@@ -1,0 +1,144 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { radarTokens } from "../token/sources";
+import { auditToken, type TokenDossier } from "../token/audit";
+import { verdictMeta } from "../lib/verdict";
+
+const RANK: Record<string, number> = { AVOID: 4, FAIL: 3, CAUTION: 2, PASS: 1 };
+const SCAN_LIMIT = 16;
+
+function money(n?: number): string {
+  if (n == null) return "—";
+  if (n >= 1e9) return "$" + (n / 1e9).toFixed(1) + "B";
+  if (n >= 1e6) return "$" + (n / 1e6).toFixed(1) + "M";
+  if (n >= 1e3) return "$" + (n / 1e3).toFixed(0) + "K";
+  return "$" + Math.round(n);
+}
+
+async function pool<T, R>(items: T[], n: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
+  const res: R[] = new Array(items.length);
+  let idx = 0;
+  await Promise.all(
+    Array.from({ length: Math.min(n, items.length) }, async () => {
+      while (idx < items.length) {
+        const i = idx++;
+        res[i] = await fn(items[i], i);
+      }
+    }),
+  );
+  return res;
+}
+
+export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
+  const [results, setResults] = useState<TokenDossier[]>([]);
+  const [scanning, setScanning] = useState(true);
+  const [progress, setProgress] = useState(0);
+  const [updatedAt, setUpdatedAt] = useState<string>("");
+  const runId = useRef(0);
+
+  const scan = useCallback(async () => {
+    const myRun = ++runId.current;
+    setScanning(true);
+    setProgress(0);
+    const refs = (await radarTokens()).slice(0, SCAN_LIMIT);
+    let done = 0;
+    const scanned = await pool(refs, 6, async (r) => {
+      const d = await auditToken(
+        { kind: "token", ref: r.tokenAddress, via: r.chainId === "solana" ? "solana" : "evm" },
+        undefined,
+        { skipSim: true },
+      ).catch(() => null);
+      done++;
+      if (myRun === runId.current) setProgress(Math.round((done / refs.length) * 100));
+      return d;
+    });
+    if (myRun !== runId.current) return;
+    const live = (scanned.filter(Boolean) as TokenDossier[]).sort(
+      (a, b) => (RANK[b.verdict] ?? 0) - (RANK[a.verdict] ?? 0) || (a.score ?? 0) - (b.score ?? 0),
+    );
+    setResults(live);
+    setScanning(false);
+    setUpdatedAt(new Date().toLocaleTimeString());
+  }, []);
+
+  useEffect(() => {
+    scan();
+    const t = setInterval(scan, 60000);
+    return () => clearInterval(t);
+  }, [scan]);
+
+  const flagged = results.filter((r) => r.verdict === "AVOID" || r.verdict === "FAIL").length;
+
+  return (
+    <div className="mx-auto max-w-5xl px-6 py-10">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="relative inline-block h-2 w-2">
+              <span className="absolute inset-0 rounded-full bg-signal" />
+              <span className="pulse-ring absolute inset-0" />
+            </span>
+            <h1 className="text-[26px] font-medium tracking-[-0.02em] text-ink">Radar</h1>
+          </div>
+          <p className="mt-1.5 text-[14px] text-ink-dim">
+            Trending and freshly-listed tokens, audited live on-chain. Scams float to the top.
+          </p>
+        </div>
+        <div className="text-right text-[11.5px] text-ink-faint">
+          {scanning ? (
+            <span className="mono">scanning… {progress}%</span>
+          ) : (
+            <>
+              <div>
+                <span className="mono text-ink-dim">{results.length}</span> scanned ·{" "}
+                <span className="mono" style={{ color: "var(--color-avoid)" }}>{flagged}</span> flagged
+              </div>
+              <div className="mt-0.5">updated {updatedAt} · auto every 60s</div>
+            </>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-6 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+        {scanning && results.length === 0
+          ? Array.from({ length: 9 }).map((_, i) => (
+              <div key={i} className="h-[92px] animate-pulse rounded-xl border border-line bg-panel-2/40" />
+            ))
+          : results.map((d) => {
+              const m = verdictMeta(d.verdict);
+              return (
+                <button
+                  key={d.chain + d.address}
+                  onClick={() => onAudit(d.address)}
+                  className="group rounded-xl border bg-white p-3.5 text-left transition hover:shadow-sm"
+                  style={{ borderColor: d.verdict === "AVOID" || d.verdict === "FAIL" ? `${m.color}66` : "var(--color-line)" }}
+                >
+                  <div className="flex items-center gap-2">
+                    {d.imageUrl ? (
+                      <img src={d.imageUrl} alt="" className="h-7 w-7 rounded-lg border border-line object-cover" />
+                    ) : (
+                      <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-line bg-panel-2 text-[11px] text-signal">{d.symbol.slice(0, 3)}</span>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="mono truncate text-[13px] text-ink">${d.symbol}</div>
+                      <div className="text-[10.5px] capitalize text-ink-faint">{d.chain} · {d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : "?"}</div>
+                    </div>
+                    <span className="mono rounded-full border px-2 py-0.5 text-[10.5px] font-semibold tracking-wider" style={{ borderColor: m.color, color: m.color }}>
+                      {m.label}
+                    </span>
+                  </div>
+                  <div className="mt-2.5 flex items-center justify-between text-[11px] text-ink-faint">
+                    <span>liq <span className="mono text-ink-dim">{money(d.liquidityUsd)}</span></span>
+                    <span>mc <span className="mono text-ink-dim">{money(d.mcap)}</span></span>
+                    {d.capApplied ? (
+                      <span className="mono" style={{ color: "var(--color-avoid)" }}>▲ {d.capApplied.replace(/_.*/, "")}</span>
+                    ) : (
+                      <span className="mono">{d.score}/100</span>
+                    )}
+                  </div>
+                </button>
+              );
+            })}
+      </div>
+    </div>
+  );
+}

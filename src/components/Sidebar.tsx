@@ -16,6 +16,7 @@ function Icon({ d }: { d: string }) {
 }
 const ICONS = {
   home: "M3 11.5 12 4l9 7.5M5 10v10h14V10",
+  radar: "M21 12a9 9 0 1 1-4.6-7.9M12 12l5.5-3.2",
   gallery: "M4 5h16M4 12h16M4 19h16",
   graph: "M5 19V5M5 19h14M9 16l3-5 3 3 4-7",
   watch: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z",
@@ -39,7 +40,7 @@ function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof I
   );
 }
 
-export type NavTarget = "idle" | "dossiers" | "graph" | "watchlist";
+export type NavTarget = "idle" | "radar" | "dossiers" | "graph" | "watchlist";
 
 export function Sidebar({
   onNav,
@@ -64,6 +65,7 @@ export function Sidebar({
       {/* nav */}
       <nav className="space-y-0.5 px-2.5 pt-1">
         <NavItem icon="home" label="Home" active={view === "idle"} onClick={() => onNav("idle")} />
+        <NavItem icon="radar" label="Radar" active={view === "radar"} onClick={() => onNav("radar")} />
         <NavItem icon="gallery" label="Dossiers" active={view === "dossiers"} onClick={() => onNav("dossiers")} />
         <NavItem icon="graph" label="Trust graph" active={view === "graph"} onClick={() => onNav("graph")} />
         <NavItem icon="watch" label="Watchlist" active={view === "watchlist"} onClick={() => onNav("watchlist")} badge={getWatchlist().length || undefined} />

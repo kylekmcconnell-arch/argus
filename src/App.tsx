@@ -7,6 +7,7 @@ import { Report } from "./components/Report";
 import { DossiersPage } from "./components/DossiersPage";
 import { GraphPage } from "./components/GraphPage";
 import { WatchlistPage } from "./components/WatchlistPage";
+import { RadarPage } from "./components/RadarPage";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
@@ -17,7 +18,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
 type Phase =
-  | "idle" | "dossiers" | "graph" | "watchlist"
+  | "idle" | "radar" | "dossiers" | "graph" | "watchlist"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "notfound";
@@ -143,7 +144,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "dossiers" || phase === "graph" || phase === "watchlist"
+    : phase === "radar" || phase === "dossiers" || phase === "graph" || phase === "watchlist"
       ? phase
       : "idle";
 
@@ -154,6 +155,8 @@ export default function App() {
       {phase === "dossiers" && <DossiersPage onOpen={onOpen} />}
 
       {phase === "graph" && <GraphPage onOpen={onOpen} />}
+
+      {phase === "radar" && <RadarPage onAudit={onAudit} />}
 
       {phase === "watchlist" && <WatchlistPage onAudit={onAudit} />}
 

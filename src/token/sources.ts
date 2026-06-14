@@ -37,6 +37,31 @@ export const GOPLUS_CHAIN: Record<string, string> = {
   scroll: "534352",
 };
 
+// Trending + freshly-listed tokens, for the live Radar. Merges DexScreener's
+// boosted (trending) and latest-profile feeds, deduped.
+export interface RadarRef { chainId: string; tokenAddress: string }
+export async function radarTokens(): Promise<RadarRef[]> {
+  const urls = [
+    "https://api.dexscreener.com/token-boosts/top/v1",
+    "https://api.dexscreener.com/token-profiles/latest/v1",
+  ];
+  const seen = new Set<string>();
+  const out: RadarRef[] = [];
+  const lists = await Promise.all(
+    urls.map((u) => fetch(u).then((r) => (r.ok ? r.json() : [])).catch(() => [])),
+  );
+  for (const list of lists as { chainId?: string; tokenAddress?: string }[][]) {
+    for (const it of list ?? []) {
+      if (!it.chainId || !it.tokenAddress) continue;
+      const key = it.chainId + ":" + it.tokenAddress.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ chainId: it.chainId, tokenAddress: it.tokenAddress });
+    }
+  }
+  return out;
+}
+
 export async function dexByToken(address: string): Promise<DexPair[]> {
   const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
   if (!res.ok) return [];

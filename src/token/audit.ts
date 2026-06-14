@@ -136,7 +136,11 @@ function emptySafety(): NormalizedSafety {
   };
 }
 
-export async function auditToken(input: ResolvedInput, emit?: (s: TraceStep) => void): Promise<TokenDossier | null> {
+export async function auditToken(
+  input: ResolvedInput,
+  emit?: (s: TraceStep) => void,
+  opts?: { skipSim?: boolean },
+): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const trace: TraceStep[] = [];
   const step = (s: TraceStep) => { trace.push(s); emit?.(s); };
@@ -176,8 +180,8 @@ export async function auditToken(input: ResolvedInput, emit?: (s: TraceStep) => 
     sol = await goplusSolana(address);
     safety = solanaSafety(sol);
   } else if (gpChain) {
-    step({ phase: "Contract", label: "Safety + simulation", detail: "GoPlus + honeypot.is buy/sell simulation: honeypot, mint, ownership, tax, holders…", tone: "neutral" });
-    const [gp, sim] = await Promise.all([goplus(gpChain, address), honeypotIs(gpChain, address)]);
+    step({ phase: "Contract", label: opts?.skipSim ? "Safety scan" : "Safety + simulation", detail: opts?.skipSim ? "GoPlus: honeypot, mint, ownership, tax, holders…" : "GoPlus + honeypot.is buy/sell simulation…", tone: "neutral" });
+    const [gp, sim] = await Promise.all([goplus(gpChain, address), opts?.skipSim ? Promise.resolve(null) : honeypotIs(gpChain, address)]);
     gpEvm = gp;
     safety = evmSafety(gp, sim);
   } else {

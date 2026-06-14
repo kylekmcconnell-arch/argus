@@ -79,6 +79,12 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
   const gp = d.safetyChecked;
   const isSol = d.chain === "solana";
   const [watched, setWatched] = useState(() => isWatched(d.address));
+  const [copied, setCopied] = useState(false);
+  const share = () => {
+    navigator.clipboard?.writeText(`${location.origin}/?t=${d.address}`);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  };
   const watch = () =>
     setWatched(
       toggleWatch({
@@ -101,6 +107,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           <span className="mono text-[11px] text-ink-faint">/ token</span>
           <span className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
           <div className="ml-auto flex items-center gap-2">
+            <button onClick={share} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copied ? "Copied ✓" : "Share"}</button>
             <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
               {watched ? "★ Watching" : "☆ Watch"}
             </button>
