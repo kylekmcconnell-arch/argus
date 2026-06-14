@@ -6,12 +6,20 @@ import { LiveRun } from "./components/LiveRun";
 import { Report } from "./components/Report";
 import { DossiersPage } from "./components/DossiersPage";
 import { GraphPage } from "./components/GraphPage";
+import { TokenRun } from "./components/TokenRun";
+import { TokenReport } from "./components/TokenReport";
 import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
 import { type Dossier } from "./data/dossier";
 import { probeBackend } from "./lib/live";
+import { resolveInput, type ResolvedInput } from "./lib/resolveInput";
+import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
-type Phase = "idle" | "dossiers" | "graph" | "running" | "live" | "report" | "notfound";
+type Phase =
+  | "idle" | "dossiers" | "graph"
+  | "running" | "live" | "report"
+  | "token-run" | "token-report"
+  | "notfound";
 
 // Deep links:
 //   ?s=<handle>    -> straight to the curated report (shareable dossiers)
@@ -26,6 +34,8 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
   }
   const live = params.get("live");
   if (live) return { phase: "live", dossier: null, query: live };
+  const token = params.get("t");
+  if (token) return { phase: "token-run", dossier: null, query: token };
   return { phase: "idle", dossier: null, query: "" };
 }
 
@@ -35,10 +45,20 @@ export default function App() {
   const [fixture, setFixture] = useState<SubjectFixture | null>(boot.query ? findSubject(boot.query) ?? null : null);
   const [dossier, setDossier] = useState<Dossier | null>(boot.dossier);
   const [query, setQuery] = useState(boot.query);
+  const [tokenInput, setTokenInput] = useState<ResolvedInput | null>(
+    boot.phase === "token-run" && boot.query ? resolveInput(boot.query) : null,
+  );
+  const [tokenDossier, setTokenDossier] = useState<TokenDossier | null>(null);
 
-  const onAudit = useCallback(async (handle: string) => {
-    setQuery(handle);
-    const f = findSubject(handle);
+  const onAudit = useCallback(async (raw: string) => {
+    setQuery(raw);
+    const resolved = resolveInput(raw);
+    if (resolved.kind === "token") {
+      setTokenInput(resolved);
+      setPhase("token-run");
+      return;
+    }
+    const f = findSubject(raw);
     setFixture(f ?? null);
     const providers = await probeBackend();
     if (providers) {
@@ -47,6 +67,11 @@ export default function App() {
     }
     if (f) setPhase("running");
     else setPhase("notfound");
+  }, []);
+
+  const onTokenDone = useCallback((d: TokenDossier) => {
+    setTokenDossier(d);
+    setPhase("token-report");
   }, []);
 
   const onRunDone = useCallback(() => {
@@ -97,6 +122,8 @@ export default function App() {
     setPhase("idle");
     setFixture(null);
     setDossier(null);
+    setTokenInput(null);
+    setTokenDossier(null);
     setQuery("");
   }, []);
 
@@ -110,8 +137,9 @@ export default function App() {
     setPhase(t);
   }, []);
 
-  const inAudit = phase === "running" || phase === "live" || phase === "report";
-  const activeHandle = inAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
+  const personAudit = phase === "running" || phase === "live" || phase === "report";
+  const inAudit = personAudit || phase === "token-run" || phase === "token-report";
+  const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
     : phase === "dossiers" || phase === "graph"
@@ -131,6 +159,12 @@ export default function App() {
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 
       {phase === "report" && dossier && <Report dossier={dossier} onReset={reset} />}
+
+      {phase === "token-run" && tokenInput && (
+        <TokenRun input={tokenInput} onDone={onTokenDone} onError={() => setPhase("notfound")} />
+      )}
+
+      {phase === "token-report" && tokenDossier && <TokenReport dossier={tokenDossier} onReset={reset} />}
 
       {phase === "notfound" && (
         <div className="relative flex min-h-full flex-col items-center justify-center px-6 py-24 text-center">
