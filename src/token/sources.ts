@@ -84,6 +84,62 @@ export interface GoPlusSecurity {
   creator_percent?: string;
 }
 
+// honeypot.is — a real buy/sell SIMULATION (EVM). Stronger than a static flag.
+export interface HoneypotSim {
+  isHoneypot: boolean;
+  simSuccess: boolean;
+  buyTax: number;
+  sellTax: number;
+  flags: string[];
+}
+export async function honeypotIs(chainId: string, address: string): Promise<HoneypotSim | null> {
+  try {
+    const res = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
+    if (!res.ok) return null;
+    const d = (await res.json()) as any;
+    return {
+      isHoneypot: !!d.honeypotResult?.isHoneypot,
+      simSuccess: !!d.simulationSuccess,
+      buyTax: d.simulationResult?.buyTax ?? 0,
+      sellTax: d.simulationResult?.sellTax ?? 0,
+      flags: (d.flags ?? []).map((f: any) => f.description ?? f.flag ?? String(f)),
+    };
+  } catch {
+    return null;
+  }
+}
+
+// GoPlus Solana token security — different shape from EVM (mint/freeze authority,
+// transfer hooks, metadata mutability, holders).
+export interface SolanaSecurity {
+  mintable?: { status?: string };
+  freezable?: { status?: string };
+  closable?: { status?: string };
+  non_transferable?: string;
+  transfer_hook?: unknown[];
+  transfer_fee?: Record<string, unknown>;
+  metadata_mutable?: { status?: string };
+  balance_mutable_authority?: { status?: string };
+  default_account_state?: string;
+  holder_count?: string | number;
+  holders?: { account?: string; percent?: string; is_locked?: number; tag?: string }[];
+  lp_holders?: { account?: string; percent?: string; is_locked?: number }[];
+  creators?: { address?: string }[];
+  metadata?: { name?: string; symbol?: string };
+  trusted_token?: number;
+}
+export async function goplusSolana(mint: string): Promise<SolanaSecurity | null> {
+  try {
+    const res = await fetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
+    if (!res.ok) return null;
+    const d = (await res.json()) as { result?: Record<string, SolanaSecurity> };
+    const row = d.result?.[mint] ?? (d.result ? Object.values(d.result)[0] : undefined);
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function goplus(chainId: string, address: string): Promise<GoPlusSecurity | null> {
   try {
     const res = await fetch(

@@ -2,6 +2,7 @@ import { ArgusMark } from "./ArgusMark";
 import { SUBJECTS } from "../data/subjects";
 import { ROLE_META, verdictMeta } from "../lib/verdict";
 import { buildReport } from "../data/subjects";
+import { getWatchlist } from "../lib/watchlist";
 
 // Left rail, origami.chat style: light zinc-100, logo at top, nav, a recent-audits
 // list, account at the bottom.
@@ -17,10 +18,11 @@ const ICONS = {
   home: "M3 11.5 12 4l9 7.5M5 10v10h14V10",
   gallery: "M4 5h16M4 12h16M4 19h16",
   graph: "M5 19V5M5 19h14M9 16l3-5 3 3 4-7",
+  watch: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z",
   settings: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 2h-5l-.3 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L3.1 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 2.4h5l.3-2.6a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1Z",
 };
 
-function NavItem({ icon, label, active, onClick }: { icon: keyof typeof ICONS; label: string; active?: boolean; onClick?: () => void }) {
+function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof ICONS; label: string; active?: boolean; onClick?: () => void; badge?: number }) {
   return (
     <button
       onClick={onClick}
@@ -32,11 +34,12 @@ function NavItem({ icon, label, active, onClick }: { icon: keyof typeof ICONS; l
         <Icon d={ICONS[icon]} />
       </span>
       {label}
+      {badge ? <span className="mono ml-auto rounded-full bg-signal/15 px-1.5 text-[10px] text-signal-dim">{badge}</span> : null}
     </button>
   );
 }
 
-export type NavTarget = "idle" | "dossiers" | "graph";
+export type NavTarget = "idle" | "dossiers" | "graph" | "watchlist";
 
 export function Sidebar({
   onNav,
@@ -63,6 +66,7 @@ export function Sidebar({
         <NavItem icon="home" label="Home" active={view === "idle"} onClick={() => onNav("idle")} />
         <NavItem icon="gallery" label="Dossiers" active={view === "dossiers"} onClick={() => onNav("dossiers")} />
         <NavItem icon="graph" label="Trust graph" active={view === "graph"} onClick={() => onNav("graph")} />
+        <NavItem icon="watch" label="Watchlist" active={view === "watchlist"} onClick={() => onNav("watchlist")} badge={getWatchlist().length || undefined} />
       </nav>
 
       {/* recent audits */}

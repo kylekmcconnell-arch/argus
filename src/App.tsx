@@ -6,6 +6,7 @@ import { LiveRun } from "./components/LiveRun";
 import { Report } from "./components/Report";
 import { DossiersPage } from "./components/DossiersPage";
 import { GraphPage } from "./components/GraphPage";
+import { WatchlistPage } from "./components/WatchlistPage";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
@@ -16,7 +17,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
 type Phase =
-  | "idle" | "dossiers" | "graph"
+  | "idle" | "dossiers" | "graph" | "watchlist"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "notfound";
@@ -142,7 +143,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "dossiers" || phase === "graph"
+    : phase === "dossiers" || phase === "graph" || phase === "watchlist"
       ? phase
       : "idle";
 
@@ -154,6 +155,8 @@ export default function App() {
 
       {phase === "graph" && <GraphPage onOpen={onOpen} />}
 
+      {phase === "watchlist" && <WatchlistPage onAudit={onAudit} />}
+
       {phase === "running" && fixture && <RunConsole fixture={fixture} onDone={onRunDone} />}
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
@@ -164,7 +167,7 @@ export default function App() {
         <TokenRun input={tokenInput} onDone={onTokenDone} onError={() => setPhase("notfound")} />
       )}
 
-      {phase === "token-report" && tokenDossier && <TokenReport dossier={tokenDossier} onReset={reset} />}
+      {phase === "token-report" && tokenDossier && <TokenReport dossier={tokenDossier} onReset={reset} onAudit={onAudit} />}
 
       {phase === "notfound" && (
         <div className="relative flex min-h-full flex-col items-center justify-center px-6 py-24 text-center">

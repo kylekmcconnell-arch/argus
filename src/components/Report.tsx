@@ -4,6 +4,7 @@ import { TrustGraph } from "./TrustGraph";
 import type { Dossier } from "../data/dossier";
 import type { RoleReport, SubjectClass } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
+import { isWatched, toggleWatch } from "../lib/watchlist";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -267,6 +268,14 @@ export function Report({ dossier, onReset }: { dossier: Dossier; onReset: () => 
   const { report, graph, founderSummary, evidence } = dossier;
   const roles = report.roles as SubjectClass[];
   const m = verdictMeta(report.composite_verdict);
+  const [watched, setWatched] = useState(() => isWatched(report.handle));
+  const watch = () =>
+    setWatched(
+      toggleWatch({
+        id: report.handle, kind: "person", label: report.handle, addedAt: 0,
+        snapshot: { verdict: report.composite_verdict, score: report.governing_score },
+      }),
+    );
 
   const corroborationRows = [
     ...evidence.testimonials.map((t) => ({
@@ -305,6 +314,9 @@ export function Report({ dossier, onReset }: { dossier: Dossier; onReset: () => 
             {f.live ? "● LIVE" : "CURATED"}
           </span>
           <div className="ml-auto flex items-center gap-2">
+            <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
+              {watched ? "★ Watching" : "☆ Watch"}
+            </button>
             <button
               onClick={onReset}
               className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"

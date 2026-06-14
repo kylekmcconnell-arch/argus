@@ -1,6 +1,11 @@
+import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
+import { TrustGraph } from "./TrustGraph";
 import { verdictMeta } from "../lib/verdict";
+import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { TokenDossier } from "../token/audit";
+
+const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
 function money(n?: number): string {
   if (n == null) return "—";
@@ -68,10 +73,20 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-export function TokenReport({ dossier: d, onReset }: { dossier: TokenDossier; onReset: () => void }) {
+export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void }) {
   const m = verdictMeta(d.verdict);
   const s = d.safety;
-  const gp = d.goplusChecked;
+  const gp = d.safetyChecked;
+  const isSol = d.chain === "solana";
+  const [watched, setWatched] = useState(() => isWatched(d.address));
+  const watch = () =>
+    setWatched(
+      toggleWatch({
+        id: d.address, kind: "token", label: "$" + d.symbol, chain: d.chain,
+        via: isSol ? "solana" : "evm", addedAt: 0,
+        snapshot: { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap },
+      }),
+    );
 
   return (
     <div className="relative min-h-full pb-24">
@@ -85,7 +100,10 @@ export function TokenReport({ dossier: d, onReset }: { dossier: TokenDossier; on
           </button>
           <span className="mono text-[11px] text-ink-faint">/ token</span>
           <span className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
+              {watched ? "★ Watching" : "☆ Watch"}
+            </button>
             <button onClick={onReset} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">New audit</button>
           </div>
         </div>
@@ -160,14 +178,24 @@ export function TokenReport({ dossier: d, onReset }: { dossier: TokenDossier; on
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           <Card title="Contract safety">
             <div className="divide-y divide-line/60">
-              <Check label="Not a honeypot" ok={!s.honeypot} na={!gp} />
-              <Check label="Supply not mintable" ok={!s.mintable} na={!gp} />
-              <Check label="Ownership renounced" ok={!!s.ownerRenounced} na={!gp} />
-              <Check label="No take-back ownership" ok={!s.takeBack} na={!gp} />
-              <Check label="No hidden owner" ok={!s.hiddenOwner} na={!gp} />
-              <Check label="Transfers not pausable" ok={!s.pausable} na={!gp} />
-              <Check label="Source verified" ok={!!s.openSource} na={!gp} />
-              <Check label="Taxes" ok={Number(s.buyTax) + Number(s.sellTax) < 10} value={gp ? `${Number(s.buyTax).toFixed(0)}/${Number(s.sellTax).toFixed(0)}%` : undefined} na={!gp} />
+              <Check label="Not a honeypot" ok={!s.honeypot} na={!gp} value={s.simChecked && !s.honeypot ? "simulated ✓" : undefined} />
+              <Check label={isSol ? "Mint authority revoked" : "Supply not mintable"} ok={!s.mintable} na={!gp} />
+              {isSol ? (
+                <>
+                  <Check label="Freeze authority revoked" ok={!s.freezable} na={!gp} />
+                  <Check label="Metadata immutable" ok={!s.metadataMutable} na={!gp} />
+                  <Check label="Transferable" ok={!s.nonTransferable} na={!gp} />
+                </>
+              ) : (
+                <>
+                  <Check label="Ownership renounced" ok={!!s.ownerRenounced} na={!gp} />
+                  <Check label="No take-back ownership" ok={!s.takeBack} na={!gp} />
+                  <Check label="No hidden owner" ok={!s.hiddenOwner} na={!gp} />
+                  <Check label="Transfers not pausable" ok={!s.pausable} na={!gp} />
+                  <Check label="Source verified" ok={!!s.openSource} na={!gp} />
+                </>
+              )}
+              <Check label="Taxes" ok={s.buyTax + s.sellTax < 10} value={gp ? (isSol ? "0%" : `${s.buyTax.toFixed(0)}/${s.sellTax.toFixed(0)}%`) : undefined} na={!gp} />
             </div>
           </Card>
 
@@ -179,6 +207,42 @@ export function TokenReport({ dossier: d, onReset }: { dossier: TokenDossier; on
               <Check label="Top holder concentration" ok={s.topHolderPct == null || Number(s.topHolderPct) <= 25} value={s.topHolderPct != null ? `${Number(s.topHolderPct).toFixed(0)}%` : undefined} na={s.topHolderPct == null} />
               <Check label="Pair age" ok={(d.ageDays ?? 0) >= 30} value={d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : undefined} />
             </div>
+          </Card>
+        </div>
+
+        {/* team & provenance + unified graph */}
+        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          <Card title="Team & provenance">
+            {d.projectX ? (
+              <div className="flex items-center justify-between gap-2 py-1.5">
+                <span className="text-[12.5px] text-ink-dim">Project X account</span>
+                <button onClick={() => onAudit(d.projectX!)} className="mono flex items-center gap-1 text-[12px] text-signal transition hover:text-signal-dim">
+                  {d.projectX} <span aria-hidden>↗ audit</span>
+                </button>
+              </div>
+            ) : (
+              <div className="py-1.5 text-[12.5px] text-ink-faint">No X account linked to this token.</div>
+            )}
+            {d.deployer && (
+              <div className="flex items-center justify-between gap-2 border-t border-line/60 py-1.5">
+                <span className="text-[12.5px] text-ink-dim">Deployer</span>
+                <span className="mono text-[11.5px] text-ink-faint">{shortAddr(d.deployer)}</span>
+              </div>
+            )}
+            {d.topHolders.length > 0 && (
+              <div className="mt-1 border-t border-line/60 pt-2">
+                <div className="mb-1 text-[10.5px] uppercase tracking-wider text-ink-faint">Top holders</div>
+                {d.topHolders.map((h, i) => (
+                  <div key={i} className="flex items-center justify-between py-1 text-[11.5px]">
+                    <span className="mono text-ink-dim">{h.tag || shortAddr(h.address)}{h.isContract ? " ·c" : ""}</span>
+                    <span className="mono" style={{ color: h.percent > 25 ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>{h.percent.toFixed(1)}%</span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </Card>
+          <Card title="Panoptes graph">
+            <TrustGraph nodes={d.graph.nodes} edges={d.graph.edges} />
           </Card>
         </div>
 
