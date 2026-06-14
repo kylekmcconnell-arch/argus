@@ -3,5 +3,15 @@
   "references": [
     { "path": "./tsconfig.app.json" },
     { "path": "./tsconfig.node.json" }
-  ]
+  ],
+  "//": "compilerOptions below are read by Vercel's function builder (api/*) so extensionless imports resolve; tsc -b ignores them (solution file compiles nothing).",
+  "compilerOptions": {
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "target": "es2023",
+    "lib": ["ES2023", "DOM"],
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "types": ["node"]
+  }
 }
