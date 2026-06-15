@@ -1,0 +1,88 @@
+// Machine-readable API spec: GET /api/v1/openapi.json
+// Integrators import this into Postman / Swagger / openapi-generator for typed clients.
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+
+const VERDICTS = ["PASS", "CAUTION", "FAIL", "AVOID", "UNVERIFIABLE_IDENTITY"];
+
+const spec = {
+  openapi: "3.1.0",
+  info: {
+    title: "ARGUS API",
+    version: "1.0.0",
+    description: "Forensic due-diligence for crypto. Audit tokens on-chain and people on their evidence. Token audits are live and keyless; CORS-open JSON.",
+  },
+  servers: [{ url: "https://argus-one-flax.vercel.app" }],
+  paths: {
+    "/api/v1/token": {
+      get: {
+        summary: "Audit a token",
+        description: "Live forensic rug-audit from a contract address or DexScreener link. EVM and Solana. No key required.",
+        parameters: [
+          { name: "address", in: "query", schema: { type: "string" }, description: "Token contract address" },
+          { name: "url", in: "query", schema: { type: "string" }, description: "A DexScreener link (alternative to address)" },
+        ],
+        responses: {
+          "200": { description: "Token audit", content: { "application/json": { schema: { $ref: "#/components/schemas/TokenAudit" } } } },
+          "400": { description: "Missing or invalid input" },
+          "404": { description: "No DEX pair found" },
+        },
+      },
+    },
+    "/api/v1/person": {
+      get: {
+        summary: "Audit a principal",
+        description: "Multi-class audit of an X handle (founder / fund / KOL / advisor / agency), governed by the most severe role.",
+        parameters: [{ name: "handle", in: "query", required: true, schema: { type: "string" }, description: "X handle, e.g. @0xlumen" }],
+        responses: {
+          "200": { description: "Principal audit", content: { "application/json": { schema: { $ref: "#/components/schemas/PersonAudit" } } } },
+          "404": { description: "Could not resolve subject" },
+        },
+      },
+    },
+  },
+  components: {
+    schemas: {
+      Verdict: { type: "string", enum: VERDICTS },
+      Axis: {
+        type: "object",
+        properties: { key: { type: "string" }, label: { type: "string" }, score: { type: "number" }, weight: { type: "number" }, rationale: { type: "string" } },
+      },
+      Finding: {
+        type: "object",
+        properties: { claim: { type: "string" }, tone: { type: "string", enum: ["good", "warn", "bad"] }, source: { type: "string" } },
+      },
+      TokenAudit: {
+        type: "object",
+        properties: {
+          api: { type: "string" }, kind: { type: "string" }, address: { type: "string" }, chain: { type: "string" },
+          symbol: { type: "string" }, name: { type: "string" },
+          verdict: { $ref: "#/components/schemas/Verdict" }, score: { type: "number", nullable: true },
+          cap_applied: { type: "string", nullable: true }, headline: { type: "string" },
+          market: { type: "object", properties: { priceUsd: { type: "number" }, marketCap: { type: "number" }, liquidityUsd: { type: "number" }, volume24h: { type: "number" }, ageDays: { type: "number" } } },
+          safety: { type: "object", properties: { honeypot: { type: "boolean" }, mintable: { type: "boolean" }, freezable: { type: "boolean" }, ownerRenounced: { type: "boolean" }, lpLocked: { type: "boolean" }, buyTax: { type: "number" }, sellTax: { type: "number" }, holderCount: { type: "number" } } },
+          holders: { type: "object", properties: { insiderPct: { type: "number" }, bundleCount: { type: "number" }, bundleRisk: { type: "string", enum: ["low", "elevated", "high"] } } },
+          corroboration: { type: "object", nullable: true, properties: { listed: { type: "boolean" }, rank: { type: "number", nullable: true }, cexCount: { type: "number" } } },
+          axes: { type: "array", items: { $ref: "#/components/schemas/Axis" } },
+          findings: { type: "array", items: { $ref: "#/components/schemas/Finding" } },
+        },
+      },
+      PersonAudit: {
+        type: "object",
+        properties: {
+          api: { type: "string" }, kind: { type: "string" }, handle: { type: "string" }, display_name: { type: "string" },
+          live: { type: "boolean" }, verdict: { $ref: "#/components/schemas/Verdict" }, score: { type: "number", nullable: true },
+          governing_role: { type: "string", nullable: true }, cap_applied: { type: "string", nullable: true },
+          identity: { type: "string" }, headline: { type: "string" },
+          roles: { type: "array", items: { type: "object", properties: { role: { type: "string" }, verdict: { $ref: "#/components/schemas/Verdict" }, score: { type: "number", nullable: true }, cap: { type: "string", nullable: true } } } },
+          findings: { type: "array", items: { $ref: "#/components/schemas/Finding" } },
+        },
+      },
+    },
+  },
+};
+
+export default function handler(_req: VercelRequest, res: VercelResponse) {
+  res.setHeader("access-control-allow-origin", "*");
+  res.setHeader("cache-control", "public, max-age=3600");
+  res.status(200).json(spec);
+}

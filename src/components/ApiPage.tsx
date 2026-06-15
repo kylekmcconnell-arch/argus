@@ -123,6 +123,32 @@ data: { ...full dossier... }`}
         />
       </div>
 
+      {/* spec */}
+      <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-white p-4">
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px] font-medium text-ink">OpenAPI 3.1 spec</div>
+          <div className="mt-0.5 text-[12.5px] text-ink-faint">Import into Postman or Swagger, or generate a typed client with openapi-generator.</div>
+        </div>
+        <a href={`${BASE}/api/v1/openapi.json`} target="_blank" rel="noreferrer" className="mono shrink-0 rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink">/api/v1/openapi.json ↗</a>
+      </div>
+
+      {/* recipes */}
+      <h2 className="mt-7 text-[14px] font-semibold tracking-tight text-ink">Recipes</h2>
+      <div className="mt-2 space-y-4">
+        <div>
+          <div className="text-[12px] text-ink-dim">JavaScript — flag a token before you ape</div>
+          <Block code={`const a = await (await fetch(\n  "${BASE}/api/v1/token?address=" + addr\n)).json();\nif (a.verdict === "AVOID" || a.verdict === "FAIL")\n  alert(\`⚠ $\{a.symbol}: $\{a.headline}\`);`} />
+        </div>
+        <div>
+          <div className="text-[12px] text-ink-dim">Python</div>
+          <Block code={`import requests\na = requests.get("${BASE}/api/v1/token",\n  params={"address": addr}).json()\nprint(a["verdict"], a["score"], a["headline"])`} />
+        </div>
+        <div>
+          <div className="text-[12px] text-ink-dim">Telegram bot — reply with a verdict on any contract</div>
+          <Block code={`bot.onText(/^\\/audit (.+)/, async (msg, m) => {\n  const a = await (await fetch(\n    "${BASE}/api/v1/token?address=" + m[1]\n  )).json();\n  bot.sendMessage(msg.chat.id,\n    \`$\{a.symbol}: $\{a.verdict} $\{a.score}/100\\n$\{a.headline}\`);\n});`} />
+        </div>
+      </div>
+
       <div className="mt-6 rounded-xl border border-line bg-panel/40 p-4 text-[12.5px] leading-relaxed text-ink-faint">
         <span className="text-ink-dim">Coming for production:</span> API keys, per-key rate limits, usage plans, and webhooks
         for watchlist drift alerts. Token audits stay free; live people-collection and higher volume move behind a key.
