@@ -8,6 +8,7 @@ import { DossiersPage } from "./components/DossiersPage";
 import { GraphPage } from "./components/GraphPage";
 import { WatchlistPage } from "./components/WatchlistPage";
 import { RadarPage } from "./components/RadarPage";
+import { AboutPage } from "./components/AboutPage";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
@@ -18,7 +19,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
 type Phase =
-  | "idle" | "radar" | "dossiers" | "graph" | "watchlist"
+  | "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "about"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "notfound";
@@ -144,13 +145,15 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "dossiers" || phase === "graph" || phase === "watchlist"
+    : phase === "radar" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "about"
       ? phase
       : "idle";
 
   return (
     <AppShell onNav={onNav} onAudit={onAudit} activeHandle={activeHandle} view={view}>
-      {phase === "idle" && <Landing onAudit={onAudit} />}
+      {phase === "idle" && <Landing onAudit={onAudit} onAbout={() => setPhase("about")} />}
+
+      {phase === "about" && <AboutPage onStart={reset} />}
 
       {phase === "dossiers" && <DossiersPage onOpen={onOpen} />}
 
@@ -175,13 +178,25 @@ export default function App() {
       {phase === "notfound" && (
         <div className="relative flex min-h-full flex-col items-center justify-center px-6 py-24 text-center">
           <div className="grid-bg absolute inset-0 -z-10" />
-          <div className="mono text-[13px] text-signal">@{query.replace(/^@/, "")}</div>
-          <h2 className="mt-3 text-2xl font-medium tracking-tight text-ink">No live dossier yet</h2>
-          <p className="mt-2 max-w-md text-[14px] leading-relaxed text-ink-dim">
-            This demo ships with curated worked audits. With the collector backend running and provider
-            keys configured, ARGUS resolves any handle on demand. Pick a dossier from the rail to see the
-            engine run.
-          </p>
+          {resolveInput(query).kind === "token" ? (
+            <>
+              <div className="mono max-w-md break-all text-[13px] text-signal">{query}</div>
+              <h2 className="mt-3 text-2xl font-medium tracking-tight text-ink">Couldn't resolve that token</h2>
+              <p className="mt-2 max-w-md text-[14px] leading-relaxed text-ink-dim">
+                No DEX pair was found for this contract. It may be brand-new, unlisted, illiquid, or on a chain
+                ARGUS doesn't index yet. Double-check the address, or try one of the live samples on the home screen.
+              </p>
+            </>
+          ) : (
+            <>
+              <div className="mono text-[13px] text-signal">@{query.replace(/^@/, "")}</div>
+              <h2 className="mt-3 text-2xl font-medium tracking-tight text-ink">No live dossier yet</h2>
+              <p className="mt-2 max-w-md text-[14px] leading-relaxed text-ink-dim">
+                This demo ships with curated worked audits. With provider keys configured, ARGUS resolves any
+                handle on demand. Pick a dossier from the rail, or paste a token contract for a live audit.
+              </p>
+            </>
+          )}
           <button onClick={reset} className="btn-primary mt-6 px-5 py-2.5 text-[13px] font-medium">
             Back to home
           </button>

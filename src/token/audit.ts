@@ -140,7 +140,26 @@ function emptySafety(): NormalizedSafety {
   };
 }
 
+// In-session cache so re-opening a token (Radar -> report, back-nav, watchlist)
+// is instant. Keyed by ref + skipSim; short TTL keeps live data fresh.
+const _cache = new Map<string, { at: number; d: TokenDossier | null }>();
+const CACHE_TTL = 60_000;
+
 export async function auditToken(
+  input: ResolvedInput,
+  emit?: (s: TraceStep) => void,
+  opts?: { skipSim?: boolean },
+): Promise<TokenDossier | null> {
+  if (input.kind !== "token") return null;
+  const key = `${input.via}:${input.ref.toLowerCase()}:${opts?.skipSim ? 1 : 0}`;
+  const hit = _cache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
+  const d = await runTokenAudit(input, emit, opts);
+  _cache.set(key, { at: Date.now(), d });
+  return d;
+}
+
+async function runTokenAudit(
   input: ResolvedInput,
   emit?: (s: TraceStep) => void,
   opts?: { skipSim?: boolean },

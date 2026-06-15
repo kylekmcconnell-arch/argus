@@ -166,15 +166,22 @@ export async function goplusSolana(mint: string): Promise<SolanaSecurity | null>
 }
 
 export async function goplus(chainId: string, address: string): Promise<GoPlusSecurity | null> {
-  try {
-    const res = await fetch(
-      `https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`,
-    );
-    if (!res.ok) return null;
-    const d = (await res.json()) as { result?: Record<string, GoPlusSecurity> };
-    const row = d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : undefined);
-    return row ?? null;
-  } catch {
-    return null;
+  const once = async (): Promise<GoPlusSecurity | null> => {
+    try {
+      const res = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
+      if (!res.ok) return null;
+      const d = (await res.json()) as { result?: Record<string, GoPlusSecurity> };
+      return d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : undefined) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  let row = await once();
+  // GoPlus free tier sometimes omits the holders array on the first call; retry once.
+  if (row && !(row.holders && row.holders.length)) {
+    await new Promise((r) => setTimeout(r, 700));
+    const retry = await once();
+    if (retry?.holders?.length) row = retry;
   }
+  return row;
 }

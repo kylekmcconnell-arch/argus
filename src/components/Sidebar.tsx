@@ -20,7 +20,7 @@ const ICONS = {
   gallery: "M4 5h16M4 12h16M4 19h16",
   graph: "M5 19V5M5 19h14M9 16l3-5 3 3 4-7",
   watch: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z",
-  settings: "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 2h-5l-.3 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L3.1 11a7 7 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.3 2.4h5l.3-2.6a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1Z",
+  info: "M12 16v-5M12 8h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
 };
 
 function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof ICONS; label: string; active?: boolean; onClick?: () => void; badge?: number }) {
@@ -40,7 +40,7 @@ function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof I
   );
 }
 
-export type NavTarget = "idle" | "radar" | "dossiers" | "graph" | "watchlist";
+export type NavTarget = "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "about";
 
 export function Sidebar({
   onNav,
@@ -117,7 +117,7 @@ export function Sidebar({
 
       {/* account */}
       <div className="mt-auto border-t border-line px-2.5 py-3">
-        <NavItem icon="settings" label="Settings" />
+        <NavItem icon="info" label="How it works" active={view === "about"} onClick={() => nav("about")} />
         <div className="mt-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5">
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-signal text-[12px] font-semibold text-white">K</span>
           <div className="min-w-0">

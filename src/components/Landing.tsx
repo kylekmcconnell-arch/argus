@@ -5,7 +5,7 @@ import { ROLE_META } from "../lib/verdict";
 
 // Origami-style hero: centered heading + chat-style input + quick-start dossiers,
 // over a faint line-art backdrop. Calm and static, matching origami.chat.
-export function Landing({ onAudit }: { onAudit: (handle: string) => void }) {
+export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => void; onAbout: () => void }) {
   const [value, setValue] = useState("");
 
   return (
@@ -100,6 +100,7 @@ export function Landing({ onAudit }: { onAudit: (handle: string) => void }) {
 
         <div className="py-10 text-center text-[11px] text-ink-faint">
           Hard caps over scores · pseudonymity is neutral · evidence-disciplined
+          <button onClick={onAbout} className="ml-2 text-signal-dim underline-offset-2 hover:underline">How it works →</button>
         </div>
       </div>
     </div>
