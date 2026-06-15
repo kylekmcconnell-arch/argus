@@ -1960,6 +1960,7 @@ function evmSafety(gp, sim) {
     available: !!gp || !!s,
     simChecked: !!s,
     honeypot: t1(gp?.is_honeypot) || (s?.isHoneypot ?? false),
+    honeypotOnchain: t1(gp?.is_honeypot) || t1(gp?.cannot_sell_all),
     mintable: t1(gp?.is_mintable),
     freezable: false,
     nonTransferable: false,
@@ -1987,6 +1988,7 @@ function solanaSafety(sol) {
     available: !!sol,
     simChecked: false,
     honeypot: !!sol?.non_transferable && sol.non_transferable === "1",
+    honeypotOnchain: sol?.non_transferable === "1",
     mintable,
     freezable,
     nonTransferable: sol?.non_transferable === "1",
@@ -2012,6 +2014,7 @@ function emptySafety() {
     available: false,
     simChecked: false,
     honeypot: false,
+    honeypotOnchain: false,
     mintable: false,
     freezable: false,
     nonTransferable: false,
@@ -2089,10 +2092,23 @@ async function runTokenAudit(input, emit, opts) {
   const findings = [];
   const caps = [];
   const s = safety;
+  let cg = null;
+  if (!opts?.skipSim) {
+    step({ phase: "Corroborate", label: "CoinGecko cross-check", detail: "Independent listing, CEX markets, market-cap vs FDV\u2026", tone: "neutral" });
+    cg = await coingeckoToken(chain, address);
+  }
+  const provablySellable = sells >= 10 && liquidityUsd >= 25e4;
+  const broadlyTraded = (cg?.cexCount ?? 0) >= 5 || provablySellable;
   if (s.available) {
     if (s.honeypot) {
-      caps.push([10, "honeypot_confirmed"]);
-      findings.push({ claim: s.nonTransferable ? "Non-transferable token: holders cannot move it." : "Honeypot: the contract blocks selling.", tone: "bad", source: "sim" });
+      const simOnly = !s.honeypotOnchain && !s.cannotSellAll;
+      if (simOnly && broadlyTraded) {
+        const why = (cg?.cexCount ?? 0) >= 5 ? `${cg.cexCount} centralized markets` : `${sells} on-chain sells against $${Math.round(liquidityUsd).toLocaleString()} liquidity in 24h`;
+        findings.push({ claim: `honeypot.is reported a failed sell simulation, but the GoPlus on-chain check and ${why} contradict it \u2014 treated as a simulation artifact, not a honeypot.`, tone: "warn", source: "argus" });
+      } else {
+        caps.push([10, "honeypot_confirmed"]);
+        findings.push({ claim: s.nonTransferable ? "Non-transferable token: holders cannot move it." : "Honeypot: the contract blocks selling.", tone: "bad", source: s.honeypotOnchain ? "goplus" : "sim" });
+      }
     }
     if (s.cannotSellAll) caps.push([15, "cannot_sell_all"]);
     if (s.mintable) {
@@ -2116,10 +2132,7 @@ async function runTokenAudit(input, emit, opts) {
   }
   if (liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
-  let cg = null;
   if (!opts?.skipSim) {
-    step({ phase: "Corroborate", label: "CoinGecko cross-check", detail: "Independent listing, CEX markets, market-cap vs FDV\u2026", tone: "neutral" });
-    cg = await coingeckoToken(chain, address);
     if (cg && !cg.listed) {
       findings.push({ claim: "Not listed on CoinGecko \u2014 no independent market-data corroboration.", tone: "warn", source: "coingecko" });
     } else if (cg) {
@@ -2133,9 +2146,11 @@ async function runTokenAudit(input, emit, opts) {
   const eoaHolders = rawHolders.filter(
     (h) => !(h.is_contract === 1 || h.is_contract === "1") && h.is_locked !== 1 && !/lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(h.tag || "")
   );
-  const insiderPct = Math.round(eoaHolders.slice(0, 15).reduce((a, h) => a + Number(h.percent) * 100, 0));
-  const bundleCount = eoaHolders.filter((h) => Number(h.percent) * 100 >= 1).length;
-  const bundleRisk = insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
+  const topSum = eoaHolders.slice(0, 15).reduce((a, h) => a + Number(h.percent) * 100, 0);
+  const holdersReliable = rawHolders.length > 0 && topSum <= 101;
+  const insiderPct = holdersReliable ? Math.round(topSum) : 0;
+  const bundleCount = holdersReliable ? eoaHolders.filter((h) => Number(h.percent) * 100 >= 1).length : 0;
+  const bundleRisk = !holdersReliable ? "low" : insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
   if (s.available && bundleRisk !== "low") {
     findings.push({
       claim: `Concentrated supply: ${bundleCount} non-contract wallets hold ~${insiderPct}% \u2014 possible bundled launch or coordinated snipe.`,
@@ -2165,17 +2180,19 @@ async function runTokenAudit(input, emit, opts) {
   let aT3 = !s.available ? 6 : tax === 0 ? 12 : tax <= 10 ? 10 : tax <= 20 ? 7 : tax <= 40 ? 3 : 0;
   if (s.cannotSellAll || s.nonTransferable) aT3 = 0;
   axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? chain === "solana" ? "no transfer tax detected." : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.` : "Tax not verifiable keyless." });
+  const topPct = holdersReliable ? s.topHolderPct : null;
   let aT4 = s.holderCount < 50 ? 3 : s.holderCount < 500 ? 7 : s.holderCount < 5e3 ? 11 : 14;
-  if (s.topHolderPct != null) {
-    if (s.topHolderPct > 50) aT4 -= 8;
-    else if (s.topHolderPct > 25) aT4 -= 4;
-    else if (s.topHolderPct > 10) aT4 -= 2;
+  if (topPct != null) {
+    if (topPct > 50) aT4 -= 8;
+    else if (topPct > 25) aT4 -= 4;
+    else if (topPct > 10) aT4 -= 2;
     else aT4 += 2;
   }
   if (bundleRisk === "high") aT4 = clamp(aT4 - 8, 0, 16);
   else if (bundleRisk === "elevated") aT4 = clamp(aT4 - 4, 0, 16);
   aT4 = clamp(aT4, 0, 16);
-  axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: s.available ? `${s.holderCount.toLocaleString()} holders${s.topHolderPct != null ? `, top holder ${s.topHolderPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% in ${bundleCount} fresh wallets` : ""}.` : "Holder data not verifiable keyless." });
+  const t4Note = !s.available ? "Holder data not verifiable keyless." : !holdersReliable ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.` : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% in ${bundleCount} fresh wallets` : ""}.`;
+  axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
   const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;

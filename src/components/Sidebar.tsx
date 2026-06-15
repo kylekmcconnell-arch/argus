@@ -22,6 +22,7 @@ const ICONS = {
   watch: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z",
   info: "M12 16v-5M12 8h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
   code: "M8 9l-4 3 4 3M16 9l4 3-4 3M14 6l-4 12",
+  track: "M3 3v18h18M7 15l3-4 3 3 5-7",
 };
 
 function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof ICONS; label: string; active?: boolean; onClick?: () => void; badge?: number }) {
@@ -41,7 +42,7 @@ function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof I
   );
 }
 
-export type NavTarget = "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "about" | "api";
+export type NavTarget = "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "track" | "about" | "api";
 
 export function Sidebar({
   onNav,
@@ -80,6 +81,7 @@ export function Sidebar({
         <NavItem icon="gallery" label="Dossiers" active={view === "dossiers"} onClick={() => nav("dossiers")} />
         <NavItem icon="graph" label="Trust graph" active={view === "graph"} onClick={() => nav("graph")} />
         <NavItem icon="watch" label="Watchlist" active={view === "watchlist"} onClick={() => nav("watchlist")} badge={getWatchlist().length || undefined} />
+        <NavItem icon="track" label="Track record" active={view === "track"} onClick={() => nav("track")} />
       </nav>
 
       {/* recent audits */}

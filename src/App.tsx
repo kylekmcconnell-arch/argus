@@ -10,6 +10,7 @@ import { WatchlistPage } from "./components/WatchlistPage";
 import { RadarPage } from "./components/RadarPage";
 import { AboutPage } from "./components/AboutPage";
 import { ApiPage } from "./components/ApiPage";
+import { TrackRecordPage } from "./components/TrackRecordPage";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
@@ -20,7 +21,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
 type Phase =
-  | "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "about" | "api"
+  | "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "track" | "about" | "api"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "notfound";
@@ -146,7 +147,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "about" || phase === "api"
+    : phase === "radar" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "track" || phase === "about" || phase === "api"
       ? phase
       : "idle";
 
@@ -165,6 +166,8 @@ export default function App() {
       {phase === "radar" && <RadarPage onAudit={onAudit} />}
 
       {phase === "watchlist" && <WatchlistPage onAudit={onAudit} />}
+
+      {phase === "track" && <TrackRecordPage onAudit={onAudit} />}
 
       {phase === "running" && fixture && <RunConsole fixture={fixture} onDone={onRunDone} />}
 
