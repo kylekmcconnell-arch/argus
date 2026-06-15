@@ -21,6 +21,7 @@ const ICONS = {
   graph: "M5 19V5M5 19h14M9 16l3-5 3 3 4-7",
   watch: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z",
   info: "M12 16v-5M12 8h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
+  code: "M8 9l-4 3 4 3M16 9l4 3-4 3M14 6l-4 12",
 };
 
 function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof ICONS; label: string; active?: boolean; onClick?: () => void; badge?: number }) {
@@ -40,7 +41,7 @@ function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof I
   );
 }
 
-export type NavTarget = "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "about";
+export type NavTarget = "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "about" | "api";
 
 export function Sidebar({
   onNav,
@@ -117,6 +118,7 @@ export function Sidebar({
 
       {/* account */}
       <div className="mt-auto border-t border-line px-2.5 py-3">
+        <NavItem icon="code" label="API" active={view === "api"} onClick={() => nav("api")} />
         <NavItem icon="info" label="How it works" active={view === "about"} onClick={() => nav("about")} />
         <div className="mt-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5">
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-signal text-[12px] font-semibold text-white">K</span>

@@ -9,6 +9,7 @@ import { GraphPage } from "./components/GraphPage";
 import { WatchlistPage } from "./components/WatchlistPage";
 import { RadarPage } from "./components/RadarPage";
 import { AboutPage } from "./components/AboutPage";
+import { ApiPage } from "./components/ApiPage";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
@@ -19,7 +20,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
 type Phase =
-  | "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "about"
+  | "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "about" | "api"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "notfound";
@@ -145,7 +146,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "about"
+    : phase === "radar" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "about" || phase === "api"
       ? phase
       : "idle";
 
@@ -154,6 +155,8 @@ export default function App() {
       {phase === "idle" && <Landing onAudit={onAudit} onAbout={() => setPhase("about")} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
+
+      {phase === "api" && <ApiPage />}
 
       {phase === "dossiers" && <DossiersPage onOpen={onOpen} />}
 
