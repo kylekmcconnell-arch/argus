@@ -33,6 +33,8 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
   const [scanning, setScanning] = useState(true);
   const [progress, setProgress] = useState(0);
   const [updatedAt, setUpdatedAt] = useState<string>("");
+  const [chain, setChain] = useState<string>("all");
+  const [flaggedOnly, setFlaggedOnly] = useState(false);
   const runId = useRef(0);
 
   const scan = useCallback(async () => {
@@ -67,6 +69,10 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
   }, [scan]);
 
   const flagged = results.filter((r) => r.verdict === "AVOID" || r.verdict === "FAIL").length;
+  const chains = ["all", ...Array.from(new Set(results.map((r) => r.chain)))];
+  const filtered = results.filter(
+    (r) => (chain === "all" || r.chain === chain) && (!flaggedOnly || r.verdict === "AVOID" || r.verdict === "FAIL"),
+  );
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
@@ -98,12 +104,34 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
         </div>
       </div>
 
-      <div className="mt-6 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+      {/* filters */}
+      {results.length > 0 && (
+        <div className="mt-5 flex flex-wrap items-center gap-1.5">
+          {chains.map((c) => (
+            <button
+              key={c}
+              onClick={() => setChain(c)}
+              className={`rounded-full border px-2.5 py-1 text-[11.5px] capitalize transition ${chain === c ? "border-ink bg-ink text-[#fafafa]" : "border-line text-ink-dim hover:border-line-2"}`}
+            >
+              {c}
+            </button>
+          ))}
+          <button
+            onClick={() => setFlaggedOnly((v) => !v)}
+            className="ml-auto rounded-full border px-2.5 py-1 text-[11.5px] transition"
+            style={flaggedOnly ? { borderColor: "var(--color-avoid)", color: "var(--color-avoid)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}
+          >
+            {flaggedOnly ? "● flagged only" : "flagged only"}
+          </button>
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
         {scanning && results.length === 0
           ? Array.from({ length: 9 }).map((_, i) => (
               <div key={i} className="h-[92px] animate-pulse rounded-xl border border-line bg-panel-2/40" />
             ))
-          : results.map((d) => {
+          : filtered.map((d) => {
               const m = verdictMeta(d.verdict);
               return (
                 <button

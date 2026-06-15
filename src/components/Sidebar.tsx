@@ -47,16 +47,26 @@ export function Sidebar({
   onAudit,
   activeHandle,
   view,
+  open,
+  onClose,
 }: {
   onNav: (t: NavTarget) => void;
   onAudit: (handle: string) => void;
   activeHandle?: string | null;
   view: NavTarget | "audit";
+  open?: boolean;
+  onClose?: () => void;
 }) {
+  const nav = (t: NavTarget) => { onNav(t); onClose?.(); };
+  const audit = (h: string) => { onAudit(h); onClose?.(); };
   return (
-    <aside className="flex h-full w-[232px] shrink-0 flex-col border-r border-line bg-sidebar">
+    <aside
+      className={`fixed inset-y-0 left-0 z-40 flex h-full w-[232px] shrink-0 flex-col border-r border-line bg-sidebar transition-transform md:static md:translate-x-0 ${
+        open ? "translate-x-0" : "-translate-x-full"
+      }`}
+    >
       {/* brand */}
-      <button onClick={() => onNav("idle")} className="flex items-center gap-2.5 px-4 py-4">
+      <button onClick={() => nav("idle")} className="flex items-center gap-2.5 px-4 py-4">
         <ArgusMark size={26} />
         <span className="text-[15px] font-semibold tracking-tight text-ink">ARGUS</span>
         <span className="mono ml-auto rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-ink-faint">v2.2</span>
@@ -64,11 +74,11 @@ export function Sidebar({
 
       {/* nav */}
       <nav className="space-y-0.5 px-2.5 pt-1">
-        <NavItem icon="home" label="Home" active={view === "idle"} onClick={() => onNav("idle")} />
-        <NavItem icon="radar" label="Radar" active={view === "radar"} onClick={() => onNav("radar")} />
-        <NavItem icon="gallery" label="Dossiers" active={view === "dossiers"} onClick={() => onNav("dossiers")} />
-        <NavItem icon="graph" label="Trust graph" active={view === "graph"} onClick={() => onNav("graph")} />
-        <NavItem icon="watch" label="Watchlist" active={view === "watchlist"} onClick={() => onNav("watchlist")} badge={getWatchlist().length || undefined} />
+        <NavItem icon="home" label="Home" active={view === "idle"} onClick={() => nav("idle")} />
+        <NavItem icon="radar" label="Radar" active={view === "radar"} onClick={() => nav("radar")} />
+        <NavItem icon="gallery" label="Dossiers" active={view === "dossiers"} onClick={() => nav("dossiers")} />
+        <NavItem icon="graph" label="Trust graph" active={view === "graph"} onClick={() => nav("graph")} />
+        <NavItem icon="watch" label="Watchlist" active={view === "watchlist"} onClick={() => nav("watchlist")} badge={getWatchlist().length || undefined} />
       </nav>
 
       {/* recent audits */}
@@ -83,7 +93,7 @@ export function Sidebar({
           return (
             <button
               key={s.handle}
-              onClick={() => onAudit(s.handle)}
+              onClick={() => audit(s.handle)}
               className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
                 active ? "bg-white soft-shadow" : "hover:bg-white/70"
               }`}
