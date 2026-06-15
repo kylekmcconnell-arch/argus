@@ -48,6 +48,9 @@ export interface TokenDossier {
   projectX: string | null;
   deployer: string | null;
   topHolders: Holder[];
+  insiderPct: number;
+  bundleCount: number;
+  bundleRisk: "low" | "elevated" | "high";
   graph: { nodes: PanoptesNode[]; edges: PanoptesEdge[] };
   findings: { claim: string; tone: "good" | "warn" | "bad"; source: string }[];
   trace: TraceStep[];
@@ -209,6 +212,24 @@ export async function auditToken(
   if (liquidityUsd < 15000) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
 
+  // ---- insider / bundle-snipe concentration ----
+  // Non-contract, non-locked wallets holding a large combined share are the
+  // signature of a bundled launch or a coordinated early snipe.
+  const rawHolders = (chain === "solana" ? sol?.holders ?? [] : gpEvm?.holders ?? []) as Array<{ address?: string; account?: string; percent?: string; is_contract?: number | string; is_locked?: number; tag?: string }>;
+  const eoaHolders = rawHolders.filter(
+    (h) => !(h.is_contract === 1 || h.is_contract === "1") && h.is_locked !== 1 && !/lock|burn|null|dead|pool|\blp\b|amm|cex|exchange/i.test(h.tag || ""),
+  );
+  const insiderPct = Math.round(eoaHolders.slice(0, 15).reduce((a, h) => a + Number(h.percent) * 100, 0));
+  const bundleCount = eoaHolders.filter((h) => Number(h.percent) * 100 >= 1).length;
+  const bundleRisk: "low" | "elevated" | "high" = insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
+  if (s.available && bundleRisk !== "low") {
+    findings.push({
+      claim: `Concentrated supply: ${bundleCount} non-contract wallets hold ~${insiderPct}% — possible bundled launch or coordinated snipe.`,
+      tone: bundleRisk === "high" ? "bad" : "warn",
+      source: chain === "solana" ? "goplus-sol" : "goplus",
+    });
+  }
+
   // ---- axes ----
   const axes: TokenAxis[] = [];
 
@@ -243,8 +264,10 @@ export async function auditToken(
     else if (s.topHolderPct > 10) aT4 -= 2;
     else aT4 += 2;
   }
+  if (bundleRisk === "high") aT4 = clamp(aT4 - 8, 0, 16);
+  else if (bundleRisk === "elevated") aT4 = clamp(aT4 - 4, 0, 16);
   aT4 = clamp(aT4, 0, 16);
-  axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: s.available ? `${s.holderCount.toLocaleString()} holders${s.topHolderPct != null ? `, top holder ${s.topHolderPct.toFixed(0)}%` : ""}.` : "Holder data not verifiable keyless." });
+  axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: s.available ? `${s.holderCount.toLocaleString()} holders${s.topHolderPct != null ? `, top holder ${s.topHolderPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% in ${bundleCount} fresh wallets` : ""}.` : "Holder data not verifiable keyless." });
 
   const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
@@ -277,8 +300,7 @@ export async function auditToken(
     handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) ||
     handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u)));
   const deployer = chain === "solana" ? sol?.creators?.[0]?.address ?? null : gpEvm?.creator_address || (gpEvm?.owner_address && !/^0x0+$/.test(gpEvm.owner_address) ? gpEvm.owner_address : null) || null;
-  const rawHolders = chain === "solana" ? sol?.holders ?? [] : gpEvm?.holders ?? [];
-  const topHolders: Holder[] = rawHolders.slice(0, 5).map((h: any) => ({
+  const topHolders: Holder[] = rawHolders.slice(0, 5).map((h) => ({
     address: h.address ?? h.account ?? "",
     percent: Number(h.percent) * 100,
     tag: h.tag || undefined,
@@ -295,7 +317,7 @@ export async function auditToken(
     imageUrl: pair.info?.imageUrl, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
     mcap: fdv, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
     verdict, score, capApplied, headline, axes, safety: s, socials,
-    projectX, deployer, topHolders, graph, findings, trace, live: true, safetyChecked: s.available,
+    projectX, deployer, topHolders, insiderPct, bundleCount, bundleRisk, graph, findings, trace, live: true, safetyChecked: s.available,
   };
 }
 
