@@ -8,8 +8,8 @@ import type { ResolvedInput } from "../lib/resolveInput";
 import type { TraceStep } from "../data/evidence";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import {
-  dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, GOPLUS_CHAIN,
-  type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim,
+  dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
+  type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo,
 } from "./sources";
 
 export interface TokenAxis { key: string; label: string; score: number; weight: number; rationale: string }
@@ -51,6 +51,7 @@ export interface TokenDossier {
   insiderPct: number;
   bundleCount: number;
   bundleRisk: "low" | "elevated" | "high";
+  cg: CgInfo | null;
   graph: { nodes: PanoptesNode[]; edges: PanoptesEdge[] };
   findings: { claim: string; tone: "good" | "warn" | "bad"; source: string }[];
   trace: TraceStep[];
@@ -231,6 +232,22 @@ async function runTokenAudit(
   if (liquidityUsd < 15000) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
 
+  // ---- Phase 1 Step 2: corroborate against an independent market source ----
+  // (skipped on the fast Radar scan to avoid CoinGecko rate limits)
+  let cg: CgInfo | null = null;
+  if (!opts?.skipSim) {
+    step({ phase: "Corroborate", label: "CoinGecko cross-check", detail: "Independent listing, CEX markets, market-cap vs FDV…", tone: "neutral" });
+    cg = await coingeckoToken(chain, address);
+    if (cg && !cg.listed) {
+      findings.push({ claim: "Not listed on CoinGecko — no independent market-data corroboration.", tone: "warn", source: "coingecko" });
+    } else if (cg) {
+      findings.push({ claim: `Corroborated on CoinGecko${cg.rank ? ` (rank #${cg.rank})` : ""}, ${cg.cexCount} centralized market${cg.cexCount === 1 ? "" : "s"}.`, tone: "good", source: "coingecko" });
+      if (cg.mcapUsd && fdv && fdv > cg.mcapUsd * 3) {
+        findings.push({ claim: `FDV is ${(fdv / cg.mcapUsd).toFixed(1)}x circulating market cap — large unlock / dilution overhang.`, tone: "warn", source: "coingecko" });
+      }
+    }
+  }
+
   // ---- insider / bundle-snipe concentration ----
   // Non-contract, non-locked wallets holding a large combined share are the
   // signature of a bundled launch or a coordinated early snipe.
@@ -300,7 +317,8 @@ async function runTokenAudit(
   ];
   let aT6 = ageDays == null ? 4 : ageDays < 1 ? 2 : ageDays < 7 ? 4 : ageDays < 30 ? 6 : ageDays < 180 ? 8 : 10;
   if (socials.length) aT6 = clamp(aT6 + 1, 0, 10);
-  axes.push({ key: "T6", label: "Maturity & presence", score: aT6, weight: 10, rationale: `${ageDays != null ? (ageDays < 1 ? "<1 day" : Math.round(ageDays) + " days") + " old" : "age unknown"}${socials.length ? `, ${socials.length} linked socials` : ", no socials"}.` });
+  if (cg?.cexCount) aT6 = clamp(aT6 + 2, 0, 10);
+  axes.push({ key: "T6", label: "Maturity & presence", score: aT6, weight: 10, rationale: `${ageDays != null ? (ageDays < 1 ? "<1 day" : Math.round(ageDays) + " days") + " old" : "age unknown"}${socials.length ? `, ${socials.length} socials` : ", no socials"}${cg?.cexCount ? `, ${cg.cexCount} CEX listings` : cg && !cg.listed ? ", not on CoinGecko" : ""}.` });
 
   // ---- verdict ----
   const raw = Math.round(axes.reduce((a, x) => a + x.score, 0));
@@ -336,7 +354,7 @@ async function runTokenAudit(
     imageUrl: pair.info?.imageUrl, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
     mcap: fdv, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
     verdict, score, capApplied, headline, axes, safety: s, socials,
-    projectX, deployer, topHolders, insiderPct, bundleCount, bundleRisk, graph, findings, trace, live: true, safetyChecked: s.available,
+    projectX, deployer, topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
   };
 }
 

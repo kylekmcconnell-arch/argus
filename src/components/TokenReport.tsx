@@ -230,6 +230,12 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
               <Check label="Top holder concentration" ok={s.topHolderPct == null || Number(s.topHolderPct) <= 25} value={s.topHolderPct != null ? `${Number(s.topHolderPct).toFixed(0)}%` : undefined} na={s.topHolderPct == null} />
               <Check label="Bundle / snipe concentration" ok={d.bundleRisk === "low"} value={gp ? `${d.insiderPct}% · ${d.bundleCount} wallets` : undefined} na={!gp} />
               <Check label="Pair age" ok={(d.ageDays ?? 0) >= 30} value={d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : undefined} />
+              <Check
+                label="CoinGecko corroboration"
+                ok={!!d.cg?.listed && (d.cg?.cexCount ?? 0) > 0}
+                value={d.cg ? (d.cg.listed ? `${d.cg.rank ? "#" + d.cg.rank + " · " : ""}${d.cg.cexCount} CEX` : "unlisted") : undefined}
+                na={!d.cg}
+              />
             </div>
           </Card>
         </div>

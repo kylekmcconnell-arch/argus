@@ -1,5 +1,38 @@
 import { ArgusMark } from "./ArgusMark";
 
+type Status = "live" | "partial" | "planned";
+const PHASES: { n: number; title: string; steps: [string, Status][] }[] = [
+  { n: 1, title: "Token data", steps: [
+    ["DexScreener: liquidity, MC vs FDV, pair age, holders", "live"],
+    ["Corroborate: CoinGecko cross-check, CEX markets", "live"],
+    ["CoinMarketCap, emission schedule, ticker collision", "partial"],
+  ] },
+  { n: 2, title: "Surface intelligence", steps: [
+    ["Full website crawl, every page and link", "planned"],
+    ["Verify claims and partnerships independently", "planned"],
+  ] },
+  { n: 3, title: "Code and founder forensics", steps: [
+    ["GitHub repo audit, code-quality / LLM-gen detection", "planned"],
+    ["Founder background and cofounder-network risk", "partial"],
+    ["Funding archaeology", "planned"],
+    ["Panoptes trust graph", "live"],
+  ] },
+  { n: 4, title: "Contradiction detection", steps: [
+    ["Internal contradiction scan across materials", "planned"],
+  ] },
+  { n: 5, title: "Specialist analysis modules", steps: [
+    ["Smart-contract scan / rug-pull vectors", "live"],
+    ["Moat, legal & IP, job-posting intel, user validation", "planned"],
+    ["Data provenance, app security, AI attack vectors", "planned"],
+  ] },
+  { n: 6, title: "Scoring, right-of-reply, verdict", steps: [
+    ["Scoring engine + hard caps", "live"],
+    ["PASS / CAUTION / FAIL verdict", "live"],
+    ["Right-of-reply channel", "planned"],
+    ["Formatted report export", "planned"],
+  ] },
+];
+
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mt-6">
@@ -63,6 +96,32 @@ export function AboutPage({ onStart }: { onStart: () => void }) {
         The scoring model lives in two declarative files and is pinned by a golden-set calibration suite, so the same
         evidence always yields the same verdict, and tuning the model surfaces exactly which verdicts move. Radar
         scans trending tokens live; Watchlist re-checks saved audits and flags drift like liquidity pulls.
+      </Section>
+
+      <Section title="The full investigation protocol">
+        ARGUS implements a six-phase, twenty-step forensic protocol. Status reflects what runs today,
+        live and keyless, versus what is on the roadmap (web crawl, code forensics, and agent steps
+        unlock with provider keys).
+        <div className="mt-3 flex items-center gap-4 text-[11px] text-ink-faint">
+          {([["live", "var(--color-pass)"], ["partial", "var(--color-caution)"], ["planned", "var(--color-line-2)"]] as const).map(([l, c]) => (
+            <span key={l} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: c }} />{l}</span>
+          ))}
+        </div>
+        <div className="mt-3 space-y-2">
+          {PHASES.map((p) => (
+            <div key={p.n} className="rounded-xl border border-line bg-white p-3.5">
+              <div className="mb-2 text-[12px] font-semibold text-ink">Phase {p.n} · {p.title}</div>
+              <div className="space-y-1">
+                {p.steps.map(([label, status], i) => (
+                  <div key={i} className="flex items-center gap-2 text-[12.5px] text-ink-dim">
+                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: status === "live" ? "var(--color-pass)" : status === "partial" ? "var(--color-caution)" : "var(--color-line-2)" }} />
+                    {label}
+                  </div>
+                ))}
+              </div>
+            </div>
+          ))}
+        </div>
       </Section>
 
       <div className="mt-8 flex items-center gap-3">
