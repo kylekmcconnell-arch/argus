@@ -14,7 +14,7 @@ export interface DexPair {
   marketCap?: number;
   pairCreatedAt?: number;
   txns?: { h24?: { buys: number; sells: number } };
-  priceChange?: { h24?: number };
+  priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
   baseToken?: { address: string; name: string; symbol: string };
   quoteToken?: { symbol: string };
   labels?: string[];

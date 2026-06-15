@@ -40,6 +40,7 @@ export interface NormalizedSafety {
 export interface TokenDossier {
   address: string; chain: string; dexId: string; symbol: string; name: string;
   imageUrl?: string; priceUsd?: number; mcap?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
+  priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
   verdict: string; score: number | null; capApplied: string | null; headline: string;
   axes: TokenAxis[];
   safety: NormalizedSafety;
@@ -292,7 +293,7 @@ export async function auditToken(
   return {
     address, chain, dexId: pair.dexId, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
     imageUrl: pair.info?.imageUrl, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
-    mcap: fdv, liquidityUsd, vol24, ageDays,
+    mcap: fdv, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
     verdict, score, capApplied, headline, axes, safety: s, socials,
     projectX, deployer, topHolders, graph, findings, trace, live: true, safetyChecked: s.available,
   };

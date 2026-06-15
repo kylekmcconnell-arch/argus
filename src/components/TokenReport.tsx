@@ -78,6 +78,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
   const s = d.safety;
   const gp = d.safetyChecked;
   const isSol = d.chain === "solana";
+  const topSum = d.topHolders.reduce((a, h) => a + h.percent, 0);
   const [watched, setWatched] = useState(() => isWatched(d.address));
   const [copied, setCopied] = useState(false);
   const share = () => {
@@ -145,8 +146,22 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           </div>
         </div>
 
+        {/* price momentum */}
+        {d.priceChange && (
+          <div className="mt-4 grid grid-cols-4 gap-2">
+            {([["5m", d.priceChange.m5], ["1h", d.priceChange.h1], ["6h", d.priceChange.h6], ["24h", d.priceChange.h24]] as [string, number | undefined][]).map(([l, v]) => (
+              <div key={l} className="rounded-lg border border-line bg-white px-3 py-2 text-center">
+                <div className="text-[10px] uppercase tracking-wider text-ink-faint">{l}</div>
+                <div className="mono text-[13px]" style={{ color: v == null ? "var(--color-ink-faint)" : v >= 0 ? "var(--color-pass)" : "var(--color-avoid)" }}>
+                  {v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1) + "%"}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* verdict hero */}
-        <div className="relative mt-6 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow" style={{ borderColor: `${m.color}55` }}>
+        <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow" style={{ borderColor: `${m.color}55` }}>
           <div className="absolute right-0 top-0 h-full w-1/2" style={{ background: `radial-gradient(400px 200px at 100% 0%, ${m.glow}, transparent 70%)` }} />
           <div className="relative flex flex-wrap items-center gap-6">
             <Ring score={d.score} verdict={d.verdict} />
@@ -238,13 +253,23 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
             )}
             {d.topHolders.length > 0 && (
               <div className="mt-1 border-t border-line/60 pt-2">
-                <div className="mb-1 text-[10.5px] uppercase tracking-wider text-ink-faint">Top holders</div>
-                {d.topHolders.map((h, i) => (
-                  <div key={i} className="flex items-center justify-between py-1 text-[11.5px]">
-                    <span className="mono text-ink-dim">{h.tag || shortAddr(h.address)}{h.isContract ? " ·c" : ""}</span>
-                    <span className="mono" style={{ color: h.percent > 25 ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>{h.percent.toFixed(1)}%</span>
-                  </div>
-                ))}
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Holder concentration</span>
+                  <span className="mono text-[11px]" style={{ color: topSum > 50 ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>top {d.topHolders.length} = {topSum.toFixed(0)}%</span>
+                </div>
+                <div className="flex h-2 overflow-hidden rounded-full bg-line">
+                  {d.topHolders.map((h, i) => (
+                    <div key={i} title={`${h.tag || shortAddr(h.address)} · ${h.percent.toFixed(1)}%`} style={{ width: `${Math.min(h.percent, 100)}%`, background: h.percent > 25 ? "var(--color-avoid)" : i % 2 ? "var(--color-signal)" : "var(--color-signal-dim)" }} />
+                  ))}
+                </div>
+                <div className="mt-1.5">
+                  {d.topHolders.map((h, i) => (
+                    <div key={i} className="flex items-center justify-between py-0.5 text-[11.5px]">
+                      <span className="mono text-ink-dim">{h.tag || shortAddr(h.address)}{h.isContract ? " ·c" : ""}</span>
+                      <span className="mono" style={{ color: h.percent > 25 ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>{h.percent.toFixed(1)}%</span>
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
           </Card>
