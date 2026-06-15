@@ -271,7 +271,8 @@ export function Report({ dossier, onReset }: { dossier: Dossier; onReset: () => 
   const [watched, setWatched] = useState(() => isWatched(report.handle));
   const [copied, setCopied] = useState(false);
   const share = () => {
-    navigator.clipboard?.writeText(`${location.origin}/?s=${report.handle.replace(/^@/, "")}`);
+    const p = new URLSearchParams({ k: "person", t: report.handle, title: report.handle, v: report.composite_verdict, sc: String(report.governing_score ?? ""), s: (f.headline || "").slice(0, 90) });
+    navigator.clipboard?.writeText(`${location.origin}/api/card?${p}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

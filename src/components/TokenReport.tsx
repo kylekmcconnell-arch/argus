@@ -82,7 +82,8 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
   const [watched, setWatched] = useState(() => isWatched(d.address));
   const [copied, setCopied] = useState(false);
   const share = () => {
-    navigator.clipboard?.writeText(`${location.origin}/?t=${d.address}`);
+    const p = new URLSearchParams({ k: "token", t: d.address, title: d.symbol, v: d.verdict, sc: String(d.score ?? ""), s: (d.headline || "").slice(0, 90) });
+    navigator.clipboard?.writeText(`${location.origin}/api/card?${p}`);
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   };

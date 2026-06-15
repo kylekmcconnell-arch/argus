@@ -12,6 +12,7 @@
     "lib": ["ES2023", "DOM"],
     "esModuleInterop": true,
     "skipLibCheck": true,
+    "jsx": "react",
     "types": ["node"]
   }
 }
