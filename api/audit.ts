@@ -2,8 +2,8 @@
 // Streams the collector's trace steps over SSE, then the final dossier. Mirrors
 // the standalone server (server/index.ts) so local dev and prod share orchestrate.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { runAudit } from "../server/orchestrate";
-import type { TraceStep } from "../server/adapters/types";
+import { runAudit } from "./_collector.js";
+import type { TraceStep } from "../src/data/evidence";
 
 // curated replay runs ~7s; give the function headroom
 export const config = { maxDuration: 30 };

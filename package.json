@@ -7,7 +7,7 @@
     "dev": "vite",
     "server": "tsx watch server/index.ts",
     "dev:full": "concurrently -n web,api -c cyan,magenta \"vite\" \"tsx watch server/index.ts\"",
-    "build": "tsc -b && vite build",
+    "build": "node scripts/build-collector.mjs && tsc -b && vite build",
     "test": "vitest run",
     "calibrate": "tsx src/calibration/calibrate.ts",
     "lint": "eslint .",
