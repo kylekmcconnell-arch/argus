@@ -22,8 +22,8 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => voi
         </h1>
 
         <p className="mt-3 max-w-lg text-center text-[14px] leading-relaxed text-ink-dim">
-          Paste an X handle or a token contract. ARGUS audits the people on their evidence and the
-          tokens on-chain, and returns a verdict you can stake money on.
+          Paste an X handle, a token contract, or a project website. ARGUS audits the people on their
+          evidence and the tokens on-chain, and returns a verdict you can stake money on.
         </p>
 
         {/* chat-style input */}
@@ -39,7 +39,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => voi
             <input
               value={value}
               onChange={(e) => setValue(e.target.value.replace(/^@/, ""))}
-              placeholder="@handle, x.com/ url, or a token contract address"
+              placeholder="@handle, a token contract, or a project site (e.g. neuro-mesh.io)"
               className="mono min-w-0 flex-1 bg-transparent py-1.5 text-[14px] text-ink placeholder:text-ink-faint focus:outline-none"
               autoFocus
             />

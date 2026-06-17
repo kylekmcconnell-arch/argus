@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { runRecon, type Recon } from "../collect/recon";
 import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
@@ -24,11 +24,12 @@ const COVERAGE: Record<string, { label: string; color: string; blurb: string }> 
 
 const EXAMPLES = ["neuro-mesh.io", "stripe.com"];
 
-export function ReconPage() {
-  const [url, setUrl] = useState("");
+export function ReconPage({ initialUrl }: { initialUrl?: string }) {
+  const [url, setUrl] = useState(initialUrl ?? "");
   const [stages, setStages] = useState<RetrievalStage[]>([]);
   const [recon, setRecon] = useState<Recon | null>(null);
   const [running, setRunning] = useState(false);
+  const ran = useRef(false);
 
   const run = useCallback(async (raw: string) => {
     const target = raw.trim();
@@ -54,6 +55,13 @@ export function ReconPage() {
       ].filter(Boolean),
     });
   }, []);
+
+  // Auto-run when opened with a URL from the main search bar.
+  useEffect(() => {
+    if (ran.current || !initialUrl) return;
+    ran.current = true;
+    run(initialUrl);
+  }, [initialUrl, run]);
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">

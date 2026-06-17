@@ -44,6 +44,8 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
   if (live) return { phase: "live", dossier: null, query: live };
   const token = params.get("t");
   if (token) return { phase: "token-run", dossier: null, query: token };
+  const site = params.get("site");
+  if (site) return { phase: "recon", dossier: null, query: site };
   return { phase: "idle", dossier: null, query: "" };
 }
 
@@ -57,6 +59,7 @@ export default function App() {
     boot.phase === "token-run" && boot.query ? resolveInput(boot.query) : null,
   );
   const [tokenDossier, setTokenDossier] = useState<TokenDossier | null>(null);
+  const [reconUrl, setReconUrl] = useState<string | null>(boot.phase === "recon" ? boot.query : null);
 
   const onAudit = useCallback(async (raw: string) => {
     setQuery(raw);
@@ -64,6 +67,11 @@ export default function App() {
     if (resolved.kind === "token") {
       setTokenInput(resolved);
       setPhase("token-run");
+      return;
+    }
+    if (resolved.kind === "site") {
+      setReconUrl(resolved.ref);
+      setPhase("recon");
       return;
     }
     const f = findSubject(raw);
@@ -158,6 +166,8 @@ export default function App() {
       setDossier(null);
       setQuery("");
     }
+    // opening Site recon from the rail is a fresh, manual page
+    if (t === "recon") setReconUrl(null);
     setPhase(t);
   }, []);
 
@@ -188,7 +198,7 @@ export default function App() {
 
       {phase === "track" && <TrackRecordPage onAudit={onAudit} />}
 
-      {phase === "recon" && <ReconPage />}
+      {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} />}
 
       {phase === "admin" && <AdminPage onAudit={onAudit} />}
 
