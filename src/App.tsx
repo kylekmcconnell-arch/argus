@@ -198,7 +198,7 @@ export default function App() {
 
       {phase === "track" && <TrackRecordPage onAudit={onAudit} />}
 
-      {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} />}
+      {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} onAudit={onAudit} />}
 
       {phase === "admin" && <AdminPage onAudit={onAudit} />}
 

@@ -69,6 +69,20 @@ export async function dexByToken(address: string): Promise<DexPair[]> {
   return d.pairs ?? [];
 }
 
+// Keyless, CORS-open free-text search across DexScreener — lets a site recon
+// look for a project's token on-chain by name/ticker when the page hides the
+// contract address.
+export async function searchTokens(query: string): Promise<DexPair[]> {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query)}`);
+    if (!res.ok) return [];
+    const d = (await res.json()) as { pairs?: DexPair[] };
+    return d.pairs ?? [];
+  } catch {
+    return [];
+  }
+}
+
 // Investigation Logic Map, Phase 1 Step 2: corroborate token data against an
 // independent market-data source. CoinGecko public is keyless + CORS-open.
 const CG_PLATFORM: Record<string, string> = {

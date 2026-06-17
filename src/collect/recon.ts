@@ -9,6 +9,7 @@
 //   absent           - rendered fine, no team section at all
 //   not-retrieved    - the site never rendered; a COVERAGE GAP, not a finding
 import { retrieveSite, type Retrieval } from "./retrieve";
+import { pivotOnChain, type OnChainPivot } from "./onchain";
 
 export type TeamState = "named" | "unnamed-section" | "absent" | "not-retrieved";
 
@@ -23,6 +24,7 @@ export interface Recon {
   tokenSignals: string[];     // on-chain / token signals (this is a token project?)
   findings: ReconFinding[];
   identityLine: string;       // the one honest sentence that replaces "anonymous team"
+  pivot?: OnChainPivot;       // on-chain reality check, when it reads as a token project
 }
 
 const SOCIAL = /\bhttps?:\/\/(?:www\.)?(x\.com|twitter\.com|t\.me|discord\.(?:gg|com)|github\.com|linkedin\.com)\/[^\s)"'<>]+/gi;
@@ -118,7 +120,16 @@ export function analyzeContent(retrieval: Retrieval): Recon {
   return { retrieval, title: retrieval.title, team, socials, funding, tokenSignals, findings, identityLine };
 }
 
-export async function runRecon(url: string, emit?: (s: import("./retrieve").RetrievalStage) => void): Promise<Recon> {
+export async function runRecon(
+  url: string,
+  emit?: (s: import("./retrieve").RetrievalStage) => void,
+  onPivot?: (label: string) => void,
+): Promise<Recon> {
   const retrieval = await retrieveSite(url, emit);
-  return analyzeContent(retrieval);
+  const recon = analyzeContent(retrieval);
+  if (retrieval.status !== "gap") {
+    const pivot = await pivotOnChain(retrieval.content, recon.tokenSignals.length, onPivot);
+    if (pivot.attempted) recon.pivot = pivot;
+  }
+  return recon;
 }

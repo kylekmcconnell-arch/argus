@@ -24,9 +24,10 @@ const COVERAGE: Record<string, { label: string; color: string; blurb: string }> 
 
 const EXAMPLES = ["neuro-mesh.io", "stripe.com"];
 
-export function ReconPage({ initialUrl }: { initialUrl?: string }) {
+export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudit?: (q: string) => void }) {
   const [url, setUrl] = useState(initialUrl ?? "");
   const [stages, setStages] = useState<RetrievalStage[]>([]);
+  const [pivotNotes, setPivotNotes] = useState<string[]>([]);
   const [recon, setRecon] = useState<Recon | null>(null);
   const [running, setRunning] = useState(false);
   const ran = useRef(false);
@@ -38,7 +39,12 @@ export function ReconPage({ initialUrl }: { initialUrl?: string }) {
     setRunning(true);
     setRecon(null);
     setStages([]);
-    const r = await runRecon(target, (s) => setStages((prev) => [...prev, s]));
+    setPivotNotes([]);
+    const r = await runRecon(
+      target,
+      (s) => setStages((prev) => [...prev, s]),
+      (note) => setPivotNotes((prev) => [...prev, note]),
+    );
     setRecon(r);
     setRunning(false);
     logAudit({
@@ -52,6 +58,8 @@ export function ReconPage({ initialUrl }: { initialUrl?: string }) {
         r.team.state === "unnamed-section" ? "team-unnamed" : "",
         r.team.state === "named" ? "team-named" : "",
         r.tokenSignals.length >= 2 ? "token-project" : "",
+        r.pivot?.reconcile.tone === "bad" ? "token-claim-unverified" : "",
+        r.pivot?.found ? "token-found-onchain" : "",
       ].filter(Boolean),
     });
   }, []);
@@ -145,6 +153,56 @@ export function ReconPage({ initialUrl }: { initialUrl?: string }) {
             </div>
           </div>
 
+          {/* on-chain reality check */}
+          {recon.pivot && (
+            <div className="mt-3 rounded-xl border bg-white p-4" style={{ borderColor: TONE[recon.pivot.reconcile.tone] + "66" }}>
+              <div className="flex items-center gap-2">
+                <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">On-chain reality check</span>
+                <span className="mono shrink-0 text-[12px]" style={{ color: TONE[recon.pivot.reconcile.tone] }}>{GLYPH[recon.pivot.reconcile.tone]}</span>
+              </div>
+
+              {/* the claim it is checking */}
+              <div className="mt-2 flex flex-wrap gap-1.5">
+                {recon.pivot.claim.ticker && <Chip k="ticker" v={recon.pivot.claim.ticker} />}
+                {recon.pivot.claim.fdv && <Chip k="claims" v={recon.pivot.claim.fdv} />}
+                {recon.pivot.claim.raise && <Chip k="raise" v={recon.pivot.claim.raise} />}
+                {recon.pivot.claim.live && <Chip k="" v="token live" />}
+              </div>
+
+              {pivotNotes.length > 0 && (
+                <div className="mt-2 space-y-0.5">
+                  {pivotNotes.map((n, i) => <div key={i} className="mono text-[11.5px] text-ink-faint">→ {n}</div>)}
+                </div>
+              )}
+
+              <p className="mt-2 text-[13.5px] font-medium leading-relaxed text-ink">{recon.pivot.reconcile.line}</p>
+
+              {/* found token -> click through to the full token audit */}
+              {recon.pivot.found && onAudit && (
+                <button
+                  onClick={() => onAudit(recon.pivot!.found!.address)}
+                  className="mono mt-3 rounded-lg border border-line bg-panel-2/50 px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                >
+                  open full token audit for {recon.pivot.found.symbol} →
+                </button>
+              )}
+
+              {/* name-search candidates, when nothing confidently matched */}
+              {!recon.pivot.found && recon.pivot.candidates.length > 0 && (
+                <div className="mt-2.5">
+                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Closest by name (not a confirmed match)</div>
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {recon.pivot.candidates.map((c) => (
+                      <button key={c.address} onClick={() => onAudit?.(c.address)} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim transition hover:text-ink">
+                        {c.symbol} · {c.chain} · ${Math.round(c.liqUsd).toLocaleString()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* extracted entities */}
           {(recon.socials.length > 0 || recon.funding.length > 0 || recon.tokenSignals.length > 0) && (
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
@@ -183,6 +241,14 @@ export function ReconPage({ initialUrl }: { initialUrl?: string }) {
         from content actually rendered.
       </div>
     </div>
+  );
+}
+
+function Chip({ k, v }: { k: string; v: string }) {
+  return (
+    <span className="mono rounded-md border border-line bg-panel-2/40 px-1.5 py-0.5 text-[11px] text-ink-dim">
+      {k && <span className="text-ink-faint">{k} </span>}{v}
+    </span>
   );
 }
 
