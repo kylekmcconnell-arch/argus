@@ -11,6 +11,9 @@ import { RadarPage } from "./components/RadarPage";
 import { AboutPage } from "./components/AboutPage";
 import { ApiPage } from "./components/ApiPage";
 import { TrackRecordPage } from "./components/TrackRecordPage";
+import { ReconPage } from "./components/ReconPage";
+import { AdminPage } from "./components/AdminPage";
+import { logAudit } from "./lib/auditlog";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
@@ -21,7 +24,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
 type Phase =
-  | "idle" | "radar" | "dossiers" | "graph" | "watchlist" | "track" | "about" | "api"
+  | "idle" | "radar" | "recon" | "dossiers" | "graph" | "watchlist" | "track" | "admin" | "about" | "api"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "notfound";
@@ -77,12 +80,27 @@ export default function App() {
   const onTokenDone = useCallback((d: TokenDossier) => {
     setTokenDossier(d);
     setPhase("token-report");
+    logAudit({
+      kind: "token", query: `$${d.symbol}`, verdict: d.verdict, score: d.score,
+      summary: d.headline,
+      flags: [d.capApplied ? `cap:${d.capApplied}` : "", d.bundleRisk !== "low" ? `bundle:${d.bundleRisk}` : ""].filter(Boolean),
+    });
   }, []);
+
+  const logPerson = (d: Dossier) => {
+    logAudit({
+      kind: "person", query: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
+      summary: d.headline,
+      flags: [d.report.cap_applied ? `cap:${d.report.cap_applied}` : "", `role:${d.report.governing_role}`].filter(Boolean),
+    });
+  };
 
   const onRunDone = useCallback(() => {
     setFixture((f) => {
       if (f) {
-        setDossier(buildReport(f));
+        const d = buildReport(f);
+        setDossier(d);
+        logPerson(d);
         setPhase("report");
       }
       return f;
@@ -91,6 +109,7 @@ export default function App() {
 
   const onLiveDone = useCallback((d: Dossier) => {
     setDossier(d);
+    logPerson(d);
     setPhase("report");
   }, []);
 
@@ -147,7 +166,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "track" || phase === "about" || phase === "api"
+    : phase === "radar" || phase === "recon" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "track" || phase === "admin" || phase === "about" || phase === "api"
       ? phase
       : "idle";
 
@@ -168,6 +187,10 @@ export default function App() {
       {phase === "watchlist" && <WatchlistPage onAudit={onAudit} />}
 
       {phase === "track" && <TrackRecordPage onAudit={onAudit} />}
+
+      {phase === "recon" && <ReconPage />}
+
+      {phase === "admin" && <AdminPage onAudit={onAudit} />}
 
       {phase === "running" && fixture && <RunConsole fixture={fixture} onDone={onRunDone} />}
 
