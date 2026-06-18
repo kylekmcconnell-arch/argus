@@ -214,18 +214,27 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
                   <Check label="Ownership renounced" ok={!!s.ownerRenounced} na={!gp} />
                   <Check label="No take-back ownership" ok={!s.takeBack} na={!gp} />
                   <Check label="No hidden owner" ok={!s.hiddenOwner} na={!gp} />
+                  <Check label="Not upgradeable (proxy)" ok={!s.proxy} na={!gp} />
+                  <Check label="Owner can't rewrite balances" ok={!s.ownerChangeBalance} na={!gp} />
                   <Check label="Transfers not pausable" ok={!s.pausable} na={!gp} />
                   <Check label="Source verified" ok={!!s.openSource} na={!gp} />
                 </>
               )}
               <Check label="Taxes" ok={s.buyTax + s.sellTax < 10} value={gp ? (isSol ? "0%" : `${s.buyTax.toFixed(0)}/${s.sellTax.toFixed(0)}%`) : undefined} na={!gp} />
+              {!isSol && <Check label="Tax not modifiable" ok={!s.slippageModifiable} na={!gp} />}
             </div>
           </Card>
 
           <Card title="Liquidity & holders">
             <div className="divide-y divide-line/60">
-              <Check label="Liquidity locked / burned" ok={!!s.lpLocked} na={!gp} />
+              <Check
+                label="Liquidity locked / burned"
+                ok={s.lpBurnedPct >= 50 || s.lpLockedPct >= 50}
+                value={gp ? (s.lpBurnedPct >= 50 ? `burned ${s.lpBurnedPct.toFixed(0)}%` : s.lpLockedPct >= 50 ? `locked ${s.lpLockedPct.toFixed(0)}%` : s.lpTopUnlockedEoaPct >= 50 ? `1 wallet ${s.lpTopUnlockedEoaPct.toFixed(0)}%` : "not locked") : undefined}
+                na={!gp}
+              />
               <Check label="Liquidity depth" ok={(d.liquidityUsd ?? 0) >= 50000} value={money(d.liquidityUsd)} />
+              {!isSol && <Check label="Creator holdings" ok={s.creatorPercent < 5} value={gp ? `${s.creatorPercent.toFixed(0)}%` : undefined} na={!gp} />}
               <Check label="Holders" ok={Number(s.holderCount) >= 500} value={gp ? Number(s.holderCount).toLocaleString() : undefined} na={!gp} />
               <Check label="Top holder concentration" ok={s.topHolderPct == null || Number(s.topHolderPct) <= 25} value={s.topHolderPct != null ? `${Number(s.topHolderPct).toFixed(0)}%` : undefined} na={s.topHolderPct == null} />
               <Check label="Bundle / snipe concentration" ok={d.bundleRisk === "low"} value={gp ? `${d.insiderPct}% · ${d.bundleCount} wallets` : undefined} na={!gp} />
