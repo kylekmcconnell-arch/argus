@@ -40,6 +40,10 @@ export interface NormalizedSafety {
   lpBurnedPct: number;        // sent to a null/dead address — permanently unpullable
   lpLockedPct: number;        // held in a locker / locked, excluding burns
   lpTopUnlockedEoaPct: number; // largest share in a single unlocked non-contract wallet (rug-ready)
+  // Solana (Token-2022) risk vectors
+  balanceMutable: boolean;    // controller can rewrite holder balances
+  transferHook: boolean;      // a program runs on every transfer (can block sells)
+  transferFee: boolean;       // built-in transfer tax
   // owner-power risk vectors (dangerous mainly while the owner is active)
   proxy: boolean;
   slippageModifiable: boolean;
@@ -129,6 +133,7 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     topHolderPct,
     lpLocked,
     lpBurnedPct, lpLockedPct, lpTopUnlockedEoaPct,
+    balanceMutable: false, transferHook: false, transferFee: false,
     proxy: t1(gp?.is_proxy),
     slippageModifiable: t1(gp?.slippage_modifiable) || t1(gp?.personal_slippage_modifiable),
     blacklist: t1(gp?.is_blacklisted),
@@ -173,6 +178,9 @@ function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
     topHolderPct,
     lpLocked,
     lpBurnedPct: 0, lpLockedPct, lpTopUnlockedEoaPct,
+    balanceMutable: solFlag(sol?.balance_mutable_authority),
+    transferHook: (sol?.transfer_hook?.length ?? 0) > 0,
+    transferFee: Object.keys(sol?.transfer_fee ?? {}).length > 0,
     proxy: false, slippageModifiable: false, blacklist: false, tradingCooldown: false,
     externalCall: false, ownerChangeBalance: false, creatorPercent: 0,
   };
@@ -185,6 +193,7 @@ function emptySafety(): NormalizedSafety {
     selfdestruct: false, pausable: false, openSource: false, cannotSellAll: false,
     metadataMutable: false, buyTax: 0, sellTax: 0, holderCount: 0, topHolderPct: null, lpLocked: false,
     lpBurnedPct: 0, lpLockedPct: 0, lpTopUnlockedEoaPct: 0,
+    balanceMutable: false, transferHook: false, transferFee: false,
     proxy: false, slippageModifiable: false, blacklist: false, tradingCooldown: false,
     externalCall: false, ownerChangeBalance: false, creatorPercent: 0,
   };
@@ -334,6 +343,16 @@ async function runTokenAudit(
     if (s.externalCall) findings.push({ claim: "Contract makes external calls — behavior can change via an external dependency.", tone: "warn", source: "goplus" });
     if (s.creatorPercent >= 5) findings.push({ claim: `Creator still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: "goplus" });
 
+    // ---- Solana (Token-2022) vectors ----
+    if (chain === "solana") {
+      if (s.balanceMutable) {
+        if (broadlyTraded) findings.push({ claim: "A balance-mutable authority exists, but broad market presence indicates it is not an active threat.", tone: "warn", source: "argus" });
+        else { caps.push([20, "balance_mutable_authority"]); findings.push({ claim: "Balance-mutable authority is active — the controller can rewrite your token balance.", tone: "bad", source: "goplus-sol" }); }
+      }
+      if (s.transferHook) findings.push({ claim: "Transfer hook active: an external program runs on every transfer and can block sells.", tone: "bad", source: "goplus-sol" });
+      if (s.transferFee) findings.push({ claim: "A Token-2022 transfer fee is configured — a built-in tax on every transfer.", tone: "warn", source: "goplus-sol" });
+    }
+
     // ---- LP-holder forensics: where the liquidity actually sits ----
     if (s.lpBurnedPct >= 50) findings.push({ claim: `Liquidity is burned (~${s.lpBurnedPct.toFixed(0)}%) — permanently removed, it cannot be pulled.`, tone: "good", source: "goplus" });
     else if (s.lpLockedPct >= 50) findings.push({ claim: `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: "goplus" });
@@ -402,6 +421,7 @@ async function runTokenAudit(
   else if (chain === "solana") {
     if (s.metadataMutable) aT2 -= 8;
     if (!s.ownerRenounced) aT2 -= 6;
+    if (s.transferHook) aT2 -= 8;
   } else {
     if (!s.openSource) aT2 -= 8;
     if (s.pausable) aT2 -= 8;
@@ -420,6 +440,7 @@ async function runTokenAudit(
   if (s.cannotSellAll || s.nonTransferable) aT3 = 0;
   // a modifiable tax with an active owner is a trap even when the tax reads low now
   if (s.slippageModifiable && !s.ownerRenounced) aT3 = clamp(aT3 - 5, 0, 12);
+  if (s.transferFee) aT3 = clamp(aT3 - 5, 0, 12);
   axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? (chain === "solana" ? "no transfer tax detected." : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.`) : "Tax not verifiable keyless." });
 
   const topPct = holdersReliable ? s.topHolderPct : null;
@@ -527,6 +548,7 @@ function buildHeadline(verdict: string, cap: string | null, s: NormalizedSafety,
   if (cap === "freeze_authority_active") return "Freeze authority is live, the team can freeze your tokens at any time.";
   if (cap === "reclaimable_ownership") return "Ownership can be reclaimed after renouncement, a classic rug setup.";
   if (cap === "owner_can_modify_balance") return "Owner can rewrite holder balances, they can zero your wallet at will.";
+  if (cap === "balance_mutable_authority") return "A balance-mutable authority can rewrite your token balance at will.";
   if (verdict === "PASS") return `Clears the forensic bar: ${s.ownerRenounced ? "authorities revoked" : "owned"}, ${s.lpLocked ? "LP locked" : "tradeable"}, with real depth${projectX ? `. Team: ${projectX}` : "."}`;
   if (verdict === "CAUTION") return `Tradeable but with reservations${liq < 15000 ? "; liquidity is thin" : ""}. Size accordingly.`;
   if (!s.available) return "Scored on market data only; on-chain contract safety could not be verified keyless on this chain.";

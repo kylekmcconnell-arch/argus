@@ -206,6 +206,9 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
               {isSol ? (
                 <>
                   <Check label="Freeze authority revoked" ok={!s.freezable} na={!gp} />
+                  <Check label="No balance-mutable authority" ok={!s.balanceMutable} na={!gp} />
+                  <Check label="No transfer hook" ok={!s.transferHook} na={!gp} />
+                  <Check label="No transfer fee" ok={!s.transferFee} na={!gp} />
                   <Check label="Metadata immutable" ok={!s.metadataMutable} na={!gp} />
                   <Check label="Transferable" ok={!s.nonTransferable} na={!gp} />
                 </>
