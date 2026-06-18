@@ -14,6 +14,32 @@ function money(n?: number): string {
   return "$" + Math.round(n);
 }
 
+const BADGE_TONE: Record<string, string> = { bad: "var(--color-avoid)", warn: "var(--color-caution)", good: "var(--color-pass)" };
+
+// At-a-glance forensic flags for the feed, worst first. All available from the
+// fast (skipSim) scan — GoPlus contract data + DexScreener price action.
+function riskBadges(d: TokenDossier): { label: string; tone: "bad" | "warn" | "good" }[] {
+  const s = d.safety;
+  const pc = d.priceChange?.h24 ?? 0;
+  const b: { label: string; tone: "bad" | "warn" | "good" }[] = [];
+  if (s.mintable) b.push({ label: "mintable", tone: "bad" });
+  if (s.freezable) b.push({ label: "freeze", tone: "bad" });
+  if (s.ownerChangeBalance && !s.ownerRenounced) b.push({ label: "owner-bal", tone: "bad" });
+  if (s.lpTopUnlockedEoaPct >= 80) b.push({ label: "LP 1-wallet", tone: "bad" });
+  if (s.slippageModifiable && !s.ownerRenounced) b.push({ label: "tax-mod", tone: "bad" });
+  if (pc <= -60) b.push({ label: "dumped", tone: "bad" });
+  if (d.bundleRisk === "high") b.push({ label: "bundled", tone: "bad" });
+  if (s.proxy) b.push({ label: "proxy", tone: "warn" });
+  if (d.bundleRisk === "elevated") b.push({ label: "snipe risk", tone: "warn" });
+  if (pc >= 300 && (d.liquidityUsd ?? 0) < 100000) b.push({ label: "vertical pump", tone: "warn" });
+  if (b.length === 0) {
+    if (s.lpBurnedPct >= 50) b.push({ label: "LP burned", tone: "good" });
+    else if (s.lpLockedPct >= 50) b.push({ label: "LP locked", tone: "good" });
+    if (s.ownerRenounced && !s.mintable && !s.freezable) b.push({ label: "renounced", tone: "good" });
+  }
+  return b.slice(0, 4);
+}
+
 async function pool<T, R>(items: T[], n: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
   const res: R[] = new Array(items.length);
   let idx = 0;
@@ -163,6 +189,18 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
                       <span className="mono">{d.score}/100</span>
                     )}
                   </div>
+                  {(() => {
+                    const badges = riskBadges(d);
+                    return badges.length > 0 ? (
+                      <div className="mt-2 flex flex-wrap gap-1">
+                        {badges.map((bd) => (
+                          <span key={bd.label} className="mono rounded px-1.5 py-0.5 text-[9.5px] font-medium" style={{ color: BADGE_TONE[bd.tone], background: BADGE_TONE[bd.tone] + "14" }}>
+                            {bd.label}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null;
+                  })()}
                 </button>
               );
             })}
