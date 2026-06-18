@@ -213,7 +213,13 @@ async function runTokenAudit(
   const vol24 = pair.volume?.h24 ?? 0;
   const buys = pair.txns?.h24?.buys ?? 0;
   const sells = pair.txns?.h24?.sells ?? 0;
+  const pc24 = pair.priceChange?.h24 ?? 0;
   const ageDays = pair.pairCreatedAt ? (Date.now() - pair.pairCreatedAt) / 86400000 : undefined;
+  // Trading-authenticity signals. High volume-to-liquidity churn is normal for
+  // thin meme tokens, so it is NOT wash trading on its own — the signature is
+  // heavy churn with the price going nowhere (volume that does not move price).
+  const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
+  const washSignature = volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
   step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15000 ? "warn" : "neutral" });
 
   // ---- safety (chain-specific) ----
@@ -306,6 +312,10 @@ async function runTokenAudit(
   }
   if (liquidityUsd < 15000) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
+  // ---- manipulation & price-action signals ----
+  if (washSignature) findings.push({ claim: `Volume is ${volLiq.toFixed(0)}x liquidity in 24h while the price moved only ${pc24.toFixed(1)}% — a wash-trading / fake-volume signature.`, tone: "bad", source: "dexscreener" });
+  if (pc24 <= -60) findings.push({ claim: `Down ${Math.abs(pc24).toFixed(0)}% in 24h — the token appears to have already dumped.`, tone: "bad", source: "dexscreener" });
+  else if (pc24 >= 300 && liquidityUsd < 100000) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity — a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
 
   // CoinGecko-derived corroboration findings (cg was fetched above).
   if (!opts?.skipSim) {
@@ -397,11 +407,12 @@ async function runTokenAudit(
       : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% in ${bundleCount} fresh wallets` : ""}.`;
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
 
-  const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
-  if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
+  if (washSignature) aT5 = 2; // churn without price movement = manufactured volume
+  else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
+  if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%) — wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
 
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
