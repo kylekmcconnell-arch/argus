@@ -5,7 +5,7 @@
 // flagged subjects sharing the same hidden hub becomes a cabal. None of that is
 // visible in any single report — it only emerges when the graphs are unified.
 import type { Dossier } from "../data/dossier";
-import type { PanoptesNode } from "../engine";
+import type { PanoptesNode, PanoptesEdge } from "../engine";
 
 export type NetFlag = "bridge" | "serial" | "cabal" | "hub";
 
