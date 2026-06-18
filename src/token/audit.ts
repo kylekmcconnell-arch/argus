@@ -36,6 +36,10 @@ export interface NormalizedSafety {
   holderCount: number;
   topHolderPct: number | null;
   lpLocked: boolean;
+  // LP-holder forensics: where the liquidity actually sits
+  lpBurnedPct: number;        // sent to a null/dead address — permanently unpullable
+  lpLockedPct: number;        // held in a locker / locked, excluding burns
+  lpTopUnlockedEoaPct: number; // largest share in a single unlocked non-contract wallet (rug-ready)
   // owner-power risk vectors (dangerous mainly while the owner is active)
   proxy: boolean;
   slippageModifiable: boolean;
@@ -83,13 +87,26 @@ function handleFromUrl(url?: string): string | null {
   return m ? "@" + m[1].toLowerCase() : null;
 }
 
+const isBurnAddr = (a?: string) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
+const isBurnTag = (t?: string) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
+
 // --- normalize EVM safety from GoPlus + honeypot.is ---
 function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): NormalizedSafety {
   const s = sim;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
-  const lpLocked =
-    (gp?.lp_holders?.some((h) => h.is_locked === 1) ?? false) ||
-    (gp?.lp_holders?.reduce((a, h) => a + (h.is_locked ? Number(h.percent) : 0), 0) ?? 0) > 0.5;
+  // Classify where the liquidity sits: burned (permanent) vs locked vs sitting in
+  // an unlocked wallet. Concentration in an unlocked CONTRACT (e.g. a pair/staking
+  // contract, as PEPE shows) is not a rug signal — only an unlocked non-contract
+  // wallet holding the LP is rug-ready.
+  let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
+  for (const h of gp?.lp_holders ?? []) {
+    const pct = Number(h.percent) * 100;
+    if (!Number.isFinite(pct)) continue;
+    if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct;
+    else if (h.is_locked === 1) lpLockedPct += pct;
+    else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
+  }
+  const lpLocked = lpBurnedPct + lpLockedPct >= 50;
   return {
     available: !!gp || !!s,
     simChecked: !!s,
@@ -111,6 +128,7 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     holderCount: num(gp?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
+    lpBurnedPct, lpLockedPct, lpTopUnlockedEoaPct,
     proxy: t1(gp?.is_proxy),
     slippageModifiable: t1(gp?.slippage_modifiable) || t1(gp?.personal_slippage_modifiable),
     blacklist: t1(gp?.is_blacklisted),
@@ -123,7 +141,14 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
 
 function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
   const topHolderPct = sol?.holders?.length ? Number(sol.holders[0].percent) * 100 : null;
-  const lpLocked = sol?.lp_holders?.some((h) => h.is_locked === 1) ?? false;
+  let lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
+  for (const h of sol?.lp_holders ?? []) {
+    const pct = Number(h.percent) * 100;
+    if (!Number.isFinite(pct)) continue;
+    if (h.is_locked === 1) lpLockedPct += pct;
+    else lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
+  }
+  const lpLocked = lpLockedPct >= 50;
   const mintable = solFlag(sol?.mintable);
   const freezable = solFlag(sol?.freezable);
   return {
@@ -147,6 +172,7 @@ function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
     holderCount: num(sol?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
+    lpBurnedPct: 0, lpLockedPct, lpTopUnlockedEoaPct,
     proxy: false, slippageModifiable: false, blacklist: false, tradingCooldown: false,
     externalCall: false, ownerChangeBalance: false, creatorPercent: 0,
   };
@@ -158,6 +184,7 @@ function emptySafety(): NormalizedSafety {
     nonTransferable: false, ownerRenounced: false, takeBack: false, hiddenOwner: false,
     selfdestruct: false, pausable: false, openSource: false, cannotSellAll: false,
     metadataMutable: false, buyTax: 0, sellTax: 0, holderCount: 0, topHolderPct: null, lpLocked: false,
+    lpBurnedPct: 0, lpLockedPct: 0, lpTopUnlockedEoaPct: 0,
     proxy: false, slippageModifiable: false, blacklist: false, tradingCooldown: false,
     externalCall: false, ownerChangeBalance: false, creatorPercent: 0,
   };
@@ -307,7 +334,11 @@ async function runTokenAudit(
     if (s.externalCall) findings.push({ claim: "Contract makes external calls — behavior can change via an external dependency.", tone: "warn", source: "goplus" });
     if (s.creatorPercent >= 5) findings.push({ claim: `Creator still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: "goplus" });
 
-    if (s.lpLocked) findings.push({ claim: "Liquidity is locked.", tone: "good", source: "goplus" });
+    // ---- LP-holder forensics: where the liquidity actually sits ----
+    if (s.lpBurnedPct >= 50) findings.push({ claim: `Liquidity is burned (~${s.lpBurnedPct.toFixed(0)}%) — permanently removed, it cannot be pulled.`, tone: "good", source: "goplus" });
+    else if (s.lpLockedPct >= 50) findings.push({ claim: `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: "goplus" });
+    else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet — it can be pulled at any time.`, tone: "bad", source: "goplus" });
+    else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet — removable at will.`, tone: "warn", source: "goplus" });
     else findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
   }
   if (liquidityUsd < 15000) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
@@ -358,9 +389,13 @@ async function runTokenAudit(
   const axes: TokenAxis[] = [];
 
   let aT1 = liquidityUsd < 2000 ? 2 : liquidityUsd < 10000 ? 6 : liquidityUsd < 50000 ? 12 : liquidityUsd < 250000 ? 18 : 22;
-  if (s.lpLocked) aT1 = clamp(aT1 + 2, 0, 24);
-  else if (s.available) aT1 = clamp(aT1 - 3, 0, 24);
-  axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${s.available ? (s.lpLocked ? ", LP locked" : ", LP not locked") : ""}.` });
+  let lpNote = "";
+  if (s.lpBurnedPct >= 50) { aT1 = clamp(aT1 + 3, 0, 24); lpNote = ", LP burned"; }
+  else if (s.lpLockedPct >= 50) { aT1 = clamp(aT1 + 2, 0, 24); lpNote = ", LP locked"; }
+  else if (s.available && s.lpTopUnlockedEoaPct >= 80) { aT1 = clamp(aT1 - 6, 0, 24); lpNote = ", LP in one unlocked wallet"; }
+  else if (s.available && s.lpTopUnlockedEoaPct >= 50) { aT1 = clamp(aT1 - 4, 0, 24); lpNote = ", LP mostly in one wallet"; }
+  else if (s.available) { aT1 = clamp(aT1 - 3, 0, 24); lpNote = ", LP not locked"; }
+  axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${lpNote}.` });
 
   let aT2 = 26;
   if (!s.available) aT2 = 9;

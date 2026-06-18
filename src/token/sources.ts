@@ -151,7 +151,7 @@ export interface GoPlusSecurity {
   lp_holder_count?: string;
   lp_total_supply?: string;
   holders?: { address: string; percent: string; is_locked?: number; is_contract?: number; tag?: string }[];
-  lp_holders?: { address: string; percent: string; is_locked?: number }[];
+  lp_holders?: { address: string; percent: string; is_locked?: number; is_contract?: number; tag?: string }[];
   creator_address?: string;
   creator_percent?: string;
 }
