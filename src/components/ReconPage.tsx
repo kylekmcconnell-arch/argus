@@ -2,6 +2,23 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { runRecon, type Recon } from "../collect/recon";
 import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
+import { verdictMeta } from "../lib/verdict";
+
+function Ring({ score, color }: { score: number | null; color: string }) {
+  const size = 60, r = size / 2 - 5, c = 2 * Math.PI * r;
+  const pct = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
+  return (
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} className="-rotate-90">
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-line)" strokeWidth="4" />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} style={{ transition: "stroke-dashoffset 0.7s ease-out" }} />
+      </svg>
+      <div className="absolute inset-0 flex items-center justify-center">
+        <span className="mono text-[16px] font-semibold tabular" style={{ color }}>{score ?? "—"}</span>
+      </div>
+    </div>
+  );
+}
 
 const TONE: Record<string, string> = {
   good: "var(--color-pass)",
@@ -50,7 +67,8 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
     logAudit({
       kind: "site",
       query: r.retrieval.url,
-      verdict: r.retrieval.status,
+      verdict: r.verdict?.verdict ?? r.retrieval.status,
+      score: r.verdict?.score ?? null,
       coverage: r.retrieval.status,
       summary: r.identityLine,
       flags: [
@@ -128,19 +146,39 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
       {/* result */}
       {recon && (
         <>
-          {/* coverage + identity */}
-          <div className="mt-4 rounded-xl border bg-white p-4" style={{ borderColor: COVERAGE[recon.retrieval.status].color + "66" }}>
-            <div className="flex items-center gap-2">
-              <span className="mono rounded px-1.5 py-0.5 text-[10.5px] font-semibold" style={{ color: COVERAGE[recon.retrieval.status].color, background: COVERAGE[recon.retrieval.status].color + "14" }}>
-                {COVERAGE[recon.retrieval.status].label}
-              </span>
-              {recon.title && <span className="truncate text-[13px] text-ink">{recon.title}</span>}
-            </div>
-            <p className="mt-2 text-[14px] font-medium leading-relaxed text-ink">{recon.identityLine}</p>
-            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-faint">{COVERAGE[recon.retrieval.status].blurb}</p>
-          </div>
+          {/* verdict hero */}
+          {recon.verdict && (() => {
+            const v = recon.verdict!;
+            const m = verdictMeta(v.verdict);
+            return (
+              <div className="mt-4 rounded-xl border bg-white p-5" style={{ borderColor: m.color + "66", background: m.glow }}>
+                <div className="flex items-center gap-4">
+                  <Ring score={v.score} color={m.color} />
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="mono text-[18px] font-semibold tracking-tight" style={{ color: m.color }}>{m.label}</span>
+                      <span className="mono rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ color: COVERAGE[recon.retrieval.status].color, background: COVERAGE[recon.retrieval.status].color + "14" }}>
+                        {COVERAGE[recon.retrieval.status].label}
+                      </span>
+                      {v.capApplied && <span className="mono rounded px-1.5 py-0.5 text-[10px] text-ink-faint" style={{ background: "var(--color-avoid)14", color: "var(--color-avoid)" }}>cap · {v.capApplied.replace(/_/g, " ")}</span>}
+                    </div>
+                    {recon.title && <div className="mt-1 truncate text-[13px] text-ink-dim">{recon.title}</div>}
+                    <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">{recon.identityLine}</p>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-1.5 border-t border-line/60 pt-3">
+                  {v.reasons.map((r, i) => (
+                    <div key={i} className="flex items-start gap-2.5">
+                      <span className="mono mt-0.5 shrink-0 text-[12px]" style={{ color: TONE[r.tone] }}>{GLYPH[r.tone]}</span>
+                      <span className="text-[13px] leading-snug text-ink-dim">{r.text}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })()}
 
-          {/* findings */}
+          {/* findings ledger */}
           <div className="mt-3 rounded-xl border border-line bg-white p-4">
             <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Findings</div>
             <div className="mt-2 space-y-2">

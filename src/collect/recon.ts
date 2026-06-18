@@ -10,6 +10,7 @@
 //   not-retrieved    - the site never rendered; a COVERAGE GAP, not a finding
 import { retrieveSite, type Retrieval } from "./retrieve";
 import { pivotOnChain, type OnChainPivot } from "./onchain";
+import { scoreProject, type ProjectVerdict } from "./projectverdict";
 
 export type TeamState = "named" | "unnamed-section" | "absent" | "not-retrieved";
 
@@ -25,6 +26,7 @@ export interface Recon {
   findings: ReconFinding[];
   identityLine: string;       // the one honest sentence that replaces "anonymous team"
   pivot?: OnChainPivot;       // on-chain reality check, when it reads as a token project
+  verdict?: ProjectVerdict;   // synthesized PASS / CAUTION / FAIL / INCOMPLETE
 }
 
 const SOCIAL = /\bhttps?:\/\/(?:www\.)?(x\.com|twitter\.com|t\.me|discord\.(?:gg|com)|github\.com|linkedin\.com)\/[^\s)"'<>]+/gi;
@@ -48,10 +50,18 @@ const SECOND_BAD = /^(App|Protocol|Labs?|Partner|Marketplace|Ecosystem|Ecosistem
 
 function uniq(a: string[]): string[] { return [...new Set(a)]; }
 
+const CONNECTOR = /^(of|the|and|both|for|to|in|on|at|a|an|our|your|with|by|from|is|are|that|this)$/i;
 function validName(n: string): boolean {
   const parts = n.split(/\s+/);
+  if (parts.length < 2) return false;
+  // every token must read like a real name part: Title-case, not a connector,
+  // not a brand/structure word. Kills "of both the" / "of the Fund".
+  for (const p of parts) {
+    if (!/^[A-Z][A-Za-z.'-]{1,}$/.test(p)) return false;
+    if (CONNECTOR.test(p)) return false;
+    if (SECOND_BAD.test(p)) return false;
+  }
   if (FIRST_BAD.test(parts[0])) return false;
-  if (parts[1] && SECOND_BAD.test(parts[1])) return false;
   return true;
 }
 
@@ -131,5 +141,6 @@ export async function runRecon(
     const pivot = await pivotOnChain(retrieval.content, recon.tokenSignals.length, onPivot);
     if (pivot.attempted) recon.pivot = pivot;
   }
+  recon.verdict = scoreProject(recon);
   return recon;
 }

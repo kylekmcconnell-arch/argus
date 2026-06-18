@@ -17,7 +17,7 @@ function ago(ts: number): string {
 }
 
 function verdictColor(e: LogEntry): string {
-  if (e.kind === "site") return e.coverage === "gap" ? "var(--color-unverifiable)" : e.coverage === "recovered" ? "var(--color-caution)" : "var(--color-pass)";
+  if (e.kind === "site" && (e.coverage === "gap" || !e.verdict)) return "var(--color-unverifiable)";
   return verdictMeta(e.verdict ?? "INCOMPLETE").color;
 }
 
@@ -101,7 +101,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
               </span>
               <span className="flex shrink-0 flex-col items-end gap-1">
                 <span className="mono text-[11px] font-semibold uppercase" style={{ color: verdictColor(e) }}>
-                  {e.kind === "site" ? e.coverage : e.verdict}{typeof e.score === "number" ? ` ${e.score}` : ""}
+                  {e.verdict}{typeof e.score === "number" ? ` ${e.score}` : ""}
                 </span>
                 <span className="mono text-[10px] text-ink-faint">{ago(e.ts)}</span>
               </span>
