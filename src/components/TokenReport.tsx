@@ -64,6 +64,30 @@ function Check({ label, ok, value, na }: { label: string; ok: boolean; value?: s
   );
 }
 
+const TONE_RANK: Record<string, number> = { bad: 3, warn: 2, good: 1 };
+const TONE_GLYPH: Record<string, string> = { bad: "✗", warn: "⚠", good: "✓" };
+
+// A clean plain-text DD summary for pasting into a chat / channel.
+function tokenReportText(d: TokenDossier): string {
+  const moneyShort = (n?: number) => (n == null ? "—" : n >= 1e9 ? "$" + (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(0) + "K" : "$" + Math.round(n));
+  const age = d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : "?";
+  const findings = [...d.findings]
+    .sort((a, b) => (TONE_RANK[b.tone] ?? 0) - (TONE_RANK[a.tone] ?? 0))
+    .slice(0, 6)
+    .map((f) => `${TONE_GLYPH[f.tone] ?? "·"} ${f.claim}`);
+  return [
+    `$${d.symbol} — ${d.verdict} ${d.score ?? "—"}/100 · ${d.chain}${d.capApplied ? ` (cap: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
+    d.headline,
+    "",
+    ...findings,
+    "",
+    `liq ${moneyShort(d.liquidityUsd)} · mc ${moneyShort(d.mcap)} · age ${age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} CEX` : ""}`,
+    d.address,
+    `${location.origin}/?t=${d.address}`,
+    "— audited live by ARGUS",
+  ].join("\n");
+}
+
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-line bg-white p-4">
@@ -81,6 +105,12 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
   const topSum = d.topHolders.reduce((a, h) => a + h.percent, 0);
   const [watched, setWatched] = useState(() => isWatched(d.address));
   const [copied, setCopied] = useState(false);
+  const [copiedTxt, setCopiedTxt] = useState(false);
+  const copyReport = () => {
+    navigator.clipboard?.writeText(tokenReportText(d));
+    setCopiedTxt(true);
+    setTimeout(() => setCopiedTxt(false), 1500);
+  };
   const share = () => {
     const p = new URLSearchParams({ k: "token", t: d.address, title: d.symbol, v: d.verdict, sc: String(d.score ?? ""), s: (d.headline || "").slice(0, 90) });
     navigator.clipboard?.writeText(`${location.origin}/api/card?${p}`);
@@ -109,6 +139,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           <span className="mono text-[11px] text-ink-faint">/ token</span>
           <span className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
           <div className="ml-auto flex items-center gap-2">
+            <button onClick={copyReport} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copiedTxt ? "Copied ✓" : "Copy report"}</button>
             <button onClick={share} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copied ? "Copied ✓" : "Share"}</button>
             <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
               {watched ? "★ Watching" : "☆ Watch"}

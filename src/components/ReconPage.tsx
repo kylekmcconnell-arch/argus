@@ -5,6 +5,24 @@ import { logAudit } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
 
+// A clean plain-text DD summary for pasting into a chat / channel.
+function reconReportText(r: Recon): string {
+  let host = r.retrieval.url;
+  try { host = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { /* keep */ }
+  const v = r.verdict;
+  const lines = [
+    `${r.title || host} — ${v ? `${v.verdict} ${v.score ?? "—"}/100` : r.retrieval.status} · site${v?.capApplied ? ` (cap: ${v.capApplied.replace(/_/g, " ")})` : ""}`,
+    r.identityLine,
+    "",
+    ...(v?.reasons ?? []).slice(0, 6).map((re) => `${GLYPH[re.tone] ?? "·"} ${re.text}`),
+    "",
+    host,
+    `${location.origin}/?site=${encodeURIComponent(host)}`,
+    "— audited live by ARGUS",
+  ];
+  return lines.join("\n");
+}
+
 // Turn a finished recon into a graph contribution: the project, its X account,
 // and (if found) its on-chain token + that token's own subgraph.
 function reconContribution(r: Recon) {
@@ -72,6 +90,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
   const [pivotNotes, setPivotNotes] = useState<string[]>([]);
   const [recon, setRecon] = useState<Recon | null>(null);
   const [running, setRunning] = useState(false);
+  const [copied, setCopied] = useState(false);
   const ran = useRef(false);
 
   const run = useCallback(async (raw: string) => {
@@ -188,6 +207,12 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
                         {COVERAGE[recon.retrieval.status].label}
                       </span>
                       {v.capApplied && <span className="mono rounded px-1.5 py-0.5 text-[10px] text-ink-faint" style={{ background: "var(--color-avoid)14", color: "var(--color-avoid)" }}>cap · {v.capApplied.replace(/_/g, " ")}</span>}
+                      <button
+                        onClick={() => { navigator.clipboard?.writeText(reconReportText(recon)); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+                        className="mono ml-auto rounded-md border border-line px-2 py-0.5 text-[10.5px] text-ink-faint transition hover:text-ink"
+                      >
+                        {copied ? "copied ✓" : "copy report"}
+                      </button>
                     </div>
                     {recon.title && <div className="mt-1 truncate text-[13px] text-ink-dim">{recon.title}</div>}
                     <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">{recon.identityLine}</p>
