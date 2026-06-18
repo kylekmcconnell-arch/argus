@@ -58,7 +58,11 @@ const isRuggy = (n?: NetNode) => !!n && (n.wasRug || n.outcome === "Rug" || n.de
 // that itself failed. An entity wired into several of these is a serial actor.
 const isBad = (n?: NetNode) => isRuggy(n) || (!!n && n.subject && (n.verdict === "FAIL" || n.verdict === "AVOID"));
 
-export function buildNetwork(dossiers: { handle: string; d: Dossier }[]): Network {
+// A raw audit subgraph (token audits, recorded site recons) — the same
+// {nodes, edges} shape Panoptes uses, with an optional verdict on the subject.
+export interface GraphContribution { handle: string; nodes: PanoptesNode[]; edges: PanoptesEdge[]; verdict?: string }
+
+export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: GraphContribution[] = []): Network {
   const map = new Map<string, NetNode>();
   const edgeMap = new Map<string, NetEdge>();
 
@@ -75,6 +79,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[]): Networ
     }
     // merge attributes (truthy wins)
     if (raw.subject) { n.subject = true; n.key = String(raw.key); }
+    if (raw.verdict) n.verdict = String(raw.verdict);
     if (raw.was_rug) n.wasRug = true;
     if (raw.outcome) n.outcome = String(raw.outcome);
     if (raw.outcome === "Rug") n.wasRug = true;
@@ -86,13 +91,8 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[]): Networ
     return n;
   };
 
-  for (const { handle, d } of dossiers) {
-    const subjId = canonical(handle);
-    for (const raw of d.graph.nodes) {
-      const n = upsert(raw, subjId);
-      if (raw.subject) n.verdict = d.report.composite_verdict;
-    }
-    for (const e of d.graph.edges) {
+  const ingestEdges = (edges: PanoptesEdge[]) => {
+    for (const e of edges) {
       const src = canonical(e.src);
       const dst = canonical(e.dst);
       const key = `${src}->${dst}:${e.type}`;
@@ -104,6 +104,24 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[]): Networ
         rug: e.outcome === "Rug" || e.verdict === "Contradicted",
       });
     }
+  };
+
+  for (const { handle, d } of dossiers) {
+    const subjId = canonical(handle);
+    for (const raw of d.graph.nodes) {
+      const n = upsert(raw, subjId);
+      if (raw.subject) n.verdict = d.report.composite_verdict;
+    }
+    ingestEdges(d.graph.edges);
+  }
+
+  for (const c of extra) {
+    const subjId = canonical(c.handle);
+    for (const raw of c.nodes) {
+      const n = upsert(raw, subjId);
+      if (raw.subject && c.verdict && !n.verdict) n.verdict = c.verdict;
+    }
+    ingestEdges(c.edges);
   }
 
   const nodes = [...map.values()];

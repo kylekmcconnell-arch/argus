@@ -3,6 +3,7 @@ import { SUBJECTS, buildReport } from "../data/subjects";
 import { TrustGraph } from "./TrustGraph";
 import { NetworkGraph } from "./NetworkGraph";
 import { buildNetwork } from "../graph/network";
+import { getContributions, clearContributions } from "../graph/store";
 import { verdictMeta } from "../lib/verdict";
 
 // Panoptes: the same audits, two ways. "Network" merges every audit into one
@@ -10,7 +11,12 @@ import { verdictMeta } from "../lib/verdict";
 // the per-subject star map.
 export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
   const dossiers = useMemo(() => SUBJECTS.map((s) => ({ s, d: buildReport(s) })), []);
-  const net = useMemo(() => buildNetwork(dossiers.map(({ s, d }) => ({ handle: s.handle, d }))), [dossiers]);
+  const [includeMine, setIncludeMine] = useState(true);
+  const [mine, setMine] = useState(() => getContributions());
+  const net = useMemo(
+    () => buildNetwork(dossiers.map(({ s, d }) => ({ handle: s.handle, d })), includeMine ? mine : []),
+    [dossiers, includeMine, mine],
+  );
   const [mode, setMode] = useState<"network" | "subject">("network");
 
   return (
@@ -55,7 +61,22 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
 
       {mode === "network" ? (
         <>
-          <div className="mt-4">
+          {mine.length > 0 && (
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-white px-3 py-2 text-[12px]">
+              <label className="flex cursor-pointer items-center gap-1.5 text-ink-dim">
+                <input type="checkbox" checked={includeMine} onChange={(e) => setIncludeMine(e.target.checked)} className="accent-[var(--color-signal)]" />
+                include your audits
+              </label>
+              <span className="mono text-ink-faint">{mine.length} recorded from token & site audits</span>
+              <button
+                onClick={() => { clearContributions(); setMine([]); }}
+                className="mono ml-auto rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-faint transition hover:text-ink"
+              >
+                clear your audits
+              </button>
+            </div>
+          )}
+          <div className="mt-3">
             <NetworkGraph net={net} onOpenSubject={onOpen} />
           </div>
 

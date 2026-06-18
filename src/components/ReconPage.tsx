@@ -3,6 +3,31 @@ import { runRecon, type Recon } from "../collect/recon";
 import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
+import { recordContribution } from "../graph/store";
+
+// Turn a finished recon into a graph contribution: the project, its X account,
+// and (if found) its on-chain token + that token's own subgraph.
+function reconContribution(r: Recon) {
+  if (r.retrieval.status === "gap") return null;
+  let host: string;
+  try { host = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { return null; }
+  const nodes: { type: string; key: string; [k: string]: unknown }[] = [
+    { type: "Company", key: host, subject: true, verdict: r.verdict?.verdict, was_rug: r.verdict?.verdict === "FAIL" },
+  ];
+  const edges: { src: string; dst: string; type: string; [k: string]: unknown }[] = [];
+  const x = r.socials.find((s) => /x\.com|twitter\.com/i.test(s.url));
+  if (x) {
+    const seg = x.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1];
+    if (seg && !/status|home|i|share/i.test(seg)) { const h = "@" + seg.toLowerCase(); nodes.push({ type: "Person", key: h }); edges.push({ src: host, dst: h, type: "RUNS_X" }); }
+  }
+  const f = r.pivot?.found;
+  if (f) {
+    for (const n of f.graph.nodes) nodes.push(n.subject ? { ...n, verdict: f.verdict } : n);
+    for (const e of f.graph.edges) edges.push(e);
+    edges.push({ src: host, dst: "$" + f.symbol, type: "TOKEN" });
+  }
+  return { handle: host, verdict: r.verdict?.verdict, nodes, edges };
+}
 
 function Ring({ score, color }: { score: number | null; color: string }) {
   const size = 60, r = size / 2 - 5, c = 2 * Math.PI * r;
@@ -80,6 +105,8 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
         r.pivot?.found ? "token-found-onchain" : "",
       ].filter(Boolean),
     });
+    const contrib = reconContribution(r);
+    if (contrib) recordContribution(contrib);
   }, []);
 
   // Auto-run when opened with a URL from the main search bar.

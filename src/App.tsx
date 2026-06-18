@@ -14,6 +14,7 @@ import { TrackRecordPage } from "./components/TrackRecordPage";
 import { ReconPage } from "./components/ReconPage";
 import { AdminPage } from "./components/AdminPage";
 import { logAudit } from "./lib/auditlog";
+import { recordContribution, tokenContribution } from "./graph/store";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
@@ -93,6 +94,8 @@ export default function App() {
       summary: d.headline,
       flags: [d.capApplied ? `cap:${d.capApplied}` : "", d.bundleRisk !== "low" ? `bundle:${d.bundleRisk}` : ""].filter(Boolean),
     });
+    // compound the trust graph: this token, its deployer, project X and holders
+    recordContribution(tokenContribution(d.symbol, d.verdict, d.graph.nodes, d.graph.edges));
   }, []);
 
   const logPerson = (d: Dossier) => {
