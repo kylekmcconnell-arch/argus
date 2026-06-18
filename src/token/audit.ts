@@ -36,6 +36,14 @@ export interface NormalizedSafety {
   holderCount: number;
   topHolderPct: number | null;
   lpLocked: boolean;
+  // owner-power risk vectors (dangerous mainly while the owner is active)
+  proxy: boolean;
+  slippageModifiable: boolean;
+  blacklist: boolean;
+  tradingCooldown: boolean;
+  externalCall: boolean;
+  ownerChangeBalance: boolean;
+  creatorPercent: number;
 }
 
 export interface TokenDossier {
@@ -103,6 +111,13 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     holderCount: num(gp?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
+    proxy: t1(gp?.is_proxy),
+    slippageModifiable: t1(gp?.slippage_modifiable) || t1(gp?.personal_slippage_modifiable),
+    blacklist: t1(gp?.is_blacklisted),
+    tradingCooldown: t1(gp?.trading_cooldown),
+    externalCall: t1(gp?.external_call),
+    ownerChangeBalance: t1(gp?.owner_change_balance),
+    creatorPercent: (num(gp?.creator_percent) ?? 0) * 100,
   };
 }
 
@@ -132,6 +147,8 @@ function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
     holderCount: num(sol?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
+    proxy: false, slippageModifiable: false, blacklist: false, tradingCooldown: false,
+    externalCall: false, ownerChangeBalance: false, creatorPercent: 0,
   };
 }
 
@@ -141,6 +158,8 @@ function emptySafety(): NormalizedSafety {
     nonTransferable: false, ownerRenounced: false, takeBack: false, hiddenOwner: false,
     selfdestruct: false, pausable: false, openSource: false, cannotSellAll: false,
     metadataMutable: false, buyTax: 0, sellTax: 0, holderCount: 0, topHolderPct: null, lpLocked: false,
+    proxy: false, slippageModifiable: false, blacklist: false, tradingCooldown: false,
+    externalCall: false, ownerChangeBalance: false, creatorPercent: 0,
   };
 }
 
@@ -258,6 +277,30 @@ async function runTokenAudit(
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });
     if (s.simChecked && !s.honeypot) findings.push({ claim: `Sell simulation passed (buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%).`, tone: "good", source: "honeypot.is" });
     if (s.ownerRenounced && !s.mintable && !s.takeBack && !s.freezable) findings.push({ claim: chain === "solana" ? "Mint and freeze authority revoked." : "Ownership renounced; no mint or take-back.", tone: "good", source: "goplus" });
+
+    // ---- owner-power risk vectors ----
+    // These are dangerous mainly while the owner is active. A renounced contract
+    // cannot exercise them, so blue chips that merely *have* the capability
+    // (PEPE ships a blacklist + anti-whale, but is renounced) are not penalized.
+    const ownerActive = !s.ownerRenounced;
+    if (s.ownerChangeBalance && ownerActive) {
+      // GoPlus over-flags this on some upgradeable governance tokens (e.g. LDO).
+      // A token broadly traded on many venues with deep liquidity is not under an
+      // active balance-rewrite threat, so corroboration downgrades the hard cap.
+      if (broadlyTraded) {
+        findings.push({ claim: "GoPlus flags an owner-modify-balance capability, but broad CEX listing and deep liquidity indicate it is a governance/upgrade artifact, not an active threat.", tone: "warn", source: "argus" });
+      } else {
+        caps.push([20, "owner_can_modify_balance"]);
+        findings.push({ claim: "Owner can modify holder balances directly — they can zero your wallet.", tone: "bad", source: "goplus" });
+      }
+    }
+    if (s.proxy) findings.push({ claim: ownerActive ? "Upgradeable proxy with an active owner: the contract logic can be swapped out from under holders." : "Upgradeable proxy contract (logic is replaceable), though ownership is renounced.", tone: ownerActive ? "bad" : "warn", source: "goplus" });
+    if (s.slippageModifiable && ownerActive) findings.push({ claim: "Tax is modifiable: a low tax now can be raised toward 100% after you buy.", tone: "bad", source: "goplus" });
+    if (s.blacklist && ownerActive) findings.push({ claim: "Owner can blacklist addresses — your wallet can be blocked from selling.", tone: "warn", source: "goplus" });
+    if (s.tradingCooldown && ownerActive) findings.push({ claim: "Trading cooldown is enforceable — sells can be delayed.", tone: "warn", source: "goplus" });
+    if (s.externalCall) findings.push({ claim: "Contract makes external calls — behavior can change via an external dependency.", tone: "warn", source: "goplus" });
+    if (s.creatorPercent >= 5) findings.push({ claim: `Creator still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: "goplus" });
+
     if (s.lpLocked) findings.push({ claim: "Liquidity is locked.", tone: "good", source: "goplus" });
     else findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
   }
@@ -319,6 +362,10 @@ async function runTokenAudit(
     if (s.pausable) aT2 -= 8;
     if (s.selfdestruct) aT2 -= 10;
     if (!s.ownerRenounced) aT2 -= 4;
+    // upgradeable / externally-mutable logic erodes contract safety
+    if (s.proxy) aT2 -= s.ownerRenounced ? 3 : 6;
+    if (s.externalCall) aT2 -= 3;
+    if (!s.ownerRenounced && (s.blacklist || s.tradingCooldown)) aT2 -= 3;
   }
   aT2 = clamp(aT2, 0, 26);
   axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? (chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.openSource ? "verified" : "unverified"} source, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${s.pausable ? ", pausable" : ""}.`) : "On-chain safety not verifiable keyless on this chain." });
@@ -326,6 +373,8 @@ async function runTokenAudit(
   const tax = s.buyTax + s.sellTax;
   let aT3 = !s.available ? 6 : tax === 0 ? 12 : tax <= 10 ? 10 : tax <= 20 ? 7 : tax <= 40 ? 3 : 0;
   if (s.cannotSellAll || s.nonTransferable) aT3 = 0;
+  // a modifiable tax with an active owner is a trap even when the tax reads low now
+  if (s.slippageModifiable && !s.ownerRenounced) aT3 = clamp(aT3 - 5, 0, 12);
   axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? (chain === "solana" ? "no transfer tax detected." : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.`) : "Tax not verifiable keyless." });
 
   const topPct = holdersReliable ? s.topHolderPct : null;
@@ -338,6 +387,8 @@ async function runTokenAudit(
   }
   if (bundleRisk === "high") aT4 = clamp(aT4 - 8, 0, 16);
   else if (bundleRisk === "elevated") aT4 = clamp(aT4 - 4, 0, 16);
+  if (s.creatorPercent >= 15) aT4 = clamp(aT4 - 5, 0, 16);
+  else if (s.creatorPercent >= 5) aT4 = clamp(aT4 - 2, 0, 16);
   aT4 = clamp(aT4, 0, 16);
   const t4Note = !s.available
     ? "Holder data not verifiable keyless."
@@ -429,6 +480,7 @@ function buildHeadline(verdict: string, cap: string | null, s: NormalizedSafety,
   if (cap === "mint_authority_active") return "Mint authority is live, the team can dilute holders to zero.";
   if (cap === "freeze_authority_active") return "Freeze authority is live, the team can freeze your tokens at any time.";
   if (cap === "reclaimable_ownership") return "Ownership can be reclaimed after renouncement, a classic rug setup.";
+  if (cap === "owner_can_modify_balance") return "Owner can rewrite holder balances, they can zero your wallet at will.";
   if (verdict === "PASS") return `Clears the forensic bar: ${s.ownerRenounced ? "authorities revoked" : "owned"}, ${s.lpLocked ? "LP locked" : "tradeable"}, with real depth${projectX ? `. Team: ${projectX}` : "."}`;
   if (verdict === "CAUTION") return `Tradeable but with reservations${liq < 15000 ? "; liquidity is thin" : ""}. Size accordingly.`;
   if (!s.available) return "Scored on market data only; on-chain contract safety could not be verified keyless on this chain.";

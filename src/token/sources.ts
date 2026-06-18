@@ -139,6 +139,14 @@ export interface GoPlusSecurity {
   is_open_source?: string;
   transfer_pausable?: string;
   trading_cooldown?: string;
+  slippage_modifiable?: string;
+  personal_slippage_modifiable?: string;
+  is_blacklisted?: string;
+  is_whitelisted?: string;
+  is_anti_whale?: string;
+  anti_whale_modifiable?: string;
+  external_call?: string;
+  owner_change_balance?: string;
   holder_count?: string;
   lp_holder_count?: string;
   lp_total_supply?: string;
