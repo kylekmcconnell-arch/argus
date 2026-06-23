@@ -14,6 +14,16 @@ import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 const TWITTERAPI = "https://api.twitterapi.io";
 const XAI = "https://api.x.ai/v1/chat/completions";
 
+// twitterapi.io throttles (429) under bursty use; one short backoff retry.
+async function twFetch(url: string, key: string, tries = 2): Promise<Response | null> {
+  for (let i = 0; i < tries; i++) {
+    const res = await fetch(url, { headers: { "x-api-key": key } });
+    if (res.status !== 429) return res;
+    await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+  }
+  return null;
+}
+
 // ── twitterapi.io: profile ───────────────────────────────────────────────
 export interface XProfile {
   handle: string;
@@ -28,10 +38,8 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
   if (!key) return null;
   const u = handle.replace(/^@/, "");
   try {
-    const res = await fetch(`${TWITTERAPI}/twitter/user/info?userName=${encodeURIComponent(u)}`, {
-      headers: { "x-api-key": key },
-    });
-    if (!res.ok) return null;
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/info?userName=${encodeURIComponent(u)}`, key);
+    if (!res || !res.ok) return null;
     const d = (await res.json()) as any;
     const p = d.data ?? d;
     return {
@@ -52,10 +60,8 @@ export async function getRecentPosts(handle: string, limit = 20): Promise<string
   if (!key) return [];
   const u = handle.replace(/^@/, "");
   try {
-    const res = await fetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, {
-      headers: { "x-api-key": key },
-    });
-    if (!res.ok) return [];
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
+    if (!res || !res.ok) return [];
     const d = (await res.json()) as any;
     // twitterapi.io nests the array under data.tweets; tolerate the flatter shapes too.
     const tweets: any[] = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
@@ -129,6 +135,48 @@ export async function acknowledgment(endorser: string, subject: string): Promise
     return { ack: parsed.ack ?? "none", sentiment: parsed.sentiment ?? "none" };
   } catch {
     return null;
+  }
+}
+
+// ── Grok identity discovery: find ventures the subject is publicly tied to ──
+// Many founders have an empty bio and a project history that lives OFF their X
+// (companies, press, Crunchbase). Grok Live Search (web + X) finds those leads.
+// Strictly grounded: returns only ventures with a cited source, never guesses.
+export interface DiscoveredVenture { name: string; role: string; year?: string; evidence?: string }
+
+export async function discoverVentures(handle: string, name?: string): Promise<DiscoveredVenture[]> {
+  const key = env("XAI_API_KEY");
+  if (!key) return [];
+  const h = handle.replace(/^@/, "");
+  try {
+    const res = await fetch(XAI, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are a forensic due-diligence researcher. Find the companies, crypto projects, or ventures that THIS SPECIFIC person (the holder of the given X account) has founded, co-founded, or led, with PUBLIC evidence that ties that exact person to the venture (their own site/X, press, Crunchbase, GitHub). " +
+              "Reply with ONLY compact JSON: {\"ventures\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|advisor|contributor\",\"year\":\"\",\"evidence\":\"one short source phrase\"}]}. " +
+              "Include ONLY ventures you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {\"ventures\":[]}. NEVER invent, guess, or include a venture just because the name is common.",
+          },
+          { role: "user", content: `Person: ${name || h} (X handle @${h}). What companies or projects have they founded, co-founded, or led?` },
+        ],
+        search_parameters: { mode: "on", sources: [{ type: "web" }, { type: "x", x_handles: [h] }], max_search_results: 25 },
+      }),
+    });
+    if (!res.ok) return [];
+    const d = (await res.json()) as any;
+    const text: string = d.choices?.[0]?.message?.content ?? "";
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return [];
+    const parsed = JSON.parse(m[0]);
+    const out: DiscoveredVenture[] = Array.isArray(parsed.ventures) ? parsed.ventures : [];
+    return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).slice(0, 8);
+  } catch {
+    return [];
   }
 }
 

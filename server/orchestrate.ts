@@ -17,7 +17,7 @@ import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims } from "./agent";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverVentures } from "./adapters/x";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
 import { dexscreenerAdapter } from "./adapters/dexscreener";
@@ -76,33 +76,53 @@ async function coldIntake(ctx: CollectContext) {
   if (!analystAvailable()) return;
   ctx.emit({ phase: "P0 · Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify…", tone: "neutral" });
   const claims = await extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
-  if (!claims) return;
+  if (claims) {
+    ctx.evidence.roles = asRoles(claims.roles);
+    ctx.evidence.ventures = claims.ventures.map((v) => ({
+      project_name: v.project_name,
+      role: v.role ?? "founder",
+      period: v.period ?? "",
+      outcome: parseOutcome(v.claimed_outcome),
+    }));
+    ctx.evidence.testimonials = claims.testimonials.map((t) => ({
+      claimed_endorser_handle: t.claimed_endorser_handle,
+      claimed_relationship: t.claimed_relationship,
+      appears_at: "subject surfaces",
+    }));
+    ctx.evidence.advised = claims.advised.map((p) => ({
+      project_name: p.project_name,
+      project_handle: p.project_handle,
+      claimed_role: p.claimed_role ?? "advisor",
+      appears_at: "subject surfaces",
+    }));
+    ctx.evidence.promotions = claims.promotions.map((p) => ({
+      ticker: p.ticker,
+      contract_address: p.contract_address,
+      chain: p.chain,
+    }));
+    const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
+    ctx.emit({ phase: "P0 · Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} — now verifying each.`, source: "claude", tone: "neutral" });
+  }
 
-  ctx.evidence.roles = asRoles(claims.roles);
-  ctx.evidence.ventures = claims.ventures.map((v) => ({
-    project_name: v.project_name,
-    role: v.role ?? "founder",
-    period: v.period ?? "",
-    outcome: parseOutcome(v.claimed_outcome),
-  }));
-  ctx.evidence.testimonials = claims.testimonials.map((t) => ({
-    claimed_endorser_handle: t.claimed_endorser_handle,
-    claimed_relationship: t.claimed_relationship,
-    appears_at: "subject surfaces",
-  }));
-  ctx.evidence.advised = claims.advised.map((p) => ({
-    project_name: p.project_name,
-    project_handle: p.project_handle,
-    claimed_role: p.claimed_role ?? "advisor",
-    appears_at: "subject surfaces",
-  }));
-  ctx.evidence.promotions = claims.promotions.map((p) => ({
-    ticker: p.ticker,
-    contract_address: p.contract_address,
-    chain: p.chain,
-  }));
-  const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
-  ctx.emit({ phase: "P0 · Intake", label: "Claims extracted", detail: `${n} claims across ${ctx.evidence.roles.join(", ") || "no roles"} — now verifying each.`, source: "claude", tone: "neutral" });
+  // ── Identity discovery: ventures the subject is publicly tied to, beyond what
+  //    they say about themselves on X (the empty-bio founder case). ──
+  ctx.emit({ phase: "P0 · Intake", label: "Discover ventures", detail: "Searching the web and X for projects this person founded or led…", source: "grok", tone: "neutral" });
+  const discovered = await discoverVentures(ctx.handle, ctx.evidence.profile.display_name);
+  if (discovered.length) {
+    const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
+    for (const v of discovered) {
+      if (have.has(v.name.toLowerCase())) continue;
+      have.add(v.name.toLowerCase());
+      ctx.evidence.ventures.push({ project_name: v.name, role: v.role || "founder", period: v.year ?? "", outcome: VentureOutcome.ACTIVE });
+    }
+    const founderish = discovered.some((v) => /founder|cofounder/i.test(v.role));
+    if (founderish && (!ctx.evidence.roles.length || ctx.evidence.roles.every((r) => r === SubjectClass.MEMBER))) {
+      ctx.evidence.roles = [SubjectClass.FOUNDER];
+    }
+    ctx.emit({ phase: "P0 · Intake", label: "Ventures discovered", detail: `${discovered.length} public venture${discovered.length === 1 ? "" : "s"} tied to the subject (leads, pending verification): ${discovered.slice(0, 4).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
+  } else {
+    ctx.emit({ phase: "P0 · Intake", label: "No ventures found", detail: "No public ventures could be attributed to this person via web/X search.", source: "grok", tone: "neutral" });
+  }
 }
 
 function axisCatalog(roles: SubjectClass[]) {

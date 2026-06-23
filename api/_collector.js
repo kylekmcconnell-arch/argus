@@ -1245,15 +1245,21 @@ Score every listed axis, write the composite headline (one sentence on what gove
 // server/adapters/x.ts
 var TWITTERAPI = "https://api.twitterapi.io";
 var XAI = "https://api.x.ai/v1/chat/completions";
+async function twFetch(url, key, tries = 2) {
+  for (let i = 0; i < tries; i++) {
+    const res = await fetch(url, { headers: { "x-api-key": key } });
+    if (res.status !== 429) return res;
+    await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+  }
+  return null;
+}
 async function getProfile2(handle) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
   const u = handle.replace(/^@/, "");
   try {
-    const res = await fetch(`${TWITTERAPI}/twitter/user/info?userName=${encodeURIComponent(u)}`, {
-      headers: { "x-api-key": key }
-    });
-    if (!res.ok) return null;
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/info?userName=${encodeURIComponent(u)}`, key);
+    if (!res || !res.ok) return null;
     const d = await res.json();
     const p = d.data ?? d;
     return {
@@ -1272,10 +1278,8 @@ async function getRecentPosts(handle, limit = 20) {
   if (!key) return [];
   const u = handle.replace(/^@/, "");
   try {
-    const res = await fetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, {
-      headers: { "x-api-key": key }
-    });
-    if (!res.ok) return [];
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
+    if (!res || !res.ok) return [];
     const d = await res.json();
     const tweets = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
     return tweets.map((t) => t.text ?? t.full_text ?? "").filter(Boolean).slice(0, limit);
@@ -1334,6 +1338,38 @@ async function acknowledgment(endorser, subject) {
     return { ack: parsed.ack ?? "none", sentiment: parsed.sentiment ?? "none" };
   } catch {
     return null;
+  }
+}
+async function discoverVentures(handle, name) {
+  const key = env("XAI_API_KEY");
+  if (!key) return [];
+  const h = handle.replace(/^@/, "");
+  try {
+    const res = await fetch(XAI, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
+        messages: [
+          {
+            role: "system",
+            content: 'You are a forensic due-diligence researcher. Find the companies, crypto projects, or ventures that THIS SPECIFIC person (the holder of the given X account) has founded, co-founded, or led, with PUBLIC evidence that ties that exact person to the venture (their own site/X, press, Crunchbase, GitHub). Reply with ONLY compact JSON: {"ventures":[{"name":"","role":"founder|cofounder|exec|advisor|contributor","year":"","evidence":"one short source phrase"}]}. Include ONLY ventures you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"ventures":[]}. NEVER invent, guess, or include a venture just because the name is common.'
+          },
+          { role: "user", content: `Person: ${name || h} (X handle @${h}). What companies or projects have they founded, co-founded, or led?` }
+        ],
+        search_parameters: { mode: "on", sources: [{ type: "web" }, { type: "x", x_handles: [h] }], max_search_results: 25 }
+      })
+    });
+    if (!res.ok) return [];
+    const d = await res.json();
+    const text = d.choices?.[0]?.message?.content ?? "";
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return [];
+    const parsed = JSON.parse(m[0]);
+    const out = Array.isArray(parsed.ventures) ? parsed.ventures : [];
+    return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).slice(0, 8);
+  } catch {
+    return [];
   }
 }
 function fmtFollowers(n) {
@@ -1742,32 +1778,50 @@ async function coldIntake(ctx) {
   if (!analystAvailable()) return;
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify\u2026", tone: "neutral" });
   const claims = await extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
-  if (!claims) return;
-  ctx.evidence.roles = asRoles(claims.roles);
-  ctx.evidence.ventures = claims.ventures.map((v) => ({
-    project_name: v.project_name,
-    role: v.role ?? "founder",
-    period: v.period ?? "",
-    outcome: parseOutcome(v.claimed_outcome)
-  }));
-  ctx.evidence.testimonials = claims.testimonials.map((t) => ({
-    claimed_endorser_handle: t.claimed_endorser_handle,
-    claimed_relationship: t.claimed_relationship,
-    appears_at: "subject surfaces"
-  }));
-  ctx.evidence.advised = claims.advised.map((p) => ({
-    project_name: p.project_name,
-    project_handle: p.project_handle,
-    claimed_role: p.claimed_role ?? "advisor",
-    appears_at: "subject surfaces"
-  }));
-  ctx.evidence.promotions = claims.promotions.map((p) => ({
-    ticker: p.ticker,
-    contract_address: p.contract_address,
-    chain: p.chain
-  }));
-  const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
-  ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} claims across ${ctx.evidence.roles.join(", ") || "no roles"} \u2014 now verifying each.`, source: "claude", tone: "neutral" });
+  if (claims) {
+    ctx.evidence.roles = asRoles(claims.roles);
+    ctx.evidence.ventures = claims.ventures.map((v) => ({
+      project_name: v.project_name,
+      role: v.role ?? "founder",
+      period: v.period ?? "",
+      outcome: parseOutcome(v.claimed_outcome)
+    }));
+    ctx.evidence.testimonials = claims.testimonials.map((t) => ({
+      claimed_endorser_handle: t.claimed_endorser_handle,
+      claimed_relationship: t.claimed_relationship,
+      appears_at: "subject surfaces"
+    }));
+    ctx.evidence.advised = claims.advised.map((p) => ({
+      project_name: p.project_name,
+      project_handle: p.project_handle,
+      claimed_role: p.claimed_role ?? "advisor",
+      appears_at: "subject surfaces"
+    }));
+    ctx.evidence.promotions = claims.promotions.map((p) => ({
+      ticker: p.ticker,
+      contract_address: p.contract_address,
+      chain: p.chain
+    }));
+    const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} \u2014 now verifying each.`, source: "claude", tone: "neutral" });
+  }
+  ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover ventures", detail: "Searching the web and X for projects this person founded or led\u2026", source: "grok", tone: "neutral" });
+  const discovered = await discoverVentures(ctx.handle, ctx.evidence.profile.display_name);
+  if (discovered.length) {
+    const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
+    for (const v of discovered) {
+      if (have.has(v.name.toLowerCase())) continue;
+      have.add(v.name.toLowerCase());
+      ctx.evidence.ventures.push({ project_name: v.name, role: v.role || "founder", period: v.year ?? "", outcome: "Active" /* ACTIVE */ });
+    }
+    const founderish = discovered.some((v) => /founder|cofounder/i.test(v.role));
+    if (founderish && (!ctx.evidence.roles.length || ctx.evidence.roles.every((r) => r === "MEMBER" /* MEMBER */))) {
+      ctx.evidence.roles = ["FOUNDER" /* FOUNDER */];
+    }
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Ventures discovered", detail: `${discovered.length} public venture${discovered.length === 1 ? "" : "s"} tied to the subject (leads, pending verification): ${discovered.slice(0, 4).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
+  } else {
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "No ventures found", detail: "No public ventures could be attributed to this person via web/X search.", source: "grok", tone: "neutral" });
+  }
 }
 function axisCatalog(roles) {
   const out = [];
