@@ -10,6 +10,7 @@
     "build": "node scripts/build-collector.mjs && tsc -b && vite build",
     "test": "vitest run",
     "calibrate": "tsx src/calibration/calibrate.ts",
+    "check-env": "tsx scripts/check-env.ts",
     "lint": "eslint .",
     "preview": "vite preview"
   },
