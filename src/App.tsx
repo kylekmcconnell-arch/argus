@@ -206,6 +206,15 @@ export default function App() {
     });
   }, []);
 
+  // from the investigation report: open the full people report for the project
+  // account (already collected — no re-spend), which shows the axis/cap reasoning.
+  const onOpenProjectAccount = useCallback(() => {
+    setInvestigation((inv) => {
+      if (inv?.projectAccount) { setDossier(inv.projectAccount); setQuery(inv.projectAccount.handle); setPhase("report"); }
+      return inv;
+    });
+  }, []);
+
   const onNav = useCallback((t: NavTarget) => {
     clearUrl();
     if (t === "idle") {
@@ -266,7 +275,7 @@ export default function App() {
       )}
 
       {phase === "investigation-report" && investigation && (
-        <InvestigationReport inv={investigation} onAudit={onAudit} onReset={reset} onOpenToken={onOpenToken} />
+        <InvestigationReport inv={investigation} onAudit={onAudit} onReset={reset} onOpenToken={onOpenToken} onOpenProjectAccount={onOpenProjectAccount} />
       )}
 
       {phase === "notfound" && (

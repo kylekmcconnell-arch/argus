@@ -27,7 +27,7 @@ import type { Dossier } from "../data/dossier";
 export interface FounderCandidate {
   name: string;          // display name or @handle
   handle: string | null; // observed @handle (auditable), or null (named only)
-  source: "site";
+  source: "site" | "project"; // named on the site vs surfaced from the project account
 }
 
 export interface Investigation {
@@ -64,42 +64,54 @@ const shorten = (u: string) => u.replace(/^https?:\/\//, "").replace(/\/$/, "").
 const normHandle = (h: string) => h.replace(/^@/, "").toLowerCase();
 const SITE_NOISE = /^(home|share|intent|i|status|explore|search|hashtag|notifications|messages)$/i;
 
-function deriveFounders(recon: Recon | null, projectX: string | null): FounderCandidate[] {
+function deriveFounders(recon: Recon | null, projectX: string | null, projectAccount: Dossier | null): FounderCandidate[] {
   const out: FounderCandidate[] = [];
   const seen = new Set<string>();
   const px = projectX ? normHandle(projectX) : "";
-
-  // Only surface founders when the site actually NAMES a team. For unnamed /
-  // absent / gap states, founderNote says the team is not stated, so we list
-  // nobody here — no stray X link on the page gets promoted to a "founder".
-  if (recon?.team.state !== "named") return out;
-
-  // Named individuals on the site — shown, but NO handle is synthesized.
-  for (const name of recon.team.names) {
-    const k = name.toLowerCase();
-    if (!seen.has(k)) { seen.add(k); out.push({ name, handle: null, source: "site" }); }
-  }
-  // Personal X accounts OBSERVED on the project site (not the project account).
-  // Accept only BARE profile links (…/handle), never /handle/status/<id> tweet
-  // links — the first path segment of a tweet link is the author, not a founder.
-  for (const s of recon.socials) {
-    const m = s.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})\/?(?:\?.*)?$/i);
-    if (!m || SITE_NOISE.test(m[1])) continue;
-    const handle = "@" + m[1];
-    const k = normHandle(handle);
-    if (k === px || seen.has(k)) continue;
+  const add = (name: string, handle: string | null, source: FounderCandidate["source"]) => {
+    const k = handle ? normHandle(handle) : name.toLowerCase();
+    if (!k || k === px || seen.has(k)) return;
     seen.add(k);
-    out.push({ name: handle, handle, source: "site" });
+    out.push({ name, handle, source });
+  };
+
+  // 1. Site team — only when the site actually NAMES a team (no stray-link
+  //    promotion). Named individuals carry no synthesized handle; bare X profile
+  //    links observed on the page are auditable.
+  if (recon?.team.state === "named") {
+    for (const name of recon.team.names) add(name, null, "site");
+    for (const s of recon.socials) {
+      const m = s.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})\/?(?:\?.*)?$/i);
+      if (m && !SITE_NOISE.test(m[1])) add("@" + m[1], "@" + m[1], "site");
+    }
   }
-  return out.slice(0, 8);
+
+  // 2. Handles the PROJECT ACCOUNT itself surfaces — its bio/headline (e.g. a
+  //    backing VC named "by @EnigmaFund") and the analyst's structured claims.
+  //    These are observed @handles, never synthesized, so they are auditable.
+  if (projectAccount) {
+    const text = `${projectAccount.bio ?? ""} ${projectAccount.headline ?? ""}`;
+    for (const m of text.matchAll(/@([A-Za-z0-9_]{2,30})\b/g)) add("@" + m[1], "@" + m[1], "project");
+    for (const a of projectAccount.evidence.associates) if (a.associate_key) add(a.associate_key, a.associate_key, "project");
+    for (const t of projectAccount.evidence.testimonials) if (t.claimed_endorser_handle) add(t.claimed_endorser_handle, t.claimed_endorser_handle, "project");
+    for (const p of projectAccount.evidence.advised) if (p.project_handle) add(p.project_handle, p.project_handle, "project");
+  }
+  return out.slice(0, 10);
 }
 
 function founderNote(siteUrl: string | null, recon: Recon | null, founders: FounderCandidate[]): string {
-  if (!siteUrl) return "No project website surfaced from the token's sources — founder identity is not established from available evidence (not an absence claim).";
-  if (!recon || recon.retrieval.status === "gap") return "Could not render the project site — the team could not be assessed. This is a coverage gap, not an absence claim.";
-  if (recon.team.state === "named") return `Named on the project site: ${recon.team.names.slice(0, 5).join(", ")}${founders.some((f) => f.handle) ? ". Linked X accounts can be backgrounded below." : " (no verified handles to background)."}`;
-  if (recon.team.state === "unnamed-section") return "A team section is present but names no individuals — stated-but-unnamed, distinct from anonymous.";
-  return "The site rendered, but no team section was found — the founders are not stated on it.";
+  let base: string;
+  if (!siteUrl) base = "No project website surfaced from the token's sources — the team is not stated on-site.";
+  else if (!recon || recon.retrieval.status === "gap") base = "Could not render the project site — the team could not be assessed there (a coverage gap, not an absence claim).";
+  else if (recon.team.state === "named") base = `Named on the project site: ${recon.team.names.slice(0, 5).join(", ")}.`;
+  else if (recon.team.state === "unnamed-section") base = "The project site has a team section but names no individuals — stated-but-unnamed.";
+  else base = "The project site rendered, but no team section was found.";
+
+  // Surface accounts the project account itself links to (e.g. a backing VC).
+  const linked = founders.filter((f) => f.handle && f.source === "project").map((f) => f.handle!);
+  if (linked.length) base += ` The project account links to ${linked.slice(0, 4).join(", ")} — background ${linked.length === 1 ? "it" : "them"} below.`;
+  else if (!linked.length && recon?.team.state !== "named") base += " No personal accounts are surfaced to background.";
+  return base;
 }
 
 export function streamInvestigation(rootRef: string, h: InvestigationHandlers): () => void {
@@ -162,7 +174,7 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
       if (aborted) return;
 
       // ── Founders (honesty-gated; no auto-spend beyond the project account) ──
-      const founders = deriveFounders(recon, projectX);
+      const founders = deriveFounders(recon, projectX, projectAccount);
       const note = founderNote(siteUrl, recon, founders);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
       h.onDone({ rootRef, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note });

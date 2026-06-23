@@ -36,11 +36,13 @@ export function InvestigationReport({
   onAudit,
   onReset,
   onOpenToken,
+  onOpenProjectAccount,
 }: {
   inv: Investigation;
   onAudit: (q: string) => void;
   onReset: () => void;
   onOpenToken: () => void;
+  onOpenProjectAccount: () => void;
 }) {
   const [spent, setSpent] = useState(0);
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
@@ -101,9 +103,13 @@ export function InvestigationReport({
 
             {founders.length > 0 && (
               <div className="mt-2.5 space-y-1.5 border-t border-line/60 pt-2.5">
+                <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">People & accounts surfaced</div>
                 {founders.map((f) => (
                   <div key={f.name} className="flex items-center justify-between gap-2">
-                    <span className="mono text-[12.5px] text-ink">{f.name}</span>
+                    <span className="min-w-0 truncate">
+                      <span className="mono text-[12.5px] text-ink">{f.name}</span>
+                      <span className="ml-2 text-[10.5px] text-ink-faint">{f.source === "project" ? "from project account" : f.handle ? "linked on site" : "named on site"}</span>
+                    </span>
                     {f.handle ? (
                       <button
                         onClick={() => auditFounder(f.handle!)}
@@ -114,7 +120,7 @@ export function InvestigationReport({
                         {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "background →"}
                       </button>
                     ) : (
-                      <span className="mono shrink-0 text-[10.5px] text-ink-faint">named on site · no verified handle</span>
+                      <span className="mono shrink-0 text-[10.5px] text-ink-faint">no verified handle</span>
                     )}
                   </div>
                 ))}
@@ -156,6 +162,12 @@ export function InvestigationReport({
                 <span className="text-[13.5px] font-medium text-ink">{projectAccount.display_name || projectAccount.handle}</span>
                 <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} />
                 <span className="ml-auto text-[11px] text-ink-faint">{projectAccount.followers} followers · joined {projectAccount.joined}</span>
+              </div>
+              {/* why the score landed where it did */}
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11.5px] text-ink-faint">
+                <span>governed by <span className="text-ink-dim">{String(projectAccount.report.governing_role).toLowerCase()}</span></span>
+                {projectAccount.report.cap_applied && <span className="mono rounded px-1.5 py-0.5" style={{ background: "var(--color-avoid)18", color: "var(--color-avoid)" }}>cap · {String(projectAccount.report.cap_applied).replace(/_/g, " ")}</span>}
+                <button onClick={onOpenProjectAccount} className="mono ml-auto rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-dim transition hover:border-line-2 hover:text-ink">why this score · full report →</button>
               </div>
               {projectAccount.bio && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">{projectAccount.bio}</p>}
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink">{projectAccount.headline}</p>
