@@ -17,6 +17,9 @@ import { logAudit } from "./lib/auditlog";
 import { recordContribution, tokenContribution } from "./graph/store";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
+import { InvestigationRun } from "./components/InvestigationRun";
+import { InvestigationReport } from "./components/InvestigationReport";
+import type { Investigation } from "./lib/investigation";
 import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
 import { type Dossier } from "./data/dossier";
 import { probeBackend } from "./lib/live";
@@ -28,6 +31,7 @@ type Phase =
   | "idle" | "radar" | "recon" | "dossiers" | "graph" | "watchlist" | "track" | "admin" | "about" | "api"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
+  | "investigation" | "investigation-report"
   | "notfound";
 
 // Deep links:
@@ -47,6 +51,8 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
   if (token) return { phase: "token-run", dossier: null, query: token };
   const site = params.get("site");
   if (site) return { phase: "recon", dossier: null, query: site };
+  const inv = params.get("inv");
+  if (inv) return { phase: "investigation", dossier: null, query: inv };
   return { phase: "idle", dossier: null, query: "" };
 }
 
@@ -61,6 +67,8 @@ export default function App() {
   );
   const [tokenDossier, setTokenDossier] = useState<TokenDossier | null>(null);
   const [reconUrl, setReconUrl] = useState<string | null>(boot.phase === "recon" ? boot.query : null);
+  const [investigationInput, setInvestigationInput] = useState<string | null>(boot.phase === "investigation" ? boot.query : null);
+  const [investigation, setInvestigation] = useState<Investigation | null>(null);
 
   const onAudit = useCallback(async (raw: string) => {
     setQuery(raw);
@@ -84,6 +92,30 @@ export default function App() {
     }
     if (f) setPhase("running");
     else setPhase("notfound");
+  }, []);
+
+  // The main search bar runs the full autonomous investigation for a contract;
+  // handles and sites fall through to the normal routing. Internal clicks
+  // (Radar, recon, watchlist, founder buttons) keep using onAudit for a quick
+  // single-surface audit and don't auto-spend.
+  const onInvestigate = useCallback((raw: string) => {
+    if (resolveInput(raw).kind === "token") {
+      setQuery(raw);
+      setInvestigationInput(raw);
+      setPhase("investigation");
+      return;
+    }
+    onAudit(raw);
+  }, [onAudit]);
+
+  const onInvestigationDone = useCallback((inv: Investigation) => {
+    setInvestigation(inv);
+    setPhase("investigation-report");
+    logAudit({
+      kind: "token", query: `$${inv.token.symbol}`, verdict: inv.token.verdict, score: inv.token.score,
+      summary: inv.founderNote,
+      flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
+    });
   }, []);
 
   const onTokenDone = useCallback((d: TokenDossier) => {
@@ -159,7 +191,17 @@ export default function App() {
     setDossier(null);
     setTokenInput(null);
     setTokenDossier(null);
+    setInvestigationInput(null);
+    setInvestigation(null);
     setQuery("");
+  }, []);
+
+  // from the investigation report: open the full on-chain token report
+  const onOpenToken = useCallback(() => {
+    setInvestigation((inv) => {
+      if (inv) { setTokenDossier(inv.token); setPhase("token-report"); }
+      return inv;
+    });
   }, []);
 
   const onNav = useCallback((t: NavTarget) => {
@@ -175,7 +217,7 @@ export default function App() {
   }, []);
 
   const personAudit = phase === "running" || phase === "live" || phase === "report";
-  const inAudit = personAudit || phase === "token-run" || phase === "token-report";
+  const inAudit = personAudit || phase === "token-run" || phase === "token-report" || phase === "investigation" || phase === "investigation-report";
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
@@ -185,7 +227,7 @@ export default function App() {
 
   return (
     <AppShell onNav={onNav} onAudit={onAudit} activeHandle={activeHandle} view={view}>
-      {phase === "idle" && <Landing onAudit={onAudit} onAbout={() => setPhase("about")} />}
+      {phase === "idle" && <Landing onAudit={onInvestigate} onAbout={() => setPhase("about")} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
 
@@ -216,6 +258,14 @@ export default function App() {
       )}
 
       {phase === "token-report" && tokenDossier && <TokenReport dossier={tokenDossier} onReset={reset} onAudit={onAudit} />}
+
+      {phase === "investigation" && investigationInput && (
+        <InvestigationRun input={investigationInput} onDone={onInvestigationDone} onError={() => setPhase("notfound")} />
+      )}
+
+      {phase === "investigation-report" && investigation && (
+        <InvestigationReport inv={investigation} onAudit={onAudit} onReset={reset} onOpenToken={onOpenToken} />
+      )}
 
       {phase === "notfound" && (
         <div className="relative flex min-h-full flex-col items-center justify-center px-6 py-24 text-center">
