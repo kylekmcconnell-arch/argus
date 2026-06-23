@@ -103,6 +103,8 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
   const gp = d.safetyChecked;
   const isSol = d.chain === "solana";
   const topSum = d.topHolders.reduce((a, h) => a + h.percent, 0);
+  const projectSite = d.socials.find((x) => x.label === "site" && /^https?:\/\//i.test(x.url))?.url;
+  const otherLinks = d.socials.filter((x) => x.label !== "site" && !/x\.com|twitter\.com/i.test(x.url));
   const [watched, setWatched] = useState(() => isWatched(d.address));
   const [copied, setCopied] = useState(false);
   const [copiedTxt, setCopiedTxt] = useState(false);
@@ -286,6 +288,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* team & provenance + unified graph */}
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
           <Card title="Team & provenance">
+            <div className="mb-1 text-[11px] leading-snug text-ink-faint">Vet the people behind it — these run a full audit of the project's account and site.</div>
             {d.projectX ? (
               <div className="flex items-center justify-between gap-2 py-1.5">
                 <span className="text-[12.5px] text-ink-dim">Project X account</span>
@@ -295,6 +298,24 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
               </div>
             ) : (
               <div className="py-1.5 text-[12.5px] text-ink-faint">No X account linked to this token.</div>
+            )}
+            {projectSite && (
+              <div className="flex items-center justify-between gap-2 border-t border-line/60 py-1.5">
+                <span className="text-[12.5px] text-ink-dim">Project site</span>
+                <button onClick={() => onAudit(projectSite)} className="mono flex items-center gap-1 text-[12px] text-signal transition hover:text-signal-dim">
+                  recon for team <span aria-hidden>↗</span>
+                </button>
+              </div>
+            )}
+            {otherLinks.length > 0 && (
+              <div className="flex items-center gap-2 border-t border-line/60 py-1.5 text-[12.5px]">
+                <span className="text-ink-dim">Other links</span>
+                <span className="ml-auto flex flex-wrap justify-end gap-x-2 gap-y-0.5">
+                  {otherLinks.map((x) => (
+                    <a key={x.url} href={x.url} target="_blank" rel="noreferrer" className="mono text-[11.5px] text-ink-faint transition hover:text-ink">{x.label}</a>
+                  ))}
+                </span>
+              </div>
             )}
             {d.deployer && (
               <div className="flex items-center justify-between gap-2 border-t border-line/60 py-1.5">
