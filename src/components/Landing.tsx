@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArgusMark, HeroBackdrop } from "./ArgusMark";
+import { HeroBackdrop } from "./ArgusMark";
 import { SUBJECTS } from "../data/subjects";
 import { ROLE_META } from "../lib/verdict";
 
@@ -12,11 +12,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => voi
     <div className="relative flex min-h-full flex-col">
       <HeroBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[440px] w-full opacity-50" />
 
-      <div className="relative z-10 mx-auto flex w-full max-w-2xl flex-1 flex-col items-center px-6 pt-[11vh]">
-        <div className="mb-5">
-          <ArgusMark size={40} />
-        </div>
-
+      <div className="relative z-10 mx-auto flex w-full max-w-2xl flex-1 flex-col items-center px-6 pt-[13vh]">
         <h1 className="text-center text-[34px] font-medium leading-[1.1] tracking-[-0.02em] text-ink">
           Who is actually behind the handle?
         </h1>
