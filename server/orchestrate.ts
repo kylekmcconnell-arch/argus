@@ -17,7 +17,7 @@ import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims } from "./agent";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers } from "./adapters/x";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
 import { dexscreenerAdapter } from "./adapters/dexscreener";
@@ -60,10 +60,18 @@ async function coldIntake(ctx: CollectContext) {
   if (prof) {
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
     ctx.evidence.profile.bio = prof.bio ?? "";
-    ctx.emit({ phase: "P0 · Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle}`, source: "twitterapi.io", tone: "neutral" });
+    if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
+    if (prof.createdAt) {
+      const d = new Date(prof.createdAt);
+      if (!isNaN(d.getTime())) ctx.evidence.profile.joined = d.toLocaleString("en-US", { month: "short", year: "numeric" });
+    }
+    ctx.emit({ phase: "P0 · Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} · ${ctx.evidence.profile.followers} followers · joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
   }
   const posts = await getRecentPosts(ctx.handle);
-  if (posts.length) ctx.evidence.recentActivity = posts;
+  if (posts.length) {
+    ctx.evidence.recentActivity = posts;
+    ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
+  }
 
   if (!analystAvailable()) return;
   ctx.emit({ phase: "P0 · Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify…", tone: "neutral" });

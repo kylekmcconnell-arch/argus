@@ -1277,7 +1277,7 @@ async function getRecentPosts(handle, limit = 20) {
     });
     if (!res.ok) return [];
     const d = await res.json();
-    const tweets = d.tweets ?? d.data ?? [];
+    const tweets = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
     return tweets.map((t) => t.text ?? t.full_text ?? "").filter(Boolean).slice(0, limit);
   } catch {
     return [];
@@ -1337,7 +1337,7 @@ async function acknowledgment(endorser, subject) {
   }
 }
 function fmtFollowers(n) {
-  if (!n) return "\u2014";
+  if (n == null) return "\u2014";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
   if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
   return String(n);
@@ -1347,7 +1347,8 @@ var xAdapter = {
   label: "X (Grok + twitterapi.io)",
   available: () => !!env("TWITTERAPI_KEY") || !!env("XAI_API_KEY"),
   async run(ctx) {
-    const prof = ctx.evidence.profile.bio ? null : await getProfile2(ctx.handle);
+    const haveProfile = ctx.evidence.profile.followers && ctx.evidence.profile.followers !== "\u2014";
+    const prof = haveProfile ? null : await getProfile2(ctx.handle);
     if (prof) {
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
@@ -1726,10 +1727,18 @@ async function coldIntake(ctx) {
   if (prof) {
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
     ctx.evidence.profile.bio = prof.bio ?? "";
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle}`, source: "twitterapi.io", tone: "neutral" });
+    if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
+    if (prof.createdAt) {
+      const d = new Date(prof.createdAt);
+      if (!isNaN(d.getTime())) ctx.evidence.profile.joined = d.toLocaleString("en-US", { month: "short", year: "numeric" });
+    }
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} \xB7 ${ctx.evidence.profile.followers} followers \xB7 joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
   }
   const posts = await getRecentPosts(ctx.handle);
-  if (posts.length) ctx.evidence.recentActivity = posts;
+  if (posts.length) {
+    ctx.evidence.recentActivity = posts;
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
+  }
   if (!analystAvailable()) return;
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify\u2026", tone: "neutral" });
   const claims = await extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
@@ -1957,10 +1966,20 @@ function handleFromUrl(url) {
   const m = url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i);
   return m ? "@" + m[1].toLowerCase() : null;
 }
+var isBurnAddr = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
+var isBurnTag = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
 function evmSafety(gp, sim) {
   const s = sim;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
-  const lpLocked = (gp?.lp_holders?.some((h) => h.is_locked === 1) ?? false) || (gp?.lp_holders?.reduce((a, h) => a + (h.is_locked ? Number(h.percent) : 0), 0) ?? 0) > 0.5;
+  let lpBurnedPct = 0, lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
+  for (const h of gp?.lp_holders ?? []) {
+    const pct = Number(h.percent) * 100;
+    if (!Number.isFinite(pct)) continue;
+    if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct;
+    else if (h.is_locked === 1) lpLockedPct += pct;
+    else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
+  }
+  const lpLocked = lpBurnedPct + lpLockedPct >= 50;
   return {
     available: !!gp || !!s,
     simChecked: !!s,
@@ -1981,12 +2000,32 @@ function evmSafety(gp, sim) {
     sellTax: s?.simSuccess ? s.sellTax : (num(gp?.sell_tax) ?? 0) * 100,
     holderCount: num(gp?.holder_count) ?? 0,
     topHolderPct,
-    lpLocked
+    lpLocked,
+    lpBurnedPct,
+    lpLockedPct,
+    lpTopUnlockedEoaPct,
+    balanceMutable: false,
+    transferHook: false,
+    transferFee: false,
+    proxy: t1(gp?.is_proxy),
+    slippageModifiable: t1(gp?.slippage_modifiable) || t1(gp?.personal_slippage_modifiable),
+    blacklist: t1(gp?.is_blacklisted),
+    tradingCooldown: t1(gp?.trading_cooldown),
+    externalCall: t1(gp?.external_call),
+    ownerChangeBalance: t1(gp?.owner_change_balance),
+    creatorPercent: (num(gp?.creator_percent) ?? 0) * 100
   };
 }
 function solanaSafety(sol) {
   const topHolderPct = sol?.holders?.length ? Number(sol.holders[0].percent) * 100 : null;
-  const lpLocked = sol?.lp_holders?.some((h) => h.is_locked === 1) ?? false;
+  let lpLockedPct = 0, lpTopUnlockedEoaPct = 0;
+  for (const h of sol?.lp_holders ?? []) {
+    const pct = Number(h.percent) * 100;
+    if (!Number.isFinite(pct)) continue;
+    if (h.is_locked === 1) lpLockedPct += pct;
+    else lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
+  }
+  const lpLocked = lpLockedPct >= 50;
   const mintable = solFlag(sol?.mintable);
   const freezable = solFlag(sol?.freezable);
   return {
@@ -2011,7 +2050,20 @@ function solanaSafety(sol) {
     sellTax: 0,
     holderCount: num(sol?.holder_count) ?? 0,
     topHolderPct,
-    lpLocked
+    lpLocked,
+    lpBurnedPct: 0,
+    lpLockedPct,
+    lpTopUnlockedEoaPct,
+    balanceMutable: solFlag(sol?.balance_mutable_authority),
+    transferHook: (sol?.transfer_hook?.length ?? 0) > 0,
+    transferFee: Object.keys(sol?.transfer_fee ?? {}).length > 0,
+    proxy: false,
+    slippageModifiable: false,
+    blacklist: false,
+    tradingCooldown: false,
+    externalCall: false,
+    ownerChangeBalance: false,
+    creatorPercent: 0
   };
 }
 function emptySafety() {
@@ -2035,7 +2087,20 @@ function emptySafety() {
     sellTax: 0,
     holderCount: 0,
     topHolderPct: null,
-    lpLocked: false
+    lpLocked: false,
+    lpBurnedPct: 0,
+    lpLockedPct: 0,
+    lpTopUnlockedEoaPct: 0,
+    balanceMutable: false,
+    transferHook: false,
+    transferFee: false,
+    proxy: false,
+    slippageModifiable: false,
+    blacklist: false,
+    tradingCooldown: false,
+    externalCall: false,
+    ownerChangeBalance: false,
+    creatorPercent: 0
   };
 }
 var _cache = /* @__PURE__ */ new Map();
@@ -2076,7 +2141,10 @@ async function runTokenAudit(input, emit, opts) {
   const vol24 = pair.volume?.h24 ?? 0;
   const buys = pair.txns?.h24?.buys ?? 0;
   const sells = pair.txns?.h24?.sells ?? 0;
+  const pc24 = pair.priceChange?.h24 ?? 0;
   const ageDays = pair.pairCreatedAt ? (Date.now() - pair.pairCreatedAt) / 864e5 : void 0;
+  const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
+  const washSignature = volLiq >= 15 && Math.abs(pc24) < 10 && buys + sells >= 50;
   step({ phase: "Market", label: `$${pair.baseToken.symbol}`, detail: `liquidity $${Math.round(liquidityUsd).toLocaleString()}, 24h vol $${Math.round(vol24).toLocaleString()}, mcap $${Math.round(fdv).toLocaleString()}`, source: "dexscreener", tone: liquidityUsd < 15e3 ? "warn" : "neutral" });
   const gpChain = GOPLUS_CHAIN[chain];
   let safety = emptySafety();
@@ -2132,11 +2200,43 @@ async function runTokenAudit(input, emit, opts) {
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });
     if (s.simChecked && !s.honeypot) findings.push({ claim: `Sell simulation passed (buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%).`, tone: "good", source: "honeypot.is" });
     if (s.ownerRenounced && !s.mintable && !s.takeBack && !s.freezable) findings.push({ claim: chain === "solana" ? "Mint and freeze authority revoked." : "Ownership renounced; no mint or take-back.", tone: "good", source: "goplus" });
-    if (s.lpLocked) findings.push({ claim: "Liquidity is locked.", tone: "good", source: "goplus" });
+    const ownerActive = !s.ownerRenounced;
+    if (s.ownerChangeBalance && ownerActive) {
+      if (broadlyTraded) {
+        findings.push({ claim: "GoPlus flags an owner-modify-balance capability, but broad CEX listing and deep liquidity indicate it is a governance/upgrade artifact, not an active threat.", tone: "warn", source: "argus" });
+      } else {
+        caps.push([20, "owner_can_modify_balance"]);
+        findings.push({ claim: "Owner can modify holder balances directly \u2014 they can zero your wallet.", tone: "bad", source: "goplus" });
+      }
+    }
+    if (s.proxy) findings.push({ claim: ownerActive ? "Upgradeable proxy with an active owner: the contract logic can be swapped out from under holders." : "Upgradeable proxy contract (logic is replaceable), though ownership is renounced.", tone: ownerActive ? "bad" : "warn", source: "goplus" });
+    if (s.slippageModifiable && ownerActive) findings.push({ claim: "Tax is modifiable: a low tax now can be raised toward 100% after you buy.", tone: "bad", source: "goplus" });
+    if (s.blacklist && ownerActive) findings.push({ claim: "Owner can blacklist addresses \u2014 your wallet can be blocked from selling.", tone: "warn", source: "goplus" });
+    if (s.tradingCooldown && ownerActive) findings.push({ claim: "Trading cooldown is enforceable \u2014 sells can be delayed.", tone: "warn", source: "goplus" });
+    if (s.externalCall) findings.push({ claim: "Contract makes external calls \u2014 behavior can change via an external dependency.", tone: "warn", source: "goplus" });
+    if (s.creatorPercent >= 5) findings.push({ claim: `Creator still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: "goplus" });
+    if (chain === "solana") {
+      if (s.balanceMutable) {
+        if (broadlyTraded) findings.push({ claim: "A balance-mutable authority exists, but broad market presence indicates it is not an active threat.", tone: "warn", source: "argus" });
+        else {
+          caps.push([20, "balance_mutable_authority"]);
+          findings.push({ claim: "Balance-mutable authority is active \u2014 the controller can rewrite your token balance.", tone: "bad", source: "goplus-sol" });
+        }
+      }
+      if (s.transferHook) findings.push({ claim: "Transfer hook active: an external program runs on every transfer and can block sells.", tone: "bad", source: "goplus-sol" });
+      if (s.transferFee) findings.push({ claim: "A Token-2022 transfer fee is configured \u2014 a built-in tax on every transfer.", tone: "warn", source: "goplus-sol" });
+    }
+    if (s.lpBurnedPct >= 50) findings.push({ claim: `Liquidity is burned (~${s.lpBurnedPct.toFixed(0)}%) \u2014 permanently removed, it cannot be pulled.`, tone: "good", source: "goplus" });
+    else if (s.lpLockedPct >= 50) findings.push({ claim: `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: "goplus" });
+    else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet \u2014 it can be pulled at any time.`, tone: "bad", source: "goplus" });
+    else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet \u2014 removable at will.`, tone: "warn", source: "goplus" });
     else findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
   }
   if (liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
+  if (washSignature) findings.push({ claim: `Volume is ${volLiq.toFixed(0)}x liquidity in 24h while the price moved only ${pc24.toFixed(1)}% \u2014 a wash-trading / fake-volume signature.`, tone: "bad", source: "dexscreener" });
+  if (pc24 <= -60) findings.push({ claim: `Down ${Math.abs(pc24).toFixed(0)}% in 24h \u2014 the token appears to have already dumped.`, tone: "bad", source: "dexscreener" });
+  else if (pc24 >= 300 && liquidityUsd < 1e5) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity \u2014 a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
   if (!opts?.skipSim) {
     if (cg && !cg.listed) {
       findings.push({ claim: "Not listed on CoinGecko \u2014 no independent market-data corroboration.", tone: "warn", source: "coingecko" });
@@ -2165,25 +2265,46 @@ async function runTokenAudit(input, emit, opts) {
   }
   const axes = [];
   let aT1 = liquidityUsd < 2e3 ? 2 : liquidityUsd < 1e4 ? 6 : liquidityUsd < 5e4 ? 12 : liquidityUsd < 25e4 ? 18 : 22;
-  if (s.lpLocked) aT1 = clamp(aT1 + 2, 0, 24);
-  else if (s.available) aT1 = clamp(aT1 - 3, 0, 24);
-  axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${s.available ? s.lpLocked ? ", LP locked" : ", LP not locked" : ""}.` });
+  let lpNote = "";
+  if (s.lpBurnedPct >= 50) {
+    aT1 = clamp(aT1 + 3, 0, 24);
+    lpNote = ", LP burned";
+  } else if (s.lpLockedPct >= 50) {
+    aT1 = clamp(aT1 + 2, 0, 24);
+    lpNote = ", LP locked";
+  } else if (s.available && s.lpTopUnlockedEoaPct >= 80) {
+    aT1 = clamp(aT1 - 6, 0, 24);
+    lpNote = ", LP in one unlocked wallet";
+  } else if (s.available && s.lpTopUnlockedEoaPct >= 50) {
+    aT1 = clamp(aT1 - 4, 0, 24);
+    lpNote = ", LP mostly in one wallet";
+  } else if (s.available) {
+    aT1 = clamp(aT1 - 3, 0, 24);
+    lpNote = ", LP not locked";
+  }
+  axes.push({ key: "T1", label: "Liquidity & lock", score: aT1, weight: 24, rationale: `$${Math.round(liquidityUsd).toLocaleString()} pooled${lpNote}.` });
   let aT2 = 26;
   if (!s.available) aT2 = 9;
   else if (chain === "solana") {
     if (s.metadataMutable) aT2 -= 8;
     if (!s.ownerRenounced) aT2 -= 6;
+    if (s.transferHook) aT2 -= 8;
   } else {
     if (!s.openSource) aT2 -= 8;
     if (s.pausable) aT2 -= 8;
     if (s.selfdestruct) aT2 -= 10;
     if (!s.ownerRenounced) aT2 -= 4;
+    if (s.proxy) aT2 -= s.ownerRenounced ? 3 : 6;
+    if (s.externalCall) aT2 -= 3;
+    if (!s.ownerRenounced && (s.blacklist || s.tradingCooldown)) aT2 -= 3;
   }
   aT2 = clamp(aT2, 0, 26);
   axes.push({ key: "T2", label: "Contract safety", score: aT2, weight: 26, rationale: s.available ? chain === "solana" ? `${s.ownerRenounced ? "authorities revoked" : "mint/freeze authority active"}${s.metadataMutable ? ", metadata mutable" : ""}.` : `${s.openSource ? "verified" : "unverified"} source, ${s.ownerRenounced ? "ownership renounced" : "owner active"}${s.pausable ? ", pausable" : ""}.` : "On-chain safety not verifiable keyless on this chain." });
   const tax = s.buyTax + s.sellTax;
   let aT3 = !s.available ? 6 : tax === 0 ? 12 : tax <= 10 ? 10 : tax <= 20 ? 7 : tax <= 40 ? 3 : 0;
   if (s.cannotSellAll || s.nonTransferable) aT3 = 0;
+  if (s.slippageModifiable && !s.ownerRenounced) aT3 = clamp(aT3 - 5, 0, 12);
+  if (s.transferFee) aT3 = clamp(aT3 - 5, 0, 12);
   axes.push({ key: "T3", label: "Taxes & tradeability", score: aT3, weight: 12, rationale: s.available ? chain === "solana" ? "no transfer tax detected." : `buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%${s.simChecked ? " (simulated)" : ""}.` : "Tax not verifiable keyless." });
   const topPct = holdersReliable ? s.topHolderPct : null;
   let aT4 = s.holderCount < 50 ? 3 : s.holderCount < 500 ? 7 : s.holderCount < 5e3 ? 11 : 14;
@@ -2195,14 +2316,17 @@ async function runTokenAudit(input, emit, opts) {
   }
   if (bundleRisk === "high") aT4 = clamp(aT4 - 8, 0, 16);
   else if (bundleRisk === "elevated") aT4 = clamp(aT4 - 4, 0, 16);
+  if (s.creatorPercent >= 15) aT4 = clamp(aT4 - 5, 0, 16);
+  else if (s.creatorPercent >= 5) aT4 = clamp(aT4 - 2, 0, 16);
   aT4 = clamp(aT4, 0, 16);
   const t4Note = !s.available ? "Holder data not verifiable keyless." : !holdersReliable ? `${s.holderCount.toLocaleString()} holders; distribution not reliably reported by the free data tier.` : `${s.holderCount.toLocaleString()} holders${topPct != null ? `, top holder ${topPct.toFixed(0)}%` : ""}${bundleRisk !== "low" ? `, ~${insiderPct}% in ${bundleCount} fresh wallets` : ""}.`;
   axes.push({ key: "T4", label: "Holder distribution", score: aT4, weight: 16, rationale: t4Note });
-  const volLiq = liquidityUsd > 0 ? vol24 / liquidityUsd : 0;
   let aT5 = vol24 < 500 ? 4 : volLiq > 25 ? 4 : volLiq > 8 ? 7 : volLiq < 0.02 ? 5 : 11;
   const total = buys + sells;
-  if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
+  if (washSignature) aT5 = 2;
+  else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
+  if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%) \u2014 wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
     ...(pair.info?.socials ?? []).map((x) => ({ label: x.type, url: x.url }))
@@ -2295,6 +2419,8 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
   if (cap === "mint_authority_active") return "Mint authority is live, the team can dilute holders to zero.";
   if (cap === "freeze_authority_active") return "Freeze authority is live, the team can freeze your tokens at any time.";
   if (cap === "reclaimable_ownership") return "Ownership can be reclaimed after renouncement, a classic rug setup.";
+  if (cap === "owner_can_modify_balance") return "Owner can rewrite holder balances, they can zero your wallet at will.";
+  if (cap === "balance_mutable_authority") return "A balance-mutable authority can rewrite your token balance at will.";
   if (verdict === "PASS") return `Clears the forensic bar: ${s.ownerRenounced ? "authorities revoked" : "owned"}, ${s.lpLocked ? "LP locked" : "tradeable"}, with real depth${projectX ? `. Team: ${projectX}` : "."}`;
   if (verdict === "CAUTION") return `Tradeable but with reservations${liq < 15e3 ? "; liquidity is thin" : ""}. Size accordingly.`;
   if (!s.available) return "Scored on market data only; on-chain contract safety could not be verified keyless on this chain.";
@@ -2305,6 +2431,9 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
 var EVM = /^0x[a-fA-F0-9]{40}$/;
 var SOLANA = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 var DEX_URL = /dexscreener\.com\/([a-z0-9]+)\/([a-zA-Z0-9]+)/i;
+var HTTP_URL = /^https?:\/\//i;
+var DOMAIN = /^([a-z0-9-]+\.)+[a-z]{2,24}(\/\S*)?$/i;
+var NAME_SERVICE = /\.(eth|sol|crypto|nft|bnb|x|lens)$/i;
 function resolveInput(raw) {
   const s = raw.trim();
   const dex = s.match(DEX_URL);
@@ -2312,6 +2441,10 @@ function resolveInput(raw) {
   if (EVM.test(s)) return { kind: "token", ref: s, via: "evm" };
   if (!s.startsWith("@") && !/twitter\.com|x\.com/i.test(s) && SOLANA.test(s) && s.length >= 32) {
     return { kind: "token", ref: s, via: "solana" };
+  }
+  if (!/x\.com|twitter\.com/i.test(s)) {
+    if (HTTP_URL.test(s)) return { kind: "site", ref: s };
+    if (!s.startsWith("@") && DOMAIN.test(s) && !NAME_SERVICE.test(s)) return { kind: "site", ref: s };
   }
   return { kind: "handle", ref: s };
 }

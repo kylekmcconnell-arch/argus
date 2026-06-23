@@ -57,7 +57,8 @@ export async function getRecentPosts(handle: string, limit = 20): Promise<string
     });
     if (!res.ok) return [];
     const d = (await res.json()) as any;
-    const tweets: any[] = d.tweets ?? d.data ?? [];
+    // twitterapi.io nests the array under data.tweets; tolerate the flatter shapes too.
+    const tweets: any[] = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
     return tweets
       .map((t) => t.text ?? t.full_text ?? "")
       .filter(Boolean)
@@ -131,8 +132,8 @@ export async function acknowledgment(endorser: string, subject: string): Promise
   }
 }
 
-function fmtFollowers(n?: number): string {
-  if (!n) return "—";
+export function fmtFollowers(n?: number): string {
+  if (n == null) return "—";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
   if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
   return String(n);
@@ -143,8 +144,10 @@ export const xAdapter: Adapter = {
   label: "X (Grok + twitterapi.io)",
   available: () => !!env("TWITTERAPI_KEY") || !!env("XAI_API_KEY"),
   async run(ctx: CollectContext) {
-    // 1. profile via twitterapi.io (skip if already resolved upstream)
-    const prof = ctx.evidence.profile.bio ? null : await getProfile(ctx.handle);
+    // 1. profile via twitterapi.io — fallback retry only if coldIntake didn't
+    //    already resolve the follower count (so a busy/empty bio still gets it).
+    const haveProfile = ctx.evidence.profile.followers && ctx.evidence.profile.followers !== "—";
+    const prof = haveProfile ? null : await getProfile(ctx.handle);
     if (prof) {
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
