@@ -1,22 +1,54 @@
 @import "tailwindcss";
 
-/* ARGUS, reskinned to the origami.chat system: light paper, Sora, a single
-   pink accent, near-black buttons, small radii, soft shadows. The token NAMES
-   are unchanged from the dark build so every component flips automatically. */
+/* ARGUS — "crypto intelligence": deep navy canvas, a royal-blue signal, the
+   dotted-eye mark. DARK is the default (the @theme values); LIGHT is a runtime
+   override on :root[data-theme="light"]. Token NAMES never change, so every
+   component flips automatically between modes. */
 @theme {
-  --color-void: #fafafa; /* app background (paper) */
-  --color-panel: #ffffff; /* cards */
-  --color-panel-2: #f7f7f8; /* inset / subtle */
-  --color-sidebar: #f4f4f5; /* left rail */
-  --color-line: #e7e7ea; /* hairline border (zinc-200) */
-  --color-line-2: #d6d6db; /* stronger border (zinc-300) */
-  --color-ink: #09090b; /* primary text (zinc-950) */
-  --color-ink-dim: #52525b; /* secondary text (zinc-600) */
-  --color-ink-faint: #a1a1aa; /* tertiary text (zinc-400) */
+  --color-void: #0a1322; /* app background — deep navy */
+  --color-panel: #111d31; /* cards */
+  --color-panel-2: #16243b; /* inset / subtle */
+  --color-sidebar: #0c1726; /* left rail */
+  --color-line: #1d2c43; /* hairline border */
+  --color-line-2: #2a3c57; /* stronger border */
+  --color-ink: #eaf0f8; /* primary text (near-white) */
+  --color-ink-dim: #9aabc2; /* secondary text */
+  --color-ink-faint: #57687f; /* tertiary text */
 
-  --color-signal: #d64a9e; /* origami pink accent */
-  --color-signal-dim: #b0367f;
-  --color-accent-tint: #fdf2f8; /* pink-50 wash (announcement bar) */
+  --color-signal: #3b82f6; /* royal-blue accent (the iris) */
+  --color-signal-dim: #2563eb;
+  --color-accent-tint: #0e1c31; /* subtle blue-tinted bar */
+
+  --color-pass: #22c55e;
+  --color-caution: #f59e0b;
+  --color-fail: #fb7185;
+  --color-avoid: #ef4444;
+  --color-unverifiable: #a78bfa;
+
+  --font-sans: "Sora", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+}
+
+:root {
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 34px -18px rgba(0, 0, 0, 0.65);
+  --select: rgba(59, 130, 246, 0.26);
+}
+
+/* LIGHT mode — the alternate. */
+:root[data-theme="light"] {
+  --color-void: #ffffff;
+  --color-panel: #ffffff;
+  --color-panel-2: #f4f7fb;
+  --color-sidebar: #f2f6fc;
+  --color-line: #e3e9f1;
+  --color-line-2: #cfd8e6;
+  --color-ink: #0a1322;
+  --color-ink-dim: #44566f;
+  --color-ink-faint: #8493a8;
+
+  --color-signal: #2563eb;
+  --color-signal-dim: #1d4ed8;
+  --color-accent-tint: #eef4fe;
 
   --color-pass: #16a34a;
   --color-caution: #d97706;
@@ -24,8 +56,8 @@
   --color-avoid: #dc2626;
   --color-unverifiable: #7c3aed;
 
-  --font-sans: "Sora", ui-sans-serif, system-ui, -apple-system, sans-serif;
-  --font-mono: "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
+  --shadow: 0 1px 2px rgba(9, 9, 11, 0.04), 0 8px 30px -16px rgba(9, 9, 11, 0.12);
+  --select: rgba(37, 99, 235, 0.16);
 }
 
 @layer base {
@@ -43,7 +75,7 @@
     -webkit-font-smoothing: antialiased;
   }
   ::selection {
-    background: rgba(214, 74, 158, 0.18);
+    background: var(--select);
   }
 }
 
@@ -66,15 +98,15 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* near-black primary button, origami style */
+/* blue primary button — the brand accent */
 .btn-primary {
-  background: var(--color-ink);
-  color: #fafafa;
+  background: var(--color-signal);
+  color: #ffffff;
   border-radius: 6px;
   transition: filter 0.15s ease, transform 0.05s ease;
 }
 .btn-primary:hover {
-  filter: brightness(1.25);
+  filter: brightness(1.12);
 }
 .btn-primary:active {
   transform: scale(0.985);
@@ -107,7 +139,7 @@
 }
 
 .soft-shadow {
-  box-shadow: 0 1px 2px rgba(9, 9, 11, 0.04), 0 8px 30px -16px rgba(9, 9, 11, 0.12);
+  box-shadow: var(--shadow);
 }
 
 .thin-scroll::-webkit-scrollbar { width: 7px; height: 7px; }

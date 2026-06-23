@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { verdictMeta } from "../lib/verdict";
 import type { Investigation } from "../lib/investigation";
 
@@ -24,7 +24,7 @@ function VerdictPill({ verdict, score }: { verdict: string; score: number | null
 
 function Card({ title, children, accent }: { title: string; children: React.ReactNode; accent?: string }) {
   return (
-    <div className="rounded-xl border bg-white p-4" style={{ borderColor: accent ? accent + "55" : "var(--color-line)" }}>
+    <div className="rounded-xl border bg-panel p-4" style={{ borderColor: accent ? accent + "55" : "var(--color-line)" }}>
       <div className="mb-2 text-[11px] uppercase tracking-wider text-ink-faint">{title}</div>
       {children}
     </div>
@@ -43,9 +43,15 @@ export function InvestigationReport({
   onOpenToken: () => void;
 }) {
   const [spent, setSpent] = useState(0);
+  const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const { token, projectX, recon, projectAccount, founders } = inv;
   const tm = verdictMeta(token.verdict);
-  const auditFounder = (handle: string) => { if (spent < MAX_FOUNDER_AUDITS) { setSpent((n) => n + 1); onAudit(handle); } };
+  const auditFounder = (handle: string) => {
+    if (spentRef.current >= MAX_FOUNDER_AUDITS) return;
+    spentRef.current += 1;
+    setSpent(spentRef.current);
+    onAudit(handle);
+  };
 
   return (
     <div className="relative min-h-full pb-24">

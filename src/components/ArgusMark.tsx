@@ -1,51 +1,65 @@
-// ARGUS mark — a peacock ocellus (feather eye-spot). When Hera slew the
-// hundred-eyed giant Argus Panoptes, she set his eyes into the peacock's tail.
-// A single feather-eye: the myth, the all-seeing watch, and a clean scalable mark.
+// ARGUS mark — the all-seeing eye of Argus Panoptes, rendered as a halftone field
+// of dots forming an almond eye, dense on the left and fading right, with a solid
+// blue iris. Generated deterministically so it scales cleanly at any size.
+
+interface Dot { x: number; y: number; r: number; o: number }
+
+// Builds the dot field for an eye spanning x∈[x0,x1], centered at cy, amplitude A.
+function eyeDots(x0: number, x1: number, cy: number, A: number, step: number, irisFrac = 0.66): { dots: Dot[]; irisX: number; irisY: number; irisR: number } {
+  const W = x1 - x0;
+  const h = (x: number) => A * Math.sin((Math.PI * (x - x0)) / W); // 0 at the corners
+  const irisX = x0 + W * irisFrac;
+  const irisY = cy;
+  const irisR = A * 0.3;
+  const dots: Dot[] = [];
+  for (let x = x0; x <= x1 + 0.001; x += step) {
+    const hh = h(x);
+    if (hh <= step * 0.4) continue;
+    const tx = (x - x0) / W; // 0 left … 1 right
+    for (let y = cy - hh; y <= cy + hh + 0.001; y += step) {
+      const edge = 1 - Math.abs(y - cy) / hh; // 1 at midline, 0 at the lid
+      const nearLid = 1 - edge;
+      let r = (step * 0.46) * (1 - tx * 0.82) * (0.55 + 0.8 * nearLid);
+      if (Math.hypot(x - irisX, y - irisY) < irisR * 2.1) continue; // clear space around the iris
+      if (r < step * 0.12) continue; // drop the faint far-right dots → sparse outline
+      dots.push({ x, y, r, o: 0.34 + 0.62 * (1 - tx) });
+    }
+  }
+  return { dots, irisX, irisY, irisR };
+}
+
 export function ArgusMark({ size = 28, live = false }: { size?: number; live?: boolean }) {
+  const { dots, irisX, irisY, irisR } = eyeDots(12, 88, 50, 23, 4.6);
   return (
-    <svg width={size} height={size} viewBox="0 0 48 48" fill="none" aria-hidden>
-      {/* feather barbs (texture), faint */}
-      <g stroke="var(--color-line-2)" strokeWidth="0.9" opacity="0.55" strokeLinecap="round">
-        <path d="M16 13 L19.5 16.5" /><path d="M14.5 19 L18.5 21" /><path d="M14.5 26 L18.5 25" />
-        <path d="M32 13 L28.5 16.5" /><path d="M33.5 19 L29.5 21" /><path d="M33.5 26 L29.5 25" />
+    <svg width={size} height={size} viewBox="0 0 100 100" fill="none" aria-hidden>
+      <g fill="var(--color-signal)">
+        {dots.map((d, i) => (
+          <circle key={i} cx={d.x} cy={d.y} r={d.r} opacity={d.o} />
+        ))}
       </g>
-      {/* feather blade (teardrop) */}
-      <path d="M24 3 C35 12 36 28 24 40 C12 28 13 12 24 3 Z" stroke="var(--color-ink)" strokeWidth="1.6" fill="none" />
-      {/* quill */}
-      <path d="M24 40 L24 45.5" stroke="var(--color-ink)" strokeWidth="1.5" strokeLinecap="round" />
-      {/* ocellus halo */}
-      <path d="M24 10 C32 16 33 27 24 35 C15 27 16 16 24 10 Z" fill="var(--color-accent-tint)" stroke="var(--color-signal)" strokeWidth="1.1" />
-      {/* the eye */}
-      <circle cx="24" cy="24" r="5.4" fill="#fff" stroke="var(--color-ink)" strokeWidth="1.1" />
-      <circle cx="24" cy="24" r="3.9" fill="var(--color-signal)" />
-      <circle cx="24" cy="24" r="1.7" fill="var(--color-ink)">
-        {live && <animate attributeName="opacity" values="1;0.35;1" dur="1.6s" repeatCount="indefinite" />}
-      </circle>
-      <circle cx="22.5" cy="22.5" r="0.8" fill="#fff" />
+      {live && (
+        <circle cx={irisX} cy={irisY} r={irisR} fill="none" stroke="var(--color-signal)" strokeWidth="1.4" opacity="0.5">
+          <animate attributeName="r" values={`${irisR};${irisR * 2.1};${irisR}`} dur="2.2s" repeatCount="indefinite" />
+          <animate attributeName="opacity" values="0.5;0;0.5" dur="2.2s" repeatCount="indefinite" />
+        </circle>
+      )}
+      <circle cx={irisX} cy={irisY} r={irisR} fill="var(--color-signal)" />
+      <circle cx={irisX - irisR * 0.32} cy={irisY - irisR * 0.32} r={irisR * 0.3} fill="#ffffff" opacity="0.75" />
     </svg>
   );
 }
 
-// A faint peacock tail fan for the hero background: many feather-eyes radiating,
-// the place the hundred eyes came to rest.
+// A faint, oversized dotted eye for the hero canvas — the hundred eyes at rest.
 export function HeroBackdrop({ className = "" }: { className?: string }) {
-  const feathers = Array.from({ length: 11 }, (_, i) => {
-    const a = -75 + i * 15; // spread the fan
-    const L = 330 + (i % 2 === 0 ? 70 : 0) - Math.abs(a) * 0.7;
-    return { a, L };
-  });
+  const { dots, irisX, irisY, irisR } = eyeDots(120, 1080, 300, 200, 30);
   return (
-    <svg className={className} viewBox="0 0 1200 560" fill="none" preserveAspectRatio="xMidYMax slice" aria-hidden>
-      <g stroke="var(--color-line-2)" fill="none" opacity="0.7">
-        {feathers.map(({ a, L }, i) => (
-          <g key={i} transform={`translate(600 575) rotate(${a})`}>
-            <line x1="0" y1="0" x2="0" y2={-L} strokeWidth="1" />
-            <ellipse cx="0" cy={-(L - 26)} rx="20" ry="44" strokeWidth="1" />
-            <circle cx="0" cy={-(L - 26)} r="9" strokeWidth="1" />
-            <circle cx="0" cy={-(L - 26)} r="3.5" fill="var(--color-line-2)" stroke="none" />
-          </g>
+    <svg className={className} viewBox="0 0 1200 600" fill="none" preserveAspectRatio="xMidYMid meet" aria-hidden>
+      <g fill="var(--color-signal)" opacity="0.16">
+        {dots.map((d, i) => (
+          <circle key={i} cx={d.x} cy={d.y} r={d.r} opacity={d.o} />
         ))}
       </g>
+      <circle cx={irisX} cy={irisY} r={irisR} fill="var(--color-signal)" opacity="0.2" />
     </svg>
   );
 }

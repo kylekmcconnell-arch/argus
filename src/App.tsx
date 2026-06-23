@@ -108,6 +108,8 @@ export default function App() {
     onAudit(raw);
   }, [onAudit]);
 
+  const onInvestigationError = useCallback(() => setPhase("notfound"), []);
+
   const onInvestigationDone = useCallback((inv: Investigation) => {
     setInvestigation(inv);
     setPhase("investigation-report");
@@ -260,7 +262,7 @@ export default function App() {
       {phase === "token-report" && tokenDossier && <TokenReport dossier={tokenDossier} onReset={reset} onAudit={onAudit} />}
 
       {phase === "investigation" && investigationInput && (
-        <InvestigationRun input={investigationInput} onDone={onInvestigationDone} onError={() => setPhase("notfound")} />
+        <InvestigationRun input={investigationInput} onDone={onInvestigationDone} onError={onInvestigationError} />
       )}
 
       {phase === "investigation-report" && investigation && (

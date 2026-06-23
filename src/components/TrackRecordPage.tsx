@@ -17,7 +17,7 @@ function Pill({ verdict }: { verdict: string }) {
 
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub: string; tone: string }) {
   return (
-    <div className="rounded-xl border border-line bg-white p-4">
+    <div className="rounded-xl border border-line bg-panel p-4">
       <div className="text-[11px] uppercase tracking-wider text-ink-faint">{label}</div>
       <div className="mono mt-1 text-[30px] font-semibold leading-none tabular" style={{ color: tone }}>{value}</div>
       <div className="mt-1.5 text-[12px] leading-snug text-ink-faint">{sub}</div>
@@ -71,7 +71,7 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
         <button
           onClick={run}
           disabled={running}
-          className="mono shrink-0 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:opacity-50"
+          className="mono shrink-0 rounded-lg border border-line bg-panel px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:opacity-50"
         >
           {running ? `running ${done}/${CORPUS.length}` : "re-run"}
         </button>
@@ -107,7 +107,7 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
       )}
 
       {/* results table */}
-      <div className="mt-6 overflow-hidden rounded-xl border border-line bg-white">
+      <div className="mt-6 overflow-hidden rounded-xl border border-line bg-panel">
         <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-line px-4 py-2 text-[10.5px] uppercase tracking-wider text-ink-faint">
           <span>Token</span>
           <span>What drove the verdict</span>

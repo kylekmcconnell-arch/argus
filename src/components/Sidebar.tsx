@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
 import { SUBJECTS } from "../data/subjects";
 import { ROLE_META, verdictMeta } from "../lib/verdict";
@@ -32,7 +33,7 @@ function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof I
     <button
       onClick={onClick}
       className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13.5px] transition ${
-        active ? "bg-white text-ink soft-shadow" : "text-ink-dim hover:bg-white/70 hover:text-ink"
+        active ? "bg-panel text-ink soft-shadow" : "text-ink-dim hover:bg-panel/70 hover:text-ink"
       }`}
     >
       <span className={active ? "text-signal" : "text-ink-faint"}>
@@ -40,6 +41,28 @@ function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof I
       </span>
       {label}
       {badge ? <span className="mono ml-auto rounded-full bg-signal/15 px-1.5 text-[10px] text-signal-dim">{badge}</span> : null}
+    </button>
+  );
+}
+
+function ThemeToggle() {
+  const [theme, setTheme] = useState<string>(() => (typeof document !== "undefined" ? document.documentElement.dataset.theme || "dark" : "dark"));
+  const toggle = () => {
+    const next = theme === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem("argus-theme", next); } catch { /* noop */ }
+    setTheme(next);
+  };
+  return (
+    <button onClick={toggle} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13.5px] text-ink-dim transition hover:bg-panel/70 hover:text-ink">
+      <span className="text-ink-faint">
+        {theme === "dark" ? (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg>
+        ) : (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="4.2" /><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8" /></svg>
+        )}
+      </span>
+      {theme === "dark" ? "Light mode" : "Dark mode"}
     </button>
   );
 }
@@ -73,7 +96,7 @@ export function Sidebar({
       <button onClick={() => nav("idle")} className="flex items-center gap-2.5 px-4 py-4">
         <ArgusMark size={26} />
         <span className="text-[15px] font-semibold tracking-tight text-ink">ARGUS</span>
-        <span className="mono ml-auto rounded border border-line bg-white px-1.5 py-0.5 text-[10px] text-ink-faint">v2.2</span>
+        <span className="mono ml-auto rounded border border-line bg-panel px-1.5 py-0.5 text-[10px] text-ink-faint">v2.2</span>
       </button>
 
       {/* nav */}
@@ -102,10 +125,10 @@ export function Sidebar({
               key={s.handle}
               onClick={() => audit(s.handle)}
               className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
-                active ? "bg-white soft-shadow" : "hover:bg-white/70"
+                active ? "bg-panel soft-shadow" : "hover:bg-panel/70"
               }`}
             >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-white text-[11px] text-signal">
+              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel text-[11px] text-signal">
                 {s.avatar}
               </span>
               <span className="min-w-0 flex-1">
@@ -126,6 +149,7 @@ export function Sidebar({
       <div className="mt-auto border-t border-line px-2.5 py-3">
         <NavItem icon="code" label="API" active={view === "api"} onClick={() => nav("api")} />
         <NavItem icon="info" label="How it works" active={view === "about"} onClick={() => nav("about")} />
+        <ThemeToggle />
         <div className="mt-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5">
           <span className="flex h-7 w-7 items-center justify-center rounded-full bg-signal text-[12px] font-semibold text-white">K</span>
           <div className="min-w-0">

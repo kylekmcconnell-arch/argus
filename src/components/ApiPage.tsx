@@ -7,7 +7,7 @@ function Copy({ text }: { text: string }) {
   return (
     <button
       onClick={() => { navigator.clipboard?.writeText(text); setDone(true); setTimeout(() => setDone(false), 1400); }}
-      className="mono rounded-md border border-line bg-white px-2 py-0.5 text-[11px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+      className="mono rounded-md border border-line bg-panel px-2 py-0.5 text-[11px] text-ink-dim transition hover:border-line-2 hover:text-ink"
     >
       {done ? "copied" : "copy"}
     </button>
@@ -25,7 +25,7 @@ function Block({ code }: { code: string }) {
 
 function Endpoint({ method, path, desc, params, curl, response }: { method: string; path: string; desc: string; params: [string, string][]; curl: string; response: string }) {
   return (
-    <div className="rounded-xl border border-line bg-white p-4">
+    <div className="rounded-xl border border-line bg-panel p-4">
       <div className="flex items-center gap-2">
         <span className="mono rounded border border-line px-1.5 py-0.5 text-[11px] font-semibold text-pass">{method}</span>
         <span className="mono text-[13px] text-ink">{path}</span>
@@ -124,7 +124,7 @@ data: { ...full dossier... }`}
       </div>
 
       {/* spec */}
-      <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-white p-4">
+      <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-panel p-4">
         <div className="min-w-0 flex-1">
           <div className="text-[13px] font-medium text-ink">OpenAPI 3.1 spec</div>
           <div className="mt-0.5 text-[12.5px] text-ink-faint">Import into Postman or Swagger, or generate a typed client with openapi-generator.</div>

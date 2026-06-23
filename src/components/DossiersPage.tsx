@@ -20,7 +20,7 @@ export function DossiersPage({ onOpen }: { onOpen: (handle: string) => void }) {
             <button
               key={s.handle}
               onClick={() => onOpen(s.handle)}
-              className="group flex flex-col rounded-xl border border-line bg-white p-4 text-left transition hover:border-line-2 hover:shadow-sm"
+              className="group flex flex-col rounded-xl border border-line bg-panel p-4 text-left transition hover:border-line-2 hover:shadow-sm"
             >
               <div className="flex items-center gap-3">
                 <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-line bg-panel-2 text-[17px] text-signal">

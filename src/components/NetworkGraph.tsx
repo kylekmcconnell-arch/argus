@@ -248,7 +248,7 @@ export function NetworkGraph({
       {(view.k !== 1 || view.x !== 0 || view.y !== 0 || override.size > 0) && (
         <button
           onClick={() => { setView({ x: 0, y: 0, k: 1 }); setOverride(new Map()); }}
-          className="mono absolute bottom-2 right-3 rounded-md border border-line bg-white/80 px-2 py-0.5 text-[10.5px] text-ink-dim backdrop-blur transition hover:text-ink"
+          className="mono absolute bottom-2 right-3 rounded-md border border-line bg-panel/80 px-2 py-0.5 text-[10.5px] text-ink-dim backdrop-blur transition hover:text-ink"
         >
           reset view
         </button>

@@ -146,7 +146,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
 
       {/* input */}
       <div className="mt-5 flex items-center gap-2">
-        <div className="flex flex-1 items-center rounded-lg border border-line bg-white px-3">
+        <div className="flex flex-1 items-center rounded-lg border border-line bg-panel px-3">
           <span className="mono text-[12px] text-ink-faint">https://</span>
           <input
             value={url}
@@ -167,13 +167,13 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
       <div className="mt-2 flex items-center gap-2 text-[12px] text-ink-faint">
         <span>try</span>
         {EXAMPLES.map((e) => (
-          <button key={e} onClick={() => run(e)} className="mono rounded border border-line bg-white px-1.5 py-0.5 text-ink-dim transition hover:text-ink">{e}</button>
+          <button key={e} onClick={() => run(e)} className="mono rounded border border-line bg-panel px-1.5 py-0.5 text-ink-dim transition hover:text-ink">{e}</button>
         ))}
       </div>
 
       {/* retrieval trace — the fail -> escalate routing, shown */}
       {stages.length > 0 && (
-        <div className="mt-6 overflow-hidden rounded-xl border border-line bg-white">
+        <div className="mt-6 overflow-hidden rounded-xl border border-line bg-panel">
           <div className="border-b border-line px-4 py-2 text-[10.5px] uppercase tracking-wider text-ink-faint">Retrieval</div>
           {stages.map((s, i) => (
             <div key={i} className="flex items-start gap-3 border-b border-line px-4 py-2.5 last:border-0">
@@ -197,7 +197,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
             const v = recon.verdict!;
             const m = verdictMeta(v.verdict);
             return (
-              <div className="mt-4 rounded-xl border bg-white p-5" style={{ borderColor: m.color + "66", background: m.glow }}>
+              <div className="mt-4 rounded-xl border bg-panel p-5" style={{ borderColor: m.color + "66", background: m.glow }}>
                 <div className="flex items-center gap-4">
                   <Ring score={v.score} color={m.color} />
                   <div className="min-w-0">
@@ -231,7 +231,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
           })()}
 
           {/* findings ledger */}
-          <div className="mt-3 rounded-xl border border-line bg-white p-4">
+          <div className="mt-3 rounded-xl border border-line bg-panel p-4">
             <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Findings</div>
             <div className="mt-2 space-y-2">
               {recon.findings.map((f, i) => (
@@ -245,7 +245,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
 
           {/* on-chain reality check */}
           {recon.pivot && (
-            <div className="mt-3 rounded-xl border bg-white p-4" style={{ borderColor: TONE[recon.pivot.reconcile.tone] + "66" }}>
+            <div className="mt-3 rounded-xl border bg-panel p-4" style={{ borderColor: TONE[recon.pivot.reconcile.tone] + "66" }}>
               <div className="flex items-center gap-2">
                 <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">On-chain reality check</span>
                 <span className="mono shrink-0 text-[12px]" style={{ color: TONE[recon.pivot.reconcile.tone] }}>{GLYPH[recon.pivot.reconcile.tone]}</span>
@@ -344,7 +344,7 @@ function Chip({ k, v }: { k: string; v: string }) {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-line bg-white p-4">
+    <div className="rounded-xl border border-line bg-panel p-4">
       <div className="mb-2 text-[10.5px] uppercase tracking-wider text-ink-faint">{title}</div>
       {children}
     </div>

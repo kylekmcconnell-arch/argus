@@ -44,7 +44,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Card({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-xl border border-line bg-white p-4">
+    <div className="rounded-xl border border-line bg-panel p-4">
       <div className="text-[13px] font-medium text-ink">{title}</div>
       <div className="mt-1 text-[12.5px] leading-relaxed text-ink-faint">{body}</div>
     </div>
@@ -109,7 +109,7 @@ export function AboutPage({ onStart }: { onStart: () => void }) {
         </div>
         <div className="mt-3 space-y-2">
           {PHASES.map((p) => (
-            <div key={p.n} className="rounded-xl border border-line bg-white p-3.5">
+            <div key={p.n} className="rounded-xl border border-line bg-panel p-3.5">
               <div className="mb-2 text-[12px] font-semibold text-ink">Phase {p.n} · {p.title}</div>
               <div className="space-y-1">
                 {p.steps.map(([label, status], i) => (

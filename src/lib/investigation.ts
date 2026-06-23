@@ -69,16 +69,21 @@ function deriveFounders(recon: Recon | null, projectX: string | null): FounderCa
   const seen = new Set<string>();
   const px = projectX ? normHandle(projectX) : "";
 
+  // Only surface founders when the site actually NAMES a team. For unnamed /
+  // absent / gap states, founderNote says the team is not stated, so we list
+  // nobody here — no stray X link on the page gets promoted to a "founder".
+  if (recon?.team.state !== "named") return out;
+
   // Named individuals on the site — shown, but NO handle is synthesized.
-  if (recon?.team.state === "named") {
-    for (const name of recon.team.names) {
-      const k = name.toLowerCase();
-      if (!seen.has(k)) { seen.add(k); out.push({ name, handle: null, source: "site" }); }
-    }
+  for (const name of recon.team.names) {
+    const k = name.toLowerCase();
+    if (!seen.has(k)) { seen.add(k); out.push({ name, handle: null, source: "site" }); }
   }
   // Personal X accounts OBSERVED on the project site (not the project account).
-  for (const s of recon?.socials ?? []) {
-    const m = s.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i);
+  // Accept only BARE profile links (…/handle), never /handle/status/<id> tweet
+  // links — the first path segment of a tweet link is the author, not a founder.
+  for (const s of recon.socials) {
+    const m = s.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})\/?(?:\?.*)?$/i);
     if (!m || SITE_NOISE.test(m[1])) continue;
     const handle = "@" + m[1];
     const k = normHandle(handle);

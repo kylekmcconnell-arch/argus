@@ -44,7 +44,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
         {log.length > 0 && (
           <button
             onClick={() => { clearLog(); setLog([]); }}
-            className="mono shrink-0 rounded-lg border border-line bg-white px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+            className="mono shrink-0 rounded-lg border border-line bg-panel px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
           >
             clear
           </button>
@@ -65,7 +65,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`mono rounded-md border px-2.5 py-1 transition ${filter === f ? "border-line-2 bg-panel-2 text-ink" : "border-line bg-white text-ink-dim hover:text-ink"}`}
+            className={`mono rounded-md border px-2.5 py-1 transition ${filter === f ? "border-line-2 bg-panel-2 text-ink" : "border-line bg-panel text-ink-dim hover:text-ink"}`}
           >
             {f}
           </button>
@@ -74,11 +74,11 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
 
       {/* log */}
       {shown.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-line bg-white/50 p-10 text-center text-[13px] text-ink-faint">
+        <div className="mt-6 rounded-xl border border-dashed border-line bg-panel/50 p-10 text-center text-[13px] text-ink-faint">
           {log.length === 0 ? "No audits yet. Run a token, a handle, or a site recon and it will appear here." : "Nothing matches this filter."}
         </div>
       ) : (
-        <div className="mt-4 overflow-hidden rounded-xl border border-line bg-white">
+        <div className="mt-4 overflow-hidden rounded-xl border border-line bg-panel">
           {shown.map((e) => (
             <button
               key={e.id}
@@ -115,7 +115,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {
   return (
-    <div className="rounded-xl border border-line bg-white p-3">
+    <div className="rounded-xl border border-line bg-panel p-3">
       <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">{label}</div>
       <div className="mono mt-1 text-[22px] font-semibold tabular" style={{ color: tone ?? "var(--color-ink)" }}>{value}</div>
     </div>

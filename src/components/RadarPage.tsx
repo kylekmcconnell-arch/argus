@@ -137,7 +137,7 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
             <button
               key={c}
               onClick={() => setChain(c)}
-              className={`rounded-full border px-2.5 py-1 text-[11.5px] capitalize transition ${chain === c ? "border-ink bg-ink text-[#fafafa]" : "border-line text-ink-dim hover:border-line-2"}`}
+              className={`rounded-full border px-2.5 py-1 text-[11.5px] capitalize transition ${chain === c ? "border-ink bg-ink text-void" : "border-line text-ink-dim hover:border-line-2"}`}
             >
               {c}
             </button>
@@ -163,7 +163,7 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
                 <button
                   key={d.chain + d.address}
                   onClick={() => onAudit(d.address)}
-                  className="group rounded-xl border bg-white p-3.5 text-left transition hover:shadow-sm"
+                  className="group rounded-xl border bg-panel p-3.5 text-left transition hover:shadow-sm"
                   style={{ borderColor: d.verdict === "AVOID" || d.verdict === "FAIL" ? `${m.color}66` : "var(--color-line)" }}
                 >
                   <div className="flex items-center gap-2">

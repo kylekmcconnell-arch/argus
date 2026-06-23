@@ -90,7 +90,7 @@ function tokenReportText(d: TokenDossier): string {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-line bg-white p-4">
+    <div className="rounded-xl border border-line bg-panel p-4">
       <div className="mb-2 text-[12.5px] font-medium text-ink">{title}</div>
       {children}
     </div>
@@ -184,7 +184,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {d.priceChange && (
           <div className="mt-4 grid grid-cols-4 gap-2">
             {([["5m", d.priceChange.m5], ["1h", d.priceChange.h1], ["6h", d.priceChange.h6], ["24h", d.priceChange.h24]] as [string, number | undefined][]).map(([l, v]) => (
-              <div key={l} className="rounded-lg border border-line bg-white px-3 py-2 text-center">
+              <div key={l} className="rounded-lg border border-line bg-panel px-3 py-2 text-center">
                 <div className="text-[10px] uppercase tracking-wider text-ink-faint">{l}</div>
                 <div className="mono text-[13px]" style={{ color: v == null ? "var(--color-ink-faint)" : v >= 0 ? "var(--color-pass)" : "var(--color-avoid)" }}>
                   {v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1) + "%"}
@@ -221,7 +221,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* axes */}
         <section className="mt-5">
           <div className="mb-2.5 text-[13px] font-semibold tracking-tight text-ink">Forensic breakdown</div>
-          <div className="rounded-xl border border-line bg-white px-4 py-1 divide-y divide-line/60">
+          <div className="rounded-xl border border-line bg-panel px-4 py-1 divide-y divide-line/60">
             {d.axes.map((a) => <Bar key={a.key} a={a} color={m.color} />)}
             <div className="flex items-center justify-between py-2.5 text-[11.5px] text-ink-faint">
               <span>weighted total</span>
@@ -356,7 +356,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
             <div className="mb-2.5 text-[13px] font-semibold tracking-tight text-ink">Signals</div>
             <div className="space-y-2">
               {d.findings.map((f, i) => (
-                <div key={i} className="flex items-start gap-3 rounded-xl border border-line bg-white p-3.5">
+                <div key={i} className="flex items-start gap-3 rounded-xl border border-line bg-panel p-3.5">
                   <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: f.tone === "good" ? "var(--color-pass)" : f.tone === "warn" ? "var(--color-caution)" : "var(--color-avoid)" }} />
                   <p className="flex-1 text-[13px] leading-snug text-ink">{f.claim}</p>
                   <span className="mono text-[10.5px] text-ink-faint">{f.source}</span>

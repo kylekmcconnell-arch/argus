@@ -70,7 +70,7 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
       </div>
 
       {rows.length === 0 ? (
-        <div className="mt-10 rounded-xl border border-dashed border-line-2 bg-white/50 p-10 text-center text-[13.5px] text-ink-faint">
+        <div className="mt-10 rounded-xl border border-dashed border-line-2 bg-panel/50 p-10 text-center text-[13.5px] text-ink-faint">
           Nothing watched yet. Open any audit and hit <span className="text-ink-dim">Watch</span> to track it here.
         </div>
       ) : (
@@ -86,7 +86,7 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
                 : null;
             const alert = worsened || (liqDrop != null && liqDrop < -0.25);
             return (
-              <div key={r.item.id} className="flex items-center gap-3 rounded-xl border bg-white px-4 py-3" style={alert ? { borderColor: "var(--color-avoid)" } : {}}>
+              <div key={r.item.id} className="flex items-center gap-3 rounded-xl border bg-panel px-4 py-3" style={alert ? { borderColor: "var(--color-avoid)" } : {}}>
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-panel-2 text-[12px] text-signal">
                   {r.item.kind === "token" ? r.item.label.replace("$", "").slice(0, 3) : r.item.label.replace("@", "").slice(0, 1).toUpperCase()}
                 </span>

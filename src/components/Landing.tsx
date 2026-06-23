@@ -32,7 +32,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => voi
             e.preventDefault();
             if (value.trim()) onAudit(value.trim());
           }}
-          className="mt-7 w-full rounded-xl border border-line bg-white p-2.5 soft-shadow transition focus-within:border-line-2"
+          className="mt-7 w-full rounded-xl border border-line bg-panel p-2.5 soft-shadow transition focus-within:border-line-2"
         >
           <div className="flex items-center gap-2">
             <span className="mono pl-2 text-[15px] text-ink-faint select-none">@</span>
@@ -62,7 +62,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => voi
               <button
                 key={s.handle}
                 onClick={() => onAudit(s.handle)}
-                className="group flex items-center gap-3 rounded-lg border border-line bg-white px-3 py-2.5 text-left transition hover:border-line-2 hover:shadow-sm"
+                className="group flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2.5 text-left transition hover:border-line-2 hover:shadow-sm"
               >
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-panel-2 text-[14px] text-signal">
                   {s.avatar}
@@ -90,7 +90,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => voi
               <button
                 key={t.sym}
                 onClick={() => onAudit(t.addr)}
-                className="mono rounded-full border border-line bg-white px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                className="mono rounded-full border border-line bg-panel px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
               >
                 {t.sym}
               </button>

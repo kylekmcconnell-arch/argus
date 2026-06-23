@@ -30,7 +30,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
             subjects sharing one hidden hub becomes a cabal. None of that shows in a single report.
           </p>
         </div>
-        <div className="flex shrink-0 rounded-lg border border-line bg-white p-0.5 text-[12px]">
+        <div className="flex shrink-0 rounded-lg border border-line bg-panel p-0.5 text-[12px]">
           {(["network", "subject"] as const).map((m) => (
             <button
               key={m}
@@ -62,7 +62,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
       {mode === "network" ? (
         <>
           {mine.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-white px-3 py-2 text-[12px]">
+            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-[12px]">
               <label className="flex cursor-pointer items-center gap-1.5 text-ink-dim">
                 <input type="checkbox" checked={includeMine} onChange={(e) => setIncludeMine(e.target.checked)} className="accent-[var(--color-signal)]" />
                 include your audits
@@ -113,7 +113,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
               <button
                 key={s.handle}
                 onClick={() => onOpen(s.handle)}
-                className="group rounded-xl border border-line bg-white p-3 text-left transition hover:border-line-2 hover:shadow-sm"
+                className="group rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:shadow-sm"
               >
                 <div className="mb-1 flex items-center gap-2 px-1">
                   <span className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-panel-2 text-[12px] text-signal">
@@ -153,7 +153,7 @@ function Cabals({ net }: { net: ReturnType<typeof buildNetwork> }) {
           </p>
           <div className="mt-2 flex flex-wrap gap-1.5">
             {cabal.via.map((v) => (
-              <span key={v.id} className="mono rounded-md border border-line bg-white px-1.5 py-0.5 text-[11px] text-ink-dim">
+              <span key={v.id} className="mono rounded-md border border-line bg-panel px-1.5 py-0.5 text-[11px] text-ink-dim">
                 {v.key}
               </span>
             ))}
@@ -172,7 +172,7 @@ function Intel({
   title: string; subtitle: string; items: { key: string; detail: string }[]; empty: string; tone: string;
 }) {
   return (
-    <div className="rounded-xl border border-line bg-white p-4">
+    <div className="rounded-xl border border-line bg-panel p-4">
       <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
         <span className="h-2 w-2 rounded-full" style={{ background: tone }} />
         {title}
