@@ -1244,7 +1244,27 @@ Score every listed axis, write the composite headline (one sentence on what gove
 
 // server/adapters/x.ts
 var TWITTERAPI = "https://api.twitterapi.io";
-var XAI = "https://api.x.ai/v1/chat/completions";
+async function grokSearch(system, user) {
+  const key = env("XAI_API_KEY");
+  if (!key) return null;
+  try {
+    const res = await fetch("https://api.x.ai/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
+        input: [{ role: "system", content: system }, { role: "user", content: user }],
+        tools: [{ type: "web_search" }, { type: "x_search" }]
+      })
+    });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o) => o.content ?? []).map((c) => c.text ?? "").join(" ") : "") ?? "";
+    return text || null;
+  } catch {
+    return null;
+  }
+}
 async function twFetch(url, key, tries = 2) {
   for (let i = 0; i < tries; i++) {
     const res = await fetch(url, { headers: { "x-api-key": key } });
@@ -1309,31 +1329,12 @@ async function acknowledgment(endorser, subject) {
   if (!key) return null;
   const e = endorser.replace(/^@/, "");
   const s = subject.replace(/^@/, "");
+  const system = "You verify endorsements for a due-diligence engine, with live web and X search. Decide the strongest public acknowledgment @" + e + " has ever made of @" + s + ' on X, and overall sentiment. Reply with ONLY a compact JSON object {"ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}.';
+  const text = await grokSearch(system, `Has @${e} ever publicly acknowledged @${s} on X? Search @${e}'s posts.`);
+  if (!text) return null;
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return null;
   try {
-    const res = await fetch(XAI, {
-      method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
-        messages: [
-          {
-            role: "system",
-            content: "You verify endorsements for a due-diligence engine. Decide the strongest public acknowledgment @" + e + " has ever made of @" + s + ' on X, and overall sentiment. Reply with ONLY a compact JSON object {"ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}.'
-          },
-          { role: "user", content: `Has @${e} ever publicly acknowledged @${s}?` }
-        ],
-        search_parameters: {
-          mode: "on",
-          sources: [{ type: "x", x_handles: [e] }],
-          max_search_results: 20
-        }
-      })
-    });
-    if (!res.ok) return null;
-    const d = await res.json();
-    const text = d.choices?.[0]?.message?.content ?? "";
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return null;
     const parsed = JSON.parse(m[0]);
     return { ack: parsed.ack ?? "none", sentiment: parsed.sentiment ?? "none" };
   } catch {
@@ -1341,30 +1342,13 @@ async function acknowledgment(endorser, subject) {
   }
 }
 async function discoverVentures(handle, name) {
-  const key = env("XAI_API_KEY");
-  if (!key) return [];
   const h = handle.replace(/^@/, "");
+  const system = 'You are a forensic due-diligence researcher with live web and X search. Find the companies, crypto projects, or ventures that THIS SPECIFIC person (the holder of the given X account) has founded, co-founded, or led, with PUBLIC evidence that ties that exact person to the venture (their own site/X, press, Crunchbase, GitHub). Reply with ONLY compact JSON: {"ventures":[{"name":"","role":"founder|cofounder|exec|advisor|contributor","year":"","evidence":"one short source phrase"}]}. Include ONLY ventures you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"ventures":[]}. NEVER invent, guess, or include a venture just because the name is common.';
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). What companies or projects have they founded, co-founded, or led? Search the web and X.`);
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
   try {
-    const res = await fetch(XAI, {
-      method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
-        messages: [
-          {
-            role: "system",
-            content: 'You are a forensic due-diligence researcher. Find the companies, crypto projects, or ventures that THIS SPECIFIC person (the holder of the given X account) has founded, co-founded, or led, with PUBLIC evidence that ties that exact person to the venture (their own site/X, press, Crunchbase, GitHub). Reply with ONLY compact JSON: {"ventures":[{"name":"","role":"founder|cofounder|exec|advisor|contributor","year":"","evidence":"one short source phrase"}]}. Include ONLY ventures you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"ventures":[]}. NEVER invent, guess, or include a venture just because the name is common.'
-          },
-          { role: "user", content: `Person: ${name || h} (X handle @${h}). What companies or projects have they founded, co-founded, or led?` }
-        ],
-        search_parameters: { mode: "on", sources: [{ type: "web" }, { type: "x", x_handles: [h] }], max_search_results: 25 }
-      })
-    });
-    if (!res.ok) return [];
-    const d = await res.json();
-    const text = d.choices?.[0]?.message?.content ?? "";
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return [];
     const parsed = JSON.parse(m[0]);
     const out = Array.isArray(parsed.ventures) ? parsed.ventures : [];
     return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).slice(0, 8);

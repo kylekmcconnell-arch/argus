@@ -12,7 +12,35 @@ import { env } from "../config";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 
 const TWITTERAPI = "https://api.twitterapi.io";
-const XAI = "https://api.x.ai/v1/chat/completions";
+
+// Grok search via the current Responses API + tools (the legacy search_parameters
+// Live Search API was retired -> 410 Gone). Returns the model's text, or null.
+export async function grokSearch(system: string, user: string): Promise<string | null> {
+  const key = env("XAI_API_KEY");
+  if (!key) return null;
+  try {
+    const res = await fetch("https://api.x.ai/v1/responses", {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
+        input: [{ role: "system", content: system }, { role: "user", content: user }],
+        tools: [{ type: "web_search" }, { type: "x_search" }],
+      }),
+    });
+    if (!res.ok) return null;
+    const d = (await res.json()) as any;
+    const text =
+      d.output_text ??
+      (Array.isArray(d.output)
+        ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ")
+        : "") ??
+      "";
+    return text || null;
+  } catch {
+    return null;
+  }
+}
 
 // twitterapi.io throttles (429) under bursty use; one short backoff retry.
 async function twFetch(url: string, key: string, tries = 2): Promise<Response | null> {
@@ -103,34 +131,15 @@ export async function acknowledgment(endorser: string, subject: string): Promise
   if (!key) return null;
   const e = endorser.replace(/^@/, "");
   const s = subject.replace(/^@/, "");
+  const system =
+    "You verify endorsements for a due-diligence engine, with live web and X search. Decide the strongest public acknowledgment @" +
+    e + " has ever made of @" + s + " on X, and overall sentiment. Reply with ONLY a compact JSON object " +
+    '{"ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}.';
+  const text = await grokSearch(system, `Has @${e} ever publicly acknowledged @${s} on X? Search @${e}'s posts.`);
+  if (!text) return null;
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return null;
   try {
-    const res = await fetch(XAI, {
-      method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You verify endorsements for a due-diligence engine. Decide the strongest public acknowledgment @" +
-              e + " has ever made of @" + s + " on X, and overall sentiment. Reply with ONLY a compact JSON object " +
-              '{"ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}.',
-          },
-          { role: "user", content: `Has @${e} ever publicly acknowledged @${s}?` },
-        ],
-        search_parameters: {
-          mode: "on",
-          sources: [{ type: "x", x_handles: [e] }],
-          max_search_results: 20,
-        },
-      }),
-    });
-    if (!res.ok) return null;
-    const d = (await res.json()) as any;
-    const text: string = d.choices?.[0]?.message?.content ?? "";
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return null;
     const parsed = JSON.parse(m[0]);
     return { ack: parsed.ack ?? "none", sentiment: parsed.sentiment ?? "none" };
   } catch {
@@ -145,33 +154,16 @@ export async function acknowledgment(endorser: string, subject: string): Promise
 export interface DiscoveredVenture { name: string; role: string; year?: string; evidence?: string }
 
 export async function discoverVentures(handle: string, name?: string): Promise<DiscoveredVenture[]> {
-  const key = env("XAI_API_KEY");
-  if (!key) return [];
   const h = handle.replace(/^@/, "");
+  const system =
+    "You are a forensic due-diligence researcher with live web and X search. Find the companies, crypto projects, or ventures that THIS SPECIFIC person (the holder of the given X account) has founded, co-founded, or led, with PUBLIC evidence that ties that exact person to the venture (their own site/X, press, Crunchbase, GitHub). " +
+    "Reply with ONLY compact JSON: {\"ventures\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|advisor|contributor\",\"year\":\"\",\"evidence\":\"one short source phrase\"}]}. " +
+    "Include ONLY ventures you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {\"ventures\":[]}. NEVER invent, guess, or include a venture just because the name is common.";
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). What companies or projects have they founded, co-founded, or led? Search the web and X.`);
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
   try {
-    const res = await fetch(XAI, {
-      method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
-        messages: [
-          {
-            role: "system",
-            content:
-              "You are a forensic due-diligence researcher. Find the companies, crypto projects, or ventures that THIS SPECIFIC person (the holder of the given X account) has founded, co-founded, or led, with PUBLIC evidence that ties that exact person to the venture (their own site/X, press, Crunchbase, GitHub). " +
-              "Reply with ONLY compact JSON: {\"ventures\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|advisor|contributor\",\"year\":\"\",\"evidence\":\"one short source phrase\"}]}. " +
-              "Include ONLY ventures you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {\"ventures\":[]}. NEVER invent, guess, or include a venture just because the name is common.",
-          },
-          { role: "user", content: `Person: ${name || h} (X handle @${h}). What companies or projects have they founded, co-founded, or led?` },
-        ],
-        search_parameters: { mode: "on", sources: [{ type: "web" }, { type: "x", x_handles: [h] }], max_search_results: 25 },
-      }),
-    });
-    if (!res.ok) return [];
-    const d = (await res.json()) as any;
-    const text: string = d.choices?.[0]?.message?.content ?? "";
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) return [];
     const parsed = JSON.parse(m[0]);
     const out: DiscoveredVenture[] = Array.isArray(parsed.ventures) ? parsed.ventures : [];
     return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).slice(0, 8);
