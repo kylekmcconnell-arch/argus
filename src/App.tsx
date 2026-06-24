@@ -19,6 +19,7 @@ import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { InvestigationRun } from "./components/InvestigationRun";
 import { InvestigationReport } from "./components/InvestigationReport";
+import { ProjectView } from "./components/ProjectView";
 import type { Investigation } from "./lib/investigation";
 import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
 import { type Dossier } from "./data/dossier";
@@ -32,6 +33,7 @@ type Phase =
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "investigation" | "investigation-report"
+  | "project"
   | "notfound";
 
 // Deep links:
@@ -69,6 +71,7 @@ export default function App() {
   const [reconUrl, setReconUrl] = useState<string | null>(boot.phase === "recon" ? boot.query : null);
   const [investigationInput, setInvestigationInput] = useState<string | null>(boot.phase === "investigation" ? boot.query : null);
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
+  const [viewedProject, setViewedProject] = useState<{ name: string; domain?: string } | null>(null);
 
   const onAudit = useCallback(async (raw: string) => {
     setQuery(raw);
@@ -109,6 +112,12 @@ export default function App() {
   }, [onAudit]);
 
   const onInvestigationError = useCallback(() => setPhase("notfound"), []);
+
+  // Open a project-centric view: dig who worked on it, all auditable.
+  const onOpenProject = useCallback((name: string, domain?: string) => {
+    setViewedProject({ name, domain });
+    setPhase("project");
+  }, []);
 
   const onInvestigationDone = useCallback((inv: Investigation) => {
     setInvestigation(inv);
@@ -269,7 +278,8 @@ export default function App() {
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 
-      {phase === "report" && dossier && <Report dossier={dossier} onReset={reset} onAudit={onAudit} />}
+      {phase === "report" && dossier && <Report dossier={dossier} onReset={reset} onAudit={onAudit} onOpenProject={onOpenProject} />}
+      {phase === "project" && viewedProject && <ProjectView project={viewedProject} onAudit={onAudit} onReset={reset} />}
 
       {phase === "token-run" && tokenInput && (
         <TokenRun input={tokenInput} onDone={onTokenDone} onError={() => setPhase("notfound")} />

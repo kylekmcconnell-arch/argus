@@ -265,7 +265,7 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
 
 /* ── main report ──────────────────────────────────────────────────── */
 
-export function Report({ dossier, onReset, onAudit }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void }) {
+export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onOpenProject?: (name: string, domain?: string) => void }) {
   const f = dossier;
   const { report, graph, founderSummary, evidence } = dossier;
   const roles = report.roles as SubjectClass[];
@@ -464,7 +464,18 @@ export function Report({ dossier, onReset, onAudit }: { dossier: Dossier; onRese
                       {vm && <span className="mono ml-2 text-[10px]" style={{ color: vm.color }}>{vm.label}</span>}
                       <div className="mt-0.5 text-[11.5px] leading-snug text-ink-dim">
                         {c.direct && <span>directly linked{c.ties.length > 0 ? " · " : ""}</span>}
-                        {c.ties.length > 0 && <span>via <span className="text-ink">{c.ties.map((t) => t.label).join(", ")}</span></span>}
+                        {c.ties.length > 0 && (
+                          <span>via {c.ties.map((t, ti) => (
+                            <span key={t.key}>
+                              {ti > 0 && ", "}
+                              {onOpenProject && t.type === "Company" ? (
+                                <button onClick={() => onOpenProject(t.label)} className="text-ink underline-offset-2 transition hover:text-signal-dim hover:underline">{t.label}</button>
+                              ) : (
+                                <span className="text-ink">{t.label}</span>
+                              )}
+                            </span>
+                          ))}</span>
+                        )}
                       </div>
                     </div>
                     {onAudit && (
@@ -512,7 +523,11 @@ export function Report({ dossier, onReset, onAudit }: { dossier: Dossier; onRese
                           className="h-1.5 w-1.5 shrink-0 rounded-full"
                           style={{ background: v.outcome === "Rug" ? "var(--color-avoid)" : v.outcome === "Acquisition" || v.outcome === "IPO" ? "var(--color-pass)" : "var(--color-ink-faint)" }}
                         />
-                        <span className="truncate text-ink">{v.project_name}</span>
+                        {onOpenProject ? (
+                          <button onClick={() => onOpenProject(v.project_name)} className="truncate text-left text-ink underline-offset-2 transition hover:text-signal-dim hover:underline" title="See everyone who worked on this">{v.project_name}</button>
+                        ) : (
+                          <span className="truncate text-ink">{v.project_name}</span>
+                        )}
                         <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-dim">{v.role}</span>
                         {v.period && <span className="shrink-0 text-[11px] text-ink-faint">{v.period}</span>}
                         {v.evidence_url && (

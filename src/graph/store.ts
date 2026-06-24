@@ -6,7 +6,7 @@
 import type { GraphContribution } from "./network";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import type { Dossier } from "../data/dossier";
-import type { Investigation } from "../lib/investigation";
+import type { Investigation, WebPerson } from "../lib/investigation";
 
 const KEY = "argus:graphstore";
 const CAP = 80; // most recent contributions
@@ -52,6 +52,21 @@ export function tokenContribution(symbol: string, verdict: string, nodes: Panopt
 // edges become the connective tissue of the network.
 export function personContribution(d: Dossier): GraphContribution {
   return { handle: d.handle, verdict: d.report.composite_verdict, nodes: d.graph.nodes, edges: d.graph.edges };
+}
+
+// A project-centric discovery contributes the project node + everyone found to
+// have worked on it. This is how clicking a project compounds the web: the people
+// become nodes that bridge to any other audit they appear in.
+export function projectPeopleContribution(projectName: string, people: WebPerson[]): GraphContribution {
+  const nodes: PanoptesNode[] = [{ type: "Company", key: projectName, subject: true }];
+  const edges: PanoptesEdge[] = [];
+  for (const p of people) {
+    const key = p.handle ?? p.name;
+    if (!key) continue;
+    nodes.push({ type: "Person", key, role: p.role });
+    edges.push({ src: key, dst: projectName, type: "WORKED_ON" });
+  }
+  return { handle: projectName, nodes, edges };
 }
 
 // Convenience: a full investigation contributes its token subgraph PLUS the
