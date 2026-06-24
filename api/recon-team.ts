@@ -47,6 +47,8 @@ async function grokPeople(key: string, system: string, user: string): Promise<an
 async function twJson(url: string, key: string): Promise<any> {
   try { const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
 }
+// Chains/infra/tools every project follows + tags — not team, so filter them out.
+const TW_DENY = new Set(["solana", "ethereum", "bitcoin", "base", "arbitrum", "optimism", "polygon", "bnbchain", "avax", "avalancheavax", "pumpdotfun", "dexscreener", "dextools", "coingecko", "coinmarketcap", "jupiterexchange", "raydiumprotocol", "binance", "coinbase", "uniswap", "tether_to", "circle"]);
 async function followsAndTags(handle: string, key: string): Promise<any[]> {
   const u = handle.replace(/^@/, "");
   const postsD = await twJson(`${TW}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
@@ -54,6 +56,7 @@ async function followsAndTags(handle: string, key: string): Promise<any[]> {
   const mentions = new Set<string>();
   for (const t of tweets) for (const mm of String(t.text ?? "").matchAll(/@([A-Za-z0-9_]{2,30})/g)) mentions.add(mm[1].toLowerCase());
   mentions.delete(u.toLowerCase());
+  TW_DENY.forEach((d) => mentions.delete(d));
   if (!mentions.size) return [];
   const follows = new Map<string, any>();
   let cursor = "";
@@ -67,8 +70,12 @@ async function followsAndTags(handle: string, key: string): Promise<any[]> {
   }
   const out: any[] = [];
   for (const lk of mentions) {
+    if (TW_DENY.has(lk)) continue;
     const f = follows.get(lk);
-    if (f) out.push({ name: f.name || "@" + (f.userName ?? lk), handle: "@" + (f.userName ?? lk), role: "team", evidence: "the project follows and tags this account" });
+    // a chain/infra account usually has a huge following; people-team don't.
+    if (f && Number(f.followers_count ?? f.followers ?? 0) < 2_000_000) {
+      out.push({ name: f.name || "@" + (f.userName ?? lk), handle: "@" + (f.userName ?? lk), role: "follows + tags", evidence: "the project both follows and tags this account" });
+    }
   }
   return out;
 }
