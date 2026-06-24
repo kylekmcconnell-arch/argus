@@ -269,7 +269,7 @@ export default function App() {
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 
-      {phase === "report" && dossier && <Report dossier={dossier} onReset={reset} />}
+      {phase === "report" && dossier && <Report dossier={dossier} onReset={reset} onAudit={onAudit} />}
 
       {phase === "token-run" && tokenInput && (
         <TokenRun input={tokenInput} onDone={onTokenDone} onError={() => setPhase("notfound")} />

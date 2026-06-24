@@ -172,3 +172,51 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
 
   return { nodes, edges, bridges, serialActors, cabals };
 }
+
+// ── Per-subject connections: the navigable web for one audited subject ──
+// Given everything accumulated, find the OTHER audited subjects this one is tied
+// to, and the shared entities (projects, companies, people, wallets) that connect
+// them — i.e. "worked together at X", "both tied to deployer Y". This is what the
+// report turns into a fluid, clickable web: each connection is another subject you
+// can open, whose report shows ITS connections, and so on.
+export interface SharedTie { key: string; label: string; type: string }
+export interface SubjectConnection { other: string; otherVerdict?: string; ties: SharedTie[]; direct: boolean }
+
+export function subjectConnections(handle: string, contributions: GraphContribution[], max = 12): SubjectConnection[] {
+  const me = canonical(handle);
+  // entities my own audits surfaced (canonical key -> display label + type)
+  const mine = new Map<string, { label: string; type: string }>();
+  for (const c of contributions) {
+    if (canonical(c.handle) !== me) continue;
+    for (const n of c.nodes) {
+      const k = canonical(n.key);
+      if (k !== me) mine.set(k, { label: String(n.key), type: String(n.type) });
+    }
+  }
+  if (!mine.size) return [];
+
+  const byOther = new Map<string, { verdict?: string; ties: Map<string, SharedTie>; direct: boolean }>();
+  const ensure = (h: string, verdict?: string) => {
+    if (!byOther.has(h)) byOther.set(h, { verdict, ties: new Map(), direct: false });
+    return byOther.get(h)!;
+  };
+  for (const c of contributions) {
+    const other = canonical(c.handle);
+    if (other === me) continue;
+    // direct tie: the other subject is itself one of the entities I surfaced
+    if (mine.has(other)) { const e = ensure(c.handle, c.verdict); e.direct = true; }
+    // shared tie: a third entity both of us touch
+    for (const n of c.nodes) {
+      const k = canonical(n.key);
+      if (k !== me && k !== other && mine.has(k)) {
+        const e = ensure(c.handle, c.verdict);
+        e.ties.set(k, { key: k, label: mine.get(k)!.label, type: mine.get(k)!.type });
+      }
+    }
+  }
+  return [...byOther.entries()]
+    .map(([other, v]) => ({ other, otherVerdict: v.verdict, ties: [...v.ties.values()], direct: v.direct }))
+    .filter((x) => x.ties.length > 0 || x.direct)
+    .sort((a, b) => Number(b.direct) - Number(a.direct) || b.ties.length - a.ties.length)
+    .slice(0, max);
+}

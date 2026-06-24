@@ -5,6 +5,8 @@ import type { Dossier } from "../data/dossier";
 import type { RoleReport, SubjectClass } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
+import { getContributions } from "../graph/store";
+import { subjectConnections } from "../graph/network";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -263,12 +265,14 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
 
 /* ── main report ──────────────────────────────────────────────────── */
 
-export function Report({ dossier, onReset }: { dossier: Dossier; onReset: () => void }) {
+export function Report({ dossier, onReset, onAudit }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void }) {
   const f = dossier;
   const { report, graph, founderSummary, evidence } = dossier;
   const roles = report.roles as SubjectClass[];
   const m = verdictMeta(report.composite_verdict);
   const [watched, setWatched] = useState(() => isWatched(report.handle));
+  // The compounding web: who else (from your past audits) this subject is tied to.
+  const connections = subjectConnections(report.handle, getContributions());
   const [copied, setCopied] = useState(false);
   const share = () => {
     const p = new URLSearchParams({ k: "person", t: report.handle, title: report.handle, v: report.composite_verdict, sc: String(report.governing_score ?? ""), s: (f.headline || "").slice(0, 90) });
@@ -440,6 +444,32 @@ export function Report({ dossier, onReset }: { dossier: Dossier; onReset: () => 
                       <span className="text-ink-dim">{c.conflict}</span>
                       {c.confidence === "low" && <span className="ml-1.5 text-[10.5px] text-ink-faint">(low confidence)</span>}
                     </div>
+                  </div>
+                );
+              })}
+            </Card>
+          </Section>
+        )}
+
+        {/* connections — the compounding web: other audited subjects tied to this one */}
+        {connections.length > 0 && (
+          <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
+            <Card className="divide-y divide-line/60">
+              {connections.map((c) => {
+                const vm = c.otherVerdict ? verdictMeta(c.otherVerdict) : null;
+                return (
+                  <div key={c.other} className="flex items-start justify-between gap-3 px-4 py-2.5">
+                    <div className="min-w-0">
+                      <span className="mono text-[12.5px] text-ink">{c.other}</span>
+                      {vm && <span className="mono ml-2 text-[10px]" style={{ color: vm.color }}>{vm.label}</span>}
+                      <div className="mt-0.5 text-[11.5px] leading-snug text-ink-dim">
+                        {c.direct && <span>directly linked{c.ties.length > 0 ? " · " : ""}</span>}
+                        {c.ties.length > 0 && <span>via <span className="text-ink">{c.ties.map((t) => t.label).join(", ")}</span></span>}
+                      </div>
+                    </div>
+                    {onAudit && (
+                      <button onClick={() => onAudit(c.other)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>open →</button>
+                    )}
                   </div>
                 );
               })}
