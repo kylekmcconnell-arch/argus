@@ -176,7 +176,7 @@ export function Sidebar({
               >
                 <AuditAvatar src={auditImage(e)} letter={avatar} />
                 <span className="min-w-0 flex-1">
-                  <span className="mono block truncate text-[12.5px] text-ink">{e.query}</span>
+                  <span className="mono block truncate text-[12.5px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
                   <span className="block truncate text-[10px] text-ink-faint">
                     {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}
                   </span>
