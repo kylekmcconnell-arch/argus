@@ -282,6 +282,15 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
                 na={!d.cg}
               />
             </div>
+            {d.cg?.cexNames && d.cg.cexNames.length > 0 && (
+              <div className="mt-2.5 flex flex-wrap items-center gap-1 border-t border-line/60 pt-2.5">
+                <span className="text-[11px] text-ink-faint">listed on</span>
+                {d.cg.cexNames.slice(0, 10).map((n) => (
+                  <span key={n} className="mono rounded px-1.5 py-0.5 text-[10.5px]" style={{ background: "rgba(22,163,74,0.10)", color: "var(--color-pass)" }}>{n}</span>
+                ))}
+                {d.cg.cexCount > 10 && <span className="text-[10px] text-ink-faint">+{d.cg.cexCount - 10} more</span>}
+              </div>
+            )}
           </Card>
         </div>
 

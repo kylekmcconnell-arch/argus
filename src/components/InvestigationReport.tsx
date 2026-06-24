@@ -64,6 +64,20 @@ export function InvestigationReport({
     }
     return [...map.values()];
   })();
+  // The full team, from EVERY source: site names, site-linked handles, project
+  // bio handles, X-content team, and the web/LinkedIn dig — merged into one list.
+  const teamPeople: { name: string; handle?: string; role?: string; linkedin?: string; source: string }[] = (() => {
+    const map = new Map<string, { name: string; handle?: string; role?: string; linkedin?: string; source: string }>();
+    const k = (h?: string | null, n?: string) => (h ? h.replace(/^@/, "").toLowerCase() : (n ?? "").toLowerCase());
+    for (const m of teamUnified) map.set(k(m.handle, m.name), { name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, source: m.linkedin ? "web/LinkedIn" : "X content" });
+    for (const f of founders) {
+      const key = k(f.handle, f.name);
+      const ex = map.get(key);
+      if (ex) { if (!ex.handle && f.handle) ex.handle = f.handle; }
+      else map.set(key, { name: f.name, handle: f.handle ?? undefined, source: f.source === "site" ? "site" : "project account" });
+    }
+    return [...map.values()];
+  })();
   const advisors = (projectAccount?.evidence.testimonials ?? []).filter((t) => t.claimed_relationship === "advisor");
   const advisorChip = (v?: string): { label: string; color: string } => {
     const s = (v ?? "").toLowerCase();
@@ -117,37 +131,28 @@ export function InvestigationReport({
               <span>mc <span className="mono text-ink-dim">{money(token.mcap)}</span></span>
               <span>chain <span className="mono text-ink-dim capitalize">{token.chain}</span></span>
             </div>
+            {/* CEX listings — real centralized-exchange listings are a strong legitimacy signal */}
+            {token.cg?.cexNames && token.cg.cexNames.length > 0 ? (
+              <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-line/60 pt-2">
+                <span className="text-[11px] text-ink-faint">listed on</span>
+                {token.cg.cexNames.slice(0, 8).map((n) => (
+                  <span key={n} className="mono rounded px-1.5 py-0.5 text-[10.5px]" style={{ background: "rgba(22,163,74,0.10)", color: "var(--color-pass)" }}>{n}</span>
+                ))}
+                {token.cg.cexCount > 8 && <span className="text-[10px] text-ink-faint">+{token.cg.cexCount - 8} more</span>}
+              </div>
+            ) : token.cg && !token.cg.listed ? (
+              <div className="mt-2 border-t border-line/60 pt-2 text-[11px] text-ink-faint">Not on CoinGecko · no centralized-exchange listings (DEX-only).</div>
+            ) : token.cg && token.cg.cexCount === 0 ? (
+              <div className="mt-2 border-t border-line/60 pt-2 text-[11px] text-ink-faint">No centralized-exchange listings (DEX-only).</div>
+            ) : null}
             <button onClick={onOpenToken} className="mono mt-3 rounded-lg border border-line px-2.5 py-1 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink">full on-chain report →</button>
           </Card>
 
-          {/* the people behind it */}
+          {/* the people behind it (summary; the full team is its own section below) */}
           <Card title="The people behind it">
             <p className="text-[12.5px] leading-relaxed text-ink-dim">{recon ? recon.identityLine : inv.founderNote}</p>
-
-            {founders.length > 0 && (
-              <div className="mt-2.5 space-y-1.5 border-t border-line/60 pt-2.5">
-                <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">People & accounts surfaced</div>
-                {founders.map((f) => (
-                  <div key={f.name} className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate">
-                      <span className="mono text-[12.5px] text-ink">{f.name}</span>
-                      <span className="ml-2 text-[10.5px] text-ink-faint">{f.source === "project" ? "from project account" : f.handle ? "linked on site" : "named on site"}</span>
-                    </span>
-                    {f.handle ? (
-                      <button
-                        onClick={() => auditFounder(f.handle!)}
-                        disabled={spent >= MAX_FOUNDER_AUDITS}
-                        className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40"
-                        style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
-                      >
-                        {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "background →"}
-                      </button>
-                    ) : (
-                      <span className="mono shrink-0 text-[10.5px] text-ink-faint">no verified handle</span>
-                    )}
-                  </div>
-                ))}
-              </div>
+            {teamPeople.length > 0 && (
+              <p className="mt-1.5 text-[11.5px] text-ink-faint">{teamPeople.length} {teamPeople.length === 1 ? "person" : "people"} surfaced across X, the site, and web/LinkedIn — see Team below.</p>
             )}
 
             {/* project account — explicitly NOT a founder */}
@@ -212,23 +217,24 @@ export function InvestigationReport({
           </Card>
         </div>
 
-        {/* team + advisors: X content merged with the web/LinkedIn deep search */}
-        {(teamUnified.length > 0 || advisors.length > 0) && (
+        {/* TEAM — the headline section, merged from every source, each clickable */}
+        {(teamPeople.length > 0 || advisors.length > 0) && (
           <div className="mt-3">
-            <Card title="Team & advisors · X content + web/LinkedIn search">
-              {teamUnified.length > 0 && (
+            <Card title="Team · from X content, the site, and web/LinkedIn">
+              {teamPeople.length > 0 && (
                 <div>
-                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team ({teamUnified.length})</div>
+                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team & founders ({teamPeople.length}) · click to run a full audit</div>
                   <div className="mt-1.5 space-y-1.5">
-                    {teamUnified.map((m) => (
+                    {teamPeople.map((m) => (
                       <div key={m.handle ?? m.name} className="flex items-center justify-between gap-2">
                         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                          <span className="mono text-[12.5px] text-ink">{m.name}</span>
-                          {m.handle && m.handle !== m.name && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
-                          <span className="text-[10.5px] text-ink-faint">{m.role}</span>
+                          <span className="text-[12.5px] text-ink">{m.name}</span>
+                          {m.handle && m.handle.replace(/^@/, "").toLowerCase() !== m.name.toLowerCase() && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
+                          {m.role && <span className="text-[10.5px] text-ink-faint">{m.role}</span>}
                           {m.linkedin && (
                             <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
                           )}
+                          <span className="rounded px-1 text-[9.5px] text-ink-faint" style={{ background: "var(--color-line)" }}>{m.source}</span>
                         </span>
                         {m.handle ? (
                           <button
@@ -237,7 +243,7 @@ export function InvestigationReport({
                             className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40"
                             style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
                           >
-                            {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "background →"}
+                            {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "audit →"}
                           </button>
                         ) : (
                           <span className="mono shrink-0 text-[10.5px] text-ink-faint">no handle</span>
@@ -248,7 +254,7 @@ export function InvestigationReport({
                 </div>
               )}
               {advisors.length > 0 && (
-                <div className={teamUnified.length > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}>
+                <div className={teamPeople.length > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}>
                   <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Advisors / backers ({advisors.length}) · claimed, corroborated</div>
                   <div className="mt-1.5 space-y-1.5">
                     {advisors.map((a) => {
