@@ -19,6 +19,8 @@ export async function grokSearch(system: string, user: string): Promise<string |
   const key = env("XAI_API_KEY");
   if (!key) return null;
   try {
+    // The agentic web+X search can loop for a while; bound it so a slow call
+    // can't stall the whole streaming audit (the function has a hard duration cap).
     const res = await fetch("https://api.x.ai/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
@@ -27,6 +29,7 @@ export async function grokSearch(system: string, user: string): Promise<string |
         input: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [{ type: "web_search" }, { type: "x_search" }],
       }),
+      signal: AbortSignal.timeout(45000),
     });
     if (!res.ok) return null;
     const d = (await res.json()) as any;

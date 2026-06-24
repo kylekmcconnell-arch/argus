@@ -1256,7 +1256,8 @@ async function grokSearch(system, user) {
         model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
         input: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [{ type: "web_search" }, { type: "x_search" }]
-      })
+      }),
+      signal: AbortSignal.timeout(45e3)
     });
     if (!res.ok) return null;
     const d = await res.json();

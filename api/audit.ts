@@ -5,8 +5,10 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { runAudit } from "./_collector.js";
 import type { TraceStep } from "../src/data/evidence";
 
-// curated replay runs ~7s; give the function headroom
-export const config = { maxDuration: 30 };
+// Live collection fans out to several agentic providers (Grok web+X search,
+// Claude analyst, on-chain), each multi-second; the curated replay is ~7s. Give
+// the streaming function real headroom so a full live audit finalizes.
+export const config = { maxDuration: 120 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const handle = typeof req.query.handle === "string" ? req.query.handle : "";
