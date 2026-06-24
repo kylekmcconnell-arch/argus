@@ -48,6 +48,15 @@ export function InvestigationReport({
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
   const tm = verdictMeta(token.verdict);
+  // Team + advisors mined from the project account's X content (see findTeam).
+  const teamMembers = (projectAccount?.evidence.associates ?? []).filter((a) => /^team:/i.test(a.relation ?? ""));
+  const advisors = (projectAccount?.evidence.testimonials ?? []).filter((t) => t.claimed_relationship === "advisor");
+  const advisorChip = (v?: string): { label: string; color: string } => {
+    const s = (v ?? "").toLowerCase();
+    if (s.includes("corrobor")) return { label: "corroborated", color: "var(--color-pass)" };
+    if (s.includes("contradict")) return { label: "contradicted", color: "var(--color-avoid)" };
+    return { label: "unconfirmed", color: "var(--color-ink-faint)" };
+  };
   const auditFounder = (handle: string) => {
     if (spentRef.current >= MAX_FOUNDER_AUDITS) return;
     spentRef.current += 1;
@@ -188,6 +197,67 @@ export function InvestigationReport({
             )}
           </Card>
         </div>
+
+        {/* team + advisors mined from the project account's X content */}
+        {(teamMembers.length > 0 || advisors.length > 0) && (
+          <div className="mt-3">
+            <Card title="Team & advisors · surfaced from the project's X content">
+              {teamMembers.length > 0 && (
+                <div>
+                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team ({teamMembers.length})</div>
+                  <div className="mt-1.5 space-y-1.5">
+                    {teamMembers.map((m) => (
+                      <div key={m.associate_key} className="flex items-center justify-between gap-2">
+                        <span className="min-w-0 truncate">
+                          <span className="mono text-[12.5px] text-ink">{m.associate_key}</span>
+                          <span className="ml-2 text-[10.5px] text-ink-faint">{(m.relation ?? "team").replace(/^team:\s*/i, "")}</span>
+                        </span>
+                        <button
+                          onClick={() => auditFounder(m.associate_key)}
+                          disabled={spent >= MAX_FOUNDER_AUDITS}
+                          className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40"
+                          style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
+                        >
+                          {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "background →"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {advisors.length > 0 && (
+                <div className={teamMembers.length > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}>
+                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Advisors / backers ({advisors.length}) · claimed, corroborated</div>
+                  <div className="mt-1.5 space-y-1.5">
+                    {advisors.map((a) => {
+                      const c = advisorChip(a.corroboration_verdict);
+                      return (
+                        <div key={a.claimed_endorser_handle} className="flex items-center justify-between gap-2">
+                          <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                            <span className="mono text-[12.5px] text-ink">{a.claimed_endorser_handle}</span>
+                            <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${c.color}1a`, color: c.color }}>{c.label}</span>
+                            {a.follows_subject === false && <span className="text-[10px] text-ink-faint">does not follow project</span>}
+                          </span>
+                          {a.claimed_endorser_handle && (
+                            <button
+                              onClick={() => auditFounder(a.claimed_endorser_handle!)}
+                              disabled={spent >= MAX_FOUNDER_AUDITS}
+                              className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40"
+                              style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
+                            >
+                              {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "background →"}
+                            </button>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-2 text-[11px] leading-snug text-ink-faint">A claimed advisor who does not follow or has never acknowledged the project is a classic fake-name-drop signal.</p>
+                </div>
+              )}
+            </Card>
+          </div>
+        )}
 
         {/* project account dossier detail */}
         {projectAccount && (

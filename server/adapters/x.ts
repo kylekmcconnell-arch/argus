@@ -392,36 +392,42 @@ export async function discoverByMentions(handle: string, name?: string, oldHandl
 // posts (team intros, "meet the team", role announcements like "welcome @x as
 // our CTO") and in posts that tag them, long before any of it reaches a website.
 // This mines that content for team members the site/bio never listed.
-export interface TeamMember { name: string; handle?: string; role: string; evidence?: string }
+export interface TeamMember { name: string; handle?: string; role: string; evidence?: string; kind: "team" | "advisor" }
 
 export async function findTeam(handle: string, name: string | undefined, posts: string[] = []): Promise<TeamMember[]> {
   const h = handle.replace(/^@/, "");
   const postContext = posts.length
-    ? `\n\nThe account's recent posts (mine these for team intros / role announcements):\n${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}`
+    ? `\n\nThe account's recent posts (mine these for team intros / role + advisor announcements):\n${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}`
     : "";
   const system =
-    "You are a forensic researcher with live X search. Identify the PEOPLE who are part of the team or company behind the given X account: founders, cofounders, and team members publicly named or introduced. " +
-    "Look especially at the account's OWN posts (team intros, 'meet the team', role announcements like 'welcome @x as our CTO', 'our founder @y', cofounder mentions) and posts that tag team members, plus posts mentioning the project that name its people. " +
-    "For each person give their name, X handle if found, role, and a short evidence phrase. Include ONLY people with real public evidence tying them to THIS account/project as team. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. " +
-    "Reply with ONLY compact JSON: {\"team\":[{\"name\":\"\",\"handle\":\"@...\",\"role\":\"founder|cofounder|ceo|cto|engineer|designer|marketing|team\",\"evidence\":\"\"}]}. If none, return {\"team\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders and team members of this project or company? Search the account's own posts and the posts that mention it.${postContext}`);
+    "You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account, in two groups: " +
+    "(1) TEAM — founders, cofounders, and core team members; and (2) ADVISORS — people the project names as advisors, mentors, or backers (a frequent scam vector when the named advisor never actually agreed). " +
+    "Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. " +
+    "For each person give name, X handle if found, role, a short evidence phrase, and kind ('team' or 'advisor'). Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. " +
+    "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"role\":\"founder|cofounder|ceo|cto|engineer|advisor|backer|team\",\"kind\":\"team|advisor\",\"evidence\":\"\"}]}. If none, return {\"people\":[]}. NEVER invent. Never use em dashes.";
+  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, AND advisors/backers of this project? Search the account's own posts and the posts that mention it.${postContext}`);
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
     const parsed = JSON.parse(m[0]);
-    const out: any[] = Array.isArray(parsed.team) ? parsed.team : [];
+    const out: any[] = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
     const self = h.toLowerCase();
     return out
       .filter((t) => t && typeof t.name === "string" && t.name.trim())
-      .map((t) => ({
-        name: t.name.trim(),
-        handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : undefined,
-        role: t.role || "team",
-        evidence: t.evidence,
-      }))
+      .map((t) => {
+        const role = (t.role || "team").toString();
+        const kind: "team" | "advisor" = (t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role)) ? "advisor" : "team";
+        return {
+          name: t.name.trim(),
+          handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : undefined,
+          role,
+          evidence: t.evidence,
+          kind,
+        };
+      })
       .filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self)
-      .slice(0, 12);
+      .slice(0, 14);
   } catch {
     return [];
   }
@@ -478,24 +484,28 @@ export const xAdapter: Adapter = {
       }
     }
 
-    // 2. corroborate each claimed testimonial / advisory relationship
-    const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised];
-    for (const t of claims) {
-      const endorser = (t as any).claimed_endorser_handle || (t as any).project_handle;
-      if (!endorser) continue;
-      const follows = await followsSubject(endorser, ctx.handle);
-      const ack = await acknowledgment(endorser, ctx.handle);
-      if (follows !== null) t.follows_subject = follows;
-      if (ack) {
-        t.public_acknowledgment = ack.ack;
-        t.sentiment = ack.sentiment;
-        t.relationship_corroborated = ack.ack === "endorsement" || ack.ack === "thanks";
-        t.fud_present = ack.sentiment === "negative";
-      }
-      // re-derive the verdict from the freshly collected observations
-      t.corroboration_verdict = classifyTestimonial(t);
-      const tone = t.corroboration_verdict === TestimonialVerdict.CONTRADICTED ? "bad" : t.corroboration_verdict === TestimonialVerdict.CORROBORATED ? "good" : "warn";
-      ctx.emit({ phase: "Corroborate", label: `${endorser}`, detail: `${t.corroboration_verdict}${follows === false ? " · does not follow subject" : ""}`, source: "X", tone });
-    }
+    // 2. corroborate each claimed testimonial / advisory / advisor relationship.
+    //    Run concurrently and cap the count: each does a follow-graph check plus a
+    //    Grok acknowledgment, and a sequential loop over many claims (advisors add
+    //    to it) would blow the audit's time budget.
+    const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised]
+      .filter((t) => (t as any).claimed_endorser_handle || (t as any).project_handle)
+      .slice(0, 6);
+    await Promise.all(
+      claims.map(async (t) => {
+        const endorser = (t as any).claimed_endorser_handle || (t as any).project_handle;
+        const [follows, ack] = await Promise.all([followsSubject(endorser, ctx.handle), acknowledgment(endorser, ctx.handle)]);
+        if (follows !== null) t.follows_subject = follows;
+        if (ack) {
+          t.public_acknowledgment = ack.ack;
+          t.sentiment = ack.sentiment;
+          t.relationship_corroborated = ack.ack === "endorsement" || ack.ack === "thanks";
+          t.fud_present = ack.sentiment === "negative";
+        }
+        t.corroboration_verdict = classifyTestimonial(t);
+        const tone = t.corroboration_verdict === TestimonialVerdict.CONTRADICTED ? "bad" : t.corroboration_verdict === TestimonialVerdict.CORROBORATED ? "good" : "warn";
+        ctx.emit({ phase: "Corroborate", label: `${endorser}`, detail: `${(t as any).claimed_relationship ?? "endorser"}: ${t.corroboration_verdict}${follows === false ? " · does not follow subject" : ""}`, source: "X", tone });
+      }),
+    );
   },
 };

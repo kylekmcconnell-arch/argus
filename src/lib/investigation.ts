@@ -121,8 +121,10 @@ function deriveFounders(recon: Recon | null, projectX: string | null, projectAcc
   if (projectAccount) {
     const text = `${projectAccount.bio ?? ""} ${projectAccount.headline ?? ""}`;
     for (const m of text.matchAll(/@([A-Za-z0-9_]{2,30})\b/g)) add("@" + m[1], "@" + m[1], "project");
-    for (const a of projectAccount.evidence.associates) if (a.associate_key) add(a.associate_key, a.associate_key, "project");
-    for (const t of projectAccount.evidence.testimonials) if (t.claimed_endorser_handle) add(t.claimed_endorser_handle, t.claimed_endorser_handle, "project");
+    // Team (relation "team:…") and advisors (relationship "advisor") get their own
+    // dedicated sections, so keep them out of the generic surfaced-people list.
+    for (const a of projectAccount.evidence.associates) if (a.associate_key && !/^team:/i.test(a.relation ?? "")) add(a.associate_key, a.associate_key, "project");
+    for (const t of projectAccount.evidence.testimonials) if (t.claimed_endorser_handle && t.claimed_relationship !== "advisor") add(t.claimed_endorser_handle, t.claimed_endorser_handle, "project");
     for (const p of projectAccount.evidence.advised) if (p.project_handle) add(p.project_handle, p.project_handle, "project");
   }
   return out.slice(0, 10);

@@ -132,30 +132,45 @@ async function coldIntake(ctx: CollectContext) {
   // parallel keeps wall-clock to one). Subject-first finds what they claim/built;
   // reverse-mention finds projects whose OWN timeline named them; team-from-X
   // mines THIS account's posts for the people behind it (the project-account case).
-  const [bySubject, byMentions, team] = await Promise.all([
+  const [bySubject, byMentions, people] = await Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
     discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
   ]);
 
-  // Team members named in the account's X content. Only those with a real @handle
-  // become associates (the investigation surfaces those as backgroundable people);
-  // a bare name can't be normalized to a handle and isn't auditable, so it is just
-  // reported in the trace.
-  if (team.length) {
+  // People named in the account's X content, routed by kind:
+  //  - TEAM -> associates (the investigation lists them as backgroundable people).
+  //  - ADVISORS -> testimonials (claimed endorsers), so the corroboration loop can
+  //    check whether the named advisor actually follows/acknowledges the project,
+  //    or it's a fake name-drop. Only @-handled people are wired in (a bare name
+  //    can't be normalized and isn't auditable); named-only ones are just reported.
+  if (people.length) {
+    const teamList = people.filter((p) => p.kind === "team");
+    const advisorList = people.filter((p) => p.kind === "advisor");
     const haveAssoc = new Set(ctx.evidence.associates.map((a) => a.associate_handle.replace(/^@/, "").toLowerCase()));
-    const added: string[] = [];
-    for (const t of team) {
+    const haveTest = new Set(ctx.evidence.testimonials.map((t) => (t.claimed_endorser_handle ?? "").replace(/^@/, "").toLowerCase()));
+    const addedTeam: string[] = [];
+    for (const t of teamList) {
       if (!t.handle) continue;
       const key = t.handle.replace(/^@/, "").toLowerCase();
       if (haveAssoc.has(key)) continue;
       haveAssoc.add(key);
       ctx.evidence.associates.push({ associate_handle: t.handle, relation: `team: ${t.role}`, notes: t.evidence });
-      added.push(`${t.name} (${t.handle})`);
+      addedTeam.push(`${t.name} (${t.handle})`);
     }
-    const namedOnly = team.filter((t) => !t.handle).map((t) => `${t.name} (${t.role})`);
-    const parts = [added.length ? added.slice(0, 6).join(", ") : "", namedOnly.length ? `named only: ${namedOnly.slice(0, 4).join(", ")}` : ""].filter(Boolean);
-    if (parts.length) ctx.emit({ phase: "P0 · Intake", label: "Team surfaced", detail: `${team.length} team member${team.length === 1 ? "" : "s"} named in this account's X content. ${parts.join(" · ")}.`, source: "grok", tone: "good" });
+    const addedAdv: string[] = [];
+    for (const a of advisorList) {
+      if (!a.handle) continue;
+      const key = a.handle.replace(/^@/, "").toLowerCase();
+      if (haveTest.has(key)) continue;
+      haveTest.add(key);
+      ctx.evidence.testimonials.push({ claimed_endorser_handle: a.handle, claimed_relationship: "advisor", appears_at: "project X content" });
+      addedAdv.push(`${a.name} (${a.handle})`);
+    }
+    const namedOnly = people.filter((p) => !p.handle).map((p) => `${p.name} (${p.kind === "advisor" ? "advisor" : p.role})`);
+    if (addedTeam.length) ctx.emit({ phase: "P0 · Intake", label: "Team surfaced", detail: `${addedTeam.length} team member${addedTeam.length === 1 ? "" : "s"} named in this account's X content: ${addedTeam.slice(0, 6).join(", ")}.`, source: "grok", tone: "good" });
+    if (addedAdv.length) ctx.emit({ phase: "P0 · Intake", label: "Advisors surfaced", detail: `${addedAdv.length} advisor${addedAdv.length === 1 ? "" : "s"}/backer${addedAdv.length === 1 ? "" : "s"} claimed in X content (corroborating each): ${addedAdv.slice(0, 6).join(", ")}.`, source: "grok", tone: "neutral" });
+    if (namedOnly.length) ctx.emit({ phase: "P0 · Intake", label: "Named only", detail: `Also named without a handle (not auditable): ${namedOnly.slice(0, 5).join(", ")}.`, source: "grok", tone: "neutral" });
   }
   const mergedMap = new Map<string, DiscoveredAffiliation>();
   for (const v of [...bySubject, ...byMentions]) {

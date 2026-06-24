@@ -1542,23 +1542,28 @@ async function findTeam(handle, name, posts = []) {
   const h = handle.replace(/^@/, "");
   const postContext = posts.length ? `
 
-The account's recent posts (mine these for team intros / role announcements):
+The account's recent posts (mine these for team intros / role + advisor announcements):
 ${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "";
-  const system = `You are a forensic researcher with live X search. Identify the PEOPLE who are part of the team or company behind the given X account: founders, cofounders, and team members publicly named or introduced. Look especially at the account's OWN posts (team intros, 'meet the team', role announcements like 'welcome @x as our CTO', 'our founder @y', cofounder mentions) and posts that tag team members, plus posts mentioning the project that name its people. For each person give their name, X handle if found, role, and a short evidence phrase. Include ONLY people with real public evidence tying them to THIS account/project as team. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"team":[{"name":"","handle":"@...","role":"founder|cofounder|ceo|cto|engineer|designer|marketing|team","evidence":""}]}. If none, return {"team":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders and team members of this project or company? Search the account's own posts and the posts that mention it.${postContext}`);
+  const system = `You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account, in two groups: (1) TEAM \u2014 founders, cofounders, and core team members; and (2) ADVISORS \u2014 people the project names as advisors, mentors, or backers (a frequent scam vector when the named advisor never actually agreed). Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. For each person give name, X handle if found, role, a short evidence phrase, and kind ('team' or 'advisor'). Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","role":"founder|cofounder|ceo|cto|engineer|advisor|backer|team","kind":"team|advisor","evidence":""}]}. If none, return {"people":[]}. NEVER invent. Never use em dashes.`;
+  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, AND advisors/backers of this project? Search the account's own posts and the posts that mention it.${postContext}`);
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
     const parsed = JSON.parse(m[0]);
-    const out = Array.isArray(parsed.team) ? parsed.team : [];
+    const out = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
     const self = h.toLowerCase();
-    return out.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => ({
-      name: t.name.trim(),
-      handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : void 0,
-      role: t.role || "team",
-      evidence: t.evidence
-    })).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 12);
+    return out.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => {
+      const role = (t.role || "team").toString();
+      const kind = t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
+      return {
+        name: t.name.trim(),
+        handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : void 0,
+        role,
+        evidence: t.evidence,
+        kind
+      };
+    }).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 14);
   } catch {
     return [];
   }
@@ -1605,23 +1610,23 @@ var xAdapter = {
         ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "No curated callers, founders or funds among the subject's recent followers \u2014 no peer-credibility signal surfaced.", source: "twitterapi.io", tone: "neutral" });
       }
     }
-    const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised];
-    for (const t of claims) {
-      const endorser = t.claimed_endorser_handle || t.project_handle;
-      if (!endorser) continue;
-      const follows = await followsSubject(endorser, ctx.handle);
-      const ack = await acknowledgment(endorser, ctx.handle);
-      if (follows !== null) t.follows_subject = follows;
-      if (ack) {
-        t.public_acknowledgment = ack.ack;
-        t.sentiment = ack.sentiment;
-        t.relationship_corroborated = ack.ack === "endorsement" || ack.ack === "thanks";
-        t.fud_present = ack.sentiment === "negative";
-      }
-      t.corroboration_verdict = classifyTestimonial(t);
-      const tone = t.corroboration_verdict === "Contradicted" /* CONTRADICTED */ ? "bad" : t.corroboration_verdict === "Corroborated" /* CORROBORATED */ ? "good" : "warn";
-      ctx.emit({ phase: "Corroborate", label: `${endorser}`, detail: `${t.corroboration_verdict}${follows === false ? " \xB7 does not follow subject" : ""}`, source: "X", tone });
-    }
+    const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);
+    await Promise.all(
+      claims.map(async (t) => {
+        const endorser = t.claimed_endorser_handle || t.project_handle;
+        const [follows, ack] = await Promise.all([followsSubject(endorser, ctx.handle), acknowledgment(endorser, ctx.handle)]);
+        if (follows !== null) t.follows_subject = follows;
+        if (ack) {
+          t.public_acknowledgment = ack.ack;
+          t.sentiment = ack.sentiment;
+          t.relationship_corroborated = ack.ack === "endorsement" || ack.ack === "thanks";
+          t.fud_present = ack.sentiment === "negative";
+        }
+        t.corroboration_verdict = classifyTestimonial(t);
+        const tone = t.corroboration_verdict === "Contradicted" /* CONTRADICTED */ ? "bad" : t.corroboration_verdict === "Corroborated" /* CORROBORATED */ ? "good" : "warn";
+        ctx.emit({ phase: "Corroborate", label: `${endorser}`, detail: `${t.claimed_relationship ?? "endorser"}: ${t.corroboration_verdict}${follows === false ? " \xB7 does not follow subject" : ""}`, source: "X", tone });
+      })
+    );
   }
 };
 
@@ -2218,25 +2223,38 @@ async function coldIntake(ctx) {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} \u2014 now verifying each.`, source: "claude", tone: "neutral" });
   }
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts\u2026", source: "grok", tone: "neutral" });
-  const [bySubject, byMentions, team] = await Promise.all([
+  const [bySubject, byMentions, people] = await Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
     discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity)
   ]);
-  if (team.length) {
+  if (people.length) {
+    const teamList = people.filter((p) => p.kind === "team");
+    const advisorList = people.filter((p) => p.kind === "advisor");
     const haveAssoc = new Set(ctx.evidence.associates.map((a) => a.associate_handle.replace(/^@/, "").toLowerCase()));
-    const added = [];
-    for (const t of team) {
+    const haveTest = new Set(ctx.evidence.testimonials.map((t) => (t.claimed_endorser_handle ?? "").replace(/^@/, "").toLowerCase()));
+    const addedTeam = [];
+    for (const t of teamList) {
       if (!t.handle) continue;
       const key = t.handle.replace(/^@/, "").toLowerCase();
       if (haveAssoc.has(key)) continue;
       haveAssoc.add(key);
       ctx.evidence.associates.push({ associate_handle: t.handle, relation: `team: ${t.role}`, notes: t.evidence });
-      added.push(`${t.name} (${t.handle})`);
+      addedTeam.push(`${t.name} (${t.handle})`);
     }
-    const namedOnly = team.filter((t) => !t.handle).map((t) => `${t.name} (${t.role})`);
-    const parts = [added.length ? added.slice(0, 6).join(", ") : "", namedOnly.length ? `named only: ${namedOnly.slice(0, 4).join(", ")}` : ""].filter(Boolean);
-    if (parts.length) ctx.emit({ phase: "P0 \xB7 Intake", label: "Team surfaced", detail: `${team.length} team member${team.length === 1 ? "" : "s"} named in this account's X content. ${parts.join(" \xB7 ")}.`, source: "grok", tone: "good" });
+    const addedAdv = [];
+    for (const a of advisorList) {
+      if (!a.handle) continue;
+      const key = a.handle.replace(/^@/, "").toLowerCase();
+      if (haveTest.has(key)) continue;
+      haveTest.add(key);
+      ctx.evidence.testimonials.push({ claimed_endorser_handle: a.handle, claimed_relationship: "advisor", appears_at: "project X content" });
+      addedAdv.push(`${a.name} (${a.handle})`);
+    }
+    const namedOnly = people.filter((p) => !p.handle).map((p) => `${p.name} (${p.kind === "advisor" ? "advisor" : p.role})`);
+    if (addedTeam.length) ctx.emit({ phase: "P0 \xB7 Intake", label: "Team surfaced", detail: `${addedTeam.length} team member${addedTeam.length === 1 ? "" : "s"} named in this account's X content: ${addedTeam.slice(0, 6).join(", ")}.`, source: "grok", tone: "good" });
+    if (addedAdv.length) ctx.emit({ phase: "P0 \xB7 Intake", label: "Advisors surfaced", detail: `${addedAdv.length} advisor${addedAdv.length === 1 ? "" : "s"}/backer${addedAdv.length === 1 ? "" : "s"} claimed in X content (corroborating each): ${addedAdv.slice(0, 6).join(", ")}.`, source: "grok", tone: "neutral" });
+    if (namedOnly.length) ctx.emit({ phase: "P0 \xB7 Intake", label: "Named only", detail: `Also named without a handle (not auditable): ${namedOnly.slice(0, 5).join(", ")}.`, source: "grok", tone: "neutral" });
   }
   const mergedMap = /* @__PURE__ */ new Map();
   for (const v of [...bySubject, ...byMentions]) {
