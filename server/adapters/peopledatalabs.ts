@@ -43,12 +43,17 @@ export const peopledatalabsAdapter: Adapter = {
   label: "People Data Labs",
   available: () => !!env("PDL_API_KEY"),
   async run(ctx: CollectContext) {
+    const handle = ctx.handle.replace(/^@/, "");
     const name = ctx.evidence.profile.display_name;
-    if (!name || name === ctx.handle.replace(/^@/, "")) return;
-    ctx.emit({ phase: "P1 · Identity", label: "Identity resolution", detail: `Enriching ${name} via People Data Labs…`, tone: "neutral" });
-    const person = await enrichPerson({ name });
+    // Resolve on the X handle as a social profile, not just the (often common)
+    // display name — PDL matches a handle exactly but a bare name ambiguously.
+    const profile = `twitter.com/${handle}`;
+    ctx.emit({ phase: "P1 · Identity", label: "Identity resolution", detail: `Enriching @${handle}${name && name !== handle ? ` (${name})` : ""} via People Data Labs…`, tone: "neutral" });
+    const person =
+      (await enrichPerson({ profile, name: name && name !== handle ? name : undefined })) ||
+      (name && name !== handle ? await enrichPerson({ name }) : null);
     if (!person) {
-      ctx.emit({ phase: "P1 · Identity", label: "No match", detail: "No real-world identity record; scored as pseudonymous (no penalty).", source: "peopledatalabs", tone: "neutral" });
+      ctx.emit({ phase: "P1 · Identity", label: "No match", detail: "No real-world identity record matched this handle; scored as pseudonymous (no penalty).", source: "peopledatalabs", tone: "neutral" });
       return;
     }
     ctx.evidence.profile.identity_confidence = person.linkedin ? "Probable" : ctx.evidence.profile.identity_confidence;
