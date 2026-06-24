@@ -1270,13 +1270,13 @@ async function grokSearch(system, user) {
     return null;
   }
 }
-async function twFetch(url, key, tries = 3) {
+async function twFetch(url, key, tries = 2) {
   let last = null;
   for (let i = 0; i < tries; i++) {
     const res = await fetch(url, { headers: { "x-api-key": key } });
     last = res;
     if (res.status !== 429 && res.status !== 502 && res.status !== 503) return res;
-    await new Promise((r) => setTimeout(r, 700 * (i + 1)));
+    await new Promise((r) => setTimeout(r, res.status === 429 ? 5200 : 700 * (i + 1)));
   }
   return last;
 }
@@ -1359,37 +1359,31 @@ var NOTABLE = [
   { handle: "pumpdotfun", label: "infra (Pump.fun)", size: "600K" },
   { handle: "base", label: "infra (Base)", size: "1.5M" }
 ];
-async function checkFollow(source, target) {
-  const key = env("TWITTERAPI_KEY");
-  if (!key) return null;
-  const s = source.replace(/^@/, "");
-  const t = target.replace(/^@/, "");
-  try {
-    const res = await twFetch(`${TWITTERAPI}/twitter/user/check_follow_relationship?source_user_name=${encodeURIComponent(s)}&target_user_name=${encodeURIComponent(t)}`, key);
-    if (!res || !res.ok) return null;
-    const d = await res.json();
-    if (d?.status === "error" || !d?.data) return null;
-    return { following: !!d.data.following, followedBy: !!d.data.followed_by };
-  } catch {
-    return null;
-  }
-}
+var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 async function notableFollowers(subject) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
+  const want = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
   const hits = /* @__PURE__ */ new Set();
-  const queue = [...NOTABLE];
-  const CONCURRENCY = 5;
-  const worker = async () => {
-    for (; ; ) {
-      const n = queue.shift();
-      if (!n) return;
-      if (n.handle.toLowerCase() === subject.replace(/^@/, "").toLowerCase()) continue;
-      const rel = await checkFollow(n.handle, subject);
-      if (rel?.following) hits.add(n.handle);
+  const u = subject.replace(/^@/, "");
+  let cursor = "";
+  const MAX_PAGES = 3;
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res = await twFetch(url, key);
+    if (!res || !res.ok) break;
+    const d = await res.json();
+    if (d?.status === "error") break;
+    const followers = d.followers ?? d.data?.followers ?? [];
+    if (!followers.length) break;
+    for (const f of followers) {
+      const m = want.get((f.userName ?? f.screen_name ?? "").toLowerCase());
+      if (m) hits.add(m.handle);
     }
-  };
-  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    if (hits.size >= want.size || !d.has_next_page || !d.next_cursor) break;
+    cursor = d.next_cursor;
+    await delay(5200);
+  }
   return NOTABLE.filter((n) => hits.has(n.handle));
 }
 async function acknowledgment(endorser, subject) {
@@ -1492,7 +1486,7 @@ var xAdapter = {
       if (nf.length) {
         ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `Followed by ${nf.length} high-signal account${nf.length === 1 ? "" : "s"}: ${nf.slice(0, 6).map((n) => `@${n.handle} (${n.label})`).join(", ")}${nf.length > 6 ? ", \u2026" : ""}.`, source: "twitterapi.io", tone: "good" });
       } else {
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "None of the curated callers, founders or funds follow this account \u2014 no peer-credibility signal.", source: "twitterapi.io", tone: "neutral" });
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "No curated callers, founders or funds among the subject's recent followers \u2014 no peer-credibility signal surfaced.", source: "twitterapi.io", tone: "neutral" });
       }
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised];
@@ -2041,7 +2035,7 @@ var ADAPTERS = [
   onchainAdapter
 ];
 var KEYED = /* @__PURE__ */ new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain"]);
-var delay = (ms) => new Promise((r) => setTimeout(r, ms));
+var delay2 = (ms) => new Promise((r) => setTimeout(r, ms));
 function parseOutcome(s) {
   if (!s) return "Unknown" /* UNKNOWN */;
   const match = Object.values(VentureOutcome).find((v) => v.toLowerCase() === s.toLowerCase());
@@ -2184,9 +2178,9 @@ async function runAudit(rawHandle, emit) {
   if (fixture && !anyLive) {
     for (const step of fixture.trace) {
       emit(step);
-      await delay(420 + Math.random() * 360);
+      await delay2(420 + Math.random() * 360);
     }
-    await delay(500);
+    await delay2(500);
     return assembleDossier(toEvidence(fixture), false);
   }
   const evidence = fixture ? toEvidence(fixture) : emptyEvidence(rawHandle);
@@ -2237,7 +2231,7 @@ async function runAudit(rawHandle, emit) {
     return null;
   }
   emit({ phase: "Finalize", label: "Govern composite", detail: "Applying caps and selecting the governing role.", tone: "neutral" });
-  await delay(300);
+  await delay2(300);
   return assembleDossier(evidence, true);
 }
 

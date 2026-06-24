@@ -49,13 +49,15 @@ export async function grokSearch(system: string, user: string): Promise<string |
 // twitterapi.io throttles hard (429) under bursty use, and occasionally 502/503.
 // Retry transient statuses with exponential backoff; return the last response so
 // the caller can still inspect a terminal error.
-async function twFetch(url: string, key: string, tries = 3): Promise<Response | null> {
+async function twFetch(url: string, key: string, tries = 2): Promise<Response | null> {
   let last: Response | null = null;
   for (let i = 0; i < tries; i++) {
     const res = await fetch(url, { headers: { "x-api-key": key } });
     last = res;
     if (res.status !== 429 && res.status !== 502 && res.status !== 503) return res;
-    await new Promise((r) => setTimeout(r, 700 * (i + 1)));
+    // The free tier allows 1 request / 5s, so a 429 needs a full ~5s wait to
+    // recover (a sub-second backoff just 429s again). 5xx backs off briefly.
+    await new Promise((r) => setTimeout(r, res.status === 429 ? 5200 : 700 * (i + 1)));
   }
   return last;
 }
@@ -188,24 +190,41 @@ export async function checkFollow(source: string, target: string): Promise<{ fol
   }
 }
 
-// Which of the curated notable accounts follow the subject? Bounded concurrency
-// keeps it fast without tripping twitterapi's rate limiter.
+// Which of the curated notable accounts follow the subject?
+//
+// The exact way is a check_follow_relationship per notable account, but the
+// twitterapi FREE tier caps at 1 request / 5s, so 24 of those would take ~2min.
+// Instead we scan the subject's own followers (200/page, reverse-chron) and
+// intersect locally with the curated set — one cheap call covers a small/new
+// project completely (the main vetting case); paginating a few pages covers the
+// recent followers of larger accounts. Honest partial coverage on free tier;
+// a paid tier (no QPS cap) would let us run the exhaustive relationship check.
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export async function notableFollowers(subject: string): Promise<NotableFollower[]> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
+  const want = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
   const hits = new Set<string>();
-  const queue = [...NOTABLE];
-  const CONCURRENCY = 5;
-  const worker = async () => {
-    for (;;) {
-      const n = queue.shift();
-      if (!n) return;
-      if (n.handle.toLowerCase() === subject.replace(/^@/, "").toLowerCase()) continue;
-      const rel = await checkFollow(n.handle, subject);
-      if (rel?.following) hits.add(n.handle);
+  const u = subject.replace(/^@/, "");
+  let cursor = "";
+  const MAX_PAGES = 3; // bounded by the free-tier QPS; ~600 most-recent followers
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res = await twFetch(url, key);
+    if (!res || !res.ok) break;
+    const d = (await res.json()) as any;
+    if (d?.status === "error") break;
+    const followers: any[] = d.followers ?? d.data?.followers ?? [];
+    if (!followers.length) break;
+    for (const f of followers) {
+      const m = want.get((f.userName ?? f.screen_name ?? "").toLowerCase());
+      if (m) hits.add(m.handle);
     }
-  };
-  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+    if (hits.size >= want.size || !d.has_next_page || !d.next_cursor) break;
+    cursor = d.next_cursor;
+    await delay(5200); // respect free-tier QPS between pages
+  }
   return NOTABLE.filter((n) => hits.has(n.handle)); // preserve curated order
 }
 
@@ -369,7 +388,7 @@ export const xAdapter: Adapter = {
       if (nf.length) {
         ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `Followed by ${nf.length} high-signal account${nf.length === 1 ? "" : "s"}: ${nf.slice(0, 6).map((n) => `@${n.handle} (${n.label})`).join(", ")}${nf.length > 6 ? ", …" : ""}.`, source: "twitterapi.io", tone: "good" });
       } else {
-        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "None of the curated callers, founders or funds follow this account — no peer-credibility signal.", source: "twitterapi.io", tone: "neutral" });
+        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "No curated callers, founders or funds among the subject's recent followers — no peer-credibility signal surfaced.", source: "twitterapi.io", tone: "neutral" });
       }
     }
 
