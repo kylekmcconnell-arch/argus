@@ -619,10 +619,10 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             </div>
           )}
 
-          <div className="min-w-0">
-            <Section title="Panoptes trust graph" kicker="who vouches, who they touched">
+          <div className="min-w-0 lg:col-span-2">
+            <Section title="Connection web" kicker="click any node to open it · subject → projects → the people behind them">
               <Card className="p-2">
-                <TrustGraph nodes={graph.nodes} edges={graph.edges} />
+                <TrustGraph nodes={graph.nodes} edges={graph.edges} connections={connections} onAudit={onAudit} onOpenProject={onOpenProject} />
               </Card>
             </Section>
           </div>
