@@ -17,7 +17,7 @@ import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, followsSubject, handleHistory, type DiscoveredAffiliation } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, findTeam, followsSubject, handleHistory, type DiscoveredAffiliation } from "./adapters/x";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
@@ -127,15 +127,36 @@ async function coldIntake(ctx: CollectContext) {
   //    their own bio and LinkedIn. Each lead is then corroborated against an
   //    independent source (the venture's X follow-graph, an archived team page)
   //    so a web hit becomes a graded tie, never a bare assertion. ──
-  ctx.emit({ phase: "P0 · Intake", label: "Discover affiliations", detail: "Two angles in parallel: what this person is tied to, AND who has ever named them as founder/team (incl. old posts)…", source: "grok", tone: "neutral" });
-  // Two blind search angles run concurrently (each Grok call is 45s-capped, so
+  ctx.emit({ phase: "P0 · Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts…", source: "grok", tone: "neutral" });
+  // Three blind search angles run concurrently (each Grok call is 45s-capped, so
   // parallel keeps wall-clock to one). Subject-first finds what they claim/built;
-  // reverse-mention finds projects whose OWN timeline named them — the angle that
-  // catches a co-founder role the subject never tweeted about.
-  const [bySubject, byMentions] = await Promise.all([
+  // reverse-mention finds projects whose OWN timeline named them; team-from-X
+  // mines THIS account's posts for the people behind it (the project-account case).
+  const [bySubject, byMentions, team] = await Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
     discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
+    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
   ]);
+
+  // Team members named in the account's X content. Only those with a real @handle
+  // become associates (the investigation surfaces those as backgroundable people);
+  // a bare name can't be normalized to a handle and isn't auditable, so it is just
+  // reported in the trace.
+  if (team.length) {
+    const haveAssoc = new Set(ctx.evidence.associates.map((a) => a.associate_handle.replace(/^@/, "").toLowerCase()));
+    const added: string[] = [];
+    for (const t of team) {
+      if (!t.handle) continue;
+      const key = t.handle.replace(/^@/, "").toLowerCase();
+      if (haveAssoc.has(key)) continue;
+      haveAssoc.add(key);
+      ctx.evidence.associates.push({ associate_handle: t.handle, relation: `team: ${t.role}`, notes: t.evidence });
+      added.push(`${t.name} (${t.handle})`);
+    }
+    const namedOnly = team.filter((t) => !t.handle).map((t) => `${t.name} (${t.role})`);
+    const parts = [added.length ? added.slice(0, 6).join(", ") : "", namedOnly.length ? `named only: ${namedOnly.slice(0, 4).join(", ")}` : ""].filter(Boolean);
+    if (parts.length) ctx.emit({ phase: "P0 · Intake", label: "Team surfaced", detail: `${team.length} team member${team.length === 1 ? "" : "s"} named in this account's X content. ${parts.join(" · ")}.`, source: "grok", tone: "good" });
+  }
   const mergedMap = new Map<string, DiscoveredAffiliation>();
   for (const v of [...bySubject, ...byMentions]) {
     const k = v.name.toLowerCase();

@@ -387,6 +387,46 @@ export async function discoverByMentions(handle: string, name?: string, oldHandl
   }
 }
 
+// ── Team extraction from X content ──
+// The people behind a project are usually NAMED in the project account's own
+// posts (team intros, "meet the team", role announcements like "welcome @x as
+// our CTO") and in posts that tag them, long before any of it reaches a website.
+// This mines that content for team members the site/bio never listed.
+export interface TeamMember { name: string; handle?: string; role: string; evidence?: string }
+
+export async function findTeam(handle: string, name: string | undefined, posts: string[] = []): Promise<TeamMember[]> {
+  const h = handle.replace(/^@/, "");
+  const postContext = posts.length
+    ? `\n\nThe account's recent posts (mine these for team intros / role announcements):\n${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}`
+    : "";
+  const system =
+    "You are a forensic researcher with live X search. Identify the PEOPLE who are part of the team or company behind the given X account: founders, cofounders, and team members publicly named or introduced. " +
+    "Look especially at the account's OWN posts (team intros, 'meet the team', role announcements like 'welcome @x as our CTO', 'our founder @y', cofounder mentions) and posts that tag team members, plus posts mentioning the project that name its people. " +
+    "For each person give their name, X handle if found, role, and a short evidence phrase. Include ONLY people with real public evidence tying them to THIS account/project as team. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. " +
+    "Reply with ONLY compact JSON: {\"team\":[{\"name\":\"\",\"handle\":\"@...\",\"role\":\"founder|cofounder|ceo|cto|engineer|designer|marketing|team\",\"evidence\":\"\"}]}. If none, return {\"team\":[]}. NEVER invent. Never use em dashes.";
+  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders and team members of this project or company? Search the account's own posts and the posts that mention it.${postContext}`);
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const parsed = JSON.parse(m[0]);
+    const out: any[] = Array.isArray(parsed.team) ? parsed.team : [];
+    const self = h.toLowerCase();
+    return out
+      .filter((t) => t && typeof t.name === "string" && t.name.trim())
+      .map((t) => ({
+        name: t.name.trim(),
+        handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : undefined,
+        role: t.role || "team",
+        evidence: t.evidence,
+      }))
+      .filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self)
+      .slice(0, 12);
+  } catch {
+    return [];
+  }
+}
+
 export function fmtFollowers(n?: number): string {
   if (n == null) return "—";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";

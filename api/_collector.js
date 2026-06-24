@@ -1538,6 +1538,31 @@ async function discoverByMentions(handle, name, oldHandles = []) {
     return [];
   }
 }
+async function findTeam(handle, name, posts = []) {
+  const h = handle.replace(/^@/, "");
+  const postContext = posts.length ? `
+
+The account's recent posts (mine these for team intros / role announcements):
+${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "";
+  const system = `You are a forensic researcher with live X search. Identify the PEOPLE who are part of the team or company behind the given X account: founders, cofounders, and team members publicly named or introduced. Look especially at the account's OWN posts (team intros, 'meet the team', role announcements like 'welcome @x as our CTO', 'our founder @y', cofounder mentions) and posts that tag team members, plus posts mentioning the project that name its people. For each person give their name, X handle if found, role, and a short evidence phrase. Include ONLY people with real public evidence tying them to THIS account/project as team. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"team":[{"name":"","handle":"@...","role":"founder|cofounder|ceo|cto|engineer|designer|marketing|team","evidence":""}]}. If none, return {"team":[]}. NEVER invent. Never use em dashes.`;
+  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders and team members of this project or company? Search the account's own posts and the posts that mention it.${postContext}`);
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const parsed = JSON.parse(m[0]);
+    const out = Array.isArray(parsed.team) ? parsed.team : [];
+    const self = h.toLowerCase();
+    return out.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => ({
+      name: t.name.trim(),
+      handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : void 0,
+      role: t.role || "team",
+      evidence: t.evidence
+    })).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 12);
+  } catch {
+    return [];
+  }
+}
 function fmtFollowers(n) {
   if (n == null) return "\u2014";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
@@ -2192,11 +2217,27 @@ async function coldIntake(ctx) {
     const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} \u2014 now verifying each.`, source: "claude", tone: "neutral" });
   }
-  ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Two angles in parallel: what this person is tied to, AND who has ever named them as founder/team (incl. old posts)\u2026", source: "grok", tone: "neutral" });
-  const [bySubject, byMentions] = await Promise.all([
+  ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts\u2026", source: "grok", tone: "neutral" });
+  const [bySubject, byMentions, team] = await Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
-    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? [])
+    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
+    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity)
   ]);
+  if (team.length) {
+    const haveAssoc = new Set(ctx.evidence.associates.map((a) => a.associate_handle.replace(/^@/, "").toLowerCase()));
+    const added = [];
+    for (const t of team) {
+      if (!t.handle) continue;
+      const key = t.handle.replace(/^@/, "").toLowerCase();
+      if (haveAssoc.has(key)) continue;
+      haveAssoc.add(key);
+      ctx.evidence.associates.push({ associate_handle: t.handle, relation: `team: ${t.role}`, notes: t.evidence });
+      added.push(`${t.name} (${t.handle})`);
+    }
+    const namedOnly = team.filter((t) => !t.handle).map((t) => `${t.name} (${t.role})`);
+    const parts = [added.length ? added.slice(0, 6).join(", ") : "", namedOnly.length ? `named only: ${namedOnly.slice(0, 4).join(", ")}` : ""].filter(Boolean);
+    if (parts.length) ctx.emit({ phase: "P0 \xB7 Intake", label: "Team surfaced", detail: `${team.length} team member${team.length === 1 ? "" : "s"} named in this account's X content. ${parts.join(" \xB7 ")}.`, source: "grok", tone: "good" });
+  }
   const mergedMap = /* @__PURE__ */ new Map();
   for (const v of [...bySubject, ...byMentions]) {
     const k = v.name.toLowerCase();
