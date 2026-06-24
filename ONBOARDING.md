@@ -4,6 +4,16 @@ Forensic crypto due-diligence. Vite + React + TypeScript front end, a Node
 collector (`server/`) bundled into Vercel serverless functions (`api/`). Auto
 deploys to the live site on push to `main`.
 
+## 0. Prerequisites (fresh machine, one time)
+Install in a normal terminal:
+1. **Node.js (LTS)** — gives you `node` + `npm`. Get it from nodejs.org (Mac/Windows
+   installer), or `brew install node` on a Mac with Homebrew. Check: `node -v`.
+2. **Vercel CLI + Claude Code** (need Node first):
+   `npm install -g vercel @anthropic-ai/claude-code`
+3. **GitHub CLI** (for auth + cloning the private repo):
+   Mac `brew install gh` (or cli.github.com) · Windows `winget install GitHub.cli`.
+4. **git** — Mac prompts to install on first `git` use; Windows: git-scm.com.
+
 ## 1. Access (ask Kyle)
 - **GitHub:** added as a collaborator on `kylekmcconnell-arch/argus` (clone + push).
 - **Vercel:** added as a member of the `argus` project — this is how you get the
