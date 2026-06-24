@@ -2037,17 +2037,20 @@ async function coldIntake(ctx) {
     await Promise.all(
       pending.slice(0, 5).map(async ({ v, rec }) => {
         const corrob = [];
+        const subjectU = ctx.handle.replace(/^@/, "").toLowerCase();
+        const xHandle = v.x_handle ?? (v.evidence?.match(/@([A-Za-z0-9_]{2,30})/g) ?? []).map((s) => s.slice(1)).find((u) => u.toLowerCase() !== subjectU);
+        const domain = v.domain ?? v.evidence?.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|app|finance|org|net|co|ai|gg|so))\b/i)?.[1];
         try {
-          if (v.domain) {
-            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name);
+          if (domain) {
+            const arch = await archivedAffiliation(domain, ctx.evidence.profile.display_name);
             if (arch) {
               corrob.push(`archived ${arch.where} page (${arch.year})`);
               rec.evidence_url = arch.url;
             }
           }
-          if (v.x_handle) {
-            const follows = await followsSubject(v.x_handle, ctx.handle);
-            if (follows) corrob.push(`${v.x_handle} follows the subject`);
+          if (xHandle) {
+            const follows = await followsSubject("@" + xHandle.replace(/^@/, ""), ctx.handle);
+            if (follows) corrob.push(`@${xHandle.replace(/^@/, "")} follows the subject`);
           }
         } catch {
         }
