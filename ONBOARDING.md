@@ -10,21 +10,38 @@ deploys to the live site on push to `main`.
   API keys without anyone pasting them.
 
 ## 2. Run it locally
+
+> Run the setup below in a NORMAL terminal (Terminal.app / iTerm), as yourself.
+> Do NOT paste these into Claude Code — its shell is sandboxed (it can't reach
+> vercel.com and won't enter your GitHub login), so the clone + vercel steps will
+> fail there. Claude Code is for editing/running the code once it's cloned.
+
 ```bash
+# one-time auth (you're a collaborator, so this clones the private repo):
+gh auth login
+
 git clone https://github.com/kylekmcconnell-arch/argus.git
 cd argus
 npm install
 
-# pull every funded provider key straight from Vercel (recommended):
-npm i -g vercel && vercel login && vercel link   # pick the "argus" project
-vercel env pull .env
+# pull every funded provider key straight from Vercel (recommended).
+# NOTE: --environment=production — the keys live in Vercel's production env;
+# the default (development) would come back mostly empty.
+npm i -g vercel && vercel login && vercel link        # pick the "argus" project
+vercel env pull --environment=production .env
 
 # ...or, without Vercel: cp .env.example .env and fill in the keys you have.
 
 npm run dev:full     # runs the web app (Vite) + the collector server together
 ```
 Vite prints the local URL. `npm run check-env` reports which providers are wired
-(without printing any secrets).
+(without printing any secrets). `.env` is gitignored — never commit it.
+
+Then, in the same folder, start Claude Code for the actual work:
+```bash
+npm install -g @anthropic-ai/claude-code   # if not installed
+claude                                     # log in with your own Claude Pro/Max
+```
 
 ## 3. How it's wired
 - **Front end:** `src/` (React, Tailwind v4). The audit/report/investigation UI.
