@@ -42,14 +42,18 @@ export async function grokSearch(system: string, user: string): Promise<string |
   }
 }
 
-// twitterapi.io throttles (429) under bursty use; one short backoff retry.
-async function twFetch(url: string, key: string, tries = 2): Promise<Response | null> {
+// twitterapi.io throttles hard (429) under bursty use, and occasionally 502/503.
+// Retry transient statuses with exponential backoff; return the last response so
+// the caller can still inspect a terminal error.
+async function twFetch(url: string, key: string, tries = 3): Promise<Response | null> {
+  let last: Response | null = null;
   for (let i = 0; i < tries; i++) {
     const res = await fetch(url, { headers: { "x-api-key": key } });
-    if (res.status !== 429) return res;
-    await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+    last = res;
+    if (res.status !== 429 && res.status !== 502 && res.status !== 503) return res;
+    await new Promise((r) => setTimeout(r, 700 * (i + 1)));
   }
-  return null;
+  return last;
 }
 
 // ── twitterapi.io: profile ───────────────────────────────────────────────
@@ -69,7 +73,11 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
     const res = await twFetch(`${TWITTERAPI}/twitter/user/info?userName=${encodeURIComponent(u)}`, key);
     if (!res || !res.ok) return null;
     const d = (await res.json()) as any;
+    // twitterapi.io returns HTTP 200 even on failure, with {status:"error", data:null}
+    // (rate limit, user-not-found). Treat that as a miss, not an empty profile.
+    if (d?.status === "error" || d?.data === null) return null;
     const p = d.data ?? d;
+    if (!p || (p.name == null && p.followers == null && p.followers_count == null && p.description == null)) return null;
     return {
       handle: "@" + u,
       name: p.name,

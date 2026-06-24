@@ -1265,13 +1265,15 @@ async function grokSearch(system, user) {
     return null;
   }
 }
-async function twFetch(url, key, tries = 2) {
+async function twFetch(url, key, tries = 3) {
+  let last = null;
   for (let i = 0; i < tries; i++) {
     const res = await fetch(url, { headers: { "x-api-key": key } });
-    if (res.status !== 429) return res;
-    await new Promise((r) => setTimeout(r, 600 * (i + 1)));
+    last = res;
+    if (res.status !== 429 && res.status !== 502 && res.status !== 503) return res;
+    await new Promise((r) => setTimeout(r, 700 * (i + 1)));
   }
-  return null;
+  return last;
 }
 async function getProfile2(handle) {
   const key = env("TWITTERAPI_KEY");
@@ -1281,7 +1283,9 @@ async function getProfile2(handle) {
     const res = await twFetch(`${TWITTERAPI}/twitter/user/info?userName=${encodeURIComponent(u)}`, key);
     if (!res || !res.ok) return null;
     const d = await res.json();
+    if (d?.status === "error" || d?.data === null) return null;
     const p = d.data ?? d;
+    if (!p || p.name == null && p.followers == null && p.followers_count == null && p.description == null) return null;
     return {
       handle: "@" + u,
       name: p.name,
@@ -1753,6 +1757,8 @@ async function coldIntake(ctx) {
       if (!isNaN(d.getTime())) ctx.evidence.profile.joined = d.toLocaleString("en-US", { month: "short", year: "numeric" });
     }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} \xB7 ${ctx.evidence.profile.followers} followers \xB7 joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
+  } else {
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Profile unavailable", detail: "Couldn't resolve this handle on twitterapi.io (rate-limited or not found). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
   }
   const posts = await getRecentPosts(ctx.handle);
   if (posts.length) {
