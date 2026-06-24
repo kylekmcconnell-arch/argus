@@ -48,8 +48,22 @@ export function InvestigationReport({
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
   const tm = verdictMeta(token.verdict);
-  // Team + advisors mined from the project account's X content (see findTeam).
-  const teamMembers = (projectAccount?.evidence.associates ?? []).filter((a) => /^team:/i.test(a.relation ?? ""));
+  // Unified team: members named in the project's X content (associates) merged
+  // with people dug up via the web/LinkedIn search, deduped by handle so a
+  // pseudonymous handle gets enriched with its real name + LinkedIn.
+  const teamUnified: { name: string; handle?: string; role: string; linkedin?: string }[] = (() => {
+    const map = new Map<string, { name: string; handle?: string; role: string; linkedin?: string }>();
+    for (const a of projectAccount?.evidence.associates ?? []) {
+      if (!/^team:/i.test(a.relation ?? "")) continue;
+      map.set(a.associate_key.toLowerCase(), { name: a.associate_key, handle: a.associate_key, role: (a.relation ?? "team").replace(/^team:\s*/i, "") });
+    }
+    for (const p of inv.webTeam ?? []) {
+      const ex = p.handle ? map.get(p.handle.toLowerCase()) : undefined;
+      if (ex) { ex.name = p.name || ex.name; ex.linkedin = ex.linkedin ?? p.linkedin; if (!ex.role || ex.role === "team") ex.role = p.role; }
+      else map.set((p.handle ?? p.name).toLowerCase(), { name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin });
+    }
+    return [...map.values()];
+  })();
   const advisors = (projectAccount?.evidence.testimonials ?? []).filter((t) => t.claimed_relationship === "advisor");
   const advisorChip = (v?: string): { label: string; color: string } => {
     const s = (v ?? "").toLowerCase();
@@ -198,28 +212,36 @@ export function InvestigationReport({
           </Card>
         </div>
 
-        {/* team + advisors mined from the project account's X content */}
-        {(teamMembers.length > 0 || advisors.length > 0) && (
+        {/* team + advisors: X content merged with the web/LinkedIn deep search */}
+        {(teamUnified.length > 0 || advisors.length > 0) && (
           <div className="mt-3">
-            <Card title="Team & advisors · surfaced from the project's X content">
-              {teamMembers.length > 0 && (
+            <Card title="Team & advisors · X content + web/LinkedIn search">
+              {teamUnified.length > 0 && (
                 <div>
-                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team ({teamMembers.length})</div>
+                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team ({teamUnified.length})</div>
                   <div className="mt-1.5 space-y-1.5">
-                    {teamMembers.map((m) => (
-                      <div key={m.associate_key} className="flex items-center justify-between gap-2">
-                        <span className="min-w-0 truncate">
-                          <span className="mono text-[12.5px] text-ink">{m.associate_key}</span>
-                          <span className="ml-2 text-[10.5px] text-ink-faint">{(m.relation ?? "team").replace(/^team:\s*/i, "")}</span>
+                    {teamUnified.map((m) => (
+                      <div key={m.handle ?? m.name} className="flex items-center justify-between gap-2">
+                        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          <span className="mono text-[12.5px] text-ink">{m.name}</span>
+                          {m.handle && m.handle !== m.name && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
+                          <span className="text-[10.5px] text-ink-faint">{m.role}</span>
+                          {m.linkedin && (
+                            <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                          )}
                         </span>
-                        <button
-                          onClick={() => auditFounder(m.associate_key)}
-                          disabled={spent >= MAX_FOUNDER_AUDITS}
-                          className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40"
-                          style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
-                        >
-                          {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "background →"}
-                        </button>
+                        {m.handle ? (
+                          <button
+                            onClick={() => auditFounder(m.handle!)}
+                            disabled={spent >= MAX_FOUNDER_AUDITS}
+                            className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40"
+                            style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
+                          >
+                            {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "background →"}
+                          </button>
+                        ) : (
+                          <span className="mono shrink-0 text-[10.5px] text-ink-faint">no handle</span>
+                        )}
                       </div>
                     ))}
                   </div>

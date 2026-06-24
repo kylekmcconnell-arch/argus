@@ -46,6 +46,10 @@ export interface DeployerTrail {
   note: string;
 }
 
+// A person found by the web-deep team search (Google/LinkedIn/Crunchbase/X), with
+// their real name connected to handle + LinkedIn where possible.
+export interface WebPerson { name: string; handle?: string; linkedin?: string; role: string; evidence?: string }
+
 export interface Investigation {
   rootRef: string;
   token: TokenDossier;
@@ -56,6 +60,7 @@ export interface Investigation {
   founders: FounderCandidate[];
   founderNote: string;            // honest founder-identity summary
   deployerTrail: DeployerTrail | null; // who funded the deployer (Solana)
+  webTeam: WebPerson[];           // team found by the web/LinkedIn deep search
 }
 
 async function fetchDeployerTrail(wallet: string): Promise<DeployerTrail | null> {
@@ -67,6 +72,19 @@ async function fetchDeployerTrail(wallet: string): Promise<DeployerTrail | null>
     return d as DeployerTrail;
   } catch {
     return null;
+  }
+}
+
+async function fetchWebTeam(siteUrl: string, projectName: string, recon: Recon | null): Promise<WebPerson[]> {
+  try {
+    const host = new URL(siteUrl).hostname.replace(/^www\./, "");
+    const qs = new URLSearchParams({ domain: host, name: projectName || "", names: (recon?.team.names ?? []).slice(0, 8).join(",") });
+    const res = await fetch(`/api/recon-team?${qs}`);
+    if (!res.ok) return [];
+    const d = await res.json();
+    return Array.isArray(d.people) ? (d.people as WebPerson[]) : [];
+  } catch {
+    return [];
   }
 }
 
@@ -193,6 +211,23 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
       }
       if (aborted) return;
 
+      // ── Hop 2b: dig the web + LinkedIn for the team (the render-based recon is
+      //    shallow; this searches Google/LinkedIn/Crunchbase/X and connects names
+      //    to real identities + profiles). ──
+      let webTeam: WebPerson[] = [];
+      if (siteUrl) {
+        h.onHop("digging the web + LinkedIn for the team");
+        h.onStep(milestone("Step 2b · Deep team search", `Searching Google, LinkedIn, Crunchbase and X for the people behind ${shorten(siteUrl)}…`, "neutral"));
+        webTeam = await fetchWebTeam(siteUrl, token.name, recon);
+        if (!aborted && webTeam.length) {
+          const withLi = webTeam.filter((p) => p.linkedin).length;
+          h.onStep(milestone("Team dug up", `${webTeam.length} ${webTeam.length === 1 ? "person" : "people"} via web/LinkedIn: ${webTeam.map((p) => p.handle ? `${p.name} (${p.handle})` : p.name).join(", ")}.${withLi ? ` ${withLi} with a LinkedIn.` : ""}`, "good"));
+        } else if (!aborted) {
+          h.onStep(milestone("Team search", "No team members could be dug up via web/LinkedIn/X search.", "neutral"));
+        }
+      }
+      if (aborted) return;
+
       // ── Hop 3: background the project's X account (ONE paid people-audit, auto) ──
       let projectAccount: Dossier | null = null;
       if (projectX) {
@@ -222,7 +257,7 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
       const founders = deriveFounders(recon, projectX, projectAccount);
       const note = founderNote(siteUrl, recon, founders);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
-      h.onDone({ rootRef, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note, deployerTrail });
+      h.onDone({ rootRef, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note, deployerTrail, webTeam });
     } catch (e) {
       if (!aborted) h.onError(String(e));
     }
