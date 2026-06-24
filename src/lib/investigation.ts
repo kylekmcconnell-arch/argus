@@ -75,7 +75,7 @@ async function fetchDeployerTrail(wallet: string): Promise<DeployerTrail | null>
   }
 }
 
-async function fetchWebTeam(siteUrl: string, projectName: string, recon: Recon | null): Promise<WebPerson[]> {
+export async function fetchWebTeam(siteUrl: string, projectName: string, recon: Recon | null): Promise<WebPerson[]> {
   try {
     const host = new URL(siteUrl).hostname.replace(/^www\./, "");
     const qs = new URLSearchParams({ domain: host, name: projectName || "", names: (recon?.team.names ?? []).slice(0, 8).join(",") });

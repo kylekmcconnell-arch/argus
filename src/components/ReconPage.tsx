@@ -4,6 +4,7 @@ import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
+import { fetchWebTeam, type WebPerson } from "../lib/investigation";
 
 // A clean plain-text DD summary for pasting into a chat / channel.
 function reconReportText(r: Recon): string {
@@ -91,6 +92,9 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
   const [recon, setRecon] = useState<Recon | null>(null);
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [webTeam, setWebTeam] = useState<WebPerson[]>([]);
+  const [teamSearching, setTeamSearching] = useState(false);
+  const [teamSearched, setTeamSearched] = useState(false);
   const ran = useRef(false);
 
   const run = useCallback(async (raw: string) => {
@@ -101,6 +105,8 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
     setRecon(null);
     setStages([]);
     setPivotNotes([]);
+    setWebTeam([]);
+    setTeamSearched(false);
     const r = await runRecon(
       target,
       (s) => setStages((prev) => [...prev, s]),
@@ -108,6 +114,14 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
     );
     setRecon(r);
     setRunning(false);
+
+    // Dig the web + LinkedIn for the team (the render-based recon is shallow).
+    if (r.retrieval.status !== "gap") {
+      setTeamSearching(true);
+      fetchWebTeam(r.retrieval.url, r.title ?? "", r)
+        .then((people) => setWebTeam(people))
+        .finally(() => { setTeamSearching(false); setTeamSearched(true); });
+    }
     logAudit({
       kind: "site",
       query: r.retrieval.url,
@@ -319,6 +333,37 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
                     {recon.tokenSignals.map((t) => <span key={t} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim">{t}</span>)}
                   </div>
                 </Card>
+              )}
+            </div>
+          )}
+
+          {/* team dug up via web + LinkedIn (deeper than the rendered page) */}
+          {(teamSearching || teamSearched) && (
+            <div className="mt-3 rounded-xl border border-line bg-panel p-4">
+              <div className="flex items-center gap-2">
+                <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team · web + LinkedIn search</span>
+                {teamSearching && <span className="text-[11px] text-ink-faint">digging Google / LinkedIn / Crunchbase / X…</span>}
+              </div>
+              {webTeam.length > 0 ? (
+                <div className="mt-2 space-y-1.5">
+                  {webTeam.map((p) => (
+                    <div key={p.handle ?? p.name} className="flex items-center justify-between gap-2">
+                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                        <span className="text-[12.5px] text-ink">{p.name}</span>
+                        {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
+                        <span className="text-[10.5px] text-ink-faint">{p.role}</span>
+                        {p.linkedin && (
+                          <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                        )}
+                      </span>
+                      {p.handle && onAudit && (
+                        <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                !teamSearching && <p className="mt-1.5 text-[12px] text-ink-faint">No team members could be dug up via web / LinkedIn / X search.</p>
               )}
             </div>
           )}
