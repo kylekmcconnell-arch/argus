@@ -55,22 +55,33 @@ export function personContribution(d: Dossier): GraphContribution {
 }
 
 // Convenience: a full investigation contributes its token subgraph PLUS the
-// deployer's funding source. Only an ANONYMOUS funder wallet is added as a node:
-// it is the connective tissue that exposes a serial operator when the same
-// wallet funds multiple deployers across separate investigations. A CEX funder
-// is deliberately omitted — it is a legitimate exchange, not an operator, and a
-// shared exchange node would falsely read as a hub.
+// deployer's full funding chain. Every ANONYMOUS wallet in the chain becomes a
+// node: these are the connective tissue that exposes a serial operator when the
+// same intermediary funds deployers across separate investigations. CEX hops are
+// deliberately omitted — a legitimate exchange is not an operator, and a shared
+// exchange node would falsely read as a hub.
 export function investigationContribution(inv: Investigation): GraphContribution | null {
   const g = inv.token?.graph;
   if (!g) return null;
   const nodes: PanoptesNode[] = [...g.nodes];
   const edges: PanoptesEdge[] = [...g.edges];
   const trail = inv.deployerTrail;
-  if (trail?.funder && trail.funder.kind === "wallet" && inv.token.deployer) {
-    const deployerKey = "wallet:" + inv.token.deployer.slice(0, 8);
+  const dep = inv.token.deployer;
+  // Match the deployer's existing token-graph node key; chain wallets get a
+  // stable funder key so the same wallet collapses to one node across audits.
+  const keyOf = (addr: string) => (dep && addr === dep ? "wallet:" + addr.slice(0, 8) : "funder:" + addr.slice(0, 8));
+  if (dep && trail?.chain?.length) {
+    for (const hop of trail.chain) {
+      if (hop.kind === "cex") continue; // exchange, not a bridging node
+      const fromKey = keyOf(hop.from);
+      const toKey = keyOf(hop.to);
+      nodes.push({ type: "Identity", subtype: "FunderWallet", key: toKey, address: hop.to });
+      edges.push({ src: toKey, dst: fromKey, type: "FUNDED" }); // funder -> recipient
+    }
+  } else if (dep && trail?.funder && trail.funder.kind === "wallet") {
     const funderKey = "funder:" + trail.funder.address.slice(0, 8);
-    nodes.push({ type: "Identity", subtype: "FunderWallet", key: funderKey, address: trail.funder.address, tokens_created: trail.tokensCreated });
-    edges.push({ src: funderKey, dst: deployerKey, type: "FUNDED" });
+    nodes.push({ type: "Identity", subtype: "FunderWallet", key: funderKey, address: trail.funder.address });
+    edges.push({ src: funderKey, dst: "wallet:" + dep.slice(0, 8), type: "FUNDED" });
   }
   return { handle: "$" + inv.token.symbol, verdict: inv.token.verdict, nodes, edges };
 }

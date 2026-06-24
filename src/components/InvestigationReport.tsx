@@ -153,7 +153,23 @@ export function InvestigationReport({
                   {deployerTrail?.walletAgeDays != null && <> · wallet <span className="text-ink-dim">{deployerTrail.walletAgeDays}d</span> old</>}
                   {deployerTrail?.tokensCreated != null && <> · <span className="text-ink-dim">{deployerTrail.tokensCreated}</span> tokens minted</>}
                 </div>
-                {deployerTrail?.funder ? (
+                {deployerTrail?.chain && deployerTrail.chain.length > 0 ? (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1">
+                    <span className="text-ink-faint">money trail</span>
+                    <span className="mono rounded bg-panel-2 px-1 py-0.5 text-ink-dim">{shortAddr(token.deployer)}</span>
+                    {deployerTrail.chain.map((h, i) => (
+                      <span key={i} className="flex items-center gap-1">
+                        <span className="text-ink-faint">←</span>
+                        {h.label ? (
+                          <span className="mono rounded px-1.5 py-0.5" style={{ background: "rgba(22,163,74,0.12)", color: "var(--color-pass)" }}>{h.label}</span>
+                        ) : (
+                          <span className="mono rounded bg-panel-2 px-1 py-0.5 text-ink-dim">{shortAddr(h.to)}</span>
+                        )}
+                      </span>
+                    ))}
+                    {!deployerTrail.terminatesAtCex && <span className="text-ink-faint">· trail cold</span>}
+                  </div>
+                ) : deployerTrail?.funder ? (
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                     <span>funded by</span>
                     {deployerTrail.funder.label ? (
@@ -161,11 +177,11 @@ export function InvestigationReport({
                     ) : (
                       <span className="mono text-ink-dim">{shortAddr(deployerTrail.funder.address)}</span>
                     )}
-                    {deployerTrail.serialDeployer && (
-                      <span className="mono rounded px-1.5 py-0.5" style={{ background: "rgba(220,38,38,0.12)", color: "var(--color-avoid)" }}>serial deployer · {deployerTrail.tokensCreated}+ tokens</span>
-                    )}
                   </div>
                 ) : null}
+                {deployerTrail?.serialDeployer && (
+                  <span className="mono mt-1 inline-block rounded px-1.5 py-0.5" style={{ background: "rgba(220,38,38,0.12)", color: "var(--color-avoid)" }}>serial deployer · {deployerTrail.tokensCreated}+ tokens</span>
+                )}
                 {deployerTrail && <div className="mt-1 leading-snug">{deployerTrail.note}</div>}
                 {!deployerTrail && <div className="mt-0.5">deployer wallet, no identity verification available.</div>}
               </div>

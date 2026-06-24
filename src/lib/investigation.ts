@@ -31,9 +31,14 @@ export interface FounderCandidate {
 }
 
 // The deployer's money trail: the one thing a pseudonymous deployer can't hide.
+export interface FundingHop { from: string; to: string; label: string | null; kind: string }
 export interface DeployerTrail {
   wallet: string;
   funder: { address: string; label: string | null; kind: string } | null;
+  chain?: FundingHop[];
+  origin?: { address: string; label: string | null; kind: string } | null;
+  terminatesAtCex?: boolean;
+  hops?: number;
   tokensCreated: number | null;
   serialDeployer: boolean;
   walletAgeDays: number | null;
