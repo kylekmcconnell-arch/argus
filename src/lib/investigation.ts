@@ -30,6 +30,17 @@ export interface FounderCandidate {
   source: "site" | "project"; // named on the site vs surfaced from the project account
 }
 
+// The deployer's money trail: the one thing a pseudonymous deployer can't hide.
+export interface DeployerTrail {
+  wallet: string;
+  funder: { address: string; label: string | null; kind: string } | null;
+  tokensCreated: number | null;
+  serialDeployer: boolean;
+  walletAgeDays: number | null;
+  firstActivity: string | null;
+  note: string;
+}
+
 export interface Investigation {
   rootRef: string;
   token: TokenDossier;
@@ -39,6 +50,19 @@ export interface Investigation {
   projectAccount: Dossier | null; // people-audit of the project X account
   founders: FounderCandidate[];
   founderNote: string;            // honest founder-identity summary
+  deployerTrail: DeployerTrail | null; // who funded the deployer (Solana)
+}
+
+async function fetchDeployerTrail(wallet: string): Promise<DeployerTrail | null> {
+  try {
+    const res = await fetch(`/api/deployer?wallet=${encodeURIComponent(wallet)}`);
+    if (!res.ok) return null;
+    const d = await res.json();
+    if (!d || d.available === false || d.error) return null;
+    return d as DeployerTrail;
+  } catch {
+    return null;
+  }
 }
 
 export interface InvestigationHandlers {
@@ -132,6 +156,20 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
       const siteUrl = token.socials.find((s) => /^https?:\/\//i.test(s.url) && !/x\.com|twitter\.com|t\.me|discord|github\.com/i.test(s.url))?.url ?? null;
       h.onStep(milestone("Token audited", `$${token.symbol}: ${token.verdict} ${token.score ?? "—"}/100.${projectX ? ` Project X ${projectX}.` : " No project X linked."}${siteUrl ? ` Site ${shorten(siteUrl)}.` : " No site linked."}`, token.verdict === "PASS" ? "good" : "warn"));
 
+      // ── Hop 1b: trace who funded the deployer (Solana, Helius) ──
+      // The deployer wallet is a pseudonym; its funding source often is not.
+      let deployerTrail: DeployerTrail | null = null;
+      if (token.deployer && token.chain === "solana") {
+        h.onHop("tracing who funded the deployer");
+        h.onStep(milestone("Step 1b · Deployer funding trail", `Tracing the SOL that funded deployer ${token.deployer.slice(0, 6)}…${token.deployer.slice(-4)}.`, "neutral"));
+        deployerTrail = await fetchDeployerTrail(token.deployer);
+        if (!aborted && deployerTrail) {
+          const tone = deployerTrail.funder?.kind === "cex" ? "good" : deployerTrail.serialDeployer ? "bad" : "neutral";
+          h.onStep(milestone("Deployer trail", deployerTrail.note, tone));
+        }
+      }
+      if (aborted) return;
+
       // ── Hop 2: recon the project site for the team (free) ──
       let recon: Recon | null = null;
       if (siteUrl) {
@@ -177,7 +215,7 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
       const founders = deriveFounders(recon, projectX, projectAccount);
       const note = founderNote(siteUrl, recon, founders);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
-      h.onDone({ rootRef, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note });
+      h.onDone({ rootRef, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note, deployerTrail });
     } catch (e) {
       if (!aborted) h.onError(String(e));
     }

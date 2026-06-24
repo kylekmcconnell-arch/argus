@@ -46,7 +46,7 @@ export function InvestigationReport({
 }) {
   const [spent, setSpent] = useState(0);
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
-  const { token, projectX, recon, projectAccount, founders } = inv;
+  const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
   const tm = verdictMeta(token.verdict);
   const auditFounder = (handle: string) => {
     if (spentRef.current >= MAX_FOUNDER_AUDITS) return;
@@ -148,7 +148,26 @@ export function InvestigationReport({
 
             {token.deployer && (
               <div className="mt-2.5 border-t border-line/60 pt-2.5 text-[11.5px] text-ink-faint">
-                Deployed by <span className="mono text-ink-dim">{shortAddr(token.deployer)}</span> · deployer wallet, no identity verification available.
+                <div>
+                  Deployed by <span className="mono text-ink-dim">{shortAddr(token.deployer)}</span>
+                  {deployerTrail?.walletAgeDays != null && <> · wallet <span className="text-ink-dim">{deployerTrail.walletAgeDays}d</span> old</>}
+                  {deployerTrail?.tokensCreated != null && <> · <span className="text-ink-dim">{deployerTrail.tokensCreated}</span> tokens minted</>}
+                </div>
+                {deployerTrail?.funder ? (
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    <span>funded by</span>
+                    {deployerTrail.funder.label ? (
+                      <span className="mono rounded px-1.5 py-0.5" style={{ background: "rgba(22,163,74,0.10)", color: "var(--color-pass)" }}>{deployerTrail.funder.label}</span>
+                    ) : (
+                      <span className="mono text-ink-dim">{shortAddr(deployerTrail.funder.address)}</span>
+                    )}
+                    {deployerTrail.serialDeployer && (
+                      <span className="mono rounded px-1.5 py-0.5" style={{ background: "rgba(220,38,38,0.12)", color: "var(--color-avoid)" }}>serial deployer · {deployerTrail.tokensCreated}+ tokens</span>
+                    )}
+                  </div>
+                ) : null}
+                {deployerTrail && <div className="mt-1 leading-snug">{deployerTrail.note}</div>}
+                {!deployerTrail && <div className="mt-0.5">deployer wallet, no identity verification available.</div>}
               </div>
             )}
           </Card>

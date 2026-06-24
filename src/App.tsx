@@ -14,7 +14,7 @@ import { TrackRecordPage } from "./components/TrackRecordPage";
 import { ReconPage } from "./components/ReconPage";
 import { AdminPage } from "./components/AdminPage";
 import { logAudit } from "./lib/auditlog";
-import { recordContribution, tokenContribution, personContribution } from "./graph/store";
+import { recordContribution, tokenContribution, personContribution, investigationContribution } from "./graph/store";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { InvestigationRun } from "./components/InvestigationRun";
@@ -118,6 +118,10 @@ export default function App() {
       summary: inv.founderNote,
       flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
     });
+    // compound the graph with the token, its deployer, and (if anonymous) the
+    // funder — so a funder bankrolling multiple launches bridges across audits
+    const c = investigationContribution(inv);
+    if (c) recordContribution(c);
   }, []);
 
   const onTokenDone = useCallback((d: TokenDossier) => {
