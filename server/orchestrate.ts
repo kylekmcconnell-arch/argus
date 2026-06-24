@@ -70,9 +70,9 @@ async function coldIntake(ctx: CollectContext) {
     }
     ctx.emit({ phase: "P0 · Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} · ${ctx.evidence.profile.followers} followers · joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
   } else {
-    // Be honest about a missing profile (twitterapi 429 / not-found) instead of
-    // silently rendering "— followers" — discovery below can still proceed.
-    ctx.emit({ phase: "P0 · Intake", label: "Profile unavailable", detail: "Couldn't resolve this handle on twitterapi.io (rate-limited or not found). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
+    // Be honest about a missing profile instead of silently rendering "—
+    // followers" — discovery below can still proceed.
+    ctx.emit({ phase: "P0 · Intake", label: "Profile unavailable", detail: "twitterapi.io has no record of this handle (not in their index). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
   }
 
   // Handle-change history: a rebrand to escape a burned reputation is a real

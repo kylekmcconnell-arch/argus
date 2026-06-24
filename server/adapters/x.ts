@@ -77,25 +77,33 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
   const u = handle.replace(/^@/, "");
-  try {
-    const res = await twFetch(`${TWITTERAPI}/twitter/user/info?userName=${encodeURIComponent(u)}`, key);
-    if (!res || !res.ok) return null;
-    const d = (await res.json()) as any;
-    // twitterapi.io returns HTTP 200 even on failure, with {status:"error", data:null}
-    // (rate limit, user-not-found). Treat that as a miss, not an empty profile.
-    if (d?.status === "error" || d?.data === null) return null;
-    const p = d.data ?? d;
-    if (!p || (p.name == null && p.followers == null && p.followers_count == null && p.description == null)) return null;
-    return {
-      handle: "@" + u,
-      name: p.name,
-      bio: p.description,
-      followers: p.followers ?? p.followers_count,
-      createdAt: p.createdAt ?? p.created_at,
-    };
-  } catch {
-    return null;
+  const url = `${TWITTERAPI}/twitter/user/info?userName=${encodeURIComponent(u)}`;
+  // twitterapi.io returns HTTP 200 even on failure ({status:"error", data:null}),
+  // and a COLD lookup of a less-trafficked account sometimes returns "not found"
+  // once, then resolves once they fetch it. Retry the error envelope once.
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await twFetch(url, key);
+      if (!res || !res.ok) return null;
+      const d = (await res.json()) as any;
+      if (d?.status === "error" || d?.data === null) {
+        if (attempt === 0) { await new Promise((r) => setTimeout(r, 1500)); continue; }
+        return null;
+      }
+      const p = d.data ?? d;
+      if (!p || (p.name == null && p.followers == null && p.followers_count == null && p.description == null)) return null;
+      return {
+        handle: "@" + u,
+        name: p.name,
+        bio: p.description,
+        followers: p.followers ?? p.followers_count,
+        createdAt: p.createdAt ?? p.created_at,
+      };
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 
 // Handle-change history via memory.lol (keyless OSINT index that maps an X

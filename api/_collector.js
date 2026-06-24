@@ -1325,23 +1325,33 @@ async function getProfile2(handle) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
   const u = handle.replace(/^@/, "");
-  try {
-    const res = await twFetch(`${TWITTERAPI}/twitter/user/info?userName=${encodeURIComponent(u)}`, key);
-    if (!res || !res.ok) return null;
-    const d = await res.json();
-    if (d?.status === "error" || d?.data === null) return null;
-    const p = d.data ?? d;
-    if (!p || p.name == null && p.followers == null && p.followers_count == null && p.description == null) return null;
-    return {
-      handle: "@" + u,
-      name: p.name,
-      bio: p.description,
-      followers: p.followers ?? p.followers_count,
-      createdAt: p.createdAt ?? p.created_at
-    };
-  } catch {
-    return null;
+  const url = `${TWITTERAPI}/twitter/user/info?userName=${encodeURIComponent(u)}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const res = await twFetch(url, key);
+      if (!res || !res.ok) return null;
+      const d = await res.json();
+      if (d?.status === "error" || d?.data === null) {
+        if (attempt === 0) {
+          await new Promise((r) => setTimeout(r, 1500));
+          continue;
+        }
+        return null;
+      }
+      const p = d.data ?? d;
+      if (!p || p.name == null && p.followers == null && p.followers_count == null && p.description == null) return null;
+      return {
+        handle: "@" + u,
+        name: p.name,
+        bio: p.description,
+        followers: p.followers ?? p.followers_count,
+        createdAt: p.createdAt ?? p.created_at
+      };
+    } catch {
+      return null;
+    }
   }
+  return null;
 }
 async function handleHistory(handle) {
   const u = handle.replace(/^@/, "");
@@ -2178,7 +2188,7 @@ async function coldIntake(ctx) {
     }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} \xB7 ${ctx.evidence.profile.followers} followers \xB7 joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
   } else {
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "Profile unavailable", detail: "Couldn't resolve this handle on twitterapi.io (rate-limited or not found). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Profile unavailable", detail: "twitterapi.io has no record of this handle (not in their index). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
   }
   const hist = await handleHistory(ctx.handle);
   if (hist && hist.priorHandles.length) {
@@ -2435,17 +2445,19 @@ var CG_PLATFORM = {
   fantom: "fantom"
 };
 var CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
+var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
 async function coingeckoToken(chain, address) {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
     const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0 };
+    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [] };
     if (!res.ok) return null;
     const d = await res.json();
     const tickers = d.tickers ?? [];
     const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
     const cex = new Set(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean));
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size };
+    const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
+    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames };
   } catch {
     return null;
   }
