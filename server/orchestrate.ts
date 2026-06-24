@@ -119,45 +119,51 @@ async function coldIntake(ctx: CollectContext) {
   ctx.emit({ phase: "P0 · Intake", label: "Discover affiliations", detail: "Searching the web and X for every company this person is publicly tied to, not just ones they founded…", source: "grok", tone: "neutral" });
   const discovered = await discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name);
   if (discovered.length) {
+    // 1. Push every fresh lead immediately so the audit never blocks on
+    //    corroboration. Each record is a live object we refine in place below.
     const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
-    for (const v of discovered) {
-      if (have.has(v.name.toLowerCase())) continue;
-      have.add(v.name.toLowerCase());
-
-      // Corroborate the lead against a second, independent source.
-      const corrob: string[] = [];
-      let evidenceUrl: string | undefined;
-      if (v.domain) {
-        const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name);
-        if (arch) { corrob.push(`archived ${arch.where} page (${arch.year})`); evidenceUrl = arch.url; }
-      }
-      if (v.x_handle) {
-        const follows = await followsSubject(v.x_handle, ctx.handle);
-        if (follows) corrob.push(`${v.x_handle} follows the subject`);
-      }
-      const corroborated = corrob.length > 0;
-      const note = [v.evidence, corroborated ? `corroborated: ${corrob.join("; ")}` : "single-source lead, unverified"].filter(Boolean).join(" · ");
-      ctx.evidence.ventures.push({
-        project_name: v.name,
-        role: v.role,
-        period: v.year ?? "",
-        outcome: VentureOutcome.ACTIVE,
-        evidence_url: evidenceUrl ?? null,
-        notes: note,
+    const pending = discovered
+      .filter((v) => { const k = v.name.toLowerCase(); if (have.has(k)) return false; have.add(k); return true; })
+      .map((v) => {
+        const rec = {
+          project_name: v.name,
+          role: v.role,
+          period: v.year ?? "",
+          outcome: VentureOutcome.ACTIVE,
+          evidence_url: null as string | null,
+          notes: [v.evidence, "single-source lead, unverified"].filter(Boolean).join(" · "),
+        };
+        ctx.evidence.ventures.push(rec);
+        return { v, rec };
       });
-      ctx.emit({
-        phase: "P0 · Intake",
-        label: corroborated ? `Affiliation corroborated · ${v.name}` : `Affiliation lead · ${v.name}`,
-        detail: `${v.role}${v.year ? `, ${v.year}` : ""}${v.evidence ? ` — ${v.evidence}` : ""}. ${corroborated ? corrob.join("; ") + "." : "Single source; shown as an unverified lead."}`,
-        source: "grok",
-        tone: corroborated ? "good" : "neutral",
-      });
-    }
     const founderish = discovered.some((v) => /founder|cofounder/i.test(v.role));
     if (founderish && (!ctx.evidence.roles.length || ctx.evidence.roles.every((r) => r === SubjectClass.MEMBER))) {
       ctx.evidence.roles = [SubjectClass.FOUNDER];
     }
     ctx.emit({ phase: "P0 · Intake", label: "Affiliations discovered", detail: `${discovered.length} public affiliation${discovered.length === 1 ? "" : "s"} tied to the subject: ${discovered.slice(0, 5).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
+
+    // 2. Corroborate the top leads against a second, independent source, all in
+    //    parallel and time-boxed, so wall-clock is one slow check, not N. Each
+    //    confirmed tie refines its record in place and emits a step.
+    await Promise.all(
+      pending.slice(0, 5).map(async ({ v, rec }) => {
+        const corrob: string[] = [];
+        try {
+          if (v.domain) {
+            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name);
+            if (arch) { corrob.push(`archived ${arch.where} page (${arch.year})`); rec.evidence_url = arch.url; }
+          }
+          if (v.x_handle) {
+            const follows = await followsSubject(v.x_handle, ctx.handle);
+            if (follows) corrob.push(`${v.x_handle} follows the subject`);
+          }
+        } catch { /* corroboration is best-effort; the lead still stands */ }
+        if (corrob.length) {
+          rec.notes = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" · ");
+          ctx.emit({ phase: "P0 · Intake", label: `Affiliation corroborated · ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""} — ${corrob.join("; ")}.`, source: "argus", tone: "good" });
+        }
+      }),
+    );
   } else {
     ctx.emit({ phase: "P0 · Intake", label: "No affiliations found", detail: "No public company affiliations could be attributed to this person via web/X search.", source: "grok", tone: "neutral" });
   }

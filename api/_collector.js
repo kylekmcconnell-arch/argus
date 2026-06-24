@@ -1854,8 +1854,8 @@ var onchainAdapter = {
 var CDX = "https://web.archive.org/cdx/search/cdx";
 async function newestSnapshot(urlPath) {
   try {
-    const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-3`;
-    const res = await fetch(CDX + qs, { signal: AbortSignal.timeout(7e3) });
+    const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-1`;
+    const res = await fetch(CDX + qs, { signal: AbortSignal.timeout(4e3) });
     if (!res.ok) return null;
     const rows = await res.json();
     if (!Array.isArray(rows) || rows.length < 2) return null;
@@ -1873,13 +1873,13 @@ async function archivedAffiliation(domain, name) {
   if (!clean || !name) return null;
   const needles = nameNeedles(name);
   if (!needles.length) return null;
-  const paths = [`${clean}/team`, `${clean}/about`, `${clean}/team/*`, clean];
+  const paths = [`${clean}/team`, `${clean}/about`, clean];
   for (const p of paths) {
     const snap = await newestSnapshot(p);
     if (!snap) continue;
     try {
       const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
-      const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(8e3) });
+      const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(5e3) });
       if (!res.ok) continue;
       const text = (await res.text()).toLowerCase();
       if (needles.some((n) => text.includes(n))) {
@@ -1977,45 +1977,51 @@ async function coldIntake(ctx) {
   const discovered = await discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name);
   if (discovered.length) {
     const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
-    for (const v of discovered) {
-      if (have.has(v.name.toLowerCase())) continue;
-      have.add(v.name.toLowerCase());
-      const corrob = [];
-      let evidenceUrl;
-      if (v.domain) {
-        const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name);
-        if (arch) {
-          corrob.push(`archived ${arch.where} page (${arch.year})`);
-          evidenceUrl = arch.url;
-        }
-      }
-      if (v.x_handle) {
-        const follows = await followsSubject(v.x_handle, ctx.handle);
-        if (follows) corrob.push(`${v.x_handle} follows the subject`);
-      }
-      const corroborated = corrob.length > 0;
-      const note = [v.evidence, corroborated ? `corroborated: ${corrob.join("; ")}` : "single-source lead, unverified"].filter(Boolean).join(" \xB7 ");
-      ctx.evidence.ventures.push({
+    const pending = discovered.filter((v) => {
+      const k = v.name.toLowerCase();
+      if (have.has(k)) return false;
+      have.add(k);
+      return true;
+    }).map((v) => {
+      const rec = {
         project_name: v.name,
         role: v.role,
         period: v.year ?? "",
         outcome: "Active" /* ACTIVE */,
-        evidence_url: evidenceUrl ?? null,
-        notes: note
-      });
-      ctx.emit({
-        phase: "P0 \xB7 Intake",
-        label: corroborated ? `Affiliation corroborated \xB7 ${v.name}` : `Affiliation lead \xB7 ${v.name}`,
-        detail: `${v.role}${v.year ? `, ${v.year}` : ""}${v.evidence ? ` \u2014 ${v.evidence}` : ""}. ${corroborated ? corrob.join("; ") + "." : "Single source; shown as an unverified lead."}`,
-        source: "grok",
-        tone: corroborated ? "good" : "neutral"
-      });
-    }
+        evidence_url: null,
+        notes: [v.evidence, "single-source lead, unverified"].filter(Boolean).join(" \xB7 ")
+      };
+      ctx.evidence.ventures.push(rec);
+      return { v, rec };
+    });
     const founderish = discovered.some((v) => /founder|cofounder/i.test(v.role));
     if (founderish && (!ctx.evidence.roles.length || ctx.evidence.roles.every((r) => r === "MEMBER" /* MEMBER */))) {
       ctx.evidence.roles = ["FOUNDER" /* FOUNDER */];
     }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Affiliations discovered", detail: `${discovered.length} public affiliation${discovered.length === 1 ? "" : "s"} tied to the subject: ${discovered.slice(0, 5).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
+    await Promise.all(
+      pending.slice(0, 5).map(async ({ v, rec }) => {
+        const corrob = [];
+        try {
+          if (v.domain) {
+            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name);
+            if (arch) {
+              corrob.push(`archived ${arch.where} page (${arch.year})`);
+              rec.evidence_url = arch.url;
+            }
+          }
+          if (v.x_handle) {
+            const follows = await followsSubject(v.x_handle, ctx.handle);
+            if (follows) corrob.push(`${v.x_handle} follows the subject`);
+          }
+        } catch {
+        }
+        if (corrob.length) {
+          rec.notes = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" \xB7 ");
+          ctx.emit({ phase: "P0 \xB7 Intake", label: `Affiliation corroborated \xB7 ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""} \u2014 ${corrob.join("; ")}.`, source: "argus", tone: "good" });
+        }
+      })
+    );
   } else {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "No affiliations found", detail: "No public company affiliations could be attributed to this person via web/X search.", source: "grok", tone: "neutral" });
   }

@@ -11,8 +11,8 @@ interface Snapshot { timestamp: string; original: string }
 
 async function newestSnapshot(urlPath: string): Promise<Snapshot | null> {
   try {
-    const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-3`;
-    const res = await fetch(CDX + qs, { signal: AbortSignal.timeout(7000) });
+    const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-1`;
+    const res = await fetch(CDX + qs, { signal: AbortSignal.timeout(4000) });
     if (!res.ok) return null;
     const rows = (await res.json()) as string[][];
     if (!Array.isArray(rows) || rows.length < 2) return null;
@@ -38,13 +38,13 @@ export async function archivedAffiliation(
   const needles = nameNeedles(name);
   if (!needles.length) return null;
 
-  const paths = [`${clean}/team`, `${clean}/about`, `${clean}/team/*`, clean];
+  const paths = [`${clean}/team`, `${clean}/about`, clean];
   for (const p of paths) {
     const snap = await newestSnapshot(p);
     if (!snap) continue;
     try {
       const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
-      const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(8000) });
+      const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) continue;
       const text = (await res.text()).toLowerCase();
       if (needles.some((n) => text.includes(n))) {
