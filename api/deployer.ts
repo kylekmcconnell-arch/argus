@@ -44,58 +44,64 @@ async function rpc(url: string, method: string, params: unknown): Promise<any> {
   return d.result;
 }
 
-// Walk getSignaturesForAddress back to the wallet's very first signature.
-async function oldestActivity(url: string, wallet: string): Promise<{ oldestSig: string | null; firstBlockTime: number | null; pages: number; truncated: boolean }> {
+// Walk getSignaturesForAddress back to the wallet's very first signatures. We
+// keep the oldest few (not just one) because the absolute-oldest tx is sometimes
+// the token mint itself; the funding sits in a neighbouring early tx.
+async function oldestActivity(url: string, wallet: string): Promise<{ oldestSigs: string[]; firstBlockTime: number | null; truncated: boolean }> {
   let before: string | undefined;
-  let oldestSig: string | null = null;
-  let firstBlockTime: number | null = null;
-  let pages = 0;
-  for (; pages < MAX_SIG_PAGES; pages++) {
+  let lastBatch: any[] = [];
+  for (let pages = 0; pages < MAX_SIG_PAGES; pages++) {
     const batch: any[] = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }]);
     if (!batch?.length) break;
-    const last = batch[batch.length - 1];
-    oldestSig = last.signature;
-    if (last.blockTime) firstBlockTime = last.blockTime;
-    if (batch.length < 1000) { before = undefined; return { oldestSig, firstBlockTime, pages: pages + 1, truncated: false }; }
-    before = last.signature;
+    lastBatch = batch;
+    if (batch.length < 1000) {
+      const tail = batch.slice(-6).reverse(); // oldest first
+      return { oldestSigs: tail.map((s) => s.signature), firstBlockTime: batch[batch.length - 1].blockTime ?? null, truncated: false };
+    }
+    before = batch[batch.length - 1].signature;
   }
-  return { oldestSig, firstBlockTime, pages, truncated: true };
+  const tail = lastBatch.slice(-6).reverse();
+  return { oldestSigs: tail.map((s) => s.signature), firstBlockTime: lastBatch[lastBatch.length - 1]?.blockTime ?? null, truncated: true };
 }
 
-// Parse the earliest transaction for the account that sent SOL INTO the wallet.
-async function fundingSource(url: string, wallet: string, sig: string): Promise<string | null> {
-  const tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }]);
-  if (!tx) return null;
+// Find the account that first sent SOL INTO the wallet, scanning the oldest few
+// transactions (oldest first) and recognising the common funding shapes.
+async function fundingSource(url: string, wallet: string, sigs: string[]): Promise<string | null> {
   const scan = (instrs: any[]): string | null => {
     for (const ix of instrs ?? []) {
       const p = ix.parsed;
-      if (p?.type === "transfer" && p.info?.destination === wallet && p.info?.source && p.info.source !== wallet) {
-        return p.info.source as string;
-      }
+      if (!p?.info) continue;
+      // plain SOL transfer to the wallet
+      if (p.type === "transfer" && p.info.destination === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
+      // wallet created + funded by another account (rent-funding the new account)
+      if ((p.type === "createAccount" || p.type === "createAccountWithSeed") && p.info.newAccount === wallet && p.info.source && p.info.source !== wallet) return p.info.source;
     }
     return null;
   };
-  // direct instructions, then inner (CPI) instructions
-  const direct = scan(tx.transaction?.message?.instructions);
-  if (direct) return direct;
-  for (const inner of tx.meta?.innerInstructions ?? []) {
-    const s = scan(inner.instructions);
-    if (s) return s;
-  }
-  // Fallback: balance-delta heuristic — the non-wallet account that lost the most
-  // SOL in a tx that credited the wallet is the most likely funder.
-  const keys: string[] = (tx.transaction?.message?.accountKeys ?? []).map((k: any) => (typeof k === "string" ? k : k.pubkey));
-  const pre: number[] = tx.meta?.preBalances ?? [];
-  const post: number[] = tx.meta?.postBalances ?? [];
-  const wi = keys.indexOf(wallet);
-  if (wi >= 0 && post[wi] > pre[wi]) {
-    let best = -1, bestDrop = 0;
-    for (let i = 0; i < keys.length; i++) {
-      if (i === wi) continue;
-      const drop = pre[i] - post[i];
-      if (drop > bestDrop) { bestDrop = drop; best = i; }
+  for (const sig of sigs) {
+    const tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }]);
+    if (!tx) continue;
+    const direct = scan(tx.transaction?.message?.instructions);
+    if (direct) return direct;
+    for (const inner of tx.meta?.innerInstructions ?? []) {
+      const s = scan(inner.instructions);
+      if (s) return s;
     }
-    if (best >= 0) return keys[best];
+    // Balance-delta fallback: if the wallet gained SOL in this tx, the account
+    // that lost the most SOL is the funder. Skip system/vote programs.
+    const keys: string[] = (tx.transaction?.message?.accountKeys ?? []).map((k: any) => (typeof k === "string" ? k : k.pubkey));
+    const pre: number[] = tx.meta?.preBalances ?? [];
+    const post: number[] = tx.meta?.postBalances ?? [];
+    const wi = keys.indexOf(wallet);
+    if (wi >= 0 && (post[wi] ?? 0) > (pre[wi] ?? 0)) {
+      let best = -1, bestDrop = 0;
+      for (let i = 0; i < keys.length; i++) {
+        if (i === wi) continue;
+        const drop = (pre[i] ?? 0) - (post[i] ?? 0);
+        if (drop > bestDrop && drop > 1_000_000) { bestDrop = drop; best = i; } // > ~0.001 SOL
+      }
+      if (best >= 0) return keys[best];
+    }
   }
   return null;
 }
@@ -122,9 +128,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const url = `https://mainnet.helius-rpc.com/?api-key=${key}`;
   try {
-    const { oldestSig, firstBlockTime, truncated } = await oldestActivity(url, wallet);
+    const { oldestSigs, firstBlockTime, truncated } = await oldestActivity(url, wallet);
     const [funderAddr, created] = await Promise.all([
-      oldestSig ? fundingSource(url, wallet, oldestSig) : Promise.resolve(null),
+      oldestSigs.length ? fundingSource(url, wallet, oldestSigs) : Promise.resolve(null),
       tokensCreated(url, wallet),
     ]);
     const walletAgeDays = firstBlockTime ? Math.max(0, Math.round((Date.now() / 1000 - firstBlockTime) / 86400)) : null;
