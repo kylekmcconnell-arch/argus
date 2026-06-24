@@ -35,8 +35,26 @@ export interface LiveHandlers {
 
 // Streams /api/audit via fetch + manual SSE parsing (EventSource can't be
 // aborted as cleanly and we want a single GET). Returns an abort function.
+//
+// Resilience: the audit MUST reach a terminal state. The backend can die mid
+// stream (function duration cap, network drop) without ever sending a `done` or
+// `error` event; without guarding for that the UI hangs on "working…" forever.
+// We track whether a terminal handler has fired, surface an error if the stream
+// closes early, and run a watchdog just past the function's own 120s ceiling.
 export function streamAudit(handle: string, h: LiveHandlers): () => void {
   const ctrl = new AbortController();
+  let settled = false;
+  const settle = (fn: () => void) => {
+    if (settled) return;
+    settled = true;
+    fn();
+  };
+  // Just past the server's maxDuration (120s): if nothing finalized, fail loud.
+  const watchdog = setTimeout(() => {
+    settle(() => h.onError("timed out: the audit took too long and did not finish"));
+    ctrl.abort();
+  }, 135000);
+
   (async () => {
     try {
       const res = await fetch(`/api/audit?handle=${encodeURIComponent(handle)}`, {
@@ -44,7 +62,7 @@ export function streamAudit(handle: string, h: LiveHandlers): () => void {
         headers: { accept: "text/event-stream" },
       });
       if (!res.ok || !res.body) {
-        h.onError("backend error");
+        settle(() => h.onError("backend error"));
         return;
       }
       const reader = res.body.getReader();
@@ -62,13 +80,22 @@ export function streamAudit(handle: string, h: LiveHandlers): () => void {
           if (!ev || !dataLine) continue;
           const data = JSON.parse(dataLine);
           if (ev === "step") h.onStep(data as TraceStep);
-          else if (ev === "done") h.onDone(data as Dossier);
-          else if (ev === "error") h.onError(data?.error ?? "error");
+          else if (ev === "done") settle(() => h.onDone(data as Dossier));
+          else if (ev === "error") settle(() => h.onError(data?.error ?? "error"));
         }
       }
+      // Stream closed. If we never saw a done/error event, the backend ended
+      // early — surface it instead of leaving the UI spinning forever.
+      settle(() => h.onError("the audit stream closed before finishing — please retry"));
     } catch (e) {
-      if ((e as Error).name !== "AbortError") h.onError(String(e));
+      if ((e as Error).name !== "AbortError") settle(() => h.onError(String(e)));
+    } finally {
+      clearTimeout(watchdog);
     }
   })();
-  return () => ctrl.abort();
+
+  return () => {
+    clearTimeout(watchdog);
+    ctrl.abort();
+  };
 }
