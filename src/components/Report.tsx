@@ -7,6 +7,8 @@ import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
+import { Avatar } from "./Avatar";
+import { xAvatar } from "../lib/avatars";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -342,9 +344,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
       <div className="mx-auto max-w-5xl px-5">
         {/* subject identity */}
         <div className="mt-6 flex flex-wrap items-start gap-4">
-          <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line-2 bg-panel text-2xl text-signal">
-            {f.avatar}
-          </div>
+          <Avatar src={xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-[19px] font-semibold tracking-tight text-ink">{f.display_name}</h1>
@@ -463,7 +463,9 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
                 const vm = c.otherVerdict ? verdictMeta(c.otherVerdict) : null;
                 return (
                   <div key={c.other} className="flex items-start justify-between gap-3 px-4 py-2.5">
-                    <div className="min-w-0">
+                    <div className="flex min-w-0 items-start gap-2">
+                      <Avatar src={/^@[A-Za-z0-9_]{2,30}$/.test(c.other) ? xAvatar(c.other) : null} letter={(c.other.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[9px]" />
+                      <div className="min-w-0">
                       <span className="mono text-[12.5px] text-ink">{c.other}</span>
                       {vm && <span className="mono ml-2 text-[10px]" style={{ color: vm.color }}>{vm.label}</span>}
                       <div className="mt-0.5 text-[11.5px] leading-snug text-ink-dim">
@@ -480,6 +482,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
                             </span>
                           ))}</span>
                         )}
+                      </div>
                       </div>
                     </div>
                     {onAudit && (

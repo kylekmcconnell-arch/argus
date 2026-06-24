@@ -1,6 +1,10 @@
 import { useRef, useState } from "react";
 import { verdictMeta } from "../lib/verdict";
 import type { Investigation } from "../lib/investigation";
+import { Avatar } from "./Avatar";
+import { xAvatar } from "../lib/avatars";
+
+const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
 const MAX_FOUNDER_AUDITS = 5;
 
@@ -228,6 +232,7 @@ export function InvestigationReport({
                     {teamPeople.map((m) => (
                       <div key={m.handle ?? m.name} className="flex items-center justify-between gap-2">
                         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          <Avatar src={m.handle ? xAvatar(m.handle) : null} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                           <span className="text-[12.5px] text-ink">{m.name}</span>
                           {m.handle && m.handle.replace(/^@/, "").toLowerCase() !== m.name.toLowerCase() && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
                           {m.role && <span className="text-[10.5px] text-ink-faint">{m.role}</span>}
@@ -262,6 +267,7 @@ export function InvestigationReport({
                       return (
                         <div key={a.claimed_endorser_handle} className="flex items-center justify-between gap-2">
                           <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                            <Avatar src={a.claimed_endorser_handle ? xAvatar(a.claimed_endorser_handle) : null} letter={initial(a.claimed_endorser_handle ?? "?")} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                             <span className="mono text-[12.5px] text-ink">{a.claimed_endorser_handle}</span>
                             <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${c.color}1a`, color: c.color }}>{c.label}</span>
                             {a.follows_subject === false && <span className="text-[10px] text-ink-faint">does not follow project</span>}
@@ -292,6 +298,7 @@ export function InvestigationReport({
           <div className="mt-3">
             <Card title={`Project account · ${projectAccount.handle}`}>
               <div className="flex flex-wrap items-center gap-2">
+                <Avatar src={xAvatar(projectAccount.handle)} letter={initial(projectAccount.handle)} size={28} rounded="rounded-lg" letterClass="text-[12px]" />
                 <span className="text-[13.5px] font-medium text-ink">{projectAccount.display_name || projectAccount.handle}</span>
                 <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} />
                 <span className="ml-auto text-[11px] text-ink-faint">{projectAccount.followers} followers · joined {projectAccount.joined}</span>

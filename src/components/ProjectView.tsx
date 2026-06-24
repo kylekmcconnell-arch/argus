@@ -2,6 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { WebPerson } from "../lib/investigation";
 import { recordContribution, projectPeopleContribution, getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
+import { Avatar } from "./Avatar";
+import { xAvatar } from "../lib/avatars";
+
+const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
 // Dig everyone tied to a project by NAME (and domain if known), via the same
 // web/LinkedIn/X search the recon uses. Name-only is fine for a bare venture.
@@ -91,6 +95,7 @@ export function ProjectView({
               {people.map((p) => (
                 <div key={p.handle ?? p.name} className="flex items-start justify-between gap-3">
                   <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                    <Avatar src={p.handle ? xAvatar(p.handle) : null} letter={initial(p.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                     <span className="text-[12.5px] text-ink">{p.name}</span>
                     {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
                     <span className="text-[10.5px] text-ink-faint">{p.role}</span>
