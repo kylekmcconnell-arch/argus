@@ -5,6 +5,7 @@
 // is the seed of the data asset, kept in localStorage until there is a backend.
 import type { GraphContribution } from "./network";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
+import type { Dossier } from "../data/dossier";
 
 const KEY = "argus:graphstore";
 const CAP = 80; // most recent contributions
@@ -41,4 +42,13 @@ function canonicalKey(c: GraphContribution): string {
 // subject node with its verdict so the network colors it correctly.
 export function tokenContribution(symbol: string, verdict: string, nodes: PanoptesNode[], edges: PanoptesEdge[]): GraphContribution {
   return { handle: "$" + symbol, verdict, nodes, edges };
+}
+
+// Convenience: build a contribution from a person audit. This is what lets the
+// graph compound across people, not just tokens — once a subject's discovered
+// affiliations (Company nodes) are recorded, a later audit of that same company,
+// or of another person tied to it, bridges to them automatically. Affiliation
+// edges become the connective tissue of the network.
+export function personContribution(d: Dossier): GraphContribution {
+  return { handle: d.handle, verdict: d.report.composite_verdict, nodes: d.graph.nodes, edges: d.graph.edges };
 }

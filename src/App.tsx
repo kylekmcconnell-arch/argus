@@ -14,7 +14,7 @@ import { TrackRecordPage } from "./components/TrackRecordPage";
 import { ReconPage } from "./components/ReconPage";
 import { AdminPage } from "./components/AdminPage";
 import { logAudit } from "./lib/auditlog";
-import { recordContribution, tokenContribution } from "./graph/store";
+import { recordContribution, tokenContribution, personContribution } from "./graph/store";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { InvestigationRun } from "./components/InvestigationRun";
@@ -138,6 +138,9 @@ export default function App() {
       summary: d.headline,
       flags: [d.report.cap_applied ? `cap:${d.report.cap_applied}` : "", `role:${d.report.governing_role}`].filter(Boolean),
     });
+    // compound the trust graph with this person and their affiliations, so the
+    // network bridges them to any token/company/person later tied to the same node
+    recordContribution(personContribution(d));
   };
 
   const onRunDone = useCallback(() => {

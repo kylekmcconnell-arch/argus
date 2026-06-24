@@ -5,7 +5,8 @@ var PROVIDERS = [
   { id: "coingecko", label: "CoinGecko", env: ["COINGECKO_API_KEY"], free: true, feeds: "token price/mcap, call performance (K2)" },
   { id: "dexscreener", label: "DexScreener", env: [], free: true, feeds: "live DEX liquidity/volume, rug signals" },
   { id: "crunchbase", label: "Crunchbase", env: ["CRUNCHBASE_API_KEY"], free: false, feeds: "ventures, investors, repeat backing (F2/F3/I2)" },
-  { id: "peopledatalabs", label: "People Data Labs", env: ["PDL_API_KEY"], free: false, feeds: "identity, career history (F1/F2)" },
+  { id: "peopledatalabs", label: "People Data Labs", env: ["PDL_API_KEY"], free: false, feeds: "identity, off-LinkedIn career history (F1/F2)" },
+  { id: "github", label: "GitHub forensics", env: ["GITHUB_TOKEN"], free: false, feeds: "twitter-linked identity, org/repo affiliations (F1/F2)" },
   { id: "reddit", label: "Reddit", env: ["REDDIT_CLIENT_ID", "REDDIT_CLIENT_SECRET"], free: true, feeds: "community FUD / reputation (F5/I5/AG4)" },
   { id: "helius", label: "Helius (Solana)", env: ["HELIUS_API_KEY"], free: true, feeds: "wallet forensics, on-chain conduct (K4)" },
   { id: "bitquery", label: "Bitquery (multi-chain)", env: ["BITQUERY_API_KEY"], free: false, feeds: "deployer/holder forensics, rug confirmation" },
@@ -1345,17 +1346,24 @@ async function acknowledgment(endorser, subject) {
     return null;
   }
 }
-async function discoverVentures(handle, name) {
+async function discoverAffiliations(handle, name) {
   const h = handle.replace(/^@/, "");
-  const system = 'You are a forensic due-diligence researcher with live web and X search. Find the companies, crypto projects, or ventures that THIS SPECIFIC person (the holder of the given X account) has founded, co-founded, or led, with PUBLIC evidence that ties that exact person to the venture (their own site/X, press, Crunchbase, GitHub). Reply with ONLY compact JSON: {"ventures":[{"name":"","role":"founder|cofounder|exec|advisor|contributor","year":"","evidence":"one short source phrase"}]}. Include ONLY ventures you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"ventures":[]}. NEVER invent, guess, or include a venture just because the name is common.';
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). What companies or projects have they founded, co-founded, or led? Search the web and X.`);
+  const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Look beyond their own bio and LinkedIn: accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase. There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Search the web and X, including team and accelerator pages.`);
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
     const parsed = JSON.parse(m[0]);
-    const out = Array.isArray(parsed.ventures) ? parsed.ventures : [];
-    return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).slice(0, 8);
+    const out = Array.isArray(parsed.affiliations) ? parsed.affiliations : Array.isArray(parsed.ventures) ? parsed.ventures : [];
+    return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).map((v) => ({
+      name: v.name.trim(),
+      role: v.role || "affiliate",
+      year: v.year,
+      evidence: v.evidence,
+      x_handle: v.x_handle && /^@?[A-Za-z0-9_]{2,30}$/.test(v.x_handle) ? "@" + v.x_handle.replace(/^@/, "") : void 0,
+      domain: v.domain && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(v.domain) ? v.domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : void 0
+    })).slice(0, 10);
   } catch {
     return [];
   }
@@ -1459,6 +1467,123 @@ var peopledatalabsAdapter = {
     ctx.evidence.profile.identity_confidence = person.linkedin ? "Probable" : ctx.evidence.profile.identity_confidence;
     ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} prior roles on record.`;
     ctx.emit({ phase: "P1 \xB7 Identity", label: "Identity resolved", detail: `${person.fullName} \xB7 ${person.experience.length} verified roles`, source: "peopledatalabs", tone: "good" });
+    const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
+    const added = [];
+    for (const x of person.experience) {
+      const company = (x.company ?? "").trim();
+      if (!company || have.has(company.toLowerCase())) continue;
+      have.add(company.toLowerCase());
+      const period = [x.start, x.end].filter(Boolean).join("\u2013");
+      ctx.evidence.ventures.push({
+        project_name: company,
+        role: x.title || "role on record",
+        period,
+        outcome: "Unknown" /* UNKNOWN */,
+        notes: "People Data Labs employment record"
+      });
+      added.push(company);
+    }
+    if (added.length) {
+      ctx.emit({ phase: "P1 \xB7 Identity", label: "Career history", detail: `${added.length} prior employer(s) on record (incl. roles not on their profile): ${added.slice(0, 5).join(", ")}.`, source: "peopledatalabs", tone: "good" });
+    }
+  }
+};
+
+// server/adapters/github.ts
+var GH = "https://api.github.com";
+var headers = (key) => ({
+  authorization: `Bearer ${key}`,
+  accept: "application/vnd.github+json",
+  "user-agent": "argus-due-diligence"
+});
+async function ghJson(path, key) {
+  try {
+    const res = await fetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(8e3) });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+async function resolveGithub(handle, name, key) {
+  const h = handle.replace(/^@/, "").toLowerCase();
+  const candidates = /* @__PURE__ */ new Set([h]);
+  for (const q of [name, handle.replace(/^@/, "")]) {
+    if (!q) continue;
+    const found = await ghJson(`/search/users?q=${encodeURIComponent(q)}&per_page=5`, key);
+    for (const it of found?.items ?? []) candidates.add(it.login);
+  }
+  let weak = null;
+  for (const login of [...candidates].slice(0, 8)) {
+    const u = await ghJson(`/users/${encodeURIComponent(login)}`, key);
+    if (!u) continue;
+    if ((u.twitter_username ?? "").toLowerCase() === h) {
+      return { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "gold" };
+    }
+    if (!weak && u.login.toLowerCase() === h) {
+      weak = { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "weak" };
+    }
+  }
+  return weak;
+}
+async function githubAffiliations(login, key) {
+  const out = /* @__PURE__ */ new Map();
+  const orgs = await ghJson(`/users/${encodeURIComponent(login)}/orgs`, key);
+  for (const o of orgs ?? []) out.set(o.login.toLowerCase(), { org: o.login, description: o.description, via: "public org member" });
+  const repos = await ghJson(`/users/${encodeURIComponent(login)}/repos?sort=pushed&type=all&per_page=30`, key);
+  for (const r of repos ?? []) {
+    if (r.fork) continue;
+    const owner = r.owner;
+    if (owner.type === "Organization" && owner.login.toLowerCase() !== login.toLowerCase()) {
+      const k = owner.login.toLowerCase();
+      if (!out.has(k)) out.set(k, { org: owner.login, via: `repo ${r.name}` });
+    }
+  }
+  return [...out.values()].slice(0, 10);
+}
+var githubAdapter = {
+  id: "github",
+  label: "GitHub forensics",
+  available: () => !!env("GITHUB_TOKEN"),
+  async run(ctx) {
+    const key = env("GITHUB_TOKEN");
+    if (!key) return;
+    const name = ctx.evidence.profile.display_name;
+    ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub resolution", detail: `Matching ${ctx.handle} to a GitHub account by linked X handle\u2026`, source: "github", tone: "neutral" });
+    const match = await resolveGithub(ctx.handle, name, key);
+    if (!match) {
+      ctx.emit({ phase: "P1 \xB7 Identity", label: "No GitHub match", detail: "No GitHub account links back to this X handle.", source: "github", tone: "neutral" });
+      return;
+    }
+    if (match.confidence === "weak") {
+      ctx.emit({ phase: "P1 \xB7 Identity", label: "Possible GitHub", detail: `github.com/${match.login} shares the handle but does not link back to X. Unconfirmed, not attributed.`, source: "github", tone: "warn" });
+      return;
+    }
+    ctx.evidence.profile.identity_confidence = "Probable";
+    ctx.evidence.profile.identity_note = `GitHub github.com/${match.login}${match.name ? ` (${match.name})` : ""} links back to this X handle.`;
+    ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub confirmed", detail: `github.com/${match.login} links back to ${ctx.handle} (twitter_username match).`, source: "github", tone: "good" });
+    const affs = await githubAffiliations(match.login, key);
+    if (!affs.length) {
+      ctx.emit({ phase: "P1 \xB7 Identity", label: "No public orgs", detail: "GitHub account has no public org memberships or org-repo contributions.", source: "github", tone: "neutral" });
+      return;
+    }
+    const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
+    const added = [];
+    for (const a of affs) {
+      if (have.has(a.org.toLowerCase())) continue;
+      have.add(a.org.toLowerCase());
+      ctx.evidence.ventures.push({
+        project_name: a.org,
+        role: "github contributor",
+        period: "",
+        outcome: "Active" /* ACTIVE */,
+        evidence_url: `https://github.com/${a.org}`,
+        notes: `GitHub: ${a.via}`
+      });
+      ctx.evidence.associates.push({ associate_handle: a.org, relation: "github org", evidence_url: `https://github.com/${a.org}` });
+      added.push(a.org);
+    }
+    ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub affiliations", detail: `${added.length} org(s) this account builds with (near-permanent, hard to scrub): ${added.slice(0, 5).join(", ")}.`, source: "github", tone: "good" });
   }
 };
 
@@ -1577,9 +1702,9 @@ async function tokenByContract(chain, address) {
   const key = env("COINGECKO_API_KEY");
   const platform = PLATFORM[chain.toLowerCase()] ?? chain.toLowerCase();
   const base = key ? PRO : PUBLIC;
-  const headers = key ? { "x-cg-pro-api-key": key } : {};
+  const headers2 = key ? { "x-cg-pro-api-key": key } : {};
   try {
-    const res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers });
+    const res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers2 });
     if (!res.ok) return null;
     const d = await res.json();
     return {
@@ -1725,9 +1850,62 @@ var onchainAdapter = {
   }
 };
 
+// server/adapters/wayback.ts
+var CDX = "https://web.archive.org/cdx/search/cdx";
+async function newestSnapshot(urlPath) {
+  try {
+    const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-3`;
+    const res = await fetch(CDX + qs, { signal: AbortSignal.timeout(7e3) });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    if (!Array.isArray(rows) || rows.length < 2) return null;
+    const last = rows[rows.length - 1];
+    const ti = rows[0].indexOf("timestamp");
+    const oi = rows[0].indexOf("original");
+    if (ti < 0 || oi < 0) return null;
+    return { timestamp: last[ti], original: last[oi] };
+  } catch {
+    return null;
+  }
+}
+async function archivedAffiliation(domain, name) {
+  const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  if (!clean || !name) return null;
+  const needles = nameNeedles(name);
+  if (!needles.length) return null;
+  const paths = [`${clean}/team`, `${clean}/about`, `${clean}/team/*`, clean];
+  for (const p of paths) {
+    const snap = await newestSnapshot(p);
+    if (!snap) continue;
+    try {
+      const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
+      const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(8e3) });
+      if (!res.ok) continue;
+      const text = (await res.text()).toLowerCase();
+      if (needles.some((n) => text.includes(n))) {
+        return {
+          url: `https://web.archive.org/web/${snap.timestamp}/${snap.original}`,
+          year: snap.timestamp.slice(0, 4),
+          where: p.replace(clean, "").replace(/^\//, "") || "homepage"
+        };
+      }
+    } catch {
+    }
+  }
+  return null;
+}
+function nameNeedles(name) {
+  const n = name.trim().toLowerCase();
+  const toks = n.split(/\s+/).filter((t) => t.length > 1);
+  if (toks.length < 2) return [];
+  const out = /* @__PURE__ */ new Set([n, `${toks[0]} ${toks[toks.length - 1]}`]);
+  return [...out];
+}
+
 // server/orchestrate.ts
 var ADAPTERS = [
   xAdapter,
+  githubAdapter,
   peopledatalabsAdapter,
   crunchbaseAdapter,
   dexscreenerAdapter,
@@ -1735,7 +1913,7 @@ var ADAPTERS = [
   redditAdapter,
   onchainAdapter
 ];
-var KEYED = /* @__PURE__ */ new Set(["x", "peopledatalabs", "crunchbase", "reddit", "onchain"]);
+var KEYED = /* @__PURE__ */ new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain"]);
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 function parseOutcome(s) {
   if (!s) return "Unknown" /* UNKNOWN */;
@@ -1795,22 +1973,51 @@ async function coldIntake(ctx) {
     const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} \u2014 now verifying each.`, source: "claude", tone: "neutral" });
   }
-  ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover ventures", detail: "Searching the web and X for projects this person founded or led\u2026", source: "grok", tone: "neutral" });
-  const discovered = await discoverVentures(ctx.handle, ctx.evidence.profile.display_name);
+  ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Searching the web and X for every company this person is publicly tied to, not just ones they founded\u2026", source: "grok", tone: "neutral" });
+  const discovered = await discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name);
   if (discovered.length) {
     const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
     for (const v of discovered) {
       if (have.has(v.name.toLowerCase())) continue;
       have.add(v.name.toLowerCase());
-      ctx.evidence.ventures.push({ project_name: v.name, role: v.role || "founder", period: v.year ?? "", outcome: "Active" /* ACTIVE */ });
+      const corrob = [];
+      let evidenceUrl;
+      if (v.domain) {
+        const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name);
+        if (arch) {
+          corrob.push(`archived ${arch.where} page (${arch.year})`);
+          evidenceUrl = arch.url;
+        }
+      }
+      if (v.x_handle) {
+        const follows = await followsSubject(v.x_handle, ctx.handle);
+        if (follows) corrob.push(`${v.x_handle} follows the subject`);
+      }
+      const corroborated = corrob.length > 0;
+      const note = [v.evidence, corroborated ? `corroborated: ${corrob.join("; ")}` : "single-source lead, unverified"].filter(Boolean).join(" \xB7 ");
+      ctx.evidence.ventures.push({
+        project_name: v.name,
+        role: v.role,
+        period: v.year ?? "",
+        outcome: "Active" /* ACTIVE */,
+        evidence_url: evidenceUrl ?? null,
+        notes: note
+      });
+      ctx.emit({
+        phase: "P0 \xB7 Intake",
+        label: corroborated ? `Affiliation corroborated \xB7 ${v.name}` : `Affiliation lead \xB7 ${v.name}`,
+        detail: `${v.role}${v.year ? `, ${v.year}` : ""}${v.evidence ? ` \u2014 ${v.evidence}` : ""}. ${corroborated ? corrob.join("; ") + "." : "Single source; shown as an unverified lead."}`,
+        source: "grok",
+        tone: corroborated ? "good" : "neutral"
+      });
     }
     const founderish = discovered.some((v) => /founder|cofounder/i.test(v.role));
     if (founderish && (!ctx.evidence.roles.length || ctx.evidence.roles.every((r) => r === "MEMBER" /* MEMBER */))) {
       ctx.evidence.roles = ["FOUNDER" /* FOUNDER */];
     }
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "Ventures discovered", detail: `${discovered.length} public venture${discovered.length === 1 ? "" : "s"} tied to the subject (leads, pending verification): ${discovered.slice(0, 4).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Affiliations discovered", detail: `${discovered.length} public affiliation${discovered.length === 1 ? "" : "s"} tied to the subject: ${discovered.slice(0, 5).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
   } else {
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "No ventures found", detail: "No public ventures could be attributed to this person via web/X search.", source: "grok", tone: "neutral" });
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "No affiliations found", detail: "No public company affiliations could be attributed to this person via web/X search.", source: "grok", tone: "neutral" });
   }
 }
 function axisCatalog(roles) {

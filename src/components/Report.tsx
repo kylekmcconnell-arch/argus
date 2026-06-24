@@ -421,6 +421,39 @@ export function Report({ dossier, onReset }: { dossier: Dossier; onReset: () => 
 
         {/* signature modules */}
         <div className="grid gap-3 lg:grid-cols-2">
+          {evidence.ventures.length > 0 && (
+            <div className="min-w-0">
+              <Section title="Ventures & affiliations" kicker="every company tied to them · corroborated where possible">
+                <Card className="divide-y divide-line/60">
+                  {evidence.ventures.map((v, i) => {
+                    const corroborated = /corroborated:/i.test(v.notes ?? "");
+                    const isLead = !corroborated && /unverified|lead/i.test(v.notes ?? "");
+                    return (
+                      <div key={i} className="flex items-center gap-2 px-4 py-2.5 text-[12.5px]">
+                        <span
+                          className="h-1.5 w-1.5 shrink-0 rounded-full"
+                          style={{ background: v.outcome === "Rug" ? "var(--color-avoid)" : v.outcome === "Acquisition" || v.outcome === "IPO" ? "var(--color-pass)" : "var(--color-ink-faint)" }}
+                        />
+                        <span className="truncate text-ink">{v.project_name}</span>
+                        <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-dim">{v.role}</span>
+                        {v.period && <span className="shrink-0 text-[11px] text-ink-faint">{v.period}</span>}
+                        {v.evidence_url && (
+                          <a href={v.evidence_url} target="_blank" rel="noreferrer" className="shrink-0 text-[10.5px] text-signal-dim hover:underline">source</a>
+                        )}
+                        <span
+                          className="mono ml-auto shrink-0 text-[10px]"
+                          style={{ color: corroborated ? "var(--color-pass)" : "var(--color-ink-faint)" }}
+                        >
+                          {corroborated ? "corroborated" : isLead ? "lead" : ""}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </Card>
+              </Section>
+            </div>
+          )}
+
           {corroborationRows.length > 0 && (
             <div className="min-w-0">
               <Section title="Testimonial corroboration" kicker="claimed vs. acknowledged">
@@ -455,26 +488,6 @@ export function Report({ dossier, onReset }: { dossier: Dossier; onReset: () => 
                         {founderSummary.repeat_backing.strength}
                       </div>
                     </div>
-                  </div>
-                  <div className="mt-3 space-y-1.5 border-t border-line pt-3">
-                    {evidence.ventures.map((v, i) => (
-                      <div key={i} className="flex items-center gap-2 text-[12.5px]">
-                        <span
-                          className="h-1.5 w-1.5 rounded-full"
-                          style={{
-                            background:
-                              v.outcome === "Rug"
-                                ? "var(--color-avoid)"
-                                : v.outcome === "Acquisition" || v.outcome === "IPO"
-                                ? "var(--color-pass)"
-                                : "var(--color-ink-faint)",
-                          }}
-                        />
-                        <span className="text-ink">{v.project_name}</span>
-                        <span className="text-ink-faint">{v.period}</span>
-                        <span className="mono ml-auto text-[11.5px] text-ink-dim">{v.outcome}{v.acquirer ? ` → ${v.acquirer}` : ""}</span>
-                      </div>
-                    ))}
                   </div>
                   {founderSummary.repeat_backing.repeat_backers.length > 0 && (
                     <p className="mt-2 text-[12px] text-ink-faint">

@@ -4,6 +4,7 @@
 
 import type { Adapter, CollectContext } from "./types";
 import { env } from "../config";
+import { VentureOutcome } from "../../src/engine";
 
 const BASE = "https://api.peopledatalabs.com/v5";
 
@@ -53,5 +54,28 @@ export const peopledatalabsAdapter: Adapter = {
     ctx.evidence.profile.identity_confidence = person.linkedin ? "Probable" : ctx.evidence.profile.identity_confidence;
     ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} prior roles on record.`;
     ctx.emit({ phase: "P1 · Identity", label: "Identity resolved", detail: `${person.fullName} · ${person.experience.length} verified roles`, source: "peopledatalabs", tone: "good" });
+
+    // The career history is the off-LinkedIn affiliation gold PDL aggregates from
+    // far more than LinkedIn — push each prior role into ventures so it surfaces
+    // and feeds the trust graph, instead of being collapsed into a count.
+    const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
+    const added: string[] = [];
+    for (const x of person.experience) {
+      const company = (x.company ?? "").trim();
+      if (!company || have.has(company.toLowerCase())) continue;
+      have.add(company.toLowerCase());
+      const period = [x.start, x.end].filter(Boolean).join("–");
+      ctx.evidence.ventures.push({
+        project_name: company,
+        role: x.title || "role on record",
+        period,
+        outcome: VentureOutcome.UNKNOWN,
+        notes: "People Data Labs employment record",
+      });
+      added.push(company);
+    }
+    if (added.length) {
+      ctx.emit({ phase: "P1 · Identity", label: "Career history", detail: `${added.length} prior employer(s) on record (incl. roles not on their profile): ${added.slice(0, 5).join(", ")}.`, source: "peopledatalabs", tone: "good" });
+    }
   },
 };

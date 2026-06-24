@@ -17,16 +17,19 @@ import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims } from "./agent";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverVentures } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, followsSubject } from "./adapters/x";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
+import { githubAdapter } from "./adapters/github";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
 import { dexscreenerAdapter } from "./adapters/dexscreener";
 import { coingeckoAdapter } from "./adapters/coingecko";
 import { redditAdapter } from "./adapters/reddit";
 import { onchainAdapter } from "./adapters/onchain";
+import { archivedAffiliation } from "./adapters/wayback";
 
 const ADAPTERS: Adapter[] = [
   xAdapter,
+  githubAdapter,
   peopledatalabsAdapter,
   crunchbaseAdapter,
   dexscreenerAdapter,
@@ -37,7 +40,7 @@ const ADAPTERS: Adapter[] = [
 
 // Adapters that require a key to do anything meaningful (keyless DEX/CG no-op
 // without a promoted contract, so they don't count as "live collection").
-const KEYED = new Set(["x", "peopledatalabs", "crunchbase", "reddit", "onchain"]);
+const KEYED = new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain"]);
 
 const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -108,24 +111,55 @@ async function coldIntake(ctx: CollectContext) {
     ctx.emit({ phase: "P0 · Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} — now verifying each.`, source: "claude", tone: "neutral" });
   }
 
-  // ── Identity discovery: ventures the subject is publicly tied to, beyond what
-  //    they say about themselves on X (the empty-bio founder case). ──
-  ctx.emit({ phase: "P0 · Intake", label: "Discover ventures", detail: "Searching the web and X for projects this person founded or led…", source: "grok", tone: "neutral" });
-  const discovered = await discoverVentures(ctx.handle, ctx.evidence.profile.display_name);
+  // ── Affiliation discovery: every venture the subject is publicly tied to in
+  //    ANY capacity (founded, led, worked at, contributed to, advised), beyond
+  //    their own bio and LinkedIn. Each lead is then corroborated against an
+  //    independent source (the venture's X follow-graph, an archived team page)
+  //    so a web hit becomes a graded tie, never a bare assertion. ──
+  ctx.emit({ phase: "P0 · Intake", label: "Discover affiliations", detail: "Searching the web and X for every company this person is publicly tied to, not just ones they founded…", source: "grok", tone: "neutral" });
+  const discovered = await discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name);
   if (discovered.length) {
     const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
     for (const v of discovered) {
       if (have.has(v.name.toLowerCase())) continue;
       have.add(v.name.toLowerCase());
-      ctx.evidence.ventures.push({ project_name: v.name, role: v.role || "founder", period: v.year ?? "", outcome: VentureOutcome.ACTIVE });
+
+      // Corroborate the lead against a second, independent source.
+      const corrob: string[] = [];
+      let evidenceUrl: string | undefined;
+      if (v.domain) {
+        const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name);
+        if (arch) { corrob.push(`archived ${arch.where} page (${arch.year})`); evidenceUrl = arch.url; }
+      }
+      if (v.x_handle) {
+        const follows = await followsSubject(v.x_handle, ctx.handle);
+        if (follows) corrob.push(`${v.x_handle} follows the subject`);
+      }
+      const corroborated = corrob.length > 0;
+      const note = [v.evidence, corroborated ? `corroborated: ${corrob.join("; ")}` : "single-source lead, unverified"].filter(Boolean).join(" · ");
+      ctx.evidence.ventures.push({
+        project_name: v.name,
+        role: v.role,
+        period: v.year ?? "",
+        outcome: VentureOutcome.ACTIVE,
+        evidence_url: evidenceUrl ?? null,
+        notes: note,
+      });
+      ctx.emit({
+        phase: "P0 · Intake",
+        label: corroborated ? `Affiliation corroborated · ${v.name}` : `Affiliation lead · ${v.name}`,
+        detail: `${v.role}${v.year ? `, ${v.year}` : ""}${v.evidence ? ` — ${v.evidence}` : ""}. ${corroborated ? corrob.join("; ") + "." : "Single source; shown as an unverified lead."}`,
+        source: "grok",
+        tone: corroborated ? "good" : "neutral",
+      });
     }
     const founderish = discovered.some((v) => /founder|cofounder/i.test(v.role));
     if (founderish && (!ctx.evidence.roles.length || ctx.evidence.roles.every((r) => r === SubjectClass.MEMBER))) {
       ctx.evidence.roles = [SubjectClass.FOUNDER];
     }
-    ctx.emit({ phase: "P0 · Intake", label: "Ventures discovered", detail: `${discovered.length} public venture${discovered.length === 1 ? "" : "s"} tied to the subject (leads, pending verification): ${discovered.slice(0, 4).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
+    ctx.emit({ phase: "P0 · Intake", label: "Affiliations discovered", detail: `${discovered.length} public affiliation${discovered.length === 1 ? "" : "s"} tied to the subject: ${discovered.slice(0, 5).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
   } else {
-    ctx.emit({ phase: "P0 · Intake", label: "No ventures found", detail: "No public ventures could be attributed to this person via web/X search.", source: "grok", tone: "neutral" });
+    ctx.emit({ phase: "P0 · Intake", label: "No affiliations found", detail: "No public company affiliations could be attributed to this person via web/X search.", source: "grok", tone: "neutral" });
   }
 }
 

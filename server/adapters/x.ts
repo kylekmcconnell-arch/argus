@@ -155,26 +155,53 @@ export async function acknowledgment(endorser: string, subject: string): Promise
   }
 }
 
-// ── Grok identity discovery: find ventures the subject is publicly tied to ──
-// Many founders have an empty bio and a project history that lives OFF their X
-// (companies, press, Crunchbase). Grok Live Search (web + X) finds those leads.
-// Strictly grounded: returns only ventures with a cited source, never guesses.
-export interface DiscoveredVenture { name: string; role: string; year?: string; evidence?: string }
+// ── Grok identity discovery: every venture/affiliation the subject is publicly
+//    tied to, not just the ones they founded. Many people's real history lives
+//    OFF their X and OFF their LinkedIn (early-employee/contributor roles, press,
+//    accelerator pages, GitHub). A founder-only grammar misses all of it, so we
+//    ask for the full affiliation set: founded, led, worked at, contributed to,
+//    or otherwise publicly tied. Strictly grounded: only ties with a real, cited
+//    source, never guesses. We also capture the venture's own X handle + domain
+//    so the orchestrator can corroborate the tie (follow-graph, archived team page).
+export interface DiscoveredAffiliation {
+  name: string;
+  role: string;          // founder | cofounder | exec | employee | engineer | contributor | advisor | affiliate
+  year?: string;
+  evidence?: string;     // one short source phrase
+  x_handle?: string;     // the VENTURE's X account, if found (e.g. @deksxyz)
+  domain?: string;       // the venture's website host, if found (e.g. deks.xyz)
+}
 
-export async function discoverVentures(handle: string, name?: string): Promise<DiscoveredVenture[]> {
+export async function discoverAffiliations(handle: string, name?: string): Promise<DiscoveredAffiliation[]> {
   const h = handle.replace(/^@/, "");
   const system =
-    "You are a forensic due-diligence researcher with live web and X search. Find the companies, crypto projects, or ventures that THIS SPECIFIC person (the holder of the given X account) has founded, co-founded, or led, with PUBLIC evidence that ties that exact person to the venture (their own site/X, press, Crunchbase, GitHub). " +
-    "Reply with ONLY compact JSON: {\"ventures\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|advisor|contributor\",\"year\":\"\",\"evidence\":\"one short source phrase\"}]}. " +
-    "Include ONLY ventures you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {\"ventures\":[]}. NEVER invent, guess, or include a venture just because the name is common.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). What companies or projects have they founded, co-founded, or led? Search the web and X.`);
+    "You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. " +
+    "Look beyond their own bio and LinkedIn: accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase. There MUST be public evidence tying THAT EXACT person to the venture. " +
+    "For each, also report the venture's own X handle and website domain if you can find them. " +
+    "Reply with ONLY compact JSON: {\"affiliations\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate\",\"year\":\"\",\"evidence\":\"one short source phrase\",\"x_handle\":\"@...\",\"domain\":\"example.com\"}]}. " +
+    "Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {\"affiliations\":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.";
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Search the web and X, including team and accelerator pages.`);
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
     const parsed = JSON.parse(m[0]);
-    const out: DiscoveredVenture[] = Array.isArray(parsed.ventures) ? parsed.ventures : [];
-    return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).slice(0, 8);
+    const out: DiscoveredAffiliation[] = Array.isArray(parsed.affiliations)
+      ? parsed.affiliations
+      : Array.isArray(parsed.ventures) // tolerate the old key
+        ? parsed.ventures
+        : [];
+    return out
+      .filter((v) => v && typeof v.name === "string" && v.name.trim())
+      .map((v) => ({
+        name: v.name.trim(),
+        role: v.role || "affiliate",
+        year: v.year,
+        evidence: v.evidence,
+        x_handle: v.x_handle && /^@?[A-Za-z0-9_]{2,30}$/.test(v.x_handle) ? "@" + v.x_handle.replace(/^@/, "") : undefined,
+        domain: v.domain && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(v.domain) ? v.domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : undefined,
+      }))
+      .slice(0, 10);
   } catch {
     return [];
   }
