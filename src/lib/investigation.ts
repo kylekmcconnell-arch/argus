@@ -86,6 +86,11 @@ export async function fetchWebTeam(siteUrl: string, projectName: string, recon: 
       .map((s) => s.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1])
       .find((h) => h && !NOISE.test(h));
     if (xh) qs.set("x", xh);
+    // GitHub org from the site's links unlocks the org-members/contributors angle.
+    const ghOrg = (recon?.socials ?? [])
+      .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
+      .find((g) => g && !/^(orgs|sponsors|topics|features|about)$/i.test(g));
+    if (ghOrg) qs.set("gh", ghOrg);
     const res = await fetch(`/api/recon-team?${qs}`);
     if (!res.ok) return [];
     const d = await res.json();
