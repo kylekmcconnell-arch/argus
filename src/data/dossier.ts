@@ -18,6 +18,7 @@ export interface Dossier {
   followers: string;
   joined: string;
   identity_note: string;
+  prior_handles?: string[];
   headline: string;
   live: boolean;
   notableFollowers: NotableFollower[];
@@ -63,6 +64,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     followers: ev.profile.followers,
     joined: ev.profile.joined,
     identity_note: ev.profile.identity_note,
+    prior_handles: ev.profile.prior_handles,
     headline: ev.headline,
     live,
     notableFollowers: ev.notableFollowers,

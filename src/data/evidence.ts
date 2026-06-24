@@ -24,6 +24,7 @@ export interface SubjectProfile {
   joined: string;
   identity_confidence: IdentityConfidence;
   identity_note: string;
+  prior_handles?: string[]; // past X usernames for the same account id (rebrands)
 }
 
 export interface AxisInput {

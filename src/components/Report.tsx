@@ -415,7 +415,14 @@ export function Report({ dossier, onReset }: { dossier: Dossier; onReset: () => 
           <span className="mono mt-0.5 rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-line-2)", color: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-ink-dim)" }}>
             {report.identity_confidence}
           </span>
-          <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.identity_note}</p>
+          <div className="min-w-0">
+            <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.identity_note}</p>
+            {f.prior_handles && f.prior_handles.length > 0 && (
+              <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: "var(--color-caution)" }}>
+                ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
+              </p>
+            )}
+          </div>
         </div>
 
         {/* role breakdown — governing role full-width and expanded, the rest below */}

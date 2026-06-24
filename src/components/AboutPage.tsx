@@ -8,14 +8,15 @@ const PHASES: { n: number; title: string; steps: [string, Status][] }[] = [
     ["CoinMarketCap, emission schedule, ticker collision", "partial"],
   ] },
   { n: 2, title: "Surface intelligence", steps: [
-    ["Full website crawl, every page and link", "planned"],
-    ["Verify claims and partnerships independently", "planned"],
+    ["Render the project site + on-chain pivot (full crawl planned)", "partial"],
+    ["Verify claims independently: Wayback team pages, follow-graph, PDL", "partial"],
+    ["X handle-change history + old-handle mention search", "live"],
   ] },
   { n: 3, title: "Code and founder forensics", steps: [
-    ["GitHub repo audit, code-quality / LLM-gen detection", "planned"],
-    ["Founder background and cofounder-network risk", "partial"],
-    ["Funding archaeology", "planned"],
-    ["Panoptes trust graph", "live"],
+    ["GitHub identity + org/repo forensics (code-quality scan planned)", "partial"],
+    ["Founder background, off-LinkedIn affiliations, notable followers", "live"],
+    ["Funding archaeology: deployer funding-chain to CEX (Helius)", "live"],
+    ["Panoptes trust graph + cross-audit funder/affiliation bridging", "live"],
   ] },
   { n: 4, title: "Contradiction detection", steps: [
     ["Internal contradiction scan across materials", "planned"],

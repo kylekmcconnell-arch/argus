@@ -17,7 +17,7 @@ import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims } from "./agent";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, followsSubject, type DiscoveredAffiliation } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, followsSubject, handleHistory, type DiscoveredAffiliation } from "./adapters/x";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
@@ -74,6 +74,17 @@ async function coldIntake(ctx: CollectContext) {
     // silently rendering "— followers" — discovery below can still proceed.
     ctx.emit({ phase: "P0 · Intake", label: "Profile unavailable", detail: "Couldn't resolve this handle on twitterapi.io (rate-limited or not found). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
   }
+
+  // Handle-change history: a rebrand to escape a burned reputation is a real
+  // flag, and the old handles let us search the subject's history under them.
+  const hist = await handleHistory(ctx.handle);
+  if (hist && hist.priorHandles.length) {
+    ctx.evidence.profile.prior_handles = hist.priorHandles;
+    ctx.emit({ phase: "P0 · Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")} — a rebrand. Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
+  } else if (hist) {
+    ctx.emit({ phase: "P0 · Intake", label: "Handle history", detail: "No prior X handle on record for this account (no rebrand found; memory.lol coverage is partial).", source: "memory.lol", tone: "neutral" });
+  }
+
   const posts = await getRecentPosts(ctx.handle);
   if (posts.length) {
     ctx.evidence.recentActivity = posts;
@@ -123,7 +134,7 @@ async function coldIntake(ctx: CollectContext) {
   // catches a co-founder role the subject never tweeted about.
   const [bySubject, byMentions] = await Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
-    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name),
+    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
   ]);
   const mergedMap = new Map<string, DiscoveredAffiliation>();
   for (const v of [...bySubject, ...byMentions]) {

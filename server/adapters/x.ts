@@ -98,6 +98,27 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
   }
 }
 
+// Handle-change history via memory.lol (keyless OSINT index that maps an X
+// account id to every screen name it has used, with date ranges). A rebrand is a
+// classic move to escape a burned reputation, and X keeps the same id across
+// handle changes, so the old names are recoverable. Coverage is partial: an empty
+// result means "not in the index", never a guarantee of no change.
+export async function handleHistory(handle: string): Promise<{ priorHandles: string[]; idStr?: string } | null> {
+  const u = handle.replace(/^@/, "");
+  try {
+    const res = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8000) });
+    if (!res.ok) return null;
+    const d = (await res.json()) as any;
+    const acct = (d.accounts ?? [])[0];
+    if (!acct?.screen_names) return { priorHandles: [], idStr: acct?.id_str };
+    const names = Object.keys(acct.screen_names);
+    const prior = names.filter((n) => n.toLowerCase() !== u.toLowerCase());
+    return { priorHandles: prior, idStr: acct.id_str };
+  } catch {
+    return null;
+  }
+}
+
 // twitterapi.io: recent posts, fuel for claim extraction + activity signal.
 export async function getRecentPosts(handle: string, limit = 20): Promise<string[]> {
   const key = env("TWITTERAPI_KEY");
@@ -335,14 +356,15 @@ export async function discoverAffiliations(handle: string, name?: string): Promi
 // launch post tagging the subject — these live on the PROJECT's timeline, not
 // the subject's, and often in OLD posts a recency-biased search skips. This is
 // the angle that catches a role the subject never tweeted about themselves.
-export async function discoverByMentions(handle: string, name?: string): Promise<DiscoveredAffiliation[]> {
+export async function discoverByMentions(handle: string, name?: string, oldHandles: string[] = []): Promise<DiscoveredAffiliation[]> {
   const h = handle.replace(/^@/, "");
+  const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} — search posts mentioning those old handles too, since their history may live under them.` : "";
   const system =
     "You are a forensic due-diligence researcher with live X (Twitter) search. Find every company, crypto project, fund, or DAO ACCOUNT that has publicly NAMED, TAGGED, ANNOUNCED, or referred to the given person as a founder, co-founder, team member, or employee. " +
     "Search X thoroughly INCLUDING OLDER / HISTORICAL posts, not just recent ones — co-founder announcements and 'meet the team' posts are often years old. There MUST be a real post tying the project to this exact person. " +
     "Reply with ONLY compact JSON: {\"affiliations\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate\",\"year\":\"\",\"evidence\":\"the post / what it said\",\"x_handle\":\"@projectAccount\",\"domain\":\"example.com\"}]}. " +
     "Include ONLY ties backed by a real post you found. If none, return {\"affiliations\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Which project or company accounts on X have ever named, tagged, or announced this person as a founder, co-founder, or team member? Search historical posts too, going back years.`);
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Which project or company accounts on X have ever named, tagged, or announced this person as a founder, co-founder, or team member? Search historical posts too, going back years.`);
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];

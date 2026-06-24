@@ -837,6 +837,7 @@ function assembleDossier(ev, live) {
     followers: ev.profile.followers,
     joined: ev.profile.joined,
     identity_note: ev.profile.identity_note,
+    prior_handles: ev.profile.prior_handles,
     headline: ev.headline,
     live,
     notableFollowers: ev.notableFollowers,
@@ -1302,6 +1303,21 @@ async function getProfile2(handle) {
     return null;
   }
 }
+async function handleHistory(handle) {
+  const u = handle.replace(/^@/, "");
+  try {
+    const res = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8e3) });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const acct = (d.accounts ?? [])[0];
+    if (!acct?.screen_names) return { priorHandles: [], idStr: acct?.id_str };
+    const names = Object.keys(acct.screen_names);
+    const prior = names.filter((n) => n.toLowerCase() !== u.toLowerCase());
+    return { priorHandles: prior, idStr: acct.id_str };
+  } catch {
+    return null;
+  }
+}
 async function getRecentPosts(handle, limit = 20) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
@@ -1459,10 +1475,11 @@ async function discoverAffiliations(handle, name) {
     return [];
   }
 }
-async function discoverByMentions(handle, name) {
+async function discoverByMentions(handle, name, oldHandles = []) {
   const h = handle.replace(/^@/, "");
+  const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} \u2014 search posts mentioning those old handles too, since their history may live under them.` : "";
   const system = `You are a forensic due-diligence researcher with live X (Twitter) search. Find every company, crypto project, fund, or DAO ACCOUNT that has publicly NAMED, TAGGED, ANNOUNCED, or referred to the given person as a founder, co-founder, team member, or employee. Search X thoroughly INCLUDING OLDER / HISTORICAL posts, not just recent ones \u2014 co-founder announcements and 'meet the team' posts are often years old. There MUST be a real post tying the project to this exact person. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"the post / what it said","x_handle":"@projectAccount","domain":"example.com"}]}. Include ONLY ties backed by a real post you found. If none, return {"affiliations":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Which project or company accounts on X have ever named, tagged, or announced this person as a founder, co-founder, or team member? Search historical posts too, going back years.`);
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Which project or company accounts on X have ever named, tagged, or announced this person as a founder, co-founder, or team member? Search historical posts too, going back years.`);
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -2093,6 +2110,13 @@ async function coldIntake(ctx) {
   } else {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Profile unavailable", detail: "Couldn't resolve this handle on twitterapi.io (rate-limited or not found). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
   }
+  const hist = await handleHistory(ctx.handle);
+  if (hist && hist.priorHandles.length) {
+    ctx.evidence.profile.prior_handles = hist.priorHandles;
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")} \u2014 a rebrand. Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
+  } else if (hist) {
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Handle history", detail: "No prior X handle on record for this account (no rebrand found; memory.lol coverage is partial).", source: "memory.lol", tone: "neutral" });
+  }
   const posts = await getRecentPosts(ctx.handle);
   if (posts.length) {
     ctx.evidence.recentActivity = posts;
@@ -2131,7 +2155,7 @@ async function coldIntake(ctx) {
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Two angles in parallel: what this person is tied to, AND who has ever named them as founder/team (incl. old posts)\u2026", source: "grok", tone: "neutral" });
   const [bySubject, byMentions] = await Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
-    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name)
+    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? [])
   ]);
   const mergedMap = /* @__PURE__ */ new Map();
   for (const v of [...bySubject, ...byMentions]) {
