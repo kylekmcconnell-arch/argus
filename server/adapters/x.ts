@@ -206,6 +206,27 @@ const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
 export async function notableFollowers(subject: string): Promise<NotableFollower[]> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
+  const self = subject.replace(/^@/, "").toLowerCase();
+
+  // Paid tier (set ARGUS_TWITTERAPI_PAID): no 1-req/5s cap, so run the exhaustive
+  // and ACCURATE method — does each curated account follow the subject — checked
+  // concurrently and correct at any account size, not just recent followers.
+  if (env("ARGUS_TWITTERAPI_PAID")) {
+    const hits = new Set<string>();
+    const queue = [...NOTABLE];
+    const worker = async () => {
+      for (;;) {
+        const n = queue.shift();
+        if (!n) return;
+        if (n.handle.toLowerCase() === self) continue;
+        const rel = await checkFollow(n.handle, subject);
+        if (rel?.following) hits.add(n.handle);
+      }
+    };
+    await Promise.all(Array.from({ length: 5 }, worker));
+    return NOTABLE.filter((n) => hits.has(n.handle));
+  }
+
   const want = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
   const hits = new Set<string>();
   const u = subject.replace(/^@/, "");

@@ -1359,10 +1359,41 @@ var NOTABLE = [
   { handle: "pumpdotfun", label: "infra (Pump.fun)", size: "600K" },
   { handle: "base", label: "infra (Base)", size: "1.5M" }
 ];
+async function checkFollow(source, target) {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return null;
+  const s = source.replace(/^@/, "");
+  const t = target.replace(/^@/, "");
+  try {
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/check_follow_relationship?source_user_name=${encodeURIComponent(s)}&target_user_name=${encodeURIComponent(t)}`, key);
+    if (!res || !res.ok) return null;
+    const d = await res.json();
+    if (d?.status === "error" || !d?.data) return null;
+    return { following: !!d.data.following, followedBy: !!d.data.followed_by };
+  } catch {
+    return null;
+  }
+}
 var delay = (ms) => new Promise((r) => setTimeout(r, ms));
 async function notableFollowers(subject) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
+  const self = subject.replace(/^@/, "").toLowerCase();
+  if (env("ARGUS_TWITTERAPI_PAID")) {
+    const hits2 = /* @__PURE__ */ new Set();
+    const queue = [...NOTABLE];
+    const worker = async () => {
+      for (; ; ) {
+        const n = queue.shift();
+        if (!n) return;
+        if (n.handle.toLowerCase() === self) continue;
+        const rel = await checkFollow(n.handle, subject);
+        if (rel?.following) hits2.add(n.handle);
+      }
+    };
+    await Promise.all(Array.from({ length: 5 }, worker));
+    return NOTABLE.filter((n) => hits2.has(n.handle));
+  }
   const want = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
   const hits = /* @__PURE__ */ new Set();
   const u = subject.replace(/^@/, "");
