@@ -3,6 +3,30 @@ import { ArgusMark } from "./ArgusMark";
 import { verdictMeta } from "../lib/verdict";
 import { getWatchlist } from "../lib/watchlist";
 import { getLog, type LogEntry } from "../lib/auditlog";
+import { auditImage } from "../lib/avatars";
+
+// Subject thumbnail: the real logo/photo, falling back to a letter if it is
+// missing or fails to load (unavatar/favicon/dexscreener can 404).
+function AuditAvatar({ src, letter }: { src: string | null; letter: string }) {
+  const [failed, setFailed] = useState(false);
+  if (src && !failed) {
+    return (
+      <img
+        src={src}
+        alt=""
+        loading="lazy"
+        referrerPolicy="no-referrer"
+        onError={() => setFailed(true)}
+        className="h-6 w-6 shrink-0 rounded-md border border-line bg-panel object-cover"
+      />
+    );
+  }
+  return (
+    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel text-[11px] text-signal">
+      {letter}
+    </span>
+  );
+}
 
 // Most recent audits, de-duped by what was audited (one row per subject, newest).
 function recentAudits(max: number): LogEntry[] {
@@ -150,9 +174,7 @@ export function Sidebar({
                   active ? "bg-panel soft-shadow" : "hover:bg-panel/70"
                 }`}
               >
-                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel text-[11px] text-signal">
-                  {avatar}
-                </span>
+                <AuditAvatar src={auditImage(e)} letter={avatar} />
                 <span className="min-w-0 flex-1">
                   <span className="mono block truncate text-[12.5px] text-ink">{e.query}</span>
                   <span className="block truncate text-[10px] text-ink-faint">

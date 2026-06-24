@@ -114,7 +114,7 @@ export default function App() {
     setInvestigation(inv);
     setPhase("investigation-report");
     logAudit({
-      kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, verdict: inv.token.verdict, score: inv.token.score,
+      kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
       summary: inv.founderNote,
       flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
     });
@@ -128,7 +128,7 @@ export default function App() {
     setTokenDossier(d);
     setPhase("token-report");
     logAudit({
-      kind: "token", query: `$${d.symbol}`, ref: d.address, verdict: d.verdict, score: d.score,
+      kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
       summary: d.headline,
       flags: [d.capApplied ? `cap:${d.capApplied}` : "", d.bundleRisk !== "low" ? `bundle:${d.bundleRisk}` : ""].filter(Boolean),
     });
