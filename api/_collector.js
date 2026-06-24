@@ -1369,6 +1369,28 @@ async function discoverAffiliations(handle, name) {
     return [];
   }
 }
+async function discoverByMentions(handle, name) {
+  const h = handle.replace(/^@/, "");
+  const system = `You are a forensic due-diligence researcher with live X (Twitter) search. Find every company, crypto project, fund, or DAO ACCOUNT that has publicly NAMED, TAGGED, ANNOUNCED, or referred to the given person as a founder, co-founder, team member, or employee. Search X thoroughly INCLUDING OLDER / HISTORICAL posts, not just recent ones \u2014 co-founder announcements and 'meet the team' posts are often years old. There MUST be a real post tying the project to this exact person. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"the post / what it said","x_handle":"@projectAccount","domain":"example.com"}]}. Include ONLY ties backed by a real post you found. If none, return {"affiliations":[]}. NEVER invent. Never use em dashes.`;
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Which project or company accounts on X have ever named, tagged, or announced this person as a founder, co-founder, or team member? Search historical posts too, going back years.`);
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const parsed = JSON.parse(m[0]);
+    const out = Array.isArray(parsed.affiliations) ? parsed.affiliations : [];
+    return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).map((v) => ({
+      name: v.name.trim(),
+      role: v.role || "affiliate",
+      year: v.year,
+      evidence: v.evidence,
+      x_handle: v.x_handle && /^@?[A-Za-z0-9_]{2,30}$/.test(v.x_handle) ? "@" + v.x_handle.replace(/^@/, "") : void 0,
+      domain: v.domain && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(v.domain) ? v.domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : void 0
+    })).slice(0, 10);
+  } catch {
+    return [];
+  }
+}
 function fmtFollowers(n) {
   if (n == null) return "\u2014";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
@@ -1975,8 +1997,19 @@ async function coldIntake(ctx) {
     const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} \u2014 now verifying each.`, source: "claude", tone: "neutral" });
   }
-  ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Searching the web and X for every company this person is publicly tied to, not just ones they founded\u2026", source: "grok", tone: "neutral" });
-  const discovered = await discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name);
+  ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Two angles in parallel: what this person is tied to, AND who has ever named them as founder/team (incl. old posts)\u2026", source: "grok", tone: "neutral" });
+  const [bySubject, byMentions] = await Promise.all([
+    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
+    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name)
+  ]);
+  const mergedMap = /* @__PURE__ */ new Map();
+  for (const v of [...bySubject, ...byMentions]) {
+    const k = v.name.toLowerCase();
+    const ex = mergedMap.get(k);
+    if (!ex) mergedMap.set(k, v);
+    else mergedMap.set(k, { ...ex, x_handle: ex.x_handle ?? v.x_handle, domain: ex.domain ?? v.domain, evidence: ex.evidence ?? v.evidence, role: ex.role || v.role });
+  }
+  const discovered = [...mergedMap.values()];
   if (discovered.length) {
     const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
     const pending = discovered.filter((v) => {

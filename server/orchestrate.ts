@@ -17,7 +17,7 @@ import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims } from "./agent";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, followsSubject } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, followsSubject, type DiscoveredAffiliation } from "./adapters/x";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
@@ -116,8 +116,24 @@ async function coldIntake(ctx: CollectContext) {
   //    their own bio and LinkedIn. Each lead is then corroborated against an
   //    independent source (the venture's X follow-graph, an archived team page)
   //    so a web hit becomes a graded tie, never a bare assertion. ──
-  ctx.emit({ phase: "P0 · Intake", label: "Discover affiliations", detail: "Searching the web and X for every company this person is publicly tied to, not just ones they founded…", source: "grok", tone: "neutral" });
-  const discovered = await discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name);
+  ctx.emit({ phase: "P0 · Intake", label: "Discover affiliations", detail: "Two angles in parallel: what this person is tied to, AND who has ever named them as founder/team (incl. old posts)…", source: "grok", tone: "neutral" });
+  // Two blind search angles run concurrently (each Grok call is 45s-capped, so
+  // parallel keeps wall-clock to one). Subject-first finds what they claim/built;
+  // reverse-mention finds projects whose OWN timeline named them — the angle that
+  // catches a co-founder role the subject never tweeted about.
+  const [bySubject, byMentions] = await Promise.all([
+    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
+    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name),
+  ]);
+  const mergedMap = new Map<string, DiscoveredAffiliation>();
+  for (const v of [...bySubject, ...byMentions]) {
+    const k = v.name.toLowerCase();
+    const ex = mergedMap.get(k);
+    // Keep the richest record: prefer an X handle / domain (so corroboration can run).
+    if (!ex) mergedMap.set(k, v);
+    else mergedMap.set(k, { ...ex, x_handle: ex.x_handle ?? v.x_handle, domain: ex.domain ?? v.domain, evidence: ex.evidence ?? v.evidence, role: ex.role || v.role });
+  }
+  const discovered = [...mergedMap.values()];
   if (discovered.length) {
     // 1. Push every fresh lead immediately so the audit never blocks on
     //    corroboration. Each record is a live object we refine in place below.

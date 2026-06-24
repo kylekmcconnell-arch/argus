@@ -210,6 +210,42 @@ export async function discoverAffiliations(handle: string, name?: string): Promi
   }
 }
 
+// Reverse-mention discovery: the complement to discoverAffiliations. That one
+// asks "what has THIS person done"; this one asks "who has ever NAMED this
+// person as theirs". A co-founder announcement, a "meet the team" thread, a
+// launch post tagging the subject — these live on the PROJECT's timeline, not
+// the subject's, and often in OLD posts a recency-biased search skips. This is
+// the angle that catches a role the subject never tweeted about themselves.
+export async function discoverByMentions(handle: string, name?: string): Promise<DiscoveredAffiliation[]> {
+  const h = handle.replace(/^@/, "");
+  const system =
+    "You are a forensic due-diligence researcher with live X (Twitter) search. Find every company, crypto project, fund, or DAO ACCOUNT that has publicly NAMED, TAGGED, ANNOUNCED, or referred to the given person as a founder, co-founder, team member, or employee. " +
+    "Search X thoroughly INCLUDING OLDER / HISTORICAL posts, not just recent ones — co-founder announcements and 'meet the team' posts are often years old. There MUST be a real post tying the project to this exact person. " +
+    "Reply with ONLY compact JSON: {\"affiliations\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate\",\"year\":\"\",\"evidence\":\"the post / what it said\",\"x_handle\":\"@projectAccount\",\"domain\":\"example.com\"}]}. " +
+    "Include ONLY ties backed by a real post you found. If none, return {\"affiliations\":[]}. NEVER invent. Never use em dashes.";
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Which project or company accounts on X have ever named, tagged, or announced this person as a founder, co-founder, or team member? Search historical posts too, going back years.`);
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const parsed = JSON.parse(m[0]);
+    const out: DiscoveredAffiliation[] = Array.isArray(parsed.affiliations) ? parsed.affiliations : [];
+    return out
+      .filter((v) => v && typeof v.name === "string" && v.name.trim())
+      .map((v) => ({
+        name: v.name.trim(),
+        role: v.role || "affiliate",
+        year: v.year,
+        evidence: v.evidence,
+        x_handle: v.x_handle && /^@?[A-Za-z0-9_]{2,30}$/.test(v.x_handle) ? "@" + v.x_handle.replace(/^@/, "") : undefined,
+        domain: v.domain && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(v.domain) ? v.domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : undefined,
+      }))
+      .slice(0, 10);
+  } catch {
+    return [];
+  }
+}
+
 export function fmtFollowers(n?: number): string {
   if (n == null) return "—";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
