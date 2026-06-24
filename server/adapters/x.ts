@@ -10,6 +10,7 @@
 import type { Adapter, CollectContext } from "./types";
 import { env } from "../config";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
+import type { NotableFollower } from "../../src/data/evidence";
 
 const TWITTERAPI = "https://api.twitterapi.io";
 
@@ -131,6 +132,81 @@ export async function followsSubject(endorser: string, subject: string): Promise
   } catch {
     return null;
   }
+}
+
+// ── Follower QUALITY: do respected accounts follow the subject? ──────────
+// Follower count is trivially botted; follower IDENTITY is not. Being followed
+// by known callers, founders, funds and infra is a real credibility signal a
+// scam can't fake, and its absence on a high-count account is itself telling.
+// twitterapi's check_follow_relationship answers "does A follow B" in one call,
+// so we check a curated high-signal set against the subject — accurate at any
+// account size (scanning a big account's followers would miss early followers).
+
+// Curated, deliberately small, high-signal set. Labels/sizes are for context and
+// may drift; the point is WHO. Grow this list as the trust graph matures.
+const NOTABLE: NotableFollower[] = [
+  { handle: "cobie", label: "trader", size: "700K" },
+  { handle: "CryptoKaleo", label: "caller", size: "700K" },
+  { handle: "blknoiz06", label: "caller", size: "750K" },
+  { handle: "inversebrah", label: "KOL", size: "300K" },
+  { handle: "CryptoCred", label: "trader", size: "400K" },
+  { handle: "HsakaTrades", label: "trader", size: "450K" },
+  { handle: "notthreadguy", label: "KOL", size: "250K" },
+  { handle: "theunipcs", label: "caller", size: "250K" },
+  { handle: "CryptoGodJohn", label: "caller", size: "400K" },
+  { handle: "frankdegods", label: "founder/KOL", size: "350K" },
+  { handle: "0xMert_", label: "infra (Helius)", size: "250K" },
+  { handle: "aeyakovenko", label: "founder (Solana)", size: "470K" },
+  { handle: "rajgokal", label: "founder (Solana)", size: "250K" },
+  { handle: "VitalikButerin", label: "founder (Ethereum)", size: "5.6M" },
+  { handle: "jessepollak", label: "founder (Base)", size: "350K" },
+  { handle: "haydenzadams", label: "founder (Uniswap)", size: "300K" },
+  { handle: "StaniKulechov", label: "founder (Aave)", size: "270K" },
+  { handle: "cz_binance", label: "founder (Binance)", size: "9M" },
+  { handle: "cdixon", label: "investor (a16z)", size: "900K" },
+  { handle: "balajis", label: "investor", size: "1M" },
+  { handle: "punk6529", label: "investor", size: "500K" },
+  { handle: "solana", label: "infra (Solana)", size: "3M" },
+  { handle: "pumpdotfun", label: "infra (Pump.fun)", size: "600K" },
+  { handle: "base", label: "infra (Base)", size: "1.5M" },
+];
+
+// Does `source` follow `target`? One call via check_follow_relationship.
+export async function checkFollow(source: string, target: string): Promise<{ following: boolean; followedBy: boolean } | null> {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return null;
+  const s = source.replace(/^@/, "");
+  const t = target.replace(/^@/, "");
+  try {
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/check_follow_relationship?source_user_name=${encodeURIComponent(s)}&target_user_name=${encodeURIComponent(t)}`, key);
+    if (!res || !res.ok) return null;
+    const d = (await res.json()) as any;
+    if (d?.status === "error" || !d?.data) return null;
+    return { following: !!d.data.following, followedBy: !!d.data.followed_by };
+  } catch {
+    return null;
+  }
+}
+
+// Which of the curated notable accounts follow the subject? Bounded concurrency
+// keeps it fast without tripping twitterapi's rate limiter.
+export async function notableFollowers(subject: string): Promise<NotableFollower[]> {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return [];
+  const hits = new Set<string>();
+  const queue = [...NOTABLE];
+  const CONCURRENCY = 5;
+  const worker = async () => {
+    for (;;) {
+      const n = queue.shift();
+      if (!n) return;
+      if (n.handle.toLowerCase() === subject.replace(/^@/, "").toLowerCase()) continue;
+      const rel = await checkFollow(n.handle, subject);
+      if (rel?.following) hits.add(n.handle);
+    }
+  };
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+  return NOTABLE.filter((n) => hits.has(n.handle)); // preserve curated order
 }
 
 // ── Grok Live Search: did endorser publicly acknowledge subject? ─────────
@@ -281,6 +357,19 @@ export const xAdapter: Adapter = {
       if (posts.length) {
         ctx.evidence.recentActivity = posts;
         ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts.`, source: "twitterapi.io", tone: "neutral" });
+      }
+    }
+
+    // 1b. follower QUALITY: which respected accounts follow the subject. The
+    //     answer (who, not how many) is a credibility signal a bot farm can't fake.
+    if (!ctx.evidence.notableFollowers.length) {
+      ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "Checking whether respected callers, founders and funds follow this account…", source: "twitterapi.io", tone: "neutral" });
+      const nf = await notableFollowers(ctx.handle);
+      ctx.evidence.notableFollowers = nf;
+      if (nf.length) {
+        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `Followed by ${nf.length} high-signal account${nf.length === 1 ? "" : "s"}: ${nf.slice(0, 6).map((n) => `@${n.handle} (${n.label})`).join(", ")}${nf.length > 6 ? ", …" : ""}.`, source: "twitterapi.io", tone: "good" });
+      } else {
+        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "None of the curated callers, founders or funds follow this account — no peer-credibility signal.", source: "twitterapi.io", tone: "neutral" });
       }
     }
 

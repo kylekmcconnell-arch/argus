@@ -358,6 +358,25 @@ export function Report({ dossier, onReset }: { dossier: Dossier; onReset: () => 
                 ))}
               </span>
             </div>
+            {/* follower quality: respected accounts that follow this subject */}
+            {f.notableFollowers.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                <span className="text-[11px] text-ink-faint">Followed by</span>
+                {f.notableFollowers.slice(0, 8).map((n) => (
+                  <a
+                    key={n.handle}
+                    href={`https://x.com/${n.handle}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="mono rounded-md border border-line px-1.5 py-0.5 text-[10.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                    title={`${n.label} · ~${n.size} followers`}
+                  >
+                    @{n.handle} <span className="text-ink-faint">{n.label}</span>
+                  </a>
+                ))}
+                {f.notableFollowers.length > 8 && <span className="text-[10.5px] text-ink-faint">+{f.notableFollowers.length - 8} more</span>}
+              </div>
+            )}
           </div>
         </div>
 

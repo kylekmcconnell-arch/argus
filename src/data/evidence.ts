@@ -32,6 +32,15 @@ export interface AxisInput {
   rationale: string;
 }
 
+// A high-signal account (respected caller, founder, VC, or infra) that follows
+// the subject. Follower QUALITY, not count: who vouches by following matters more
+// than a raw number a bot farm can inflate.
+export interface NotableFollower {
+  handle: string;
+  label: string; // caller | trader | founder | investor | infra
+  size: string;  // rough follower tier, for context (e.g. "700K")
+}
+
 export interface TraceStep {
   phase: string;
   label: string;
@@ -54,6 +63,7 @@ export interface CollectedEvidence {
   axes: AxisInput[];
   headline: string;
   recentActivity: string[]; // recent post text, fuel for claim extraction
+  notableFollowers: NotableFollower[]; // respected accounts that follow the subject
 }
 
 export function emptyEvidence(handle: string): CollectedEvidence {
@@ -81,5 +91,6 @@ export function emptyEvidence(handle: string): CollectedEvidence {
     axes: [],
     headline: "",
     recentActivity: [],
+    notableFollowers: [],
   };
 }

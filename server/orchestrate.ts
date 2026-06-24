@@ -254,6 +254,7 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
         promotions: evidence.promotions,
         wallets: evidence.wallets,
         findings: evidence.findings,
+        notableFollowers: evidence.notableFollowers,
       },
       null,
       0,
