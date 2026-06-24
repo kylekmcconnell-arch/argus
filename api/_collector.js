@@ -1276,7 +1276,7 @@ async function twFetch(url, key, tries = 2) {
     const res = await fetch(url, { headers: { "x-api-key": key } });
     last = res;
     if (res.status !== 429 && res.status !== 502 && res.status !== 503) return res;
-    await new Promise((r) => setTimeout(r, res.status === 429 ? 5200 : 700 * (i + 1)));
+    await new Promise((r) => setTimeout(r, res.status === 429 ? 1200 : 700 * (i + 1)));
   }
   return last;
 }
@@ -1366,23 +1366,26 @@ async function notableFollowers(subject) {
   const want = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
   const hits = /* @__PURE__ */ new Set();
   const u = subject.replace(/^@/, "");
-  let cursor = "";
-  const MAX_PAGES = 3;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-    const res = await twFetch(url, key);
-    if (!res || !res.ok) break;
-    const d = await res.json();
-    if (d?.status === "error") break;
-    const followers = d.followers ?? d.data?.followers ?? [];
-    if (!followers.length) break;
-    for (const f of followers) {
-      const m = want.get((f.userName ?? f.screen_name ?? "").toLowerCase());
-      if (m) hits.add(m.handle);
+  const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200`;
+  let d = null;
+  for (let i = 0; i < 2; i++) {
+    const res = await fetch(url, { headers: { "x-api-key": key } });
+    if (res.ok) {
+      try {
+        d = await res.json();
+      } catch {
+        d = null;
+      }
+      break;
     }
-    if (hits.size >= want.size || !d.has_next_page || !d.next_cursor) break;
-    cursor = d.next_cursor;
+    if (res.status !== 429) break;
     await delay(5200);
+  }
+  if (!d || d.status === "error") return [];
+  const followers = d.followers ?? d.data?.followers ?? [];
+  for (const f of followers) {
+    const m = want.get((f.userName ?? f.screen_name ?? "").toLowerCase());
+    if (m) hits.add(m.handle);
   }
   return NOTABLE.filter((n) => hits.has(n.handle));
 }

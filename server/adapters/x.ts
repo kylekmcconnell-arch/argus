@@ -55,9 +55,11 @@ async function twFetch(url: string, key: string, tries = 2): Promise<Response | 
     const res = await fetch(url, { headers: { "x-api-key": key } });
     last = res;
     if (res.status !== 429 && res.status !== 502 && res.status !== 503) return res;
-    // The free tier allows 1 request / 5s, so a 429 needs a full ~5s wait to
-    // recover (a sub-second backoff just 429s again). 5xx backs off briefly.
-    await new Promise((r) => setTimeout(r, res.status === 429 ? 5200 : 700 * (i + 1)));
+    // Short backoff: a full 5s wait per 429 (free-tier QPS) balloons the whole
+    // audit past its budget when many calls are made, so we keep this fast and
+    // accept that a busy free-tier audit drops some calls. The real fix is a paid
+    // tier (no QPS cap); see notableFollowers for the single-call accommodation.
+    await new Promise((r) => setTimeout(r, res.status === 429 ? 1200 : 700 * (i + 1)));
   }
   return last;
 }
@@ -207,23 +209,24 @@ export async function notableFollowers(subject: string): Promise<NotableFollower
   const want = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
   const hits = new Set<string>();
   const u = subject.replace(/^@/, "");
-  let cursor = "";
-  const MAX_PAGES = 3; // bounded by the free-tier QPS; ~600 most-recent followers
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-    const res = await twFetch(url, key);
-    if (!res || !res.ok) break;
-    const d = (await res.json()) as any;
-    if (d?.status === "error") break;
-    const followers: any[] = d.followers ?? d.data?.followers ?? [];
-    if (!followers.length) break;
-    for (const f of followers) {
-      const m = want.get((f.userName ?? f.screen_name ?? "").toLowerCase());
-      if (m) hits.add(m.handle);
-    }
-    if (hits.size >= want.size || !d.has_next_page || !d.next_cursor) break;
-    cursor = d.next_cursor;
-    await delay(5200); // respect free-tier QPS between pages
+  // One page (200 most-recent followers): cheap enough not to blow the audit's
+  // time budget on free tier, and COMPLETE for a small/new project (the main
+  // vetting case). A dedicated single 5s-spaced retry beats a 429 reliably
+  // without slowing the rest of the audit. Paid tier (no QPS cap) would scan
+  // deep / run the exhaustive relationship check; on free tier this is shallow.
+  const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200`;
+  let d: any = null;
+  for (let i = 0; i < 2; i++) {
+    const res = await fetch(url, { headers: { "x-api-key": key } });
+    if (res.ok) { try { d = await res.json(); } catch { d = null; } break; }
+    if (res.status !== 429) break;
+    await delay(5200); // free-tier QPS: one full wait to beat the limit
+  }
+  if (!d || d.status === "error") return [];
+  const followers: any[] = d.followers ?? d.data?.followers ?? [];
+  for (const f of followers) {
+    const m = want.get((f.userName ?? f.screen_name ?? "").toLowerCase());
+    if (m) hits.add(m.handle);
   }
   return NOTABLE.filter((n) => hits.has(n.handle)); // preserve curated order
 }
