@@ -38,8 +38,9 @@ export interface AxisInput {
 // than a raw number a bot farm can inflate.
 export interface NotableFollower {
   handle: string;
-  label: string; // caller | trader | founder | investor | infra
-  size: string;  // rough follower tier, for context (e.g. "700K")
+  label: string;   // caller | trader | founder | investor | infra | high reach
+  size: string;    // follower-count tier for display (e.g. "700K", "2.3M")
+  count?: number;  // the follower's own follower count (drives high-reach + sort)
 }
 
 // An internal contradiction: a subject claim that conflicts with another claim

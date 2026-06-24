@@ -221,64 +221,50 @@ export async function checkFollow(source: string, target: string): Promise<{ fol
   }
 }
 
-// Which of the curated notable accounts follow the subject?
-//
-// The exact way is a check_follow_relationship per notable account, but the
-// twitterapi FREE tier caps at 1 request / 5s, so 24 of those would take ~2min.
-// Instead we scan the subject's own followers (200/page, reverse-chron) and
-// intersect locally with the curated set — one cheap call covers a small/new
-// project completely (the main vetting case); paginating a few pages covers the
-// recent followers of larger accounts. Honest partial coverage on free tier;
-// a paid tier (no QPS cap) would let us run the exhaustive relationship check.
-const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+// Follower QUALITY, surfaced two ways from a scan of the subject's followers:
+//   1. curated accounts (known callers/founders/funds) that follow them, and
+//   2. HIGH-REACH accounts — anyone with a large audience of their own, even if
+//      not on the curated list ("2 accounts with >1M followers follow them").
+// Each follower object carries followers_count, so we bucket by reach and sort by
+// it. Now that the QPS cap is lifted (paid credits) we scan several pages; results
+// are the highest-reach + curated followers among them.
+const HIGH_REACH = 100_000;
 
 export async function notableFollowers(subject: string): Promise<NotableFollower[]> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
-  const self = subject.replace(/^@/, "").toLowerCase();
-
-  // Paid tier (set ARGUS_TWITTERAPI_PAID): no 1-req/5s cap, so run the exhaustive
-  // and ACCURATE method — does each curated account follow the subject — checked
-  // concurrently and correct at any account size, not just recent followers.
-  if (env("ARGUS_TWITTERAPI_PAID")) {
-    const hits = new Set<string>();
-    const queue = [...NOTABLE];
-    const worker = async () => {
-      for (;;) {
-        const n = queue.shift();
-        if (!n) return;
-        if (n.handle.toLowerCase() === self) continue;
-        const rel = await checkFollow(n.handle, subject);
-        if (rel?.following) hits.add(n.handle);
-      }
-    };
-    await Promise.all(Array.from({ length: 5 }, worker));
-    return NOTABLE.filter((n) => hits.has(n.handle));
-  }
-
-  const want = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
-  const hits = new Set<string>();
   const u = subject.replace(/^@/, "");
-  // One page (200 most-recent followers): cheap enough not to blow the audit's
-  // time budget on free tier, and COMPLETE for a small/new project (the main
-  // vetting case). A dedicated single 5s-spaced retry beats a 429 reliably
-  // without slowing the rest of the audit. Paid tier (no QPS cap) would scan
-  // deep / run the exhaustive relationship check; on free tier this is shallow.
-  const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200`;
-  let d: any = null;
-  for (let i = 0; i < 2; i++) {
-    const res = await fetch(url, { headers: { "x-api-key": key } });
-    if (res.ok) { try { d = await res.json(); } catch { d = null; } break; }
-    if (res.status !== 429) break;
-    await delay(5200); // free-tier QPS: one full wait to beat the limit
+  const curated = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
+  const found = new Map<string, NotableFollower>();
+  let cursor = "";
+  const MAX_PAGES = 8; // ~1600 most-recent followers
+
+  for (let page = 0; page < MAX_PAGES; page++) {
+    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+    const res = await twFetch(url, key);
+    if (!res || !res.ok) break;
+    const d = (await res.json()) as any;
+    if (d?.status === "error") break;
+    const followers: any[] = d.followers ?? d.data?.followers ?? [];
+    if (!followers.length) break;
+    for (const f of followers) {
+      const h = String(f.userName ?? f.screen_name ?? "");
+      if (!h) continue;
+      const lk = h.toLowerCase();
+      if (found.has(lk)) continue;
+      const fc = Number(f.followers_count ?? f.followers ?? 0);
+      const cur = curated.get(lk);
+      if (cur) {
+        found.set(lk, { handle: h, label: cur.label, size: fc ? fmtFollowers(fc) : cur.size, count: fc || undefined });
+      } else if (fc >= HIGH_REACH) {
+        found.set(lk, { handle: h, label: "high reach", size: fmtFollowers(fc), count: fc });
+      }
+    }
+    if (!d.has_next_page || !d.next_cursor) break;
+    cursor = d.next_cursor;
   }
-  if (!d || d.status === "error") return [];
-  const followers: any[] = d.followers ?? d.data?.followers ?? [];
-  for (const f of followers) {
-    const m = want.get((f.userName ?? f.screen_name ?? "").toLowerCase());
-    if (m) hits.add(m.handle);
-  }
-  return NOTABLE.filter((n) => hits.has(n.handle)); // preserve curated order
+  // Biggest audiences first; cap the list.
+  return [...found.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 16);
 }
 
 // ── Grok Live Search: did endorser publicly acknowledge subject? ─────────
@@ -482,13 +468,16 @@ export const xAdapter: Adapter = {
     // 1b. follower QUALITY: which respected accounts follow the subject. The
     //     answer (who, not how many) is a credibility signal a bot farm can't fake.
     if (!ctx.evidence.notableFollowers.length) {
-      ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "Checking whether respected callers, founders and funds follow this account…", source: "twitterapi.io", tone: "neutral" });
+      ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "Scanning followers for high-reach accounts and known callers/founders/funds…", source: "twitterapi.io", tone: "neutral" });
       const nf = await notableFollowers(ctx.handle);
       ctx.evidence.notableFollowers = nf;
       if (nf.length) {
-        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `Followed by ${nf.length} high-signal account${nf.length === 1 ? "" : "s"}: ${nf.slice(0, 6).map((n) => `@${n.handle} (${n.label})`).join(", ")}${nf.length > 6 ? ", …" : ""}.`, source: "twitterapi.io", tone: "good" });
+        const over1m = nf.filter((n) => (n.count ?? 0) >= 1e6).length;
+        const over100k = nf.filter((n) => (n.count ?? 0) >= 1e5).length;
+        const reach = over1m ? `${over1m} with >1M followers` : over100k ? `${over100k} with >100K followers` : "";
+        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `Followed by ${nf.length} notable account${nf.length === 1 ? "" : "s"}${reach ? ` (${reach})` : ""}: ${nf.slice(0, 6).map((n) => `@${n.handle}${n.size ? ` ${n.size}` : ""}`).join(", ")}${nf.length > 6 ? ", …" : ""}.`, source: "twitterapi.io", tone: "good" });
       } else {
-        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "No curated callers, founders or funds among the subject's recent followers — no peer-credibility signal surfaced.", source: "twitterapi.io", tone: "neutral" });
+        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "No high-reach or known accounts among the subject's recent followers.", source: "twitterapi.io", tone: "neutral" });
       }
     }
 

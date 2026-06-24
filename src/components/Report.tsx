@@ -362,23 +362,27 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
                 ))}
               </span>
             </div>
-            {/* follower quality: respected accounts that follow this subject */}
+            {/* follower quality: high-reach + known accounts that follow this subject */}
             {f.notableFollowers.length > 0 && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
                 <span className="text-[11px] text-ink-faint">Followed by</span>
-                {f.notableFollowers.slice(0, 8).map((n) => (
-                  <a
-                    key={n.handle}
-                    href={`https://x.com/${n.handle}`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mono rounded-md border border-line px-1.5 py-0.5 text-[10.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
-                    title={`${n.label} · ~${n.size} followers`}
-                  >
-                    @{n.handle} <span className="text-ink-faint">{n.label}</span>
-                  </a>
-                ))}
-                {f.notableFollowers.length > 8 && <span className="text-[10.5px] text-ink-faint">+{f.notableFollowers.length - 8} more</span>}
+                {f.notableFollowers.slice(0, 10).map((n) => {
+                  const big = (n.count ?? 0) >= 1e6;
+                  return (
+                    <a
+                      key={n.handle}
+                      href={`https://x.com/${n.handle}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="mono rounded-md border px-1.5 py-0.5 text-[10.5px] transition hover:text-ink"
+                      style={big ? { borderColor: "var(--color-pass)", color: "var(--color-pass)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}
+                      title={`${n.label} · ${n.size} followers`}
+                    >
+                      @{n.handle} <span className="text-ink-faint">{n.size}{n.label && n.label !== "high reach" ? ` · ${n.label}` : ""}</span>
+                    </a>
+                  );
+                })}
+                {f.notableFollowers.length > 10 && <span className="text-[10.5px] text-ink-faint">+{f.notableFollowers.length - 10} more</span>}
               </div>
             )}
           </div>
