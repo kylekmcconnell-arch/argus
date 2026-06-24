@@ -248,7 +248,7 @@ export function InvestigationReport({
                 </div>
               )}
               {advisors.length > 0 && (
-                <div className={teamMembers.length > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}>
+                <div className={teamUnified.length > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}>
                   <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Advisors / backers ({advisors.length}) · claimed, corroborated</div>
                   <div className="mt-1.5 space-y-1.5">
                     {advisors.map((a) => {
