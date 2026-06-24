@@ -47,10 +47,10 @@ async function rpc(url: string, method: string, params: unknown): Promise<any> {
 // Walk getSignaturesForAddress back to the wallet's very first signatures. We
 // keep the oldest few (not just one) because the absolute-oldest tx is sometimes
 // the token mint itself; the funding sits in a neighbouring early tx.
-async function oldestActivity(url: string, wallet: string): Promise<{ oldestSigs: string[]; firstBlockTime: number | null; truncated: boolean }> {
+async function oldestActivity(url: string, wallet: string, maxPages = MAX_SIG_PAGES): Promise<{ oldestSigs: string[]; firstBlockTime: number | null; truncated: boolean }> {
   let before: string | undefined;
   let lastBatch: any[] = [];
-  for (let pages = 0; pages < MAX_SIG_PAGES; pages++) {
+  for (let pages = 0; pages < maxPages; pages++) {
     const batch: any[] = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }]);
     if (!batch?.length) break;
     lastBatch = batch;
@@ -62,6 +62,37 @@ async function oldestActivity(url: string, wallet: string): Promise<{ oldestSigs
   }
   const tail = lastBatch.slice(-6).reverse();
   return { oldestSigs: tail.map((s) => s.signature), firstBlockTime: lastBatch[lastBatch.length - 1]?.blockTime ?? null, truncated: true };
+}
+
+interface Hop { from: string; to: string; label: string | null; kind: "cex" | "wallet" }
+
+// Follow the money back hop by hop: deployer <- funder <- funder's funder <- ...
+// until the trail reaches a CEX (the KYC'd cash-out origin), runs dry, loops, or
+// hits the hop/time budget. Intermediary hops use shallow pagination to stay fast;
+// a deep, multi-hop chain through fresh wallets is the classic launder-before-launch
+// pattern, and a CEX terminus is where a subpoena would actually land.
+async function traceChain(url: string, deployer: string, maxHops: number, deadline: number): Promise<{ chain: Hop[]; origin: { address: string; label: string | null; kind: "cex" | "wallet" } | null; truncatedAt: string | null }> {
+  const chain: Hop[] = [];
+  const seen = new Set<string>([deployer]);
+  let current = deployer;
+  for (let hop = 0; hop < maxHops; hop++) {
+    if (Date.now() > deadline) return { chain, origin: chain.length ? { address: current, label: CEX[current] ?? null, kind: CEX[current] ? "cex" : "wallet" } : null, truncatedAt: current };
+    const { oldestSigs, truncated } = await oldestActivity(url, current, hop === 0 ? MAX_SIG_PAGES : 3);
+    const funder = oldestSigs.length ? await fundingSource(url, current, oldestSigs) : null;
+    if (!funder) {
+      const originAddr = chain.length ? current : null;
+      return { chain, origin: originAddr ? { address: originAddr, label: CEX[originAddr] ?? null, kind: CEX[originAddr] ? "cex" : "wallet" } : null, truncatedAt: truncated ? current : null };
+    }
+    const label = CEX[funder] ?? null;
+    const kind: "cex" | "wallet" = label ? "cex" : "wallet";
+    chain.push({ from: current, to: funder, label, kind });
+    if (label) return { chain, origin: { address: funder, label, kind }, truncatedAt: null }; // reached a CEX
+    if (seen.has(funder)) return { chain, origin: { address: funder, label: null, kind: "wallet" }, truncatedAt: null }; // cycle
+    seen.add(funder);
+    current = funder;
+  }
+  const last = chain[chain.length - 1];
+  return { chain, origin: last ? { address: last.to, label: last.label, kind: last.kind } : null, truncatedAt: null };
 }
 
 // Find the account that first sent SOL INTO the wallet, scanning the oldest few
@@ -128,34 +159,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   const url = `https://mainnet.helius-rpc.com/?api-key=${key}`;
   try {
-    const { oldestSigs, firstBlockTime, truncated } = await oldestActivity(url, wallet);
-    const [funderAddr, created] = await Promise.all([
-      oldestSigs.length ? fundingSource(url, wallet, oldestSigs) : Promise.resolve(null),
+    // Deployer's own age + mint count, in parallel with the chain trace.
+    const deadline = Date.now() + 22000; // leave margin under the 30s function cap
+    const [created, ageInfo, traced] = await Promise.all([
       tokensCreated(url, wallet),
+      oldestActivity(url, wallet).then((a) => ({ firstBlockTime: a.firstBlockTime, truncated: a.truncated })),
+      traceChain(url, wallet, 4, deadline),
     ]);
-    const walletAgeDays = firstBlockTime ? Math.max(0, Math.round((Date.now() / 1000 - firstBlockTime) / 86400)) : null;
-    const cexLabel = funderAddr ? CEX[funderAddr] : undefined;
-    const funder = funderAddr
-      ? { address: funderAddr, label: cexLabel ?? null, kind: cexLabel ? "cex" : "wallet" }
-      : null;
+    const { chain, origin, truncatedAt } = traced;
+    const walletAgeDays = ageInfo.firstBlockTime ? Math.max(0, Math.round((Date.now() / 1000 - ageInfo.firstBlockTime) / 86400)) : null;
+    const funder = chain[0] ? { address: chain[0].to, label: chain[0].label, kind: chain[0].kind } : null;
+    const terminatesAtCex = origin?.kind === "cex";
+    const anonHops = chain.filter((h) => h.kind === "wallet").length;
 
-    const note = funder
-      ? cexLabel
-        ? `Deployer was funded from ${cexLabel} — the trail ends at a KYC'd exchange account.`
-        : `Deployer was funded by an anonymous wallet (${funderAddr!.slice(0, 6)}…). If other launches trace to the same funder, it is a serial operator.`
-      : truncated
+    const note = !funder
+      ? ageInfo.truncated
         ? "Wallet too active to trace the original funder within limits."
-        : "No clear funding source found on-chain.";
+        : "No clear funding source found on-chain."
+      : terminatesAtCex
+        ? `Funding trail: deployer ${"← anon ".repeat(Math.max(0, anonHops))}← ${origin!.label}. The money cashes out at a KYC'd ${origin!.label} account${anonHops > 0 ? ` through ${anonHops} intermediary wallet${anonHops === 1 ? "" : "s"}` : ""}.`
+      : truncatedAt
+        ? `Funding trail runs ${chain.length} hop${chain.length === 1 ? "" : "s"} back, then goes cold at a high-activity wallet (${truncatedAt.slice(0, 6)}…). No CEX terminus reached.`
+        : `Funding trail runs ${chain.length} hop${chain.length === 1 ? "" : "s"} back to an anonymous wallet (${origin?.address.slice(0, 6)}…), with no CEX terminus. Shared funders across launches expose a serial operator.`;
 
     res.status(200).json({
       wallet,
       available: true,
       funder,
+      chain,
+      origin,
+      terminatesAtCex,
+      hops: chain.length,
       tokensCreated: created,
       serialDeployer: typeof created === "number" && created >= 5,
       walletAgeDays,
-      firstActivity: firstBlockTime ? new Date(firstBlockTime * 1000).toISOString().slice(0, 10) : null,
-      truncated,
+      firstActivity: ageInfo.firstBlockTime ? new Date(ageInfo.firstBlockTime * 1000).toISOString().slice(0, 10) : null,
+      truncated: ageInfo.truncated,
       note,
     });
   } catch (e) {
