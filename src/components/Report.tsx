@@ -425,6 +425,28 @@ export function Report({ dossier, onReset }: { dossier: Dossier; onReset: () => 
           </div>
         </div>
 
+        {/* contradictions — claims that do not match the evidence */}
+        {f.contradictions.length > 0 && (
+          <Section title="Contradictions" kicker="claims that do not match the collected evidence">
+            <Card className="divide-y divide-line/60">
+              {f.contradictions.map((c, i) => {
+                const sc = c.severity === "high" ? "var(--color-avoid)" : c.severity === "medium" ? "var(--color-caution)" : "var(--color-ink-faint)";
+                return (
+                  <div key={i} className="flex items-start gap-2.5 px-4 py-3">
+                    <span className="mono mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase" style={{ background: `${sc}1a`, color: sc }}>{c.severity}</span>
+                    <div className="min-w-0 text-[12.5px] leading-snug">
+                      <span className="text-ink">{c.claim}</span>
+                      <span className="text-ink-faint"> — but </span>
+                      <span className="text-ink-dim">{c.conflict}</span>
+                      {c.confidence === "low" && <span className="ml-1.5 text-[10.5px] text-ink-faint">(low confidence)</span>}
+                    </div>
+                  </div>
+                );
+              })}
+            </Card>
+          </Section>
+        )}
+
         {/* role breakdown — governing role full-width and expanded, the rest below */}
         <Section title="Role breakdown" kicker="each role scored on its own track · never averaged">
           {(() => {

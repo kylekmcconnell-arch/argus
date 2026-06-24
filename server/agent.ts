@@ -6,6 +6,7 @@
 // Gated on ANTHROPIC_API_KEY. With no key, callers fall back to heuristics.
 
 import { ANALYST_MODEL, env } from "./config";
+import type { Contradiction } from "../src/data/evidence";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
@@ -127,6 +128,52 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
     },
   };
   return structured<ExtractedClaims>(system, user, tool, 2048);
+}
+
+// Phase 4: internal contradiction scan. Given everything collected, find places
+// where the subject's own claims conflict with each other or with the evidence.
+// This is the "do the stories match the facts" pass. Strict: a missing data
+// point is a GAP, never a contradiction.
+const lvl = (s?: string): "low" | "medium" | "high" => {
+  const v = (s ?? "").toLowerCase();
+  return v === "high" ? "high" : v === "low" ? "low" : "medium";
+};
+
+export async function scanContradictions(handle: string, evidenceJson: string): Promise<Contradiction[] | null> {
+  const system =
+    "You are ARGUS contradiction analysis. From everything collected about a subject, find INTERNAL CONTRADICTIONS: where the subject's own stated claims conflict with each other or with the collected evidence. " +
+    "Examples: claims a team of N but only one builder is found; claims an audit but no auditor or verification exists; claims a named backer who never acknowledges them; a stated launch/founding date that conflicts with the account age, domain age, or on-chain history; claims 'doxxed' but no real identity resolves; claims locked liquidity that on-chain shows unlocked; a partnership the partner never confirmed; a venture in the bio that discovery found no evidence for. " +
+    "Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes.";
+  const user = `Subject: ${handle}\n\nCollected evidence (JSON):\n${evidenceJson}`;
+  const tool: ToolSchema = {
+    name: "record_contradictions",
+    description: "Record internal contradictions between the subject's claims and the collected evidence.",
+    input_schema: {
+      type: "object",
+      properties: {
+        contradictions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              claim: { type: "string", description: "what the subject asserts" },
+              conflict: { type: "string", description: "the specific evidence that contradicts it" },
+              severity: { type: "string", enum: ["low", "medium", "high"] },
+              confidence: { type: "string", enum: ["low", "medium", "high"] },
+            },
+            required: ["claim", "conflict", "severity", "confidence"],
+          },
+        },
+      },
+      required: ["contradictions"],
+    },
+  };
+  const r = await structured<{ contradictions: { claim: string; conflict: string; severity: string; confidence: string }[] }>(system, user, tool, 2048);
+  if (!r) return null;
+  return (r.contradictions ?? [])
+    .filter((c) => c && c.claim?.trim() && c.conflict?.trim())
+    .map((c) => ({ claim: c.claim.trim(), conflict: c.conflict.trim(), severity: lvl(c.severity), confidence: lvl(c.confidence) }))
+    .slice(0, 10);
 }
 
 // The flagship analyst call: given everything collected, score each axis of each

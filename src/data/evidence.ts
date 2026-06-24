@@ -42,6 +42,15 @@ export interface NotableFollower {
   size: string;  // rough follower tier, for context (e.g. "700K")
 }
 
+// An internal contradiction: a subject claim that conflicts with another claim
+// or with the collected evidence. A GAP (missing data) is never a contradiction.
+export interface Contradiction {
+  claim: string;     // what the subject asserts
+  conflict: string;  // the specific evidence that contradicts it
+  severity: "low" | "medium" | "high";
+  confidence: "low" | "medium" | "high";
+}
+
 export interface TraceStep {
   phase: string;
   label: string;
@@ -65,6 +74,7 @@ export interface CollectedEvidence {
   headline: string;
   recentActivity: string[]; // recent post text, fuel for claim extraction
   notableFollowers: NotableFollower[]; // respected accounts that follow the subject
+  contradictions: Contradiction[]; // internal contradictions across materials
 }
 
 export function emptyEvidence(handle: string): CollectedEvidence {
@@ -93,5 +103,6 @@ export function emptyEvidence(handle: string): CollectedEvidence {
     headline: "",
     recentActivity: [],
     notableFollowers: [],
+    contradictions: [],
   };
 }

@@ -62,6 +62,7 @@ export function toEvidence(f: SubjectFixture): CollectedEvidence {
     headline: f.headline,
     recentActivity: [],
     notableFollowers: [],
+    contradictions: [],
   };
 }
 

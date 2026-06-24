@@ -19,7 +19,7 @@ const PHASES: { n: number; title: string; steps: [string, Status][] }[] = [
     ["Panoptes trust graph + cross-audit funder/affiliation bridging", "live"],
   ] },
   { n: 4, title: "Contradiction detection", steps: [
-    ["Internal contradiction scan across materials", "planned"],
+    ["Internal contradiction scan across all collected materials", "live"],
   ] },
   { n: 5, title: "Specialist analysis modules", steps: [
     ["Smart-contract scan / rug-pull vectors", "live"],

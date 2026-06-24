@@ -15,7 +15,7 @@ import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
-import { analystAvailable, analyzeSubject, extractClaims } from "./agent";
+import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
 
 import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, followsSubject, handleHistory, type DiscoveredAffiliation } from "./adapters/x";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
@@ -253,23 +253,36 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
     emit({ phase: "P0 · Routing", label: "Classify roles", detail: `Routed to ${evidence.roles.join(", ")} (${route.confidence} confidence).`, tone: "neutral" });
   }
 
+  const baseEvidence = {
+    profile: evidence.profile,
+    ventures: evidence.ventures,
+    testimonials: evidence.testimonials,
+    advised: evidence.advised,
+    promotions: evidence.promotions,
+    wallets: evidence.wallets,
+    findings: evidence.findings,
+    notableFollowers: evidence.notableFollowers,
+    recentActivity: evidence.recentActivity.slice(0, 12),
+  };
+
+  // ── Phase 4: contradiction scan — do the stories match the facts? Runs before
+  //    scoring so any contradictions inform the analyst's axes. ──
+  if (analystAvailable()) {
+    emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions…", tone: "neutral" });
+    const found = await scanContradictions(evidence.profile.handle, JSON.stringify(baseEvidence, null, 0).slice(0, 12000));
+    if (found && found.length) {
+      evidence.contradictions = found;
+      const worst = found.some((c) => c.severity === "high") ? "bad" : "warn";
+      emit({ phase: "Contradictions", label: `${found.length} contradiction${found.length === 1 ? "" : "s"}`, detail: found.slice(0, 3).map((c) => `${c.claim} vs ${c.conflict}`).join(" · "), source: "claude", tone: worst });
+    } else {
+      emit({ phase: "Contradictions", label: "None found", detail: "No internal contradictions surfaced across the subject's claims and the evidence.", source: "claude", tone: "good" });
+    }
+  }
+
   // analyst scoring
   if (analystAvailable()) {
     emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence…", tone: "neutral" });
-    const evidenceJson = JSON.stringify(
-      {
-        profile: evidence.profile,
-        ventures: evidence.ventures,
-        testimonials: evidence.testimonials,
-        advised: evidence.advised,
-        promotions: evidence.promotions,
-        wallets: evidence.wallets,
-        findings: evidence.findings,
-        notableFollowers: evidence.notableFollowers,
-      },
-      null,
-      0,
-    ).slice(0, 12000);
+    const evidenceJson = JSON.stringify({ ...baseEvidence, contradictions: evidence.contradictions }, null, 0).slice(0, 13000);
     const verdict = await analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson);
     if (verdict) {
       evidence.axes = verdict.axes;

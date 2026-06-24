@@ -841,6 +841,7 @@ function assembleDossier(ev, live) {
     headline: ev.headline,
     live,
     notableFollowers: ev.notableFollowers,
+    contradictions: ev.contradictions,
     report,
     graph: a.toPanoptes(),
     founderSummary: ev.roles.includes("FOUNDER" /* FOUNDER */) ? a.founderSummary() : void 0,
@@ -887,7 +888,8 @@ function toEvidence(f) {
     axes: f.axes,
     headline: f.headline,
     recentActivity: [],
-    notableFollowers: []
+    notableFollowers: [],
+    contradictions: []
   };
 }
 var lumen = {
@@ -1115,7 +1117,8 @@ function emptyEvidence(handle) {
     axes: [],
     headline: "",
     recentActivity: [],
-    notableFollowers: []
+    notableFollowers: [],
+    contradictions: []
   };
 }
 
@@ -1207,6 +1210,43 @@ ${posts.slice(0, 20).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
     }
   };
   return structured(system, user, tool, 2048);
+}
+var lvl = (s) => {
+  const v = (s ?? "").toLowerCase();
+  return v === "high" ? "high" : v === "low" ? "low" : "medium";
+};
+async function scanContradictions(handle, evidenceJson) {
+  const system = "You are ARGUS contradiction analysis. From everything collected about a subject, find INTERNAL CONTRADICTIONS: where the subject's own stated claims conflict with each other or with the collected evidence. Examples: claims a team of N but only one builder is found; claims an audit but no auditor or verification exists; claims a named backer who never acknowledges them; a stated launch/founding date that conflicts with the account age, domain age, or on-chain history; claims 'doxxed' but no real identity resolves; claims locked liquidity that on-chain shows unlocked; a partnership the partner never confirmed; a venture in the bio that discovery found no evidence for. Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes.";
+  const user = `Subject: ${handle}
+
+Collected evidence (JSON):
+${evidenceJson}`;
+  const tool = {
+    name: "record_contradictions",
+    description: "Record internal contradictions between the subject's claims and the collected evidence.",
+    input_schema: {
+      type: "object",
+      properties: {
+        contradictions: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              claim: { type: "string", description: "what the subject asserts" },
+              conflict: { type: "string", description: "the specific evidence that contradicts it" },
+              severity: { type: "string", enum: ["low", "medium", "high"] },
+              confidence: { type: "string", enum: ["low", "medium", "high"] }
+            },
+            required: ["claim", "conflict", "severity", "confidence"]
+          }
+        }
+      },
+      required: ["contradictions"]
+    }
+  };
+  const r = await structured(system, user, tool, 2048);
+  if (!r) return null;
+  return (r.contradictions ?? []).filter((c) => c && c.claim?.trim() && c.conflict?.trim()).map((c) => ({ claim: c.claim.trim(), conflict: c.conflict.trim(), severity: lvl(c.severity), confidence: lvl(c.confidence) })).slice(0, 10);
 }
 async function analyzeSubject(handle, roles, axisCatalog2, evidenceJson) {
   const system = "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject on a fixed set of axes from collected evidence only. Be skeptical: a strong story never papers over a disqualifying fact. Score conservatively when evidence is thin. Each axis score must be between 0 and its weight. Write one tight rationale per axis citing the evidence. Never use em dashes.";
@@ -2258,22 +2298,31 @@ async function runAudit(rawHandle, emit) {
     evidence.roles = route.applicable_classes.length ? route.applicable_classes : ["MEMBER" /* MEMBER */];
     emit({ phase: "P0 \xB7 Routing", label: "Classify roles", detail: `Routed to ${evidence.roles.join(", ")} (${route.confidence} confidence).`, tone: "neutral" });
   }
+  const baseEvidence = {
+    profile: evidence.profile,
+    ventures: evidence.ventures,
+    testimonials: evidence.testimonials,
+    advised: evidence.advised,
+    promotions: evidence.promotions,
+    wallets: evidence.wallets,
+    findings: evidence.findings,
+    notableFollowers: evidence.notableFollowers,
+    recentActivity: evidence.recentActivity.slice(0, 12)
+  };
+  if (analystAvailable()) {
+    emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions\u2026", tone: "neutral" });
+    const found = await scanContradictions(evidence.profile.handle, JSON.stringify(baseEvidence, null, 0).slice(0, 12e3));
+    if (found && found.length) {
+      evidence.contradictions = found;
+      const worst = found.some((c) => c.severity === "high") ? "bad" : "warn";
+      emit({ phase: "Contradictions", label: `${found.length} contradiction${found.length === 1 ? "" : "s"}`, detail: found.slice(0, 3).map((c) => `${c.claim} vs ${c.conflict}`).join(" \xB7 "), source: "claude", tone: worst });
+    } else {
+      emit({ phase: "Contradictions", label: "None found", detail: "No internal contradictions surfaced across the subject's claims and the evidence.", source: "claude", tone: "good" });
+    }
+  }
   if (analystAvailable()) {
     emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence\u2026", tone: "neutral" });
-    const evidenceJson = JSON.stringify(
-      {
-        profile: evidence.profile,
-        ventures: evidence.ventures,
-        testimonials: evidence.testimonials,
-        advised: evidence.advised,
-        promotions: evidence.promotions,
-        wallets: evidence.wallets,
-        findings: evidence.findings,
-        notableFollowers: evidence.notableFollowers
-      },
-      null,
-      0
-    ).slice(0, 12e3);
+    const evidenceJson = JSON.stringify({ ...baseEvidence, contradictions: evidence.contradictions }, null, 0).slice(0, 13e3);
     const verdict = await analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson);
     if (verdict) {
       evidence.axes = verdict.axes;
