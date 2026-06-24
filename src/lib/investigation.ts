@@ -79,6 +79,13 @@ export async function fetchWebTeam(siteUrl: string, projectName: string, recon: 
   try {
     const host = new URL(siteUrl).hostname.replace(/^www\./, "");
     const qs = new URLSearchParams({ domain: host, name: projectName || "", names: (recon?.team.names ?? []).slice(0, 8).join(",") });
+    // The project's own X handle (from the site's social links) unlocks the
+    // X-content angle of the team search — the team named in its own posts.
+    const NOISE = /^(home|share|intent|i|status|explore|search|hashtag|messages)$/i;
+    const xh = (recon?.socials ?? [])
+      .map((s) => s.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1])
+      .find((h) => h && !NOISE.test(h));
+    if (xh) qs.set("x", xh);
     const res = await fetch(`/api/recon-team?${qs}`);
     if (!res.ok) return [];
     const d = await res.json();
