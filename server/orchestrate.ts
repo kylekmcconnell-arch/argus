@@ -265,11 +265,16 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
     recentActivity: evidence.recentActivity.slice(0, 12),
   };
 
-  // ── Phase 4: contradiction scan — do the stories match the facts? Runs before
-  //    scoring so any contradictions inform the analyst's axes. ──
+  // ── Phase 4 contradiction scan + axis scoring, run CONCURRENTLY (both read the
+  //    same evidence) so the extra Claude call doesn't extend the critical path. ──
   if (analystAvailable()) {
     emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions…", tone: "neutral" });
-    const found = await scanContradictions(evidence.profile.handle, JSON.stringify(baseEvidence, null, 0).slice(0, 12000));
+    emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence…", tone: "neutral" });
+    const evidenceJson = JSON.stringify(baseEvidence, null, 0).slice(0, 12000);
+    const [found, verdict] = await Promise.all([
+      scanContradictions(evidence.profile.handle, evidenceJson),
+      analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson),
+    ]);
     if (found && found.length) {
       evidence.contradictions = found;
       const worst = found.some((c) => c.severity === "high") ? "bad" : "warn";
@@ -277,13 +282,6 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
     } else {
       emit({ phase: "Contradictions", label: "None found", detail: "No internal contradictions surfaced across the subject's claims and the evidence.", source: "claude", tone: "good" });
     }
-  }
-
-  // analyst scoring
-  if (analystAvailable()) {
-    emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence…", tone: "neutral" });
-    const evidenceJson = JSON.stringify({ ...baseEvidence, contradictions: evidence.contradictions }, null, 0).slice(0, 13000);
-    const verdict = await analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson);
     if (verdict) {
       evidence.axes = verdict.axes;
       evidence.headline = verdict.headline || evidence.headline;

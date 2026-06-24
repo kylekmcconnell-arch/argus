@@ -2311,7 +2311,12 @@ async function runAudit(rawHandle, emit) {
   };
   if (analystAvailable()) {
     emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions\u2026", tone: "neutral" });
-    const found = await scanContradictions(evidence.profile.handle, JSON.stringify(baseEvidence, null, 0).slice(0, 12e3));
+    emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence\u2026", tone: "neutral" });
+    const evidenceJson = JSON.stringify(baseEvidence, null, 0).slice(0, 12e3);
+    const [found, verdict] = await Promise.all([
+      scanContradictions(evidence.profile.handle, evidenceJson),
+      analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson)
+    ]);
     if (found && found.length) {
       evidence.contradictions = found;
       const worst = found.some((c) => c.severity === "high") ? "bad" : "warn";
@@ -2319,11 +2324,6 @@ async function runAudit(rawHandle, emit) {
     } else {
       emit({ phase: "Contradictions", label: "None found", detail: "No internal contradictions surfaced across the subject's claims and the evidence.", source: "claude", tone: "good" });
     }
-  }
-  if (analystAvailable()) {
-    emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence\u2026", tone: "neutral" });
-    const evidenceJson = JSON.stringify({ ...baseEvidence, contradictions: evidence.contradictions }, null, 0).slice(0, 13e3);
-    const verdict = await analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson);
     if (verdict) {
       evidence.axes = verdict.axes;
       evidence.headline = verdict.headline || evidence.headline;
