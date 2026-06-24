@@ -1,9 +1,24 @@
 import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
-import { SUBJECTS } from "../data/subjects";
-import { ROLE_META, verdictMeta } from "../lib/verdict";
-import { buildReport } from "../data/subjects";
+import { verdictMeta } from "../lib/verdict";
 import { getWatchlist } from "../lib/watchlist";
+import { getLog, type LogEntry } from "../lib/auditlog";
+
+// Most recent audits, de-duped by what was audited (one row per subject, newest).
+function recentAudits(max: number): LogEntry[] {
+  const seen = new Set<string>();
+  const out: LogEntry[] = [];
+  for (const e of getLog()) {
+    const k = `${e.kind}:${(e.ref ?? e.query).toLowerCase()}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(e);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+const KIND_LABEL: Record<LogEntry["kind"], string> = { person: "handle", token: "token", site: "site" };
 
 // Left rail, origami.chat style: light zinc-100, logo at top, nav, a recent-audits
 // list, account at the bottom.
@@ -86,6 +101,7 @@ export function Sidebar({
 }) {
   const nav = (t: NavTarget) => { onNav(t); onClose?.(); };
   const audit = (h: string) => { onAudit(h); onClose?.(); };
+  const recent = recentAudits(14);
   return (
     <aside
       className={`fixed inset-y-0 left-0 z-40 flex h-full w-[232px] shrink-0 flex-col border-r border-line bg-sidebar transition-transform md:static md:translate-x-0 ${
@@ -116,33 +132,38 @@ export function Sidebar({
         Recent audits
       </div>
       <div className="mt-1.5 space-y-0.5 overflow-y-auto px-2.5 thin-scroll">
-        {SUBJECTS.map((s) => {
-          const verdict = buildReport(s).report.composite_verdict;
-          const vm = verdictMeta(verdict);
-          const active = activeHandle === s.handle;
-          return (
-            <button
-              key={s.handle}
-              onClick={() => audit(s.handle)}
-              className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
-                active ? "bg-panel soft-shadow" : "hover:bg-panel/70"
-              }`}
-            >
-              <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel text-[11px] text-signal">
-                {s.avatar}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="mono block truncate text-[12.5px] text-ink">{s.handle}</span>
-                <span className="flex items-center gap-1 text-[10px] text-ink-faint">
-                  {s.roles.slice(0, 3).map((r) => (
-                    <span key={r}>{ROLE_META[r].glyph}</span>
-                  ))}
+        {recent.length === 0 ? (
+          <div className="px-2 py-1.5 text-[11.5px] leading-snug text-ink-faint">
+            Nothing yet. Audit a handle, token, or site and it lands here.
+          </div>
+        ) : (
+          recent.map((e) => {
+            const ref = e.ref ?? e.query;
+            const vm = e.verdict ? verdictMeta(e.verdict) : null;
+            const active = activeHandle === ref || activeHandle === e.query;
+            const avatar = (e.query.replace(/^[@$]/, "").replace(/^https?:\/\//, "")[0] ?? "?").toUpperCase();
+            return (
+              <button
+                key={e.id}
+                onClick={() => audit(ref)}
+                className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
+                  active ? "bg-panel soft-shadow" : "hover:bg-panel/70"
+                }`}
+              >
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel text-[11px] text-signal">
+                  {avatar}
                 </span>
-              </span>
-              <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: vm.color }} />
-            </button>
-          );
-        })}
+                <span className="min-w-0 flex-1">
+                  <span className="mono block truncate text-[12.5px] text-ink">{e.query}</span>
+                  <span className="block truncate text-[10px] text-ink-faint">
+                    {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}
+                  </span>
+                </span>
+                {vm && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: vm.color }} />}
+              </button>
+            );
+          })
+        )}
       </div>
 
       {/* account */}

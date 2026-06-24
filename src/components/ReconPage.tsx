@@ -111,6 +111,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
     logAudit({
       kind: "site",
       query: r.retrieval.url,
+      ref: r.retrieval.url,
       verdict: r.verdict?.verdict ?? r.retrieval.status,
       score: r.verdict?.score ?? null,
       coverage: r.retrieval.status,

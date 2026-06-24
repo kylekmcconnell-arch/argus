@@ -9,7 +9,8 @@ export interface LogEntry {
   id: string;
   ts: number;
   kind: AuditKind;
-  query: string;
+  query: string;          // display label (e.g. $SYMBOL, @handle, a site URL)
+  ref?: string;           // the re-runnable identifier (contract / handle / url)
   verdict?: string;       // PASS/CAUTION/FAIL/AVOID, or site coverage status
   score?: number | null;
   summary: string;        // one-line takeaway (identity line / headline)
