@@ -2131,6 +2131,61 @@ function nameNeedles(name) {
   return [...out];
 }
 
+// server/adapters/wallet.ts
+var ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
+var NAME_IN_TEXT = /\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b/gi;
+async function getJson(url) {
+  try {
+    const r = await fetch(url, { signal: AbortSignal.timeout(9e3) });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+async function web3bio(name) {
+  const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);
+  const arr = Array.isArray(d) ? d : d ? [d] : [];
+  return arr.find((x) => x && typeof x.address === "string" && x.address)?.address ?? null;
+}
+async function ensideas(name) {
+  const d = await getJson(`https://api.ensideas.com/ens/resolve/${encodeURIComponent(name)}`);
+  return d && typeof d.address === "string" && /^0x[a-fA-F0-9]{40}$/.test(d.address) ? d.address : null;
+}
+async function snsResolve(name) {
+  const j = await getJson(`https://sns-sdk-proxy.bonfida.workers.dev/resolve/${encodeURIComponent(name.replace(/\.sol$/i, ""))}`);
+  return j && typeof j.result === "string" ? j.result : null;
+}
+async function resolveName(name) {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".sol")) {
+    const a2 = await snsResolve(lower);
+    return a2 ? { address: a2, chain: "solana" } : null;
+  }
+  let a = await web3bio(lower);
+  if (!a && /\.eth$/i.test(lower)) a = await ensideas(lower);
+  return a ? { address: a, chain: a.startsWith("0x") ? "evm" : "solana" } : null;
+}
+async function resolveWalletsFromText(text) {
+  if (!text) return [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (address, chain, source) => {
+    if (!address) return;
+    const k = address.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ address, chain, source });
+  };
+  for (const m of text.matchAll(ADDR_IN_TEXT)) add(m[0], "evm", "0x address self-disclosed in X bio/posts");
+  const names = /* @__PURE__ */ new Set();
+  for (const m of text.matchAll(NAME_IN_TEXT)) names.add(m[0].toLowerCase());
+  for (const nm of [...names].slice(0, 6)) {
+    const r = await resolveName(nm);
+    add(r?.address ?? null, r?.chain ?? "evm", `${nm} (self-disclosed in X bio/posts)`);
+  }
+  return out.slice(0, 6);
+}
+
 // server/orchestrate.ts
 var ADAPTERS = [
   xAdapter,
@@ -2178,6 +2233,13 @@ async function coldIntake(ctx) {
   if (posts.length) {
     ctx.evidence.recentActivity = posts;
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
+  }
+  const foundWallets = await resolveWalletsFromText([ctx.evidence.profile.bio, ...posts].join(" \n "));
+  if (foundWallets.length) {
+    for (const w of foundWallets) {
+      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: "SelfDoxxed", notes: w.source });
+    }
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Wallet resolved", detail: `Self-disclosed wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}\u2026 (${w.chain})`).join(", ")}. Running on-chain forensics on it.`, source: "find-wallet", tone: "good" });
   }
   if (!analystAvailable()) return;
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify\u2026", tone: "neutral" });
