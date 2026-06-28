@@ -35,10 +35,18 @@ async function snsResolve(domain: string): Promise<string | null> {
   const j = await getJson(`https://sns-sdk-proxy.bonfida.workers.dev/resolve/${encodeURIComponent(dn)}`);
   return j && typeof j.result === "string" ? j.result : null;
 }
+// Reliable ENS-mainnet resolver; web3.bio errors on some popular .eth names.
+async function ensideas(name: string): Promise<string | null> {
+  const d = await getJson(`https://api.ensideas.com/ens/resolve/${encodeURIComponent(name)}`);
+  return d && typeof d.address === "string" && /^0x[a-fA-F0-9]{40}$/.test(d.address) ? d.address : null;
+}
 async function resolveName(name: string): Promise<{ address: string; chain: string } | null> {
   const lower = name.toLowerCase();
   if (lower.endsWith(".sol")) { const a = await snsResolve(lower); return a ? { address: a, chain: "solana" } : null; }
-  const a = await web3bio(lower);
+  // web3.bio covers basenames/lens/farcaster; ensideas is the reliable ENS .eth
+  // fallback (web3.bio throws on some popular names like vitalik.eth).
+  let a = await web3bio(lower);
+  if (!a && /\.eth$/i.test(lower)) a = await ensideas(lower);
   return a ? { address: a, chain: a.startsWith("0x") ? "evm" : "solana" } : null;
 }
 
