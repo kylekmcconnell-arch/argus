@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { recordContribution, walletContribution, knownAddresses } from "../graph/store";
+import { explorer, shortAddr } from "../lib/wallets";
 
 // ── Find wallet ─────────────────────────────────────────────────────────────
 // Sleuth-style clue box: paste a handle, an ENS/.sol name, a full or PARTIAL
@@ -23,9 +24,6 @@ type Card = {
 };
 
 const SAMPLES = ["vitalik.eth", "@jessepollak", "toly.sol", "@brian_armstrong"];
-const explorer = (w: { address: string; chain: string }) =>
-  w.chain === "solana" ? `https://solscan.io/account/${w.address}` : `https://etherscan.io/address/${w.address}`;
-const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const handleLike = (s: string) => /^@?[A-Za-z0-9_]{2,30}$/.test(s.trim()) && !s.includes(".");
 
 // A clue is "partial" when it's a truncated address: an ellipsis form, or a bare
@@ -226,7 +224,7 @@ export function FindWallet({ onAudit, onReset }: { onAudit: (q: string) => void;
                     <div key={m.address} className="rounded-lg border border-line bg-void/40 p-2.5">
                       <div className="flex items-center gap-2">
                         <ChainBadge chain={m.chain} />
-                        <a href={explorer(m)} target="_blank" rel="noreferrer" className="mono text-[12.5px] text-signal underline-offset-2 hover:underline">{short(m.address)}</a>
+                        <a href={explorer(m)} target="_blank" rel="noreferrer" className="mono text-[12.5px] text-signal underline-offset-2 hover:underline">{shortAddr(m.address)}</a>
                         <CopyBtn text={m.address} />
                       </div>
                       <div className="mt-1 text-[11px] text-ink-faint">tied to {m.tiedTo.join(", ")}</div>
@@ -295,7 +293,7 @@ function WalletRow({ w }: { w: Wallet }) {
     <div className="rounded-lg border border-line bg-void/40 p-2.5">
       <div className="flex flex-wrap items-center gap-2">
         <ChainBadge chain={w.chain} />
-        <a href={explorer(w)} target="_blank" rel="noreferrer" className="mono text-[12.5px] text-signal underline-offset-2 hover:underline">{short(w.address)}</a>
+        <a href={explorer(w)} target="_blank" rel="noreferrer" className="mono text-[12.5px] text-signal underline-offset-2 hover:underline">{shortAddr(w.address)}</a>
         <CopyBtn text={w.address} />
         <span className={`text-[11px] ${unconfirmed ? "text-caution" : "text-ink-faint"}`}>{w.source}</span>
         {w.chain === "solana" && (

@@ -9,6 +9,7 @@ import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
+import { explorer, shortAddr, walletTier } from "../lib/wallets";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -74,6 +75,20 @@ function Section({ title, kicker, children }: { title: string; kicker?: string; 
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={`rounded-xl border border-line bg-panel/70 ${className}`}>{children}</div>
+  );
+}
+
+// Copy a full wallet address (the row shows a truncated form).
+function CopyAddr({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      onClick={() => navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); })}
+      className="shrink-0 text-[10.5px] text-ink-faint transition hover:text-ink"
+      title="Copy full address"
+    >
+      {done ? "copied" : "copy"}
+    </button>
   );
 }
 
@@ -517,6 +532,56 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
 
         {/* signature modules */}
         <div className="grid gap-3 lg:grid-cols-2">
+          {evidence.wallets.length > 0 && (
+            <div className="min-w-0">
+              <Section title="Wallets & on-chain links" kicker="addresses tied to them · ranked by attribution strength">
+                <Card className="divide-y divide-line/60">
+                  {[...evidence.wallets]
+                    .sort((a, b) => walletTier(a).rank - walletTier(b).rank)
+                    .map((w, i) => {
+                      const t = walletTier(w);
+                      const flags = [
+                        w.sold_into_own_promo ? "sold into own promo" : "",
+                        w.scam_adjacent_flow ? "scam-adjacent flow" : "",
+                      ].filter(Boolean);
+                      return (
+                        <div key={i} className="px-4 py-2.5 text-[12.5px]">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] uppercase tracking-wide text-ink-faint">
+                              {w.chain === "solana" ? "SOL" : "EVM"}
+                            </span>
+                            <a href={explorer(w)} target="_blank" rel="noreferrer" className="mono truncate text-signal underline-offset-2 hover:underline">{shortAddr(w.address)}</a>
+                            <CopyAddr text={w.address} />
+                            {w.link_evidence_url && (
+                              <a href={w.link_evidence_url} target="_blank" rel="noreferrer" className="shrink-0 text-[10.5px] text-signal-dim hover:underline">proof</a>
+                            )}
+                            <span className="mono ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px]" style={{ color: t.color, border: `1px solid ${t.color}40` }}>
+                              {t.label}
+                            </span>
+                          </div>
+                          {(w.notes || w.activity_summary) && (
+                            <div className="mt-1 text-[11px] leading-snug text-ink-faint">
+                              {[w.notes, w.activity_summary].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
+                          {(flags.length > 0 || w.positive_signals) && (
+                            <div className="mt-1.5 flex flex-wrap gap-1">
+                              {flags.map((fl) => (
+                                <span key={fl} className="mono rounded border border-avoid/40 px-1 py-0.5 text-[9.5px] text-avoid">{fl}</span>
+                              ))}
+                              {w.positive_signals && (
+                                <span className="mono rounded border border-pass/40 px-1 py-0.5 text-[9.5px] text-pass">{w.positive_signals}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </Card>
+              </Section>
+            </div>
+          )}
+
           {evidence.ventures.length > 0 && (
             <div className="min-w-0">
               <Section title="Ventures & affiliations" kicker="every company tied to them · corroborated where possible">
