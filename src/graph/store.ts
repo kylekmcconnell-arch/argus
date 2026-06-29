@@ -1,15 +1,20 @@
-// A local, accumulating record of the entities every real audit surfaces. Each
-// token audit and recorded site recon contributes its Panoptes subgraph here;
-// the trust graph then unifies them, so the network compounds with use — audit
-// two tokens that share a deployer and they connect, even across sessions. This
-// is the seed of the data asset, kept in localStorage until there is a backend.
+// An accumulating record of the entities every real audit surfaces. Each token
+// audit and recorded site recon contributes its Panoptes subgraph here; the
+// trust graph then unifies them, so the network compounds with use — audit two
+// tokens that share a deployer and they connect, even across sessions.
+//
+// localStorage is the synchronous working cache. When a shared backend is
+// configured (/api/graph, gated on Supabase env), every contribution also syncs
+// up and the COMMUNITY graph hydrates down on load — so Kyle's and Enigma's
+// audits compound into one network. With no backend it stays local-only.
 import type { GraphContribution } from "./network";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import type { Dossier } from "../data/dossier";
 import type { Investigation, WebPerson } from "../lib/investigation";
 
 const KEY = "argus:graphstore";
-const CAP = 80; // most recent contributions
+const CAP = 150; // working-cache size (the shared backend holds the full community set)
+const SYNC_URL = "/api/graph";
 
 export function getContributions(): GraphContribution[] {
   try {
@@ -29,10 +34,72 @@ export function recordContribution(c: GraphContribution): void {
   } catch {
     /* storage unavailable — non-fatal */
   }
+  void syncContribution(c); // push to the shared graph (no-op if no backend)
+  emitGraphChange();
 }
 
 export function clearContributions(): void {
   try { localStorage.removeItem(KEY); } catch { /* noop */ }
+  emitGraphChange();
+}
+
+// ── shared backend: sync up, hydrate down ──────────────────────────────────
+// Views read getContributions() synchronously; the community hydrate is async,
+// so notify subscribers (e.g. the Trust graph page) to re-read once it lands.
+type GraphListener = () => void;
+const listeners = new Set<GraphListener>();
+export function subscribeGraph(cb: GraphListener): () => void {
+  listeners.add(cb);
+  return () => { listeners.delete(cb); };
+}
+function emitGraphChange(): void {
+  for (const cb of [...listeners]) { try { cb(); } catch { /* */ } }
+}
+
+async function syncContribution(c: GraphContribution): Promise<boolean> {
+  try {
+    // No keepalive: it caps the body at 64KB, which a large subgraph can exceed.
+    const r = await fetch(SYNC_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(c),
+    });
+    if (!r.ok) return false;
+    const d = await r.json().catch(() => ({}));
+    return d?.ok === true;
+  } catch {
+    return false; // offline or no backend — the local cache still holds it
+  }
+}
+
+let hydrated = false;
+// Pull the community graph and merge it into the local cache. Local-only entries
+// (recorded in a prior session whose POST never landed) win for their own
+// subjects AND get backfilled up, so the shared graph self-heals. Runs once per
+// session, on app mount. No-op when no backend is configured.
+export async function hydrateCommunityGraph(): Promise<void> {
+  if (hydrated) return;
+  hydrated = true;
+  try {
+    const r = await fetch(SYNC_URL, { signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d?.available === false) return; // backend not configured — stay local-only
+    const remote: GraphContribution[] = Array.isArray(d?.contributions) ? d.contributions : [];
+    const local = getContributions();
+    const remoteKeys = new Set(remote.map(canonicalKey));
+    const localOnly = local.filter((c) => !remoteKeys.has(canonicalKey(c)));
+    if (remote.length) {
+      const merged = [...localOnly, ...remote].slice(0, CAP);
+      localStorage.setItem(KEY, JSON.stringify(merged));
+      emitGraphChange();
+    }
+    // Backfill contributions that exist locally but not in the shared graph
+    // (a POST that failed/was cancelled in a past session). Best-effort.
+    for (const c of localOnly) void syncContribution(c);
+  } catch {
+    /* no backend / offline — stay local-only */
+  }
 }
 
 function canonicalKey(c: GraphContribution): string {

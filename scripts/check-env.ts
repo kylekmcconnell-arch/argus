@@ -31,6 +31,11 @@ console.log(
     C.reset,
 );
 console.log(`  Analyst model           ${C.dim}${process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6"}${C.reset}`);
+const graphShared = !!process.env.SUPABASE_URL && !!(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY);
+console.log(
+  `  Shared trust graph      ${graphShared ? `${C.green}SHARED${C.reset}` : `${C.yellow}local-only${C.reset}`}` +
+    (graphShared ? "" : `${C.dim} — set SUPABASE_URL + SUPABASE_SERVICE_ROLE_KEY (run supabase/schema.sql) to compound across analysts${C.reset}`),
+);
 
 // Flag any provider that has SOME but not ALL of its required vars (e.g. only
 // one of Reddit's two), which would silently leave it disabled.

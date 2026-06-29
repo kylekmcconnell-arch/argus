@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { AppShell } from "./components/AppShell";
 import { Landing } from "./components/Landing";
 import { RunConsole } from "./components/RunConsole";
@@ -15,7 +15,7 @@ import { ReconPage } from "./components/ReconPage";
 import { FindWallet } from "./components/FindWallet";
 import { AdminPage } from "./components/AdminPage";
 import { logAudit } from "./lib/auditlog";
-import { recordContribution, tokenContribution, personContribution, investigationContribution } from "./graph/store";
+import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph } from "./graph/store";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
 import { InvestigationRun } from "./components/InvestigationRun";
@@ -74,6 +74,10 @@ export default function App() {
   const [investigationInput, setInvestigationInput] = useState<string | null>(boot.phase === "investigation" ? boot.query : null);
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
   const [viewedProject, setViewedProject] = useState<{ name: string; domain?: string } | null>(null);
+
+  // Pull the shared community graph into the local cache once on load, so this
+  // session sees everyone's audits (no-op when no backend is configured).
+  useEffect(() => { void hydrateCommunityGraph(); }, []);
 
   const onAudit = useCallback(async (raw: string) => {
     setQuery(raw);

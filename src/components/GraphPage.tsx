@@ -1,9 +1,9 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { SUBJECTS, buildReport } from "../data/subjects";
 import { TrustGraph } from "./TrustGraph";
 import { NetworkGraph } from "./NetworkGraph";
 import { buildNetwork } from "../graph/network";
-import { getContributions, clearContributions } from "../graph/store";
+import { getContributions, clearContributions, subscribeGraph } from "../graph/store";
 import { verdictMeta } from "../lib/verdict";
 
 // Panoptes: the same audits, two ways. "Network" merges every audit into one
@@ -13,6 +13,8 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
   const dossiers = useMemo(() => SUBJECTS.map((s) => ({ s, d: buildReport(s) })), []);
   const [includeMine, setIncludeMine] = useState(true);
   const [mine, setMine] = useState(() => getContributions());
+  // Refresh when the community graph hydrates or a new audit is recorded.
+  useEffect(() => subscribeGraph(() => setMine(getContributions())), []);
   const net = useMemo(
     () => buildNetwork(dossiers.map(({ s, d }) => ({ handle: s.handle, d })), includeMine ? mine : []),
     [dossiers, includeMine, mine],
