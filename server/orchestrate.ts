@@ -26,7 +26,7 @@ import { coingeckoAdapter } from "./adapters/coingecko";
 import { redditAdapter } from "./adapters/reddit";
 import { onchainAdapter } from "./adapters/onchain";
 import { archivedAffiliation } from "./adapters/wayback";
-import { resolveWalletsFromText } from "./adapters/wallet";
+import { resolveForHandle } from "./adapters/wallet";
 
 const ADAPTERS: Adapter[] = [
   xAdapter,
@@ -95,12 +95,12 @@ async function coldIntake(ctx: CollectContext) {
   // Find-wallet: a self-disclosed wallet (a 0x address or ENS/basename/.sol name)
   // in the bio/posts. Resolving it connects this person to their on-chain
   // footprint, feeds the on-chain forensics, and adds a wallet node to the graph.
-  const foundWallets = await resolveWalletsFromText([ctx.evidence.profile.bio, ...posts].join(" \n "));
+  const foundWallets = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...posts].join(" \n "));
   if (foundWallets.length) {
     for (const w of foundWallets) {
-      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: "SelfDoxxed", notes: w.source });
+      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: w.tier, notes: w.source });
     }
-    ctx.emit({ phase: "P0 · Intake", label: "Wallet resolved", detail: `Self-disclosed wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}… (${w.chain})`).join(", ")}. Running on-chain forensics on it.`, source: "find-wallet", tone: "good" });
+    ctx.emit({ phase: "P0 · Intake", label: "Wallet resolved", detail: `${foundWallets.length} wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}… (${w.chain}, ${w.source.includes("Farcaster") ? "Farcaster" : "self-disclosed"})`).join(", ")}. Running on-chain forensics.`, source: "find-wallet", tone: "good" });
   }
 
   if (!analystAvailable()) return;

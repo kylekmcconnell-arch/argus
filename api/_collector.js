@@ -2165,6 +2165,15 @@ async function resolveName(name) {
   if (!a && /\.eth$/i.test(lower)) a = await ensideas(lower);
   return a ? { address: a, chain: a.startsWith("0x") ? "evm" : "solana" } : null;
 }
+async function farcasterWallets(handle) {
+  const u = handle.replace(/^@/, "");
+  const ud = await getJson(`https://api.warpcast.com/v2/user-by-username?username=${encodeURIComponent(u)}`);
+  const fid = ud?.result?.user?.fid;
+  if (!fid) return [];
+  const vd = await getJson(`https://api.warpcast.com/v2/verifications?fid=${fid}`);
+  const verifs = vd?.result?.verifications ?? [];
+  return verifs.filter((v) => typeof v.address === "string" && /^0x[a-fA-F0-9]{40}$/.test(v.address)).map((v) => ({ address: v.address, chain: "evm", source: `Farcaster verified wallet (@${u})`, tier: "InvestigatorAttributed" }));
+}
 async function resolveWalletsFromText(text) {
   if (!text) return [];
   const out = [];
@@ -2174,7 +2183,7 @@ async function resolveWalletsFromText(text) {
     const k = address.toLowerCase();
     if (seen.has(k)) return;
     seen.add(k);
-    out.push({ address, chain, source });
+    out.push({ address, chain, source, tier: "SelfDoxxed" });
   };
   for (const m of text.matchAll(ADDR_IN_TEXT)) add(m[0], "evm", "0x address self-disclosed in X bio/posts");
   const names = /* @__PURE__ */ new Set();
@@ -2184,6 +2193,28 @@ async function resolveWalletsFromText(text) {
     add(r?.address ?? null, r?.chain ?? "evm", `${nm} (self-disclosed in X bio/posts)`);
   }
   return out.slice(0, 6);
+}
+async function resolveForHandle(handle, text, opts = {}) {
+  const u = handle.replace(/^@/, "").toLowerCase();
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (w) => {
+    if (!w) return;
+    const k = w.address.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(w);
+  };
+  const [fromText, fromFc] = await Promise.all([resolveWalletsFromText(text), farcasterWallets(handle)]);
+  fromText.forEach(add);
+  fromFc.forEach(add);
+  if (opts.includePossible) {
+    for (const nm of [`${u}.eth`, `${u}.base.eth`]) {
+      const r = await resolveName(nm);
+      if (r) add({ address: r.address, chain: r.chain, source: `${nm} (handle-name match, unconfirmed)`, tier: "InvestigatorAttributed" });
+    }
+  }
+  return out.slice(0, 8);
 }
 
 // server/orchestrate.ts
@@ -2234,12 +2265,12 @@ async function coldIntake(ctx) {
     ctx.evidence.recentActivity = posts;
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
   }
-  const foundWallets = await resolveWalletsFromText([ctx.evidence.profile.bio, ...posts].join(" \n "));
+  const foundWallets = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...posts].join(" \n "));
   if (foundWallets.length) {
     for (const w of foundWallets) {
-      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: "SelfDoxxed", notes: w.source });
+      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: w.tier, notes: w.source });
     }
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "Wallet resolved", detail: `Self-disclosed wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}\u2026 (${w.chain})`).join(", ")}. Running on-chain forensics on it.`, source: "find-wallet", tone: "good" });
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Wallet resolved", detail: `${foundWallets.length} wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}\u2026 (${w.chain}, ${w.source.includes("Farcaster") ? "Farcaster" : "self-disclosed"})`).join(", ")}. Running on-chain forensics.`, source: "find-wallet", tone: "good" });
   }
   if (!analystAvailable()) return;
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify\u2026", tone: "neutral" });
