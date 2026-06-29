@@ -69,6 +69,59 @@ export function projectPeopleContribution(projectName: string, people: WebPerson
   return { handle: projectName, nodes, edges };
 }
 
+// A find-wallet resolution contributes the clue (as its subject) wired to each
+// wallet it resolved, so the result compounds: a handle resolved to a wallet here
+// bridges to any token audit whose deployer/holder graph touches that same wallet,
+// and to a later people-audit of the same handle. Wallet keys match the audit
+// engine's `${chain}:${address}` so the nodes collapse to one.
+export function walletContribution(
+  clue: string,
+  wallets: { address: string; chain: string }[],
+): GraphContribution | null {
+  if (!wallets.length) return null;
+  const handleLike = /^@?[A-Za-z0-9_]{2,30}$/.test(clue) && !clue.includes(".");
+  const subjectKey = handleLike ? "@" + clue.replace(/^@/, "") : clue;
+  const nodes: PanoptesNode[] = [{ type: handleLike ? "Person" : "Identity", key: subjectKey, subject: true }];
+  const edges: PanoptesEdge[] = [];
+  for (const w of wallets) {
+    const key = `${w.chain}:${w.address}`;
+    nodes.push({ type: "Identity", subtype: "Wallet", key, address: w.address });
+    edges.push({ src: subjectKey, dst: key, type: "CONTROLS_WALLET" });
+  }
+  return { handle: subjectKey, nodes, edges };
+}
+
+// Every full wallet address ARGUS has already surfaced across all contributions,
+// with the entities it is tied to. This is the index a partial-address clue
+// (0x71C0…A04e) is matched against — a best effort against the accumulated graph,
+// since there is no public "search by partial address" service.
+export function knownAddresses(): { address: string; chain: "evm" | "solana"; tiedTo: string[] }[] {
+  const EVM = /0x[a-fA-F0-9]{40}/;
+  const SOL = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/;
+  const byAddr = new Map<string, { address: string; chain: "evm" | "solana"; tiedTo: Set<string> }>();
+  const tie = (addr: string, chain: "evm" | "solana", label: string) => {
+    const k = addr.toLowerCase();
+    let e = byAddr.get(k);
+    if (!e) { e = { address: addr, chain, tiedTo: new Set() }; byAddr.set(k, e); }
+    if (label) e.tiedTo.add(label);
+  };
+  for (const c of getContributions()) {
+    const owner = c.handle;
+    for (const n of c.nodes) {
+      const fromAddr = typeof (n as { address?: unknown }).address === "string" ? String((n as { address?: unknown }).address) : "";
+      const fromKey = String(n.key ?? "");
+      const label = `${owner}${n.type ? ` (${n.type}${(n as { subtype?: unknown }).subtype ? `/${(n as { subtype?: unknown }).subtype}` : ""})` : ""}`;
+      for (const src of [fromAddr, fromKey]) {
+        const evm = src.match(EVM);
+        if (evm) { tie(evm[0], "evm", label); continue; }
+        const sol = src.replace(/^\w+:/, "").match(SOL);
+        if (sol && !src.startsWith("0x")) tie(sol[0], "solana", label);
+      }
+    }
+  }
+  return [...byAddr.values()].map((e) => ({ address: e.address, chain: e.chain, tiedTo: [...e.tiedTo] }));
+}
+
 // Convenience: a full investigation contributes its token subgraph PLUS the
 // deployer's full funding chain. Every ANONYMOUS wallet in the chain becomes a
 // node: these are the connective tissue that exposes a serial operator when the

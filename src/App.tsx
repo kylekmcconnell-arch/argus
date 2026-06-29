@@ -12,6 +12,7 @@ import { AboutPage } from "./components/AboutPage";
 import { ApiPage } from "./components/ApiPage";
 import { TrackRecordPage } from "./components/TrackRecordPage";
 import { ReconPage } from "./components/ReconPage";
+import { FindWallet } from "./components/FindWallet";
 import { AdminPage } from "./components/AdminPage";
 import { logAudit } from "./lib/auditlog";
 import { recordContribution, tokenContribution, personContribution, investigationContribution } from "./graph/store";
@@ -29,7 +30,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
 type Phase =
-  | "idle" | "radar" | "recon" | "dossiers" | "graph" | "watchlist" | "track" | "admin" | "about" | "api"
+  | "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "watchlist" | "track" | "admin" | "about" | "api"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "investigation" | "investigation-report"
@@ -55,6 +56,7 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
   if (site) return { phase: "recon", dossier: null, query: site };
   const inv = params.get("inv");
   if (inv) return { phase: "investigation", dossier: null, query: inv };
+  if (params.has("find")) return { phase: "find", dossier: null, query: "" };
   return { phase: "idle", dossier: null, query: "" };
 }
 
@@ -248,7 +250,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "recon" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "track" || phase === "admin" || phase === "about" || phase === "api"
+    : phase === "radar" || phase === "recon" || phase === "find" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "track" || phase === "admin" || phase === "about" || phase === "api"
       ? phase
       : "idle";
 
@@ -271,6 +273,8 @@ export default function App() {
       {phase === "track" && <TrackRecordPage onAudit={onAudit} />}
 
       {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} onAudit={onAudit} />}
+
+      {phase === "find" && <FindWallet onAudit={onAudit} onReset={reset} />}
 
       {phase === "admin" && <AdminPage onAudit={onAudit} />}
 
