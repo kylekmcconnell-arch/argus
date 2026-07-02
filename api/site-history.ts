@@ -10,7 +10,7 @@
 // Keyless (Wayback CDX + archived HTML + a live fetch). Read-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-export const config = { maxDuration: 30 };
+export const config = { maxDuration: 60 };
 
 const CDX = "https://web.archive.org/cdx/search/cdx";
 const SECTION_WORDS = ["team", "advisor", "advisors", "founders", "leadership", "partners", "backers", "investors", "roadmap", "audit", "audited", "tokenomics", "whitepaper", "about"];
@@ -35,8 +35,8 @@ async function oldestVersions(domain: string): Promise<Snap[]> {
   const qs = `?url=${encodeURIComponent(domain)}&output=json&filter=statuscode:200&collapse=digest&fl=timestamp,original&limit=8`;
   // archive.org intermittently returns empty under load — retry with backoff so a
   // domain that HAS history never falsely reads as "no archived history."
-  for (let attempt = 0; attempt < 4; attempt++) {
-    const raw = await getText(CDX + qs, 9000);
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const raw = await getText(CDX + qs, 8000);
     if (raw) {
       try {
         const rows = JSON.parse(raw) as string[][];
@@ -47,7 +47,7 @@ async function oldestVersions(domain: string): Promise<Snap[]> {
         }
       } catch { /* retry */ }
     }
-    if (attempt < 3) await sleep(400 * (attempt + 1));
+    if (attempt < 2) await sleep(600 * (attempt + 1));
   }
   return [];
 }
