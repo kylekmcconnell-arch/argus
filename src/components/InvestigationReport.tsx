@@ -43,12 +43,14 @@ export function InvestigationReport({
   onReset,
   onOpenToken,
   onOpenProjectAccount,
+  onReAudit,
 }: {
   inv: Investigation;
   onAudit: (q: string) => void;
   onReset: () => void;
   onOpenToken: () => void;
   onOpenProjectAccount: () => void;
+  onReAudit?: () => void;
 }) {
   const [spent, setSpent] = useState(0);
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
@@ -112,7 +114,13 @@ export function InvestigationReport({
             Home
           </button>
           <span className="mono text-[11px] text-ink-faint">/ investigation</span>
-          <span className="mono ml-auto rounded border px-1.5 py-0.5 text-[10px] tracking-wider" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
+          {onReAudit && (
+            <button onClick={onReAudit} title="Run this investigation again, fresh" className="ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
+              Re-audit
+            </button>
+          )}
+          <span className={`mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider ${onReAudit ? "" : "ml-auto"}`} style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
         </div>
       </header>
 

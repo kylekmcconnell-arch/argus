@@ -300,7 +300,14 @@ export default function App() {
       )}
 
       {phase === "investigation-report" && investigation && (
-        <InvestigationReport inv={investigation} onAudit={onAudit} onReset={reset} onOpenToken={onOpenToken} onOpenProjectAccount={onOpenProjectAccount} />
+        <InvestigationReport
+          inv={investigation}
+          onAudit={onAudit}
+          onReset={reset}
+          onOpenToken={onOpenToken}
+          onOpenProjectAccount={onOpenProjectAccount}
+          onReAudit={() => { setInvestigationInput(investigation.token.address); setInvestigation(null); setPhase("investigation"); }}
+        />
       )}
 
       {phase === "notfound" && (
