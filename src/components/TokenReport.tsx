@@ -4,6 +4,7 @@ import { TrustGraph } from "./TrustGraph";
 import { verdictMeta } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { TokenDossier } from "../token/audit";
+import { TokenSparkline } from "./TokenSparkline";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -197,6 +198,15 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
             ))}
           </div>
         )}
+
+        {/* price performance history */}
+        <div className="mt-4 rounded-xl border border-line bg-panel p-4">
+          <div className="mb-2 flex items-baseline justify-between">
+            <div className="text-[12.5px] font-medium text-ink">Price performance</div>
+            <div className="text-[10px] uppercase tracking-wider text-ink-faint">GeckoTerminal</div>
+          </div>
+          <TokenSparkline address={d.address} chain={d.chain} pairAddress={d.pairAddress} />
+        </div>
 
         {/* verdict hero */}
         <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow" style={{ borderColor: `${m.color}55` }}>

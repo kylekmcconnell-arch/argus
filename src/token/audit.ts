@@ -55,7 +55,7 @@ export interface NormalizedSafety {
 }
 
 export interface TokenDossier {
-  address: string; chain: string; dexId: string; symbol: string; name: string;
+  address: string; chain: string; dexId: string; pairAddress?: string; symbol: string; name: string;
   imageUrl?: string; priceUsd?: number; mcap?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
   priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
   verdict: string; score: number | null; capApplied: string | null; headline: string;
@@ -509,7 +509,7 @@ async function runTokenAudit(
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} · ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
 
   return {
-    address, chain, dexId: pair.dexId, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
+    address, chain, dexId: pair.dexId, pairAddress: pair.pairAddress, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
     imageUrl: pair.info?.imageUrl, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
     mcap: fdv, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
     verdict, score, capApplied, headline, axes, safety: s, socials,

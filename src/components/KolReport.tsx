@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { auditToken } from "../token/audit";
 import { resolveInput } from "../lib/resolveInput";
 import { verdictMeta } from "../lib/verdict";
+import { TokenSparkline } from "./TokenSparkline";
 
 // Dedicated KOL (influencer) report. A KOL's threat model is different from a
 // founder's: they pump-and-dump. So this grades the two things that matter —
@@ -10,7 +11,7 @@ import { verdictMeta } from "../lib/verdict";
 // known associates. Auto-runs on the report.
 type Promo = { ticker?: string; contract_address?: string; chain?: string };
 type Assoc = { associate_key: string; relation?: string };
-type TokRes = { label: string; address?: string; verdict?: string; score?: number | null; liquidityUsd?: number; dead: boolean; unresolved?: boolean };
+type TokRes = { label: string; address?: string; chain?: string; pairAddress?: string; verdict?: string; score?: number | null; liquidityUsd?: number; dead: boolean; unresolved?: boolean };
 
 async function tickerToContract(ticker: string): Promise<string | null> {
   const sym = ticker.replace(/^\$/, "").toUpperCase();
@@ -39,7 +40,7 @@ async function auditPromotions(promos: Promo[]): Promise<TokRes[]> {
     const d = input.kind === "token" ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
     if (!d) { out.push({ label, dead: false, unresolved: true }); continue; }
     const dead = d.verdict === "FAIL" || d.verdict === "AVOID" || (d.liquidityUsd ?? 0) < 500;
-    out.push({ label: d.symbol ? `$${d.symbol}` : label, address: d.address, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, dead });
+    out.push({ label: d.symbol ? `$${d.symbol}` : label, address: d.address, chain: d.chain, pairAddress: d.pairAddress, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, dead });
   }
   return out;
 }
@@ -97,6 +98,7 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
                   {m && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${m.color}1a`, color: m.color }}>{t.verdict}{t.score != null ? ` ${t.score}` : ""}</span>}
                   <span className="text-[11px] text-ink-faint">liq {money(t.liquidityUsd)}</span>
                   {t.dead && <span className="mono rounded border border-avoid/40 px-1.5 py-0.5 text-[9.5px] text-avoid">rugged / dead</span>}
+                  {t.address && t.chain && <span className="ml-auto"><TokenSparkline address={t.address} chain={t.chain} pairAddress={t.pairAddress} compact /></span>}
                 </div>
               );
             })}
