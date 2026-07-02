@@ -91,8 +91,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const daily: Candle[] = (dailyD?.data?.attributes?.ohlcv_list ?? []).slice().sort((a: Candle, b: Candle) => a[0] - b[0]);
     if (daily.length < 2) { res.status(200).json({ available: true, note: "not enough price history" }); return; }
 
-    const anchorSec = call?.sec ?? daily[0][0];
-    const anchor = call ? "call" : "launch";
+    // Anchor to the call if its price is in range; otherwise (call predates the
+    // ~6 months of history GeckoTerminal retains) fall back to the launch/oldest
+    // candle. We still surface the call tweet + date either way.
+    const dailyPriceAt = (sec: number) => nearest(daily, sec);
+    let anchorSec = daily[0][0];
+    let anchor: "call" | "launch" = "launch";
+    let callPredatesHistory = false;
+    if (call) {
+      if (dailyPriceAt(call.sec) != null) { anchorSec = call.sec; anchor = "call"; }
+      else callPredatesHistory = true;
+    }
 
     // Hourly candles around the anchor for fine early offsets (1h..1w).
     const hourlyD = await gt(`/networks/${network}/pools/${pool}/ohlcv/hour?aggregate=1&limit=200&before_timestamp=${anchorSec + 8 * 86400}&currency=usd`);
@@ -105,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
 
     const anchorPrice = priceAt(anchorSec);
-    if (anchorPrice == null || anchorPrice <= 0) { res.status(200).json({ available: true, note: "no price at anchor time", _dbg: { anchor, anchorSec, dailyLen: daily.length, dailyFirst: daily[0]?.[0], dailyLast: daily[daily.length - 1]?.[0], hourlyLen: hourly.length, hourlyFirst: hourly[0]?.[0], hourlyLast: hourly[hourly.length - 1]?.[0], callFound: !!call } }); return; }
+    if (anchorPrice == null || anchorPrice <= 0) { res.status(200).json({ available: true, note: "no price at anchor time" }); return; }
 
     const nowSec = daily[daily.length - 1][0];
     const periods = OFFSETS.map(([label, hrs]) => {
@@ -123,6 +132,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       anchor,
       anchorTime: anchorSec,
       anchorPrice,
+      callTime: call?.sec ?? null,
+      callPredatesHistory,
       tweetUrl: call?.url ?? null,
       tweetText: call?.text ?? null,
       periods,
