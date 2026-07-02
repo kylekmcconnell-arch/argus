@@ -76,7 +76,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    res.status(405).json({ error: "GET or POST" });
+    // Remove a subject's contribution from the shared graph — part of the
+    // start-from-scratch purge for a wrongly-audited subject.
+    if (req.method === "DELETE") {
+      const handle = typeof req.query.handle === "string" ? req.query.handle.trim().slice(0, 200) : "";
+      if (!handle) { res.status(400).json({ error: "handle required" }); return; }
+      const r = await fetch(`${c.url}/rest/v1/${TABLE}?canonical_key=eq.${encodeURIComponent(canonical(handle))}`, {
+        method: "DELETE",
+        headers: { ...headers(c.key), prefer: "return=minimal" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) { res.status(200).json({ ok: false, error: `delete ${r.status}` }); return; }
+      res.status(200).json({ ok: true });
+      return;
+    }
+
+    res.status(405).json({ error: "GET, POST or DELETE" });
   } catch (e) {
     res.status(200).json({ available: true, contributions: [], error: String(e) });
   }

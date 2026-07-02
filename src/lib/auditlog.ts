@@ -104,6 +104,21 @@ async function syncEntryUpdate(entry: LogEntry, sharedRow: boolean): Promise<voi
   }
 }
 
+// Remove EVERY log row for one subject — local rows, the shared cache, and the
+// shared backend (all contributors). Part of the start-from-scratch purge.
+export function removeSubjectRows(ref: string): void {
+  const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^[@$]/, "");
+  const target = norm(ref);
+  if (!target) return;
+  const keep = (e: LogEntry) => norm(e.ref ?? e.query) !== target;
+  try {
+    localStorage.setItem(KEY, JSON.stringify(getLog().filter(keep)));
+  } catch { /* storage unavailable */ }
+  sharedCache = sharedCache.filter(keep);
+  void fetch(`${SYNC_URL}?ref=${encodeURIComponent(ref)}`, { method: "DELETE" }).catch(() => { /* offline */ });
+  emitLogChange();
+}
+
 // Rewrite the role: flags on every stored row for one subject — local rows and
 // shared (other analysts') rows — and push the updates up. This is how
 // re-categorization re-files old audits WITHOUT rerunning them: scores and

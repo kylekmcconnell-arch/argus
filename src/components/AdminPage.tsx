@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { getLog, clearLog, logStats, mergedLog, applyRoles, type LogEntry } from "../lib/auditlog";
+import { purgeSubject } from "../lib/purge";
 import { verdictMeta } from "../lib/verdict";
 
 // Re-file every audited person under the CURRENT role taxonomy without
@@ -161,6 +162,23 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
                   {e.verdict}{typeof e.score === "number" ? ` ${e.score}` : ""}
                 </span>
                 <span className="mono text-[10px] text-ink-faint">{ago(e.ts)}</span>
+              </span>
+              {/* span, not <button> — this whole row is already a button */}
+              <span
+                role="button"
+                tabIndex={0}
+                title="Remove this subject everywhere: audit log (yours + shared), stored report, trust graph — a fresh audit starts from scratch"
+                onClick={(ev) => {
+                  ev.stopPropagation();
+                  ev.preventDefault();
+                  const ref = e.ref ?? e.query;
+                  if (!window.confirm(`Remove ${e.query} everywhere (log, stored report, graph)? A rescan will start from scratch.`)) return;
+                  purgeSubject(ref);
+                  setLog(getLog());
+                }}
+                className="mono mt-0.5 shrink-0 cursor-pointer rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-faint transition hover:border-avoid hover:text-avoid"
+              >
+                ×
               </span>
             </button>
           ))}

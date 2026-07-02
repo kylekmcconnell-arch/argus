@@ -92,7 +92,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    res.status(405).json({ error: "GET or POST" });
+    // Remove EVERY row for one subject (all contributors) — the "start from
+    // scratch" path when old audits were categorized wrong. Matches ref or query
+    // with and without the @/$ prefix.
+    if (req.method === "DELETE") {
+      const refRaw = str(typeof req.query.ref === "string" ? req.query.ref : "", 300);
+      if (!refRaw) { res.status(400).json({ error: "ref required" }); return; }
+      const bare = refRaw.replace(/^[@$]/, "");
+      const variants = [...new Set([refRaw, bare, `@${bare}`, `$${bare}`])];
+      const ors = variants.flatMap((v) => [`ref.ilike.${v}`, `query.ilike.${v}`]).join(",");
+      const r = await fetch(`${c.url}/rest/v1/${TABLE}?or=(${encodeURIComponent(ors)})`, {
+        method: "DELETE",
+        headers: { ...headers(c.key), prefer: "return=minimal" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) { res.status(200).json({ ok: false, error: `delete ${r.status}: ${(await r.text()).slice(0, 200)}` }); return; }
+      res.status(200).json({ ok: true });
+      return;
+    }
+
+    res.status(405).json({ error: "GET, POST or DELETE" });
   } catch (e) {
     res.status(200).json({ available: true, entries: [], error: String(e) });
   }

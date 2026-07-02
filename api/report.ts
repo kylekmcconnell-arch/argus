@@ -67,7 +67,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
-    res.status(405).json({ error: "GET or POST" });
+    // Delete the stored report(s) for a subject — used with the audit-log purge
+    // so a wrongly-categorized subject can be fully re-done from scratch.
+    if (req.method === "DELETE") {
+      const ref = normRef(typeof req.query.ref === "string" ? req.query.ref : "");
+      if (!ref) { res.status(400).json({ error: "ref required" }); return; }
+      const kindF = typeof req.query.kind === "string" && req.query.kind ? `&kind=eq.${encodeURIComponent(req.query.kind)}` : "";
+      const r = await fetch(`${c.url}/rest/v1/${TABLE}?ref=eq.${encodeURIComponent(ref)}${kindF}`, {
+        method: "DELETE",
+        headers: { ...headers(c.key), prefer: "return=minimal" },
+        signal: AbortSignal.timeout(10000),
+      });
+      if (!r.ok) { res.status(200).json({ ok: false, error: `delete ${r.status}` }); return; }
+      res.status(200).json({ ok: true });
+      return;
+    }
+
+    res.status(405).json({ error: "GET, POST or DELETE" });
   } catch (e) {
     res.status(200).json({ available: true, report: null, error: String(e) });
   }

@@ -16,6 +16,7 @@ import { PfpCheck } from "./PfpCheck";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
+import { purgeSubject } from "../lib/purge";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -375,6 +376,17 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
             >
               New audit
+            </button>
+            <button
+              onClick={() => {
+                if (!window.confirm(`Delete ${report.handle} everywhere (audit log, stored report, trust graph)? A rescan will start from scratch.`)) return;
+                purgeSubject(report.handle);
+                onReset();
+              }}
+              title="Remove this report everywhere and start from scratch"
+              className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-faint transition hover:border-avoid hover:text-avoid"
+            >
+              Delete
             </button>
           </div>
         </div>
