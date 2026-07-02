@@ -27,26 +27,40 @@ async function getText(url: string, ms: number, ua?: string): Promise<string | n
 
 interface Snap { timestamp: string; original: string }
 
-// A CDX page of distinct homepage versions. Positive limit = oldest N, negative =
-// newest N (a small limit keeps it fast even for sites with huge crawl history).
-async function cdx(domain: string, limit: number): Promise<Snap[]> {
-  const qs = `?url=${encodeURIComponent(domain)}&output=json&filter=statuscode:200&collapse=digest&fl=timestamp,original&limit=${limit}`;
-  const raw = await getText(CDX + qs, 9000);
-  if (!raw) return [];
-  try {
-    const rows = JSON.parse(raw) as string[][];
-    if (!Array.isArray(rows) || rows.length < 2) return [];
-    const ti = rows[0].indexOf("timestamp");
-    const oi = rows[0].indexOf("original");
-    return rows.slice(1).map((r) => ({ timestamp: r[ti], original: r[oi] })).filter((s) => s.timestamp && s.original);
-  } catch {
-    return [];
+// Oldest distinct homepage versions (CDX positive limit is reliable; the negative
+// "newest N" form archive.org serves flakily, so we get the latest a different way).
+// One retry — archive.org CDX intermittently returns empty.
+async function oldestVersions(domain: string): Promise<Snap[]> {
+  const qs = `?url=${encodeURIComponent(domain)}&output=json&filter=statuscode:200&collapse=digest&fl=timestamp,original&limit=8`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await getText(CDX + qs, 9000);
+    if (raw) {
+      try {
+        const rows = JSON.parse(raw) as string[][];
+        if (Array.isArray(rows) && rows.length >= 2) {
+          const ti = rows[0].indexOf("timestamp");
+          const oi = rows[0].indexOf("original");
+          return rows.slice(1).map((r) => ({ timestamp: r[ti], original: r[oi] })).filter((s) => s.timestamp && s.original);
+        }
+      } catch { /* retry */ }
+    }
   }
+  return [];
 }
-// Oldest few + newest few (two targeted queries, not one big pull).
-async function versions(domain: string): Promise<{ oldest: Snap[]; newest: Snap[] }> {
-  const [oldest, newest] = await Promise.all([cdx(domain, 8), cdx(domain, -8)]);
-  return { oldest, newest };
+
+// The single newest snapshot, via the Wayback availability API (one fast, reliable
+// call — unlike CDX negative limits). "closest to the far future" = latest capture.
+async function newestArchive(domain: string): Promise<Snap | null> {
+  const raw = await getText(`https://archive.org/wayback/available?url=${encodeURIComponent(domain)}&timestamp=29991231`, 8000);
+  if (!raw) return null;
+  try {
+    const closest = JSON.parse(raw)?.archived_snapshots?.closest;
+    if (!closest?.available || !closest.timestamp) return null;
+    const original = String(closest.url ?? "").match(/\/web\/\d+(?:id_)?\/(.+)$/)?.[1] ?? `http://${domain}/`;
+    return { timestamp: String(closest.timestamp), original };
+  } catch {
+    return null;
+  }
 }
 
 const strip = (html: string) =>
@@ -84,8 +98,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!domain || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) { res.status(400).json({ error: "a domain (url=) is required" }); return; }
 
   try {
-    const { oldest, newest } = await versions(domain);
-    if (!oldest.length && !newest.length) { res.status(200).json({ domain, available: true, note: "No archived history found for this domain (very new, or never crawled by archive.org)." }); return; }
+    const [oldest, newest] = await Promise.all([oldestVersions(domain), newestArchive(domain)]);
+    if (!oldest.length && !newest) { res.status(200).json({ domain, available: true, note: "No archived history found for this domain (very new, or never crawled by archive.org)." }); return; }
 
     // Earliest substantive snapshot: skip thin/parking pages up front.
     let earliest: Features | null = null;
@@ -103,15 +117,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let currentSrc = "live";
     const live = await getText(`https://${domain}`, 7000, "Mozilla/5.0 (compatible; ARGUS/1.0)");
     if (live && strip(live).length >= 200) current = extract(live);
-    if (!current) {
-      const last = newest[newest.length - 1] ?? oldest[oldest.length - 1];
-      if (last) {
-        const html = await getText(`https://web.archive.org/web/${last.timestamp}id_/${last.original}`, 7000);
-        if (html) { current = extract(html); currentSrc = `archive ${last.timestamp.slice(0, 4)}`; }
-      }
+    if (!current && newest) {
+      const html = await getText(`https://web.archive.org/web/${newest.timestamp}id_/${newest.original}`, 7000);
+      if (html) { current = extract(html); currentSrc = `archive ${newest.timestamp.slice(0, 4)}`; }
     }
 
-    const lastYear = (newest[newest.length - 1] ?? oldest[oldest.length - 1])?.timestamp.slice(0, 4) ?? "";
+    const lastYear = newest?.timestamp.slice(0, 4) ?? "";
     if (!earliest || !current) { res.status(200).json({ domain, available: true, note: "Could not fetch enough page content to diff." }); return; }
 
     const removedSections = diff(earliest.sections, current.sections);
