@@ -12,15 +12,19 @@ import { FunderSweep } from "./FunderSweep";
 type Promo = { ticker?: string; contract_address?: string; chain?: string };
 type Wal = { address: string; chain: string };
 
+// Resolve a promoted ticker to a contract by EXACT symbol match — a fuzzy search
+// picks unrelated tokens (or ones whose address merely contains the letters), so
+// we only accept baseToken.symbol === ticker, prefer Solana, then top liquidity.
 async function tickerToContract(ticker: string): Promise<string | null> {
+  const sym = ticker.replace(/^\$/, "").toUpperCase();
+  if (!sym) return null;
   try {
-    const r = await fetch(`https://api.dexscreener.com/latest/dex/search/?q=${encodeURIComponent(ticker.replace(/^\$/, ""))}`);
+    const r = await fetch(`https://api.dexscreener.com/latest/dex/search/?q=${encodeURIComponent(sym)}`);
     const d = await r.json();
-    const pairs: any[] = Array.isArray(d?.pairs) ? d.pairs : [];
-    const best = pairs
-      .filter((p) => p?.baseToken?.address)
-      .sort((a, b) => Number(b?.liquidity?.usd ?? 0) - Number(a?.liquidity?.usd ?? 0))[0];
-    return best?.baseToken?.address ?? null;
+    const pairs: any[] = (Array.isArray(d?.pairs) ? d.pairs : [])
+      .filter((p) => p?.baseToken?.address && String(p?.baseToken?.symbol ?? "").toUpperCase() === sym)
+      .sort((a, b) => (b?.chainId === "solana" ? 1 : 0) - (a?.chainId === "solana" ? 1 : 0) || Number(b?.liquidity?.usd ?? 0) - Number(a?.liquidity?.usd ?? 0));
+    return pairs[0]?.baseToken?.address ?? null;
   } catch {
     return null;
   }
