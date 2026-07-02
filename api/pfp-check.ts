@@ -7,19 +7,36 @@
 // Gated on ANTHROPIC_API_KEY (reuses the OCR pattern). Read-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-export const config = { maxDuration: 30 };
+export const config = { maxDuration: 45 };
 
 const HANDLE = /^[A-Za-z0-9_]{1,30}$/;
 
 async function fetchImage(url: string): Promise<{ media: string; data: string } | null> {
   try {
-    const r = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(9000), headers: { "user-agent": "argus-osint/1.0" } });
+    const r = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(7000), headers: { "user-agent": "argus-osint/1.0" } });
     if (!r.ok) return null;
     const media = (r.headers.get("content-type") || "image/jpeg").split(";")[0];
     if (!/^image\//.test(media)) return null;
     const buf = Buffer.from(await r.arrayBuffer());
     if (buf.length < 256 || buf.length > 4_500_000) return null; // skip empty/placeholder or oversized
     return { media, data: buf.toString("base64") };
+  } catch {
+    return null;
+  }
+}
+
+// twitterapi.io gives the real X avatar URL when unavatar can't resolve one.
+async function twitterAvatar(handle: string): Promise<string | null> {
+  const key = process.env.TWITTERAPI_KEY;
+  if (!key || !HANDLE.test(handle)) return null;
+  try {
+    const r = await fetch(`https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(handle)}`, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(7000) });
+    if (!r.ok) return null;
+    const d = (await r.json()) as any;
+    const p = d?.data ?? d;
+    const u = p?.profileImage || p?.profile_image_url_https || p?.profile_image_url;
+    // twitter's "_normal" is 48px; request the full-size original
+    return typeof u === "string" ? u.replace(/_normal(\.\w+)$/, "$1") : null;
   } catch {
     return null;
   }
@@ -33,8 +50,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!imageUrl) { res.status(400).json({ error: "handle or url required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Photo check unavailable (no analyst key)." }); return; }
 
-  const img = await fetchImage(imageUrl);
-  if (!img) { res.status(200).json({ available: true, imageUrl, classification: "no_photo", flag: false, note: "No profile photo found (default avatar or unreachable). An anonymous project with no face is a soft flag on its own." }); return; }
+  // Try the requested/unavatar URL, then fall back to the real X avatar via
+  // twitterapi (unavatar 404s on fallback=false when it can't resolve).
+  let img = await fetchImage(imageUrl);
+  let usedUrl = imageUrl;
+  if (!img && handle) {
+    const alt = await twitterAvatar(handle);
+    if (alt) { const got = await fetchImage(alt); if (got) { img = got; usedUrl = alt; } }
+  }
+  if (!img) { res.status(200).json({ available: true, imageUrl: usedUrl, classification: "no_photo", flag: false, note: "No profile photo found (default avatar or unreachable). An anonymous project with no face is a soft flag on its own." }); return; }
 
   try {
     const r = await fetch("https://api.anthropic.com/v1/messages", {
@@ -60,7 +84,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (m) { try { parsed = JSON.parse(m[0]); } catch { /* */ } }
     res.status(200).json({
       available: true,
-      imageUrl,
+      imageUrl: usedUrl,
       classification: typeof parsed.classification === "string" ? parsed.classification : "unclear",
       confidence: typeof parsed.confidence === "number" ? parsed.confidence : undefined,
       isRealPerson: parsed.is_real_person !== false,
