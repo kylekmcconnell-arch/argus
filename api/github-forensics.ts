@@ -1,12 +1,14 @@
 // GitHub commit forensics. GET /api/github-forensics?login=<user>  |  ?org=<org>
 //
 // A crypto team can scrub its site, use pseudonyms on X, and rotate wallets — but
-// the git history is the thing they forget. Every commit carries an author name,
-// an author EMAIL, and a timezone offset, written by the dev's local git config.
-// Personal emails (real name @ gmail) de-anonymize an "anonymous" founder; the
-// spread of timezone offsets geolocates the team; a repo that's a fork of a known
-// project reveals copied code and fake "original" work. This is the OSINT unlock
-// an investigator does by hand, one commit at a time — automated across the repos.
+// the git history is the thing they forget. Every commit carries an author name
+// and an author EMAIL, written by the dev's local git config. Personal emails
+// (real name @ gmail) de-anonymize an "anonymous" founder; the full author roster
+// exposes the real team behind a pseudonymous project; a repo that's a fork of
+// another project reveals copied code passed off as original. This is the OSINT
+// unlock an investigator does by hand, one commit at a time — automated across
+// the repos. (Timezone offsets aren't used: GitHub's REST API normalizes the
+// commit date to UTC, so the local offset isn't recoverable this way.)
 //
 // Gated on GITHUB_TOKEN (already set). Read-only. ~1 call per repo scanned.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
@@ -45,18 +47,10 @@ async function gh<T>(path: string, key: string): Promise<T | null> {
   }
 }
 
-// Offset from an ISO commit date ("2023-06-01T14:23:11+08:00" / "...Z") — the
-// dev's local UTC offset, straight out of their git config. Geography, leaked.
-function tzOffset(iso: string): string | null {
-  if (typeof iso !== "string") return null;
-  if (/Z$/.test(iso)) return "+00:00";
-  const m = iso.match(/([+-]\d{2}:\d{2})$/);
-  return m ? m[1] : null;
-}
 const domainOf = (email: string) => (email.includes("@") ? email.split("@")[1].toLowerCase() : "");
 
 interface RepoRef { name: string; full: string; fork: boolean; parent?: string }
-interface Identity { name: string; email: string; login?: string; commits: number; kind: "personal" | "corporate" | "unknown"; timezones: Record<string, number>; repos: string[] }
+interface Identity { name: string; email: string; login?: string; commits: number; kind: "personal" | "corporate" | "unknown"; repos: string[] }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = process.env.GITHUB_TOKEN;
@@ -82,7 +76,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     // Forks need a second call to learn the parent (list endpoint omits it).
     const identities = new Map<string, Identity>();
-    const tzTotals: Record<string, number> = {};
 
     for (const repo of chosen) {
       const q = login ? `?author=${encodeURIComponent(login)}&per_page=${COMMITS_PER_REPO}` : `?per_page=${COMMITS_PER_REPO}`;
@@ -97,26 +90,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (!id) {
           const dom = domainOf(email);
           const kind = PERSONAL.has(dom) ? "personal" : dom ? "corporate" : "unknown";
-          id = { name, email, login: c.author?.login, commits: 0, kind, timezones: {}, repos: [] };
+          id = { name, email, login: c.author?.login, commits: 0, kind, repos: [] };
           identities.set(k, id);
         }
         id.commits++;
         if (c.author?.login && !id.login) id.login = c.author.login;
         if (!id.repos.includes(repo.name)) id.repos.push(repo.name);
-        const off = tzOffset(a.date);
-        if (off) { id.timezones[off] = (id.timezones[off] ?? 0) + 1; tzTotals[off] = (tzTotals[off] ?? 0) + 1; }
       }
     }
 
     const people = [...identities.values()].sort((a, b) => b.commits - a.commits).slice(0, 25);
     const leaks = people.filter((p) => p.kind === "personal");
-    const dominantTz = Object.entries(tzTotals).sort((a, b) => b[1] - a[1]).slice(0, 3).map(([off, n]) => ({ offset: off, commits: n }));
 
     const note = !people.length
       ? "No commit-author metadata recovered (repos empty, or authors use GitHub's email privacy)."
       : `${people.length} distinct commit author${people.length === 1 ? "" : "s"} across ${chosen.length} repo${chosen.length === 1 ? "" : "s"}. ` +
-        (leaks.length ? `${leaks.length} leaked a personal email (real-identity exposure). ` : "") +
-        (dominantTz.length ? `Primary timezone ${dominantTz[0].offset}. ` : "") +
+        (leaks.length ? `${leaks.length} leaked a personal email — real-identity exposure. ` : "") +
         (forks.length ? `${forks.length} repo(s) are forks of other projects (copied code).` : "");
 
     res.status(200).json({
@@ -126,7 +115,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       reposScanned: chosen.map((r) => r.full),
       identities: people,
       emailLeaks: leaks.map((p) => ({ name: p.name, email: p.email, login: p.login, commits: p.commits })),
-      timezones: dominantTz,
       forks,
       note,
     });

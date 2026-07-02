@@ -5,6 +5,7 @@ import { logAudit } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
 import { fetchWebTeam, type WebPerson } from "../lib/investigation";
+import { GithubForensics } from "./GithubForensics";
 
 // A clean plain-text DD summary for pasting into a chat / channel.
 function reconReportText(r: Recon): string {
@@ -149,6 +150,11 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
     ran.current = true;
     run(initialUrl);
   }, [initialUrl, run]);
+
+  // The project's GitHub org (from its site's links), for commit forensics.
+  const ghOrg = (recon?.socials ?? [])
+    .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
+    .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">
@@ -367,6 +373,9 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
               )}
             </div>
           )}
+
+          {/* commit forensics: the real devs behind the project's GitHub org */}
+          {ghOrg && <GithubForensics org={ghOrg} />}
         </>
       )}
 

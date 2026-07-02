@@ -137,10 +137,27 @@ async function fundingSource(url: string, wallet: string, sigs: string[]): Promi
   return null;
 }
 
-async function tokensCreated(url: string, wallet: string): Promise<number | null> {
+// Count tokens this wallet has MINTED, from Helius enhanced-tx TOKEN_MINT events.
+// NOT DAS getAssetsByCreator — that returns 0 for pump.fun / fresh-SPL dev wallets
+// (the launchpad is the on-chain creator), so it silently under-reported serial
+// deployers. The mint event is deterministic; stablecoin/wSOL legs are excluded.
+const DENY_MINT = new Set<string>([
+  "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
+  "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
+  "So11111111111111111111111111111111111111112", // wSOL
+]);
+async function tokensCreated(key: string, wallet: string): Promise<number | null> {
   try {
-    const r = await rpc(url, "getAssetsByCreator", { creatorAddress: wallet, onlyVerified: false, page: 1, limit: 1000 });
-    return typeof r?.total === "number" ? r.total : (r?.items?.length ?? null);
+    const r = await fetch(`https://api.helius.xyz/v0/addresses/${wallet}/transactions?api-key=${key}&limit=100`, { signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    const txs = await r.json();
+    if (!Array.isArray(txs)) return null;
+    const mints = new Set<string>();
+    for (const t of txs) {
+      if (t.type !== "TOKEN_MINT" && t.type !== "CREATE") continue;
+      for (const x of t.tokenTransfers ?? []) if (typeof x.mint === "string" && x.mint && !DENY_MINT.has(x.mint)) mints.add(x.mint);
+    }
+    return mints.size;
   } catch {
     return null;
   }
@@ -162,7 +179,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Deployer's own age + mint count, in parallel with the chain trace.
     const deadline = Date.now() + 22000; // leave margin under the 30s function cap
     const [created, ageInfo, traced] = await Promise.all([
-      tokensCreated(url, wallet),
+      tokensCreated(key, wallet),
       oldestActivity(url, wallet).then((a) => ({ firstBlockTime: a.firstBlockTime, truncated: a.truncated })),
       traceChain(url, wallet, 4, deadline),
     ]);

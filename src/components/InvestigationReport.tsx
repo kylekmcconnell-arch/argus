@@ -4,6 +4,7 @@ import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
 import { FunderSweep } from "./FunderSweep";
+import { GithubForensics } from "./GithubForensics";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -53,6 +54,10 @@ export function InvestigationReport({
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
   const tm = verdictMeta(token.verdict);
+  // The project's GitHub org (from its site links), for commit forensics.
+  const ghOrg = (recon?.socials ?? [])
+    .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
+    .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
   // Unified team: members named in the project's X content (associates) merged
   // with people dug up via the web/LinkedIn search, deduped by handle so a
   // pseudonymous handle gets enriched with its real name + LinkedIn.
@@ -292,6 +297,13 @@ export function InvestigationReport({
                 </div>
               )}
             </Card>
+          </div>
+        )}
+
+        {/* commit forensics: the real devs behind the project's GitHub org */}
+        {ghOrg && (
+          <div className="mt-3">
+            <GithubForensics org={ghOrg} />
           </div>
         )}
 
