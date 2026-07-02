@@ -1191,6 +1191,56 @@ function emptyEvidence(handle) {
   };
 }
 
+// server/cost.ts
+var PRICE = {
+  grokIn: 0.2 / 1e6,
+  // grok-4-fast $/token in
+  grokOut: 0.5 / 1e6,
+  // grok-4-fast $/token out
+  grokSource: 25 / 1e3,
+  // live search $/source
+  claudeIn: 3 / 1e6,
+  // sonnet-class $/token in
+  claudeOut: 15 / 1e6
+  // sonnet-class $/token out
+};
+var EST_SOURCES_PER_SEARCH = 5;
+var fresh = () => ({ grokIn: 0, grokOut: 0, grokCalls: 0, sources: 0, sourcesEstimated: false, claudeIn: 0, claudeOut: 0, claudeCalls: 0 });
+var acc = fresh();
+function resetCost() {
+  acc = fresh();
+}
+function addGrokUsage(u, toolCalls) {
+  acc.grokCalls += 1;
+  acc.grokIn += u?.input_tokens ?? 0;
+  acc.grokOut += u?.output_tokens ?? 0;
+  if (typeof u?.num_sources_used === "number") {
+    acc.sources += u.num_sources_used;
+  } else if (toolCalls && toolCalls > 0) {
+    acc.sources += toolCalls * EST_SOURCES_PER_SEARCH;
+    acc.sourcesEstimated = true;
+  }
+}
+function addClaudeUsage(u) {
+  acc.claudeCalls += 1;
+  acc.claudeIn += u?.input_tokens ?? 0;
+  acc.claudeOut += u?.output_tokens ?? 0;
+}
+function getCost() {
+  const grokUsd = acc.grokIn * PRICE.grokIn + acc.grokOut * PRICE.grokOut + acc.sources * PRICE.grokSource;
+  const claudeUsd = acc.claudeIn * PRICE.claudeIn + acc.claudeOut * PRICE.claudeOut;
+  const round = (n) => Math.round(n * 100) / 100;
+  return {
+    usd: round(grokUsd + claudeUsd),
+    grokUsd: round(grokUsd),
+    claudeUsd: round(claudeUsd),
+    grokCalls: acc.grokCalls,
+    claudeCalls: acc.claudeCalls,
+    sources: acc.sources,
+    estimated: true
+  };
+}
+
 // server/agent.ts
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 function analystAvailable() {
@@ -1221,6 +1271,7 @@ async function structured(system, user, tool, maxTokens = 2048) {
       return null;
     }
     const data = await res.json();
+    addClaudeUsage(data.usage);
     const block = data.content.find((b) => b.type === "tool_use");
     return block?.input ?? null;
   } catch (e) {
@@ -1384,6 +1435,7 @@ async function grokSearch(system, user, opts) {
     try {
       const toolCalls = Array.isArray(d.output) ? d.output.filter((o) => /search|tool/.test(String(o.type ?? ""))).length : void 0;
       console.log("[grok-usage]", JSON.stringify({ in: d.usage?.input_tokens, out: d.usage?.output_tokens, toolCalls }));
+      addGrokUsage(d.usage, toolCalls);
     } catch {
     }
     const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o) => o.content ?? []).map((c) => c.text ?? "").join(" ") : "") ?? "";
@@ -2728,6 +2780,7 @@ function axisCatalog(roles) {
   return out;
 }
 async function runAudit(rawHandle, emit) {
+  resetCost();
   const fixture = findSubject(rawHandle);
   const liveProviders = ADAPTERS.filter((a) => KEYED.has(a.id) && a.available());
   const anyLive = liveProviders.length > 0 || analystAvailable();
@@ -2801,7 +2854,11 @@ async function runAudit(rawHandle, emit) {
   }
   emit({ phase: "Finalize", label: "Govern composite", detail: "Applying caps and selecting the governing role.", tone: "neutral" });
   await delay(300);
-  return assembleDossier(evidence, true);
+  const dossier = assembleDossier(evidence, true);
+  const cost = getCost();
+  dossier.cost = cost;
+  emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches \u2248${cost.sources} sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
+  return dossier;
 }
 
 // src/token/sources.ts

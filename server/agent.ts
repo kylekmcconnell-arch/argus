@@ -6,6 +6,7 @@
 // Gated on ANTHROPIC_API_KEY. With no key, callers fall back to heuristics.
 
 import { ANALYST_MODEL, env } from "./config";
+import { addClaudeUsage } from "./cost";
 import type { Contradiction } from "../src/data/evidence";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -53,7 +54,9 @@ export async function structured<T>(
     }
     const data = (await res.json()) as {
       content: { type: string; name?: string; input?: unknown }[];
+      usage?: { input_tokens?: number; output_tokens?: number };
     };
+    addClaudeUsage(data.usage); // per-audit cost accounting
     const block = data.content.find((b) => b.type === "tool_use");
     return (block?.input as T) ?? null;
   } catch (e) {

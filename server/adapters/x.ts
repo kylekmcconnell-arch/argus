@@ -9,6 +9,7 @@
 
 import type { Adapter, CollectContext } from "./types";
 import { env } from "../config";
+import { addGrokUsage } from "../cost";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower } from "../../src/data/evidence";
 
@@ -39,11 +40,13 @@ export async function grokSearch(system: string, user: string, opts?: { maxToolC
     if (res.status === 400) res = await call(false); // param unsupported -> compat retry
     if (!res.ok) return null;
     const d = (await res.json()) as any;
-    // Burn visibility in the function logs: tokens + how many searches ran.
+    // Burn visibility: log usage AND accumulate it into the per-audit cost
+    // that gets attached to the dossier.
     try {
       const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : undefined;
       console.log("[grok-usage]", JSON.stringify({ in: d.usage?.input_tokens, out: d.usage?.output_tokens, toolCalls }));
-    } catch { /* logging only */ }
+      addGrokUsage(d.usage, toolCalls);
+    } catch { /* accounting only */ }
     const text =
       d.output_text ??
       (Array.isArray(d.output)

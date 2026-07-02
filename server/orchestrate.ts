@@ -16,6 +16,7 @@ import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
+import { resetCost, getCost } from "./cost";
 
 import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, type DiscoveredAffiliation, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
@@ -359,6 +360,7 @@ function axisCatalog(roles: SubjectClass[]) {
 }
 
 export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier | null> {
+  resetCost(); // fresh per-audit provider-spend ledger
   const fixture = findSubject(rawHandle);
   const liveProviders = ADAPTERS.filter((a) => KEYED.has(a.id) && a.available());
   const anyLive = liveProviders.length > 0 || analystAvailable();
@@ -453,5 +455,10 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
 
   emit({ phase: "Finalize", label: "Govern composite", detail: "Applying caps and selecting the governing role.", tone: "neutral" });
   await delay(300);
-  return assembleDossier(evidence, true);
+  const dossier = assembleDossier(evidence, true);
+  // Attach what this run actually spent, so the report library can show it.
+  const cost = getCost();
+  dossier.cost = cost;
+  emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches ≈${cost.sources} sources · Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
+  return dossier;
 }

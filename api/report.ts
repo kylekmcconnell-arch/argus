@@ -30,8 +30,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Library listing: every persisted report (all analysts), newest first,
       // WITHOUT payloads (those are heavy — fetched per-ref on open).
       if (req.query.list != null) {
+        // cost:payload->cost lifts the per-audit spend out of the stored dossier
+        // without shipping the whole heavy payload.
         const r = await fetch(
-          `${c.url}/rest/v1/${TABLE}?select=ref,kind,query,contributor,verdict,score,ts&order=ts.desc&limit=200`,
+          `${c.url}/rest/v1/${TABLE}?select=ref,kind,query,contributor,verdict,score,ts,cost:payload->cost&order=ts.desc&limit=200`,
           { headers: headers(c.key), signal: AbortSignal.timeout(10000) },
         );
         if (!r.ok) { res.status(200).json({ available: true, reports: [], error: `read ${r.status}` }); return; }

@@ -26,6 +26,9 @@ export interface Dossier {
   contradictions: Contradiction[];
   webTeam: WebTeamMember[];
   report: AuditReport;
+  // What the collector run spent on providers (attached server-side; persists
+  // with the report so the library can show per-audit cost).
+  cost?: { usd: number; grokUsd: number; claudeUsd: number; grokCalls: number; claudeCalls: number; sources: number; estimated: boolean };
   graph: { nodes: PanoptesNode[]; edges: PanoptesEdge[] };
   founderSummary?: ReturnType<Audit["founderSummary"]>;
   evidence: {

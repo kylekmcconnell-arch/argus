@@ -103,6 +103,15 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
                 </span>
                 <span className="block truncate text-[10.5px] text-ink-faint">
                   {ago(r.ts)}{r.contributor && r.contributor !== me && r.contributor !== "anonymous" ? ` · by ${r.contributor}` : ""}
+                  {typeof r.cost?.usd === "number" && (
+                    <span
+                      className="mono"
+                      title={`estimated provider spend for this audit run · Grok $${(r.cost.grokUsd ?? 0).toFixed(2)}${r.cost.sources ? ` (~${r.cost.sources} sources)` : ""} · Claude $${(r.cost.claudeUsd ?? 0).toFixed(2)}`}
+                    >
+                      {" · ~$"}{r.cost.usd.toFixed(2)}
+                    </span>
+                  )}
+                  {r.kind === "token" && !r.cost && " · free"}
                 </span>
               </span>
               <span className="mono shrink-0 text-right leading-none" style={{ color }}>
