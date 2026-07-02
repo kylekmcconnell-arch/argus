@@ -126,7 +126,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({
       count: Array.isArray(txs) ? txs.length : 0,
       types: [...new Set((txs || []).map((t) => `${t.type}/${t.source}`))],
-      creates: (txs || []).filter((t) => t.type === "CREATE" || t.source === "PUMP_FUN").slice(0, 3).map((t) => ({ type: t.type, source: t.source, mints: (t.tokenTransfers || []).map((x: any) => x.mint).filter(Boolean), desc: (t.description || "").slice(0, 100) })),
+      creates: (txs || []).filter((t) => t.type === "TOKEN_MINT" || t.type === "CREATE").slice(0, 4).map((t) => ({ type: t.type, source: t.source, tt: (t.tokenTransfers || []).map((x: any) => ({ mint: x.mint, from: (x.fromUserAccount || "").slice(0, 6), to: (x.toUserAccount || "").slice(0, 6) })), desc: (t.description || "").slice(0, 90) })),
     });
     return;
   }
