@@ -92,19 +92,23 @@ export default function App() {
   useEffect(() => { void hydrateCommunityGraph(); void hydrateSharedLog(); }, []);
 
   const onAudit = useCallback(async (raw: string) => {
-    setQuery(raw);
     const resolved = resolveInput(raw);
     if (resolved.kind === "token") {
+      setQuery(raw);
       setTokenInput(resolved);
       setPhase("token-run");
       return;
     }
     if (resolved.kind === "site") {
+      setQuery(raw);
       setReconUrl(resolved.ref);
       setPhase("recon");
       return;
     }
-    const f = findSubject(raw);
+    // handle: use the RESOLVED username (e.g. extracted from an x.com URL), not raw.
+    const handle = resolved.ref;
+    setQuery(handle);
+    const f = findSubject(handle);
     setFixture(f ?? null);
     const providers = await probeBackend();
     if (providers) {
