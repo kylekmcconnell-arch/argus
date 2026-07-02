@@ -1,0 +1,93 @@
+import { useState } from "react";
+
+// Deleted-content archaeology (/api/site-history): diff a site's earliest archive
+// against the live version and show what was REMOVED — scrubbed team/advisor
+// sections, deleted LinkedIn/X/GitHub profile links, dropped names, and title
+// pivots (a prior product on the same domain). On-click, keyless.
+export function SiteHistory({ domain }: { domain: string }) {
+  const [data, setData] = useState<any | null>(null);
+  const [loading, setLoading] = useState(false);
+  const run = async () => {
+    if (loading || data) return;
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/site-history?url=${encodeURIComponent(domain)}`);
+      setData(await r.json());
+    } catch {
+      setData({ note: "Site-history lookup failed." });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  if (!data) {
+    return (
+      <div className="mt-3 rounded-xl border border-line bg-panel p-4">
+        <div className="flex items-center justify-between gap-2">
+          <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Deleted-content archaeology</span>
+          <button onClick={run} disabled={loading} className="mono rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-dim transition hover:text-ink disabled:opacity-50">
+            {loading ? "diffing archives…" : "what did they remove? →"}
+          </button>
+        </div>
+        <p className="mt-1.5 text-[12px] leading-relaxed text-ink-faint">
+          Diff this site's earliest archive against the live version — scrubbed team pages, deleted advisor sections,
+          removed LinkedIn links, and prior-product pivots. Removed content is the highest-signal content.
+        </p>
+      </div>
+    );
+  }
+
+  const sections: string[] = data.removedSections ?? [];
+  const profiles: string[] = data.removedProfileLinks ?? [];
+  const names: string[] = data.removedNames ?? [];
+  const pivot = data.titleChange;
+  const damning = sections.length > 0 || profiles.length > 0 || pivot;
+
+  return (
+    <div className="mt-3 rounded-xl border border-line bg-panel p-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Deleted-content archaeology</span>
+        {data.firstArchived && <span className="mono text-[10px] text-ink-faint">archived {data.firstArchived}{data.lastArchived ? `–${data.lastArchived}` : ""} · vs {data.comparedTo}</span>}
+      </div>
+      {data.note && <div className={`mt-1.5 text-[12px] leading-relaxed ${damning ? "text-avoid" : "text-ink-dim"}`}>{data.note}</div>}
+
+      {pivot && (
+        <div className="mt-2.5">
+          <div className="text-[10.5px] uppercase tracking-wide text-ink-faint">Title pivot</div>
+          <div className="mt-1 text-[12px] text-ink-dim">
+            <span className="text-ink-faint line-through">{pivot.from}</span> <span className="text-ink-faint">→</span> <span className="text-ink">{pivot.to}</span>
+          </div>
+        </div>
+      )}
+
+      {sections.length > 0 && (
+        <div className="mt-2.5">
+          <div className="text-[10.5px] uppercase tracking-wide text-ink-faint">Removed sections ({sections.length})</div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {sections.map((s) => <span key={s} className="mono rounded border border-avoid/40 px-1.5 py-0.5 text-[10px] text-avoid">{s}</span>)}
+          </div>
+        </div>
+      )}
+
+      {profiles.length > 0 && (
+        <div className="mt-2.5">
+          <div className="text-[10.5px] uppercase tracking-wide text-ink-faint">Deleted team / social links ({profiles.length})</div>
+          <div className="mt-1 space-y-0.5">
+            {profiles.map((p) => (
+              <a key={p} href={`https://${p}`} target="_blank" rel="noreferrer" className="mono block truncate text-[11px] text-signal underline-offset-2 hover:underline">{p}</a>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {names.length > 0 && (
+        <div className="mt-2.5">
+          <div className="text-[10.5px] uppercase tracking-wide text-ink-faint">Names gone from the site ({names.length}) · approximate</div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            {names.map((n) => <span key={n} className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim">{n}</span>)}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

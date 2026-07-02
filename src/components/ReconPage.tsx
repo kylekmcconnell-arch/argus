@@ -6,6 +6,7 @@ import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
 import { fetchWebTeam, type WebPerson } from "../lib/investigation";
 import { GithubForensics } from "./GithubForensics";
+import { SiteHistory } from "./SiteHistory";
 
 // A clean plain-text DD summary for pasting into a chat / channel.
 function reconReportText(r: Recon): string {
@@ -155,6 +156,9 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
   const ghOrg = (recon?.socials ?? [])
     .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
     .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
+  // The recon'd host, for deleted-content archaeology.
+  let reconHost = "";
+  try { reconHost = recon ? new URL(recon.retrieval.url).hostname.replace(/^www\./, "") : ""; } catch { /* keep empty */ }
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">
@@ -376,6 +380,9 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
 
           {/* commit forensics: the real devs behind the project's GitHub org */}
           {ghOrg && <GithubForensics org={ghOrg} />}
+
+          {/* deleted-content archaeology: what the site removed over time */}
+          {reconHost && <SiteHistory domain={reconHost} />}
         </>
       )}
 
