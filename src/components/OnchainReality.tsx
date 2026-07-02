@@ -45,8 +45,13 @@ export function OnchainReality({ promotions, wallets, onAudit }: { promotions: P
       let contract: string | null = promotions.find((p) => p.contract_address)?.contract_address ?? null;
       let tickerLabel = "";
       if (!contract) {
-        const tk = promotions.find((p) => p.ticker)?.ticker;
-        if (tk) { tickerLabel = tk.startsWith("$") ? tk : "$" + tk; contract = await tickerToContract(tk); }
+        // Try each promoted ticker (exact-symbol) until one resolves — the promoted
+        // ticker isn't always the tradeable token.
+        for (const p of promotions) {
+          if (!p.ticker) continue;
+          const c = await tickerToContract(p.ticker);
+          if (c) { contract = c; tickerLabel = p.ticker.startsWith("$") ? p.ticker : "$" + p.ticker; break; }
+        }
       }
       const solWallet = wallets.find((w) => w.chain === "solana")?.address;
       if (!contract && !solWallet) { setState("done"); return; }
