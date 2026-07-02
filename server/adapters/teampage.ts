@@ -13,7 +13,12 @@ function candidateUrls(domain: string): string[] {
   const paths = ["team", "about", "about-us", "team-members", "our-team", "company", "people", "leadership"];
   const urls: string[] = [];
   for (const host of [d, `docs.${d}`, `www.${d}`]) {
-    for (const p of paths) urls.push(`https://${host}/${p}`);
+    for (const p of paths) {
+      urls.push(`https://${host}/${p}`);
+      // Docs platforms (GitBook, Mintlify, …) render the roster via JS but serve a
+      // plain-text Markdown version at <path>.md — where the names actually are.
+      urls.push(`https://${host}/${p}.md`);
+    }
   }
   return urls;
 }
@@ -33,8 +38,10 @@ async function fetchPage(url: string): Promise<{ url: string; text: string } | n
     const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null;
     const ct = r.headers.get("content-type") ?? "";
-    if (!/html/i.test(ct)) return null;
-    const text = htmlToText(await r.text());
+    if (!/html|markdown|text\/plain/i.test(ct)) return null;
+    const raw = await r.text();
+    // Markdown variants are already text; only HTML needs stripping.
+    const text = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
     // A real team page mentions roles; skip thin/404-ish pages.
     if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) return null;
     return { url, text };

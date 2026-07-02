@@ -1776,7 +1776,10 @@ function candidateUrls(domain) {
   const paths = ["team", "about", "about-us", "team-members", "our-team", "company", "people", "leadership"];
   const urls = [];
   for (const host of [d, `docs.${d}`, `www.${d}`]) {
-    for (const p of paths) urls.push(`https://${host}/${p}`);
+    for (const p of paths) {
+      urls.push(`https://${host}/${p}`);
+      urls.push(`https://${host}/${p}.md`);
+    }
   }
   return urls;
 }
@@ -1788,8 +1791,9 @@ async function fetchPage(url) {
     const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
     if (!r.ok) return null;
     const ct = r.headers.get("content-type") ?? "";
-    if (!/html/i.test(ct)) return null;
-    const text = htmlToText(await r.text());
+    if (!/html|markdown|text\/plain/i.test(ct)) return null;
+    const raw = await r.text();
+    const text = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
     if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) return null;
     return { url, text };
   } catch {
