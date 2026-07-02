@@ -50,14 +50,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!imageUrl) { res.status(400).json({ error: "handle or url required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Photo check unavailable (no analyst key)." }); return; }
 
-  // Try the requested/unavatar URL, then fall back to the real X avatar via
-  // twitterapi (unavatar 404s on fallback=false when it can't resolve).
-  let img = await fetchImage(imageUrl);
+  // Prefer the real X avatar via twitterapi (reliable), then unavatar. unavatar
+  // 404s on fallback=false when it can't resolve, so it's the backup here.
+  let img: { media: string; data: string } | null = null;
   let usedUrl = imageUrl;
-  if (!img && handle) {
-    const alt = await twitterAvatar(handle);
-    if (alt) { const got = await fetchImage(alt); if (got) { img = got; usedUrl = alt; } }
-  }
+  const tw = handle ? await twitterAvatar(handle) : null;
+  if (tw) { const got = await fetchImage(tw); if (got) { img = got; usedUrl = tw; } }
+  if (!img) { const got = await fetchImage(imageUrl); if (got) { img = got; usedUrl = imageUrl; } }
+
+  if (req.query.probe) { res.status(200).json({ handle, twitterAvatar: tw, unavatar: imageUrl, usedUrl, gotImage: !!img, bytes: img ? img.data.length : 0 }); return; }
   if (!img) { res.status(200).json({ available: true, imageUrl: usedUrl, classification: "no_photo", flag: false, note: "No profile photo found (default avatar or unreachable). An anonymous project with no face is a soft flag on its own." }); return; }
 
   try {
@@ -74,9 +75,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           "Reply with ONLY compact JSON: {\"classification\":\"...\",\"confidence\":0.0,\"is_real_person\":true,\"flag\":true,\"tells\":[\"...\"],\"note\":\"one sentence\"}. Never invent a specific identity; describe what you see.",
         messages: [{ role: "user", content: [{ type: "image", source: { type: "base64", media_type: img.media, data: img.data } }, { type: "text", text: "Classify this profile photo and flag anything suspicious for a supposedly real founder." }] }],
       }),
-      signal: AbortSignal.timeout(25000),
+      signal: AbortSignal.timeout(22000),
     });
-    if (!r.ok) { res.status(200).json({ available: true, imageUrl, note: `vision ${r.status}` }); return; }
+    if (!r.ok) { res.status(200).json({ available: true, imageUrl: usedUrl, note: `vision ${r.status}` }); return; }
     const d = (await r.json()) as any;
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
     const m = text.match(/\{[\s\S]*\}/);
