@@ -167,6 +167,13 @@ export async function hydrateSharedLog(): Promise<void> {
     if (d?.available === false || !Array.isArray(d?.entries)) return;
     sharedCache = d.entries as LogEntry[];
     emitLogChange();
+    // Backfill: any LOCAL row the shared log has never seen (audits run before
+    // sync existed, or that failed to sync) gets pushed up now — so server-side
+    // maintenance (re-categorization, cleanups) can reach every audit, not just
+    // the ones that happened to sync.
+    const sharedIds = new Set(sharedCache.map((e) => (e.id.includes(":") ? e.id.slice(e.id.lastIndexOf(":") + 1) : e.id)));
+    const missing = getLog().filter((e) => !sharedIds.has(e.id)).slice(0, 40);
+    for (const e of missing) void syncEntry(e);
   } catch {
     /* stay local-only */
   }

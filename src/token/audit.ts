@@ -530,14 +530,22 @@ function buildGraph(symbol: string, verdict: string, projectX: string | null, de
     nodes.push({ type: "Identity", subtype: "Wallet", key: k });
     edges.push({ src: center, dst: k, type: "DEPLOYED_BY" });
   }
-  holders.slice(0, 4).forEach((h, i) => {
-    const k = (h.tag || "holder") + ":" + h.address.slice(0, 6) + i;
+  holders.slice(0, 4).forEach((h) => {
+    // Key by the ADDRESS only (no positional index): the same holder wallet in
+    // two audits must land on the same node to bridge them.
+    const k = (h.tag || "holder") + ":" + h.address.slice(0, 8);
     nodes.push({ type: "Identity", subtype: "Wallet", key: k, concentration: h.percent });
     edges.push({ src: center, dst: k, type: "HELD_BY", verdict: h.percent > 25 ? "Contradicted" : undefined });
   });
-  socials.slice(0, 2).forEach((x) => {
-    nodes.push({ type: "Company", key: x.label });
-    edges.push({ src: center, dst: x.label, type: "LINKS" });
+  socials.slice(0, 3).forEach((x) => {
+    // Key by the real DESTINATION (@handle or domain) — nodes keyed by the
+    // generic label ("site", "twitter") collapsed across audits and fake-bridged
+    // every token into one blob cabal.
+    const xh = x.url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i)?.[1];
+    const key = xh ? "@" + xh : x.url.match(/^https?:\/\/(?:www\.)?([^/]+)/i)?.[1];
+    if (!key || (projectX && key.toLowerCase() === projectX.toLowerCase())) return;
+    nodes.push({ type: "Company", key });
+    edges.push({ src: center, dst: key, type: "LINKS" });
   });
   return { nodes, edges };
 }

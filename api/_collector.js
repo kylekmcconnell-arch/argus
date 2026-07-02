@@ -204,7 +204,7 @@ var PROFILES = {
     ]
   },
   ["INVESTOR" /* INVESTOR */]: {
-    label: "Investor / Fund",
+    label: "Venture Capital / Fund",
     lens: "Evaluated against fund databases and the reality of claimed relationships. The question is whether the track record and endorsements are real.",
     axes: {
       I1_identity_legitimacy: 15,
@@ -3469,14 +3469,17 @@ function buildGraph(symbol, verdict, projectX, deployer, holders, socials) {
     nodes.push({ type: "Identity", subtype: "Wallet", key: k });
     edges.push({ src: center, dst: k, type: "DEPLOYED_BY" });
   }
-  holders.slice(0, 4).forEach((h, i) => {
-    const k = (h.tag || "holder") + ":" + h.address.slice(0, 6) + i;
+  holders.slice(0, 4).forEach((h) => {
+    const k = (h.tag || "holder") + ":" + h.address.slice(0, 8);
     nodes.push({ type: "Identity", subtype: "Wallet", key: k, concentration: h.percent });
     edges.push({ src: center, dst: k, type: "HELD_BY", verdict: h.percent > 25 ? "Contradicted" : void 0 });
   });
-  socials.slice(0, 2).forEach((x) => {
-    nodes.push({ type: "Company", key: x.label });
-    edges.push({ src: center, dst: x.label, type: "LINKS" });
+  socials.slice(0, 3).forEach((x) => {
+    const xh = x.url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i)?.[1];
+    const key = xh ? "@" + xh : x.url.match(/^https?:\/\/(?:www\.)?([^/]+)/i)?.[1];
+    if (!key || projectX && key.toLowerCase() === projectX.toLowerCase()) return;
+    nodes.push({ type: "Company", key });
+    edges.push({ src: center, dst: key, type: "LINKS" });
   });
   return { nodes, edges };
 }

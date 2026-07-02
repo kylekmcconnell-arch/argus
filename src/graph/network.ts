@@ -39,7 +39,7 @@ export interface Network {
   edges: NetEdge[];
   bridges: NetNode[];      // shared across >= 2 audited subjects
   serialActors: NetNode[]; // tied to >= 2 rugs / deceptions
-  cabals: { subjects: string[]; via: NetNode[] }[];
+  cabals: { subjects: string[]; via: NetNode[]; score?: number; holderOnly?: boolean }[];
 }
 
 // Entity resolution: normalize a raw node key to a canonical id so that
@@ -62,11 +62,24 @@ const isBad = (n?: NetNode) => isRuggy(n) || (!!n && n.subject && (n.verdict ===
 // {nodes, edges} shape Panoptes uses, with an optional verdict on the subject.
 export interface GraphContribution { handle: string; nodes: PanoptesNode[]; edges: PanoptesEdge[]; verdict?: string }
 
+// Generic labels that older audits recorded as literal node keys ("site",
+// "twitter", …). They collapse to one node via canonical() and fake-bridge
+// EVERY audit into one blob cabal. Filtered on ingest so even old stored
+// contributions can't pollute the network.
+const GENERIC_KEYS = new Set([
+  "site", "website", "web", "twitter", "x", "telegram", "discord", "github",
+  "docs", "documentation", "medium", "linktree", "whitepaper", "mail", "email",
+  "youtube", "tiktok", "instagram", "reddit", "facebook", "warpcast", "farcaster",
+  "coingecko", "dexscreener", "linkedin", "blog", "other", "unknown",
+]);
+const isGenericKey = (raw: string) => GENERIC_KEYS.has(canonical(raw));
+
 export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: GraphContribution[] = []): Network {
   const map = new Map<string, NetNode>();
   const edgeMap = new Map<string, NetEdge>();
 
-  const upsert = (raw: PanoptesNode, surfacedBy: string): NetNode => {
+  const upsert = (raw: PanoptesNode, surfacedBy: string): NetNode | null => {
+    if (!raw.subject && isGenericKey(String(raw.key))) return null;
     const id = canonical(raw.key);
     let n = map.get(id);
     if (!n) {
@@ -93,6 +106,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
 
   const ingestEdges = (edges: PanoptesEdge[]) => {
     for (const e of edges) {
+      if (isGenericKey(String(e.src)) || isGenericKey(String(e.dst))) continue;
       const src = canonical(e.src);
       const dst = canonical(e.dst);
       const key = `${src}->${dst}:${e.type}`;
@@ -110,7 +124,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
     const subjId = canonical(handle);
     for (const raw of d.graph.nodes) {
       const n = upsert(raw, subjId);
-      if (raw.subject) n.verdict = d.report.composite_verdict;
+      if (n && raw.subject) n.verdict = d.report.composite_verdict;
     }
     ingestEdges(d.graph.edges);
   }
@@ -119,7 +133,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
     const subjId = canonical(c.handle);
     for (const raw of c.nodes) {
       const n = upsert(raw, subjId);
-      if (raw.subject && c.verdict && !n.verdict) n.verdict = c.verdict;
+      if (n && raw.subject && c.verdict && !n.verdict) n.verdict = c.verdict;
     }
     ingestEdges(c.edges);
   }
@@ -153,22 +167,60 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   const bridges = nodes.filter((n) => n.flags.includes("bridge")).sort((a, b) => b.subjects.length - a.subjects.length);
   const serialActors = nodes.filter((n) => !n.subject && n.flags.includes("serial")).sort((a, b) => b.rugLinks - a.rugLinks);
 
-  // cabals: connected components (union-find) that contain >= 2 audited subjects
+  // ── cabals v2: shared entities between audited subjects, weighted by how hard
+  // the tie is to fake. A shared NAMED person/company or a shared deployer/funder
+  // wallet is strong evidence of coordination; overlapping top-holders is weak
+  // (exchanges and market makers hold everything). Calling a "cabal" requires at
+  // least one strong tie, or three-plus holder overlaps. Each qualifying subject
+  // cluster is its own cabal, strongest first — never one blob.
+  const isHolderVia = (n: NetNode) => /^holder:/i.test(n.key);
+  const isWalletVia = (n: NetNode) => !isHolderVia(n) && (/^(wallet|funder):/i.test(n.key) || n.type === "Identity");
+  const isNamedVia = (n: NetNode) => (n.type === "Person" || n.type === "Company") && !isHolderVia(n) && !isWalletVia(n);
+
+  // Union subjects ONLY through shared via-entities (a node surfaced by >= 2
+  // subjects), so unrelated subjects that merely coexist in one component don't
+  // get lumped together.
   const parent = new Map<string, string>();
   const find = (x: string): string => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x)!)!); x = parent.get(x)!; } return x; };
-  for (const n of nodes) parent.set(n.id, n.id);
-  for (const e of edges) { const a = find(e.src), b = find(e.dst); if (a !== b) parent.set(a, b); }
-  const comp = new Map<string, string[]>();
-  for (const n of nodes) { const r = find(n.id); (comp.get(r) ?? comp.set(r, []).get(r)!).push(n.id); }
-  const cabals: Network["cabals"] = [];
-  for (const ids of comp.values()) {
-    const members = ids.map((id) => byId.get(id)!);
-    const subj = members.filter((m) => m.subject);
-    if (subj.length < 2) continue;
-    const via = members.filter((m) => !m.subject && (m.subjects.length >= 2 || m.wasRug || m.inCabal)).sort((a, b) => b.subjects.length - a.subjects.length);
-    if (via.length === 0) continue;
-    cabals.push({ subjects: subj.map((s) => s.key), via });
+  const subjectIds = nodes.filter((n) => n.subject).map((n) => n.id);
+  for (const id of subjectIds) parent.set(id, id);
+  const sharedVias = nodes.filter((n) => !n.subject && n.subjects.length >= 2);
+  const viasByCluster = new Map<string, NetNode[]>();
+  for (const v of sharedVias) {
+    const present = v.subjects.filter((s) => parent.has(s));
+    for (let i = 1; i < present.length; i++) {
+      const a = find(present[0]), b = find(present[i]);
+      if (a !== b) parent.set(a, b);
+    }
   }
+  const clusters = new Map<string, string[]>();
+  for (const id of subjectIds) { const r = find(id); (clusters.get(r) ?? clusters.set(r, []).get(r)!).push(id); }
+  for (const v of sharedVias) {
+    const present = v.subjects.filter((s) => parent.has(s));
+    if (present.length < 2) continue;
+    const r = find(present[0]);
+    (viasByCluster.get(r) ?? viasByCluster.set(r, []).get(r)!).push(v);
+  }
+
+  const cabals: Network["cabals"] = [];
+  for (const [root, ids] of clusters) {
+    if (ids.length < 2) continue;
+    const via = (viasByCluster.get(root) ?? []).sort((a, b) => {
+      const w = (n: NetNode) => (isNamedVia(n) ? 3 : isWalletVia(n) ? 2 : 1);
+      return w(b) - w(a) || b.subjects.length - a.subjects.length;
+    });
+    const named = via.filter(isNamedVia).length;
+    const wallets = via.filter(isWalletVia).length;
+    const holders = via.filter(isHolderVia).length;
+    if (named + wallets === 0 && holders < 3) continue; // holder overlap alone isn't a cabal
+    cabals.push({
+      subjects: ids.map((id) => byId.get(id)!.key),
+      via,
+      score: (named + wallets) * 2 + holders,
+      holderOnly: named + wallets === 0,
+    });
+  }
+  cabals.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
   return { nodes, edges, bridges, serialActors, cabals };
 }

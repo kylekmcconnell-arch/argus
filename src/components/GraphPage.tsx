@@ -179,8 +179,8 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
             <Cabals net={net} />
             <Intel
               title="Bridge entities"
-              subtitle="Appear in more than one audit"
-              items={net.bridges.map((b) => ({ key: b.key, detail: `${b.subjects.length} audits` }))}
+              subtitle="The same real entity surfacing in more than one audit"
+              items={net.bridges.slice(0, 12).map((b) => ({ key: b.key, detail: `${b.subjects.length} audits · ${/^holder:/i.test(b.key) ? "top holder" : b.type.toLowerCase()}` }))}
               empty="No shared entities across audits yet."
               tone="var(--color-unverifiable)"
             />
@@ -232,29 +232,38 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
 }
 
 function Cabals({ net }: { net: ReturnType<typeof buildNetwork> }) {
-  const cabal = net.cabals[0];
+  const cabals = net.cabals.slice(0, 2);
+  const strong = cabals.some((c) => !c.holderOnly);
+  const color = strong ? "var(--color-avoid)" : "var(--color-caution)";
   return (
-    <div className="rounded-xl border p-4" style={{ borderColor: "var(--color-avoid)", background: "rgba(220,38,38,0.04)" }}>
-      <div className="flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: "var(--color-avoid)" }}>
-        <span className="h-2 w-2 rounded-full" style={{ background: "var(--color-avoid)" }} />
-        Cabal detected
+    <div className="rounded-xl border p-4" style={{ borderColor: cabals.length ? color : "var(--color-line)", background: cabals.length ? (strong ? "rgba(220,38,38,0.04)" : "rgba(217,119,6,0.04)") : "var(--color-panel)" }}>
+      <div className="flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: cabals.length ? color : "var(--color-ink)" }}>
+        <span className="h-2 w-2 rounded-full" style={{ background: cabals.length ? color : "var(--color-line-2)" }} />
+        {cabals.length ? `Linked cluster${cabals.length > 1 ? "s" : ""} detected` : "Cabal detection"}
       </div>
-      {cabal ? (
-        <>
-          <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
-            {cabal.subjects.join(", ")} are independently flagged, but they are not independent: they share{" "}
-            {cabal.via.length} connecting {cabal.via.length === 1 ? "entity" : "entities"}.
-          </p>
-          <div className="mt-2 flex flex-wrap gap-1.5">
-            {cabal.via.map((v) => (
-              <span key={v.id} className="mono rounded-md border border-line bg-panel px-1.5 py-0.5 text-[11px] text-ink-dim">
-                {v.key}
-              </span>
-            ))}
+      {cabals.length ? (
+        cabals.map((cabal, ci) => (
+          <div key={ci} className={ci > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
+              <span className="text-ink">{cabal.subjects.join(", ")}</span> share{" "}
+              {cabal.via.length} real connecting {cabal.via.length === 1 ? "entity" : "entities"}
+              {cabal.holderOnly ? " — all top-holder overlap, which can be exchanges or market makers rather than coordination" : " — shared people, companies, or wallets, which is hard to explain innocently"}.
+            </p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {cabal.via.slice(0, 10).map((v) => (
+                <span key={v.id} className="mono rounded-md border border-line bg-panel px-1.5 py-0.5 text-[11px] text-ink-dim" title={v.type}>
+                  {v.key}
+                </span>
+              ))}
+              {cabal.via.length > 10 && <span className="text-[10px] text-ink-faint">+{cabal.via.length - 10} more</span>}
+            </div>
           </div>
-        </>
+        ))
       ) : (
-        <p className="mt-2 text-[12.5px] text-ink-faint">No connected cluster across the audited subjects.</p>
+        <p className="mt-2 text-[12.5px] text-ink-faint">
+          No coordinated cluster across the audited subjects. A cabal call requires shared named people, companies, or
+          wallets — not just overlapping top-holders.
+        </p>
       )}
     </div>
   );

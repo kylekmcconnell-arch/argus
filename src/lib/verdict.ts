@@ -25,7 +25,7 @@ export const ROLE_META: Record<SubjectClass, { label: string; glyph: string }> =
   [SubjectClass.FOUNDER]: { label: "Founder", glyph: "⚒" },
   [SubjectClass.PROJECT]: { label: "Project", glyph: "◭" },
   [SubjectClass.KOL]: { label: "KOL", glyph: "📡" },
-  [SubjectClass.INVESTOR]: { label: "Investor", glyph: "◈" },
+  [SubjectClass.INVESTOR]: { label: "Venture Capital", glyph: "◈" },
   [SubjectClass.ADVISOR]: { label: "Advisor", glyph: "✦" },
   [SubjectClass.AGENCY]: { label: "Agency", glyph: "⛭" },
   [SubjectClass.MEMBER]: { label: "Member", glyph: "○" },

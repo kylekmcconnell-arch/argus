@@ -117,7 +117,7 @@ export const PROFILES: Record<SubjectClass, Profile> = {
   },
 
   [SubjectClass.INVESTOR]: {
-    label: "Investor / Fund",
+    label: "Venture Capital / Fund",
     lens:
       "Evaluated against fund databases and the reality of claimed relationships. " +
       "The question is whether the track record and endorsements are real.",
