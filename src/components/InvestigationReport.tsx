@@ -311,7 +311,7 @@ export function InvestigationReport({
         {/* commit forensics: the real devs behind the project's GitHub org */}
         {ghOrg && (
           <div className="mt-3">
-            <GithubForensics org={ghOrg} />
+            <GithubForensics org={ghOrg} subjectKey={`$${token.symbol}`} />
           </div>
         )}
 

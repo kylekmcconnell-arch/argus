@@ -43,6 +43,49 @@ export function clearContributions(): void {
   emitGraphChange();
 }
 
+// Merge extra nodes/edges INTO the subject's existing contribution (not a replace),
+// so a forensic panel that runs after the audit can attach its findings to the
+// same subject — keeping them "mine" for subjectConnections. Creates the
+// contribution if none exists yet.
+function mergeContribution(handle: string, addNodes: PanoptesNode[], addEdges: PanoptesEdge[]): void {
+  try {
+    const all = getContributions();
+    const hk = handle.trim().toLowerCase().replace(/^[@$]/, "");
+    const existing = all.find((c) => canonicalKey(c) === hk);
+    if (!existing) {
+      recordContribution({ handle, nodes: [{ type: "Person", key: handle, subject: true } as PanoptesNode, ...addNodes], edges: addEdges });
+      return;
+    }
+    const haveN = new Set(existing.nodes.map((n) => String(n.key).toLowerCase()));
+    for (const n of addNodes) { const k = String(n.key).toLowerCase(); if (!haveN.has(k)) { haveN.add(k); existing.nodes.push(n); } }
+    const haveE = new Set(existing.edges.map((e) => `${e.src}|${e.dst}|${e.type}`.toLowerCase()));
+    for (const e of addEdges) { const k = `${e.src}|${e.dst}|${e.type}`.toLowerCase(); if (!haveE.has(k)) { haveE.add(k); existing.edges.push(e); } }
+    localStorage.setItem(KEY, JSON.stringify(all.slice(0, CAP)));
+    void syncContribution(existing);
+    emitGraphChange();
+  } catch {
+    /* non-fatal */
+  }
+}
+
+// Attach forensic entities a panel discovered (leaked dev emails, prior handles,
+// cross-platform accounts, seeded deployers) to the subject in the graph. Uses
+// consistent keys (email:… / platform:username / wallet:…) so the SAME entity
+// collapses across audits — two projects sharing a dev email or a funder bridge
+// automatically. This is what turns the panels' findings into the compounding web.
+export interface ForensicEntity { key: string; type: string; subtype?: string; edgeType: string; label?: string }
+export function recordForensicEntities(subjectKey: string, entities: ForensicEntity[]): void {
+  const clean = entities.filter((e) => e && e.key && e.key.trim());
+  if (!clean.length || !subjectKey) return;
+  const nodes: PanoptesNode[] = [];
+  const edges: PanoptesEdge[] = [];
+  for (const e of clean) {
+    nodes.push({ type: e.type, key: e.key, ...(e.subtype ? { subtype: e.subtype } : {}), ...(e.label ? { label: e.label } : {}) } as PanoptesNode);
+    edges.push({ src: subjectKey, dst: e.key, type: e.edgeType });
+  }
+  mergeContribution(subjectKey, nodes, edges);
+}
+
 // ── shared backend: sync up, hydrate down ──────────────────────────────────
 // Views read getContributions() synchronously; the community hydrate is async,
 // so notify subscribers (e.g. the Trust graph page) to re-read once it lands.

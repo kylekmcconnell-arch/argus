@@ -379,7 +379,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
           )}
 
           {/* commit forensics: the real devs behind the project's GitHub org */}
-          {ghOrg && <GithubForensics org={ghOrg} />}
+          {ghOrg && <GithubForensics org={ghOrg} subjectKey={reconHost || ghOrg} />}
 
           {/* deleted-content archaeology: what the site removed over time */}
           {reconHost && <SiteHistory domain={reconHost} />}

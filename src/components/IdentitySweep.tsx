@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { recordForensicEntities } from "../graph/store";
 
 // Past-identity sweep (/api/identity-sweep): prior X handles (rebrands) + the same
 // username found on GitHub / Farcaster / Reddit / Telegram, tying a pseudonym to a
@@ -15,7 +16,17 @@ export function IdentitySweep({ handle, auto }: { handle: string; auto?: boolean
     setLoading(true);
     try {
       const r = await fetch(`/api/identity-sweep?handle=${encodeURIComponent(handle.replace(/^@/, ""))}`);
-      setData(await r.json());
+      const d = await r.json();
+      setData(d);
+      // Record prior handles (rebrands) + cross-platform footprint into the graph
+      // so the same identity bridges across audits.
+      const prior: string[] = d?.priorHandles ?? [];
+      const footprint: { platform: string; username: string }[] = d?.footprint ?? [];
+      const ents = [
+        ...prior.map((p) => ({ key: `@${p.replace(/^@/, "").toLowerCase()}`, type: "Person", edgeType: "REBRAND_FROM", label: `@${p}` })),
+        ...footprint.map((h) => ({ key: `${h.platform.toLowerCase()}:${h.username.toLowerCase()}`, type: "Identity", subtype: "Account", edgeType: "SAME_USERNAME", label: `${h.platform} @${h.username}` })),
+      ];
+      if (ents.length) recordForensicEntities(handle, ents);
     } catch {
       setData({ note: "Identity sweep failed." });
     } finally {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { shortAddr } from "../lib/wallets";
+import { recordForensicEntities } from "../graph/store";
 
 // Serial-operator sweep for a Solana wallet (/api/funder): the wallet's OWN
 // launches (a single wallet that serial-mints is a rug farm) plus the forward
@@ -44,6 +45,15 @@ export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q:
       const r = await fetch(`/api/funder?wallet=${encodeURIComponent(wallet)}`);
       const d = await r.json();
       setData(d?.available === false ? { note: d.note ?? "Sweep unavailable (Helius not configured)." } : d);
+      // Record this wallet's launches + the deployers it seeded, so a shared
+      // funder/deployer bridges launches across audits (serial-operator web).
+      const ownT: { mint: string; name?: string }[] = d?.ownTokens ?? [];
+      const seededD: { wallet: string; tokensCreated: number }[] = d?.seededDeployers ?? [];
+      const ents = [
+        ...ownT.map((t) => ({ key: `token:${t.mint}`, type: "Token", edgeType: "LAUNCHED", label: t.name || t.mint })),
+        ...seededD.map((s) => ({ key: `wallet:${s.wallet}`, type: "Identity", subtype: "Wallet", edgeType: "SEEDED", label: s.wallet })),
+      ];
+      if (ents.length) recordForensicEntities(`wallet:${wallet}`, ents);
     } catch {
       setData({ note: "Sweep failed." });
     } finally {

@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { recordForensicEntities } from "../graph/store";
 
 // GitHub commit forensics (/api/github-forensics): the real people behind a repo
 // or org, recovered from commit-author metadata. Personal-email leaks tie a
@@ -6,7 +7,7 @@ import { useState } from "react";
 // (a few API calls), like the other deep tools.
 type Ident = { name: string; email: string; login?: string; commits: number; kind: "personal" | "corporate" | "unknown" };
 
-export function GithubForensics({ org, login }: { org?: string; login?: string }) {
+export function GithubForensics({ org, login, subjectKey }: { org?: string; login?: string; subjectKey?: string }) {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const label = org ? `github.com/${org}` : `github.com/${login}`;
@@ -18,6 +19,13 @@ export function GithubForensics({ org, login }: { org?: string; login?: string }
       const r = await fetch(`/api/github-forensics?${qs}`);
       const d = await r.json();
       setData(d?.available === false ? { note: d.note ?? "GitHub forensics unavailable (no GITHUB_TOKEN)." } : d);
+      // A leaked dev email is the strongest bridge key — two projects sharing one
+      // are the same team. Record them so the graph connects them automatically.
+      const leaks = Array.isArray(d?.emailLeaks) ? d.emailLeaks : [];
+      const key = subjectKey || org || login;
+      if (key && leaks.length) {
+        recordForensicEntities(key, leaks.map((l: any) => ({ key: `email:${String(l.email).toLowerCase()}`, type: "Identity", subtype: "Email", edgeType: "COMMIT_EMAIL", label: `${l.name} · ${l.email}` })));
+      }
     } catch {
       setData({ note: "GitHub forensics failed." });
     } finally {
