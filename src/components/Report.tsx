@@ -12,6 +12,7 @@ import { xAvatar } from "../lib/avatars";
 import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { OnchainReality } from "./OnchainReality";
+import { PfpCheck } from "./PfpCheck";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -737,6 +738,12 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               </Section>
             </div>
           )}
+
+          <div className="min-w-0 lg:col-span-2">
+            <Section title="Profile photo" kicker="is the face real, or AI-generated / stock / a logo standing in for a person?">
+              <PfpCheck handle={report.handle} />
+            </Section>
+          </div>
 
           {(evidence.promotions?.length > 0 || symbolHints.length > 0 || evidence.wallets.some((w) => w.chain === "solana")) && (
             <div className="min-w-0 lg:col-span-2">
