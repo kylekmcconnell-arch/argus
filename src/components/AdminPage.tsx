@@ -172,7 +172,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
                   ev.stopPropagation();
                   ev.preventDefault();
                   const ref = e.ref ?? e.query;
-                  if (!window.confirm(`Remove ${e.query} everywhere (log, stored report, graph)? A rescan will start from scratch.`)) return;
+                  if (!window.confirm(`Delete ${e.query} everywhere (audit log, stored report, trust graph)? This cannot be undone. You can always audit it again later.`)) return;
                   purgeSubject(ref);
                   setLog(getLog());
                 }}

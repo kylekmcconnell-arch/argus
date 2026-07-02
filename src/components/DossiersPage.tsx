@@ -115,7 +115,7 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
                 title="Remove this subject everywhere (log, stored report, graph)"
                 onClick={(ev) => {
                   ev.stopPropagation();
-                  if (!window.confirm(`Remove ${r.query ?? r.ref} everywhere? A rescan will start from scratch.`)) return;
+                  if (!window.confirm(`Delete ${r.query ?? r.ref} everywhere (audit log, stored report, trust graph)? This cannot be undone. You can always audit it again later.`)) return;
                   purgeSubject(r.ref);
                   setReports((prev) => (prev ?? []).filter((x) => !(x.kind === r.kind && x.ref === r.ref)));
                 }}

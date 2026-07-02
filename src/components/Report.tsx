@@ -379,7 +379,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             </button>
             <button
               onClick={() => {
-                if (!window.confirm(`Delete ${report.handle} everywhere (audit log, stored report, trust graph)? A rescan will start from scratch.`)) return;
+                if (!window.confirm(`Delete ${report.handle} everywhere (audit log, stored report, trust graph)? This cannot be undone. You can always audit it again later.`)) return;
                 purgeSubject(report.handle);
                 onReset();
               }}

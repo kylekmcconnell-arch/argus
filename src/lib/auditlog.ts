@@ -177,12 +177,30 @@ export function getSharedLog(): LogEntry[] {
 }
 
 // Local + community, de-duped by id, newest first. Local entries win (they carry
-// the freshest "mine" view); remote-only entries bring their contributor tag.
+// the freshest "mine" view) — EXCEPT role flags, where the shared log is the
+// reconciled truth: a re-categorization (run by any analyst, or server-side)
+// updates the shared rows, and every browser adopts the corrected roles on the
+// next hydrate without anyone re-clicking anything. Shared row ids are
+// "<contributor>:<localId>", so we match on the id suffix.
 export function mergedLog(): LogEntry[] {
   const local = getLog();
-  const seen = new Set(local.map((e) => e.id));
-  const out = [...local];
-  for (const e of sharedCache) if (!seen.has(e.id)) out.push(e);
+  const byId = new Map(local.map((e) => [e.id, e]));
+  const out: LogEntry[] = local.map((e) => ({ ...e }));
+  const outById = new Map(out.map((e) => [e.id, e]));
+  for (const e of sharedCache) {
+    const suffix = e.id.includes(":") ? e.id.slice(e.id.lastIndexOf(":") + 1) : e.id;
+    const localMatch = byId.get(e.id) ?? byId.get(suffix);
+    if (localMatch) {
+      const sharedRoles = (e.flags ?? []).filter((f) => /^role:/i.test(f));
+      const localRoles = (localMatch.flags ?? []).filter((f) => /^role:/i.test(f));
+      if (sharedRoles.length && sharedRoles.join("|") !== localRoles.join("|")) {
+        const target = outById.get(localMatch.id)!;
+        target.flags = [...(target.flags ?? []).filter((f) => !/^role:/i.test(f)), ...sharedRoles];
+      }
+      continue;
+    }
+    out.push(e);
+  }
   out.sort((a, b) => b.ts - a.ts);
   return out;
 }
