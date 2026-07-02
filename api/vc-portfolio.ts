@@ -43,11 +43,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!key) { res.status(200).json({ available: false, note: "Grok (XAI_API_KEY) not configured." }); return; }
 
   const system =
-    "You are a forensic researcher with live web and X search. Assemble the investment PORTFOLIO and track record of the given crypto/tech VC, fund, syndicate, or angel investor. " +
-    "For EACH company or token they invested in, backed, incubated, or led/joined a round for, capture: the project name, its token ticker (with a leading $ if it has one), the token contract address + chain if you can find them, the project's X handle, the round/stage (pre-seed, seed, series A, strategic, etc.), the year, and the CURRENT OUTCOME/STATUS (active and healthy, acquired, quietly shut down, or rugged/collapsed/dead). " +
-    "DIG: Crunchbase, the fund's own portfolio page, round announcements, CryptoRank/Messari, and press. Be thorough and list as many REAL, verifiable investments as you can — aim for the full portfolio, not just the famous ones. Never invent a deal. " +
-    "Reply with ONLY compact JSON: {\"investments\":[{\"project\":\"\",\"ticker\":\"$...\",\"contract\":\"\",\"chain\":\"\",\"x_handle\":\"@...\",\"stage\":\"\",\"year\":\"\",\"outcome\":\"\"}]}. If none found, {\"investments\":[]}. Never use em dashes.";
-  const user = `Investor/VC: ${name}${handle && handle.toLowerCase() !== name.toLowerCase() ? ` (X @${handle})` : ""}. List their full crypto/startup investment portfolio with each deal's stage, year, token (ticker + contract + chain), the project's X handle, and its current outcome.`;
+    "You are a research analyst assembling the public investment portfolio of a crypto/tech VC, fund, or angel. " +
+    "USE both your own knowledge AND live web/X search (Crunchbase, the fund's portfolio page, round announcements, CryptoRank, Messari, press). A well-known fund has MANY public investments — list as many as you can, do not return an empty list for a fund with a known portfolio. " +
+    "For EACH portfolio company or token, capture what you can (fields you don't know can be empty strings): project name (required), token ticker (with a leading $ if it has one), token contract address + chain if known, the project's X handle, the round/stage, the year, and the current OUTCOME/STATUS (active/healthy, acquired, shut down, or rugged/dead). " +
+    "Only include REAL investments (from your knowledge or search); do not fabricate deals that never happened, but DO include well-documented public ones even if you cannot find every field. " +
+    "Reply with ONLY compact JSON: {\"investments\":[{\"project\":\"\",\"ticker\":\"$...\",\"contract\":\"\",\"chain\":\"\",\"x_handle\":\"@...\",\"stage\":\"\",\"year\":\"\",\"outcome\":\"\"}]}. Return an empty list ONLY if this is genuinely not an investor or has no findable investments. Never use em dashes.";
+  const user = `Investor/fund: ${name}${handle && handle.toLowerCase() !== name.toLowerCase() ? ` (X @${handle})` : ""}. List their crypto and startup investment portfolio — as many real, publicly known holdings as you can, with each deal's project name, token ticker, X handle, stage, year, and current outcome. Include famous ones you already know even without a citation.`;
 
   const out = await grok(key, system, user);
   const raw: any[] = Array.isArray(out?.investments) ? out.investments : [];
