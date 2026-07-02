@@ -21,9 +21,10 @@ async function tickerToContract(ticker: string): Promise<string | null> {
   try {
     const r = await fetch(`https://api.dexscreener.com/latest/dex/search/?q=${encodeURIComponent(sym)}`);
     const d = await r.json();
-    const pairs: any[] = (Array.isArray(d?.pairs) ? d.pairs : [])
-      .filter((p) => p?.baseToken?.address && String(p?.baseToken?.symbol ?? "").toUpperCase() === sym)
-      .sort((a, b) => (b?.chainId === "solana" ? 1 : 0) - (a?.chainId === "solana" ? 1 : 0) || Number(b?.liquidity?.usd ?? 0) - Number(a?.liquidity?.usd ?? 0));
+    const all: any[] = Array.isArray(d?.pairs) ? d.pairs : [];
+    const pairs = all
+      .filter((p: any) => p?.baseToken?.address && String(p?.baseToken?.symbol ?? "").toUpperCase() === sym)
+      .sort((a: any, b: any) => (b?.chainId === "solana" ? 1 : 0) - (a?.chainId === "solana" ? 1 : 0) || Number(b?.liquidity?.usd ?? 0) - Number(a?.liquidity?.usd ?? 0));
     return pairs[0]?.baseToken?.address ?? null;
   } catch {
     return null;
