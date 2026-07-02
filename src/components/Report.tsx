@@ -292,6 +292,18 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
   const [watched, setWatched] = useState(() => isWatched(report.handle));
   // The compounding web: who else (from your past audits) this subject is tied to.
   const connections = subjectConnections(report.handle, getContributions());
+  // Candidate token symbols for the on-chain check: the project's own token often
+  // isn't the promoted ticker (RECC Finance -> the tradeable $RECC, not $RETF).
+  const symbolHints = (() => {
+    const STOP = /^(finance|protocol|labs?|capital|network|dao|fi|token|coin|money|app|official|crypto|swap|pay|world|game|games)$/i;
+    const clean = (s: string) => s.replace(/[^a-z0-9]/gi, "");
+    const out = new Set<string>();
+    const first = (f.display_name || "").split(/\s+/).map(clean).filter(Boolean).find((w) => !STOP.test(w));
+    if (first) out.add(first.toUpperCase());
+    const m = report.handle.replace(/^@/, "").match(/^([A-Za-z0-9]{2,})(finance|protocol|labs?|capital|network|dao|fi|token|coin|money|app|official|crypto|swap|pay)$/i);
+    if (m) out.add(m[1].toUpperCase());
+    return [...out].filter((s) => s.length >= 2 && s.length <= 8);
+  })();
   const [copied, setCopied] = useState(false);
   const share = () => {
     const p = new URLSearchParams({ k: "person", t: report.handle, title: report.handle, v: report.composite_verdict, sc: String(report.governing_score ?? ""), s: (f.headline || "").slice(0, 90) });
@@ -726,10 +738,10 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             </div>
           )}
 
-          {(evidence.promotions?.length > 0 || evidence.wallets.some((w) => w.chain === "solana")) && (
+          {(evidence.promotions?.length > 0 || symbolHints.length > 0 || evidence.wallets.some((w) => w.chain === "solana")) && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="On-chain reality check" kicker="the token they promote → its deployer → the money trail + serial-launch history">
-                <OnchainReality promotions={evidence.promotions ?? []} wallets={evidence.wallets} onAudit={onAudit} />
+                <OnchainReality promotions={evidence.promotions ?? []} wallets={evidence.wallets} symbolHints={symbolHints} onAudit={onAudit} />
               </Section>
             </div>
           )}

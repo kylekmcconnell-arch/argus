@@ -31,7 +31,7 @@ async function tickerToContract(ticker: string): Promise<string | null> {
   }
 }
 
-export function OnchainReality({ promotions, wallets, onAudit }: { promotions: Promo[]; wallets: Wal[]; onAudit?: (q: string) => void }) {
+export function OnchainReality({ promotions, wallets, symbolHints, onAudit }: { promotions: Promo[]; wallets: Wal[]; symbolHints?: string[]; onAudit?: (q: string) => void }) {
   const [state, setState] = useState<"idle" | "loading" | "done">("idle");
   const [tok, setTok] = useState<any | null>(null);
   const [trail, setTrail] = useState<any | null>(null);
@@ -51,6 +51,14 @@ export function OnchainReality({ promotions, wallets, onAudit }: { promotions: P
           if (!p.ticker) continue;
           const c = await tickerToContract(p.ticker);
           if (c) { contract = c; tickerLabel = p.ticker.startsWith("$") ? p.ticker : "$" + p.ticker; break; }
+        }
+      }
+      if (!contract) {
+        // Fall back to a symbol derived from the project's name/handle (RECC Finance
+        // -> RECC): the account's actual token often isn't the promoted ticker.
+        for (const h of symbolHints ?? []) {
+          const c = await tickerToContract(h);
+          if (c) { contract = c; tickerLabel = "$" + h; break; }
         }
       }
       const solWallet = wallets.find((w) => w.chain === "solana")?.address;
