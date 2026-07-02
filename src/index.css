@@ -144,3 +144,19 @@
 
 .thin-scroll::-webkit-scrollbar { width: 7px; height: 7px; }
 .thin-scroll::-webkit-scrollbar-thumb { background: var(--color-line-2); border-radius: 99px; }
+
+/* Recent-scores marquee: a slow continuous drift instead of a scrollbar. The
+   track holds two identical copies (each padded by exactly one gap) so the
+   -50% loop point is seamless. Pauses on hover so the cards stay clickable. */
+@keyframes scores-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.scores-marquee {
+  animation: scores-marquee var(--marquee-dur, 45s) linear infinite;
+  will-change: transform;
+}
+.scores-marquee:hover { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .scores-marquee { animation: none; }
+}

@@ -69,9 +69,24 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
         <div className="relative z-10 border-b border-line/60 px-6 py-3.5">
           <div className="mx-auto max-w-5xl">
             <div className="mb-2 text-[10.5px] uppercase tracking-[0.16em] text-ink-faint">Recent scores · click to open the report</div>
-            <div className="flex gap-2.5 overflow-x-auto thin-scroll pb-1">
-              {scores.map((e) => <ScoreCard key={e.id} e={e} onOpen={onOpenRecent} />)}
-            </div>
+            {scores.length >= 5 ? (
+              // Auto-rotating marquee (pauses on hover). Two identical copies, each
+              // carrying one trailing gap, make the -50% loop seamless.
+              <div className="overflow-hidden pb-1" style={{ maskImage: "linear-gradient(90deg, transparent, black 3%, black 97%, transparent)", WebkitMaskImage: "linear-gradient(90deg, transparent, black 3%, black 97%, transparent)" }}>
+                <div className="scores-marquee flex w-max" style={{ ["--marquee-dur" as string]: `${scores.length * 7}s` }}>
+                  <div className="flex gap-2.5 pr-2.5">
+                    {scores.map((e) => <ScoreCard key={e.id} e={e} onOpen={onOpenRecent} />)}
+                  </div>
+                  <div className="flex gap-2.5 pr-2.5" aria-hidden inert>
+                    {scores.map((e) => <ScoreCard key={`dup-${e.id}`} e={e} onOpen={onOpenRecent} />)}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div className="flex gap-2.5 overflow-x-auto thin-scroll pb-1">
+                {scores.map((e) => <ScoreCard key={e.id} e={e} onOpen={onOpenRecent} />)}
+              </div>
+            )}
           </div>
         </div>
       )}
