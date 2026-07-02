@@ -17,6 +17,7 @@ export interface Dossier {
   bio: string;
   followers: string;
   joined: string;
+  days_since_post?: number;
   identity_note: string;
   prior_handles?: string[];
   headline: string;
@@ -86,6 +87,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     bio: ev.profile.bio,
     followers: ev.profile.followers,
     joined: ev.profile.joined,
+    days_since_post: ev.profile.days_since_post,
     identity_note: ev.profile.identity_note,
     prior_handles: ev.profile.prior_handles,
     headline: ev.headline,

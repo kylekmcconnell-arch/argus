@@ -44,10 +44,17 @@ export function CallTimeline({ handle, ticker, address, chain }: { handle: strin
 
   const anchorIsCall = d.anchor === "call";
   const callDate = d.callTime ? fmtDate(d.callTime) : null;
+  const daysAgo = d.callTime ? Math.floor((Date.now() / 1000 - d.callTime) / 86400) : null;
+  const recent = daysAgo != null && daysAgo <= 30;
 
   return (
     <div className="mt-1.5">
       <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-ink-faint">
+        {recent && (
+          <span className="mono rounded px-1.5 py-0.5 text-[9px] font-medium" style={{ background: "rgba(232,177,42,.14)", color: "var(--color-caution)" }}>
+            shilled {daysAgo === 0 ? "today" : `${daysAgo}d ago`}
+          </span>
+        )}
         {anchorIsCall && callDate ? (
           <span className="text-ink-dim">Called {callDate}, priced from that post</span>
         ) : (

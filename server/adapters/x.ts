@@ -161,6 +161,28 @@ export async function getRecentPosts(handle: string, limit = 20): Promise<string
   }
 }
 
+// twitterapi.io: the timestamp of the most recent tweet. Dormancy is a live-ness
+// signal — a project that stops posting for weeks is often winding down, gone
+// quiet after a raise, or abandoned. Returns null if unknown.
+export async function getLastPostAt(handle: string): Promise<string | null> {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return null;
+  const u = handle.replace(/^@/, "");
+  try {
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
+    if (!res || !res.ok) return null;
+    const d = (await res.json()) as any;
+    const tweets: any[] = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
+    const times = tweets
+      .map((t) => Date.parse(t.createdAt ?? t.created_at ?? ""))
+      .filter((n) => Number.isFinite(n));
+    if (!times.length) return null;
+    return new Date(Math.max(...times)).toISOString();
+  } catch {
+    return null;
+  }
+}
+
 // twitterapi.io: does `endorser` follow `subject`?  Best-effort: scan the
 // endorser's followings for the subject. Returns null if unknown.
 export async function followsSubject(endorser: string, subject: string): Promise<boolean | null> {
@@ -538,6 +560,16 @@ export const xAdapter: Adapter = {
         ctx.evidence.recentActivity = posts;
         ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts.`, source: "twitterapi.io", tone: "neutral" });
       }
+    }
+
+    // posting cadence / dormancy — a project going quiet for weeks is a liveness flag.
+    const lastPostAt = await getLastPostAt(ctx.handle);
+    if (lastPostAt) {
+      const days = Math.floor((Date.now() - Date.parse(lastPostAt)) / 86400000);
+      ctx.evidence.profile.last_post_at = lastPostAt;
+      ctx.evidence.profile.days_since_post = days;
+      const dormant = days >= 21;
+      ctx.emit({ phase: "P0 · Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days — a project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
     }
 
     // 1b. follower QUALITY: which respected accounts follow the subject. The

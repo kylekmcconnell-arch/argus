@@ -391,6 +391,12 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-ink-faint">
               <span><span className="text-ink-dim">{f.followers}</span> followers</span>
               <span>joined {f.joined}</span>
+              {typeof f.days_since_post === "number" && (
+                <span className={f.days_since_post >= 21 ? "text-avoid" : "text-ink-faint"}>
+                  {f.days_since_post >= 21 ? "⚠ " : ""}
+                  {f.days_since_post === 0 ? "posted today" : f.days_since_post === 1 ? "posted yesterday" : `last posted ${f.days_since_post}d ago`}
+                </span>
+              )}
               <span className="flex items-center gap-1.5">
                 {roles.map((r) => (
                   <span key={r} className="rounded border border-line px-1.5 py-0.5 text-ink-dim">

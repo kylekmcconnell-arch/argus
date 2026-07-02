@@ -25,6 +25,8 @@ export interface SubjectProfile {
   identity_confidence: IdentityConfidence;
   identity_note: string;
   prior_handles?: string[]; // past X usernames for the same account id (rebrands)
+  last_post_at?: string;    // ISO time of the most recent tweet (dormancy signal)
+  days_since_post?: number; // days since that post, computed at collect time
 }
 
 export interface AxisInput {

@@ -11,8 +11,15 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 export const config = { maxDuration: 30 };
 
 const TW = "https://api.twitterapi.io";
-const GT = "https://api.geckoterminal.com/api/v2";
 const HANDLE = /^[A-Za-z0-9_]{1,30}$/;
+
+// On-chain OHLCV comes from GeckoTerminal. With a paid CoinGecko key we hit the
+// Pro on-chain endpoint (same path shape) for deeper history + higher rate
+// limits — which is what lets us price calls older than the free tier's ~6mo
+// window. Falls back to the free public GeckoTerminal API when no key is set.
+const CG_KEY = process.env.COINGECKO_API_KEY;
+const GT = CG_KEY ? "https://pro-api.coingecko.com/api/v3/onchain" : "https://api.geckoterminal.com/api/v2";
+const GT_HEADERS: Record<string, string> = CG_KEY ? { accept: "application/json", "x-cg-pro-api-key": CG_KEY } : { accept: "application/json" };
 
 const NETWORK: Record<string, string> = {
   solana: "solana", ethereum: "eth", eth: "eth", bsc: "bsc", base: "base",
@@ -27,7 +34,7 @@ const OFFSETS: [string, number][] = [
 ];
 
 async function gt(path: string): Promise<any | null> {
-  try { const r = await fetch(`${GT}${path}`, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
+  try { const r = await fetch(`${GT}${path}`, { headers: GT_HEADERS, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
 }
 async function tw(url: string, key: string): Promise<any | null> {
   try { const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
@@ -87,7 +94,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const call = twKey ? await findCall(handle, ticker, address, twKey) : null;
 
     // Daily candles across the token's life (for launch anchor + long offsets).
-    const dailyD = await gt(`/networks/${network}/pools/${pool}/ohlcv/day?aggregate=1&limit=200&currency=usd`);
+    const dailyD = await gt(`/networks/${network}/pools/${pool}/ohlcv/day?aggregate=1&limit=1000&currency=usd`);
     const daily: Candle[] = (dailyD?.data?.attributes?.ohlcv_list ?? []).slice().sort((a: Candle, b: Candle) => a[0] - b[0]);
     if (daily.length < 2) { res.status(200).json({ available: true, note: "not enough price history" }); return; }
 

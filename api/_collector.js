@@ -850,6 +850,7 @@ function assembleDossier(ev, live) {
     bio: ev.profile.bio,
     followers: ev.profile.followers,
     joined: ev.profile.joined,
+    days_since_post: ev.profile.days_since_post,
     identity_note: ev.profile.identity_note,
     prior_handles: ev.profile.prior_handles,
     headline: ev.headline,
@@ -1279,6 +1280,8 @@ ${evidenceJson}
 
 Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.
 
+ACTIVITY RULE: weigh posting cadence. profile.days_since_post is how long the account has been silent. For a PROJECT/token, going quiet for weeks (roughly 21+ days) is a real liveness flag (abandoned, winding down, or quiet after a raise) and should temper traction/execution axes; for an individual it is a milder signal. Recent, steady posting is mildly positive, not a free pass.
+
 IDENTITY RULE: if the evidence has a "team" array of named people tied to the project (especially any with a LinkedIn, or a named founder/CEO/CTO), the project's real-world identity is RESOLVED. A pseudonymous brand/company handle run on behalf of a publicly named team is NORMAL and is NOT an anonymity red flag: do not score identity/backing axes as if the operators were anonymous, and do NOT write a headline that calls the founder identity "unresolved", "unnamed", or "anonymous" when named leaders are present. Only treat identity as unresolved when the evidence genuinely names no one behind the project.`;
   const tool = {
     name: "record_verdict",
@@ -1412,6 +1415,22 @@ async function getRecentPosts(handle, limit = 20) {
     return tweets.map((t) => t.text ?? t.full_text ?? "").filter(Boolean).slice(0, limit);
   } catch {
     return [];
+  }
+}
+async function getLastPostAt(handle) {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return null;
+  const u = handle.replace(/^@/, "");
+  try {
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
+    if (!res || !res.ok) return null;
+    const d = await res.json();
+    const tweets = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
+    const times = tweets.map((t) => Date.parse(t.createdAt ?? t.created_at ?? "")).filter((n) => Number.isFinite(n));
+    if (!times.length) return null;
+    return new Date(Math.max(...times)).toISOString();
+  } catch {
+    return null;
   }
 }
 async function followsSubject(endorser, subject) {
@@ -1658,6 +1677,14 @@ var xAdapter = {
         ctx.evidence.recentActivity = posts;
         ctx.emit({ phase: "P0 \xB7 Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts.`, source: "twitterapi.io", tone: "neutral" });
       }
+    }
+    const lastPostAt = await getLastPostAt(ctx.handle);
+    if (lastPostAt) {
+      const days = Math.floor((Date.now() - Date.parse(lastPostAt)) / 864e5);
+      ctx.evidence.profile.last_post_at = lastPostAt;
+      ctx.evidence.profile.days_since_post = days;
+      const dormant = days >= 21;
+      ctx.emit({ phase: "P0 \xB7 Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days \u2014 a project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
     }
     if (!ctx.evidence.notableFollowers.length) {
       ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Scanning followers for high-reach accounts and known callers/founders/funds\u2026", source: "twitterapi.io", tone: "neutral" });
@@ -3110,6 +3137,7 @@ async function runTokenAudit(input, emit, opts) {
     address,
     chain,
     dexId: pair.dexId,
+    pairAddress: pair.pairAddress,
     symbol: pair.baseToken.symbol,
     name: pair.baseToken.name,
     imageUrl: pair.info?.imageUrl,

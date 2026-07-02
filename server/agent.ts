@@ -204,6 +204,11 @@ export async function analyzeSubject(
     `\n\nCollected evidence (JSON):\n${evidenceJson}\n\n` +
     `Score every listed axis, write the composite headline (one sentence on what ` +
     `governs the verdict), and an identity note.\n\n` +
+    `ACTIVITY RULE: weigh posting cadence. profile.days_since_post is how long the ` +
+    `account has been silent. For a PROJECT/token, going quiet for weeks (roughly ` +
+    `21+ days) is a real liveness flag (abandoned, winding down, or quiet after a ` +
+    `raise) and should temper traction/execution axes; for an individual it is a ` +
+    `milder signal. Recent, steady posting is mildly positive, not a free pass.\n\n` +
     `IDENTITY RULE: if the evidence has a "team" array of named people tied to the ` +
     `project (especially any with a LinkedIn, or a named founder/CEO/CTO), the ` +
     `project's real-world identity is RESOLVED. A pseudonymous brand/company handle ` +
