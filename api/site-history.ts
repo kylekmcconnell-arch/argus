@@ -25,10 +25,13 @@ async function getText(url: string, ms: number, ua?: string): Promise<string | n
   }
 }
 
-// Distinct archived versions of the homepage, oldest→newest.
-async function versions(domain: string): Promise<{ timestamp: string; original: string }[]> {
-  const qs = `?url=${encodeURIComponent(domain)}&output=json&filter=statuscode:200&collapse=digest&fl=timestamp,original&limit=60`;
-  const raw = await getText(CDX + qs, 8000);
+interface Snap { timestamp: string; original: string }
+
+// A CDX page of distinct homepage versions. Positive limit = oldest N, negative =
+// newest N (a small limit keeps it fast even for sites with huge crawl history).
+async function cdx(domain: string, limit: number): Promise<Snap[]> {
+  const qs = `?url=${encodeURIComponent(domain)}&output=json&filter=statuscode:200&collapse=digest&fl=timestamp,original&limit=${limit}`;
+  const raw = await getText(CDX + qs, 9000);
   if (!raw) return [];
   try {
     const rows = JSON.parse(raw) as string[][];
@@ -39,6 +42,11 @@ async function versions(domain: string): Promise<{ timestamp: string; original: 
   } catch {
     return [];
   }
+}
+// Oldest few + newest few (two targeted queries, not one big pull).
+async function versions(domain: string): Promise<{ oldest: Snap[]; newest: Snap[] }> {
+  const [oldest, newest] = await Promise.all([cdx(domain, 8), cdx(domain, -8)]);
+  return { oldest, newest };
 }
 
 const strip = (html: string) =>
@@ -76,13 +84,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!domain || !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(domain)) { res.status(400).json({ error: "a domain (url=) is required" }); return; }
 
   try {
-    const snaps = await versions(domain);
-    if (snaps.length < 1) { res.status(200).json({ domain, available: true, note: "No archived history found for this domain (very new, or never crawled by archive.org)." }); return; }
+    const { oldest, newest } = await versions(domain);
+    if (!oldest.length && !newest.length) { res.status(200).json({ domain, available: true, note: "No archived history found for this domain (very new, or never crawled by archive.org)." }); return; }
 
     // Earliest substantive snapshot: skip thin/parking pages up front.
     let earliest: Features | null = null;
     let earliestTs = "";
-    for (const s of snaps.slice(0, 4)) {
+    for (const s of oldest.slice(0, 4)) {
       const html = await getText(`https://web.archive.org/web/${s.timestamp}id_/${s.original}`, 7000);
       if (!html) continue;
       const f = extract(html);
@@ -90,18 +98,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!earliest) { earliest = f; earliestTs = s.timestamp; }
     }
 
-    // Current = the LIVE site if reachable, else the newest archived snapshot.
+    // Current = the LIVE site if reachable, else the NEWEST archived snapshot.
     let current: Features | null = null;
     let currentSrc = "live";
     const live = await getText(`https://${domain}`, 7000, "Mozilla/5.0 (compatible; ARGUS/1.0)");
     if (live && strip(live).length >= 200) current = extract(live);
     if (!current) {
-      const last = snaps[snaps.length - 1];
-      const html = await getText(`https://web.archive.org/web/${last.timestamp}id_/${last.original}`, 7000);
-      if (html) { current = extract(html); currentSrc = `archive ${last.timestamp.slice(0, 4)}`; }
+      const last = newest[newest.length - 1] ?? oldest[oldest.length - 1];
+      if (last) {
+        const html = await getText(`https://web.archive.org/web/${last.timestamp}id_/${last.original}`, 7000);
+        if (html) { current = extract(html); currentSrc = `archive ${last.timestamp.slice(0, 4)}`; }
+      }
     }
 
-    if (!earliest || !current) { res.status(200).json({ domain, available: true, versions: snaps.length, note: "Could not fetch enough page content to diff." }); return; }
+    const lastYear = (newest[newest.length - 1] ?? oldest[oldest.length - 1])?.timestamp.slice(0, 4) ?? "";
+    if (!earliest || !current) { res.status(200).json({ domain, available: true, note: "Could not fetch enough page content to diff." }); return; }
 
     const removedSections = diff(earliest.sections, current.sections);
     const removedHeadings = diff(earliest.headings, current.headings).slice(0, 12);
@@ -116,13 +127,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (titleChanged) bits.push(`title changed ("${earliest.title}" → "${current.title}") — possible pivot / prior product`);
     const note = bits.length
       ? `Since ${firstYear}, this site ${bits.join("; ")}. Removed content is the highest-signal content.`
-      : `No significant content removals detected between the ${firstYear} snapshot and now (${snaps.length} archived versions).`;
+      : `No significant content removals detected between the ${firstYear} snapshot and ${lastYear || "now"}.`;
 
     res.status(200).json({
       domain,
       available: true,
       firstArchived: firstYear,
-      versions: snaps.length,
+      lastArchived: lastYear,
       comparedTo: currentSrc,
       titleChange: titleChanged ? { from: earliest.title, to: current.title } : null,
       removedSections,
