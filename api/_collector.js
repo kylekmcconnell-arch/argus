@@ -2470,11 +2470,16 @@ async function coldIntake(ctx) {
   ]);
   const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
-  const seenWt = /* @__PURE__ */ new Set();
+  const seenHandle = /* @__PURE__ */ new Set();
+  const seenName = /* @__PURE__ */ new Set();
+  const norm2 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
   for (const t of [...siteTeam, ...people, ...postRoleTeam]) {
-    const key = (t.handle ?? t.name).trim().toLowerCase();
-    if (!key || seenWt.has(key)) continue;
-    seenWt.add(key);
+    const h = t.handle ? norm2(t.handle) : "";
+    const n = norm2(t.name);
+    if (h && seenHandle.has(h) || n && seenName.has(n)) continue;
+    if (!h && !n) continue;
+    if (h) seenHandle.add(h);
+    if (n) seenName.add(n);
     webTeam.push({ name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects });
   }
   if (webTeam.length) {

@@ -168,11 +168,19 @@ async function coldIntake(ctx: CollectContext) {
   // handle to audit) — this is what a plain handle audit used to drop.
   const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
-  const seenWt = new Set<string>();
+  // Dedup on BOTH handle and normalized name so the same person found once by
+  // name (post scan) and once with a handle (site search) doesn't list twice.
+  // Richer sources (siteTeam) come first, so the handle/LinkedIn version wins.
+  const seenHandle = new Set<string>();
+  const seenName = new Set<string>();
+  const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
   for (const t of [...siteTeam, ...people, ...postRoleTeam]) {
-    const key = (t.handle ?? t.name).trim().toLowerCase();
-    if (!key || seenWt.has(key)) continue;
-    seenWt.add(key);
+    const h = t.handle ? norm(t.handle) : "";
+    const n = norm(t.name);
+    if ((h && seenHandle.has(h)) || (n && seenName.has(n))) continue;
+    if (!h && !n) continue;
+    if (h) seenHandle.add(h);
+    if (n) seenName.add(n);
     webTeam.push({ name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects });
   }
   if (webTeam.length) {
