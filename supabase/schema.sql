@@ -52,3 +52,25 @@ create trigger graph_contributions_touch
 -- Lock the table to the service role only. The API talks to it with the service
 -- role key (server-side, in a Vercel env var); the anon key can't read or write.
 alter table public.graph_contributions enable row level security;
+
+-- ── Shared "Recent audits" log (community feed) ─────────────────────────────
+-- Append-only history of every audit run, tagged by analyst, so Kyle + Enigma
+-- see each other's scans. Same service-role-only access as graph_contributions.
+create table if not exists public.audit_log (
+  id          uuid primary key default gen_random_uuid(),
+  client_id   text not null unique,   -- LogEntry.id namespaced by contributor (idempotent re-posts)
+  ts          timestamptz not null,   -- client audit time (ordering must match the analyst's view)
+  kind        text not null,          -- 'site' | 'token' | 'person'
+  query       text not null,
+  ref         text,
+  image       text,
+  verdict     text,
+  score       numeric,
+  summary     text not null default '',
+  coverage    text,
+  flags       jsonb not null default '[]'::jsonb,
+  contributor text not null,          -- analyst tag (a shared rail with anonymous rows is useless)
+  inserted_at timestamptz not null default now()
+);
+create index if not exists audit_log_ts_idx on public.audit_log (ts desc);
+alter table public.audit_log enable row level security;  -- service-role only

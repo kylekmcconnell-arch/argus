@@ -1,8 +1,9 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArgusMark } from "./ArgusMark";
 import { verdictMeta } from "../lib/verdict";
 import { getWatchlist } from "../lib/watchlist";
-import { getLog, type LogEntry } from "../lib/auditlog";
+import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
+import { getAnalyst, setAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
 
 // Subject thumbnail: the real logo/photo, falling back to a letter if it is
@@ -28,11 +29,12 @@ function AuditAvatar({ src, letter }: { src: string | null; letter: string }) {
   );
 }
 
-// Most recent audits, de-duped by what was audited (one row per subject, newest).
+// Most recent audits (mine + the shared community feed), de-duped by what was
+// audited (one row per subject, newest).
 function recentAudits(max: number): LogEntry[] {
   const seen = new Set<string>();
   const out: LogEntry[] = [];
-  for (const e of getLog()) {
+  for (const e of mergedLog()) {
     const k = `${e.kind}:${(e.ref ?? e.query).toLowerCase()}`;
     if (seen.has(k)) continue;
     seen.add(k);
@@ -107,6 +109,42 @@ function ThemeToggle() {
   );
 }
 
+// Who's signing audits — sets the contributor tag on shared-log rows so Kyle and
+// Enigma can tell their scans apart. Click to edit; stored locally.
+function AnalystBadge() {
+  const [name, setName] = useState(getAnalyst);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState(name);
+  const save = () => {
+    const v = draft.trim();
+    setAnalyst(v);
+    setName(getAnalyst());
+    setEditing(false);
+  };
+  const initial = (name === "anonymous" ? "?" : name[0] || "?").toUpperCase();
+  return (
+    <div className="mt-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5">
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-signal text-[12px] font-semibold text-white">{initial}</span>
+      {editing ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={save}
+          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
+          placeholder="your name (e.g. Kyle)"
+          className="mono min-w-0 flex-1 rounded border border-line bg-panel px-1.5 py-1 text-[12px] text-ink outline-none focus:border-signal"
+        />
+      ) : (
+        <button onClick={() => { setDraft(name === "anonymous" ? "" : name); setEditing(true); }} className="min-w-0 flex-1 text-left">
+          <div className="truncate text-[13px] text-ink">{name === "anonymous" ? "Set your name" : name}</div>
+          <div className="text-[11px] text-ink-faint">Signing audits as · edit</div>
+        </button>
+      )}
+    </div>
+  );
+}
+
 export type NavTarget = "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "watchlist" | "track" | "admin" | "about" | "api";
 
 export function Sidebar({
@@ -126,7 +164,11 @@ export function Sidebar({
 }) {
   const nav = (t: NavTarget) => { onNav(t); onClose?.(); };
   const audit = (h: string) => { onAudit(h); onClose?.(); };
+  const [, setTick] = useState(0);
+  // Re-render when the shared audit log hydrates or a new audit is logged.
+  useEffect(() => subscribeLog(() => setTick((t) => t + 1)), []);
   const recent = recentAudits(14);
+  const me = getAnalyst();
   return (
     <aside
       className={`fixed inset-y-0 left-0 z-40 flex h-full w-[232px] shrink-0 flex-col border-r border-line bg-sidebar transition-transform md:static md:translate-x-0 ${
@@ -181,6 +223,9 @@ export function Sidebar({
                   <span className="mono block truncate text-[12.5px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
                   <span className="block truncate text-[10px] text-ink-faint">
                     {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}
+                    {e.contributor && e.contributor !== me && e.contributor !== "anonymous" && (
+                      <span className="text-signal-dim"> · {e.contributor}</span>
+                    )}
                   </span>
                 </span>
                 {vm && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: vm.color }} />}
@@ -195,13 +240,7 @@ export function Sidebar({
         <NavItem icon="code" label="API" active={view === "api"} onClick={() => nav("api")} />
         <NavItem icon="info" label="How it works" active={view === "about"} onClick={() => nav("about")} />
         <ThemeToggle />
-        <div className="mt-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5">
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-signal text-[12px] font-semibold text-white">K</span>
-          <div className="min-w-0">
-            <div className="truncate text-[13px] text-ink">Kyle</div>
-            <div className="text-[11px] text-ink-faint">Analyst</div>
-          </div>
-        </div>
+        <AnalystBadge />
       </div>
     </aside>
   );
