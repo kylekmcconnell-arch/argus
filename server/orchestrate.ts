@@ -154,7 +154,12 @@ async function coldIntake(ctx: CollectContext) {
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
     discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
-    domain ? findTeamOnSite(domain, ctx.evidence.profile.display_name) : Promise.resolve([] as TeamMember[]),
+    // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
+    // domain or a project name — a big public project's roster lives off-X, and
+    // many project accounts (e.g. @VulcanForged) put no plain domain in the bio.
+    domain || ctx.evidence.profile.display_name
+      ? findTeamOnSite(domain, ctx.evidence.profile.display_name)
+      : Promise.resolve([] as TeamMember[]),
   ]);
 
   // Auto-pivot team: merge everyone found across the website search, the account's

@@ -14,6 +14,7 @@ import { IdentitySweep } from "./IdentitySweep";
 import { OnchainReality } from "./OnchainReality";
 import { PfpCheck } from "./PfpCheck";
 import { KolReport } from "./KolReport";
+import { NewsSection } from "./NewsSection";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -783,6 +784,12 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               </Section>
             </div>
           )}
+
+          <div className="min-w-0 lg:col-span-2">
+            <Section title="In the news" kicker="recent press — funding, launches, hacks, exits; an empty trail is itself a signal">
+              <NewsSection query={f.display_name || report.handle} />
+            </Section>
+          </div>
 
           <div className="min-w-0 lg:col-span-2">
             <Section title="Identity continuity" kicker="rebrands + the same handle across GitHub, Farcaster, Reddit, Telegram">

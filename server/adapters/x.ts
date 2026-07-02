@@ -446,16 +446,18 @@ export async function findTeam(handle: string, name: string | undefined, posts: 
 // is what surfaces named people (with LinkedIn) an X-post scan never sees.
 export async function findTeamOnSite(domain: string, projectName?: string): Promise<TeamMember[]> {
   const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
-  if (!clean) return [];
+  if (!clean && !projectName) return [];
+  const anchor = clean ? `website ${clean}${projectName ? ` (${projectName})` : ""}` : `project "${projectName}"`;
   const system =
-    "You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project at the given website: founders, cofounders, core team, engineers, AND advisors/backers. " +
-    "DIG hard: Google, the project's LinkedIn company page and its listed employees, Crunchbase, the GitHub org, press/interviews, and X. Connect each name to their X handle and LinkedIn where possible. " +
-    "Be EXHAUSTIVE but ONLY real people tied to THIS specific project (match the domain; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. " +
+    "You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project: founders, cofounders, the WHOLE leadership team (CEO/CTO/COO/CFO/CMO), engineering and product leads, AND advisors/backers. " +
+    "DIG hard and be COMPLETE: Google the project + 'team'/'leadership'/'about', open the project's LinkedIn company page and read its 'People' tab (list the employees it shows), check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people — do NOT stop at one or two; keep going until you have the full public roster you can verify. " +
+    "Connect each name to their X handle and LinkedIn where possible. " +
+    "Include ONLY real people genuinely tied to THIS specific project (match the domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. " +
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT — do NOT downgrade a founder to advisor. " +
     "For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal — this exposes serial founders and cross-project ties. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `Project website: ${clean}${projectName ? ` (${projectName})` : ""}. Find every founder, team member, and advisor behind it, connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects.`);
-  return parseTeamJSON(text, undefined, "web/LinkedIn search");
+  const text = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`);
+  return parseTeamJSON(text, undefined, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 
 // Deterministic supplement: scan the account's OWN posts for role words (founder,
