@@ -8,12 +8,14 @@ export function AppShell({
   children,
   onNav,
   onAudit,
+  onOpenRecent,
   activeHandle,
   view,
 }: {
   children: ReactNode;
   onNav: (t: NavTarget) => void;
   onAudit: (handle: string) => void;
+  onOpenRecent?: (ref: string) => void;
   activeHandle?: string | null;
   view: NavTarget | "audit";
 }) {
@@ -21,7 +23,7 @@ export function AppShell({
   return (
     <div className="flex h-screen overflow-hidden bg-void">
       {open && <div className="fixed inset-0 z-30 bg-black/30 md:hidden" onClick={() => setOpen(false)} />}
-      <Sidebar onNav={onNav} onAudit={onAudit} activeHandle={activeHandle} view={view} open={open} onClose={() => setOpen(false)} />
+      <Sidebar onNav={onNav} onAudit={onAudit} onOpenRecent={onOpenRecent} activeHandle={activeHandle} view={view} open={open} onClose={() => setOpen(false)} />
 
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* mobile top bar */}

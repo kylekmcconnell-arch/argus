@@ -152,6 +152,7 @@ export type NavTarget = "idle" | "radar" | "recon" | "find" | "dossiers" | "grap
 export function Sidebar({
   onNav,
   onAudit,
+  onOpenRecent,
   activeHandle,
   view,
   open,
@@ -159,13 +160,15 @@ export function Sidebar({
 }: {
   onNav: (t: NavTarget) => void;
   onAudit: (handle: string) => void;
+  onOpenRecent?: (ref: string) => void;
   activeHandle?: string | null;
   view: NavTarget | "audit";
   open?: boolean;
   onClose?: () => void;
 }) {
   const nav = (t: NavTarget) => { onNav(t); onClose?.(); };
-  const audit = (h: string) => { onAudit(h); onClose?.(); };
+  // Recent-audit clicks SHOW the cached result (with Rescan) rather than re-run.
+  const openRecent = (h: string) => { (onOpenRecent ?? onAudit)(h); onClose?.(); };
   const [, setTick] = useState(0);
   // Re-render when the shared audit log hydrates or a new audit is logged.
   useEffect(() => subscribeLog(() => setTick((t) => t + 1)), []);
@@ -215,7 +218,7 @@ export function Sidebar({
             return (
               <button
                 key={e.id}
-                onClick={() => audit(ref)}
+                onClick={() => openRecent(ref)}
                 className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
                   active ? "bg-panel soft-shadow" : "hover:bg-panel/70"
                 }`}

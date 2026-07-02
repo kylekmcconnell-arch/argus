@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { AppShell } from "./components/AppShell";
 import { Landing } from "./components/Landing";
 import { RunConsole } from "./components/RunConsole";
@@ -77,6 +77,15 @@ export default function App() {
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
   const [viewedProject, setViewedProject] = useState<{ name: string; domain?: string } | null>(null);
 
+  // Session cache of completed audits, so clicking a recent audit SHOWS the
+  // result it already produced (with a Rescan button) instead of re-running it.
+  type Cached =
+    | { kind: "person"; dossier: Dossier }
+    | { kind: "token"; dossier: TokenDossier }
+    | { kind: "investigation"; inv: Investigation };
+  const resultCache = useRef(new Map<string, Cached>());
+  const cacheKey = (s: string) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
+
   // Pull the shared community graph + audit log once on load, so this session
   // sees everyone's work (no-op when no backend is configured).
   useEffect(() => { void hydrateCommunityGraph(); void hydrateSharedLog(); }, []);
@@ -129,6 +138,7 @@ export default function App() {
 
   const onInvestigationDone = useCallback((inv: Investigation) => {
     setInvestigation(inv);
+    resultCache.current.set(cacheKey(inv.token.address), { kind: "investigation", inv });
     setPhase("investigation-report");
     logAudit({
       kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
@@ -143,6 +153,7 @@ export default function App() {
 
   const onTokenDone = useCallback((d: TokenDossier) => {
     setTokenDossier(d);
+    resultCache.current.set(cacheKey(d.address), { kind: "token", dossier: d });
     setPhase("token-report");
     logAudit({
       kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
@@ -154,6 +165,7 @@ export default function App() {
   }, []);
 
   const logPerson = (d: Dossier) => {
+    resultCache.current.set(cacheKey(d.handle), { kind: "person", dossier: d });
     logAudit({
       kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
       summary: d.headline,
@@ -193,6 +205,18 @@ export default function App() {
       return f;
     });
   }, []);
+
+  // Clicking a recent audit SHOWS the result already produced this session (with
+  // a Rescan button on the page), and only re-runs if we don't have it cached
+  // (e.g. a prior session, or another analyst's from the shared log).
+  const onOpenRecent = useCallback((ref: string) => {
+    const c = resultCache.current.get(cacheKey(ref));
+    if (!c) { onAudit(ref); return; }
+    setQuery(ref);
+    if (c.kind === "person") { setFixture(findSubject(ref) ?? null); setDossier(c.dossier); setPhase("report"); }
+    else if (c.kind === "token") { setTokenDossier(c.dossier); setPhase("token-report"); }
+    else { setInvestigation(c.inv); setPhase("investigation-report"); }
+  }, [onAudit]);
 
   // open a dossier straight to its report (no run), for gallery/graph cards
   const onOpen = useCallback((handle: string) => {
@@ -261,7 +285,7 @@ export default function App() {
       : "idle";
 
   return (
-    <AppShell onNav={onNav} onAudit={onAudit} activeHandle={activeHandle} view={view}>
+    <AppShell onNav={onNav} onAudit={onAudit} onOpenRecent={onOpenRecent} activeHandle={activeHandle} view={view}>
       {phase === "idle" && <Landing onAudit={onInvestigate} onAbout={() => setPhase("about")} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
