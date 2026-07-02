@@ -410,7 +410,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             {/* follower quality: high-reach + known accounts that follow this subject */}
             {f.notableFollowers.length > 0 && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] text-ink-faint">Followed by</span>
+                <span className="text-[11px] text-ink-faint">Top followers</span>
                 {f.notableFollowers.slice(0, 10).map((n) => {
                   const big = (n.count ?? 0) >= 1e6;
                   return (
@@ -463,20 +463,73 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
           </div>
         </div>
 
-        {/* identity callout */}
-        <div className="mt-3 flex items-start gap-3 rounded-xl border border-line bg-panel/40 px-4 py-3">
-          <span className="mono mt-0.5 rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-line-2)", color: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-ink-dim)" }}>
-            {report.identity_confidence}
-          </span>
-          <div className="min-w-0">
-            <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.identity_note}</p>
+        {/* identity: when a named team resolved it, SHOW the team here (the note
+            would just narrate the same names); otherwise show the note. */}
+        {webTeam && webTeam.length > 0 ? (
+          <div className="mt-3">
+            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+              <span className="mono rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: "var(--color-line-2)", color: "var(--color-ink-dim)" }}>{report.identity_confidence}</span>
+              <span className="text-[11px] text-ink-faint">identity resolved through the named team · click a handle to audit them</span>
+            </div>
+            <Card className="divide-y divide-line/60">
+              {webTeam.map((p, i) => (
+                <div key={i} className="px-4 py-2.5 text-[12.5px]">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <Avatar src={p.handle ? xAvatar(p.handle) : null} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[9px]" />
+                      <span className="text-ink">{p.name}</span>
+                      {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
+                      <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-dim">{p.role}</span>
+                      {p.linkedin && (
+                        <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                      )}
+                      {p.evidence && <span className="text-[10.5px] text-ink-faint">· {p.evidence}</span>}
+                      <span className="text-[9.5px] text-ink-faint">({p.source})</span>
+                    </span>
+                    {p.handle && onAudit ? (
+                      <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
+                    ) : (
+                      <span className="mono shrink-0 text-[10.5px] text-ink-faint">named only</span>
+                    )}
+                  </div>
+                  {p.projects && p.projects.length > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-[26px] text-[10.5px] text-ink-faint">
+                      <span>also:</span>
+                      {p.projects.map((pr, j) => (
+                        onOpenProject ? (
+                          <button key={j} onClick={() => onOpenProject(pr.name)} title="Dig everyone on this project" className="rounded border border-line px-1.5 py-0.5 text-ink-dim transition hover:border-signal-dim hover:text-signal-dim">
+                            {pr.name}{pr.role ? <span className="text-ink-faint"> · {pr.role}</span> : null}
+                          </button>
+                        ) : (
+                          <span key={j} className="rounded border border-line px-1.5 py-0.5 text-ink-dim">{pr.name}{pr.role ? ` · ${pr.role}` : ""}</span>
+                        )
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </Card>
             {f.prior_handles && f.prior_handles.length > 0 && (
               <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: "var(--color-caution)" }}>
                 ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
               </p>
             )}
           </div>
-        </div>
+        ) : (
+          <div className="mt-3 flex items-start gap-3 rounded-xl border border-line bg-panel/40 px-4 py-3">
+            <span className="mono mt-0.5 rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-line-2)", color: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-ink-dim)" }}>
+              {report.identity_confidence}
+            </span>
+            <div className="min-w-0">
+              <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.identity_note}</p>
+              {f.prior_handles && f.prior_handles.length > 0 && (
+                <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: "var(--color-caution)" }}>
+                  ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* contradictions — claims that do not match the evidence */}
         {f.contradictions.length > 0 && (
@@ -560,48 +613,6 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
           })()}
         </Section>
 
-        {webTeam && webTeam.length > 0 && (
-          <Section title="Team & people behind them" kicker="dug from the site, LinkedIn, and the account's own posts · click a handle to audit them">
-            <Card className="divide-y divide-line/60">
-              {webTeam.map((p, i) => (
-                <div key={i} className="px-4 py-2.5 text-[12.5px]">
-                  <div className="flex items-start justify-between gap-3">
-                    <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <Avatar src={p.handle ? xAvatar(p.handle) : null} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[9px]" />
-                      <span className="text-ink">{p.name}</span>
-                      {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
-                      <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-dim">{p.role}</span>
-                      {p.linkedin && (
-                        <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
-                      )}
-                      {p.evidence && <span className="text-[10.5px] text-ink-faint">· {p.evidence}</span>}
-                      <span className="text-[9.5px] text-ink-faint">({p.source})</span>
-                    </span>
-                    {p.handle && onAudit ? (
-                      <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
-                    ) : (
-                      <span className="mono shrink-0 text-[10.5px] text-ink-faint">named only</span>
-                    )}
-                  </div>
-                  {p.projects && p.projects.length > 0 && (
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-[26px] text-[10.5px] text-ink-faint">
-                      <span>also:</span>
-                      {p.projects.map((pr, j) => (
-                        onOpenProject ? (
-                          <button key={j} onClick={() => onOpenProject(pr.name)} title="Dig everyone on this project" className="rounded border border-line px-1.5 py-0.5 text-ink-dim transition hover:border-signal-dim hover:text-signal-dim">
-                            {pr.name}{pr.role ? <span className="text-ink-faint"> · {pr.role}</span> : null}
-                          </button>
-                        ) : (
-                          <span key={j} className="rounded border border-line px-1.5 py-0.5 text-ink-dim">{pr.name}{pr.role ? ` · ${pr.role}` : ""}</span>
-                        )
-                      ))}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </Card>
-          </Section>
-        )}
 
         {/* signature modules */}
         <div className="grid gap-3 lg:grid-cols-2">
@@ -796,7 +807,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
 
           <div className="min-w-0 lg:col-span-2">
             <Section title="In the news" kicker="recent press — funding, launches, hacks, exits; an empty trail is itself a signal">
-              <NewsSection query={f.display_name || report.handle} />
+              <NewsSection query={f.display_name || report.handle} handle={report.handle} />
             </Section>
           </div>
 

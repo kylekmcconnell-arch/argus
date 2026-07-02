@@ -180,7 +180,12 @@ export default function App() {
     logAudit({
       kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
       summary: d.headline,
-      flags: [d.report.cap_applied ? `cap:${d.report.cap_applied}` : "", `role:${d.report.governing_role}`].filter(Boolean),
+      // Log EVERY held role (not just the governing one) so a founder-who-is-also-
+      // a-KOL (e.g. blknoiz06) appears in all matching directories.
+      flags: [
+        d.report.cap_applied ? `cap:${d.report.cap_applied}` : "",
+        ...Array.from(new Set([d.report.governing_role, ...(d.report.roles ?? [])])).filter(Boolean).map((r) => `role:${r}`),
+      ].filter(Boolean),
     });
     // compound the trust graph with this person and their affiliations, so the
     // network bridges them to any token/company/person later tied to the same node

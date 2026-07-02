@@ -15,7 +15,7 @@ const ago = (ms: number | null) => {
   return `${Math.floor(d / 365)}y ago`;
 };
 
-export function NewsSection({ query }: { query: string }) {
+export function NewsSection({ query, handle }: { query: string; handle?: string }) {
   const [articles, setArticles] = useState<Article[] | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "none">("loading");
   const ran = useRef(false);
@@ -23,7 +23,7 @@ export function NewsSection({ query }: { query: string }) {
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
-    fetch(`/api/news?q=${encodeURIComponent(query)}`)
+    fetch(`/api/news?q=${encodeURIComponent(query)}${handle ? `&h=${encodeURIComponent(handle.replace(/^@/, ""))}` : ""}`)
       .then((r) => r.json())
       .then((d) => { const a: Article[] = d?.articles ?? []; setArticles(a); setState(a.length ? "ok" : "none"); })
       .catch(() => setState("none"));

@@ -366,8 +366,12 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
     emit({ phase: "P0 · Routing", label: "Classify roles", detail: `Routed to ${evidence.roles.join(", ")} (${route.confidence} confidence).`, tone: "neutral" });
   }
 
+  // Strip ARGUS's OWN analysis fields (identity_confidence/identity_note) from
+  // what the LLMs see: the analyst writes identity_note fresh, and the
+  // contradiction scanner must never "contradict" our metadata against itself.
+  const { identity_confidence: _ic, identity_note: _in, ...profileForLlm } = evidence.profile;
   const baseEvidence = {
-    profile: evidence.profile,
+    profile: profileForLlm,
     ventures: evidence.ventures,
     testimonials: evidence.testimonials,
     advised: evidence.advised,
