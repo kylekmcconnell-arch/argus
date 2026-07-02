@@ -10,14 +10,22 @@ export function SiteHistory({ domain }: { domain: string }) {
   const run = async () => {
     if (loading || data) return;
     setLoading(true);
-    try {
-      const r = await fetch(`/api/site-history?url=${encodeURIComponent(domain)}`);
-      setData(await r.json());
-    } catch {
-      setData({ note: "Site-history lookup failed." });
-    } finally {
-      setLoading(false);
+    // archive.org intermittently throttles; a "no history" result for a domain
+    // that has history is usually a transient blip, so retry a couple of times.
+    let last: any = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        const r = await fetch(`/api/site-history?url=${encodeURIComponent(domain)}`);
+        last = await r.json();
+      } catch {
+        last = { note: "Site-history lookup failed." };
+      }
+      const empty = !last || (!last.error && (last.removedSections?.length ?? 0) === 0 && (last.removedProfileLinks?.length ?? 0) === 0 && !last.titleChange);
+      if (!empty) break;
+      if (attempt < 2) await new Promise((res) => setTimeout(res, 2500));
     }
+    setData(last);
+    setLoading(false);
   };
 
   if (!data) {
