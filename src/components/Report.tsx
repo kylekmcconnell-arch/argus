@@ -13,6 +13,7 @@ import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { OnchainReality } from "./OnchainReality";
 import { PfpCheck } from "./PfpCheck";
+import { KolReport } from "./KolReport";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -765,6 +766,14 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             <div className="min-w-0 lg:col-span-2">
               <Section title="On-chain reality check" kicker="the token they promote → its deployer → the money trail + serial-launch history">
                 <OnchainReality promotions={evidence.promotions ?? []} wallets={evidence.wallets} symbolHints={symbolHints} onAudit={onAudit} />
+              </Section>
+            </div>
+          )}
+
+          {roles.some((r) => r === "KOL") && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="KOL report" kicker="a promoter's threat model: did their shilled tokens rug, and is their reach real?">
+                <KolReport handle={report.handle} promotions={evidence.promotions ?? []} associates={evidence.associates ?? []} onAudit={onAudit} />
               </Section>
             </div>
           )}
