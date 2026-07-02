@@ -58,6 +58,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (tw) { const got = await fetchImage(tw); if (got) { img = got; usedUrl = tw; } }
   if (!img) { const got = await fetchImage(imageUrl); if (got) { img = got; usedUrl = imageUrl; } }
 
+  if (req.query.rawtw) {
+    const k = process.env.TWITTERAPI_KEY;
+    const r = k ? await fetch(`https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(handle)}`, { headers: { "x-api-key": k } }) : null;
+    const d = r ? await r.json() : null;
+    const p = (d as any)?.data ?? d;
+    const imgFields = p ? Object.fromEntries(Object.entries(p).filter(([kk]) => /image|pic|avatar|photo/i.test(kk))) : null;
+    res.status(200).json({ handle, allKeys: p ? Object.keys(p) : null, imgFields });
+    return;
+  }
   if (req.query.probe) { res.status(200).json({ handle, twitterAvatar: tw, unavatar: imageUrl, usedUrl, gotImage: !!img, bytes: img ? img.data.length : 0 }); return; }
   if (!img) { res.status(200).json({ available: true, imageUrl: usedUrl, classification: "no_photo", flag: false, note: "No profile photo found (default avatar or unreachable). An anonymous project with no face is a soft flag on its own." }); return; }
 
