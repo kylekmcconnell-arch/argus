@@ -10,6 +10,7 @@ export const config = { maxDuration: 60 };
 
 const q = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
+let LAST_DBG = "";
 async function grok(key: string, system: string, user: string): Promise<any | null> {
   try {
     const r = await fetch("https://api.x.ai/v1/responses", {
@@ -22,12 +23,14 @@ async function grok(key: string, system: string, user: string): Promise<any | nu
       }),
       signal: AbortSignal.timeout(55000),
     });
-    if (!r.ok) return null;
+    if (!r.ok) { LAST_DBG = `http ${r.status}`; return null; }
     const d = (await r.json()) as any;
     const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
+    LAST_DBG = `textlen ${text.length}: ${text.slice(0, 220)}`;
     const m = text.match(/\{[\s\S]*\}/);
     return m ? JSON.parse(m[0]) : null;
-  } catch {
+  } catch (e) {
+    LAST_DBG = `throw ${String(e).slice(0, 120)}`;
     return null;
   }
 }
@@ -62,5 +65,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       outcome: typeof i.outcome === "string" ? i.outcome.trim().slice(0, 60) : null,
     }));
 
-  res.status(200).json({ available: true, name, count: investments.length, investments });
+  res.status(200).json({ available: true, name, count: investments.length, investments, ...(investments.length ? {} : { _dbg: LAST_DBG }) });
 }
