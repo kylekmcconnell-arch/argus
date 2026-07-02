@@ -117,6 +117,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const url = `https://mainnet.helius-rpc.com/?api-key=${key}`;
   const deadline = Date.now() + 50000;
+
+  // TEMP diagnostic: inspect raw enhanced-tx shape for a wallet (removed after
+  // I confirm how pump.fun token creation is labeled).
+  if (typeof req.query.raw === "string" && SOLADDR.test(req.query.raw)) {
+    const r = await fetch(`https://api.helius.xyz/v0/addresses/${req.query.raw}/transactions?api-key=${key}&limit=30`, { signal: AbortSignal.timeout(12000) });
+    const txs = (await r.json()) as any[];
+    res.status(200).json({
+      count: Array.isArray(txs) ? txs.length : 0,
+      types: [...new Set((txs || []).map((t) => `${t.type}/${t.source}`))],
+      creates: (txs || []).filter((t) => t.type === "CREATE" || t.source === "PUMP_FUN").slice(0, 3).map((t) => ({ type: t.type, source: t.source, mints: (t.tokenTransfers || []).map((x: any) => x.mint).filter(Boolean), desc: (t.description || "").slice(0, 100) })),
+    });
+    return;
+  }
   try {
     const { recipients, scanned, truncated } = await seedRecipients(key, wallet, deadline);
     const checked = await inChunks(recipients, CHECK_CHUNK, async (w) => {
