@@ -117,16 +117,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!wallet || !SOLADDR.test(wallet)) { res.status(400).json({ error: "valid Solana wallet required" }); return; }
   if (!key) { res.status(200).json({ wallet, available: false, note: "Helius not configured; funder sweep unavailable." }); return; }
 
-  // TEMP: isolate mint-detection on a single wallet. ?check=<wallet>
-  if (typeof req.query.check === "string" && SOLADDR.test(req.query.check)) {
-    const t = await mintedTokens(key, req.query.check);
-    res.status(200).json({ check: req.query.check, ...t });
-    return;
-  }
-
   const deadline = Date.now() + 50000;
   try {
-    const { recipients, scanned, truncated } = await seedRecipients(key, wallet, deadline);
+    // Two operator shapes, one call: (1) this wallet's OWN launches — a single
+    // wallet that serial-mints is a rug farm on its own; (2) the forward sweep —
+    // a funder that spreads launches across fresh dev wallets to look independent.
+    const [own, seed] = await Promise.all([
+      mintedTokens(key, wallet),
+      seedRecipients(key, wallet, deadline),
+    ]);
+    const { recipients, scanned, truncated } = seed;
     const checked = await inChunks(recipients, CHECK_CHUNK, async (w) => {
       if (Date.now() > deadline) return null;
       const t = await mintedTokens(key, w);
@@ -137,22 +137,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }[]).sort((a, b) => b.tokensCreated - a.tokensCreated);
     const totalTokens = seededDeployers.reduce((s, d) => s + d.tokensCreated, 0);
 
-    const note = !recipients.length
-      ? "No SOL-seeding transfers found from this wallet (not a funder, or too far back to scan)."
-      : !seededDeployers.length
-        ? `Sent SOL to ${recipients.length} wallet${recipients.length === 1 ? "" : "s"}, none of which minted tokens. Not a serial-launch funder.`
-        : `This wallet seeded ${seededDeployers.length} deployer${seededDeployers.length === 1 ? "" : "s"} that launched ${totalTokens} token${totalTokens === 1 ? "" : "s"}. A shared funder across launches is the signature of a serial operator.`;
+    const parts: string[] = [];
+    if (own.total > 1) parts.push(`This wallet itself minted ${own.total} tokens — a serial launcher.`);
+    if (seededDeployers.length) parts.push(`It seeded ${seededDeployers.length} other deployer${seededDeployers.length === 1 ? "" : "s"} that launched ${totalTokens} token${totalTokens === 1 ? "" : "s"}. A shared funder across launches is the signature of a serial operator.`);
+    if (!parts.length) parts.push(recipients.length ? `Sent SOL to ${recipients.length} wallet${recipients.length === 1 ? "" : "s"}, none of which minted tokens, and minted none itself. No serial-launch pattern.` : "No launches or SOL-seeding found for this wallet.");
 
     res.status(200).json({
       wallet,
       available: true,
+      ownLaunches: own.total,
+      ownTokens: own.sample,
       seededDeployers,
       seededCount: seededDeployers.length,
       totalTokens,
       candidatesScanned: recipients.length,
       txScanned: scanned,
       truncated,
-      note,
+      note: parts.join(" "),
     });
   } catch (e) {
     res.status(200).json({ wallet, available: true, seededDeployers: [], error: String(e), note: "Funder sweep failed." });
