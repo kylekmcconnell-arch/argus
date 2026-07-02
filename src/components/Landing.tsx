@@ -1,18 +1,82 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { HeroBackdrop } from "./ArgusMark";
 import { SUBJECTS } from "../data/subjects";
-import { ROLE_META } from "../lib/verdict";
+import { ROLE_META, verdictMeta } from "../lib/verdict";
+import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
+import { getAnalyst } from "../lib/analyst";
+import { auditImage } from "../lib/avatars";
+
+// Most recent audits that have a score/verdict, one per subject, newest first.
+function recentScored(max: number): LogEntry[] {
+  const seen = new Set<string>();
+  const out: LogEntry[] = [];
+  for (const e of mergedLog()) {
+    if (e.score == null && !e.verdict) continue;
+    const k = `${e.kind}:${(e.ref ?? e.query).toLowerCase()}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(e);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+// A clickable score card → opens the full report (persisted, no re-run).
+function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void }) {
+  const m = e.verdict ? verdictMeta(e.verdict) : null;
+  const color = m?.color ?? "var(--color-ink-faint)";
+  const letter = (e.query.replace(/^[@$]/, "").replace(/^https?:\/\//, "")[0] ?? "?").toUpperCase();
+  const img = auditImage(e);
+  const me = getAnalyst();
+  return (
+    <button
+      onClick={() => onOpen(e.ref ?? e.query)}
+      title="Open the full report"
+      className="group flex w-[180px] shrink-0 items-center gap-2.5 rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:bg-panel/80 soft-shadow"
+    >
+      {img ? (
+        <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-lg border border-line object-cover" />
+      ) : (
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-void text-[13px] text-signal">{letter}</span>
+      )}
+      <span className="min-w-0 flex-1">
+        <span className="mono block truncate text-[12px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
+        <span className="block truncate text-[9.5px] text-ink-faint">
+          {e.kind}{e.contributor && e.contributor !== me && e.contributor !== "anonymous" ? ` · ${e.contributor}` : ""}
+        </span>
+      </span>
+      <span className="mono shrink-0 text-right leading-none" style={{ color }}>
+        <span className="block text-[19px] font-semibold tabular">{e.score ?? "—"}</span>
+        <span className="block text-[8px] tracking-wider">{e.verdict ?? ""}</span>
+      </span>
+    </button>
+  );
+}
 
 // Origami-style hero: centered heading + chat-style input + quick-start dossiers,
 // over a faint line-art backdrop. Calm and static, matching origami.chat.
-export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => void; onAbout: () => void }) {
+export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: string) => void; onAbout: () => void; onOpenRecent?: (ref: string) => void }) {
   const [value, setValue] = useState("");
+  const [, setTick] = useState(0);
+  useEffect(() => subscribeLog(() => setTick((t) => t + 1)), []);
+  const scores = recentScored(12);
 
   return (
     <div className="relative flex min-h-full flex-col">
       <HeroBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[440px] w-full opacity-50" />
 
-      <div className="relative z-10 mx-auto flex w-full max-w-2xl flex-1 flex-col items-center px-6 pt-[13vh]">
+      {scores.length > 0 && onOpenRecent && (
+        <div className="relative z-10 border-b border-line/60 px-6 py-3.5">
+          <div className="mx-auto max-w-5xl">
+            <div className="mb-2 text-[10.5px] uppercase tracking-[0.16em] text-ink-faint">Recent scores · click to open the report</div>
+            <div className="flex gap-2.5 overflow-x-auto thin-scroll pb-1">
+              {scores.map((e) => <ScoreCard key={e.id} e={e} onOpen={onOpenRecent} />)}
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div className={`relative z-10 mx-auto flex w-full max-w-2xl flex-1 flex-col items-center px-6 ${scores.length > 0 && onOpenRecent ? "pt-[7vh]" : "pt-[13vh]"}`}>
         <h1 className="text-center text-[34px] font-medium leading-[1.1] tracking-[-0.02em] text-ink">
           Who is actually behind the handle?
         </h1>

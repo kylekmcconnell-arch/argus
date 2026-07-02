@@ -306,7 +306,7 @@ export default function App() {
 
   return (
     <AppShell onNav={onNav} onAudit={onAudit} onOpenRecent={onOpenRecent} activeHandle={activeHandle} view={view}>
-      {phase === "idle" && <Landing onAudit={onInvestigate} onAbout={() => setPhase("about")} />}
+      {phase === "idle" && <Landing onAudit={onInvestigate} onAbout={() => setPhase("about")} onOpenRecent={onOpenRecent} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
 
