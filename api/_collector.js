@@ -851,7 +851,8 @@ function assembleDossier(ev, live) {
       testimonials: a.getTestimonials(),
       advised: a.getAdvisedProjects(),
       associates: a.getAssociates(),
-      wallets: a.getWallets()
+      wallets: a.getWallets(),
+      promotions: a.getPromotions()
     }
   };
 }
@@ -1543,35 +1544,15 @@ async function findTeam(handle, name, posts = []) {
 
 The account's recent posts (mine these for team intros / role + advisor announcements):
 ${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "";
-  const system = `You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account, in two groups: (1) TEAM \u2014 founders, cofounders, and core team members; and (2) ADVISORS \u2014 people the project names as advisors, mentors, or backers (a frequent scam vector when the named advisor never actually agreed). Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. For each person give name, X handle if found, role, a short evidence phrase, and kind ('team' or 'advisor'). Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","role":"founder|cofounder|ceo|cto|engineer|advisor|backer|team","kind":"team|advisor","evidence":""}]}. If none, return {"people":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, AND advisors/backers of this project? Search the account's own posts and the posts that mention it.${postContext}`);
-  if (!text) return [];
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return [];
-  try {
-    const parsed = JSON.parse(m[0]);
-    const out = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
-    const self = h.toLowerCase();
-    return out.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => {
-      const role = (t.role || "team").toString();
-      const kind = t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
-      return {
-        name: t.name.trim(),
-        handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : void 0,
-        role,
-        evidence: t.evidence,
-        kind
-      };
-    }).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 14);
-  } catch {
-    return [];
-  }
+  const system = `You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account: founders, cofounders, core team, engineers, AND advisors/backers. Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. Be PRECISE about each person's role AT THIS project: only call someone an advisor if they are actually named as one; if they are a founder/cofounder, say so \u2014 do NOT downgrade a founder to advisor. For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that live web/X search reveals \u2014 this exposes serial founders and cross-project ties. Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"founder|cofounder|ceo|cto|engineer|advisor|backer","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If none, return {"people":[]}. NEVER invent. Never use em dashes.`;
+  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects. Search the account's own posts and posts mentioning it.${postContext}`);
+  return parseTeamJSON(text, h, "X content");
 }
 async function findTeamOnSite(domain, projectName) {
   const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
   if (!clean) return [];
-  const system = `You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project at the given website: founders, cofounders, core team, engineers, AND advisors/backers. DIG hard: Google, the project's LinkedIn company page and its listed employees, Crunchbase, the GitHub org, press/interviews, and X. Connect each name to their X handle and LinkedIn where possible. Be EXHAUSTIVE but ONLY real people tied to THIS specific project (match the domain; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"","kind":"team|advisor","evidence":""}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `Project website: ${clean}${projectName ? ` (${projectName})` : ""}. Find every founder, team member, and advisor behind it, and connect each to their X handle and LinkedIn.`);
+  const system = `You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project at the given website: founders, cofounders, core team, engineers, AND advisors/backers. DIG hard: Google, the project's LinkedIn company page and its listed employees, Crunchbase, the GitHub org, press/interviews, and X. Connect each name to their X handle and LinkedIn where possible. Be EXHAUSTIVE but ONLY real people tied to THIS specific project (match the domain; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT \u2014 do NOT downgrade a founder to advisor. For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal \u2014 this exposes serial founders and cross-project ties. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
+  const text = await grokSearch(system, `Project website: ${clean}${projectName ? ` (${projectName})` : ""}. Find every founder, team member, and advisor behind it, connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects.`);
   return parseTeamJSON(text, void 0, "web/LinkedIn search");
 }
 var ROLE_RE = /\b(co-?founders?|founders?|ceo|cto|coo|cfo|cmo|chief\s+\w+\s+officer|lead\s+(?:dev|developer|engineer)|core\s+(?:dev|team)|head\s+of\s+\w+|advisors?|our\s+(?:founder|ceo|cto|coo|team|dev|lead))\b/i;
@@ -1614,6 +1595,7 @@ function parseTeamJSON(text, selfHandle, source) {
       const role = (t.role || "team").toString();
       const kind = t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
       const linkedin = typeof t.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(t.linkedin) ? t.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
+      const projects = Array.isArray(t.projects) ? t.projects.filter((p) => p && typeof p.name === "string" && p.name.trim()).map((p) => ({ name: p.name.trim().slice(0, 60), role: typeof p.role === "string" && p.role.trim() ? p.role.trim().slice(0, 40) : void 0 })).slice(0, 6) : void 0;
       return {
         name: t.name.trim(),
         handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : void 0,
@@ -1621,7 +1603,8 @@ function parseTeamJSON(text, selfHandle, source) {
         kind,
         linkedin,
         evidence: typeof t.evidence === "string" ? t.evidence : void 0,
-        source
+        source,
+        projects: projects && projects.length ? projects : void 0
       };
     }).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 16);
   } catch {
@@ -2396,7 +2379,7 @@ async function coldIntake(ctx) {
     const key = (t.handle ?? t.name).trim().toLowerCase();
     if (!key || seenWt.has(key)) continue;
     seenWt.add(key);
-    webTeam.push({ name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content" });
+    webTeam.push({ name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects });
   }
   if (webTeam.length) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });

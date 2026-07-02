@@ -555,22 +555,38 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
           <Section title="Team & people behind them" kicker="dug from the site, LinkedIn, and the account's own posts · click a handle to audit them">
             <Card className="divide-y divide-line/60">
               {webTeam.map((p, i) => (
-                <div key={i} className="flex items-start justify-between gap-3 px-4 py-2.5 text-[12.5px]">
-                  <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                    <Avatar src={p.handle ? xAvatar(p.handle) : null} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[9px]" />
-                    <span className="text-ink">{p.name}</span>
-                    {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
-                    <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-dim">{p.role}</span>
-                    {p.linkedin && (
-                      <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                <div key={i} className="px-4 py-2.5 text-[12.5px]">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <Avatar src={p.handle ? xAvatar(p.handle) : null} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[9px]" />
+                      <span className="text-ink">{p.name}</span>
+                      {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
+                      <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-dim">{p.role}</span>
+                      {p.linkedin && (
+                        <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                      )}
+                      {p.evidence && <span className="text-[10.5px] text-ink-faint">· {p.evidence}</span>}
+                      <span className="text-[9.5px] text-ink-faint">({p.source})</span>
+                    </span>
+                    {p.handle && onAudit ? (
+                      <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
+                    ) : (
+                      <span className="mono shrink-0 text-[10.5px] text-ink-faint">named only</span>
                     )}
-                    {p.evidence && <span className="text-[10.5px] text-ink-faint">· {p.evidence}</span>}
-                    <span className="text-[9.5px] text-ink-faint">({p.source})</span>
-                  </span>
-                  {p.handle && onAudit ? (
-                    <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
-                  ) : (
-                    <span className="mono shrink-0 text-[10.5px] text-ink-faint">named only</span>
+                  </div>
+                  {p.projects && p.projects.length > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-[26px] text-[10.5px] text-ink-faint">
+                      <span>also:</span>
+                      {p.projects.map((pr, j) => (
+                        onOpenProject ? (
+                          <button key={j} onClick={() => onOpenProject(pr.name)} title="Dig everyone on this project" className="rounded border border-line px-1.5 py-0.5 text-ink-dim transition hover:border-signal-dim hover:text-signal-dim">
+                            {pr.name}{pr.role ? <span className="text-ink-faint"> · {pr.role}</span> : null}
+                          </button>
+                        ) : (
+                          <span key={j} className="rounded border border-line px-1.5 py-0.5 text-ink-dim">{pr.name}{pr.role ? ` · ${pr.role}` : ""}</span>
+                        )
+                      ))}
+                    </div>
                   )}
                 </div>
               ))}

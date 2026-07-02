@@ -70,6 +70,7 @@ export interface WebTeamMember {
   linkedin?: string;
   evidence?: string;
   source: string; // where it came from: web/LinkedIn search, post role-scan, X content
+  projects?: { name: string; role?: string }[]; // their OTHER projects (serial-founder web)
 }
 
 export interface CollectedEvidence {
