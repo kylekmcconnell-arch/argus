@@ -3,6 +3,7 @@ import { verdictMeta } from "../lib/verdict";
 import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
+import { FunderSweep } from "./FunderSweep";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -216,6 +217,7 @@ export function InvestigationReport({
                 )}
                 {deployerTrail && <div className="mt-1 leading-snug">{deployerTrail.note}</div>}
                 {!deployerTrail && <div className="mt-0.5">deployer wallet, no identity verification available.</div>}
+                <FunderSweep wallet={token.deployer} onAudit={onAudit} />
               </div>
             )}
           </Card>

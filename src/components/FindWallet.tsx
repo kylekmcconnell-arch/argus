@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { recordContribution, walletContribution, knownAddresses } from "../graph/store";
 import { explorer, shortAddr } from "../lib/wallets";
+import { FunderSweep } from "./FunderSweep";
 
 // ── Find wallet ─────────────────────────────────────────────────────────────
 // Sleuth-style clue box: paste a handle, an ENS/.sol name, a full or PARTIAL
@@ -213,7 +214,7 @@ export function FindWallet({ onAudit, onReset }: { onAudit: (q: string) => void;
               {/* resolved wallets */}
               {card.wallets && card.wallets.length > 0 && (
                 <div className="mt-3 space-y-2">
-                  {card.wallets.map((w) => <WalletRow key={w.address} w={w} />)}
+                  {card.wallets.map((w) => <WalletRow key={w.address} w={w} onAudit={onAudit} />)}
                 </div>
               )}
 
@@ -271,8 +272,9 @@ function CopyBtn({ text }: { text: string }) {
 }
 
 // One resolved wallet: address, source, explorer link, and (Solana) an on-chain
-// funding-trail trace via /api/deployer — who funded it, its age, tokens minted.
-function WalletRow({ w }: { w: Wallet }) {
+// funding-trail trace via /api/deployer — who funded it, its age, tokens minted —
+// plus a serial-launch sweep (the wallet's own launches + deployers it seeded).
+function WalletRow({ w, onAudit }: { w: Wallet; onAudit?: (q: string) => void }) {
   const [trail, setTrail] = useState<any | null>(null);
   const [tracing, setTracing] = useState(false);
   const trace = async () => {
@@ -314,6 +316,7 @@ function WalletRow({ w }: { w: Wallet }) {
           )}
         </div>
       )}
+      {w.chain === "solana" && <FunderSweep wallet={w.address} onAudit={onAudit} />}
     </div>
   );
 }
