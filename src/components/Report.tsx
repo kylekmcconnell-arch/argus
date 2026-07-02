@@ -17,6 +17,7 @@ import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
 import { purgeSubject } from "../lib/purge";
+import { ServiceAlert } from "./ServiceAlert";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -393,6 +394,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
       </header>
 
       <div className="mx-auto max-w-5xl px-5">
+        <div className="mt-4"><ServiceAlert /></div>
         {/* subject identity */}
         <div className="mt-6 flex flex-wrap items-start gap-4">
           <Avatar src={xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />

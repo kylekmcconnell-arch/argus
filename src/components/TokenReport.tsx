@@ -5,6 +5,7 @@ import { verdictMeta } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { TokenDossier } from "../token/audit";
 import { TokenSparkline } from "./TokenSparkline";
+import { ServiceAlert } from "./ServiceAlert";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -157,6 +158,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
       </header>
 
       <div className="mx-auto max-w-5xl px-5">
+        <div className="mt-4"><ServiceAlert /></div>
         {/* token identity */}
         <div className="mt-6 flex flex-wrap items-center gap-4">
           {d.imageUrl ? (

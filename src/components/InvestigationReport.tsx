@@ -7,6 +7,7 @@ import { FunderSweep } from "./FunderSweep";
 import { GithubForensics } from "./GithubForensics";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
+import { ServiceAlert } from "./ServiceAlert";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -127,6 +128,7 @@ export function InvestigationReport({
       </header>
 
       <div className="mx-auto max-w-4xl px-5">
+        <div className="mt-4"><ServiceAlert /></div>
         {/* headline */}
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-3">
