@@ -77,6 +77,26 @@ async function firstTxSigner(url: string, mint: string): Promise<string | null> 
   }
 }
 
+// Method 3 (pump.fun + any launchpad): the enhanced-tx API filters server-side by
+// type and gives a parsed feePayer, so we can reach the mint's CREATE / TOKEN_MINT
+// tx directly without paginating the whole busy history. The feePayer of that tx
+// is the dev — the reliable pump.fun deployer source.
+async function fromEnhancedCreate(key: string, mint: string): Promise<string | null> {
+  for (const type of ["CREATE", "TOKEN_MINT"]) {
+    try {
+      const r = await fetch(`https://api.helius.xyz/v0/addresses/${mint}/transactions?api-key=${key}&type=${type}&limit=100`, { signal: AbortSignal.timeout(12000) });
+      if (!r.ok) continue;
+      const txs = await r.json();
+      if (!Array.isArray(txs) || !txs.length) continue;
+      // the creation is the OLDEST matching tx; the batch is newest-first
+      const create = txs[txs.length - 1];
+      const payer = create?.feePayer;
+      if (ok(payer)) return payer;
+    } catch { /* try next type */ }
+  }
+  return null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = process.env.HELIUS_API_KEY;
   const mint = typeof req.query.mint === "string" ? req.query.mint.trim() : "";
@@ -85,13 +105,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const url = `https://mainnet.helius-rpc.com/?api-key=${key}`;
   try {
-    const [asset, firstTx] = await Promise.all([fromAsset(url, mint), firstTxSigner(url, mint)]);
-    // Prefer the creation-tx fee payer (ground truth). Fall back to an indexed
-    // creator, then the update authority.
-    const deployer = firstTx ?? asset.creators[0] ?? asset.authority ?? null;
-    const via = firstTx ? "creation-tx fee payer" : asset.creators[0] ? "DAS creator" : asset.authority ? "update authority" : null;
+    const [asset, firstTx, createPayer] = await Promise.all([
+      fromAsset(url, mint),
+      firstTxSigner(url, mint),
+      fromEnhancedCreate(key, mint),
+    ]);
+    // Prefer a real creation-tx fee payer (ground truth), then the enhanced-tx
+    // create payer (pump.fun), then an indexed creator, then the update authority.
+    const deployer = firstTx ?? createPayer ?? asset.creators[0] ?? asset.authority ?? null;
+    const via = firstTx ? "creation-tx fee payer" : createPayer ? "enhanced create feePayer" : asset.creators[0] ? "DAS creator" : asset.authority ? "update authority" : null;
     const body: any = { mint, available: true, deployer, via };
-    if (req.query.debug) body.candidates = { firstTx, creators: asset.creators, authority: asset.authority };
+    if (req.query.debug) body.candidates = { firstTx, createPayer, creators: asset.creators, authority: asset.authority };
     res.status(200).json(body);
   } catch (e) {
     res.status(200).json({ mint, available: true, deployer: null, error: String(e) });
