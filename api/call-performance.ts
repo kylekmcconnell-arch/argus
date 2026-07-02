@@ -105,7 +105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     };
 
     const anchorPrice = priceAt(anchorSec);
-    if (anchorPrice == null || anchorPrice <= 0) { res.status(200).json({ available: true, note: "no price at anchor time" }); return; }
+    if (anchorPrice == null || anchorPrice <= 0) { res.status(200).json({ available: true, note: "no price at anchor time", _dbg: { anchor, anchorSec, dailyLen: daily.length, dailyFirst: daily[0]?.[0], dailyLast: daily[daily.length - 1]?.[0], hourlyLen: hourly.length, hourlyFirst: hourly[0]?.[0], hourlyLast: hourly[hourly.length - 1]?.[0], callFound: !!call } }); return; }
 
     const nowSec = daily[daily.length - 1][0];
     const periods = OFFSETS.map(([label, hrs]) => {
