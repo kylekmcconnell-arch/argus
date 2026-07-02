@@ -60,9 +60,18 @@ export function OnchainReality({ promotions, wallets, onAudit }: { promotions: P
         const input = resolveInput(contract);
         const d = input.kind === "token" ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
         setTok(d);
-        const dep = d?.deployer ?? null;
+        const isSol = (input.kind === "token" && input.via === "solana") || d?.chain === "solana";
+        let dep = d?.deployer ?? null;
+        // GoPlus often lacks the creator; resolve the deployer reliably from Helius.
+        if (!dep && isSol) {
+          try {
+            const r = await fetch(`/api/resolve-deployer?mint=${encodeURIComponent(contract)}`);
+            const rd = await r.json();
+            dep = typeof rd?.deployer === "string" ? rd.deployer : null;
+          } catch { /* deployer optional */ }
+        }
         setSubject({ label: d?.symbol ? `$${d.symbol}` : tickerLabel || "promoted token", deployer: dep ?? undefined });
-        if (dep && d?.chain === "solana") {
+        if (dep && isSol) {
           try {
             const r = await fetch(`/api/deployer?wallet=${encodeURIComponent(dep)}`);
             const t = await r.json();
