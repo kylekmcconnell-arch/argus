@@ -40,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
       signal: AbortSignal.timeout(55000),
     });
-    if (!r.ok) { res.status(200).json({ available: true, error: `grok ${r.status}` }); return; }
+    if (!r.ok) { res.status(200).json({ available: true, error: `grok ${r.status}: ${(await r.text()).slice(0, 200)}` }); return; }
     const d = (await r.json()) as any;
     const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
     const m = text.match(/\{[\s\S]*\}/);
