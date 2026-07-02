@@ -17,7 +17,7 @@ import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, findTeam, findTeamOnSite, scanPostsForRoles, followsSubject, handleHistory, type DiscoveredAffiliation, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, type DiscoveredAffiliation, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
@@ -175,20 +175,44 @@ async function coldIntake(ctx: CollectContext) {
   // handle to audit) — this is what a plain handle audit used to drop.
   const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
-  // Dedup on BOTH handle and normalized name so the same person found once by
-  // name (post scan) and once with a handle (site search) doesn't list twice.
-  // Richer sources (siteTeam) come first, so the handle/LinkedIn version wins.
-  const seenHandle = new Set<string>();
-  const seenName = new Set<string>();
+  // MERGE duplicates instead of dropping them: the team page gives the
+  // authoritative name+role but no links; Grok gives the same person WITH their
+  // @handle/LinkedIn. Keep the first occurrence and fill its missing fields from
+  // later duplicates, so a page-roster name still gets its identity links.
   const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
+  const byHandle = new Map<string, (typeof webTeam)[number]>();
+  const byName = new Map<string, (typeof webTeam)[number]>();
   for (const t of [...pageTeam, ...siteTeam, ...people, ...postRoleTeam]) {
     const h = t.handle ? norm(t.handle) : "";
     const n = norm(t.name);
-    if ((h && seenHandle.has(h)) || (n && seenName.has(n))) continue;
     if (!h && !n) continue;
-    if (h) seenHandle.add(h);
-    if (n) seenName.add(n);
-    webTeam.push({ name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects });
+    const existing = (h && byHandle.get(h)) || (n && byName.get(n)) || null;
+    if (existing) {
+      if (!existing.handle && t.handle) { existing.handle = t.handle; byHandle.set(norm(t.handle), existing); }
+      if (!existing.linkedin && t.linkedin) existing.linkedin = t.linkedin;
+      if ((!existing.projects || !existing.projects.length) && t.projects?.length) existing.projects = t.projects;
+      continue;
+    }
+    const rec = { name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects };
+    webTeam.push(rec);
+    if (h) byHandle.set(h, rec);
+    if (n) byName.set(n, rec);
+  }
+
+  // Actively resolve identities for members still name-only (the team page names
+  // them but links nothing): one batched Grok pass finds each person's X handle
+  // and LinkedIn. The co-founder of a known fund should never render "named only".
+  const nameOnly = webTeam.filter((m) => !m.handle && !m.linkedin).slice(0, 15);
+  if (nameOnly.length >= 1) {
+    const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })));
+    let linked = 0;
+    for (const f of found) {
+      const m = byName.get(norm(f.name));
+      if (!m) continue;
+      if (!m.handle && f.handle) { m.handle = f.handle; linked++; }
+      if (!m.linkedin && f.linkedin) { m.linkedin = f.linkedin; if (!f.handle) linked++; }
+    }
+    if (linked) ctx.emit({ phase: "P1 · Team", label: "Identities linked", detail: `Resolved X/LinkedIn for ${linked} of ${nameOnly.length} name-only team members.`, source: "grok", tone: "good" });
   }
   if (webTeam.length) {
     ctx.emit({ phase: "P1 · Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });

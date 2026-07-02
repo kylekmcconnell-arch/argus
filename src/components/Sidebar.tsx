@@ -73,6 +73,7 @@ const ICONS = {
   kol: "M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1M14 8a4 4 0 0 1 0 8M17 5a8 8 0 0 1 0 14",
   founder: "M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M17 4l2 2 3.5-3.5M17 11h4",
   vc: "M3 3v18h18M7 14l3-3 3 2 5-6M18 7h3v3",
+  project: "M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3M4 7.5l8 4.5 8-4.5M12 12v9",
 };
 
 function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof ICONS; label: string; active?: boolean; onClick?: () => void; badge?: number }) {
@@ -150,7 +151,7 @@ function AnalystBadge() {
   );
 }
 
-export type NavTarget = "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "vcs" | "watchlist" | "track" | "admin" | "about" | "api" | "providers" | "changelog";
+export type NavTarget = "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "track" | "admin" | "about" | "api" | "providers" | "changelog";
 
 export function Sidebar({
   onNav,
@@ -198,6 +199,7 @@ export function Sidebar({
         <NavItem icon="wallet" label="Find wallet" active={view === "find"} onClick={() => nav("find")} />
         <NavItem icon="gallery" label="Dossiers" active={view === "dossiers"} onClick={() => nav("dossiers")} />
         <NavItem icon="founder" label="Founders" active={view === "founders"} onClick={() => nav("founders")} />
+        <NavItem icon="project" label="Projects" active={view === "projects"} onClick={() => nav("projects")} />
         <NavItem icon="kol" label="KOLs" active={view === "kols"} onClick={() => nav("kols")} />
         <NavItem icon="vc" label="VCs" active={view === "vcs"} onClick={() => nav("vcs")} />
         <NavItem icon="graph" label="Trust graph" active={view === "graph"} onClick={() => nav("graph")} />

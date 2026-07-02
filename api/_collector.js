@@ -1640,6 +1640,25 @@ async function findTeamOnSite(domain, projectName) {
   const text = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`);
   return parseTeamJSON(text, void 0, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
+async function enrichTeamIdentities(project, people) {
+  if (!people.length) return [];
+  const system = `You are an OSINT researcher with live web and X search. For each named team member of the given project, find their X (Twitter) handle and LinkedIn profile. Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/..."}]} \u2014 one entry per input name, fields omitted when unknown. NEVER invent. Never use em dashes.`;
+  const list = people.map((p) => `${p.name}${p.role ? ` (${p.role})` : ""}`).join("; ");
+  const text = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`);
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const arr = JSON.parse(m[0]).people ?? [];
+    return arr.filter((p) => p && typeof p.name === "string" && p.name.trim()).map((p) => ({
+      name: p.name.trim(),
+      handle: typeof p.handle === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(p.handle.replace(/^@/, "")) ? "@" + p.handle.replace(/^@/, "") : void 0,
+      linkedin: typeof p.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(p.linkedin) ? p.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0
+    }));
+  } catch {
+    return [];
+  }
+}
 var ROLE_RE = /\b(co-?founders?|founders?|ceo|cto|coo|cfo|cmo|chief\s+\w+\s+officer|lead\s+(?:dev|developer|engineer)|core\s+(?:dev|team)|head\s+of\s+\w+|advisors?|our\s+(?:founder|ceo|cto|coo|team|dev|lead))\b/i;
 function scanPostsForRoles(posts) {
   const out = [];
@@ -2554,17 +2573,45 @@ async function coldIntake(ctx) {
   ]);
   const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
-  const seenHandle = /* @__PURE__ */ new Set();
-  const seenName = /* @__PURE__ */ new Set();
   const norm2 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
+  const byHandle = /* @__PURE__ */ new Map();
+  const byName = /* @__PURE__ */ new Map();
   for (const t of [...pageTeam, ...siteTeam, ...people, ...postRoleTeam]) {
     const h = t.handle ? norm2(t.handle) : "";
     const n = norm2(t.name);
-    if (h && seenHandle.has(h) || n && seenName.has(n)) continue;
     if (!h && !n) continue;
-    if (h) seenHandle.add(h);
-    if (n) seenName.add(n);
-    webTeam.push({ name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects });
+    const existing = h && byHandle.get(h) || n && byName.get(n) || null;
+    if (existing) {
+      if (!existing.handle && t.handle) {
+        existing.handle = t.handle;
+        byHandle.set(norm2(t.handle), existing);
+      }
+      if (!existing.linkedin && t.linkedin) existing.linkedin = t.linkedin;
+      if ((!existing.projects || !existing.projects.length) && t.projects?.length) existing.projects = t.projects;
+      continue;
+    }
+    const rec = { name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects };
+    webTeam.push(rec);
+    if (h) byHandle.set(h, rec);
+    if (n) byName.set(n, rec);
+  }
+  const nameOnly = webTeam.filter((m) => !m.handle && !m.linkedin).slice(0, 15);
+  if (nameOnly.length >= 1) {
+    const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })));
+    let linked = 0;
+    for (const f of found) {
+      const m = byName.get(norm2(f.name));
+      if (!m) continue;
+      if (!m.handle && f.handle) {
+        m.handle = f.handle;
+        linked++;
+      }
+      if (!m.linkedin && f.linkedin) {
+        m.linkedin = f.linkedin;
+        if (!f.handle) linked++;
+      }
+    }
+    if (linked) ctx.emit({ phase: "P1 \xB7 Team", label: "Identities linked", detail: `Resolved X/LinkedIn for ${linked} of ${nameOnly.length} name-only team members.`, source: "grok", tone: "good" });
   }
   if (webTeam.length) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });

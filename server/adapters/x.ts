@@ -460,6 +460,38 @@ export async function findTeamOnSite(domain: string, projectName?: string): Prom
   return parseTeamJSON(text, undefined, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 
+// Batched identity resolution for name-only team members: the project's own team
+// page names people without linking anything, but public figures (a fund's
+// cofounder, a protocol's CTO) have easily findable X handles + LinkedIn. One
+// Grok pass resolves the whole batch.
+export async function enrichTeamIdentities(
+  project: string,
+  people: { name: string; role?: string }[],
+): Promise<{ name: string; handle?: string; linkedin?: string }[]> {
+  if (!people.length) return [];
+  const system =
+    "You are an OSINT researcher with live web and X search. For each named team member of the given project, find their X (Twitter) handle and LinkedIn profile. " +
+    "Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. " +
+    "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\"}]} — one entry per input name, fields omitted when unknown. NEVER invent. Never use em dashes.";
+  const list = people.map((p) => `${p.name}${p.role ? ` (${p.role})` : ""}`).join("; ");
+  const text = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`);
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const arr: any[] = JSON.parse(m[0]).people ?? [];
+    return arr
+      .filter((p) => p && typeof p.name === "string" && p.name.trim())
+      .map((p) => ({
+        name: p.name.trim(),
+        handle: typeof p.handle === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(p.handle.replace(/^@/, "")) ? "@" + p.handle.replace(/^@/, "") : undefined,
+        linkedin: typeof p.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(p.linkedin) ? p.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : undefined,
+      }));
+  } catch {
+    return [];
+  }
+}
+
 // Deterministic supplement: scan the account's OWN posts for role words (founder,
 // CEO, CTO, "our dev", advisor...) and the name or @handle sitting next to them.
 // Catches team the LLM search misses, straight from the project's own language.
