@@ -3,6 +3,7 @@ import { auditToken } from "../token/audit";
 import { resolveInput } from "../lib/resolveInput";
 import { verdictMeta } from "../lib/verdict";
 import { TokenSparkline } from "./TokenSparkline";
+import { recordForensicEntities } from "../graph/store";
 
 // VC / investor track record: their portfolio (via /api/vc-portfolio) with each
 // token investment priced on-chain, so "prolific fund" becomes "of N token bets,
@@ -58,6 +59,17 @@ export function VcReport({ handle, name, onAudit }: { handle: string; name: stri
         const scored = await Promise.all(withToken.map(auditInvestment));
         setRows([...scored, ...rest.map((i) => ({ ...i, resolved: false }))]);
         setState("ok");
+        // Feed the shared graph: link this fund to each portfolio project/token.
+        // Shared project handles + tickers bridge the fund to the founders who
+        // built those projects and to any KOL who promoted the same token.
+        const ents = inv
+          .map((i) => {
+            const key = i.x_handle || i.ticker;
+            if (!key) return null;
+            return { key, type: i.x_handle ? "Company" : "Token", subtype: "Portfolio", edgeType: "INVESTED_IN", label: i.project + (i.stage ? ` · ${i.stage}` : "") };
+          })
+          .filter(Boolean) as { key: string; type: string; subtype: string; edgeType: string; label: string }[];
+        if (ents.length) recordForensicEntities(handle, ents);
       } catch {
         setState("none");
       }

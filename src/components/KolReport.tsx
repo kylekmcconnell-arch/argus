@@ -4,6 +4,7 @@ import { resolveInput } from "../lib/resolveInput";
 import { verdictMeta } from "../lib/verdict";
 import { TokenSparkline } from "./TokenSparkline";
 import { CallTimeline } from "./CallTimeline";
+import { recordForensicEntities } from "../graph/store";
 
 // Dedicated KOL (influencer) report. A KOL's threat model is different from a
 // founder's: they pump-and-dump. So this grades the two things that matter —
@@ -63,6 +64,13 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
       setSignals(sig && sig.available === false ? null : sig);
       setTokens(toks);
       setLoading(false);
+      // Feed the shared graph: link this KOL to every token they promoted. The
+      // token nodes are shared keys, so two KOLs who shilled the same token — or a
+      // token/project audit of it — bridge through that node.
+      const ents = toks
+        .filter((t) => !t.unresolved)
+        .map((t) => ({ key: t.label, type: "Token", subtype: "Promoted", edgeType: "PROMOTED", label: `${t.label}${t.verdict ? ` · ${t.verdict}` : ""}` }));
+      if (ents.length) recordForensicEntities(handle, ents);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
