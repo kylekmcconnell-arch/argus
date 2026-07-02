@@ -68,6 +68,8 @@ const ICONS = {
   recon: "M12 3a9 9 0 1 0 9 9M21 3l-7 7M12 7a5 5 0 1 0 5 5",
   admin: "M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z",
   wallet: "M3 7h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12M16 13h.01",
+  key: "M15 7a4 4 0 1 1-4 4h-1l-2 2-2-2H3v-3l6-6a4 4 0 0 1 6 0M15.5 7.5h.01",
+  changelog: "M8 6h11M8 12h11M8 18h11M3.5 6h.01M3.5 12h.01M3.5 18h.01",
 };
 
 function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof ICONS; label: string; active?: boolean; onClick?: () => void; badge?: number }) {
@@ -145,7 +147,7 @@ function AnalystBadge() {
   );
 }
 
-export type NavTarget = "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "watchlist" | "track" | "admin" | "about" | "api";
+export type NavTarget = "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "watchlist" | "track" | "admin" | "about" | "api" | "providers" | "changelog";
 
 export function Sidebar({
   onNav,
@@ -237,6 +239,8 @@ export function Sidebar({
 
       {/* account */}
       <div className="mt-auto border-t border-line px-2.5 py-3">
+        <NavItem icon="key" label="Providers" active={view === "providers"} onClick={() => nav("providers")} />
+        <NavItem icon="changelog" label="Changelog" active={view === "changelog"} onClick={() => nav("changelog")} />
         <NavItem icon="code" label="API" active={view === "api"} onClick={() => nav("api")} />
         <NavItem icon="info" label="How it works" active={view === "about"} onClick={() => nav("about")} />
         <ThemeToggle />

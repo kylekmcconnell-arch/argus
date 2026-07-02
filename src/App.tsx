@@ -10,6 +10,8 @@ import { WatchlistPage } from "./components/WatchlistPage";
 import { RadarPage } from "./components/RadarPage";
 import { AboutPage } from "./components/AboutPage";
 import { ApiPage } from "./components/ApiPage";
+import { ProvidersPage } from "./components/ProvidersPage";
+import { ChangelogPage } from "./components/ChangelogPage";
 import { TrackRecordPage } from "./components/TrackRecordPage";
 import { ReconPage } from "./components/ReconPage";
 import { FindWallet } from "./components/FindWallet";
@@ -30,7 +32,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
 type Phase =
-  | "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "watchlist" | "track" | "admin" | "about" | "api"
+  | "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "watchlist" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "investigation" | "investigation-report"
@@ -254,7 +256,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "recon" || phase === "find" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "track" || phase === "admin" || phase === "about" || phase === "api"
+    : phase === "radar" || phase === "recon" || phase === "find" || phase === "dossiers" || phase === "graph" || phase === "watchlist" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
       ? phase
       : "idle";
 
@@ -265,6 +267,10 @@ export default function App() {
       {phase === "about" && <AboutPage onStart={reset} />}
 
       {phase === "api" && <ApiPage />}
+
+      {phase === "providers" && <ProvidersPage />}
+
+      {phase === "changelog" && <ChangelogPage />}
 
       {phase === "dossiers" && <DossiersPage onOpen={onOpen} />}
 
