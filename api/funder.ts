@@ -117,6 +117,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!wallet || !SOLADDR.test(wallet)) { res.status(400).json({ error: "valid Solana wallet required" }); return; }
   if (!key) { res.status(200).json({ wallet, available: false, note: "Helius not configured; funder sweep unavailable." }); return; }
 
+  // TEMP: isolate mint-detection on a single wallet. ?check=<wallet>
+  if (typeof req.query.check === "string" && SOLADDR.test(req.query.check)) {
+    const t = await mintedTokens(key, req.query.check);
+    res.status(200).json({ check: req.query.check, ...t });
+    return;
+  }
+
   const deadline = Date.now() + 50000;
   try {
     const { recipients, scanned, truncated } = await seedRecipients(key, wallet, deadline);
