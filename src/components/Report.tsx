@@ -15,6 +15,7 @@ import { OnchainReality } from "./OnchainReality";
 import { PfpCheck } from "./PfpCheck";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
+import { VcReport } from "./VcReport";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -773,6 +774,14 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             <div className="min-w-0 lg:col-span-2">
               <Section title="On-chain reality check" kicker="the token they promote → its deployer → the money trail + serial-launch history">
                 <OnchainReality promotions={evidence.promotions ?? []} wallets={evidence.wallets} symbolHints={symbolHints} onAudit={onAudit} />
+              </Section>
+            </div>
+          )}
+
+          {roles.some((r) => r === "INVESTOR") && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="VC track record" kicker="their portfolio → each token bet priced on-chain: a fund graded on how its bets ended">
+                <VcReport handle={report.handle} name={f.display_name || report.handle} onAudit={onAudit} />
               </Section>
             </div>
           )}

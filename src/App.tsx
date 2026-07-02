@@ -8,6 +8,7 @@ import { DossiersPage } from "./components/DossiersPage";
 import { GraphPage } from "./components/GraphPage";
 import { KolsPage } from "./components/KolsPage";
 import { FoundersPage } from "./components/FoundersPage";
+import { VcsPage } from "./components/VcsPage";
 import { WatchlistPage } from "./components/WatchlistPage";
 import { RadarPage } from "./components/RadarPage";
 import { AboutPage } from "./components/AboutPage";
@@ -35,7 +36,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
 type Phase =
-  | "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "watchlist" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
+  | "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "vcs" | "watchlist" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "investigation" | "investigation-report"
@@ -306,7 +307,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "recon" || phase === "find" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "watchlist" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
+    : phase === "radar" || phase === "recon" || phase === "find" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "vcs" || phase === "watchlist" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
       ? phase
       : "idle";
 
@@ -329,6 +330,8 @@ export default function App() {
       {phase === "kols" && <KolsPage onAudit={onAudit} onOpenRecent={onOpenRecent} />}
 
       {phase === "founders" && <FoundersPage onAudit={onAudit} onOpenRecent={onOpenRecent} />}
+
+      {phase === "vcs" && <VcsPage onAudit={onAudit} onOpenRecent={onOpenRecent} />}
 
       {phase === "radar" && <RadarPage onAudit={onAudit} />}
 
