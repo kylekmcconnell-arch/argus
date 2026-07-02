@@ -11,6 +11,7 @@ import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
 import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
+import { OnchainReality } from "./OnchainReality";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -719,9 +720,17 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             </div>
           )}
 
+          {(evidence.promotions?.length > 0 || evidence.wallets.some((w) => w.chain === "solana")) && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="On-chain reality check" kicker="the token they promote → its deployer → the money trail + serial-launch history">
+                <OnchainReality promotions={evidence.promotions ?? []} wallets={evidence.wallets} onAudit={onAudit} />
+              </Section>
+            </div>
+          )}
+
           <div className="min-w-0 lg:col-span-2">
             <Section title="Identity continuity" kicker="rebrands + the same handle across GitHub, Farcaster, Reddit, Telegram">
-              <IdentitySweep handle={report.handle} />
+              <IdentitySweep handle={report.handle} auto />
             </Section>
           </div>
 

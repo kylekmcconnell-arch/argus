@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 // Past-identity sweep (/api/identity-sweep): prior X handles (rebrands) + the same
 // username found on GitHub / Farcaster / Reddit / Telegram, tying a pseudonym to a
@@ -6,9 +6,10 @@ import { useState } from "react";
 // per-hit detail (repos, followers, account age) is there so a human can judge.
 type Hit = { platform: string; username: string; url: string; detail: string };
 
-export function IdentitySweep({ handle }: { handle: string }) {
+export function IdentitySweep({ handle, auto }: { handle: string; auto?: boolean }) {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
+  const ran = useRef(false);
   const run = async () => {
     if (loading || data) return;
     setLoading(true);
@@ -21,6 +22,11 @@ export function IdentitySweep({ handle }: { handle: string }) {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (auto && !ran.current) { ran.current = true; void run(); }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [auto, handle]);
 
   if (!data) {
     return (

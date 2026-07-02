@@ -33,6 +33,7 @@ export interface Dossier {
     advised: ReturnType<Audit["getAdvisedProjects"]>;
     associates: ReturnType<Audit["getAssociates"]>;
     wallets: ReturnType<Audit["getWallets"]>;
+    promotions: ReturnType<Audit["getPromotions"]>;
   };
 }
 
@@ -82,6 +83,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       advised: a.getAdvisedProjects(),
       associates: a.getAssociates(),
       wallets: a.getWallets(),
+      promotions: a.getPromotions(),
     },
   };
 }
