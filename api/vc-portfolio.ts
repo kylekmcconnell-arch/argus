@@ -6,7 +6,7 @@
 // hit-rate. XAI_API_KEY.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-export const config = { maxDuration: 60 };
+export const config = { maxDuration: 120 };
 
 const q = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
@@ -47,7 +47,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     "Reply with ONLY compact JSON: {\"investments\":[{\"project\":\"\",\"ticker\":\"$...\",\"contract\":\"\",\"chain\":\"\",\"x_handle\":\"@...\",\"stage\":\"\",\"year\":\"\",\"outcome\":\"\"}]}. Return an empty list ONLY if this is genuinely not an investor or has no findable investments. Never use em dashes.";
   const user = `Investor/fund: ${name}${handle && handle.toLowerCase() !== name.toLowerCase() ? ` (X @${handle})` : ""}. List their crypto and startup investment portfolio — as many real, publicly known holdings as you can, with each deal's project name, token ticker, X handle, stage, year, and current outcome. Include famous ones you already know even without a citation.`;
 
-  const out = await grok(key, system, user);
+  // Grok is nondeterministic and occasionally answers empty for a fund with a
+  // famous public portfolio — one retry closes most of that gap.
+  let out = await grok(key, system, user);
+  if (!Array.isArray(out?.investments) || out.investments.length === 0) {
+    out = await grok(key, system, user);
+  }
   const raw: any[] = Array.isArray(out?.investments) ? out.investments : [];
   const investments = raw
     .filter((i) => i && typeof i.project === "string" && i.project.trim())

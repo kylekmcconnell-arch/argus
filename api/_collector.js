@@ -2490,7 +2490,11 @@ function parseOutcome(s) {
 }
 function asRoles(roles) {
   const valid = new Set(Object.values(SubjectClass));
-  return roles.filter((r) => valid.has(r)).map((r) => r);
+  let out = roles.filter((r) => valid.has(r)).map((r) => r);
+  if (out.includes("INVESTOR" /* INVESTOR */) && out.includes("PROJECT" /* PROJECT */)) {
+    out = out.filter((r) => r !== "PROJECT" /* PROJECT */);
+  }
+  return out;
 }
 async function coldIntake(ctx) {
   let siteUrl;

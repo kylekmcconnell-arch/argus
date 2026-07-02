@@ -781,7 +781,10 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             </Section>
           </div>
 
-          {(evidence.promotions?.length > 0 || symbolHints.length > 0 || evidence.wallets.some((w) => w.chain === "solana")) && (
+          {/* Not for funds: a VC's portfolio tokens aren't "promotions", and a
+              deployer/serial-launch trail on Maker's contract says nothing about
+              Paradigm — the VC track record section covers their bets instead. */}
+          {report.governing_role !== "INVESTOR" && (evidence.promotions?.length > 0 || symbolHints.length > 0 || evidence.wallets.some((w) => w.chain === "solana")) && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="On-chain reality check" kicker="the token they promote → its deployer → the money trail + serial-launch history">
                 <OnchainReality promotions={evidence.promotions ?? []} wallets={evidence.wallets} symbolHints={symbolHints} onAudit={onAudit} />

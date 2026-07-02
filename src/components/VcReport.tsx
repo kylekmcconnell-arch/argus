@@ -42,11 +42,13 @@ async function auditInvestment(inv: Investment): Promise<Scored> {
 export function VcReport({ handle, name, onAudit }: { handle: string; name: string; onAudit?: (q: string) => void }) {
   const [rows, setRows] = useState<Scored[] | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "none">("loading");
-  const ran = useRef(false);
+  const [attempt, setAttempt] = useState(0);
+  const ran = useRef(-1);
 
   useEffect(() => {
-    if (ran.current) return;
-    ran.current = true;
+    if (ran.current === attempt) return;
+    ran.current = attempt;
+    setState("loading");
     (async () => {
       try {
         const r = await fetch(`/api/vc-portfolio?handle=${encodeURIComponent(handle.replace(/^@/, ""))}&name=${encodeURIComponent(name)}`);
@@ -74,10 +76,17 @@ export function VcReport({ handle, name, onAudit }: { handle: string; name: stri
         setState("none");
       }
     })();
-  }, [handle, name]);
+  }, [handle, name, attempt]);
 
   if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">assembling the portfolio + pricing each bet…</div>;
-  if (state === "none" || !rows) return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-dim">No verifiable portfolio found for this investor.</div>;
+  if (state === "none" || !rows) {
+    return (
+      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-dim">
+        <span>No verifiable portfolio surfaced on this pass (the portfolio search can be flaky for a well-known fund).</span>
+        <button onClick={() => setAttempt((a) => a + 1)} className="mono rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>retry →</button>
+      </div>
+    );
+  }
 
   const priced = rows.filter((r) => r.resolved && r.verdict);
   const dead = priced.filter((r) => r.dead);

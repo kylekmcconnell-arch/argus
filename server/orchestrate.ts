@@ -54,7 +54,15 @@ function parseOutcome(s?: string): VentureOutcome {
 
 function asRoles(roles: string[]): SubjectClass[] {
   const valid = new Set(Object.values(SubjectClass) as string[]);
-  return roles.filter((r) => valid.has(r)).map((r) => r as SubjectClass);
+  let out = roles.filter((r) => valid.has(r)).map((r) => r as SubjectClass);
+  // Deterministic backstop for a rule the LLM applies inconsistently: a fund IS
+  // an organization, so it sometimes tags INVESTOR+PROJECT — but PROJECT is for
+  // accounts shipping a product/token, and the combo files funds under Projects.
+  // The INVESTOR track fully covers the org case, so PROJECT is dropped.
+  if (out.includes(SubjectClass.INVESTOR) && out.includes(SubjectClass.PROJECT)) {
+    out = out.filter((r) => r !== SubjectClass.PROJECT);
+  }
+  return out;
 }
 
 // Cold handle: resolve the profile, pull recent posts, and extract self-claims

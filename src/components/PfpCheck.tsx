@@ -51,8 +51,10 @@ export function PfpCheck({ handle, brand }: { handle: string; brand?: boolean })
   return (
     <div className="rounded-xl border border-line bg-panel p-4">
       <div className="flex items-center gap-3">
-        {data?.imageUrl && (
-          <img src={data.imageUrl} alt="" referrerPolicy="no-referrer" className="h-11 w-11 shrink-0 rounded-lg border border-line bg-void object-cover" />
+        {(data?.imageData || data?.imageUrl) && (
+          // Prefer the inline data URI (the exact bytes the classifier saw);
+          // remote avatar hosts are flaky and were rendering a blank box.
+          <img src={data.imageData ?? data.imageUrl} alt="" referrerPolicy="no-referrer" className="h-11 w-11 shrink-0 rounded-lg border border-line bg-void object-cover" />
         )}
         <div className="min-w-0 flex-1">
           <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Profile photo check</div>

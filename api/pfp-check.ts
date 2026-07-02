@@ -98,6 +98,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({
       available: true,
       imageUrl: usedUrl,
+      // We already hold the image bytes (they were sent to vision) — ship them as
+      // a data URI so the client never re-fetches unavatar, which is flaky and
+      // was leaving the thumbnail blank.
+      imageData: `data:${img.media};base64,${img.data}`,
       classification: typeof parsed.classification === "string" ? parsed.classification : "unclear",
       confidence: typeof parsed.confidence === "number" ? parsed.confidence : undefined,
       isRealPerson: parsed.is_real_person !== false,
