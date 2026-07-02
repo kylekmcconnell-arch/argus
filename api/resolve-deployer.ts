@@ -110,10 +110,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       firstTxSigner(url, mint),
       fromEnhancedCreate(key, mint),
     ]);
-    // Prefer a real creation-tx fee payer (ground truth), then the enhanced-tx
-    // create payer (pump.fun), then an indexed creator, then the update authority.
-    const deployer = firstTx ?? createPayer ?? asset.creators[0] ?? asset.authority ?? null;
-    const via = firstTx ? "creation-tx fee payer" : createPayer ? "enhanced create feePayer" : asset.creators[0] ? "DAS creator" : asset.authority ? "update authority" : null;
+    // Prefer the enhanced-tx CREATE/TOKEN_MINT feePayer — the wallet that signed
+    // the actual mint is the dev. The oldest-tx fee payer (firstTx) can instead be
+    // a shared FUNDING wallet that only paid the rent, so it's a fallback, not the
+    // primary. Then an indexed creator, then the update authority.
+    const deployer = createPayer ?? firstTx ?? asset.creators[0] ?? asset.authority ?? null;
+    const via = createPayer ? "mint feePayer" : firstTx ? "creation-tx fee payer" : asset.creators[0] ? "DAS creator" : asset.authority ? "update authority" : null;
     const body: any = { mint, available: true, deployer, via };
     if (req.query.debug) body.candidates = { firstTx, createPayer, creators: asset.creators, authority: asset.authority };
     res.status(200).json(body);

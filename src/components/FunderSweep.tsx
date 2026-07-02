@@ -1,17 +1,45 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { shortAddr } from "../lib/wallets";
 
 // Serial-operator sweep for a Solana wallet (/api/funder): the wallet's OWN
 // launches (a single wallet that serial-mints is a rug farm) plus the forward
-// sweep of every fresh deployer it seeded. Expensive (~up to 50s), so it runs
-// on click, not automatically. Every discovered token is one click from a full
-// audit via onAudit.
+// sweep of every fresh deployer it seeded. Expensive (~up to 45s), so it runs on
+// click with a live scanning state. Every discovered token is one click from a
+// full audit via onAudit.
+const STAGES = [
+  "Pulling this wallet's mint history…",
+  "Tracing every wallet it funded…",
+  "Checking which recipients minted tokens…",
+  "Assembling the launch network…",
+  "Almost there…",
+];
+
+function RadarIcon({ live }: { live?: boolean }) {
+  return (
+    <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
+      {live && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal/40" />}
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" className={live ? "argus-radar" : ""}>
+        <path d="M21 12a9 9 0 1 1-4.6-7.9" />
+        <path d="M12 12l5.5-3.2" />
+        <circle cx="12" cy="12" r="1.4" fill="var(--color-signal)" stroke="none" />
+      </svg>
+    </span>
+  );
+}
+
 export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q: string) => void }) {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
+  const [stage, setStage] = useState(0);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
+
   const run = async () => {
     if (loading || data) return;
     setLoading(true);
+    setStage(0);
+    timer.current = setInterval(() => setStage((s) => Math.min(s + 1, STAGES.length - 1)), 6000);
     try {
       const r = await fetch(`/api/funder?wallet=${encodeURIComponent(wallet)}`);
       const d = await r.json();
@@ -19,18 +47,56 @@ export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q:
     } catch {
       setData({ note: "Sweep failed." });
     } finally {
+      if (timer.current) clearInterval(timer.current);
       setLoading(false);
     }
   };
 
+  // ── loading state ──
+  if (loading) {
+    return (
+      <div className="mt-2 overflow-hidden rounded-lg border border-signal/35 bg-signal/[0.06] p-3">
+        <style>{`
+          @keyframes argus-scan { 0%{transform:translateX(-120%)} 100%{transform:translateX(360%)} }
+          @keyframes argus-spin { to { transform:rotate(360deg) } }
+          .argus-scan-bar{ animation: argus-scan 1.3s cubic-bezier(.4,0,.2,1) infinite }
+          .argus-radar{ transform-origin:center; animation: argus-spin 2.4s linear infinite }
+          @media (prefers-reduced-motion: reduce){ .argus-scan-bar,.argus-radar{ animation:none } }
+        `}</style>
+        <div className="flex items-center gap-2.5">
+          <RadarIcon live />
+          <div className="min-w-0 flex-1">
+            <div className="text-[12px] font-medium text-signal-lift">{STAGES[stage]}</div>
+            <div className="mono mt-0.5 text-[10px] text-ink-faint">serial-launch sweep · reading the chain · up to ~45s</div>
+          </div>
+        </div>
+        <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-line/60">
+          <div className="argus-scan-bar h-full w-1/3 rounded-full" style={{ background: "linear-gradient(90deg, transparent, var(--color-signal), transparent)" }} />
+        </div>
+      </div>
+    );
+  }
+
+  // ── CTA (not run yet) ──
   if (!data) {
     return (
-      <button onClick={run} disabled={loading} className="mono mt-1.5 rounded-md border border-line px-2 py-0.5 text-[10.5px] text-ink-dim transition hover:text-ink disabled:opacity-50">
-        {loading ? "sweeping launches… (up to 50s)" : "serial-launch sweep →"}
+      <button
+        onClick={run}
+        className="group mt-2 flex w-full items-center justify-between gap-3 rounded-lg border border-signal/40 bg-signal/[0.08] px-3.5 py-2.5 text-left transition hover:border-signal hover:bg-signal/[0.14]"
+      >
+        <span className="flex items-center gap-2.5">
+          <RadarIcon />
+          <span>
+            <span className="block text-[13px] font-semibold text-signal-lift">Serial-launch sweep</span>
+            <span className="block text-[10.5px] text-ink-dim">what else has this wallet launched, and who else did it fund?</span>
+          </span>
+        </span>
+        <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal transition group-hover:bg-signal group-hover:text-white">run →</span>
       </button>
     );
   }
 
+  // ── results ──
   const own: { mint: string; name?: string }[] = data.ownTokens ?? [];
   const seeded: { wallet: string; tokensCreated: number; sampleTokens: { mint: string; name?: string }[] }[] = data.seededDeployers ?? [];
   const serial = (data.ownLaunches ?? 0) > 1 || seeded.length > 0;
