@@ -18,8 +18,8 @@ const HANDLE = /^[A-Za-z0-9_]{1,30}$/;
 // limits — which is what lets us price calls older than the free tier's ~6mo
 // window. Falls back to the free public GeckoTerminal API when no key is set.
 const CG_KEY = process.env.COINGECKO_API_KEY;
-const GT = CG_KEY ? "https://pro-api.coingecko.com/api/v3/onchain" : "https://api.geckoterminal.com/api/v2";
-const GT_HEADERS: Record<string, string> = CG_KEY ? { accept: "application/json", "x-cg-pro-api-key": CG_KEY } : { accept: "application/json" };
+const GT_FREE = "https://api.geckoterminal.com/api/v2";
+const GT_PRO = "https://pro-api.coingecko.com/api/v3/onchain";
 
 const NETWORK: Record<string, string> = {
   solana: "solana", ethereum: "eth", eth: "eth", bsc: "bsc", base: "base",
@@ -33,8 +33,18 @@ const OFFSETS: [string, number][] = [
   ["1h", 1], ["12h", 12], ["24h", 24], ["1w", 168], ["1m", 720], ["2m", 1440], ["3m", 2160],
 ];
 
+async function gtOnce(base: string, headers: Record<string, string>, path: string): Promise<any | null> {
+  try { const r = await fetch(`${base}${path}`, { headers, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
+}
+// Prefer the paid CoinGecko on-chain endpoint (deeper history, higher limits)
+// when a key is set, but always fall back to the free GeckoTerminal API so a
+// missing/invalid key or an unsupported path can never break the feature.
 async function gt(path: string): Promise<any | null> {
-  try { const r = await fetch(`${GT}${path}`, { headers: GT_HEADERS, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
+  if (CG_KEY) {
+    const pro = await gtOnce(GT_PRO, { accept: "application/json", "x-cg-pro-api-key": CG_KEY }, path);
+    if (pro) return pro;
+  }
+  return gtOnce(GT_FREE, { accept: "application/json" }, path);
 }
 async function tw(url: string, key: string): Promise<any | null> {
   try { const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
