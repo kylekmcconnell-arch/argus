@@ -1194,50 +1194,77 @@ function emptyEvidence(handle) {
 // server/cost.ts
 var PRICE = {
   grokIn: 0.2 / 1e6,
-  // grok-4-fast $/token in
   grokOut: 0.5 / 1e6,
-  // grok-4-fast $/token out
   grokSource: 25 / 1e3,
-  // live search $/source
   claudeIn: 3 / 1e6,
-  // sonnet-class $/token in
-  claudeOut: 15 / 1e6
-  // sonnet-class $/token out
+  claudeOut: 15 / 1e6,
+  twitterapiCall: 2e-4,
+  pdlMatch: 0.1,
+  heliusCall: 1e-4
 };
 var EST_SOURCES_PER_SEARCH = 5;
-var fresh = () => ({ grokIn: 0, grokOut: 0, grokCalls: 0, sources: 0, sourcesEstimated: false, claudeIn: 0, claudeOut: 0, claudeCalls: 0 });
-var acc = fresh();
+var ledger = /* @__PURE__ */ new Map();
+var grok = { in: 0, out: 0, calls: 0, sources: 0 };
+var claude = { in: 0, out: 0, calls: 0 };
 function resetCost() {
-  acc = fresh();
+  ledger = /* @__PURE__ */ new Map();
+  grok = { in: 0, out: 0, calls: 0, sources: 0 };
+  claude = { in: 0, out: 0, calls: 0 };
 }
-function addGrokUsage(u, toolCalls) {
-  acc.grokCalls += 1;
-  acc.grokIn += u?.input_tokens ?? 0;
-  acc.grokOut += u?.output_tokens ?? 0;
-  if (typeof u?.num_sources_used === "number") {
-    acc.sources += u.num_sources_used;
-  } else if (toolCalls && toolCalls > 0) {
-    acc.sources += toolCalls * EST_SOURCES_PER_SEARCH;
-    acc.sourcesEstimated = true;
+function recordCall(provider, op, usd = 0, meta) {
+  const key = `${provider}|${op}`;
+  const cur = ledger.get(key);
+  if (cur) {
+    cur.calls += 1;
+    cur.usd += usd;
+    if (meta) cur.meta = meta;
+  } else {
+    ledger.set(key, { provider, op, calls: 1, usd, meta });
   }
 }
-function addClaudeUsage(u) {
-  acc.claudeCalls += 1;
-  acc.claudeIn += u?.input_tokens ?? 0;
-  acc.claudeOut += u?.output_tokens ?? 0;
+function recordTwitterapi(op) {
+  recordCall("twitterapi", op, PRICE.twitterapiCall);
 }
+function addGrokUsage(u, toolCalls, op = "live-search") {
+  const tin = u?.input_tokens ?? 0;
+  const tout = u?.output_tokens ?? 0;
+  const sources = typeof u?.num_sources_used === "number" ? u.num_sources_used : (toolCalls ?? 0) * EST_SOURCES_PER_SEARCH;
+  grok.calls += 1;
+  grok.in += tin;
+  grok.out += tout;
+  grok.sources += sources;
+  recordCall("grok", op, tin * PRICE.grokIn + tout * PRICE.grokOut + sources * PRICE.grokSource, `${tin + tout} tok \xB7 ~${sources} sources`);
+}
+function addClaudeUsage(u, op = "analysis") {
+  const tin = u?.input_tokens ?? 0;
+  const tout = u?.output_tokens ?? 0;
+  claude.calls += 1;
+  claude.in += tin;
+  claude.out += tout;
+  recordCall("claude", op, tin * PRICE.claudeIn + tout * PRICE.claudeOut, `${tin + tout} tok`);
+}
+function recordPdlMatch(matched) {
+  recordCall("peopledatalabs", "person/enrich", matched ? PRICE.pdlMatch : 0, matched ? "per-match est" : "no match (free)");
+}
+function recordHelius(op) {
+  recordCall("helius", op, PRICE.heliusCall);
+}
+var round4 = (n) => Math.round(n * 1e4) / 1e4;
 function getCost() {
-  const grokUsd = acc.grokIn * PRICE.grokIn + acc.grokOut * PRICE.grokOut + acc.sources * PRICE.grokSource;
-  const claudeUsd = acc.claudeIn * PRICE.claudeIn + acc.claudeOut * PRICE.claudeOut;
-  const round = (n) => Math.round(n * 100) / 100;
+  const lines = [...ledger.values()].map((l) => ({ ...l, usd: round4(l.usd) })).sort((a, b) => b.usd - a.usd || b.calls - a.calls);
+  const grokUsd = lines.filter((l) => l.provider === "grok").reduce((a, l) => a + l.usd, 0);
+  const claudeUsd = lines.filter((l) => l.provider === "claude").reduce((a, l) => a + l.usd, 0);
+  const total = lines.reduce((a, l) => a + l.usd, 0);
+  const round2 = (n) => Math.round(n * 100) / 100;
   return {
-    usd: round(grokUsd + claudeUsd),
-    grokUsd: round(grokUsd),
-    claudeUsd: round(claudeUsd),
-    grokCalls: acc.grokCalls,
-    claudeCalls: acc.claudeCalls,
-    sources: acc.sources,
-    estimated: true
+    usd: round2(total),
+    grokUsd: round2(grokUsd),
+    claudeUsd: round2(claudeUsd),
+    grokCalls: grok.calls,
+    claudeCalls: claude.calls,
+    sources: grok.sources,
+    estimated: true,
+    calls: lines
   };
 }
 
@@ -1271,7 +1298,7 @@ async function structured(system, user, tool, maxTokens = 2048) {
       return null;
     }
     const data = await res.json();
-    addClaudeUsage(data.usage);
+    addClaudeUsage(data.usage, tool.name);
     const block = data.content.find((b) => b.type === "tool_use");
     return block?.input ?? null;
   } catch (e) {
@@ -1445,6 +1472,7 @@ async function grokSearch(system, user, opts) {
   }
 }
 async function twFetch(url, key, tries = 2) {
+  recordTwitterapi(url.match(/\/twitter\/([a-z_/]+)/i)?.[1] ?? "other");
   let last = null;
   for (let i = 0; i < tries; i++) {
     const res = await fetch(url, { headers: { "x-api-key": key } });
@@ -1501,6 +1529,7 @@ async function getProfile2(handle) {
 async function handleHistory(handle) {
   const u = handle.replace(/^@/, "");
   try {
+    recordCall("memory.lol", "tw-history", 0);
     const res = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8e3) });
     if (!res.ok) return null;
     const d = await res.json();
@@ -1549,6 +1578,7 @@ async function followsSubject(endorser, subject) {
   const e = endorser.replace(/^@/, "");
   const s = subject.replace(/^@/, "").toLowerCase();
   try {
+    recordTwitterapi("user/followings");
     const res = await fetch(`${TWITTERAPI}/twitter/user/followings?userName=${encodeURIComponent(e)}&pageSize=200`, {
       headers: { "x-api-key": key }
     });
@@ -1853,6 +1883,7 @@ function htmlToText(html) {
 }
 async function fetchPage(url) {
   try {
+    recordCall("site-fetch", "team-page", 0);
     const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
     if (!r.ok) return null;
     const ct = r.headers.get("content-type") ?? "";
@@ -1927,9 +1958,13 @@ async function enrichPerson(params) {
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
   try {
     const res = await fetch(`${BASE}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      recordPdlMatch(false);
+      return null;
+    }
     const d = await res.json();
     const p = d.data;
+    recordPdlMatch(!!p);
     if (!p) return null;
     return {
       fullName: p.full_name,
@@ -2025,6 +2060,7 @@ var headers = (key) => ({
 });
 async function ghJson(path, key) {
   try {
+    recordCall("github", path.split("?")[0].split("/").slice(1, 3).join("/") || "api", 0);
     const res = await fetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(8e3) });
     if (!res.ok) return null;
     return await res.json();
@@ -2120,6 +2156,7 @@ async function lookupOrganization(name) {
   const key = env("CRUNCHBASE_API_KEY");
   if (!key) return null;
   try {
+    recordCall("crunchbase", "org-search", 0, "plan-billed");
     const res = await fetch(`${BASE2}/searches/organizations`, {
       method: "POST",
       headers: { "X-cb-user-key": key, "content-type": "application/json" },
@@ -2168,6 +2205,7 @@ var crunchbaseAdapter = {
 var BASE3 = "https://api.dexscreener.com";
 async function lookupToken(address) {
   try {
+    recordCall("dexscreener", "token-pairs", 0);
     const res = await fetch(`${BASE3}/latest/dex/tokens/${address}`);
     if (!res.ok) return null;
     const data = await res.json();
@@ -2231,6 +2269,7 @@ async function tokenByContract(chain, address) {
   const base = key ? PRO : PUBLIC;
   const headers2 = key ? { "x-cg-pro-api-key": key } : {};
   try {
+    recordCall("coingecko", "contract-lookup", 0);
     const res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers2 });
     if (!res.ok) return null;
     const d = await res.json();
@@ -2298,6 +2337,7 @@ async function searchMentions(query) {
   const token = await getToken();
   if (!token) return [];
   try {
+    recordCall("reddit", "search", 0);
     const res = await fetch(`https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=15&t=year`, {
       headers: { authorization: `Bearer ${token}`, "user-agent": "argus-dd/1.0" }
     });
@@ -2345,6 +2385,7 @@ async function heliusWalletActivity(address) {
   const key = env("HELIUS_API_KEY");
   if (!key) return null;
   try {
+    recordHelius("address-transactions");
     const res = await fetch(`https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${key}&limit=50`);
     if (!res.ok) return null;
     const txs = await res.json();
@@ -2382,6 +2423,7 @@ var CDX = "https://web.archive.org/cdx/search/cdx";
 async function newestSnapshot(urlPath) {
   try {
     const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-1`;
+    recordCall("wayback", "cdx-search", 0);
     const res = await fetch(CDX + qs, { signal: AbortSignal.timeout(4e3) });
     if (!res.ok) return null;
     const rows = await res.json();
@@ -2406,6 +2448,7 @@ async function archivedAffiliation(domain, name) {
     if (!snap) continue;
     try {
       const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
+      recordCall("wayback", "snapshot-fetch", 0);
       const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(5e3) });
       if (!res.ok) continue;
       const text = (await res.text()).toLowerCase();
@@ -2434,6 +2477,7 @@ var ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
 var NAME_IN_TEXT = /\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b/gi;
 async function getJson(url) {
   try {
+    recordCall("wallet-resolve", new URL(url).host, 0);
     const r = await fetch(url, { signal: AbortSignal.timeout(9e3) });
     return r.ok ? await r.json() : null;
   } catch {

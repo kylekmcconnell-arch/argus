@@ -56,7 +56,7 @@ export async function structured<T>(
       content: { type: string; name?: string; input?: unknown }[];
       usage?: { input_tokens?: number; output_tokens?: number };
     };
-    addClaudeUsage(data.usage); // per-audit cost accounting
+    addClaudeUsage(data.usage, tool.name); // per-audit cost accounting, one ledger line per tool
     const block = data.content.find((b) => b.type === "tool_use");
     return (block?.input as T) ?? null;
   } catch (e) {

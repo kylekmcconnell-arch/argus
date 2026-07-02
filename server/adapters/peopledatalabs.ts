@@ -3,6 +3,7 @@
 // F2 career history. Gated on PDL_API_KEY.
 
 import type { Adapter, CollectContext } from "./types";
+import { recordPdlMatch } from "../cost";
 import { env } from "../config";
 import { VentureOutcome } from "../../src/engine";
 
@@ -21,9 +22,10 @@ export async function enrichPerson(params: { profile?: string; name?: string; co
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
   try {
     const res = await fetch(`${BASE}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
-    if (!res.ok) return null;
+    if (!res.ok) { recordPdlMatch(false); return null; }
     const d = (await res.json()) as any;
     const p = d.data;
+    recordPdlMatch(!!p); // PDL bills per successful match
     if (!p) return null;
     return {
       fullName: p.full_name,

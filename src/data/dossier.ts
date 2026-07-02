@@ -28,7 +28,7 @@ export interface Dossier {
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
-  cost?: { usd: number; grokUsd: number; claudeUsd: number; grokCalls: number; claudeCalls: number; sources: number; estimated: boolean };
+  cost?: { usd: number; grokUsd: number; claudeUsd: number; grokCalls: number; claudeCalls: number; sources: number; estimated: boolean; calls?: { provider: string; op: string; calls: number; usd: number; meta?: string }[] };
   graph: { nodes: PanoptesNode[]; edges: PanoptesEdge[] };
   founderSummary?: ReturnType<Audit["founderSummary"]>;
   evidence: {

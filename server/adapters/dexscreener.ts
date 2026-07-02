@@ -4,6 +4,7 @@
 // pushed once we have its contract address.
 
 import type { Adapter, CollectContext } from "./types";
+import { recordCall } from "../cost";
 
 const BASE = "https://api.dexscreener.com";
 
@@ -21,6 +22,7 @@ export interface DexTokenSnapshot {
 // Public helper so the orchestrator / tests can hit it directly.
 export async function lookupToken(address: string): Promise<DexTokenSnapshot | null> {
   try {
+    recordCall("dexscreener", "token-pairs", 0);
     const res = await fetch(`${BASE}/latest/dex/tokens/${address}`);
     if (!res.ok) return null;
     const data = (await res.json()) as { pairs?: any[] };

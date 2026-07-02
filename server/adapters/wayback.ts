@@ -5,6 +5,8 @@
 // This is pure corroboration of an ALREADY-discovered lead, never a fishing trip:
 // it only ever confirms a tie the discovery layer already proposed.
 
+import { recordCall } from "../cost";
+
 const CDX = "https://web.archive.org/cdx/search/cdx";
 
 interface Snapshot { timestamp: string; original: string }
@@ -12,6 +14,7 @@ interface Snapshot { timestamp: string; original: string }
 async function newestSnapshot(urlPath: string): Promise<Snapshot | null> {
   try {
     const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-1`;
+    recordCall("wayback", "cdx-search", 0);
     const res = await fetch(CDX + qs, { signal: AbortSignal.timeout(4000) });
     if (!res.ok) return null;
     const rows = (await res.json()) as string[][];
@@ -44,6 +47,7 @@ export async function archivedAffiliation(
     if (!snap) continue;
     try {
       const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
+      recordCall("wayback", "snapshot-fetch", 0);
       const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(5000) });
       if (!res.ok) continue;
       const text = (await res.text()).toLowerCase();

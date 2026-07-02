@@ -41,7 +41,14 @@ export interface ReportListing {
   score?: number | null;
   ts?: string;
   // Provider spend of the audit run (person audits; token audits are keyless-free).
-  cost?: { usd?: number; grokUsd?: number; claudeUsd?: number; sources?: number } | null;
+  cost?: {
+    usd?: number;
+    grokUsd?: number;
+    claudeUsd?: number;
+    sources?: number;
+    // the full A-to-Z ledger: one line per provider+op, priciest first
+    calls?: { provider: string; op: string; calls: number; usd: number; meta?: string }[];
+  } | null;
 }
 
 // The report library: every persisted report from every analyst, newest first.

@@ -6,11 +6,13 @@
 //     proven the Farcaster user controls them)
 //   - handle-as-name: <handle>.eth / <handle>.base.eth (a possible match, opt-in)
 
+import { recordCall } from "../cost";
+
 const ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
 const NAME_IN_TEXT = /\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b/gi;
 
 async function getJson(url: string): Promise<any> {
-  try { const r = await fetch(url, { signal: AbortSignal.timeout(9000) }); return r.ok ? await r.json() : null; } catch { return null; }
+  try { recordCall("wallet-resolve", new URL(url).host, 0); const r = await fetch(url, { signal: AbortSignal.timeout(9000) }); return r.ok ? await r.json() : null; } catch { return null; }
 }
 async function web3bio(name: string): Promise<string | null> {
   const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);

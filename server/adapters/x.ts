@@ -9,7 +9,7 @@
 
 import type { Adapter, CollectContext } from "./types";
 import { env } from "../config";
-import { addGrokUsage } from "../cost";
+import { addGrokUsage, recordCall, recordTwitterapi } from "../cost";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower } from "../../src/data/evidence";
 
@@ -63,6 +63,8 @@ export async function grokSearch(system: string, user: string, opts?: { maxToolC
 // Retry transient statuses with exponential backoff; return the last response so
 // the caller can still inspect a terminal error.
 async function twFetch(url: string, key: string, tries = 2): Promise<Response | null> {
+  // Ledger: op = the endpoint path (e.g. "user/info"), one line per endpoint.
+  recordTwitterapi(url.match(/\/twitter\/([a-z_/]+)/i)?.[1] ?? "other");
   let last: Response | null = null;
   for (let i = 0; i < tries; i++) {
     const res = await fetch(url, { headers: { "x-api-key": key } });
@@ -141,6 +143,7 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
 export async function handleHistory(handle: string): Promise<{ priorHandles: string[]; idStr?: string } | null> {
   const u = handle.replace(/^@/, "");
   try {
+    recordCall("memory.lol", "tw-history", 0);
     const res = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
     const d = (await res.json()) as any;
@@ -204,6 +207,7 @@ export async function followsSubject(endorser: string, subject: string): Promise
   const e = endorser.replace(/^@/, "");
   const s = subject.replace(/^@/, "").toLowerCase();
   try {
+    recordTwitterapi("user/followings");
     const res = await fetch(`${TWITTERAPI}/twitter/user/followings?userName=${encodeURIComponent(e)}&pageSize=200`, {
       headers: { "x-api-key": key },
     });

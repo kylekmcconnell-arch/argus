@@ -4,6 +4,7 @@
 // subject) is an agent step; this adapter verifies named orgs and their funding.
 
 import type { Adapter, CollectContext } from "./types";
+import { recordCall } from "../cost";
 import { env } from "../config";
 
 const BASE = "https://api.crunchbase.com/api/v4";
@@ -12,6 +13,7 @@ export async function lookupOrganization(name: string) {
   const key = env("CRUNCHBASE_API_KEY");
   if (!key) return null;
   try {
+    recordCall("crunchbase", "org-search", 0, "plan-billed");
     const res = await fetch(`${BASE}/searches/organizations`, {
       method: "POST",
       headers: { "X-cb-user-key": key, "content-type": "application/json" },

@@ -4,12 +4,14 @@
 // SelfDoxxed / InvestigatorAttributed evidence step, never inferred here).
 
 import type { Adapter, CollectContext } from "./types";
+import { recordHelius } from "../cost";
 import { env } from "../config";
 
 export async function heliusWalletActivity(address: string) {
   const key = env("HELIUS_API_KEY");
   if (!key) return null;
   try {
+    recordHelius("address-transactions");
     const res = await fetch(`https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${key}&limit=50`);
     if (!res.ok) return null;
     const txs = (await res.json()) as any[];

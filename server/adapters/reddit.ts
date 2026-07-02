@@ -2,6 +2,7 @@
 // works via OAuth client credentials. Gated on REDDIT_CLIENT_ID + SECRET.
 
 import type { Adapter, CollectContext } from "./types";
+import { recordCall } from "../cost";
 import { env } from "../config";
 
 let cachedToken: { token: string; exp: number } | null = null;
@@ -34,6 +35,7 @@ export async function searchMentions(query: string): Promise<{ title: string; su
   const token = await getToken();
   if (!token) return [];
   try {
+    recordCall("reddit", "search", 0);
     const res = await fetch(`https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=15&t=year`, {
       headers: { authorization: `Bearer ${token}`, "user-agent": "argus-dd/1.0" },
     });

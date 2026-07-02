@@ -3,6 +3,7 @@
 // This fetches the likely team/about pages directly, strips them to text, and has
 // Claude pull the named roster. Keyless fetch + ANTHROPIC_API_KEY for extraction.
 import { structured } from "../agent";
+import { recordCall } from "../cost";
 import type { TeamMember } from "./x";
 
 // Common places a crypto/tech project lists its people, on the apex domain and on
@@ -35,6 +36,7 @@ function htmlToText(html: string): string {
 
 async function fetchPage(url: string): Promise<{ url: string; text: string } | null> {
   try {
+    recordCall("site-fetch", "team-page", 0);
     const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null;
     const ct = r.headers.get("content-type") ?? "";

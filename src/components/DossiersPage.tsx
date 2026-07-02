@@ -28,6 +28,7 @@ function ago(ts?: string): string {
 export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
   const [reports, setReports] = useState<ReportListing[] | null>(null);
   const [q, setQ] = useState("");
+  const [costOpen, setCostOpen] = useState<string | null>(null); // "<kind>:<ref>" with expanded cost ledger
   useEffect(() => {
     void listReports().then(setReports);
   }, []);
@@ -81,57 +82,89 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
           const km = KIND_META[r.kind] ?? KIND_META.person;
           const img = imageByRef.get(r.ref.toLowerCase());
           const letter = ((r.query ?? r.ref).replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
+          const cardKey = `${r.kind}:${r.ref}`;
+          const ledger = r.cost?.calls ?? [];
+          const open = costOpen === cardKey;
           return (
             <div
-              key={`${r.kind}:${r.ref}`}
+              key={cardKey}
               role="button"
               tabIndex={0}
               onClick={() => onOpen(r.ref)}
               onKeyDown={(e) => { if (e.key === "Enter") onOpen(r.ref); }}
               title="Open the stored report"
-              className="group flex cursor-pointer items-center gap-3 rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:bg-panel/80 soft-shadow"
+              className="group flex cursor-pointer flex-col rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:bg-panel/80 soft-shadow"
             >
-              {img ? (
-                <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-lg border border-line object-cover" />
-              ) : (
-                <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-void text-[14px] text-signal">{letter}</span>
-              )}
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-1.5">
-                  <span className="mono truncate text-[13px] text-ink">{r.query ?? r.ref}</span>
-                  <span className="mono shrink-0 rounded px-1 py-0.5 text-[8.5px] uppercase" style={{ color: km.color, background: `${km.color}14` }}>{km.label}</span>
+              <div className="flex items-center gap-3">
+                {img ? (
+                  <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-lg border border-line object-cover" />
+                ) : (
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-void text-[14px] text-signal">{letter}</span>
+                )}
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-1.5">
+                    <span className="mono truncate text-[13px] text-ink">{r.query ?? r.ref}</span>
+                    <span className="mono shrink-0 rounded px-1 py-0.5 text-[8.5px] uppercase" style={{ color: km.color, background: `${km.color}14` }}>{km.label}</span>
+                  </span>
+                  <span className="block truncate text-[10.5px] text-ink-faint">
+                    {ago(r.ts)}{r.contributor && r.contributor !== me && r.contributor !== "anonymous" ? ` · by ${r.contributor}` : ""}
+                    {typeof r.cost?.usd === "number" && (
+                      <span
+                        role={ledger.length ? "button" : undefined}
+                        tabIndex={ledger.length ? 0 : undefined}
+                        title={ledger.length ? "Show the full call-by-call cost breakdown" : "estimated provider spend for this audit run"}
+                        onClick={ledger.length ? (ev) => { ev.stopPropagation(); setCostOpen(open ? null : cardKey); } : undefined}
+                        className={`mono ${ledger.length ? "cursor-pointer underline decoration-dotted underline-offset-2 hover:text-ink" : ""}`}
+                      >
+                        {" · ~$"}{r.cost.usd.toFixed(2)}{ledger.length ? (open ? " ▾" : " ▸") : ""}
+                      </span>
+                    )}
+                    {r.kind === "token" && !r.cost && " · free"}
+                  </span>
                 </span>
-                <span className="block truncate text-[10.5px] text-ink-faint">
-                  {ago(r.ts)}{r.contributor && r.contributor !== me && r.contributor !== "anonymous" ? ` · by ${r.contributor}` : ""}
-                  {typeof r.cost?.usd === "number" && (
-                    <span
-                      className="mono"
-                      title={`estimated provider spend for this audit run · Grok $${(r.cost.grokUsd ?? 0).toFixed(2)}${r.cost.sources ? ` (~${r.cost.sources} sources)` : ""} · Claude $${(r.cost.claudeUsd ?? 0).toFixed(2)}`}
-                    >
-                      {" · ~$"}{r.cost.usd.toFixed(2)}
-                    </span>
+                <span className="mono shrink-0 text-right leading-none" style={{ color }}>
+                  <span className="block text-[18px] font-semibold tabular">{r.score ?? "—"}</span>
+                  <span className="block text-[8px] tracking-wider">{r.verdict ?? ""}</span>
+                </span>
+                <span
+                  role="button"
+                  tabIndex={0}
+                  title="Remove this subject everywhere (log, stored report, graph)"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    if (!window.confirm(`Delete ${r.query ?? r.ref} everywhere (audit log, stored report, trust graph)? This cannot be undone. You can always audit it again later.`)) return;
+                    purgeSubject(r.ref);
+                    setReports((prev) => (prev ?? []).filter((x) => !(x.kind === r.kind && x.ref === r.ref)));
+                  }}
+                  className="mono shrink-0 cursor-pointer rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-faint transition hover:border-avoid hover:text-avoid"
+                >
+                  ×
+                </span>
+              </div>
+
+              {/* full A-to-Z ledger: every provider call this audit made */}
+              {open && ledger.length > 0 && (
+                <div className="mt-2.5 border-t border-line/60 pt-2" onClick={(ev) => ev.stopPropagation()}>
+                  <div className="mb-1 text-[9.5px] uppercase tracking-wider text-ink-faint">cost breakdown · estimated, priciest first</div>
+                  <div className="space-y-0.5">
+                    {ledger.map((l, i) => (
+                      <div key={i} className="mono flex items-baseline gap-2 text-[10.5px]">
+                        <span className="text-ink-dim">{l.provider}</span>
+                        <span className="truncate text-ink-faint">{l.op}</span>
+                        <span className="text-ink-faint">×{l.calls}</span>
+                        <span className="ml-auto shrink-0 tabular" style={{ color: l.usd >= 0.01 ? "var(--color-caution)" : "var(--color-ink-faint)" }}>
+                          {l.usd > 0 ? `$${l.usd.toFixed(4)}` : "free"}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                  {ledger.some((l) => l.meta) && (
+                    <div className="mt-1 text-[9.5px] text-ink-faint">
+                      {ledger.filter((l) => l.meta).slice(0, 3).map((l) => `${l.provider}/${l.op}: ${l.meta}`).join(" · ")}
+                    </div>
                   )}
-                  {r.kind === "token" && !r.cost && " · free"}
-                </span>
-              </span>
-              <span className="mono shrink-0 text-right leading-none" style={{ color }}>
-                <span className="block text-[18px] font-semibold tabular">{r.score ?? "—"}</span>
-                <span className="block text-[8px] tracking-wider">{r.verdict ?? ""}</span>
-              </span>
-              <span
-                role="button"
-                tabIndex={0}
-                title="Remove this subject everywhere (log, stored report, graph)"
-                onClick={(ev) => {
-                  ev.stopPropagation();
-                  if (!window.confirm(`Delete ${r.query ?? r.ref} everywhere (audit log, stored report, trust graph)? This cannot be undone. You can always audit it again later.`)) return;
-                  purgeSubject(r.ref);
-                  setReports((prev) => (prev ?? []).filter((x) => !(x.kind === r.kind && x.ref === r.ref)));
-                }}
-                className="mono shrink-0 cursor-pointer rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-faint transition hover:border-avoid hover:text-avoid"
-              >
-                ×
-              </span>
+                </div>
+              )}
             </div>
           );
         })}
