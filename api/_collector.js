@@ -33,6 +33,7 @@ var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
 // src/engine/taxonomy.ts
 var SubjectClass = /* @__PURE__ */ ((SubjectClass2) => {
   SubjectClass2["FOUNDER"] = "FOUNDER";
+  SubjectClass2["PROJECT"] = "PROJECT";
   SubjectClass2["KOL"] = "KOL";
   SubjectClass2["INVESTOR"] = "INVESTOR";
   SubjectClass2["ADVISOR"] = "ADVISOR";
@@ -144,6 +145,35 @@ var PROFILES = {
       "GitHub",
       "prior cap-table / round announcements",
       "X history"
+    ]
+  },
+  ["PROJECT" /* PROJECT */]: {
+    label: "Project / Protocol",
+    lens: "Evaluated as an organization, not a person: a token, protocol, product, or company's own brand account. The question is whether a real team ships a real product with honest tokenomics, or whether it is a hype shell built to exit.",
+    axes: {
+      P1_team_and_identity: 16,
+      P2_product_substance: 24,
+      P3_token_conduct: 20,
+      P4_backing_and_partners: 14,
+      P5_traction_and_liveness: 14,
+      P6_transparency_integrity: 12
+    },
+    caps: { team_prior_rug: 10, abandoned_or_dormant: 25 },
+    flags: [
+      "no named team behind a project raising money or holding a token",
+      "the team (or its members) rugged or abandoned a prior project",
+      "product is vaporware: no working app, no GitHub, no verifiable users",
+      "token conduct: insider/team dumping, unlocked liquidity, broken tokenomics promises",
+      "scrubbed history: team/advisors/audits removed from the site over time",
+      "dormant: the account has gone silent for weeks while the token still trades"
+    ],
+    sources: [
+      "the project website + its Wayback history",
+      "GitHub / on-chain contract activity",
+      "DexScreener / on-chain token conduct",
+      "named team + their track record",
+      "backer / partner confirmations",
+      "X posting cadence"
     ]
   },
   ["KOL" /* KOL */]: {
@@ -357,6 +387,25 @@ var PATTERNS = {
     /\bwe'?re building\b/i,
     /\bcreator of\b/i,
     /\bfounded\b/i
+  ],
+  // A project/protocol's OWN brand account: an organization, not a person. Uses
+  // "we/our", describes one product/token it ships. Distinct from a KOL (who
+  // promotes OTHERS' tokens) and a founder (an individual).
+  ["PROJECT" /* PROJECT */]: [
+    /\bprotocol\b/i,
+    /\bnetwork\b/i,
+    /\bdApp\b/i,
+    /\becosystem\b/i,
+    /\bDAO\b/i,
+    /\bplatform\b/i,
+    /\bthe official\b/i,
+    /\bofficial account\b/i,
+    /\bwe'?re building\b/i,
+    /\bour (?:token|protocol|platform|app|mission|community)\b/i,
+    /\b\$[A-Z]{2,6} token\b/i,
+    /\bpowered by\b/i,
+    /\bmainnet\b/i,
+    /\btestnet\b/i
   ],
   ["ADVISOR" /* ADVISOR */]: [
     /\badvisor\b/i,
@@ -1179,7 +1228,7 @@ async function structured(system, user, tool, maxTokens = 2048) {
   }
 }
 async function extractClaims(handle, bio, posts) {
-  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
+  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization \u2014 a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. Decisive rule: a brand account promoting its own token is PROJECT (never KOL); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
   const user = `Subject: ${handle}
 Bio: ${bio || "(none)"}
 

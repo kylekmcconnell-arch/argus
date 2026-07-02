@@ -23,6 +23,7 @@ export function verdictMeta(v: string): VerdictMeta {
 
 export const ROLE_META: Record<SubjectClass, { label: string; glyph: string }> = {
   [SubjectClass.FOUNDER]: { label: "Founder", glyph: "⚒" },
+  [SubjectClass.PROJECT]: { label: "Project", glyph: "◭" },
   [SubjectClass.KOL]: { label: "KOL", glyph: "📡" },
   [SubjectClass.INVESTOR]: { label: "Investor", glyph: "◈" },
   [SubjectClass.ADVISOR]: { label: "Advisor", glyph: "✦" },
