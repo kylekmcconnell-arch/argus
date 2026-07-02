@@ -17,6 +17,7 @@ import { ReconPage } from "./components/ReconPage";
 import { FindWallet } from "./components/FindWallet";
 import { AdminPage } from "./components/AdminPage";
 import { logAudit, hydrateSharedLog } from "./lib/auditlog";
+import { syncReport, fetchReport } from "./lib/reports";
 import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph } from "./graph/store";
 import { TokenRun } from "./components/TokenRun";
 import { TokenReport } from "./components/TokenReport";
@@ -139,6 +140,7 @@ export default function App() {
   const onInvestigationDone = useCallback((inv: Investigation) => {
     setInvestigation(inv);
     resultCache.current.set(cacheKey(inv.token.address), { kind: "investigation", inv });
+    void syncReport("investigation", inv.token.address, `$${inv.token.symbol}`, inv, inv.token.verdict, inv.token.score);
     setPhase("investigation-report");
     logAudit({
       kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
@@ -154,6 +156,7 @@ export default function App() {
   const onTokenDone = useCallback((d: TokenDossier) => {
     setTokenDossier(d);
     resultCache.current.set(cacheKey(d.address), { kind: "token", dossier: d });
+    void syncReport("token", d.address, `$${d.symbol}`, d, d.verdict, d.score);
     setPhase("token-report");
     logAudit({
       kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
@@ -166,6 +169,7 @@ export default function App() {
 
   const logPerson = (d: Dossier) => {
     resultCache.current.set(cacheKey(d.handle), { kind: "person", dossier: d });
+    void syncReport("person", d.handle, d.handle, d, d.report.composite_verdict, d.report.governing_score);
     logAudit({
       kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
       summary: d.headline,
@@ -206,17 +210,33 @@ export default function App() {
     });
   }, []);
 
-  // Clicking a recent audit SHOWS the result already produced this session (with
-  // a Rescan button on the page), and only re-runs if we don't have it cached
-  // (e.g. a prior session, or another analyst's from the shared log).
-  const onOpenRecent = useCallback((ref: string) => {
-    const c = resultCache.current.get(cacheKey(ref));
-    if (!c) { onAudit(ref); return; }
+  const showCached = useCallback((ref: string, c: Cached) => {
     setQuery(ref);
     if (c.kind === "person") { setFixture(findSubject(ref) ?? null); setDossier(c.dossier); setPhase("report"); }
     else if (c.kind === "token") { setTokenDossier(c.dossier); setPhase("token-report"); }
     else { setInvestigation(c.inv); setPhase("investigation-report"); }
-  }, [onAudit]);
+  }, []);
+
+  // Clicking a recent audit SHOWS the report already produced (with a Rescan
+  // button), from: this session's cache → the persisted report on the backend
+  // (survives reload, and pulls up another analyst's actual report) → and only
+  // re-runs if we have neither.
+  const onOpenRecent = useCallback(async (ref: string) => {
+    const c = resultCache.current.get(cacheKey(ref));
+    if (c) { showCached(ref, c); return; }
+    const rep = await fetchReport(ref);
+    if (rep?.payload && (rep.kind === "person" || rep.kind === "token" || rep.kind === "investigation")) {
+      const cached = rep.kind === "investigation"
+        ? { kind: "investigation" as const, inv: rep.payload as Investigation }
+        : rep.kind === "token"
+          ? { kind: "token" as const, dossier: rep.payload as TokenDossier }
+          : { kind: "person" as const, dossier: rep.payload as Dossier };
+      resultCache.current.set(cacheKey(ref), cached);
+      showCached(ref, cached);
+      return;
+    }
+    onAudit(ref);
+  }, [onAudit, showCached]);
 
   // open a dossier straight to its report (no run), for gallery/graph cards
   const onOpen = useCallback((handle: string) => {

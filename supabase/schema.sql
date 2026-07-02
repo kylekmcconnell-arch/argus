@@ -74,3 +74,22 @@ create table if not exists public.audit_log (
 );
 create index if not exists audit_log_ts_idx on public.audit_log (ts desc);
 alter table public.audit_log enable row level security;  -- service-role only
+
+-- ── Persistent reports (full rendered audits) ───────────────────────────────
+-- The complete Dossier/TokenDossier/Investigation payload, latest-wins per
+-- subject, so a recent audit re-opens the real report (across reloads, and
+-- across analysts) instead of re-running. Service-role only.
+create table if not exists public.reports (
+  id          uuid primary key default gen_random_uuid(),
+  ref         text not null,          -- normalized subject id (handle / contract)
+  kind        text not null,          -- 'person' | 'token' | 'investigation'
+  query       text,                   -- display label
+  contributor text not null default 'anonymous',
+  payload     jsonb not null,         -- the full serialized report
+  verdict     text,
+  score       numeric,
+  ts          timestamptz not null default now()
+);
+create unique index if not exists reports_ref_kind_uidx on public.reports (ref, kind);
+create index if not exists reports_ts_idx on public.reports (ts desc);
+alter table public.reports enable row level security;
