@@ -18,6 +18,7 @@ import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapter
 import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
 
 import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, findTeam, findTeamOnSite, scanPostsForRoles, followsSubject, handleHistory, type DiscoveredAffiliation, type TeamMember } from "./adapters/x";
+import { fetchTeamPage } from "./adapters/teampage";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
@@ -150,7 +151,11 @@ async function coldIntake(ctx: CollectContext) {
   // is where the team page actually lives — mine it like Site recon would.
   const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
   const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  const [bySubject, byMentions, people, siteTeam] = await Promise.all([
+  // When no domain is in the bio, guess one from the handle so we can still fetch
+  // the project's own team page (handle "VulcanForged" -> vulcanforged.com, whose
+  // docs.* /team is the canonical roster). Failed guesses just fetch nothing.
+  const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
+  const [bySubject, byMentions, people, siteTeam, pageTeam] = await Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
     discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
@@ -160,6 +165,8 @@ async function coldIntake(ctx: CollectContext) {
     domain || ctx.evidence.profile.display_name
       ? findTeamOnSite(domain, ctx.evidence.profile.display_name)
       : Promise.resolve([] as TeamMember[]),
+    // Read the project's own /team page directly (Grok's summary can miss it).
+    fetchTeamPage(teamDomain, ctx.evidence.profile.display_name),
   ]);
 
   // Auto-pivot team: merge everyone found across the website search, the account's
@@ -174,7 +181,7 @@ async function coldIntake(ctx: CollectContext) {
   const seenHandle = new Set<string>();
   const seenName = new Set<string>();
   const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
-  for (const t of [...siteTeam, ...people, ...postRoleTeam]) {
+  for (const t of [...pageTeam, ...siteTeam, ...people, ...postRoleTeam]) {
     const h = t.handle ? norm(t.handle) : "";
     const n = norm(t.name);
     if ((h && seenHandle.has(h)) || (n && seenName.has(n))) continue;

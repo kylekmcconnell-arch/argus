@@ -1769,6 +1769,83 @@ var xAdapter = {
   }
 };
 
+// server/adapters/teampage.ts
+function candidateUrls(domain) {
+  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  if (!d) return [];
+  const paths = ["team", "about", "about-us", "team-members", "our-team", "company", "people", "leadership"];
+  const urls = [];
+  for (const host of [d, `docs.${d}`, `www.${d}`]) {
+    for (const p of paths) urls.push(`https://${host}/${p}`);
+  }
+  return urls;
+}
+function htmlToText(html) {
+  return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
+}
+async function fetchPage(url) {
+  try {
+    const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
+    if (!r.ok) return null;
+    const ct = r.headers.get("content-type") ?? "";
+    if (!/html/i.test(ct)) return null;
+    const text = htmlToText(await r.text());
+    if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) return null;
+    return { url, text };
+  } catch {
+    return null;
+  }
+}
+async function fetchTeamPage(domain, projectName) {
+  const urls = candidateUrls(domain);
+  if (!urls.length) return [];
+  const pages = (await Promise.all(urls.map(fetchPage))).filter(Boolean);
+  if (!pages.length) return [];
+  pages.sort((a, b) => (/team/i.test(b.url) ? 1 : 0) - (/team/i.test(a.url) ? 1 : 0) || b.text.length - a.text.length);
+  const corpus = pages.slice(0, 2).map((p) => `PAGE ${p.url}:
+${p.text.slice(0, 6e3)}`).join("\n\n");
+  const system = "You extract a crypto/tech project's team roster from the text of its own team/about page. List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. Use the exact role the page states. Capture any X/Twitter handle and LinkedIn URL shown next to a person. Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
+  const tool = {
+    name: "record_team",
+    description: "Record the named people listed on the project's team/about page.",
+    input_schema: {
+      type: "object",
+      properties: {
+        people: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              role: { type: "string" },
+              twitter: { type: "string", description: "@handle if shown" },
+              linkedin: { type: "string", description: "linkedin.com/in/... if shown" }
+            },
+            required: ["name", "role"]
+          }
+        }
+      },
+      required: ["people"]
+    }
+  };
+  const out = await structured(
+    system,
+    `Project${projectName ? ` ${projectName}` : ""} team page text:
+
+${corpus}`,
+    tool,
+    2048
+  );
+  if (!out?.people?.length) return [];
+  return out.people.filter((p) => p.name && p.name.trim()).map((p) => {
+    const role = (p.role || "team").toString();
+    const kind = /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
+    const handle = p.twitter && /^@?[A-Za-z0-9_]{2,30}$/.test(p.twitter.replace(/^@/, "")) ? "@" + p.twitter.replace(/^@/, "") : void 0;
+    const linkedin = p.linkedin && /linkedin\.com\/(in|company)\//i.test(p.linkedin) ? p.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
+    return { name: p.name.trim(), handle, role, kind, linkedin, evidence: "listed on the project's own team page", source: "team page" };
+  });
+}
+
 // server/adapters/peopledatalabs.ts
 var BASE = "https://api.peopledatalabs.com/v5";
 async function enrichPerson(params) {
@@ -2459,21 +2536,24 @@ async function coldIntake(ctx) {
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts\u2026", source: "grok", tone: "neutral" });
   const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
   const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  const [bySubject, byMentions, people, siteTeam] = await Promise.all([
+  const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
+  const [bySubject, byMentions, people, siteTeam, pageTeam] = await Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
     discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
     // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
     // domain or a project name — a big public project's roster lives off-X, and
     // many project accounts (e.g. @VulcanForged) put no plain domain in the bio.
-    domain || ctx.evidence.profile.display_name ? findTeamOnSite(domain, ctx.evidence.profile.display_name) : Promise.resolve([])
+    domain || ctx.evidence.profile.display_name ? findTeamOnSite(domain, ctx.evidence.profile.display_name) : Promise.resolve([]),
+    // Read the project's own /team page directly (Grok's summary can miss it).
+    fetchTeamPage(teamDomain, ctx.evidence.profile.display_name)
   ]);
   const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
   const seenHandle = /* @__PURE__ */ new Set();
   const seenName = /* @__PURE__ */ new Set();
   const norm2 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
-  for (const t of [...siteTeam, ...people, ...postRoleTeam]) {
+  for (const t of [...pageTeam, ...siteTeam, ...people, ...postRoleTeam]) {
     const h = t.handle ? norm2(t.handle) : "";
     const n = norm2(t.name);
     if (h && seenHandle.has(h) || n && seenName.has(n)) continue;
