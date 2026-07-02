@@ -14,6 +14,7 @@ export const config = { maxDuration: 30 };
 
 const CDX = "https://web.archive.org/cdx/search/cdx";
 const SECTION_WORDS = ["team", "advisor", "advisors", "founders", "leadership", "partners", "backers", "investors", "roadmap", "audit", "audited", "tokenomics", "whitepaper", "about"];
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function getText(url: string, ms: number, ua?: string): Promise<string | null> {
   try {
@@ -32,7 +33,9 @@ interface Snap { timestamp: string; original: string }
 // One retry — archive.org CDX intermittently returns empty.
 async function oldestVersions(domain: string): Promise<Snap[]> {
   const qs = `?url=${encodeURIComponent(domain)}&output=json&filter=statuscode:200&collapse=digest&fl=timestamp,original&limit=8`;
-  for (let attempt = 0; attempt < 2; attempt++) {
+  // archive.org intermittently returns empty under load — retry with backoff so a
+  // domain that HAS history never falsely reads as "no archived history."
+  for (let attempt = 0; attempt < 4; attempt++) {
     const raw = await getText(CDX + qs, 9000);
     if (raw) {
       try {
@@ -44,6 +47,7 @@ async function oldestVersions(domain: string): Promise<Snap[]> {
         }
       } catch { /* retry */ }
     }
+    if (attempt < 3) await sleep(400 * (attempt + 1));
   }
   return [];
 }
@@ -51,16 +55,20 @@ async function oldestVersions(domain: string): Promise<Snap[]> {
 // The single newest snapshot, via the Wayback availability API (one fast, reliable
 // call — unlike CDX negative limits). "closest to the far future" = latest capture.
 async function newestArchive(domain: string): Promise<Snap | null> {
-  const raw = await getText(`https://archive.org/wayback/available?url=${encodeURIComponent(domain)}&timestamp=29991231`, 8000);
-  if (!raw) return null;
-  try {
-    const closest = JSON.parse(raw)?.archived_snapshots?.closest;
-    if (!closest?.available || !closest.timestamp) return null;
-    const original = String(closest.url ?? "").match(/\/web\/\d+(?:id_)?\/(.+)$/)?.[1] ?? `http://${domain}/`;
-    return { timestamp: String(closest.timestamp), original };
-  } catch {
-    return null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const raw = await getText(`https://archive.org/wayback/available?url=${encodeURIComponent(domain)}&timestamp=29991231`, 8000);
+    if (raw) {
+      try {
+        const closest = JSON.parse(raw)?.archived_snapshots?.closest;
+        if (closest?.available && closest.timestamp) {
+          const original = String(closest.url ?? "").match(/\/web\/\d+(?:id_)?\/(.+)$/)?.[1] ?? `http://${domain}/`;
+          return { timestamp: String(closest.timestamp), original };
+        }
+      } catch { /* retry */ }
+    }
+    if (attempt < 2) await sleep(400 * (attempt + 1));
   }
+  return null;
 }
 
 const strip = (html: string) =>
