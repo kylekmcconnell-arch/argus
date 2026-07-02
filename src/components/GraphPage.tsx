@@ -2,9 +2,37 @@ import { useEffect, useMemo, useState } from "react";
 import { SUBJECTS, buildReport } from "../data/subjects";
 import { TrustGraph } from "./TrustGraph";
 import { NetworkGraph } from "./NetworkGraph";
-import { buildNetwork } from "../graph/network";
+import { buildNetwork, canonical } from "../graph/network";
 import { getContributions, clearContributions, subscribeGraph } from "../graph/store";
 import { verdictMeta } from "../lib/verdict";
+import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
+
+// Role categories for the graph, derived from the audit log's role flags: the
+// same taxonomy as the sidebar directories (Founders / Projects / KOLs / VCs).
+const CATEGORIES = [
+  { key: "FOUNDER", label: "Founders" },
+  { key: "PROJECT", label: "Projects" },
+  { key: "KOL", label: "KOLs" },
+  { key: "INVESTOR", label: "VCs" },
+] as const;
+
+function roleBuckets(): Map<string, LogEntry[]> {
+  const buckets = new Map<string, LogEntry[]>();
+  const seen = new Set<string>();
+  for (const e of mergedLog()) {
+    if (e.kind !== "person") continue;
+    const id = canonical(e.ref ?? e.query);
+    if (!id || seen.has(id)) continue; // newest audit of a subject wins
+    seen.add(id);
+    for (const f of e.flags ?? []) {
+      const m = f.match(/^role:(\w+)$/i);
+      if (!m) continue;
+      const role = m[1].toUpperCase();
+      (buckets.get(role) ?? buckets.set(role, []).get(role)!).push(e);
+    }
+  }
+  return buckets;
+}
 
 // Panoptes: the same audits, two ways. "Network" merges every audit into one
 // graph so shared entities, serial actors and cabals surface. "By subject" is
@@ -20,6 +48,18 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
     [dossiers, includeMine, mine],
   );
   const [mode, setMode] = useState<"network" | "subject">("network");
+  // Role categories (Founders / Projects / KOLs / VCs) from the audit log.
+  const [logTick, setLogTick] = useState(0);
+  useEffect(() => subscribeLog(() => setLogTick((t) => t + 1)), []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const buckets = useMemo(() => roleBuckets(), [logTick]);
+  const [activeCat, setActiveCat] = useState<string | null>(null);
+  const highlight = useMemo(() => {
+    if (!activeCat) return null;
+    const ids = new Set<string>();
+    for (const e of buckets.get(activeCat) ?? []) ids.add(canonical(e.ref ?? e.query));
+    return ids;
+  }, [activeCat, buckets]);
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
@@ -63,6 +103,30 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
 
       {mode === "network" ? (
         <>
+          {/* role-category filter: spotlight one slice of the taxonomy in the graph */}
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            <button
+              onClick={() => setActiveCat(null)}
+              className={`mono rounded-full border px-2.5 py-1 text-[11.5px] transition ${!activeCat ? "border-signal text-signal" : "border-line text-ink-dim hover:text-ink"}`}
+            >
+              All
+            </button>
+            {CATEGORIES.map((c) => {
+              const n = (buckets.get(c.key) ?? []).length;
+              if (!n) return null;
+              const active = activeCat === c.key;
+              return (
+                <button
+                  key={c.key}
+                  onClick={() => setActiveCat(active ? null : c.key)}
+                  className={`mono rounded-full border px-2.5 py-1 text-[11.5px] transition ${active ? "border-signal text-signal" : "border-line text-ink-dim hover:text-ink"}`}
+                >
+                  {c.label} <span className="text-ink-faint">{n}</span>
+                </button>
+              );
+            })}
+          </div>
+
           {mine.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-[12px]">
               <label className="flex cursor-pointer items-center gap-1.5 text-ink-dim">
@@ -79,8 +143,45 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
             </div>
           )}
           <div className="mt-3">
-            <NetworkGraph net={net} onOpenSubject={onOpen} />
+            <NetworkGraph net={net} onOpenSubject={onOpen} highlight={highlight} />
           </div>
+
+          {/* the taxonomy, as sections: who's building / shipping / promoting / funding */}
+          {CATEGORIES.some((c) => (buckets.get(c.key) ?? []).length > 0) && (
+            <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              {CATEGORIES.map((c) => {
+                const list = buckets.get(c.key) ?? [];
+                return (
+                  <div key={c.key} className="rounded-xl border border-line bg-panel p-3.5">
+                    <div className="flex items-baseline justify-between">
+                      <span className="text-[12.5px] font-semibold text-ink">{c.label}</span>
+                      <span className="mono text-[10.5px] text-ink-faint">{list.length}</span>
+                    </div>
+                    {list.length ? (
+                      <div className="mt-2 space-y-1">
+                        {list.slice(0, 8).map((e) => {
+                          const m = e.verdict ? verdictMeta(e.verdict) : null;
+                          return (
+                            <button
+                              key={e.id}
+                              onClick={() => onOpen(e.ref ?? e.query)}
+                              className="group flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left transition hover:bg-panel-2"
+                            >
+                              <span className="mono truncate text-[11.5px] text-ink-dim group-hover:text-ink">{e.query}</span>
+                              <span className="mono shrink-0 text-[11px] tabular" style={{ color: m?.color ?? "var(--color-ink-faint)" }}>{e.score ?? "—"}</span>
+                            </button>
+                          );
+                        })}
+                        {list.length > 8 && <div className="mono px-1.5 text-[10px] text-ink-faint">+{list.length - 8} more</div>}
+                      </div>
+                    ) : (
+                      <p className="mt-2 text-[11px] text-ink-faint">None audited yet.</p>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
 
           {/* cross-audit intelligence */}
           <div className="mt-5 grid gap-3 lg:grid-cols-3">

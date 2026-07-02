@@ -87,10 +87,17 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
     "speaks as 'I'). " +
     "KOL = an influencer/caller whose activity is promoting OTHER people's tokens across " +
     "MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. " +
-    "Decisive rule: a brand account promoting its own token is PROJECT (never KOL); an " +
-    "individual builder is FOUNDER; only tag KOL when they shill multiple external tokens " +
-    "they did not build. A subject can hold several roles, but do not tag KOL merely for " +
-    "hype words or for promoting the project's own token. " +
+    "INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its " +
+    "official brand account), a GP/partner/principal at one, or an angel with NAMED, " +
+    "verifiable investments (led or joined specific rounds). Buying/trading tokens, " +
+    "'investing in gems', or calling oneself an investor with no documented deals is NOT " +
+    "INVESTOR — a caller who trades is a KOL, nothing more. " +
+    "Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an " +
+    "investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts " +
+    "shipping a product/token, not allocating capital); an individual builder is FOUNDER; " +
+    "only tag KOL when they shill multiple external tokens they did not build. A subject " +
+    "can hold several roles, but do not tag KOL merely for hype words or for promoting the " +
+    "project's own token, and do not tag INVESTOR merely for trading talk. " +
     "Ventures = companies/projects they say they founded or led. " +
     "Testimonials = named people/accounts they cite as backers or endorsers. Advised " +
     "= projects they claim to advise. Promotions = tokens/tickers they shill. Use the " +

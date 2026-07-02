@@ -7,10 +7,12 @@
 import { SubjectClass } from "./taxonomy";
 
 const PATTERNS: Record<SubjectClass, RegExp[]> = {
+  // Professional capital allocation only. Bare "investing"/"angel" bio talk is
+  // retail/KOL noise, not a fund — those words deliberately do NOT score here.
   [SubjectClass.INVESTOR]: [
     /\bventure\b/i, /\bcapital\b/i, /\bVC\b/i, /\bfund\b/i, /\bGP\b/i,
     /\bgeneral partner\b/i, /\blimited partner\b/i, /\bportfolio\b/i,
-    /\bangel\b/i, /\binvest(or|ing|ments?)\b/i, /\blaunchpad\b/i, /\baccelerator\b/i,
+    /\bangel investor\b/i, /\blaunchpad\b/i, /\baccelerator\b/i,
   ],
   [SubjectClass.FOUNDER]: [
     /\bfounder\b/i, /\bco-?founder\b/i, /\bCEO\b/i, /\bCTO\b/i, /\bbuilding\b/i,
