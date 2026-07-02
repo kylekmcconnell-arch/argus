@@ -19,6 +19,7 @@ async function grok(key: string, system: string, user: string): Promise<any | nu
         model: process.env.ARGUS_GROK_MODEL || "grok-4-fast",
         input: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [{ type: "web_search" }, { type: "x_search" }],
+        max_tool_calls: 8, // cost cap: xAI bills live search per source
       }),
       signal: AbortSignal.timeout(55000),
     });

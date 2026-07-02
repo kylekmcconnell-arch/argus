@@ -17,7 +17,7 @@ import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, type DiscoveredAffiliation, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, type DiscoveredAffiliation, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
@@ -163,9 +163,10 @@ async function coldIntake(ctx: CollectContext) {
   // the project's own team page (handle "VulcanForged" -> vulcanforged.com, whose
   // docs.* /team is the canonical roster). Failed guesses just fetch nothing.
   const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
-  const [bySubject, byMentions, people, siteTeam, pageTeam] = await Promise.all([
-    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
-    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
+  // discoverAffiliations now covers the reverse-mention angle too (was a second
+  // Grok search call — merged to halve intake search spend).
+  const [bySubject, people, siteTeam, pageTeam] = await Promise.all([
+    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
     // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
     // domain or a project name — a big public project's roster lives off-X, and
@@ -282,7 +283,7 @@ async function coldIntake(ctx: CollectContext) {
     if (namedOnly.length) ctx.emit({ phase: "P0 · Intake", label: "Named only", detail: `Also named without a handle (not auditable): ${namedOnly.slice(0, 5).join(", ")}.`, source: "grok", tone: "neutral" });
   }
   const mergedMap = new Map<string, DiscoveredAffiliation>();
-  for (const v of [...bySubject, ...byMentions]) {
+  for (const v of bySubject) {
     const k = v.name.toLowerCase();
     const ex = mergedMap.get(k);
     // Keep the richest record: prefer an X handle / domain (so corroboration can run).

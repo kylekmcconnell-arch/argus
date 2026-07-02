@@ -31,6 +31,7 @@ async function grokPeople(key: string, system: string, user: string): Promise<an
         model: process.env.ARGUS_GROK_MODEL || "grok-4-fast",
         input: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [{ type: "web_search" }, { type: "x_search" }],
+        max_tool_calls: 6, // cost cap: xAI bills live search per source
       }),
       signal: AbortSignal.timeout(50000),
     });

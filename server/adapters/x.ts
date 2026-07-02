@@ -16,24 +16,34 @@ const TWITTERAPI = "https://api.twitterapi.io";
 
 // Grok search via the current Responses API + tools (the legacy search_parameters
 // Live Search API was retired -> 410 Gone). Returns the model's text, or null.
-export async function grokSearch(system: string, user: string): Promise<string | null> {
+export async function grokSearch(system: string, user: string, opts?: { maxToolCalls?: number }): Promise<string | null> {
   const key = env("XAI_API_KEY");
   if (!key) return null;
   try {
-    // The agentic web+X search can loop for a while; bound it so a slow call
-    // can't stall the whole streaming audit (the function has a hard duration cap).
-    const res = await fetch("https://api.x.ai/v1/responses", {
+    // COST: xAI bills live search PER SOURCE on top of tokens, and an unbounded
+    // agentic loop can pull dozens of sources per call. max_tool_calls caps the
+    // search loop (the dominant spend); if the API rejects the param we retry
+    // once without it. Timeout also bounds a slow loop for the streaming audit.
+    const call = (withCap: boolean) => fetch("https://api.x.ai/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
         input: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [{ type: "web_search" }, { type: "x_search" }],
+        ...(withCap ? { max_tool_calls: opts?.maxToolCalls ?? 4 } : {}),
       }),
       signal: AbortSignal.timeout(45000),
     });
+    let res = await call(true);
+    if (res.status === 400) res = await call(false); // param unsupported -> compat retry
     if (!res.ok) return null;
     const d = (await res.json()) as any;
+    // Burn visibility in the function logs: tokens + how many searches ran.
+    try {
+      const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : undefined;
+      console.log("[grok-usage]", JSON.stringify({ in: d.usage?.input_tokens, out: d.usage?.output_tokens, toolCalls }));
+    } catch { /* logging only */ }
     const text =
       d.output_text ??
       (Array.isArray(d.output)
@@ -303,29 +313,37 @@ export async function notableFollowers(subject: string): Promise<NotableFollower
   return [...found.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 16);
 }
 
-// ── Grok Live Search: did endorser publicly acknowledge subject? ─────────
-export async function acknowledgment(endorser: string, subject: string): Promise<{
+// ── Grok Live Search: did the endorsers publicly acknowledge the subject? ──
+// BATCHED: one search call covers every claimed endorser. The old one-call-per-
+// endorser version was the single biggest Grok spend in an audit (up to 6
+// uncapped live-search calls); one batched call does the same verification.
+export interface AckResult {
   ack: "none" | "mention" | "thanks" | "endorsement";
   sentiment: "positive" | "neutral" | "negative" | "none";
-} | null> {
+}
+export async function acknowledgments(endorsers: string[], subject: string): Promise<Map<string, AckResult>> {
+  const out = new Map<string, AckResult>();
   const key = env("XAI_API_KEY");
-  if (!key) return null;
-  const e = endorser.replace(/^@/, "");
+  const list = [...new Set(endorsers.map((e) => e.replace(/^@/, "")).filter(Boolean))];
+  if (!key || !list.length) return out;
   const s = subject.replace(/^@/, "");
   const system =
-    "You verify endorsements for a due-diligence engine, with live web and X search. Decide the strongest public acknowledgment @" +
-    e + " has ever made of @" + s + " on X, and overall sentiment. Reply with ONLY a compact JSON object " +
-    '{"ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}.';
-  const text = await grokSearch(system, `Has @${e} ever publicly acknowledged @${s} on X? Search @${e}'s posts.`);
-  if (!text) return null;
+    "You verify endorsements for a due-diligence engine, with live web and X search. For EACH listed account, decide the strongest public acknowledgment that account has ever made of @" + s + " on X, and its overall sentiment. " +
+    "ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. " +
+    'Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}]} — one entry per listed account, never invent posts.';
+  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1) });
+  if (!text) return out;
   const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
+  if (!m) return out;
   try {
-    const parsed = JSON.parse(m[0]);
-    return { ack: parsed.ack ?? "none", sentiment: parsed.sentiment ?? "none" };
-  } catch {
-    return null;
-  }
+    const arr: any[] = JSON.parse(m[0]).results ?? [];
+    for (const r of arr) {
+      const h = typeof r?.handle === "string" ? r.handle.replace(/^@/, "").toLowerCase() : "";
+      if (!h) continue;
+      out.set(h, { ack: r.ack ?? "none", sentiment: r.sentiment ?? "none" });
+    }
+  } catch { /* malformed -> treat as unknown */ }
+  return out;
 }
 
 // ── Grok identity discovery: every venture/affiliation the subject is publicly
@@ -345,15 +363,20 @@ export interface DiscoveredAffiliation {
   domain?: string;       // the venture's website host, if found (e.g. deks.xyz)
 }
 
-export async function discoverAffiliations(handle: string, name?: string): Promise<DiscoveredAffiliation[]> {
+// Covers BOTH discovery angles in one search call (was two): what the person
+// says/shows they did, AND who has ever publicly NAMED them as theirs (team
+// announcements on the PROJECT's timeline — often old posts the subject never
+// retweeted). One call halves the live-search spend of the intake phase.
+export async function discoverAffiliations(handle: string, name?: string, oldHandles: string[] = []): Promise<DiscoveredAffiliation[]> {
   const h = handle.replace(/^@/, "");
+  const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} — search posts mentioning those old handles too.` : "";
   const system =
     "You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. " +
-    "Look beyond their own bio and LinkedIn: accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase. There MUST be public evidence tying THAT EXACT person to the venture. " +
+    "Work BOTH angles: (1) what the person's own footprint shows — accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase, beyond their bio and LinkedIn; (2) reverse mentions — project/company accounts that ever NAMED, TAGGED, or ANNOUNCED this person as a founder/team member (co-founder announcements and 'meet the team' posts are often YEARS old, on the project's timeline, search historical posts). There MUST be public evidence tying THAT EXACT person to the venture. " +
     "For each, also report the venture's own X handle and website domain if you can find them. " +
     "Reply with ONLY compact JSON: {\"affiliations\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate\",\"year\":\"\",\"evidence\":\"one short source phrase\",\"x_handle\":\"@...\",\"domain\":\"example.com\"}]}. " +
     "Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {\"affiliations\":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Search the web and X, including team and accelerator pages.`);
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role — from their own footprint AND from project accounts announcing them. Search the web and X including historical posts.`, { maxToolCalls: 6 });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -629,10 +652,14 @@ export const xAdapter: Adapter = {
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised]
       .filter((t) => (t as any).claimed_endorser_handle || (t as any).project_handle)
       .slice(0, 6);
+    // ONE batched Grok call verifies every endorser; follow-graph checks
+    // (twitterapi, cheap) stay per-claim and run alongside.
+    const ackMap = await acknowledgments(claims.map((t) => (t as any).claimed_endorser_handle || (t as any).project_handle), ctx.handle);
     await Promise.all(
       claims.map(async (t) => {
         const endorser = (t as any).claimed_endorser_handle || (t as any).project_handle;
-        const [follows, ack] = await Promise.all([followsSubject(endorser, ctx.handle), acknowledgment(endorser, ctx.handle)]);
+        const follows = await followsSubject(endorser, ctx.handle);
+        const ack = ackMap.get(String(endorser).replace(/^@/, "").toLowerCase()) ?? null;
         if (follows !== null) t.follows_subject = follows;
         if (ack) {
           t.public_acknowledgment = ack.ack;

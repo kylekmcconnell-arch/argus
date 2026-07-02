@@ -1362,22 +1362,30 @@ IDENTITY RULE: if the evidence has a "team" array of named people tied to the pr
 
 // server/adapters/x.ts
 var TWITTERAPI = "https://api.twitterapi.io";
-async function grokSearch(system, user) {
+async function grokSearch(system, user, opts) {
   const key = env("XAI_API_KEY");
   if (!key) return null;
   try {
-    const res = await fetch("https://api.x.ai/v1/responses", {
+    const call = (withCap) => fetch("https://api.x.ai/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
         input: [{ role: "system", content: system }, { role: "user", content: user }],
-        tools: [{ type: "web_search" }, { type: "x_search" }]
+        tools: [{ type: "web_search" }, { type: "x_search" }],
+        ...withCap ? { max_tool_calls: opts?.maxToolCalls ?? 4 } : {}
       }),
       signal: AbortSignal.timeout(45e3)
     });
+    let res = await call(true);
+    if (res.status === 400) res = await call(false);
     if (!res.ok) return null;
     const d = await res.json();
+    try {
+      const toolCalls = Array.isArray(d.output) ? d.output.filter((o) => /search|tool/.test(String(o.type ?? ""))).length : void 0;
+      console.log("[grok-usage]", JSON.stringify({ in: d.usage?.input_tokens, out: d.usage?.output_tokens, toolCalls }));
+    } catch {
+    }
     const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o) => o.content ?? []).map((c) => c.text ?? "").join(" ") : "") ?? "";
     return text || null;
   } catch {
@@ -1561,56 +1569,39 @@ async function notableFollowers(subject) {
   }
   return [...found.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 16);
 }
-async function acknowledgment(endorser, subject) {
+async function acknowledgments(endorsers, subject) {
+  const out = /* @__PURE__ */ new Map();
   const key = env("XAI_API_KEY");
-  if (!key) return null;
-  const e = endorser.replace(/^@/, "");
+  const list = [...new Set(endorsers.map((e) => e.replace(/^@/, "")).filter(Boolean))];
+  if (!key || !list.length) return out;
   const s = subject.replace(/^@/, "");
-  const system = "You verify endorsements for a due-diligence engine, with live web and X search. Decide the strongest public acknowledgment @" + e + " has ever made of @" + s + ' on X, and overall sentiment. Reply with ONLY a compact JSON object {"ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}.';
-  const text = await grokSearch(system, `Has @${e} ever publicly acknowledged @${s} on X? Search @${e}'s posts.`);
-  if (!text) return null;
+  const system = "You verify endorsements for a due-diligence engine, with live web and X search. For EACH listed account, decide the strongest public acknowledgment that account has ever made of @" + s + ' on X, and its overall sentiment. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}]} \u2014 one entry per listed account, never invent posts.';
+  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1) });
+  if (!text) return out;
   const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
+  if (!m) return out;
   try {
-    const parsed = JSON.parse(m[0]);
-    return { ack: parsed.ack ?? "none", sentiment: parsed.sentiment ?? "none" };
+    const arr = JSON.parse(m[0]).results ?? [];
+    for (const r of arr) {
+      const h = typeof r?.handle === "string" ? r.handle.replace(/^@/, "").toLowerCase() : "";
+      if (!h) continue;
+      out.set(h, { ack: r.ack ?? "none", sentiment: r.sentiment ?? "none" });
+    }
   } catch {
-    return null;
   }
+  return out;
 }
-async function discoverAffiliations(handle, name) {
+async function discoverAffiliations(handle, name, oldHandles = []) {
   const h = handle.replace(/^@/, "");
-  const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Look beyond their own bio and LinkedIn: accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase. There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Search the web and X, including team and accelerator pages.`);
+  const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} \u2014 search posts mentioning those old handles too.` : "";
+  const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Work BOTH angles: (1) what the person's own footprint shows \u2014 accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase, beyond their bio and LinkedIn; (2) reverse mentions \u2014 project/company accounts that ever NAMED, TAGGED, or ANNOUNCED this person as a founder/team member (co-founder announcements and 'meet the team' posts are often YEARS old, on the project's timeline, search historical posts). There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role \u2014 from their own footprint AND from project accounts announcing them. Search the web and X including historical posts.`, { maxToolCalls: 6 });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
     const parsed = JSON.parse(m[0]);
     const out = Array.isArray(parsed.affiliations) ? parsed.affiliations : Array.isArray(parsed.ventures) ? parsed.ventures : [];
-    return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).map((v) => ({
-      name: v.name.trim(),
-      role: v.role || "affiliate",
-      year: v.year,
-      evidence: v.evidence,
-      x_handle: v.x_handle && /^@?[A-Za-z0-9_]{2,30}$/.test(v.x_handle) ? "@" + v.x_handle.replace(/^@/, "") : void 0,
-      domain: v.domain && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(v.domain) ? v.domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : void 0
-    })).slice(0, 10);
-  } catch {
-    return [];
-  }
-}
-async function discoverByMentions(handle, name, oldHandles = []) {
-  const h = handle.replace(/^@/, "");
-  const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} \u2014 search posts mentioning those old handles too, since their history may live under them.` : "";
-  const system = `You are a forensic due-diligence researcher with live X (Twitter) search. Find every company, crypto project, fund, or DAO ACCOUNT that has publicly NAMED, TAGGED, ANNOUNCED, or referred to the given person as a founder, co-founder, team member, or employee. Search X thoroughly INCLUDING OLDER / HISTORICAL posts, not just recent ones \u2014 co-founder announcements and 'meet the team' posts are often years old. There MUST be a real post tying the project to this exact person. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"the post / what it said","x_handle":"@projectAccount","domain":"example.com"}]}. Include ONLY ties backed by a real post you found. If none, return {"affiliations":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Which project or company accounts on X have ever named, tagged, or announced this person as a founder, co-founder, or team member? Search historical posts too, going back years.`);
-  if (!text) return [];
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return [];
-  try {
-    const parsed = JSON.parse(m[0]);
-    const out = Array.isArray(parsed.affiliations) ? parsed.affiliations : [];
     return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).map((v) => ({
       name: v.name.trim(),
       role: v.role || "affiliate",
@@ -1770,10 +1761,12 @@ var xAdapter = {
       }
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);
+    const ackMap = await acknowledgments(claims.map((t) => t.claimed_endorser_handle || t.project_handle), ctx.handle);
     await Promise.all(
       claims.map(async (t) => {
         const endorser = t.claimed_endorser_handle || t.project_handle;
-        const [follows, ack] = await Promise.all([followsSubject(endorser, ctx.handle), acknowledgment(endorser, ctx.handle)]);
+        const follows = await followsSubject(endorser, ctx.handle);
+        const ack = ackMap.get(String(endorser).replace(/^@/, "").toLowerCase()) ?? null;
         if (follows !== null) t.follows_subject = follows;
         if (ack) {
           t.public_acknowledgment = ack.ack;
@@ -2565,9 +2558,8 @@ async function coldIntake(ctx) {
   const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
   const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
-  const [bySubject, byMentions, people, siteTeam, pageTeam] = await Promise.all([
-    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
-    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
+  const [bySubject, people, siteTeam, pageTeam] = await Promise.all([
+    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
     // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
     // domain or a project name — a big public project's roster lives off-X, and
@@ -2664,7 +2656,7 @@ async function coldIntake(ctx) {
     if (namedOnly.length) ctx.emit({ phase: "P0 \xB7 Intake", label: "Named only", detail: `Also named without a handle (not auditable): ${namedOnly.slice(0, 5).join(", ")}.`, source: "grok", tone: "neutral" });
   }
   const mergedMap = /* @__PURE__ */ new Map();
-  for (const v of [...bySubject, ...byMentions]) {
+  for (const v of bySubject) {
     const k = v.name.toLowerCase();
     const ex = mergedMap.get(k);
     if (!ex) mergedMap.set(k, v);
