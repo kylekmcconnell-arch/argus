@@ -10,6 +10,7 @@ import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
 import { explorer, shortAddr, walletTier } from "../lib/wallets";
+import { IdentitySweep } from "./IdentitySweep";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -690,6 +691,12 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               </Section>
             </div>
           )}
+
+          <div className="min-w-0 lg:col-span-2">
+            <Section title="Identity continuity" kicker="rebrands + the same handle across GitHub, Farcaster, Reddit, Telegram">
+              <IdentitySweep handle={report.handle} />
+            </Section>
+          </div>
 
           <div className="min-w-0 lg:col-span-2">
             <Section title="Connection web" kicker="click any node to open it · subject → projects → the people behind them">

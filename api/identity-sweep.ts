@@ -124,7 +124,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const bits: string[] = [];
     if (prior.length) bits.push(`Previously went by ${prior.map((p) => "@" + p).join(", ")} — a rebrand${firstSeen ? ` (account seen since ${firstSeen.slice(0, 4)})` : ""}.`);
-    if (platforms.length) bits.push(`Same username found on ${platforms.join(", ")} — cross-platform footprint tying the handle to dated accounts elsewhere.`);
+    if (platforms.length) bits.push(`Same username exists on ${platforms.join(", ")} — a cross-platform lead. Check the details: strong for an obscure pseudonym, but on well-known handles these can be squatters or impersonators.`);
     if (bios.length) bits.push(`Recovered ${bios.length} archived bio(s) from prior handle(s).`);
     const note = bits.length ? bits.join(" ") : "No prior X handles (no rebrand on memory.lol) and no same-username accounts found on GitHub / Farcaster / Reddit / Telegram.";
 
