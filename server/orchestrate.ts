@@ -17,7 +17,7 @@ import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, findTeam, followsSubject, handleHistory, type DiscoveredAffiliation } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, findTeam, findTeamOnSite, scanPostsForRoles, followsSubject, handleHistory, type DiscoveredAffiliation, type TeamMember } from "./adapters/x";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
@@ -60,10 +60,12 @@ function asRoles(roles: string[]): SubjectClass[] {
 // so the verification adapters have something to check. Without this an unknown
 // subject has no ventures/endorsements/advisory seats to verify.
 async function coldIntake(ctx: CollectContext) {
+  let siteUrl: string | undefined;
   const prof = await xProfile(ctx.handle);
   if (prof) {
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
     ctx.evidence.profile.bio = prof.bio ?? "";
+    siteUrl = prof.website;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);
@@ -144,11 +146,35 @@ async function coldIntake(ctx: CollectContext) {
   // parallel keeps wall-clock to one). Subject-first finds what they claim/built;
   // reverse-mention finds projects whose OWN timeline named them; team-from-X
   // mines THIS account's posts for the people behind it (the project-account case).
-  const [bySubject, byMentions, people] = await Promise.all([
+  // The project's own website (from its X bio link, or a domain in the bio text)
+  // is where the team page actually lives — mine it like Site recon would.
+  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const [bySubject, byMentions, people, siteTeam] = await Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
     discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
+    domain ? findTeamOnSite(domain, ctx.evidence.profile.display_name) : Promise.resolve([] as TeamMember[]),
   ]);
+
+  // Auto-pivot team: merge everyone found across the website search, the account's
+  // own X content, and a deterministic post role-word scan (founder/CEO/CTO...).
+  // Named-only people are KEPT here (a real name + role is signal even with no
+  // handle to audit) — this is what a plain handle audit used to drop.
+  const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
+  const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
+  const seenWt = new Set<string>();
+  for (const t of [...siteTeam, ...people, ...postRoleTeam]) {
+    const key = (t.handle ?? t.name).trim().toLowerCase();
+    if (!key || seenWt.has(key)) continue;
+    seenWt.add(key);
+    webTeam.push({ name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content" });
+  }
+  if (webTeam.length) {
+    ctx.emit({ phase: "P1 · Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
+  } else if (domain) {
+    ctx.emit({ phase: "P1 · Team", label: "No named team", detail: `Dug ${domain} and the account's posts; no individual team members could be attributed. For a project raising money, an unnamed team is itself a flag.`, source: "team-search", tone: "warn" });
+  }
 
   // People named in the account's X content, routed by kind:
   //  - TEAM -> associates (the investigation lists them as backgroundable people).

@@ -60,6 +60,18 @@ export interface TraceStep {
   tone: "neutral" | "good" | "warn" | "bad";
 }
 
+// A person behind the project, dug from the website (web/LinkedIn), the account's
+// own posts (role-word scan), or its X content. Named-only people are kept — a
+// real name with a role is signal even without an X handle to audit.
+export interface WebTeamMember {
+  name: string;
+  handle?: string;
+  role: string;
+  linkedin?: string;
+  evidence?: string;
+  source: string; // where it came from: web/LinkedIn search, post role-scan, X content
+}
+
 export interface CollectedEvidence {
   profile: SubjectProfile;
   roles: SubjectClass[];
@@ -76,6 +88,7 @@ export interface CollectedEvidence {
   recentActivity: string[]; // recent post text, fuel for claim extraction
   notableFollowers: NotableFollower[]; // respected accounts that follow the subject
   contradictions: Contradiction[]; // internal contradictions across materials
+  webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
 }
 
 export function emptyEvidence(handle: string): CollectedEvidence {
@@ -101,6 +114,7 @@ export function emptyEvidence(handle: string): CollectedEvidence {
     associates: [],
     findings: [],
     axes: [],
+    webTeam: [],
     headline: "",
     recentActivity: [],
     notableFollowers: [],

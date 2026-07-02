@@ -71,6 +71,19 @@ export interface XProfile {
   bio?: string;
   followers?: number;
   createdAt?: string;
+  website?: string;
+}
+
+// The project's own website is the biggest un-mined lead on a project account —
+// the team page lives there, not in the tweets. twitterapi returns the bio link
+// under a few shapes; take the first real http(s) one.
+function pickWebsite(p: any): string | undefined {
+  const cands = [
+    p?.profile_bio?.entities?.url?.urls?.[0]?.expanded_url,
+    p?.entities?.url?.urls?.[0]?.expanded_url,
+    p?.url, p?.profile_url, p?.website, p?.link,
+  ].filter((x) => typeof x === "string" && /^https?:\/\//i.test(x));
+  return cands[0];
 }
 
 export async function getProfile(handle: string): Promise<XProfile | null> {
@@ -98,6 +111,7 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
         bio: p.description,
         followers: p.followers ?? p.followers_count,
         createdAt: p.createdAt ?? p.created_at,
+        website: pickWebsite(p),
       };
     } catch {
       return null;
@@ -386,7 +400,7 @@ export async function discoverByMentions(handle: string, name?: string, oldHandl
 // posts (team intros, "meet the team", role announcements like "welcome @x as
 // our CTO") and in posts that tag them, long before any of it reaches a website.
 // This mines that content for team members the site/bio never listed.
-export interface TeamMember { name: string; handle?: string; role: string; evidence?: string; kind: "team" | "advisor" }
+export interface TeamMember { name: string; handle?: string; role: string; evidence?: string; kind: "team" | "advisor"; linkedin?: string; source?: string }
 
 export async function findTeam(handle: string, name: string | undefined, posts: string[] = []): Promise<TeamMember[]> {
   const h = handle.replace(/^@/, "");
@@ -422,6 +436,81 @@ export async function findTeam(handle: string, name: string | undefined, posts: 
       })
       .filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self)
       .slice(0, 14);
+  } catch {
+    return [];
+  }
+}
+
+// The team page lives on the WEBSITE, not in the tweets. This runs the same
+// web/LinkedIn/Crunchbase search the Site-recon team finder uses, but from inside
+// a handle audit — pointed at the project's own domain (from its X bio link). It
+// is what surfaces named people (with LinkedIn) an X-post scan never sees.
+export async function findTeamOnSite(domain: string, projectName?: string): Promise<TeamMember[]> {
+  const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  if (!clean) return [];
+  const system =
+    "You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project at the given website: founders, cofounders, core team, engineers, AND advisors/backers. " +
+    "DIG hard: Google, the project's LinkedIn company page and its listed employees, Crunchbase, the GitHub org, press/interviews, and X. Connect each name to their X handle and LinkedIn where possible. " +
+    "Be EXHAUSTIVE but ONLY real people tied to THIS specific project (match the domain; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. " +
+    "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"\",\"kind\":\"team|advisor\",\"evidence\":\"\"}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
+  const text = await grokSearch(system, `Project website: ${clean}${projectName ? ` (${projectName})` : ""}. Find every founder, team member, and advisor behind it, and connect each to their X handle and LinkedIn.`);
+  return parseTeamJSON(text, undefined, "web/LinkedIn search");
+}
+
+// Deterministic supplement: scan the account's OWN posts for role words (founder,
+// CEO, CTO, "our dev", advisor...) and the name or @handle sitting next to them.
+// Catches team the LLM search misses, straight from the project's own language.
+const ROLE_RE = /\b(co-?founders?|founders?|ceo|cto|coo|cfo|cmo|chief\s+\w+\s+officer|lead\s+(?:dev|developer|engineer)|core\s+(?:dev|team)|head\s+of\s+\w+|advisors?|our\s+(?:founder|ceo|cto|coo|team|dev|lead))\b/i;
+export function scanPostsForRoles(posts: string[]): TeamMember[] {
+  const out: TeamMember[] = [];
+  const seen = new Set<string>();
+  const add = (m: TeamMember) => { const k = (m.handle ?? m.name).toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push(m); };
+  for (const raw of posts.slice(0, 25)) {
+    const p = String(raw ?? "");
+    const rm = p.match(ROLE_RE);
+    if (!rm) continue;
+    const role = rm[0].toLowerCase().replace(/^our\s+/, "");
+    const kind: "team" | "advisor" = /advisor/i.test(role) ? "advisor" : "team";
+    // @handle sitting in the same post as a role word
+    for (const hm of p.matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
+      add({ name: "@" + hm[1], handle: "@" + hm[1], role, kind, evidence: `role word "${role}" in the account's own post`, source: "post role-scan" });
+    }
+    // "Firstname Lastname" adjacent to a role word (best effort, capitalized pair).
+    // Exactly two capture groups (name-before-role | name-after-role) so indexing
+    // stays predictable.
+    const RW = "co-?founders?|founders?|ceo|cto|coo|cfo|cmo|advisors?";
+    const nm = p.match(new RegExp(`([A-Z][a-z]+\\s+[A-Z][a-z]+)[^.\\n]{0,18}\\b(?:${RW})\\b|\\b(?:${RW})\\b[^.\\n]{0,12}([A-Z][a-z]+\\s+[A-Z][a-z]+)`, "i"));
+    const name = nm ? (nm[1] || nm[2]) : undefined;
+    if (name && /^[A-Z][a-z]+\s+[A-Z][a-z]+$/.test(name)) {
+      add({ name, role, kind, evidence: `named next to the role word "${role}" in the account's own post`, source: "post role-scan" });
+    }
+  }
+  return out.slice(0, 12);
+}
+
+// Shared parser for the team JSON both Grok team-finders return.
+function parseTeamJSON(text: string | null, selfHandle: string | undefined, source: string): TeamMember[] {
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const parsed = JSON.parse(m[0]);
+    const arr: any[] = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
+    const self = (selfHandle ?? "").replace(/^@/, "").toLowerCase();
+    return arr
+      .filter((t) => t && typeof t.name === "string" && t.name.trim())
+      .map((t) => {
+        const role = (t.role || "team").toString();
+        const kind: "team" | "advisor" = (t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role)) ? "advisor" : "team";
+        const linkedin = typeof t.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(t.linkedin) ? t.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : undefined;
+        return {
+          name: t.name.trim(),
+          handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : undefined,
+          role, kind, linkedin, evidence: typeof t.evidence === "string" ? t.evidence : undefined, source,
+        };
+      })
+      .filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self)
+      .slice(0, 16);
   } catch {
     return [];
   }

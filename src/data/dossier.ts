@@ -8,7 +8,7 @@ import {
   type PanoptesNode,
   type PanoptesEdge,
 } from "../engine";
-import type { CollectedEvidence, NotableFollower, Contradiction } from "./evidence";
+import type { CollectedEvidence, NotableFollower, Contradiction, WebTeamMember } from "./evidence";
 
 export interface Dossier {
   handle: string;
@@ -23,6 +23,7 @@ export interface Dossier {
   live: boolean;
   notableFollowers: NotableFollower[];
   contradictions: Contradiction[];
+  webTeam: WebTeamMember[];
   report: AuditReport;
   graph: { nodes: PanoptesNode[]; edges: PanoptesEdge[] };
   founderSummary?: ReturnType<Audit["founderSummary"]>;
@@ -71,6 +72,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     live,
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
+    webTeam: ev.webTeam ?? [],
     report,
     graph: a.toPanoptes(),
     founderSummary: ev.roles.includes(SubjectClass.FOUNDER) ? a.founderSummary() : undefined,

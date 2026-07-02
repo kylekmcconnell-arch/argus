@@ -842,6 +842,7 @@ function assembleDossier(ev, live) {
     live,
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
+    webTeam: ev.webTeam ?? [],
     report,
     graph: a.toPanoptes(),
     founderSummary: ev.roles.includes("FOUNDER" /* FOUNDER */) ? a.founderSummary() : void 0,
@@ -849,7 +850,8 @@ function assembleDossier(ev, live) {
       ventures: a.getVentures(),
       testimonials: a.getTestimonials(),
       advised: a.getAdvisedProjects(),
-      associates: a.getAssociates()
+      associates: a.getAssociates(),
+      wallets: a.getWallets()
     }
   };
 }
@@ -1115,6 +1117,7 @@ function emptyEvidence(handle) {
     associates: [],
     findings: [],
     axes: [],
+    webTeam: [],
     headline: "",
     recentActivity: [],
     notableFollowers: [],
@@ -1321,6 +1324,17 @@ async function twFetch(url, key, tries = 2) {
   }
   return last;
 }
+function pickWebsite(p) {
+  const cands = [
+    p?.profile_bio?.entities?.url?.urls?.[0]?.expanded_url,
+    p?.entities?.url?.urls?.[0]?.expanded_url,
+    p?.url,
+    p?.profile_url,
+    p?.website,
+    p?.link
+  ].filter((x) => typeof x === "string" && /^https?:\/\//i.test(x));
+  return cands[0];
+}
 async function getProfile2(handle) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
@@ -1345,7 +1359,8 @@ async function getProfile2(handle) {
         name: p.name,
         bio: p.description,
         followers: p.followers ?? p.followers_count,
-        createdAt: p.createdAt ?? p.created_at
+        createdAt: p.createdAt ?? p.created_at,
+        website: pickWebsite(p)
       };
     } catch {
       return null;
@@ -1548,6 +1563,67 @@ ${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "";
         kind
       };
     }).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 14);
+  } catch {
+    return [];
+  }
+}
+async function findTeamOnSite(domain, projectName) {
+  const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  if (!clean) return [];
+  const system = `You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project at the given website: founders, cofounders, core team, engineers, AND advisors/backers. DIG hard: Google, the project's LinkedIn company page and its listed employees, Crunchbase, the GitHub org, press/interviews, and X. Connect each name to their X handle and LinkedIn where possible. Be EXHAUSTIVE but ONLY real people tied to THIS specific project (match the domain; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"","kind":"team|advisor","evidence":""}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
+  const text = await grokSearch(system, `Project website: ${clean}${projectName ? ` (${projectName})` : ""}. Find every founder, team member, and advisor behind it, and connect each to their X handle and LinkedIn.`);
+  return parseTeamJSON(text, void 0, "web/LinkedIn search");
+}
+var ROLE_RE = /\b(co-?founders?|founders?|ceo|cto|coo|cfo|cmo|chief\s+\w+\s+officer|lead\s+(?:dev|developer|engineer)|core\s+(?:dev|team)|head\s+of\s+\w+|advisors?|our\s+(?:founder|ceo|cto|coo|team|dev|lead))\b/i;
+function scanPostsForRoles(posts) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (m) => {
+    const k = (m.handle ?? m.name).toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(m);
+  };
+  for (const raw of posts.slice(0, 25)) {
+    const p = String(raw ?? "");
+    const rm = p.match(ROLE_RE);
+    if (!rm) continue;
+    const role = rm[0].toLowerCase().replace(/^our\s+/, "");
+    const kind = /advisor/i.test(role) ? "advisor" : "team";
+    for (const hm of p.matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
+      add({ name: "@" + hm[1], handle: "@" + hm[1], role, kind, evidence: `role word "${role}" in the account's own post`, source: "post role-scan" });
+    }
+    const RW = "co-?founders?|founders?|ceo|cto|coo|cfo|cmo|advisors?";
+    const nm = p.match(new RegExp(`([A-Z][a-z]+\\s+[A-Z][a-z]+)[^.\\n]{0,18}\\b(?:${RW})\\b|\\b(?:${RW})\\b[^.\\n]{0,12}([A-Z][a-z]+\\s+[A-Z][a-z]+)`, "i"));
+    const name = nm ? nm[1] || nm[2] : void 0;
+    if (name && /^[A-Z][a-z]+\s+[A-Z][a-z]+$/.test(name)) {
+      add({ name, role, kind, evidence: `named next to the role word "${role}" in the account's own post`, source: "post role-scan" });
+    }
+  }
+  return out.slice(0, 12);
+}
+function parseTeamJSON(text, selfHandle, source) {
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const parsed = JSON.parse(m[0]);
+    const arr = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
+    const self = (selfHandle ?? "").replace(/^@/, "").toLowerCase();
+    return arr.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => {
+      const role = (t.role || "team").toString();
+      const kind = t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
+      const linkedin = typeof t.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(t.linkedin) ? t.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
+      return {
+        name: t.name.trim(),
+        handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : void 0,
+        role,
+        kind,
+        linkedin,
+        evidence: typeof t.evidence === "string" ? t.evidence : void 0,
+        source
+      };
+    }).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 16);
   } catch {
     return [];
   }
@@ -2240,10 +2316,12 @@ function asRoles(roles) {
   return roles.filter((r) => valid.has(r)).map((r) => r);
 }
 async function coldIntake(ctx) {
+  let siteUrl;
   const prof = await getProfile2(ctx.handle);
   if (prof) {
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
     ctx.evidence.profile.bio = prof.bio ?? "";
+    siteUrl = prof.website;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);
@@ -2303,11 +2381,28 @@ async function coldIntake(ctx) {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} \u2014 now verifying each.`, source: "claude", tone: "neutral" });
   }
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts\u2026", source: "grok", tone: "neutral" });
-  const [bySubject, byMentions, people] = await Promise.all([
+  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const [bySubject, byMentions, people, siteTeam] = await Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
     discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
-    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity)
+    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
+    domain ? findTeamOnSite(domain, ctx.evidence.profile.display_name) : Promise.resolve([])
   ]);
+  const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
+  const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
+  const seenWt = /* @__PURE__ */ new Set();
+  for (const t of [...siteTeam, ...people, ...postRoleTeam]) {
+    const key = (t.handle ?? t.name).trim().toLowerCase();
+    if (!key || seenWt.has(key)) continue;
+    seenWt.add(key);
+    webTeam.push({ name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content" });
+  }
+  if (webTeam.length) {
+    ctx.emit({ phase: "P1 \xB7 Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
+  } else if (domain) {
+    ctx.emit({ phase: "P1 \xB7 Team", label: "No named team", detail: `Dug ${domain} and the account's posts; no individual team members could be attributed. For a project raising money, an unnamed team is itself a flag.`, source: "team-search", tone: "warn" });
+  }
   if (people.length) {
     const teamList = people.filter((p) => p.kind === "team");
     const advisorList = people.filter((p) => p.kind === "advisor");
@@ -2373,10 +2468,10 @@ async function coldIntake(ctx) {
         const corrob = [];
         const subjectU = ctx.handle.replace(/^@/, "").toLowerCase();
         const xHandle = v.x_handle ?? (v.evidence?.match(/@([A-Za-z0-9_]{2,30})/g) ?? []).map((s) => s.slice(1)).find((u) => u.toLowerCase() !== subjectU);
-        const domain = v.domain ?? v.evidence?.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|app|finance|org|net|co|ai|gg|so))\b/i)?.[1];
+        const domain2 = v.domain ?? v.evidence?.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|app|finance|org|net|co|ai|gg|so))\b/i)?.[1];
         try {
-          if (domain) {
-            const arch = await archivedAffiliation(domain, ctx.evidence.profile.display_name);
+          if (domain2) {
+            const arch = await archivedAffiliation(domain2, ctx.evidence.profile.display_name);
             if (arch) {
               corrob.push(`archived ${arch.where} page (${arch.year})`);
               rec.evidence_url = arch.url;
