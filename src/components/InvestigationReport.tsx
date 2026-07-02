@@ -5,6 +5,8 @@ import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
 import { FunderSweep } from "./FunderSweep";
 import { GithubForensics } from "./GithubForensics";
+import { TokenSparkline } from "./TokenSparkline";
+import { NamesakeCheck } from "./NamesakeCheck";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -149,6 +151,10 @@ export function InvestigationReport({
               <span>mc <span className="mono text-ink-dim">{money(token.mcap)}</span></span>
               <span>chain <span className="mono text-ink-dim capitalize">{token.chain}</span></span>
             </div>
+            {/* price history — the shape of the chart IS forensic context (pump, dump, drawdown) */}
+            <div className="mt-3 border-t border-line/60 pt-2.5">
+              <TokenSparkline address={token.address} chain={token.chain} pairAddress={token.pairAddress} />
+            </div>
             {/* CEX listings — real centralized-exchange listings are a strong legitimacy signal */}
             {token.cg?.cexNames && token.cg.cexNames.length > 0 ? (
               <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-line/60 pt-2">
@@ -234,6 +240,12 @@ export function InvestigationReport({
               </div>
             )}
           </Card>
+        </div>
+
+        {/* who the token is named after, and whether they're actually behind it —
+            for a person-named memecoin this is THE provenance question */}
+        <div className="mt-3">
+          <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} onAudit={onAudit} />
         </div>
 
         {/* TEAM — the headline section, merged from every source, each clickable */}
