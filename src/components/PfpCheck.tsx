@@ -13,7 +13,7 @@ const LABEL: Record<string, string> = {
   unclear: "Unclear",
 };
 
-export function PfpCheck({ handle }: { handle: string }) {
+export function PfpCheck({ handle, brand }: { handle: string; brand?: boolean }) {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const ran = useRef(false);
@@ -35,9 +35,18 @@ export function PfpCheck({ handle }: { handle: string }) {
 
   if (data && data.available === false) return null; // no analyst key configured
 
-  const flag = data?.flag === true;
-  const label = LABEL[data?.classification] ?? data?.classification ?? "";
+  // On a project/brand account, a logo or no-face avatar is expected and is NOT
+  // a red flag — only an individual claiming to be a real founder is undercut by
+  // a fake/logo face. So neutralise the logo case when the subject is a brand.
+  const cls = data?.classification;
+  const logoOrNone = cls === "logo_or_cartoon" || cls === "no_photo";
+  const brandLogo = !!brand && logoOrNone;
+  const flag = data?.flag === true && !brandLogo;
+  const label = LABEL[cls] ?? cls ?? "";
   const tells: string[] = data?.tells ?? [];
+  const note = brandLogo
+    ? "Branded logo or mascot avatar, which is expected for a project or company account rather than an individual. Not treated as an identity flag here."
+    : data?.note;
 
   return (
     <div className="rounded-xl border border-line bg-panel p-4">
@@ -58,11 +67,14 @@ export function PfpCheck({ handle }: { handle: string }) {
                   not a real founder photo
                 </span>
               )}
+              {brandLogo && (
+                <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">expected for a project account</span>
+              )}
             </div>
           )}
         </div>
       </div>
-      {!loading && data?.note && <div className={`mt-2 text-[12px] leading-relaxed ${flag ? "text-avoid" : "text-ink-dim"}`}>{data.note}</div>}
+      {!loading && note && <div className={`mt-2 text-[12px] leading-relaxed ${flag ? "text-avoid" : "text-ink-dim"}`}>{note}</div>}
       {!loading && tells.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {tells.map((t, i) => (

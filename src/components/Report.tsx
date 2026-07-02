@@ -758,7 +758,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
 
           <div className="min-w-0 lg:col-span-2">
             <Section title="Profile photo" kicker="is the face real, or AI-generated / stock / a logo standing in for a person?">
-              <PfpCheck handle={report.handle} />
+              <PfpCheck handle={report.handle} brand={(webTeam?.length ?? 0) > 0} />
             </Section>
           </div>
 

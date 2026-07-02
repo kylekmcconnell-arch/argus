@@ -3,6 +3,7 @@ import { auditToken } from "../token/audit";
 import { resolveInput } from "../lib/resolveInput";
 import { verdictMeta } from "../lib/verdict";
 import { TokenSparkline } from "./TokenSparkline";
+import { CallTimeline } from "./CallTimeline";
 
 // Dedicated KOL (influencer) report. A KOL's threat model is different from a
 // founder's: they pump-and-dump. So this grades the two things that matter —
@@ -93,12 +94,15 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
             {resolved.map((t, i) => {
               const m = t.verdict ? verdictMeta(t.verdict) : null;
               return (
-                <div key={i} className="flex flex-wrap items-center gap-2 px-3 py-2 text-[12px]">
-                  <button onClick={() => t.address && onAudit?.(t.address)} className="mono text-ink underline-offset-2 hover:text-signal-dim hover:underline">{t.label}</button>
-                  {m && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${m.color}1a`, color: m.color }}>{t.verdict}{t.score != null ? ` ${t.score}` : ""}</span>}
-                  <span className="text-[11px] text-ink-faint">liq {money(t.liquidityUsd)}</span>
-                  {t.dead && <span className="mono rounded border border-avoid/40 px-1.5 py-0.5 text-[9.5px] text-avoid">rugged / dead</span>}
-                  {t.address && t.chain && <span className="ml-auto"><TokenSparkline address={t.address} chain={t.chain} pairAddress={t.pairAddress} compact /></span>}
+                <div key={i} className="px-3 py-2 text-[12px]">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button onClick={() => t.address && onAudit?.(t.address)} className="mono text-ink underline-offset-2 hover:text-signal-dim hover:underline">{t.label}</button>
+                    {m && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${m.color}1a`, color: m.color }}>{t.verdict}{t.score != null ? ` ${t.score}` : ""}</span>}
+                    <span className="text-[11px] text-ink-faint">liq {money(t.liquidityUsd)}</span>
+                    {t.dead && <span className="mono rounded border border-avoid/40 px-1.5 py-0.5 text-[9.5px] text-avoid">rugged / dead</span>}
+                    {t.address && t.chain && <span className="ml-auto"><TokenSparkline address={t.address} chain={t.chain} pairAddress={t.pairAddress} compact /></span>}
+                  </div>
+                  {t.address && t.chain && <CallTimeline handle={handle} ticker={t.label} address={t.address} chain={t.chain} />}
                 </div>
               );
             })}
