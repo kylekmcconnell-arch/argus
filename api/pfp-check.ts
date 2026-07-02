@@ -26,6 +26,7 @@ async function fetchImage(url: string): Promise<{ media: string; data: string } 
 }
 
 // twitterapi.io gives the real X avatar URL when unavatar can't resolve one.
+// Field name varies, so check the common ones (+ nested legacy).
 async function twitterAvatar(handle: string): Promise<string | null> {
   const key = process.env.TWITTERAPI_KEY;
   if (!key || !HANDLE.test(handle)) return null;
@@ -33,13 +34,30 @@ async function twitterAvatar(handle: string): Promise<string | null> {
     const r = await fetch(`https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(handle)}`, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(7000) });
     if (!r.ok) return null;
     const d = (await r.json()) as any;
-    const p = d?.data ?? d;
-    const u = p?.profileImage || p?.profile_image_url_https || p?.profile_image_url;
-    // twitter's "_normal" is 48px; request the full-size original
-    return typeof u === "string" ? u.replace(/_normal(\.\w+)$/, "$1") : null;
+    const p = d?.data ?? d ?? {};
+    const u = p.profilePicture || p.profile_image_url_https || p.profile_image_url || p.profileImage || p.image || p.avatar || p?.legacy?.profile_image_url_https;
+    // twitter's "_normal" suffix is a 48px thumbnail; request the original.
+    return typeof u === "string" && /^https?:\/\//.test(u) ? u.replace(/_normal(\.\w+)(\?.*)?$/, "$1") : null;
   } catch {
     return null;
   }
+}
+
+// Resolve a usable avatar image, trying every source with one retry each — the
+// providers (unavatar especially) are intermittently flaky.
+async function resolveAvatar(handle: string, urlParam: string): Promise<{ img: { media: string; data: string }; url: string } | null> {
+  const urls: string[] = [];
+  if (urlParam) urls.push(urlParam);
+  const tw = await twitterAvatar(handle);
+  if (tw) urls.push(tw);
+  if (handle && HANDLE.test(handle)) urls.push(`https://unavatar.io/x/${encodeURIComponent(handle)}?fallback=false`, `https://unavatar.io/twitter/${encodeURIComponent(handle)}?fallback=false`);
+  for (const url of urls) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const img = await fetchImage(url);
+      if (img) return { img, url };
+    }
+  }
+  return null;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -50,24 +68,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!imageUrl) { res.status(400).json({ error: "handle or url required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Photo check unavailable (no analyst key)." }); return; }
 
-  // Prefer the real X avatar via twitterapi (reliable), then unavatar. unavatar
-  // 404s on fallback=false when it can't resolve, so it's the backup here.
-  let img: { media: string; data: string } | null = null;
-  let usedUrl = imageUrl;
-  const tw = handle ? await twitterAvatar(handle) : null;
-  if (tw) { const got = await fetchImage(tw); if (got) { img = got; usedUrl = tw; } }
-  if (!img) { const got = await fetchImage(imageUrl); if (got) { img = got; usedUrl = imageUrl; } }
-
-  if (req.query.rawtw) {
-    const k = process.env.TWITTERAPI_KEY;
-    const r = k ? await fetch(`https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(handle)}`, { headers: { "x-api-key": k } }) : null;
-    const d = r ? await r.json() : null;
-    const p = (d as any)?.data ?? d;
-    const imgFields = p ? Object.fromEntries(Object.entries(p).filter(([kk]) => /image|pic|avatar|photo/i.test(kk))) : null;
-    res.status(200).json({ handle, allKeys: p ? Object.keys(p) : null, imgFields });
-    return;
-  }
-  if (req.query.probe) { res.status(200).json({ handle, twitterAvatar: tw, unavatar: imageUrl, usedUrl, gotImage: !!img, bytes: img ? img.data.length : 0 }); return; }
+  const resolved = await resolveAvatar(handle, imageUrl);
+  const img = resolved?.img ?? null;
+  const usedUrl = resolved?.url ?? imageUrl;
   if (!img) { res.status(200).json({ available: true, imageUrl: usedUrl, classification: "no_photo", flag: false, note: "No profile photo found (default avatar or unreachable). An anonymous project with no face is a soft flag on its own." }); return; }
 
   try {
