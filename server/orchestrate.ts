@@ -172,6 +172,25 @@ async function coldIntake(ctx: CollectContext) {
   }
   if (webTeam.length) {
     ctx.emit({ phase: "P1 · Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
+    // A named team resolves the PROJECT's real-world identity even when the X
+    // handle itself is a corporate/brand account (e.g. @VulcanForged). Without
+    // this, a brand handle stays "Unverified" and the founder verdict gets
+    // capped as if anonymous, contradicting a report that names the CEO. Raise
+    // the identity floor: a LinkedIn-corroborated leader -> Confirmed, otherwise
+    // a named leader / two named people -> Probable. Only ever raises, and never
+    // overrides a suspected-impersonation finding.
+    const isLeader = (r?: string) => /founder|cofounder|co-founder|ceo|cto|coo|president|chief/i.test(r ?? "");
+    const leaders = webTeam.filter((t) => isLeader(t.role));
+    const leaderWithLinkedin = leaders.some((t) => !!t.linkedin);
+    const rank: Record<string, number> = { Unverified: 0, Probable: 1, Confirmed: 2 };
+    const cur = ctx.evidence.profile.identity_confidence;
+    if (cur !== "SuspectedImpersonation") {
+      const target = leaderWithLinkedin ? "Confirmed" : leaders.length || webTeam.length >= 2 ? "Probable" : null;
+      if (target && (rank[target] ?? 0) > (rank[cur ?? "Unverified"] ?? 0)) {
+        ctx.evidence.profile.identity_confidence = target as typeof cur;
+        ctx.emit({ phase: "P1 · Team", label: `Identity ${target.toLowerCase()}`, detail: `Project identity resolved through its named team${leaderWithLinkedin ? " (LinkedIn-corroborated leadership)" : ""}; a brand handle over a public team is not an anonymity flag.`, source: "team-search", tone: "good" });
+      }
+    }
   } else if (domain) {
     ctx.emit({ phase: "P1 · Team", label: "No named team", detail: `Dug ${domain} and the account's posts; no individual team members could be attributed. For a project raising money, an unnamed team is itself a flag.`, source: "team-search", tone: "warn" });
   }

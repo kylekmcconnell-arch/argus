@@ -203,7 +203,15 @@ export async function analyzeSubject(
     axisCatalog.map((a) => `- ${a.axis} | max ${a.weight} | ${a.role}`).join("\n") +
     `\n\nCollected evidence (JSON):\n${evidenceJson}\n\n` +
     `Score every listed axis, write the composite headline (one sentence on what ` +
-    `governs the verdict), and an identity note.`;
+    `governs the verdict), and an identity note.\n\n` +
+    `IDENTITY RULE: if the evidence has a "team" array of named people tied to the ` +
+    `project (especially any with a LinkedIn, or a named founder/CEO/CTO), the ` +
+    `project's real-world identity is RESOLVED. A pseudonymous brand/company handle ` +
+    `run on behalf of a publicly named team is NORMAL and is NOT an anonymity red ` +
+    `flag: do not score identity/backing axes as if the operators were anonymous, ` +
+    `and do NOT write a headline that calls the founder identity "unresolved", ` +
+    `"unnamed", or "anonymous" when named leaders are present. Only treat identity ` +
+    `as unresolved when the evidence genuinely names no one behind the project.`;
   const tool: ToolSchema = {
     name: "record_verdict",
     description: "Record the per-axis scores, headline, and identity note.",

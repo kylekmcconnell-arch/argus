@@ -1277,7 +1277,9 @@ Axes to score (axis | weight | role):
 Collected evidence (JSON):
 ${evidenceJson}
 
-Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.`;
+Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.
+
+IDENTITY RULE: if the evidence has a "team" array of named people tied to the project (especially any with a LinkedIn, or a named founder/CEO/CTO), the project's real-world identity is RESOLVED. A pseudonymous brand/company handle run on behalf of a publicly named team is NORMAL and is NOT an anonymity red flag: do not score identity/backing axes as if the operators were anonymous, and do NOT write a headline that calls the founder identity "unresolved", "unnamed", or "anonymous" when named leaders are present. Only treat identity as unresolved when the evidence genuinely names no one behind the project.`;
   const tool = {
     name: "record_verdict",
     description: "Record the per-axis scores, headline, and identity note.",
@@ -2397,6 +2399,18 @@ async function coldIntake(ctx) {
   }
   if (webTeam.length) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
+    const isLeader = (r) => /founder|cofounder|co-founder|ceo|cto|coo|president|chief/i.test(r ?? "");
+    const leaders = webTeam.filter((t) => isLeader(t.role));
+    const leaderWithLinkedin = leaders.some((t) => !!t.linkedin);
+    const rank = { Unverified: 0, Probable: 1, Confirmed: 2 };
+    const cur = ctx.evidence.profile.identity_confidence;
+    if (cur !== "SuspectedImpersonation") {
+      const target = leaderWithLinkedin ? "Confirmed" : leaders.length || webTeam.length >= 2 ? "Probable" : null;
+      if (target && (rank[target] ?? 0) > (rank[cur ?? "Unverified"] ?? 0)) {
+        ctx.evidence.profile.identity_confidence = target;
+        ctx.emit({ phase: "P1 \xB7 Team", label: `Identity ${target.toLowerCase()}`, detail: `Project identity resolved through its named team${leaderWithLinkedin ? " (LinkedIn-corroborated leadership)" : ""}; a brand handle over a public team is not an anonymity flag.`, source: "team-search", tone: "good" });
+      }
+    }
   } else if (domain) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "No named team", detail: `Dug ${domain} and the account's posts; no individual team members could be attributed. For a project raising money, an unnamed team is itself a flag.`, source: "team-search", tone: "warn" });
   }
@@ -3178,11 +3192,12 @@ function resolveInput(raw) {
   if (!s.startsWith("@") && !/twitter\.com|x\.com/i.test(s) && SOLANA.test(s) && s.length >= 32) {
     return { kind: "token", ref: s, via: "solana" };
   }
-  if (!/x\.com|twitter\.com/i.test(s)) {
-    if (HTTP_URL.test(s)) return { kind: "site", ref: s };
-    if (!s.startsWith("@") && DOMAIN.test(s) && !NAME_SERVICE.test(s)) return { kind: "site", ref: s };
-  }
-  return { kind: "handle", ref: s };
+  const NOISE = /^(home|explore|notifications|messages|i|intent|search|hashtag|settings|share|status|about|tos|privacy)$/i;
+  const xUrl = s.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,30})/i);
+  if (xUrl && !NOISE.test(xUrl[1])) return { kind: "handle", ref: xUrl[1] };
+  if (HTTP_URL.test(s)) return { kind: "site", ref: s };
+  if (!s.startsWith("@") && DOMAIN.test(s) && !NAME_SERVICE.test(s)) return { kind: "site", ref: s };
+  return { kind: "handle", ref: s.replace(/^@/, "") };
 }
 export {
   auditToken,
