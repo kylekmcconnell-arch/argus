@@ -47,6 +47,31 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(r.score_total!).toBeLessThanOrEqual(10);
   });
 
+  it("FOUNDER who operates manipulation tooling -> cap 10 -> AVOID", () => {
+    const a = new Audit("@toolmaker", { subject_class: SubjectClass.FOUNDER });
+    a.setIdentity("Confirmed");
+    a.addFinding({ finding_type: "ManipulationTooling", claim: "operates a token bundler + wallet mixer", source_url: "https://smithii.example/bundler", source_date: "", verification_status: "Verified", independent_source_count: 2, polarity: -1 });
+    for (const ax of ["F1_identity_verifiability", "F2_track_record", "F3_repeat_backing", "F4_build_substance", "F5_reputation_integrity", "F6_network_quality"]) {
+      a.setAxis(ax, 9);
+    }
+    const r = a.finalize();
+    expect(r.cap_applied).toBe("operates_manipulation_tooling");
+    expect(r.verdict).toBe("AVOID");
+    expect(r.score_total!).toBeLessThanOrEqual(10);
+  });
+
+  it("FOUNDER with only a REPORTED (unverified) tooling finding -> not capped", () => {
+    const a = new Audit("@maybe_toolmaker", { subject_class: SubjectClass.FOUNDER });
+    a.setIdentity("Confirmed");
+    a.addFinding({ finding_type: "ManipulationTooling", claim: "alleged bundler ties", source_url: "", source_date: "", verification_status: "Reported", independent_source_count: 1, polarity: -1 });
+    for (const ax of ["F1_identity_verifiability", "F2_track_record", "F3_repeat_backing", "F4_build_substance", "F5_reputation_integrity", "F6_network_quality"]) {
+      a.setAxis(ax, 9);
+    }
+    const r = a.finalize();
+    expect(r.cap_applied).not.toBe("operates_manipulation_tooling");
+    expect(r.score_total!).toBeGreaterThan(10);
+  });
+
   it("KOL pseudonymous wallet sold into promo -> cap 35 (not gated)", () => {
     const a = new Audit("@anon_caller", { subject_class: SubjectClass.KOL });
     a.setIdentity("Unverified");

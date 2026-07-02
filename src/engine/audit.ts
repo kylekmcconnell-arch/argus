@@ -339,6 +339,11 @@ export class Audit {
     const keys: string[] = [];
     if (role === SubjectClass.FOUNDER) {
       if (this.ventures.some((v) => v.outcome === VentureOutcome.RUG)) keys.push("prior_rug_as_principal");
+      // A founder who builds the means to rug/wash-trade undetectably (bundlers,
+      // mixers, volume fakers): the tooling flag, verified from their own product
+      // surfaces, is disqualifying on its own.
+      if (this.findings.some((f) => f.finding_type === "ManipulationTooling" && f.verification_status === "Verified"))
+        keys.push("operates_manipulation_tooling");
     } else if (role === SubjectClass.KOL) {
       if (
         this.wallets.some(

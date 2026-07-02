@@ -11,13 +11,16 @@
 // The engine always owns caps, banding and the composite verdict.
 
 import { getProfile, classifySubject, SubjectClass, VentureOutcome } from "../src/engine";
+import { env } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, discoverByMentions, findTeam, followsSubject, handleHistory, type DiscoveredAffiliation } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, getRecentPostsMeta, fmtFollowers, discoverAffiliations, discoverByMentions, findTeam, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal } from "./adapters/x";
+import { detectTokenLifecycle } from "./adapters/dexscreener";
+import { analyzeCadence } from "../src/lib/cadence";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
@@ -248,6 +251,224 @@ function axisCatalog(roles: SubjectClass[]) {
   return out;
 }
 
+// ── Phase 3.5: adverse-signal sweep, manipulation-tooling flag, cross-project
+//    overlap ("the Venn"). This is the playbook's core: for the subject AND every
+//    project/associate discovered, hunt real rug/scam/drain complaints; flag a
+//    founder who BUILDS the means to manipulate; and surface people who recur
+//    across the ventures. Findings feed the engine's existing fraud/manipulation
+//    hooks (InvestigatorCallout / DeceptionFinding / manipulation_service_flag),
+//    so a confirmed pattern actually moves the verdict, not just the narrative. ──
+const handleFrom = (s?: string | null): string | undefined =>
+  s?.match(/@([A-Za-z0-9_]{2,30})/)?.[1];
+
+// Map a graded adverse signal onto the engine's Finding shape. Only a multi-
+// source, on-chain/receipts-backed accusation is "Verified" (which trips the
+// investigator_verified_fraud cap); everything else surfaces as Reported/Rumor
+// so a single Grok hit can never sink a subject on its own.
+function toFinding(sig: AdverseSignal, aboutHandle: string) {
+  const verification =
+    sig.credibility === "evidenced" && sig.independent_source_count >= 2 ? "Verified"
+      : sig.credibility === "rumor" ? "Rumor" : "Reported";
+  const finding_type = sig.category === "drain" || sig.category === "rug" || sig.category === "liquidity_pull"
+    ? "InvestigatorCallout" : "DeceptionFinding";
+  return {
+    finding_type,
+    claim: `@${aboutHandle.replace(/^@/, "")}: ${sig.claim}`,
+    source_url: sig.source_url ?? "",
+    source_date: "",
+    source_author: sig.source,
+    verification_status: verification,
+    independent_source_count: sig.independent_source_count,
+    polarity: -1,
+  };
+}
+
+async function adverseSignalsAndTooling(ctx: CollectContext) {
+  const { evidence } = ctx;
+  const self = ctx.handle.replace(/^@/, "").toLowerCase();
+  const ticker = evidence.promotions.find((p) => p.ticker)?.ticker;
+
+  // Targets: the subject (as person), and the top discovered ventures (as
+  // projects), each with a recoverable @handle so the search is grounded.
+  const projectTargets = evidence.ventures
+    .map((v) => ({ name: v.project_name, handle: handleFrom(v.evidence_url) ?? handleFrom(v.notes) }))
+    .filter((v) => v.handle && v.handle.toLowerCase() !== self)
+    .slice(0, 4);
+  const associateTargets = evidence.associates
+    .map((a) => a.associate_handle)
+    .filter((h) => h && h.replace(/^@/, "").toLowerCase() !== self)
+    .slice(0, 4);
+
+  ctx.emit({ phase: "Adverse", label: "Scam / rug sweep", detail: `Searching for rug, slow-rug, liquidity-pull, drain, and FUD signals across the subject${ticker ? `, $${ticker.replace(/^\$/, "")}` : ""}, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}…`, source: "grok", tone: "neutral" });
+
+  // All searches + the tooling probe run concurrently and time-boxed, so the
+  // whole sweep costs one slow call, not the sum.
+  const [tooling, subjectSigs, projectSigs, assocSigs] = await Promise.all([
+    detectManipulationTooling(ctx.handle, evidence.profile.display_name),
+    searchAdverseSignals(ctx.handle, "person", ticker),
+    Promise.all(projectTargets.map((p) => searchAdverseSignals(p.handle!, "project"))),
+    Promise.all(associateTargets.map((h) => searchAdverseSignals(h, "person"))),
+  ]);
+
+  // 1. Manipulation tooling: the strongest, most objective flag. Record it as a
+  //    finding AND a flagged engagement (so the manipulation-services cap can
+  //    fire for a role that holds it), and note the founder-cap follow-up.
+  if (tooling?.operates && tooling.tools.length) {
+    const list = tooling.tools.map((t) => `${t.name} (${t.kind.replace(/_/g, " ")})`).join(", ");
+    evidence.findings.push({
+      finding_type: "ManipulationTooling",
+      claim: `Subject ${tooling.role || "operates"} tooling built for undetectable token manipulation: ${list}.`,
+      source_url: tooling.tools.find((t) => t.url)?.url ?? "",
+      source_date: "",
+      source_author: "own product pages",
+      verification_status: "Verified",
+      independent_source_count: tooling.tools.length,
+      polarity: -1,
+    });
+    for (const t of tooling.tools) {
+      evidence.clientEngagements.push({
+        client_name: t.name,
+        service_type: `manipulation_tooling:${t.kind}`,
+        manipulation_service_flag: true,
+        evidence_url: t.url,
+        notes: t.evidence,
+      });
+    }
+    ctx.emit({ phase: "Adverse", label: "Manipulation tooling", detail: `Subject builds/operates ${list}. Tools designed to bundle, mix, or fake volume undetectably.`, source: "grok", tone: "bad" });
+  }
+
+  // 2. Adverse signals across every target. Verified multi-source accusations
+  //    trip the engine's fraud caps; the rest surface with their credibility.
+  const pushSigs = (sigs: AdverseSignal[], about: string) => {
+    let verified = 0;
+    for (const s of sigs) {
+      const f = toFinding(s, about);
+      evidence.findings.push(f);
+      if (f.verification_status === "Verified") verified++;
+    }
+    return verified;
+  };
+  let totalSigs = 0, totalVerified = 0;
+  totalVerified += pushSigs(subjectSigs, self);
+  totalSigs += subjectSigs.length;
+  projectSigs.forEach((sigs, i) => { totalVerified += pushSigs(sigs, projectTargets[i].handle!); totalSigs += sigs.length; });
+  assocSigs.forEach((sigs, i) => { totalVerified += pushSigs(sigs, associateTargets[i]); totalSigs += sigs.length; });
+
+  if (totalSigs) {
+    const worst = totalVerified ? "bad" : "warn";
+    const top = [...subjectSigs, ...projectSigs.flat(), ...assocSigs.flat()]
+      .sort((a, b) => b.independent_source_count - a.independent_source_count)
+      .slice(0, 3)
+      .map((s) => `${s.category.replace(/_/g, " ")}: ${s.claim}`)
+      .join(" · ");
+    ctx.emit({ phase: "Adverse", label: `${totalSigs} adverse signal${totalSigs === 1 ? "" : "s"}`, detail: `${totalVerified} multi-source / evidenced. ${top}`, source: "grok", tone: worst });
+  } else {
+    ctx.emit({ phase: "Adverse", label: "No adverse signals", detail: "No credible rug/scam/drain/FUD complaints surfaced for the subject, its projects, or associates.", source: "grok", tone: "good" });
+  }
+
+  // 3. Cross-project overlap ("the Venn"): second hop over the ventures' teams to
+  //    find people who recur across projects. A person wired into multiple of the
+  //    subject's ventures is the internal co-occurrence the playbook looks for.
+  if (projectTargets.length >= 2) {
+    const teams = await Promise.all(projectTargets.map((p) => findTeam(p.handle!, p.name)));
+    const appearances = new Map<string, { name: string; projects: Set<string> }>();
+    teams.forEach((team, i) => {
+      for (const member of team) {
+        if (!member.handle) continue;
+        const key = member.handle.replace(/^@/, "").toLowerCase();
+        if (key === self) continue;
+        const rec = appearances.get(key) ?? { name: member.name, projects: new Set<string>() };
+        rec.projects.add(projectTargets[i].name);
+        appearances.set(key, rec);
+      }
+    });
+    const overlaps = [...appearances.entries()].filter(([, r]) => r.projects.size >= 2);
+    if (overlaps.length) {
+      const haveAssoc = new Set(evidence.associates.map((a) => a.associate_handle.replace(/^@/, "").toLowerCase()));
+      for (const [key, r] of overlaps) {
+        const projList = [...r.projects].join(", ");
+        if (haveAssoc.has(key)) {
+          const existing = evidence.associates.find((a) => a.associate_handle.replace(/^@/, "").toLowerCase() === key);
+          if (existing) existing.notes = [existing.notes, `also on: ${projList}`].filter(Boolean).join(" · ");
+        } else {
+          evidence.associates.push({ associate_handle: "@" + key, relation: "cross-project overlap", notes: `appears across ${projList}` });
+        }
+      }
+      ctx.emit({ phase: "Adverse", label: `${overlaps.length} cross-project overlap${overlaps.length === 1 ? "" : "s"}`, detail: overlaps.slice(0, 5).map(([k, r]) => `@${k} (${[...r.projects].join(", ")})`).join(" · "), source: "grok", tone: "warn" });
+    }
+  }
+}
+
+// ── Token lifecycle: migration / relaunch + post-relaunch dive ──
+// For each promoted ticker, group same-ticker contracts into generations (a
+// relaunch mints a new one) and check whether the current token launched and
+// then collapsed. The collapse is observed on-chain (Verified, but NOT proof of
+// fraud, so it surfaces without capping); the multi-generation migration is a
+// heuristic, reported as "possible".
+async function tokenLifecycle(ctx: CollectContext) {
+  const { evidence } = ctx;
+  const promos = evidence.promotions.filter((p) => p.ticker).slice(0, 3);
+  if (!promos.length) return;
+  await Promise.all(
+    promos.map(async (p) => {
+      const sig = await detectTokenLifecycle(p.ticker, p.contract_address);
+      if (!sig) return;
+      if (sig.dive) {
+        evidence.findings.push({
+          finding_type: "TokenCollapse",
+          claim: `$${sig.ticker} launched and collapsed to near-zero (${sig.dive.detail}).`,
+          source_url: `https://dexscreener.com/search?q=${encodeURIComponent(sig.dive.address)}`,
+          source_date: "",
+          source_author: "dexscreener",
+          verification_status: "Verified",
+          independent_source_count: 1,
+          polarity: -1,
+        });
+        ctx.emit({ phase: "Token", label: `$${sig.ticker} collapse`, detail: `${sig.dive.detail}. The dive-after-launch pattern.`, source: "dexscreener", tone: "bad" });
+      }
+      if (sig.migrated) {
+        const gens = sig.generations.length;
+        evidence.findings.push({
+          finding_type: "TokenMigration",
+          claim: `$${sig.ticker} has ${gens} distinct same-ticker contracts on-chain (possible migration/relaunch; unverified same-team).`,
+          source_url: "",
+          source_date: "",
+          source_author: "dexscreener",
+          verification_status: "Reported",
+          independent_source_count: 1,
+          polarity: -1,
+        });
+        ctx.emit({ phase: "Token", label: `$${sig.ticker} migration?`, detail: `${gens} same-ticker contracts on-chain. A relaunch restarts the chart; watch what happened right after. (Heuristic: could be an unrelated same-ticker token.)`, source: "dexscreener", tone: "warn" });
+      }
+    }),
+  );
+}
+
+// ── Post cadence: is the account whittling down or going silent? ──
+// A team going quiet after a launch is a disappearing-act / soft-rug tell. Pulls
+// timestamped posts and runs the pure analyzer; a decaying or silent cadence
+// surfaces as a finding (observed, non-capping).
+async function postCadence(ctx: CollectContext) {
+  const posts = await getRecentPostsMeta(ctx.handle);
+  const report = analyzeCadence(posts, Date.now());
+  if (!report) return;
+  if (report.silent || report.decaying) {
+    ctx.evidence.findings.push({
+      finding_type: "CadenceDecay",
+      claim: `@${ctx.handle.replace(/^@/, "")}: ${report.summary}`,
+      source_url: "",
+      source_date: "",
+      source_author: "twitterapi.io",
+      verification_status: "Verified",
+      independent_source_count: 1,
+      polarity: -1,
+    });
+    ctx.emit({ phase: "Cadence", label: report.silent ? "Went quiet" : "Cadence thinning", detail: report.summary, source: "twitterapi.io", tone: report.silent ? "bad" : "warn" });
+  } else {
+    ctx.emit({ phase: "Cadence", label: "Posting steady", detail: report.summary, source: "twitterapi.io", tone: "neutral" });
+  }
+}
+
 export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier | null> {
   const fixture = findSubject(rawHandle);
   const liveProviders = ADAPTERS.filter((a) => KEYED.has(a.id) && a.available());
@@ -281,6 +502,21 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
       emit({ phase: "Collect", label: `${a.label} error`, detail: String(e), tone: "warn" });
     }
   }
+
+  // Post-discovery signal passes, all before the analyst so their findings feed
+  // the scoring. Token lifecycle is keyless (DexScreener); cadence needs the
+  // twitterapi key; the adverse/tooling sweep needs Grok or Claude. Each is
+  // isolated so one failing never sinks the audit.
+  const signalPasses: Promise<void>[] = [
+    tokenLifecycle(ctx).catch((e) => { emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" }); }),
+  ];
+  if (env("TWITTERAPI_KEY")) {
+    signalPasses.push(postCadence(ctx).catch((e) => { emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" }); }));
+  }
+  if (analystAvailable() || env("XAI_API_KEY")) {
+    signalPasses.push(adverseSignalsAndTooling(ctx).catch((e) => { emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" }); }));
+  }
+  await Promise.all(signalPasses);
 
   // route roles if we don't have them yet (unknown subject)
   if (!evidence.roles.length) {
