@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { getWatchlist, removeWatch, rebaseline, type WatchItem, type WatchSnapshot } from "../lib/watchlist";
 import { auditToken } from "../token/audit";
-import { findSubject, buildReport } from "../data/subjects";
+import { fetchReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 
 const RANK: Record<string, number> = { PASS: 0, CAUTION: 1, FAIL: 2, AVOID: 3, UNVERIFIABLE_IDENTITY: 3 };
@@ -13,10 +13,11 @@ async function check(item: WatchItem): Promise<WatchSnapshot | null> {
     const d = await auditToken({ kind: "token", ref: item.id, via: item.via ?? "evm" });
     return d ? { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap } : null;
   }
-  const f = findSubject(item.id);
-  if (!f) return null;
-  const r = buildReport(f).report;
-  return { verdict: r.composite_verdict, score: r.governing_score };
+  // Person watches read the latest PERSISTED report (a rescan updates it);
+  // there is no cheap live re-check for a person, so stored-latest is the truth.
+  const rep = await fetchReport(item.id);
+  const r = (rep?.payload as { report?: { composite_verdict?: string; governing_score?: number | null } } | undefined)?.report;
+  return r?.composite_verdict ? { verdict: r.composite_verdict, score: r.governing_score ?? null } : null;
 }
 
 function money(n?: number): string {

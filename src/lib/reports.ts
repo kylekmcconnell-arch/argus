@@ -31,6 +31,29 @@ export interface StoredReport {
   ts?: string;
 }
 
+// One row per persisted report (no payload — heavy; fetched per-ref on open).
+export interface ReportListing {
+  ref: string;
+  kind: "person" | "token" | "investigation";
+  query?: string;
+  contributor?: string;
+  verdict?: string | null;
+  score?: number | null;
+  ts?: string;
+}
+
+// The report library: every persisted report from every analyst, newest first.
+export async function listReports(): Promise<ReportListing[]> {
+  try {
+    const r = await fetch("/api/report?list=1", { signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return [];
+    const d = await r.json();
+    return Array.isArray(d?.reports) ? d.reports : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function fetchReport(ref: string): Promise<StoredReport | null> {
   try {
     const r = await fetch(`/api/report?ref=${encodeURIComponent(ref.replace(/^[@$]/, ""))}`, { signal: AbortSignal.timeout(9000) });

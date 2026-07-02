@@ -1,5 +1,4 @@
 import { useEffect, useMemo, useState } from "react";
-import { SUBJECTS, buildReport } from "../data/subjects";
 import { TrustGraph } from "./TrustGraph";
 import { NetworkGraph } from "./NetworkGraph";
 import { buildNetwork, canonical } from "../graph/network";
@@ -38,15 +37,11 @@ function roleBuckets(): Map<string, LogEntry[]> {
 // graph so shared entities, serial actors and cabals surface. "By subject" is
 // the per-subject star map.
 export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
-  const dossiers = useMemo(() => SUBJECTS.map((s) => ({ s, d: buildReport(s) })), []);
-  const [includeMine, setIncludeMine] = useState(true);
   const [mine, setMine] = useState(() => getContributions());
   // Refresh when the community graph hydrates or a new audit is recorded.
   useEffect(() => subscribeGraph(() => setMine(getContributions())), []);
-  const net = useMemo(
-    () => buildNetwork(dossiers.map(({ s, d }) => ({ handle: s.handle, d })), includeMine ? mine : []),
-    [dossiers, includeMine, mine],
-  );
+  // Built entirely from REAL audits (yours + the shared community graph).
+  const net = useMemo(() => buildNetwork([], mine), [mine]);
   const [mode, setMode] = useState<"network" | "subject">("network");
   // Role categories (Founders / Projects / KOLs / VCs) from the audit log.
   const [logTick, setLogTick] = useState(0);
@@ -129,16 +124,12 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
 
           {mine.length > 0 && (
             <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-[12px]">
-              <label className="flex cursor-pointer items-center gap-1.5 text-ink-dim">
-                <input type="checkbox" checked={includeMine} onChange={(e) => setIncludeMine(e.target.checked)} className="accent-[var(--color-signal)]" />
-                include your audits
-              </label>
-              <span className="mono text-ink-faint">{mine.length} recorded from token & site audits</span>
+              <span className="mono text-ink-faint">{mine.length} audited subject{mine.length === 1 ? "" : "s"} in the graph (yours + shared)</span>
               <button
                 onClick={() => { clearContributions(); setMine([]); }}
                 className="mono ml-auto rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-faint transition hover:text-ink"
               >
-                clear your audits
+                clear local cache
               </button>
             </div>
           )}
@@ -203,26 +194,26 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
           </div>
 
           <p className="mt-4 text-[12px] leading-relaxed text-ink-faint">
-            This demo unifies four worked audits. In production the graph is persistent: every new audit writes
-            its entities back, so the next investigation inherits everything already known. The graph gets
-            sharper with use, the cost of a clean front does not.
+            The graph is persistent and shared: every audit (yours and your co-analysts') writes its entities
+            back, so the next investigation inherits everything already known. The graph gets sharper with use,
+            the cost of a clean front does not.
           </p>
         </>
       ) : (
         <div className="mt-5 grid gap-3 lg:grid-cols-2">
-          {dossiers.map(({ s, d }) => {
-            const m = verdictMeta(d.report.composite_verdict);
+          {mine.length === 0 && (
+            <p className="text-[13px] text-ink-faint">No audited subjects yet — run an audit and its star map lands here.</p>
+          )}
+          {mine.map((c) => {
+            const m = verdictMeta(c.verdict ?? "INCOMPLETE");
             return (
               <button
-                key={s.handle}
-                onClick={() => onOpen(s.handle)}
+                key={c.handle}
+                onClick={() => onOpen(c.handle)}
                 className="group rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:shadow-sm"
               >
                 <div className="mb-1 flex items-center gap-2 px-1">
-                  <span className="flex h-6 w-6 items-center justify-center rounded-md border border-line bg-panel-2 text-[12px] text-signal">
-                    {s.avatar}
-                  </span>
-                  <span className="mono text-[12.5px] text-ink">{s.handle}</span>
+                  <span className="mono text-[12.5px] text-ink">{c.handle}</span>
                   <span
                     className="mono ml-auto rounded-full border px-2 py-0.5 text-[10.5px] font-semibold tracking-wider"
                     style={{ borderColor: m.color, color: m.color, background: m.glow }}
@@ -230,7 +221,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
                     {m.label}
                   </span>
                 </div>
-                <TrustGraph nodes={d.graph.nodes} edges={d.graph.edges} />
+                <TrustGraph nodes={c.nodes} edges={c.edges} />
               </button>
             );
           })}

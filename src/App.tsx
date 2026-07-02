@@ -1,7 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { AppShell } from "./components/AppShell";
 import { Landing } from "./components/Landing";
-import { RunConsole } from "./components/RunConsole";
 import { LiveRun } from "./components/LiveRun";
 import { Report } from "./components/Report";
 import { DossiersPage } from "./components/DossiersPage";
@@ -29,7 +28,6 @@ import { InvestigationRun } from "./components/InvestigationRun";
 import { InvestigationReport } from "./components/InvestigationReport";
 import { ProjectView } from "./components/ProjectView";
 import type { Investigation } from "./lib/investigation";
-import { findSubject, buildReport, type SubjectFixture } from "./data/subjects";
 import { type Dossier } from "./data/dossier";
 import { probeBackend } from "./lib/live";
 import { resolveInput, type ResolvedInput } from "./lib/resolveInput";
@@ -45,16 +43,14 @@ type Phase =
   | "notfound";
 
 // Deep links:
-//   ?s=<handle>    -> straight to the curated report (shareable dossiers)
+//   ?s=<handle>    -> open the stored report for that subject (share links)
 //   ?live=<handle> -> straight into a live collector run
-function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: string } {
+function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: string; openRef?: string } {
   if (typeof window === "undefined") return { phase: "idle", dossier: null, query: "" };
   const params = new URLSearchParams(window.location.search);
   const s = params.get("s");
-  if (s) {
-    const f = findSubject(s);
-    if (f) return { phase: "report", dossier: buildReport(f), query: s };
-  }
+  // Resolved after mount via onOpenRecent (session cache -> stored report -> rescan).
+  if (s) return { phase: "idle", dossier: null, query: "", openRef: s };
   const live = params.get("live");
   if (live) return { phase: "live", dossier: null, query: live };
   const token = params.get("t");
@@ -70,7 +66,6 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
 export default function App() {
   const boot = initialFromUrl();
   const [phase, setPhase] = useState<Phase>(boot.phase);
-  const [fixture, setFixture] = useState<SubjectFixture | null>(boot.query ? findSubject(boot.query) ?? null : null);
   const [dossier, setDossier] = useState<Dossier | null>(boot.dossier);
   const [query, setQuery] = useState(boot.query);
   const [tokenInput, setTokenInput] = useState<ResolvedInput | null>(
@@ -112,15 +107,8 @@ export default function App() {
     // handle: use the RESOLVED username (e.g. extracted from an x.com URL), not raw.
     const handle = resolved.ref;
     setQuery(handle);
-    const f = findSubject(handle);
-    setFixture(f ?? null);
     const providers = await probeBackend();
-    if (providers) {
-      setPhase("live");
-      return;
-    }
-    if (f) setPhase("running");
-    else setPhase("notfound");
+    setPhase(providers ? "live" : "notfound");
   }, []);
 
   // The main search bar runs the full autonomous investigation for a contract;
@@ -193,39 +181,17 @@ export default function App() {
     recordContribution(personContribution(d));
   };
 
-  const onRunDone = useCallback(() => {
-    setFixture((f) => {
-      if (f) {
-        const d = buildReport(f);
-        setDossier(d);
-        logPerson(d);
-        setPhase("report");
-      }
-      return f;
-    });
-  }, []);
-
   const onLiveDone = useCallback((d: Dossier) => {
     setDossier(d);
     logPerson(d);
     setPhase("report");
   }, []);
 
-  const onLiveError = useCallback(() => {
-    setFixture((f) => {
-      if (f) {
-        setDossier(buildReport(f));
-        setPhase("report");
-      } else {
-        setPhase("notfound");
-      }
-      return f;
-    });
-  }, []);
+  const onLiveError = useCallback(() => setPhase("notfound"), []);
 
   const showCached = useCallback((ref: string, c: Cached) => {
     setQuery(ref);
-    if (c.kind === "person") { setFixture(findSubject(ref) ?? null); setDossier(c.dossier); setPhase("report"); }
+    if (c.kind === "person") { setDossier(c.dossier); setPhase("report"); }
     else if (c.kind === "token") { setTokenDossier(c.dossier); setPhase("token-report"); }
     else { setInvestigation(c.inv); setPhase("investigation-report"); }
   }, []);
@@ -251,14 +217,13 @@ export default function App() {
     onAudit(ref);
   }, [onAudit, showCached]);
 
-  // open a dossier straight to its report (no run), for gallery/graph cards
-  const onOpen = useCallback((handle: string) => {
-    const f = findSubject(handle);
-    if (!f) return;
-    setQuery(handle);
-    setFixture(f);
-    setDossier(buildReport(f));
-    setPhase("report");
+  // open a library/graph card: same path as a recent click (stored report first)
+  const onOpen = onOpenRecent;
+
+  // Share links (?s=<handle>) resolve through the same stored-report path.
+  useEffect(() => {
+    if (boot.openRef) void onOpenRecent(boot.openRef);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const clearUrl = () => {
@@ -270,7 +235,6 @@ export default function App() {
   const reset = useCallback(() => {
     clearUrl();
     setPhase("idle");
-    setFixture(null);
     setDossier(null);
     setTokenInput(null);
     setTokenDossier(null);
@@ -299,7 +263,6 @@ export default function App() {
   const onNav = useCallback((t: NavTarget) => {
     clearUrl();
     if (t === "idle") {
-      setFixture(null);
       setDossier(null);
       setQuery("");
     }
@@ -352,8 +315,6 @@ export default function App() {
       {phase === "find" && <FindWallet onAudit={onAudit} onReset={reset} />}
 
       {phase === "admin" && <AdminPage onAudit={onAudit} />}
-
-      {phase === "running" && fixture && <RunConsole fixture={fixture} onDone={onRunDone} />}
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 

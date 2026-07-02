@@ -27,6 +27,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (req.method === "GET") {
+      // Library listing: every persisted report (all analysts), newest first,
+      // WITHOUT payloads (those are heavy — fetched per-ref on open).
+      if (req.query.list != null) {
+        const r = await fetch(
+          `${c.url}/rest/v1/${TABLE}?select=ref,kind,query,contributor,verdict,score,ts&order=ts.desc&limit=200`,
+          { headers: headers(c.key), signal: AbortSignal.timeout(10000) },
+        );
+        if (!r.ok) { res.status(200).json({ available: true, reports: [], error: `read ${r.status}` }); return; }
+        const rows = (await r.json()) as any[];
+        res.status(200).json({ available: true, reports: Array.isArray(rows) ? rows : [] });
+        return;
+      }
       const ref = normRef(typeof req.query.ref === "string" ? req.query.ref : "");
       if (!ref) { res.status(400).json({ error: "ref required" }); return; }
       const kindF = typeof req.query.kind === "string" ? `&kind=eq.${encodeURIComponent(req.query.kind)}` : "";

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { HeroBackdrop } from "./ArgusMark";
-import { SUBJECTS } from "../data/subjects";
-import { ROLE_META, verdictMeta } from "../lib/verdict";
+import { verdictMeta } from "../lib/verdict";
 import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
@@ -129,32 +128,8 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
           </div>
         </form>
 
-        {/* quick start */}
-        <div className="mt-8 w-full">
-          <div className="mb-2.5 text-center text-[11px] uppercase tracking-[0.18em] text-ink-faint">Or try a live dossier</div>
-          <div className="grid grid-cols-2 gap-2.5">
-            {SUBJECTS.map((s) => (
-              <button
-                key={s.handle}
-                onClick={() => onAudit(s.handle)}
-                className="group flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2.5 text-left transition hover:border-line-2 hover:shadow-sm"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-panel-2 text-[14px] text-signal">
-                  {s.avatar}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="mono block truncate text-[13px] text-ink">{s.handle}</span>
-                  <span className="block truncate text-[11px] text-ink-faint">
-                    {s.roles.map((r) => ROLE_META[r].label).join(" · ")}
-                  </span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* live token samples */}
-        <div className="mt-5 w-full">
+        <div className="mt-8 w-full">
           <div className="mb-2.5 text-center text-[11px] uppercase tracking-[0.18em] text-ink-faint">Or audit a token, live on-chain</div>
           <div className="flex flex-wrap justify-center gap-2">
             {[
