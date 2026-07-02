@@ -59,8 +59,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!kind || !query) { res.status(400).json({ error: "kind and query required" }); return; }
       const id = str(raw?.id, 120) || `${Date.now()}`;
       const tsNum = typeof raw?.ts === "number" ? raw.ts : Date.now();
+      // Updates may target a row written by ANOTHER analyst (shared entries carry
+      // client_id as their id) — honor a verbatim client_id there so the update
+      // hits the existing row instead of minting a duplicate.
+      const clientId = raw?.mode === "update" && str(raw?.client_id, 200) ? str(raw.client_id, 200) : `${contributor}:${id}`;
       const row = {
-        client_id: `${contributor}:${id}`,
+        client_id: clientId,
         ts: new Date(tsNum).toISOString(),
         kind,
         query,
@@ -73,9 +77,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         flags: Array.isArray(raw?.flags) ? raw.flags.filter((f: unknown) => typeof f === "string").slice(0, 20) : [],
         contributor,
       };
+      // Default stays append-only (history never silently mutates). mode:"update"
+      // upsert-merges the row instead — used by re-categorization, which rewrites
+      // the role flags on EXISTING entries without rerunning the audits.
+      const resolution = raw?.mode === "update" ? "merge-duplicates" : "ignore-duplicates";
       const r = await fetch(`${c.url}/rest/v1/${TABLE}?on_conflict=client_id`, {
         method: "POST",
-        headers: { ...headers(c.key), prefer: "resolution=ignore-duplicates,return=minimal" },
+        headers: { ...headers(c.key), prefer: `resolution=${resolution},return=minimal` },
         body: JSON.stringify(row),
         signal: AbortSignal.timeout(10000),
       });

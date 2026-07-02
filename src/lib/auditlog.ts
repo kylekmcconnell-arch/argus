@@ -90,6 +90,53 @@ async function syncEntry(entry: LogEntry): Promise<void> {
   }
 }
 
+// Push an UPDATED entry up (merge-upsert). Shared rows carry client_id as their
+// id and keep their original contributor; local rows re-derive both.
+async function syncEntryUpdate(entry: LogEntry, sharedRow: boolean): Promise<void> {
+  try {
+    const { getAnalyst } = await import("./analyst");
+    const body = sharedRow
+      ? { ...entry, client_id: entry.id, contributor: entry.contributor ?? "anonymous", mode: "update" }
+      : { ...entry, contributor: getAnalyst(), mode: "update" };
+    await fetch(SYNC_URL, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+  } catch {
+    /* offline — local view is still updated */
+  }
+}
+
+// Rewrite the role: flags on every stored row for one subject — local rows and
+// shared (other analysts') rows — and push the updates up. This is how
+// re-categorization re-files old audits WITHOUT rerunning them: scores and
+// verdicts stay, only the taxonomy flags change.
+export function applyRoles(ref: string, roles: string[]): void {
+  const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^[@$]/, "");
+  const target = norm(ref);
+  if (!target) return;
+  const rewrite = (e: LogEntry): LogEntry => ({
+    ...e,
+    flags: [...(e.flags ?? []).filter((f) => !/^role:/i.test(f)), ...roles.map((r) => `role:${r}`)],
+  });
+  try {
+    const log = getLog();
+    let changed = false;
+    const next = log.map((e) => {
+      if (e.kind !== "person" || norm(e.ref ?? e.query) !== target) return e;
+      changed = true;
+      const ne = rewrite(e);
+      void syncEntryUpdate(ne, false);
+      return ne;
+    });
+    if (changed) localStorage.setItem(KEY, JSON.stringify(next));
+  } catch { /* storage unavailable */ }
+  sharedCache = sharedCache.map((e) => {
+    if (e.kind !== "person" || norm(e.ref ?? e.query) !== target) return e;
+    const ne = rewrite(e);
+    void syncEntryUpdate(ne, true);
+    return ne;
+  });
+  emitLogChange();
+}
+
 let sharedCache: LogEntry[] = [];
 let hydrated = false;
 // The community feed (all analysts), fetched once per session. Kept SEPARATE

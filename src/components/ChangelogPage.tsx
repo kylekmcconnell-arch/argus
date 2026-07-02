@@ -7,10 +7,14 @@ type Commit = { sha: string; subject: string; category: string; author: string; 
 
 const isKyle = (c: Commit) => /kylekmcconnell@gmail\.com/i.test(c.email) || /^kyle$/i.test(c.author) || c.login === "kylekmcconnell-arch";
 
+// GitHub returns ISO-8601 in UTC (Z), so slicing IS the UTC date/time.
 function dayLabel(iso: string | null): string {
   if (!iso) return "";
-  const s = iso.slice(0, 10);
-  return s;
+  return iso.slice(0, 10);
+}
+function utcTime(iso: string | null): string {
+  if (!iso) return "";
+  try { return new Date(iso).toISOString().slice(11, 16) + " UTC"; } catch { return ""; }
 }
 
 export function ChangelogPage() {
@@ -47,12 +51,13 @@ export function ChangelogPage() {
       <div className="mt-6 space-y-6">
         {groups.map((g) => (
           <div key={g.day}>
-            <div className="mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">{g.day}</div>
+            <div className="mono text-[11px] uppercase tracking-[0.14em] text-ink-faint">{g.day} <span className="normal-case tracking-normal">UTC</span></div>
             <div className="mt-2 space-y-1">
               {g.items.map((c) => {
                 const mine = isKyle(c);
                 return (
                   <div key={c.sha} className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 rounded-md px-2 py-1.5 hover:bg-panel/60">
+                    <span className="mono shrink-0 text-[10px] tabular text-ink-faint" title={c.date ?? undefined}>{utcTime(c.date)}</span>
                     <span className="mono shrink-0 rounded px-1.5 py-0.5 text-[10px]" style={mine ? { background: "rgba(59,130,246,.12)", color: "var(--color-signal)" } : { background: "var(--color-line)", color: "var(--color-ink-dim)" }}>
                       {mine ? "Kyle" : c.author}
                     </span>

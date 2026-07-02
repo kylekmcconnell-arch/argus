@@ -1,6 +1,43 @@
 import { useState } from "react";
-import { getLog, clearLog, logStats, type LogEntry } from "../lib/auditlog";
+import { getLog, clearLog, logStats, mergedLog, applyRoles, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
+
+// Re-file every audited person under the CURRENT role taxonomy without
+// rerunning a single audit: batch the stored summaries through /api/reclassify
+// (one fast LLM call), then rewrite the role flags locally + in the shared log.
+async function recategorizeAll(): Promise<{ updated: number; total: number } | { error: string }> {
+  const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^[@$]/, "");
+  const seen = new Set<string>();
+  const subjects: { ref: string; query: string; summary: string; roles: string[] }[] = [];
+  for (const e of mergedLog()) {
+    if (e.kind !== "person") continue;
+    const ref = e.ref ?? e.query;
+    const k = norm(ref);
+    if (!k || seen.has(k)) continue; // newest audit of each subject speaks for it
+    seen.add(k);
+    subjects.push({
+      ref,
+      query: e.query,
+      summary: e.summary ?? "",
+      roles: (e.flags ?? []).filter((f) => /^role:/i.test(f)).map((f) => f.slice(5)),
+    });
+  }
+  if (!subjects.length) return { updated: 0, total: 0 };
+  try {
+    const r = await fetch("/api/reclassify", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ subjects }),
+    });
+    const d = await r.json();
+    const results: { ref: string; roles: string[] }[] = d?.results ?? [];
+    if (!results.length) return { error: d?.error ?? "no results" };
+    for (const res of results) applyRoles(res.ref, res.roles);
+    return { updated: results.length, total: subjects.length };
+  } catch (e) {
+    return { error: String(e) };
+  }
+}
 
 const KIND_META: Record<string, { label: string; color: string }> = {
   site: { label: "site", color: "var(--color-unverifiable)" },
@@ -24,7 +61,15 @@ function verdictColor(e: LogEntry): string {
 export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
   const [log, setLog] = useState<LogEntry[]>(() => getLog());
   const [filter, setFilter] = useState<"all" | "site" | "token" | "person" | "gaps">("all");
+  const [recat, setRecat] = useState<"idle" | "running" | string>("idle");
   const stats = logStats(log);
+
+  const onRecategorize = async () => {
+    setRecat("running");
+    const r = await recategorizeAll();
+    setRecat("error" in r ? `failed: ${r.error}` : `re-filed ${r.updated}/${r.total} subjects`);
+    setLog(getLog());
+  };
 
   const shown = log.filter((e) =>
     filter === "all" ? true : filter === "gaps" ? (e.coverage === "gap" || e.flags?.some((f) => /gap/i.test(f))) : e.kind === filter,
@@ -41,14 +86,26 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
             of who and what has been audited.
           </p>
         </div>
-        {log.length > 0 && (
+        <div className="flex shrink-0 items-center gap-2">
           <button
-            onClick={() => { clearLog(); setLog([]); }}
-            className="mono shrink-0 rounded-lg border border-line bg-panel px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+            onClick={onRecategorize}
+            disabled={recat === "running"}
+            title="Re-file every audited person under the current role taxonomy (Founder / Project / KOL / VC) from their stored summaries — no audits are rerun, scores stay"
+            className="mono shrink-0 rounded-lg border px-3 py-1.5 text-[12px] transition disabled:opacity-60"
+            style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
           >
-            clear
+            {recat === "running" ? "recategorizing…" : "recategorize roles"}
           </button>
-        )}
+          {recat !== "idle" && recat !== "running" && <span className="text-[11px] text-ink-faint">{recat}</span>}
+          {log.length > 0 && (
+            <button
+              onClick={() => { clearLog(); setLog([]); }}
+              className="mono shrink-0 rounded-lg border border-line bg-panel px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+            >
+              clear
+            </button>
+          )}
+        </div>
       </div>
 
       {/* stats */}
