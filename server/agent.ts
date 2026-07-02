@@ -223,7 +223,7 @@ export async function analyzeSubject(
           },
         },
         headline: { type: "string" },
-        identity_note: { type: "string" },
+        identity_note: { type: "string", description: "Identity resolution. Distinguish the ACCOUNT OPERATOR from the project's TEAM: if named team members are present in the evidence (especially with a LinkedIn), acknowledge them by name and do NOT claim 'no linked real-world identity' or 'zero credentials' — instead say the account/operator is pseudonymous while N named people are publicly tied to the project (list a few). Only say no one is identified if the evidence truly has no named people." },
       },
       required: ["axes", "headline", "identity_note"],
     },

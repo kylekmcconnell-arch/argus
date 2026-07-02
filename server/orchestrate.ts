@@ -334,6 +334,9 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
     advised: evidence.advised,
     promotions: evidence.promotions,
     wallets: evidence.wallets,
+    // The named people behind the project (from the site + LinkedIn + X content),
+    // so identity/founder scoring reflects the team we actually found.
+    team: (evidence.webTeam ?? []).map((p) => ({ name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, otherProjects: p.projects })),
     findings: evidence.findings,
     notableFollowers: evidence.notableFollowers,
     recentActivity: evidence.recentActivity.slice(0, 12),

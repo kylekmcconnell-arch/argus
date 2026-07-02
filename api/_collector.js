@@ -829,6 +829,20 @@ function assembleDossier(ev, live) {
     }
   });
   const report = a.finalize();
+  const graph = a.toPanoptes();
+  const subjectKey = graph.nodes.find((n) => n.subject)?.key ?? ev.profile.handle;
+  const hasNode = (key) => graph.nodes.some((n) => String(n.key).toLowerCase() === key.toLowerCase());
+  for (const p of ev.webTeam ?? []) {
+    const pkey = p.handle ?? p.name;
+    if (!pkey) continue;
+    if (!hasNode(pkey)) graph.nodes.push({ type: "Person", key: pkey, role: p.role });
+    graph.edges.push({ src: subjectKey, dst: pkey, type: "TEAM", role: p.role });
+    for (const pr of p.projects ?? []) {
+      if (!pr.name) continue;
+      if (!hasNode(pr.name)) graph.nodes.push({ type: "Company", key: pr.name });
+      graph.edges.push({ src: pkey, dst: pr.name, type: "WORKED_ON", role: pr.role });
+    }
+  }
   return {
     handle: ev.profile.handle,
     display_name: ev.profile.display_name,
@@ -844,7 +858,7 @@ function assembleDossier(ev, live) {
     contradictions: ev.contradictions,
     webTeam: ev.webTeam ?? [],
     report,
-    graph: a.toPanoptes(),
+    graph,
     founderSummary: ev.roles.includes("FOUNDER" /* FOUNDER */) ? a.founderSummary() : void 0,
     evidence: {
       ventures: a.getVentures(),
@@ -1283,7 +1297,7 @@ Score every listed axis, write the composite headline (one sentence on what gove
           }
         },
         headline: { type: "string" },
-        identity_note: { type: "string" }
+        identity_note: { type: "string", description: "Identity resolution. Distinguish the ACCOUNT OPERATOR from the project's TEAM: if named team members are present in the evidence (especially with a LinkedIn), acknowledge them by name and do NOT claim 'no linked real-world identity' or 'zero credentials' \u2014 instead say the account/operator is pseudonymous while N named people are publicly tied to the project (list a few). Only say no one is identified if the evidence truly has no named people." }
       },
       required: ["axes", "headline", "identity_note"]
     }
@@ -2522,6 +2536,9 @@ async function runAudit(rawHandle, emit) {
     advised: evidence.advised,
     promotions: evidence.promotions,
     wallets: evidence.wallets,
+    // The named people behind the project (from the site + LinkedIn + X content),
+    // so identity/founder scoring reflects the team we actually found.
+    team: (evidence.webTeam ?? []).map((p) => ({ name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, otherProjects: p.projects })),
     findings: evidence.findings,
     notableFollowers: evidence.notableFollowers,
     recentActivity: evidence.recentActivity.slice(0, 12)
