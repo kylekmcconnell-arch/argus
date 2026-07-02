@@ -240,12 +240,17 @@ export function TrustGraph({
 
       <div className="pointer-events-none absolute bottom-1.5 left-2 text-[10px] text-ink-faint">scroll to zoom · drag to pan{dense ? " · hover a node for its link" : ""}</div>
       {zoomed && (
-        <button
-          onClick={() => setView({ x: 0, y: 0, k: 1 })}
-          className="mono absolute right-2 top-2 rounded-md border border-line bg-panel px-2 py-0.5 text-[10.5px] text-ink-dim transition hover:text-ink"
+        // span, not <button>: this graph also renders inside clickable card
+        // buttons (GraphPage "By subject"), and nested buttons are invalid HTML.
+        <span
+          role="button"
+          tabIndex={0}
+          onClick={(e) => { e.stopPropagation(); setView({ x: 0, y: 0, k: 1 }); }}
+          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setView({ x: 0, y: 0, k: 1 }); } }}
+          className="mono absolute right-2 top-2 cursor-pointer rounded-md border border-line bg-panel px-2 py-0.5 text-[10.5px] text-ink-dim transition hover:text-ink"
         >
           reset view
-        </button>
+        </span>
       )}
     </div>
   );
