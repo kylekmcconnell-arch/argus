@@ -45,8 +45,6 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
             />
           </div>
           <div className="mt-2 flex items-center gap-2 px-1">
-            <span className="rounded-md border border-line px-2 py-1 text-[11.5px] text-ink-dim">Multi-class</span>
-            <span className="rounded-md border border-line px-2 py-1 text-[11.5px] text-ink-dim">API-only</span>
             <PrivateToggle on={priv} onToggle={setPriv} />
             <button type="submit" className="btn-primary ml-auto flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] font-medium">
               Run audit
