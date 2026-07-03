@@ -132,18 +132,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const v3search = await hit("v3", `/currencies?symbol=${encodeURIComponent(symbol)}`);
     let id = candidates[0].id;
     try { const r = await fetch(`https://api.cryptorank.io/v3/currencies?symbol=${encodeURIComponent(symbol)}`, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(9000) }); if (r.ok) { const j: any = await r.json(); id = (j?.data ?? j)?.[0]?.id ?? id; } } catch { /* keep v2 id */ }
-    // Pull the OpenAPI spec (behind the key) → list every real v3 route.
-    let routes: string[] = []; const specTried: any = {};
-    for (const sp of ["/v3/docs-json", "/v3/openapi.json", "/v3/swagger.json", "/docs-json"]) {
-      try {
-        const r = await fetch(`https://api.cryptorank.io${sp}`, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(9000) });
-        const txt = await r.text();
-        specTried[sp] = { status: r.status, snip: txt.slice(0, 90) };
-        if (r.ok) { const spec = JSON.parse(txt); const ps = Object.keys(spec?.paths ?? {}); if (ps.length) { routes = ps; break; } }
-      } catch (e) { specTried[sp] = { error: String(e).slice(0, 80) }; }
-    }
-    const relevant = routes.filter((p) => /fund|vest|unlock|invest|round|currenc|categor|global|metric/i.test(p));
-    res.status(200).json({ v2id: candidates[0].id, v3id: id, totalRoutes: routes.length, relevant, specTried: routes.length ? undefined : specTried }); return;
+    const variants = [
+      `/currencies/${id}/vesting`, `/currencies/${id}/vesting/`, `/currencies/${id}/unlocks`,
+      `/currencies/${id}/funding-rounds`, `/currencies/${id}/funding-rounds/`, `/currencies/${id}/investors`,
+      `/currencies/${id}/full-metrics`, `/currencies/${id}/team`, `/currencies/${id}/details`,
+      `/funding-rounds`, `/funding-rounds?currencyId=${id}`, `/funding-rounds/currency/${id}`,
+      `/funds`, `/funds/list`, `/funds/map`, `/vesting/${id}`, `/token-unlocks/${id}`, `/currencies/${id}/fundraising`,
+    ];
+    const out: any = { id };
+    for (const p of variants) { const rr = await hit("v3", p); if (rr.status !== 404) out[p] = rr; }
+    res.status(200).json({ id, nonced: out }); return;
   }
 
   // Resolve: prefer the candidate whose on-chain contract matches; else the
