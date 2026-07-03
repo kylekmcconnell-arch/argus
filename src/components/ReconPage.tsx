@@ -7,6 +7,7 @@ import { recordContribution } from "../graph/store";
 import { fetchWebTeam, type WebPerson } from "../lib/investigation";
 import { GithubForensics } from "./GithubForensics";
 import { SiteHistory } from "./SiteHistory";
+import { ProjectXAccount } from "./ProjectXAccount";
 
 // A clean plain-text DD summary for pasting into a chat / channel.
 function reconReportText(r: Recon): string {
@@ -254,6 +255,22 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
               </div>
             );
           })()}
+
+          {/* the project's official X account — searched, resolved, broken down */}
+          {reconHost && (recon.title || reconHost) && (
+            <div className="mt-3">
+              <ProjectXAccount
+                name={recon.title || reconHost.replace(/\.[a-z]+$/, "")}
+                domain={reconHost}
+                seedHandle={(() => {
+                  const x = recon.socials.find((s) => /x\.com|twitter\.com/i.test(s.url));
+                  const seg = x?.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1] ?? (x?.label.startsWith("@") ? x.label.slice(1) : undefined);
+                  return seg && !/status|home|intent|share|i$/i.test(seg) ? seg : undefined;
+                })()}
+                onAudit={onAudit}
+              />
+            </div>
+          )}
 
           {/* findings ledger */}
           <div className="mt-3 rounded-xl border border-line bg-panel p-4">
