@@ -7,6 +7,7 @@ import type { TokenDossier } from "../token/audit";
 import { TokenSparkline } from "./TokenSparkline";
 import { MarketIntel } from "./MarketIntel";
 import { HolderForensics } from "./HolderForensics";
+import { OperatorNetwork } from "./OperatorNetwork";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 
@@ -223,6 +224,14 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         <div className="mt-4">
           <HolderForensics address={d.address} chain={d.chain} holderCount={d.safety.holderCount} evmTop={d.topHolders.map((h) => ({ pct: h.percent, tag: h.tag }))} insiderPct={d.insiderPct} />
         </div>
+
+        {/* recursive operator trace — is this deployer an isolated project or one
+            node in a serial rug factory sharing a funder across many launches? */}
+        {d.deployer && d.chain === "solana" && (
+          <div className="mt-4">
+            <OperatorNetwork deployer={d.deployer} chain={d.chain} label={`$${d.symbol}`} onAudit={onAudit} />
+          </div>
+        )}
 
         {/* verdict hero */}
         <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow" style={{ borderColor: `${m.color}55` }}>

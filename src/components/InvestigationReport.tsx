@@ -3,7 +3,7 @@ import { verdictMeta } from "../lib/verdict";
 import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
-import { FunderSweep } from "./FunderSweep";
+import { OperatorNetwork } from "./OperatorNetwork";
 import { GithubForensics } from "./GithubForensics";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
@@ -249,11 +249,18 @@ export function InvestigationReport({
                 )}
                 {deployerTrail && <div className="mt-1 leading-snug">{deployerTrail.note}</div>}
                 {!deployerTrail && <div className="mt-0.5">deployer wallet, no identity verification available.</div>}
-                <FunderSweep wallet={token.deployer} onAudit={onAudit} />
               </div>
             )}
           </Card>
         </div>
+
+        {/* Recursive operator trace: chase the deployer's money past the first hop
+            to every launch behind the same funding hand — the serial-operator web. */}
+        {token.deployer && token.chain === "solana" && (
+          <div className="mt-3">
+            <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} />
+          </div>
+        )}
 
         {/* who the token is named after, and whether they're actually behind it —
             for a person-named memecoin this is THE provenance question */}
