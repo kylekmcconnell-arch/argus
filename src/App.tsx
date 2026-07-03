@@ -32,6 +32,7 @@ import type { Investigation } from "./lib/investigation";
 import { type Dossier } from "./data/dossier";
 import { probeBackend } from "./lib/live";
 import { startPersonAudit, setOnComplete, getRun } from "./lib/runner";
+import { startTokenScan, startInvestigationScan, setScanOnComplete, getScanRun, type ScanRun } from "./lib/scanrunner";
 import { resolveInput, type ResolvedInput } from "./lib/resolveInput";
 import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
@@ -105,6 +106,7 @@ export default function App() {
     if (resolved.kind === "token") {
       setQuery(raw);
       setTokenInput(resolved);
+      startTokenScan(resolved, priv); // background: survives navigation
       setPhase("token-run");
       return;
     }
@@ -137,6 +139,7 @@ export default function App() {
     if (resolveInput(raw).kind === "token") {
       setQuery(raw);
       setInvestigationInput(raw);
+      startInvestigationScan(raw, priv); // background: survives navigation
       setPhase("investigation");
       return;
     }
@@ -151,39 +154,43 @@ export default function App() {
     setPhase("project");
   }, []);
 
-  const onInvestigationDone = useCallback((inv: Investigation) => {
-    const priv = privRef.current;
-    setInvestigation(inv);
+  // DATA-side completion (runs for every finished scan, backgrounded or not, so it
+  // lands in the library even if navigated away). Never touches the view.
+  const investigationData = useCallback((inv: Investigation, priv: boolean) => {
     resultCache.current.set(cacheKey(inv.token.address), { kind: "investigation", inv });
-    setPhase("investigation-report");
-    if (priv) return; // private: show it, leave no trace (no persist / log / graph)
+    if (priv) return;
     void syncReport("investigation", inv.token.address, `$${inv.token.symbol}`, inv, inv.token.verdict, inv.token.score);
     logAudit({
       kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
       summary: inv.founderNote,
       flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
     });
-    // compound the graph with the token, its deployer, and (if anonymous) the
-    // funder — so a funder bankrolling multiple launches bridges across audits
     const c = investigationContribution(inv);
     if (c) recordContribution(c);
   }, []);
-
-  const onTokenDone = useCallback((d: TokenDossier) => {
-    const priv = privRef.current;
-    setTokenDossier(d);
+  const tokenData = useCallback((d: TokenDossier, priv: boolean) => {
     resultCache.current.set(cacheKey(d.address), { kind: "token", dossier: d });
-    setPhase("token-report");
-    if (priv) return; // private: show it, leave no trace
+    if (priv) return;
     void syncReport("token", d.address, `$${d.symbol}`, d, d.verdict, d.score);
     logAudit({
       kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
       summary: d.headline,
       flags: [d.capApplied ? `cap:${d.capApplied}` : "", d.bundleRisk !== "low" ? `bundle:${d.bundleRisk}` : ""].filter(Boolean),
     });
-    // compound the trust graph: this token, its deployer, project X and holders
     recordContribution(tokenContribution(d.symbol, d.verdict, d.graph.nodes, d.graph.edges));
   }, []);
+  // The runner calls this for every finished token / investigation scan.
+  useEffect(() => {
+    setScanOnComplete((run: ScanRun) => {
+      if (run.kind === "token" && run.result) tokenData(run.result as TokenDossier, !!run.priv);
+      else if (run.kind === "investigation" && run.result) investigationData(run.result as Investigation, !!run.priv);
+    });
+  }, [tokenData, investigationData]);
+
+  // VIEW-side completion (only when this view is mounted on the finished run) —
+  // the runner already logged/persisted, so these just move the current view.
+  const onInvestigationDone = useCallback((inv: Investigation) => { setInvestigation(inv); setPhase("investigation-report"); }, []);
+  const onTokenDone = useCallback((d: TokenDossier) => { setTokenDossier(d); setPhase("token-report"); }, []);
 
   // Data-side completion for a person audit: cache + persist + log + graph. This
   // is view-independent — it's what makes a BACKGROUNDED audit still land in
@@ -258,14 +265,18 @@ export default function App() {
   // (survives reload, and pulls up another analyst's actual report) → and only
   // re-runs if we have neither.
   const onOpenRecent = useCallback(async (ref: string) => {
-    // A background run for this handle — re-attach to it: reopen the live console
-    // if still generating, or show its finished report.
+    // A background PERSON run — re-attach: reopen the live console or show it done.
     const run = getRun(ref);
     if (run) {
       setQuery(run.handle);
       if (run.status === "running") { setPhase("live"); return; }
       if (run.status === "done" && run.dossier) { setDossier(run.dossier); setPhase("report"); return; }
     }
+    // A background token / investigation scan still running — reopen its console.
+    const invRun = getScanRun("investigation", ref);
+    if (invRun && invRun.status === "running") { setInvestigationInput(invRun.input); setQuery(invRun.input); setPhase("investigation"); return; }
+    const tokRun = getScanRun("token", ref);
+    if (tokRun && tokRun.status === "running") { setTokenInput(resolveInput(tokRun.input)); setQuery(tokRun.input); setPhase("token-run"); return; }
     const c = resultCache.current.get(cacheKey(ref));
     if (c) { showCached(ref, c); return; }
     const rep = await fetchReport(ref);
@@ -405,7 +416,7 @@ export default function App() {
           onReset={reset}
           onOpenToken={onOpenToken}
           onOpenProjectAccount={onOpenProjectAccount}
-          onReAudit={() => { setInvestigationInput(investigation.token.address); setInvestigation(null); setPhase("investigation"); }}
+          onReAudit={() => { const a = investigation.token.address; setInvestigationInput(a); setInvestigation(null); startInvestigationScan(a, privRef.current); setPhase("investigation"); }}
         />
       )}
 

@@ -5,6 +5,7 @@ import { getWatchlist } from "../lib/watchlist";
 import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { activeRuns, subscribeRuns } from "../lib/runner";
 import { activeScans, subscribeScans } from "../lib/activescans";
+import { activeScanRuns, subscribeScanRuns } from "../lib/scanrunner";
 import { getAnalyst, setAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
 
@@ -184,11 +185,17 @@ export function Sidebar({
     const a = subscribeLog(() => setTick((t) => t + 1));
     const b = subscribeRuns(() => setTick((t) => t + 1));
     const c = subscribeScans(() => setTick((t) => t + 1));
-    return () => { a(); b(); c(); };
+    const d = subscribeScanRuns(() => setTick((t) => t + 1));
+    return () => { a(); b(); c(); d(); };
   }, []);
-  const scans = activeScans(); // token / site / investigation runs in flight
   const running = activeRuns();
   const runningKeys = new Set(running.map((r) => r.key));
+  // Everything in flight beyond person audits: backgrounded token/investigation
+  // scans (scanrunner) + foreground site recons (activescans) — same chip.
+  const scans = [
+    ...activeScanRuns().map((r) => ({ id: r.id, label: r.label, pct: r.pct, ref: r.ref, kind: r.kind })),
+    ...activeScans().map((s) => ({ id: s.id, label: s.label, pct: s.pct, ref: s.ref, kind: s.kind })),
+  ];
   // A subject being scanned right now shows only its live chip, not its old row.
   const scanRefs = new Set(scans.map((s) => s.ref.toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "")));
   const recent = recentAudits(14).filter((e) => {
