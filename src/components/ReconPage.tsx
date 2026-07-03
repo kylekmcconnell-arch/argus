@@ -126,10 +126,15 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
         .then((people) => setWebTeam(people))
         .finally(() => { setTeamSearching(false); setTeamSearched(true); });
     }
+    // Log/persist under the bare host (enigma-fund.com), NOT the full URL —
+    // the report library and the Dossiers delete both key on host, so logging
+    // the raw URL orphaned the sidebar row (purge never matched it to remove it).
+    let logHost = r.retrieval.url;
+    try { logHost = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { /* keep */ }
     logAudit({
       kind: "site",
-      query: r.retrieval.url,
-      ref: r.retrieval.url,
+      query: logHost,
+      ref: logHost,
       verdict: r.verdict?.verdict ?? r.retrieval.status,
       score: r.verdict?.score ?? null,
       coverage: r.retrieval.status,
@@ -349,7 +354,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
           )}
 
           {/* extracted entities */}
-          {(recon.socials.length > 0 || recon.funding.length > 0 || recon.tokenSignals.length > 0) && (
+          {(recon.socials.length > 0 || recon.funding.length > 0 || (recon.tokenSignals.length > 0 && !recon.isFund)) && (
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {recon.socials.length > 0 && (
                 <Card title="Socials">
@@ -367,7 +372,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
                   </div>
                 </Card>
               )}
-              {recon.tokenSignals.length > 0 && (
+              {recon.tokenSignals.length > 0 && !recon.isFund && (
                 <Card title="Token signals">
                   <div className="flex flex-wrap gap-1.5">
                     {recon.tokenSignals.map((t) => <span key={t} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim">{t}</span>)}

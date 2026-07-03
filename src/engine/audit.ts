@@ -486,7 +486,9 @@ export class Audit {
       edges.push({ src: this.handle, dst: v.project_name, type: "FOUNDED", outcome: v.outcome });
     }
     for (const p of this.promotions) {
-      const key = p.contract_address || "$" + p.ticker;
+      // Strip an existing $ before re-prefixing — a ticker stored as "$SUSHI"
+      // was rendering "$$SUSHI" in the connection web.
+      const key = p.contract_address || "$" + (p.ticker ?? "").replace(/^\$+/, "");
       nodes.push({ type: "Company", key, was_rug: !!p.outcome_was_rug });
       edges.push({ src: this.handle, dst: key, type: "PROMOTED" });
     }

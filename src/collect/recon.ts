@@ -26,12 +26,21 @@ export interface Recon {
   findings: ReconFinding[];
   identityLine: string;       // the one honest sentence that replaces "anonymous team"
   pivot?: OnChainPivot;       // on-chain reality check, when it reads as a token project
+  isFund?: boolean;           // self-describes as a VC / fund / studio (skip token reality-check)
   verdict?: ProjectVerdict;   // synthesized PASS / CAUTION / FAIL / INCOMPLETE
 }
 
 const SOCIAL = /\bhttps?:\/\/(?:www\.)?(x\.com|twitter\.com|t\.me|discord\.(?:gg|com)|github\.com|linkedin\.com)\/[^\s)"'<>]+/gi;
 const TEAM_HEADING = /\b(the team|our team|meet the team|leadership|founders?|built by|who we are|advisors?)\b/i;
 const TOKEN_SIG = /\b(token|tokenomics|airdrop|presale|\$[A-Z]{2,8}\b|on-chain|onchain|solana|ethereum|tge|staking|whitepaper)\b/i;
+// A VC / fund / studio / advisory site naturally discusses "tokens" and
+// "tokenomics" about the projects it BACKS — it is not itself a token project.
+// When the site self-describes as an investor, we do NOT reality-check it as a
+// token (that chased a random same-ticker DEX coin and defamed the site).
+const FUND_SITE = /\b(venture capital|ventures\b|\bvc\b|\bfund\b|\bfunds\b|capital\b|investment (?:firm|fund|dao)|portfolio compan|we (?:invest|back)|backing founders|accelerator|incubator|advisory|angel (?:investor|fund)|research (?:collective|studio))\b/i;
+// Strong, first-party evidence that THIS site is the token project (not just
+// keyword noise): an explicit token launch/economics claim or a $-ticker/contract.
+const STRONG_TOKEN = /\b(tokenomics|total supply|circulating supply|max supply|\bTGE\b|fair launch|token sale|presale|airdrop|buy \$?[A-Z]{2,8}\b|our token)\b|0x[a-fA-F0-9]{40}/i;
 // Funding claim: a dollar figure that is explicitly tied to a raise/valuation —
 // not any dollar amount (market-size and price copy must not read as funding).
 const FUNDING = /\$[\d.]+\s?[mMbBkK](?:illion)?\b(?:[^.\n]{0,30}\b(?:raise|raised|round|seed|series\s?[a-d]|fdv|valuation|funding|backed|led by)\b)|\bat\s+\$[\d.]+\s?[mMbB]\s*fdv\b/gi;
@@ -144,7 +153,14 @@ export function analyzeContent(retrieval: Retrieval): Recon {
   if (socials.length) findings.push({ claim: `${socials.length} social link${socials.length === 1 ? "" : "s"} found: ${socials.map((s) => s.label).join(", ")}.`, tone: "good" });
   else findings.push({ claim: "No social or community links found in the rendered content.", tone: "warn" });
   if (funding.length) findings.push({ claim: `Funding/valuation claim in copy: ${funding[0]} (claim only — not independently verified here).`, tone: "warn" });
-  if (tokenSignals.length >= 2) findings.push({ claim: `Reads as a token project (signals: ${tokenSignals.slice(0, 5).join(", ")}). Run a token audit on the contract for the on-chain verdict.`, tone: "warn" });
+  // Only call it a token project on FIRST-PARTY evidence (a launch/economics
+  // claim or an on-page contract) AND when the site isn't a fund/VC/studio.
+  // Two generic keywords ("token", "tokenomics") on an investor's site is not it.
+  const isFund = FUND_SITE.test(c) || FUND_SITE.test(retrieval.title ?? "");
+  const strongToken = STRONG_TOKEN.test(c);
+  if (!isFund && strongToken && tokenSignals.length >= 2) {
+    findings.push({ claim: `Reads as a token project (signals: ${tokenSignals.slice(0, 5).join(", ")}). Run a token audit on the contract for the on-chain verdict.`, tone: "warn" });
+  }
 
   // ---- the single honest sentence that replaces "anonymous team" ----
   let identityLine: string;
@@ -152,7 +168,7 @@ export function analyzeContent(retrieval: Retrieval): Recon {
   else if (team.state === "unnamed-section") identityLine = "Team section present but names no principals — identity unverifiable. Distinct from anonymous: it is a stated-but-unnamed team.";
   else identityLine = "No team section on the rendered site — team not established. Stated as observed absence, on content we actually rendered.";
 
-  return { retrieval, title: retrieval.title, team, socials, funding, tokenSignals, findings, identityLine };
+  return { retrieval, title: retrieval.title, team, socials, funding, tokenSignals, findings, identityLine, isFund };
 }
 
 export async function runRecon(
@@ -162,7 +178,10 @@ export async function runRecon(
 ): Promise<Recon> {
   const retrieval = await retrieveSite(url, emit);
   const recon = analyzeContent(retrieval);
-  if (retrieval.status !== "gap") {
+  // Skip the on-chain reality check on fund/VC/studio sites — they discuss
+  // portfolio tokens they don't own, and name-searching a portfolio ticker
+  // pulled a random same-ticker DEX coin and dragged the site's verdict.
+  if (retrieval.status !== "gap" && !recon.isFund) {
     const pivot = await pivotOnChain(retrieval.content, recon.tokenSignals.length, onPivot);
     if (pivot.attempted) recon.pivot = pivot;
   }
