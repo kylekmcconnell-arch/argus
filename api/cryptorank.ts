@@ -117,6 +117,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const candidates: any[] = Array.isArray(search?.data) ? search.data : [];
   if (!candidates.length) { res.status(200).json({ available: true, matched: false, note: "not listed on CryptoRank" }); return; }
 
+  // TEMP v3 probe: the public API moved to v3; discover the working routes/shapes.
+  if (q(req.query.probe)) {
+    const hit = async (base: string, p: string) => {
+      try {
+        const r = await fetch(`https://api.cryptorank.io/${base}${p}`, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(9000) });
+        let sample: any = null;
+        if (r.ok) { const j = await r.json().catch(() => null); const root = j?.data ?? j; sample = Array.isArray(root) ? { len: root.length, first0: root[0] } : root && typeof root === "object" ? Object.keys(root) : root; }
+        else sample = (await r.text().catch(() => "")).slice(0, 120);
+        return { status: r.status, sample };
+      } catch (e) { return { error: String(e) }; }
+    };
+    // Resolve a v3 id via v3 search first, fall back to the v2 id.
+    const v3search = await hit("v3", `/currencies?symbol=${encodeURIComponent(symbol)}`);
+    let id = candidates[0].id;
+    try { const r = await fetch(`https://api.cryptorank.io/v3/currencies?symbol=${encodeURIComponent(symbol)}`, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(9000) }); if (r.ok) { const j: any = await r.json(); id = (j?.data ?? j)?.[0]?.id ?? id; } } catch { /* keep v2 id */ }
+    const out: any = { v2id: candidates[0].id, v3id: id, "v3 /currencies?symbol": v3search };
+    for (const p of [`/currencies/${id}`, `/currencies/${id}/funding-rounds`, `/currencies/${id}/vesting`, `/currencies/${id}/full-metrics`, `/funding-rounds?currencyId=${id}`, `/funds?currencyId=${id}`, `/currencies/categories`, `/global`]) out[`v3 ${p}`] = await hit("v3", p);
+    res.status(200).json(out); return;
+  }
+
   // Resolve: prefer the candidate whose on-chain contract matches; else the
   // highest-ranked namesake (candidates come rank-sorted).
   let d: any = null;
