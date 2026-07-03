@@ -5,6 +5,7 @@ import { verdictMeta } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { TokenDossier } from "../token/audit";
 import { TokenSparkline } from "./TokenSparkline";
+import { MarketIntel } from "./MarketIntel";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 
@@ -210,6 +211,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
             <div className="text-[10px] uppercase tracking-wider text-ink-faint">GeckoTerminal</div>
           </div>
           <TokenSparkline address={d.address} chain={d.chain} pairAddress={d.pairAddress} />
+        </div>
+
+        {/* market intelligence — rank, ATH drawdown, dilution, unlock flags */}
+        <div className="mt-4">
+          <MarketIntel symbol={d.symbol} contract={d.address} chain={d.chain} />
         </div>
 
         {/* verdict hero */}

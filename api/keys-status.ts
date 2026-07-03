@@ -19,6 +19,7 @@ const PROVIDERS: Prov[] = [
   { key: "PDL_API_KEY", label: "People Data Labs", powers: "Professional identity records", source: "dashboard.peopledatalabs.com", tier: "paid" },
   { key: "SUPABASE_SERVICE_ROLE_KEY", also: "SUPABASE_URL", label: "Supabase", powers: "Shared trust graph + shared audit log", source: "supabase.com/dashboard", tier: "infra" },
   { key: "COINGECKO_API_KEY", label: "CoinGecko Pro", powers: "Higher-rate token data (free tier works without)", source: "coingecko.com/api", tier: "optional" },
+  { key: "CRYPTORANK_API_KEY", label: "CryptoRank", powers: "Market intel: rank, ATH drawdown, dilution, funding/vesting/unlock flags", source: "cryptorank.io/api", tier: "optional" },
   { key: "CRUNCHBASE_API_KEY", label: "Crunchbase", powers: "Company / funding records", source: "crunchbase.com", tier: "optional" },
   { key: "BITQUERY_API_KEY", label: "Bitquery", powers: "Alternate multi-chain on-chain data", source: "bitquery.io", tier: "optional" },
 ];

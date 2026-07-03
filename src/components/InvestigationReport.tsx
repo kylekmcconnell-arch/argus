@@ -8,6 +8,7 @@ import { GithubForensics } from "./GithubForensics";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ProjectIntel } from "./ProjectIntel";
+import { MarketIntel } from "./MarketIntel";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 
@@ -254,6 +255,10 @@ export function InvestigationReport({
 
         {/* who the token is named after, and whether they're actually behind it —
             for a person-named memecoin this is THE provenance question */}
+        <div className="mt-3">
+          <MarketIntel symbol={token.symbol} contract={token.address} chain={token.chain} />
+        </div>
+
         <div className="mt-3">
           <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} onAudit={onAudit} />
         </div>
