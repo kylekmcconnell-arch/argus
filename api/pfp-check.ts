@@ -6,7 +6,7 @@
 // profile photo so a supposedly-real founder fronted by a GAN face gets flagged.
 // Gated on ANTHROPIC_API_KEY (reuses the OCR pattern). Read-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { attachPanelCost, claudeUsd } from "./_cache";
+import { attachPanelCost, claudeUsd } from "./_cache.js";
 
 export const config = { maxDuration: 45 };
 

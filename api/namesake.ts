@@ -6,7 +6,7 @@
 // disown it? Faked affiliation is the classic memecoin rug setup; a genuinely
 // endorsed token is a different risk class entirely. Grok (web + X search).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache";
+import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache.js";
 
 export const config = { maxDuration: 60 };
 

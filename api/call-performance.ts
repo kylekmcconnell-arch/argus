@@ -7,7 +7,7 @@
 // month later." If no call tweet is found, anchors to the token's launch instead
 // and says so. twitterapi.io (call tweet) + GeckoTerminal (price, no key).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { attachPanelCost } from "./_cache";
+import { attachPanelCost } from "./_cache.js";
 
 export const config = { maxDuration: 30 };
 

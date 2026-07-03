@@ -5,7 +5,7 @@
 // markers and reads its recent posts' engagement to flag a paid/hollow audience.
 // twitterapi.io (TWITTERAPI_KEY). Read-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { attachPanelCost } from "./_cache";
+import { attachPanelCost } from "./_cache.js";
 
 export const config = { maxDuration: 30 };
 

@@ -5,7 +5,7 @@
 // portfolio; the client then prices each token investment on-chain for a real
 // hit-rate. XAI_API_KEY.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache";
+import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache.js";
 
 export const config = { maxDuration: 120 };
 

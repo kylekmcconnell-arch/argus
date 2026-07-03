@@ -13,16 +13,16 @@ import { createHash } from "node:crypto";
 const KIND = "grokcache";
 const TTL_MS = 24 * 3600 * 1000;
 
-function creds(): { url: string; key: string } | null {
+function creds() {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
   return url && key ? { url: url.replace(/\/$/, ""), key } : null;
 }
-const headers = (key: string) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
-const hash = (s: string) => "g:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
-const normRef = (s: string) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
+const headers = (key) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
+const hash = (s) => "g:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
+const normRef = (s) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
 
-export async function cacheGetJson<T>(key: string): Promise<T | null> {
+export async function cacheGetJson(key) {
   const c = creds();
   if (!c) return null;
   try {
@@ -30,7 +30,7 @@ export async function cacheGetJson<T>(key: string): Promise<T | null> {
       headers: headers(c.key), signal: AbortSignal.timeout(4000),
     });
     if (!r.ok) return null;
-    const rows = (await r.json()) as { payload?: { value?: T; at?: number } }[];
+    const rows = await r.json();
     const p = rows?.[0]?.payload;
     if (p?.value == null || typeof p.at !== "number" || Date.now() - p.at > TTL_MS) return null;
     return p.value;
@@ -39,7 +39,7 @@ export async function cacheGetJson<T>(key: string): Promise<T | null> {
   }
 }
 
-export async function cacheSetJson(key: string, value: unknown): Promise<void> {
+export async function cacheSetJson(key, value) {
   const c = creds();
   if (!c || value == null) return;
   try {
@@ -52,12 +52,12 @@ export async function cacheSetJson(key: string, value: unknown): Promise<void> {
   } catch { /* best-effort */ }
 }
 
-export interface PanelCostLine { provider: string; op: string; calls: number; usd: number; meta?: string }
+
 
 // Merge a panel's spend into the subject's stored report payload.cost. REPLACE
 // semantics per op (a re-opened panel overwrites its own line instead of
 // inflating the total on every view).
-export async function attachPanelCost(rawRef: string, line: PanelCostLine): Promise<void> {
+export async function attachPanelCost(rawRef, line) {
   const c = creds();
   if (!c || !rawRef) return;
   try {
@@ -67,11 +67,11 @@ export async function attachPanelCost(rawRef: string, line: PanelCostLine): Prom
       { headers: headers(c.key), signal: AbortSignal.timeout(6000) },
     );
     if (!r.ok) return;
-    const rows = (await r.json()) as any[];
+    const rows = await r.json();
     const row = rows?.[0];
     if (!row?.payload) return;
     const cost = row.payload.cost ?? { usd: 0, grokUsd: 0, claudeUsd: 0, grokCalls: 0, claudeCalls: 0, sources: 0, estimated: true, calls: [] };
-    const calls: PanelCostLine[] = Array.isArray(cost.calls) ? cost.calls : [];
+    const calls = Array.isArray(cost.calls) ? cost.calls : [];
     const idx = calls.findIndex((l) => l.provider === line.provider && l.op === line.op);
     const clean = { ...line, usd: Math.round(line.usd * 10000) / 10000 };
     if (idx >= 0) calls[idx] = clean; else calls.push(clean);
@@ -88,11 +88,11 @@ export async function attachPanelCost(rawRef: string, line: PanelCostLine): Prom
 }
 
 // Grok pricing (list rates) for panel endpoints computing their own spend.
-export function grokUsd(usage: { input_tokens?: number; output_tokens?: number } | undefined, toolCalls = 0): number {
+export function grokUsd(usage, toolCalls = 0) {
   const tin = usage?.input_tokens ?? 0;
   const tout = usage?.output_tokens ?? 0;
   return tin * 0.2 / 1e6 + tout * 0.5 / 1e6 + toolCalls * 5 * 0.025;
 }
-export function claudeUsd(usage: { input_tokens?: number; output_tokens?: number } | undefined): number {
+export function claudeUsd(usage) {
   return (usage?.input_tokens ?? 0) * 3 / 1e6 + (usage?.output_tokens ?? 0) * 15 / 1e6;
 }
