@@ -22,8 +22,9 @@ const ROLE_LABEL: Record<string, { label: string; color: string }> = {
 };
 const KIND_META: Record<string, { label: string; color: string }> = {
   person: { label: "person", color: "var(--color-signal)" },
-  token: { label: "token", color: "var(--color-caution)" },
-  investigation: { label: "project", color: "var(--color-unverifiable)" }, // a token/project deep-dive
+  // A token audit and a full investigation are both PROJECT deep-dives.
+  token: { label: "project", color: "var(--color-unverifiable)" },
+  investigation: { label: "project", color: "var(--color-unverifiable)" },
 };
 
 function ago(ts?: string): string {
@@ -127,7 +128,10 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
                   </span>
                   <span className="block truncate text-[10.5px] text-ink-faint">
                     {ago(r.ts)}{r.contributor && r.contributor !== me && r.contributor !== "anonymous" ? ` · by ${r.contributor}` : ""}
-                    {typeof r.cost?.usd === "number" && (
+                    {/* Only show a cost when it's a real, non-trivial spend.
+                        Token/project audits run keyless -> "free"; a near-zero or
+                        missing person-audit cost shows nothing (not "~$0.00"). */}
+                    {typeof r.cost?.usd === "number" && r.cost.usd >= 0.01 ? (
                       <span
                         role={ledger.length ? "button" : undefined}
                         tabIndex={ledger.length ? 0 : undefined}
@@ -137,8 +141,9 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
                       >
                         {" · ~$"}{r.cost.usd.toFixed(2)}{ledger.length ? (open ? " ▾" : " ▸") : ""}
                       </span>
-                    )}
-                    {r.kind === "token" && !r.cost && " · free"}
+                    ) : r.kind === "token" && (r.cost?.usd ?? 0) < 0.01 ? (
+                      " · free"
+                    ) : null}
                   </span>
                 </span>
                 <span className="mono shrink-0 text-right leading-none" style={{ color }}>
