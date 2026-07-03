@@ -3,6 +3,7 @@ import { ArgusMark } from "./ArgusMark";
 import { verdictMeta } from "../lib/verdict";
 import { getWatchlist } from "../lib/watchlist";
 import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
+import { activeRuns, subscribeRuns } from "../lib/runner";
 import { getAnalyst, setAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
 
@@ -175,9 +176,17 @@ export function Sidebar({
   // Recent-audit clicks SHOW the cached result (with Rescan) rather than re-run.
   const openRecent = (h: string) => { (onOpenRecent ?? onAudit)(h); onClose?.(); };
   const [, setTick] = useState(0);
-  // Re-render when the shared audit log hydrates or a new audit is logged.
-  useEffect(() => subscribeLog(() => setTick((t) => t + 1)), []);
-  const recent = recentAudits(14);
+  // Re-render when the shared audit log hydrates/updates OR a background run
+  // makes progress (so "generating…" ticks up and flips to the finished audit).
+  useEffect(() => {
+    const a = subscribeLog(() => setTick((t) => t + 1));
+    const b = subscribeRuns(() => setTick((t) => t + 1));
+    return () => { a(); b(); };
+  }, []);
+  const running = activeRuns();
+  const runningKeys = new Set(running.map((r) => r.key));
+  // Don't show a finished-and-logged audit twice while its run object lingers.
+  const recent = recentAudits(14).filter((e) => !runningKeys.has((e.ref ?? e.query).toLowerCase().replace(/^[@$]/, "")));
   const me = getAnalyst();
   return (
     <aside
@@ -215,7 +224,34 @@ export function Sidebar({
         Recent audits
       </div>
       <div className="mt-1.5 space-y-0.5 overflow-y-auto px-2.5 thin-scroll">
-        {recent.length === 0 ? (
+        {/* In-progress background runs: keep streaming across navigation and flip
+            into the finished audit below the moment they complete. Click to jump
+            back into the live console. */}
+        {running.map((r) => {
+          const active = activeHandle === r.handle;
+          const avatar = (r.handle.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
+          return (
+            <button
+              key={`run:${r.key}`}
+              onClick={() => openRecent(r.handle)}
+              title="Generating — click to watch. Keeps running if you navigate away."
+              className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${active ? "bg-panel soft-shadow" : "hover:bg-panel/70"}`}
+            >
+              <span className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line bg-void text-[12px] text-signal">
+                {avatar}
+                <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-signal ring-2 ring-sidebar" />
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="mono block truncate text-[12.5px] text-ink">{r.handle}</span>
+                <span className="block truncate text-[10px] text-signal-dim">generating… {r.pct}%</span>
+                <span className="mt-1 block h-[3px] w-full overflow-hidden rounded-full bg-line">
+                  <span className="block h-full rounded-full bg-signal transition-[width] duration-500" style={{ width: `${Math.max(6, r.pct)}%` }} />
+                </span>
+              </span>
+            </button>
+          );
+        })}
+        {recent.length === 0 && running.length === 0 ? (
           <div className="px-2 py-1.5 text-[11.5px] leading-snug text-ink-faint">
             Nothing yet. Audit a handle, token, or site and it lands here.
           </div>

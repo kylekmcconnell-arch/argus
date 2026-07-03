@@ -31,6 +31,7 @@ import { ProjectView } from "./components/ProjectView";
 import type { Investigation } from "./lib/investigation";
 import { type Dossier } from "./data/dossier";
 import { probeBackend } from "./lib/live";
+import { startPersonAudit, setOnComplete, getRun } from "./lib/runner";
 import { resolveInput, type ResolvedInput } from "./lib/resolveInput";
 import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
@@ -109,7 +110,14 @@ export default function App() {
     const handle = resolved.ref;
     setQuery(handle);
     const providers = await probeBackend();
-    setPhase(providers ? "live" : "notfound");
+    if (providers) {
+      // Start the background run NOW (before the view mounts) so it survives an
+      // immediate navigation away — the runner owns the stream, not the view.
+      startPersonAudit(handle);
+      setPhase("live");
+    } else {
+      setPhase("notfound");
+    }
   }, []);
 
   // The main search bar runs the full autonomous investigation for a contract;
@@ -164,7 +172,11 @@ export default function App() {
     recordContribution(tokenContribution(d.symbol, d.verdict, d.graph.nodes, d.graph.edges));
   }, []);
 
-  const logPerson = (d: Dossier) => {
+  // Data-side completion for a person audit: cache + persist + log + graph. This
+  // is view-independent — it's what makes a BACKGROUNDED audit still land in
+  // Recent audits and Dossiers — so the runner calls it for every finished run,
+  // whether or not the user is looking at it. It never touches the view.
+  const logPerson = useCallback((d: Dossier) => {
     resultCache.current.set(cacheKey(d.handle), { kind: "person", dossier: d });
     void syncReport("person", d.handle, d.handle, d, d.report.composite_verdict, d.report.governing_score);
     logAudit({
@@ -180,11 +192,16 @@ export default function App() {
     // compound the trust graph with this person and their affiliations, so the
     // network bridges them to any token/company/person later tied to the same node
     recordContribution(personContribution(d));
-  };
+  }, []);
 
+  // Register the completion handler once — every finished background run logs +
+  // persists through here, so it appears in the library even if navigated away.
+  useEffect(() => { setOnComplete(logPerson); }, [logPerson]);
+
+  // Owner-view transition only: the runner already logged/persisted via onComplete,
+  // so this just moves the CURRENT view to the finished report (no re-logging).
   const onLiveDone = useCallback((d: Dossier) => {
     setDossier(d);
-    logPerson(d);
     setPhase("report");
   }, []);
 
@@ -202,6 +219,14 @@ export default function App() {
   // (survives reload, and pulls up another analyst's actual report) → and only
   // re-runs if we have neither.
   const onOpenRecent = useCallback(async (ref: string) => {
+    // A background run for this handle — re-attach to it: reopen the live console
+    // if still generating, or show its finished report.
+    const run = getRun(ref);
+    if (run) {
+      setQuery(run.handle);
+      if (run.status === "running") { setPhase("live"); return; }
+      if (run.status === "done" && run.dossier) { setDossier(run.dossier); setPhase("report"); return; }
+    }
     const c = resultCache.current.get(cacheKey(ref));
     if (c) { showCached(ref, c); return; }
     const rep = await fetchReport(ref);
