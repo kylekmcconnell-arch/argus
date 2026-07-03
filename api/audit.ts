@@ -72,7 +72,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     } else {
       // Persist BEFORE signalling done, so a completed audit is saved even if the
       // client already disconnected and never receives (or acts on) `done`.
-      await persistDossier(handle, dossier);
+      // A private/incognito audit is NEVER persisted server-side.
+      if (req.query.private !== "1") await persistDossier(handle, dossier);
       send("done", dossier);
     }
   } catch (e) {

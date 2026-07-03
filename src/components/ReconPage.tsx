@@ -3,6 +3,7 @@ import { runRecon, type Recon } from "../collect/recon";
 import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
 import { ScoreTicker } from "./ScoreTicker";
+import { PrivateToggle } from "./PrivateToggle";
 import { syncReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
@@ -90,8 +91,11 @@ const COVERAGE: Record<string, { label: string; color: string; blurb: string }> 
 
 const EXAMPLES = ["neuro-mesh.io", "stripe.com"];
 
-export function ReconPage({ initialUrl, onAudit, onOpenRecent }: { initialUrl?: string; onAudit?: (q: string) => void; onOpenRecent?: (ref: string) => void }) {
+export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }: { initialUrl?: string; initialPrivate?: boolean; onAudit?: (q: string) => void; onOpenRecent?: (ref: string) => void }) {
   const [url, setUrl] = useState(initialUrl ?? "");
+  const [priv, setPriv] = useState(!!initialPrivate);
+  const privRef = useRef(!!initialPrivate);
+  const togglePriv = (v: boolean) => { setPriv(v); privRef.current = v; };
   const [stages, setStages] = useState<RetrievalStage[]>([]);
   const [pivotNotes, setPivotNotes] = useState<string[]>([]);
   const [recon, setRecon] = useState<Recon | null>(null);
@@ -127,6 +131,9 @@ export function ReconPage({ initialUrl, onAudit, onOpenRecent }: { initialUrl?: 
         .then((people) => setWebTeam(people))
         .finally(() => { setTeamSearching(false); setTeamSearched(true); });
     }
+    // Private recon: show the result but leave no trace — skip log, graph, persist.
+    if (privRef.current) return;
+
     // Log/persist under the bare host (enigma-fund.com), NOT the full URL —
     // the report library and the Dossiers delete both key on host, so logging
     // the raw URL orphaned the sidebar row (purge never matched it to remove it).
@@ -199,6 +206,7 @@ export function ReconPage({ initialUrl, onAudit, onOpenRecent }: { initialUrl?: 
             className="mono w-full bg-transparent px-1.5 py-2.5 text-[13.5px] text-ink outline-none placeholder:text-ink-faint"
           />
         </div>
+        <PrivateToggle on={priv} onToggle={togglePriv} className="shrink-0 py-2.5" />
         <button
           onClick={() => run(url)}
           disabled={running}

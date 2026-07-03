@@ -1,11 +1,13 @@
 import { useState } from "react";
 import { HeroBackdrop } from "./ArgusMark";
 import { ScoreTicker, recentScored } from "./ScoreTicker";
+import { PrivateToggle } from "./PrivateToggle";
 
 // Origami-style hero: centered heading + chat-style input + quick-start dossiers,
 // over a faint line-art backdrop. Calm and static, matching origami.chat.
-export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: string) => void; onAbout: () => void; onOpenRecent?: (ref: string) => void }) {
+export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: string, priv?: boolean) => void; onAbout: () => void; onOpenRecent?: (ref: string) => void }) {
   const [value, setValue] = useState("");
+  const [priv, setPriv] = useState(false);
   const hasScores = onOpenRecent && recentScored(1).length > 0;
 
   return (
@@ -28,7 +30,7 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (value.trim()) onAudit(value.trim());
+            if (value.trim()) onAudit(value.trim(), priv);
           }}
           className="mt-7 w-full rounded-xl border border-line bg-panel p-2.5 soft-shadow transition focus-within:border-line-2"
         >
@@ -45,6 +47,7 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
           <div className="mt-2 flex items-center gap-2 px-1">
             <span className="rounded-md border border-line px-2 py-1 text-[11.5px] text-ink-dim">Multi-class</span>
             <span className="rounded-md border border-line px-2 py-1 text-[11.5px] text-ink-dim">API-only</span>
+            <PrivateToggle on={priv} onToggle={setPriv} />
             <button type="submit" className="btn-primary ml-auto flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] font-medium">
               Run audit
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -63,7 +66,7 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
             ].map((t) => (
               <button
                 key={t.sym}
-                onClick={() => onAudit(t.addr)}
+                onClick={() => onAudit(t.addr, priv)}
                 className="mono rounded-full border border-line bg-panel px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
               >
                 {t.sym}

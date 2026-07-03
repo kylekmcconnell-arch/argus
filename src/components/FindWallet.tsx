@@ -3,6 +3,7 @@ import { recordContribution, walletContribution, knownAddresses } from "../graph
 import { explorer, shortAddr } from "../lib/wallets";
 import { FunderSweep } from "./FunderSweep";
 import { ScoreTicker } from "./ScoreTicker";
+import { PrivateToggle } from "./PrivateToggle";
 
 // ── Find wallet ─────────────────────────────────────────────────────────────
 // Sleuth-style clue box: paste a handle, an ENS/.sol name, a full or PARTIAL
@@ -65,6 +66,7 @@ export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: st
   const [banner, setBanner] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [priv, setPriv] = useState(false);
   const idRef = useRef(0);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -88,7 +90,7 @@ export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: st
     }
     const { wallets, note } = await fetchResolved(trimmed);
     patch(id, { status: "done", wallets, note: wallets.length ? undefined : note ?? "No wallet could be resolved from this clue." });
-    if (wallets.length) {
+    if (wallets.length && !priv) { // private: don't record the resolution to the trust graph
       const c = walletContribution(trimmed, wallets);
       if (c) recordContribution(c);
     }
@@ -182,6 +184,7 @@ export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: st
             <button onClick={() => fileRef.current?.click()} title="Upload a screenshot" className="shrink-0 rounded-md border border-line px-2 py-2 text-ink-dim transition hover:text-ink">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 16l4.6-4.6a2 2 0 0 1 2.8 0L16 16M14 14l1.6-1.6a2 2 0 0 1 2.8 0L20 14M4 20h16a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2zM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0z" /></svg>
             </button>
+            <PrivateToggle on={priv} onToggle={setPriv} className="shrink-0 py-2" />
             <button onClick={submit} disabled={busy || !input.trim()} className="btn-primary shrink-0 px-4 py-2 text-[13px] font-medium disabled:opacity-40">
               {busy ? "Resolving…" : "Resolve"}
             </button>
@@ -243,8 +246,9 @@ export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: st
 
         {cards.length === 0 && !busy && (
           <div className="mt-10 text-center text-[12.5px] text-ink-faint">
-            Resolved wallets are recorded into your trust graph, so a handle you resolve here bridges to any token
-            audit that touches the same wallet.
+            {priv
+              ? "Private mode: resolutions run but are not recorded to your trust graph."
+              : "Resolved wallets are recorded into your trust graph, so a handle you resolve here bridges to any token audit that touches the same wallet."}
           </div>
         )}
       </div>

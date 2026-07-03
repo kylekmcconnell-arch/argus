@@ -21,6 +21,7 @@ export interface BgRun {
   error?: string;
   dossier?: Dossier;
   startedAt: number;
+  priv?: boolean;   // private/incognito: never persisted, logged, graphed, or shown in the sidebar
 }
 
 type Listener = () => void;
@@ -28,15 +29,16 @@ type Listener = () => void;
 const runs = new Map<string, BgRun>();
 const aborts = new Map<string, () => void>();
 const listeners = new Set<Listener>();
-let onComplete: ((d: Dossier) => void) | null = null;
+let onComplete: ((d: Dossier, priv: boolean) => void) | null = null;
 
 const norm = (h: string) => h.trim().toLowerCase().replace(/^@/, "");
 function emit() { for (const l of listeners) l(); }
 
 // App registers the data-side completion handler (log + persist + graph + cache).
 // It must NOT change the view — a backgrounded audit finishing should not yank
-// the user out of whatever they're doing.
-export function setOnComplete(fn: (d: Dossier) => void) { onComplete = fn; }
+// the user out of whatever they're doing. Gets the run's private flag so it can
+// skip everything that would leave a trace.
+export function setOnComplete(fn: (d: Dossier, priv: boolean) => void) { onComplete = fn; }
 
 export function subscribeRuns(cb: Listener): () => void {
   listeners.add(cb);
@@ -46,13 +48,14 @@ export function subscribeRuns(cb: Listener): () => void {
 export function getRun(handle: string): BgRun | undefined { return runs.get(norm(handle)); }
 
 // Runs still streaming, newest first — what the sidebar shows as "generating…".
+// Private runs are excluded: a private audit leaves no sidebar trace.
 export function activeRuns(): BgRun[] {
-  return [...runs.values()].filter((r) => r.status === "running").sort((a, b) => b.startedAt - a.startedAt);
+  return [...runs.values()].filter((r) => r.status === "running" && !r.priv).sort((a, b) => b.startedAt - a.startedAt);
 }
 
 // Start (or re-attach to) a background person audit. Idempotent per handle: if one
 // is already streaming, the existing run is returned so we never double-stream.
-export function startPersonAudit(handle: string): BgRun {
+export function startPersonAudit(handle: string, priv = false): BgRun {
   const key = norm(handle);
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
@@ -64,11 +67,12 @@ export function startPersonAudit(handle: string): BgRun {
     pct: 0,
     status: "running",
     startedAt: Date.now(),
+    priv,
   };
   runs.set(key, run);
   emit();
 
-  const abort = streamAudit(key, {
+  const abort = streamAudit(key, priv, {
     onStep: (s) => {
       run.steps = [...run.steps, s];
       // Open-ended progress: ramp asymptotically toward ~92% by step count.
@@ -81,7 +85,7 @@ export function startPersonAudit(handle: string): BgRun {
       run.pct = 100;
       aborts.delete(key);
       emit();
-      onComplete?.(d); // log + persist + graph, so it lands in Recent/Dossiers
+      onComplete?.(d, !!run.priv); // log + persist + graph (skipped entirely when private)
     },
     onError: (e) => {
       run.status = "error";

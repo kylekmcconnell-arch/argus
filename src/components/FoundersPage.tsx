@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ScoreTicker } from "./ScoreTicker";
+import { PrivateToggle } from "./PrivateToggle";
 import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { getAnalyst } from "../lib/analyst";
@@ -53,8 +54,9 @@ function BuilderCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void
   );
 }
 
-export function FoundersPage({ onAudit, onOpenRecent }: { onAudit: (h: string) => void; onOpenRecent?: (ref: string) => void }) {
+export function FoundersPage({ onAudit, onOpenRecent }: { onAudit: (h: string, priv?: boolean) => void; onOpenRecent?: (ref: string) => void }) {
   const [value, setValue] = useState("");
+  const [priv, setPriv] = useState(false);
   const [, setTick] = useState(0);
   useEffect(() => subscribeLog(() => setTick((t) => t + 1)), []);
   const builders = builderAudits();
@@ -71,7 +73,7 @@ export function FoundersPage({ onAudit, onOpenRecent }: { onAudit: (h: string) =
       </p>
 
       <form
-        onSubmit={(e) => { e.preventDefault(); if (value.trim()) onAudit(value.trim()); }}
+        onSubmit={(e) => { e.preventDefault(); if (value.trim()) onAudit(value.trim(), priv); }}
         className="mt-5 flex items-center gap-2 rounded-xl border border-line bg-panel p-2.5 soft-shadow transition focus-within:border-line-2"
       >
         <span className="mono pl-2 text-[14px] text-ink-faint select-none">@</span>
@@ -81,6 +83,7 @@ export function FoundersPage({ onAudit, onOpenRecent }: { onAudit: (h: string) =
           placeholder="audit a founder by handle (e.g. gakonst)"
           className="mono min-w-0 flex-1 bg-transparent py-1.5 text-[14px] text-ink placeholder:text-ink-faint focus:outline-none"
         />
+        <PrivateToggle on={priv} onToggle={setPriv} />
         <button type="submit" className="btn-primary px-3.5 py-1.5 text-[13px] font-medium">Run audit</button>
       </form>
 

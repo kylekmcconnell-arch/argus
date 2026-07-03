@@ -249,7 +249,7 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
           h.onHop("backgrounding the project's X account");
           h.onStep(milestone("Step 3 · Background the project account", `Live people-audit of ${projectX}. This is the project's own account, not a named founder.`, "neutral"));
           projectAccount = await new Promise<Dossier | null>((resolve) => {
-            abortLive = streamAudit(projectX, {
+            abortLive = streamAudit(projectX, false, {
               onStep: (s) => { if (!aborted) h.onStep(s); },
               onDone: (d) => resolve(d),
               onError: () => resolve(null),

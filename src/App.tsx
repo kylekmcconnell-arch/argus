@@ -86,6 +86,11 @@ export default function App() {
     | { kind: "investigation"; inv: Investigation };
   const resultCache = useRef(new Map<string, Cached>());
   const cacheKey = (s: string) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
+  // Private/incognito toggle for the current NON-person flow (token / investigation
+  // / site). Person audits carry their own private flag on the background run.
+  // A private audit runs and shows the result but is never persisted, logged,
+  // graphed, or shown in the sidebar/tickers.
+  const privRef = useRef(false);
 
   // Pull the shared community graph + audit log once on load, so this session
   // sees everyone's work (no-op when no backend is configured).
@@ -93,7 +98,8 @@ export default function App() {
   // the first audit click of the day doesn't eat a cold start on the live path.
   useEffect(() => { void hydrateCommunityGraph(); void hydrateSharedLog(); void probeBackend(); }, []);
 
-  const onAudit = useCallback(async (raw: string) => {
+  const onAudit = useCallback(async (raw: string, priv = false) => {
+    privRef.current = priv;
     const resolved = resolveInput(raw);
     if (resolved.kind === "token") {
       setQuery(raw);
@@ -114,7 +120,7 @@ export default function App() {
     if (providers) {
       // Start the background run NOW (before the view mounts) so it survives an
       // immediate navigation away — the runner owns the stream, not the view.
-      startPersonAudit(handle);
+      startPersonAudit(handle, priv);
       setPhase("live");
     } else {
       setPhase("notfound");
@@ -125,14 +131,15 @@ export default function App() {
   // handles and sites fall through to the normal routing. Internal clicks
   // (Radar, recon, watchlist, founder buttons) keep using onAudit for a quick
   // single-surface audit and don't auto-spend.
-  const onInvestigate = useCallback((raw: string) => {
+  const onInvestigate = useCallback((raw: string, priv = false) => {
+    privRef.current = priv;
     if (resolveInput(raw).kind === "token") {
       setQuery(raw);
       setInvestigationInput(raw);
       setPhase("investigation");
       return;
     }
-    onAudit(raw);
+    onAudit(raw, priv);
   }, [onAudit]);
 
   const onInvestigationError = useCallback(() => setPhase("notfound"), []);
@@ -144,10 +151,12 @@ export default function App() {
   }, []);
 
   const onInvestigationDone = useCallback((inv: Investigation) => {
+    const priv = privRef.current;
     setInvestigation(inv);
     resultCache.current.set(cacheKey(inv.token.address), { kind: "investigation", inv });
-    void syncReport("investigation", inv.token.address, `$${inv.token.symbol}`, inv, inv.token.verdict, inv.token.score);
     setPhase("investigation-report");
+    if (priv) return; // private: show it, leave no trace (no persist / log / graph)
+    void syncReport("investigation", inv.token.address, `$${inv.token.symbol}`, inv, inv.token.verdict, inv.token.score);
     logAudit({
       kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
       summary: inv.founderNote,
@@ -160,10 +169,12 @@ export default function App() {
   }, []);
 
   const onTokenDone = useCallback((d: TokenDossier) => {
+    const priv = privRef.current;
     setTokenDossier(d);
     resultCache.current.set(cacheKey(d.address), { kind: "token", dossier: d });
-    void syncReport("token", d.address, `$${d.symbol}`, d, d.verdict, d.score);
     setPhase("token-report");
+    if (priv) return; // private: show it, leave no trace
+    void syncReport("token", d.address, `$${d.symbol}`, d, d.verdict, d.score);
     logAudit({
       kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
       summary: d.headline,
@@ -177,8 +188,9 @@ export default function App() {
   // is view-independent — it's what makes a BACKGROUNDED audit still land in
   // Recent audits and Dossiers — so the runner calls it for every finished run,
   // whether or not the user is looking at it. It never touches the view.
-  const logPerson = useCallback((d: Dossier) => {
+  const logPerson = useCallback((d: Dossier, priv = false) => {
     resultCache.current.set(cacheKey(d.handle), { kind: "person", dossier: d });
+    if (priv) return; // private: cached for this session's view only — nothing leaves
     void syncReport("person", d.handle, d.handle, d, d.report.composite_verdict, d.report.governing_score);
     logAudit({
       kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
@@ -318,8 +330,8 @@ export default function App() {
       setDossier(null);
       setQuery("");
     }
-    // opening Site recon from the rail is a fresh, manual page
-    if (t === "recon") setReconUrl(null);
+    // opening Site recon from the rail is a fresh, manual page (private off by default)
+    if (t === "recon") { setReconUrl(null); privRef.current = false; }
     setPhase(t);
   }, []);
 
@@ -362,7 +374,7 @@ export default function App() {
 
       {phase === "alerts" && <AlertsPage onOpen={onOpenRecent} />}
 
-      {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} onAudit={onAudit} onOpenRecent={onOpenRecent} />}
+      {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialPrivate={privRef.current} onAudit={onAudit} onOpenRecent={onOpenRecent} />}
 
       {phase === "find" && <FindWallet onAudit={onAudit} onReset={reset} onOpenRecent={onOpenRecent} />}
 

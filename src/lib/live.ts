@@ -49,7 +49,7 @@ export interface LiveHandlers {
 // `error` event; without guarding for that the UI hangs on "working…" forever.
 // We track whether a terminal handler has fired, surface an error if the stream
 // closes early, and run a watchdog just past the function's own 120s ceiling.
-export function streamAudit(handle: string, h: LiveHandlers): () => void {
+export function streamAudit(handle: string, priv: boolean, h: LiveHandlers): () => void {
   const ctrl = new AbortController();
   let settled = false;
   const settle = (fn: () => void) => {
@@ -67,7 +67,7 @@ export function streamAudit(handle: string, h: LiveHandlers): () => void {
 
   (async () => {
     try {
-      const res = await fetch(`/api/audit?handle=${encodeURIComponent(handle)}`, {
+      const res = await fetch(`/api/audit?handle=${encodeURIComponent(handle)}${priv ? "&private=1" : ""}`, {
         signal: ctrl.signal,
         headers: { accept: "text/event-stream" },
       });
