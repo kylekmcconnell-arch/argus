@@ -4,6 +4,7 @@ import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
 import { ScoreTicker } from "./ScoreTicker";
 import { PrivateToggle } from "./PrivateToggle";
+import { beginScan, endScan } from "../lib/activescans";
 import { syncReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
@@ -116,6 +117,10 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
     setPivotNotes([]);
     setWebTeam([]);
     setTeamSearched(false);
+    let scanHost = target;
+    try { scanHost = new URL(/^https?:\/\//.test(target) ? target : `https://${target}`).hostname.replace(/^www\./, ""); } catch { /* keep */ }
+    const scanId = `site:${scanHost}:${Date.now()}`;
+    beginScan({ id: scanId, label: scanHost, kind: "site", ref: scanHost, pct: 10 });
     const r = await runRecon(
       target,
       (s) => setStages((prev) => [...prev, s]),
@@ -123,6 +128,7 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
     );
     setRecon(r);
     setRunning(false);
+    endScan(scanId);
 
     // Dig the web + LinkedIn for the team (the render-based recon is shallow).
     if (r.retrieval.status !== "gap") {
