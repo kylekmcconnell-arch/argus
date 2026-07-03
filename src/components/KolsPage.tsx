@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ScoreTicker } from "./ScoreTicker";
 import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { getAnalyst } from "../lib/analyst";
@@ -60,6 +61,8 @@ export function KolsPage({ onAudit, onOpenRecent }: { onAudit: (h: string) => vo
   const open = onOpenRecent ?? onAudit;
 
   return (
+    <>
+      <ScoreTicker onOpen={open} label="Recent KOLs · click to open the report" filter={(e) => (e.flags ?? []).some((f) => f.toLowerCase() === "role:kol")} />
     <div className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="text-[26px] font-medium tracking-[-0.01em] text-ink">KOLs</h1>
       <p className="mt-2 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">
@@ -95,5 +98,6 @@ export function KolsPage({ onAudit, onOpenRecent }: { onAudit: (h: string) => vo
         </p>
       )}
     </div>
+    </>
   );
 }

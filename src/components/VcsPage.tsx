@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ScoreTicker } from "./ScoreTicker";
 import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { getAnalyst } from "../lib/analyst";
@@ -59,6 +60,8 @@ export function VcsPage({ onAudit, onOpenRecent }: { onAudit: (h: string) => voi
   const open = onOpenRecent ?? onAudit;
 
   return (
+    <>
+      <ScoreTicker onOpen={open} label="Recent VCs · click to open the report" filter={(e) => (e.flags ?? []).some((f) => f.toLowerCase() === "role:investor")} />
     <div className="mx-auto max-w-4xl px-6 py-10">
       <h1 className="text-[26px] font-medium tracking-[-0.01em] text-ink">VCs &amp; investors</h1>
       <p className="mt-2 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">
@@ -94,5 +97,6 @@ export function VcsPage({ onAudit, onOpenRecent }: { onAudit: (h: string) => voi
         </p>
       )}
     </div>
+    </>
   );
 }
