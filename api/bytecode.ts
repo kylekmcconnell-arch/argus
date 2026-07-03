@@ -49,20 +49,43 @@ const KNOWN: Record<string, { name: string; risk: "bad" | "warn" | "info" }> = {
   a9059cbb: { name: "transfer(address,uint256)", risk: "info" }, // confirms it's a token
 };
 
-async function ethGetCode(urls: string[], address: string): Promise<string | null> {
+async function rpc(urls: string[], method: string, params: unknown[]): Promise<string | null> {
   for (const url of urls) {
     try {
       const r = await fetch(url, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getCode", params: [address, "latest"] }),
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
         signal: AbortSignal.timeout(9000),
       });
       if (!r.ok) continue;
       const d = (await r.json()) as any;
-      // A live RPC that simply has no code returns "0x" — that's a real answer,
-      // not a provider failure, so accept it and stop trying fallbacks.
+      // A live RPC returning "0x" is a real answer (no code / empty slot), not a
+      // provider failure — accept it and stop trying fallbacks.
       if (typeof d.result === "string") return d.result;
     } catch { /* try the next endpoint */ }
+  }
+  return null;
+}
+const getCode = (urls: string[], address: string) => rpc(urls, "eth_getCode", [address, "latest"]);
+
+// Most modern tokens are proxies: the address holds a thin stub that delegatecalls
+// a separate implementation, so the proxy's OWN code has no token logic to read.
+// Resolve the implementation so we fingerprint the real contract. Three shapes:
+// EIP-1167 minimal proxy (impl embedded in the stub bytecode), and EIP-1967 /
+// legacy-OZ proxies (impl address stored at a fixed storage slot).
+const SLOT_1967 = "0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc";
+const SLOT_OZ = "0x7050c9e0f4ca769c69bd3a8ef740bc37934f8e2c036e5a723fd8ee048ed3f8c3";
+const addrFromWord = (w: string | null): string | null => {
+  if (!w) return null;
+  const h = w.replace(/^0x/, "").padStart(64, "0").slice(24); // last 20 bytes
+  return /^0+$/.test(h) ? null : "0x" + h;
+};
+async function resolveImplementation(urls: string[], proxy: string, code: string): Promise<string | null> {
+  const mini = code.toLowerCase().match(/363d3d373d3d3d363d73([0-9a-f]{40})5af4/);
+  if (mini) return "0x" + mini[1];
+  for (const slot of [SLOT_1967, SLOT_OZ]) {
+    const impl = addrFromWord(await rpc(urls, "eth_getStorageAt", [proxy, slot, "latest"]));
+    if (impl) return impl;
   }
   return null;
 }
@@ -100,11 +123,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!urls) { res.status(200).json({ address, chain, available: false, note: chain === "solana" ? "Bytecode fingerprinting is EVM-only (Solana tokens share the one SPL program)." : `No public RPC configured for chain '${chain}'.` }); return; }
 
   try {
-    const raw = await ethGetCode(urls, address);
+    const raw = await getCode(urls, address);
     if (raw == null) { res.status(200).json({ address, chain, available: false, note: "RPC did not return contract code." }); return; }
     if (raw === "0x" || raw.length <= 4) { res.status(200).json({ address, chain, available: true, isContract: false, note: "No contract code at this address (an externally-owned account, not a contract token)." }); return; }
 
-    const runtime = stripMetadata(raw);
+    // If it's a proxy, fingerprint the IMPLEMENTATION — that's where the token
+    // logic (and any rug capability) actually lives. Fall back to the proxy's own
+    // code if the implementation can't be fetched.
+    let code = raw, implementation: string | null = null;
+    const impl = await resolveImplementation(urls, address, raw);
+    if (impl && impl.toLowerCase() !== address.toLowerCase()) {
+      const implCode = await getCode(urls, impl);
+      if (implCode && implCode !== "0x" && implCode.length > 4) { code = implCode; implementation = impl; }
+    }
+
+    const runtime = stripMetadata(code);
     const fingerprint = createHash("sha256").update(runtime).digest("hex").slice(0, 16);
     const codeSize = Math.floor(runtime.length / 2);
     const selectors = extractSelectors(runtime);
@@ -121,11 +154,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       : warn.length
         ? `The code can ${warn.map((c) => c.name.split("(")[0]).join("/")} — a trading-control switch worth confirming is renounced.`
         : isToken
-          ? "Standard token surface: no callable mint, blacklist, or pause found in the deployed code."
-          : "Contract code fingerprinted; no standard ERC-20 transfer selector found (may be a proxy or non-standard token).";
+          ? `Standard token surface${implementation ? " (implementation behind a proxy)" : ""}: no callable mint, blacklist, or pause found in the deployed code.`
+          : "Contract code fingerprinted; no standard ERC-20 transfer selector found (non-standard token or an unrecognised proxy).";
 
     res.status(200).json({
       address, chain, available: true, isContract: true, isToken,
+      proxy: !!implementation, implementation,
       fingerprint, codeSize, selectorCount: selectors.length,
       capabilities, verdict: { tone, line },
     });

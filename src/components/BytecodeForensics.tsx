@@ -9,7 +9,7 @@ import { recordForensicEntities, getContributions } from "../graph/store";
 // forms automatically across audits. Cheap (one RPC), so it auto-runs.
 const TONE: Record<string, string> = { bad: "var(--color-avoid)", warn: "var(--color-caution)", good: "var(--color-pass)", info: "var(--color-ink-faint)" };
 type Cap = { selector: string; name: string; risk: "bad" | "warn" | "info" };
-type Data = { available: boolean; isContract?: boolean; isToken?: boolean; fingerprint?: string; codeSize?: number; capabilities?: Cap[]; verdict?: { tone: string; line: string }; note?: string };
+type Data = { available: boolean; isContract?: boolean; isToken?: boolean; proxy?: boolean; implementation?: string | null; fingerprint?: string; codeSize?: number; capabilities?: Cap[]; verdict?: { tone: string; line: string }; note?: string };
 type Twin = { handle: string; verdict?: string };
 
 export function BytecodeForensics({ address, chain, symbol }: { address: string; chain: string; symbol?: string }) {
@@ -74,6 +74,9 @@ export function BytecodeForensics({ address, chain, symbol }: { address: string;
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Bytecode fingerprint</span>
         {data.fingerprint && <span className="mono text-[10px] text-ink-faint">{data.fingerprint}</span>}
+        {data.proxy && data.implementation && (
+          <a href={`https://etherscan.io/address/${data.implementation}`} target="_blank" rel="noreferrer" title={`implementation ${data.implementation}`} className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint hover:text-signal">proxy → impl</a>
+        )}
         {typeof data.codeSize === "number" && <span className="mono ml-auto text-[10px] text-ink-faint">{data.codeSize.toLocaleString()} bytes</span>}
       </div>
 
