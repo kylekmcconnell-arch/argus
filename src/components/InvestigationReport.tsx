@@ -7,6 +7,7 @@ import { FunderSweep } from "./FunderSweep";
 import { GithubForensics } from "./GithubForensics";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
+import { ProjectIntel } from "./ProjectIntel";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 
@@ -61,6 +62,11 @@ export function InvestigationReport({
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
   const tm = verdictMeta(token.verdict);
   // The project's GitHub org (from its site links), for commit forensics.
+  // The project's own website (first non-social link) → domain intelligence.
+  const projectDomain = [...(recon?.socials ?? []), ...(token.socials ?? [])]
+    .map((s) => s.url)
+    .find((u) => /^https?:\/\//i.test(u) && !/x\.com|twitter\.com|t\.me|telegram|discord|github\.com|medium\.com|linktr\.ee/i.test(u))
+    ?.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "") ?? null;
   const ghOrg = (recon?.socials ?? [])
     .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
     .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
@@ -251,6 +257,13 @@ export function InvestigationReport({
         <div className="mt-3">
           <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} onAudit={onAudit} />
         </div>
+
+        {/* domain age + claimed-audit verification (keyless OSINT) */}
+        {projectDomain && (
+          <div className="mt-3">
+            <ProjectIntel domain={projectDomain} />
+          </div>
+        )}
 
         {/* TEAM — the headline section, merged from every source, each clickable */}
         {(teamPeople.length > 0 || advisors.length > 0) && (

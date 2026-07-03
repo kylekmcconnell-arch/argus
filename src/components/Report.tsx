@@ -16,6 +16,7 @@ import { PfpCheck } from "./PfpCheck";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
+import { ProjectIntel } from "./ProjectIntel";
 import { purgeSubject } from "../lib/purge";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
@@ -823,6 +824,18 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               </Section>
             </div>
           )}
+
+          {(() => {
+            // PROJECT accounts: domain age + audit-claim check from the bio link.
+            const dom = (f.bio.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1] ?? "").toLowerCase();
+            return roles.some((r) => r === "PROJECT") && dom ? (
+              <div className="min-w-0 lg:col-span-2">
+                <Section title="Project intelligence" kicker="domain age + claimed security audits — an established brand on a fresh domain is a contradiction">
+                  <ProjectIntel domain={dom} />
+                </Section>
+              </div>
+            ) : null;
+          })()}
 
           <div className="min-w-0 lg:col-span-2">
             <Section title="In the news" kicker="recent press — funding, launches, hacks, exits; an empty trail is itself a signal">
