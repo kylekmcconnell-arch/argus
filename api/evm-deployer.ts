@@ -48,15 +48,22 @@ const lc = (s: string) => s.toLowerCase();
 // The account that first sent ETH/gas into a wallet (its funder), from the oldest
 // txs. The first INCOMING value-bearing tx from a different account is the funder.
 async function fundingSource(chainid: number, wallet: string, key: string): Promise<{ funder: string | null; firstTs: number | null }> {
-  const d = await es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key).catch(() => null);
+  // Read BOTH external txs and INTERNAL txs (contract-routed ETH — a disperse
+  // contract, a multisig, a CEX withdrawal via proxy — invisible to txlist), then
+  // take the earliest inflow across both as the true first funder.
+  const [d, di] = await Promise.all([
+    es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key).catch(() => null),
+    es(chainid, { module: "account", action: "txlistinternal", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key).catch(() => null),
+  ]);
   const txs: any[] = Array.isArray(d?.result) ? d.result : [];
+  const itxs: any[] = Array.isArray(di?.result) ? di.result : [];
   const firstTs = txs.length ? Number(txs[0].timeStamp) || null : null;
-  for (const t of txs) {
-    if (lc(t.to) === lc(wallet) && t.from && lc(t.from) !== lc(wallet) && Number(t.value) > 0 && t.isError !== "1") {
-      return { funder: t.from, firstTs };
-    }
-  }
-  return { funder: null, firstTs };
+  const cands: { from: string; ts: number }[] = [];
+  const inflow = (t: any) => lc(t.to) === lc(wallet) && t.from && lc(t.from) !== lc(wallet) && Number(t.value) > 0 && t.isError !== "1";
+  for (const t of txs) if (inflow(t)) cands.push({ from: t.from, ts: Number(t.timeStamp) });
+  for (const t of itxs) if (inflow(t)) cands.push({ from: t.from, ts: Number(t.timeStamp) });
+  cands.sort((a, b) => a.ts - b.ts);
+  return { funder: cands[0]?.from ?? null, firstTs };
 }
 
 // How many contracts this wallet has DEPLOYED, from its tx history (creation txs

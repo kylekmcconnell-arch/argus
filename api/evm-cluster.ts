@@ -49,14 +49,29 @@ async function txlist(chainid: number, address: string, key: string, offset: num
   return Array.isArray(d?.result) ? d.result : [];
 }
 
-// A holder's first funder + the set-members it directly transacted with, from one
-// tx sample (oldest-first — captures the funding tx and early distribution).
-async function profile(chainid: number, wallet: string, key: string, inSet: Set<string>): Promise<{ wallet: string; funder: string | null; cps: string[] }> {
-  const txs = await txlist(chainid, wallet, key, 2000);
+// ERC-20 transfers of a SPECIFIC token for a wallet — holders passing the token
+// among themselves is a stronger coordination signal than sharing ETH.
+async function tokentx(chainid: number, wallet: string, token: string, key: string): Promise<any[]> {
+  const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "tokentx", contractaddress: token, address: wallet, page: "1", offset: "200", sort: "desc", apikey: key });
+  const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
+  if (!r || !r.ok) return [];
+  const d = (await r.json().catch(() => null)) as any;
+  return Array.isArray(d?.result) ? d.result : [];
+}
+
+// A holder's first funder + the set-members it directly transacted with. Reads both
+// ETH (txlist, oldest-first — captures the funding tx) AND transfers of the token
+// itself (tokentx) so wallets that pass the token to each other are linked.
+async function profile(chainid: number, wallet: string, token: string, key: string, inSet: Set<string>): Promise<{ wallet: string; funder: string | null; cps: string[] }> {
+  const [txs, ttx] = await Promise.all([txlist(chainid, wallet, key, 2000), tokentx(chainid, wallet, token, key)]);
   let funder: string | null = null;
   const cps = new Set<string>();
   for (const t of txs) {
     if (!funder && lc(t.to) === lc(wallet) && t.from && lc(t.from) !== lc(wallet) && Number(t.value) > 0 && t.isError !== "1") funder = lc(t.from);
+    const other = lc(t.from) === lc(wallet) ? lc(t.to || "") : lc(t.from || "");
+    if (other && other !== lc(wallet) && inSet.has(other)) cps.add(other);
+  }
+  for (const t of ttx) {
     const other = lc(t.from) === lc(wallet) ? lc(t.to || "") : lc(t.from || "");
     if (other && other !== lc(wallet) && inSet.has(other)) cps.add(other);
   }
@@ -103,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 2. Each holder's funder + in-set counterparties.
     const inSet = new Set(set);
     const deadline = Date.now() + 50000;
-    const profiles = await inChunks(set, CHUNK, async (w) => (Date.now() > deadline ? { wallet: w, funder: null, cps: [] } : profile(chainid, w, key, inSet)));
+    const profiles = await inChunks(set, CHUNK, async (w) => (Date.now() > deadline ? { wallet: w, funder: null, cps: [] } : profile(chainid, w, lc(address), key, inSet)));
 
     // 3. Union: shared non-exchange funder, or a direct transfer between members.
     const dsu = new DSU();
