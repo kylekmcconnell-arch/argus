@@ -24,10 +24,19 @@ const PROVIDERS: Prov[] = [
   { key: "BITQUERY_API_KEY", label: "Bitquery", powers: "Alternate multi-chain on-chain data", source: "bitquery.io", tier: "optional" },
 ];
 
-const KEYLESS = [
-  "DexScreener (token market data)", "GoPlus + honeypot.is (contract safety)", "CoinGecko free tier",
-  "Wayback Machine (deleted-content)", "Farcaster / Warpcast", "memory.lol (handle history)",
-  "Reddit + Telegram (cross-platform)", "web3.bio / ENS / Bonfida (name → wallet)",
+// Keyless sources: always on, no key. Same shape as PROVIDERS so the UI renders
+// them as identical rows (not a separate hard-to-read chip cluster).
+const KEYLESS: { label: string; powers: string; source: string }[] = [
+  { label: "DexScreener", powers: "Token market, liquidity & pair data", source: "dexscreener.com" },
+  { label: "GoPlus + honeypot.is", powers: "Contract safety + honeypot simulation", source: "gopluslabs.io" },
+  { label: "GeckoTerminal", powers: "On-chain DEX price history & OHLCV", source: "geckoterminal.com" },
+  { label: "Wayback Machine", powers: "Deleted-content archaeology (site diffs)", source: "archive.org" },
+  { label: "Farcaster / Warpcast", powers: "Casts + connected-wallet lookups", source: "warpcast.com" },
+  { label: "memory.lol", powers: "X handle-change history (rebrands)", source: "memory.lol" },
+  { label: "Reddit + Telegram", powers: "Cross-platform presence checks", source: "reddit.com" },
+  { label: "web3.bio / ENS / Bonfida", powers: "Name → wallet resolution", source: "web3.bio" },
+  { label: "RDAP", powers: "Domain registration + age", source: "rdap.org" },
+  { label: "SEC EDGAR", powers: "US securities filings", source: "sec.gov" },
 ];
 
 async function githubUsage(token: string): Promise<{ remaining: number; limit: number; resetsIn: string } | null> {
@@ -61,5 +70,8 @@ export default async function handler(_req: VercelRequest, res: VercelResponse) 
     };
   });
 
-  res.status(200).json({ providers, keyless: KEYLESS, note: "Dollar balances aren't API-exposed for most providers; this shows configured + live usage where available." });
+  // Keyless sources rendered as identical rows: always-on, no key, no top-up.
+  const keyless = KEYLESS.map((k) => ({ label: k.label, powers: k.powers, source: k.source, tier: "keyless" as const, configured: true }));
+
+  res.status(200).json({ providers, keyless, note: "Dollar balances aren't API-exposed for most providers; this shows configured + live usage where available." });
 }
