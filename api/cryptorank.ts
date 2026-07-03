@@ -132,9 +132,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const v3search = await hit("v3", `/currencies?symbol=${encodeURIComponent(symbol)}`);
     let id = candidates[0].id;
     try { const r = await fetch(`https://api.cryptorank.io/v3/currencies?symbol=${encodeURIComponent(symbol)}`, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(9000) }); if (r.ok) { const j: any = await r.json(); id = (j?.data ?? j)?.[0]?.id ?? id; } } catch { /* keep v2 id */ }
-    const out: any = { v2id: candidates[0].id, v3id: id, "v3 /currencies?symbol": v3search };
-    for (const p of [`/currencies/${id}`, `/currencies/${id}/funding-rounds`, `/currencies/${id}/vesting`, `/currencies/${id}/full-metrics`, `/funding-rounds?currencyId=${id}`, `/funds?currencyId=${id}`, `/currencies/categories`, `/global`]) out[`v3 ${p}`] = await hit("v3", p);
-    res.status(200).json(out); return;
+    // Pull the OpenAPI spec (behind the key) → list every real v3 route.
+    let routes: string[] = [];
+    try {
+      const r = await fetch(`https://api.cryptorank.io/v3/openapi.json`, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(9000) });
+      if (r.ok) { const spec: any = await r.json(); routes = Object.keys(spec?.paths ?? {}); }
+    } catch { /* */ }
+    const relevant = routes.filter((p) => /fund|vest|unlock|invest|round|currenc|categor|global|metric/i.test(p));
+    res.status(200).json({ v2id: candidates[0].id, v3id: id, totalRoutes: routes.length, relevant }); return;
   }
 
   // Resolve: prefer the candidate whose on-chain contract matches; else the
