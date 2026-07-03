@@ -898,6 +898,7 @@ function assembleDossier(ev, live) {
     handle: ev.profile.handle,
     display_name: ev.profile.display_name,
     avatar: ev.profile.avatar,
+    avatar_url: ev.profile.avatar_url,
     bio: ev.profile.bio,
     followers: ev.profile.followers,
     joined: ev.profile.joined,
@@ -1561,13 +1562,16 @@ async function getProfile2(handle) {
       }
       const p = d.data ?? d;
       if (!p || p.name == null && p.followers == null && p.followers_count == null && p.description == null) return null;
+      const rawImg = p.profilePicture ?? p.profile_image_url_https ?? p.profile_image_url ?? p.profile_image;
+      const image = typeof rawImg === "string" ? rawImg.replace(/_normal\.(jpg|jpeg|png|gif|webp)$/i, "_400x400.$1") : void 0;
       return {
         handle: "@" + u,
         name: p.name,
         bio: p.description,
         followers: p.followers ?? p.followers_count,
         createdAt: p.createdAt ?? p.created_at,
-        website: pickWebsite(p)
+        website: pickWebsite(p),
+        image
       };
     } catch {
       return null;
@@ -1612,7 +1616,8 @@ var num = (...v) => {
 var KW_IDENTITY = ["founder", "co-founder", "cofounder", "CEO", "CTO", "advisor", '"I built"', '"we built"', '"joined as"', "founded"];
 var KW_LAUNCH = ["launching", "presale", "mint", "airdrop", "raised", "seed", "IDO", '"CA:"', "tokenomics", "whitelist"];
 var KW_ENDORSE = ["backed", "investors", "partnership", "gem", "100x", '"proud to"'];
-var CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined)\b/i;
+var KW_SHILL = ["aped", "sending", '"the play"', "entry", "accumulated", "conviction", "printing", "pumping", "calling", "chart", '"my bag"', "loaded"];
+var CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined|aped?|shill|calling|conviction|printing|pumping|sending it)\b/i;
 function parseTweet(t) {
   const text = (t.text ?? t.full_text ?? "").trim();
   const at = Date.parse(t.createdAt ?? t.created_at ?? "");
@@ -1653,14 +1658,15 @@ async function collectCorpus(handle) {
   const u = handle.replace(/^@/, "");
   if (!key) return { posts: [], newest: [], count: { originals: 0, searched: 0, ranked: 0 } };
   const p1 = await lastTweetsPage(u, key).catch(() => ({ tweets: [], next: void 0 }));
-  const [p2, sId, sLa, sEn] = await Promise.all([
+  const [p2, sId, sLa, sEn, sSh] = await Promise.all([
     p1.next ? lastTweetsPage(u, key, p1.next).catch(() => ({ tweets: [] })) : Promise.resolve({ tweets: [] }),
     searchFrom(u, KW_IDENTITY, key).catch(() => []),
     searchFrom(u, KW_LAUNCH, key).catch(() => []),
-    searchFrom(u, KW_ENDORSE, key).catch(() => [])
+    searchFrom(u, KW_ENDORSE, key).catch(() => []),
+    searchFrom(u, KW_SHILL, key).catch(() => [])
   ]);
   const originalsRaw = [...p1.tweets, ...p2.tweets].map(parseTweet).filter((p) => p.text && !p.isReply && !p.isRt);
-  const searchedRaw = [...sId, ...sLa, ...sEn].map(parseTweet).filter((p) => p.text && !p.isRt);
+  const searchedRaw = [...sId, ...sLa, ...sEn, ...sSh].map(parseTweet).filter((p) => p.text && !p.isRt);
   const seen = /* @__PURE__ */ new Set();
   const dedup = (arr) => arr.filter((p) => {
     const k = p.text.slice(0, 80).toLowerCase();
@@ -2735,6 +2741,7 @@ async function coldIntake(ctx) {
   const prof = await getProfile2(ctx.handle);
   if (prof) {
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
+    if (prof.image) ctx.evidence.profile.avatar_url = prof.image;
     ctx.evidence.profile.bio = prof.bio ?? "";
     siteUrl = prof.website;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);

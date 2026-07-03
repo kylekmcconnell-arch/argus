@@ -13,7 +13,7 @@ import { recordForensicEntities } from "../graph/store";
 // known associates. Auto-runs on the report.
 type Promo = { ticker?: string; contract_address?: string; chain?: string };
 type Assoc = { associate_key: string; relation?: string };
-type TokRes = { label: string; address?: string; chain?: string; pairAddress?: string; verdict?: string; score?: number | null; liquidityUsd?: number; dead: boolean; unresolved?: boolean };
+type TokRes = { label: string; address?: string; chain?: string; pairAddress?: string; verdict?: string; score?: number | null; liquidityUsd?: number; mcap?: number; dead: boolean; unresolved?: boolean };
 
 async function tickerToContract(ticker: string): Promise<string | null> {
   const sym = ticker.replace(/^\$/, "").toUpperCase();
@@ -24,7 +24,11 @@ async function tickerToContract(ticker: string): Promise<string | null> {
     const all: any[] = Array.isArray(d?.pairs) ? d.pairs : [];
     const pairs = all
       .filter((p: any) => p?.baseToken?.address && String(p?.baseToken?.symbol ?? "").toUpperCase() === sym)
-      .sort((a: any, b: any) => (b?.chainId === "solana" ? 1 : 0) - (a?.chainId === "solana" ? 1 : 0) || Number(b?.liquidity?.usd ?? 0) - Number(a?.liquidity?.usd ?? 0));
+      // The real project usually has the largest market. Rank by MARKET CAP (then
+      // liquidity), NOT DEX-liquidity alone — a legit token can trade thinly on
+      // DEXes yet be huge on CEXes (e.g. $RLB / Rollbit). Liquidity-first matching
+      // was picking random same-ticker memecoins over the real project.
+      .sort((a: any, b: any) => (Number(b?.marketCap ?? b?.fdv ?? 0) - Number(a?.marketCap ?? a?.fdv ?? 0)) || (Number(b?.liquidity?.usd ?? 0) - Number(a?.liquidity?.usd ?? 0)));
     return pairs[0]?.baseToken?.address ?? null;
   } catch {
     return null;
@@ -56,12 +60,14 @@ async function auditPromotions(promos: Promo[]): Promise<TokRes[]> {
     if (!d) { out.push({ label, dead: false, unresolved: true }); continue; }
     if (BLUECHIP.has((d.symbol ?? "").toUpperCase())) continue; // resolved to a major asset
     const liq = d.liquidityUsd ?? 0;
-    // "rugged / dead" means the token is actually gone — thin/collapsed liquidity —
-    // NOT merely a low ARGUS score. A token with real, deep liquidity is by
-    // definition not dead, so a failed verdict only counts as dead when liquidity
-    // is also thin (guards against tagging a $1B-liquidity asset "rugged").
-    const dead = liq < 500 || ((d.verdict === "FAIL" || d.verdict === "AVOID") && liq < 250_000);
-    out.push({ label: d.symbol ? `$${d.symbol}` : label, address: d.address, chain: d.chain, pairAddress: d.pairAddress, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, dead });
+    const mc = d.mcap ?? 0;
+    // "rugged / dead" means the token is actually gone: essentially no MARKET CAP
+    // AND no tradeable liquidity. Market cap — not DEX liquidity — is the life
+    // signal: a real project ($RLB/Rollbit) can have thin DEX liquidity yet a large
+    // cap because it trades on CEXes, and is NOT dead. This is distinct from the
+    // ARGUS risk verdict (a token can be alive but still FAIL on risk).
+    const dead = mc < 50_000 && liq < 5_000;
+    out.push({ label: d.symbol ? `$${d.symbol}` : label, address: d.address, chain: d.chain, pairAddress: d.pairAddress, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap, dead });
   }
   return out;
 }
@@ -111,9 +117,9 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
       <div className="mt-2.5">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-[12px] font-medium text-ink">Tokens they promoted</span>
-          {resolved.length > 0 && (
-            <span className={`mono text-[11px] ${dead.length ? "text-avoid" : "text-ink-faint"}`}>
-              {dead.length}/{resolved.length} dead or failing
+          {resolved.length > 0 && dead.length > 0 && (
+            <span className="mono text-[11px] text-avoid">
+              {dead.length}/{resolved.length} dead
             </span>
           )}
         </div>
@@ -126,7 +132,7 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
                   <div className="flex flex-wrap items-center gap-2">
                     <button onClick={() => t.address && onAudit?.(t.address)} className="mono text-ink underline-offset-2 hover:text-signal-dim hover:underline">{t.label}</button>
                     {m && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${m.color}1a`, color: m.color }}>{t.verdict}{t.score != null ? ` ${t.score}` : ""}</span>}
-                    <span className="text-[11px] text-ink-faint">liq {money(t.liquidityUsd)}</span>
+                    <span className="text-[11px] text-ink-faint">{t.mcap ? `mcap ${money(t.mcap)}` : `liq ${money(t.liquidityUsd)}`}</span>
                     {t.dead && <span className="mono rounded border border-avoid/40 px-1.5 py-0.5 text-[9.5px] text-avoid">rugged / dead</span>}
                     {t.address && t.chain && <span className="ml-auto"><TokenSparkline address={t.address} chain={t.chain} pairAddress={t.pairAddress} compact /></span>}
                   </div>
@@ -140,7 +146,7 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
         )}
         {dead.length > 0 && (
           <p className="mt-1.5 text-[12px] leading-relaxed text-avoid">
-            {dead.length} of the {resolved.length} tokens this account promoted are now dead or failing — a shill-and-dump pattern.
+            {dead.length} of the {resolved.length} tokens this account promoted {dead.length === 1 ? "is" : "are"} effectively dead — no market cap and no tradeable liquidity{dead.length >= resolved.length / 2 ? ", a shill-and-dump pattern" : ""}.
           </p>
         )}
         {/* Promoted tickers we couldn't match to an on-chain contract — shown, not

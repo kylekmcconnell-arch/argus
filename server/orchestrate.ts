@@ -74,6 +74,7 @@ async function coldIntake(ctx: CollectContext) {
   const prof = await xProfile(ctx.handle);
   if (prof) {
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
+    if (prof.image) ctx.evidence.profile.avatar_url = prof.image; // real X photo → reliable avatar
     ctx.evidence.profile.bio = prof.bio ?? "";
     siteUrl = prof.website;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);

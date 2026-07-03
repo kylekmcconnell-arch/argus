@@ -180,6 +180,7 @@ export default function App() {
     void syncReport("person", d.handle, d.handle, d, d.report.composite_verdict, d.report.governing_score);
     logAudit({
       kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
+      image: d.avatar_url, // real X photo (falls back to unavatar in auditImage when absent)
       summary: d.headline,
       // Log EVERY held role (not just the governing one) so a founder-who-is-also-
       // a-KOL (e.g. blknoiz06) appears in all matching directories.

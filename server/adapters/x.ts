@@ -96,6 +96,7 @@ export interface XProfile {
   followers?: number;
   createdAt?: string;
   website?: string;
+  image?: string; // real X profile photo URL (more reliable than an unavatar guess)
 }
 
 // The project's own website is the biggest un-mined lead on a project account —
@@ -129,6 +130,10 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
       }
       const p = d.data ?? d;
       if (!p || (p.name == null && p.followers == null && p.followers_count == null && p.description == null)) return null;
+      // twitterapi returns the avatar under a few shapes; take the first, and ask
+      // for the full-size image (Twitter serves a 48px "_normal" by default).
+      const rawImg = p.profilePicture ?? p.profile_image_url_https ?? p.profile_image_url ?? p.profile_image;
+      const image = typeof rawImg === "string" ? rawImg.replace(/_normal\.(jpg|jpeg|png|gif|webp)$/i, "_400x400.$1") : undefined;
       return {
         handle: "@" + u,
         name: p.name,
@@ -136,6 +141,7 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
         followers: p.followers ?? p.followers_count,
         createdAt: p.createdAt ?? p.created_at,
         website: pickWebsite(p),
+        image,
       };
     } catch {
       return null;
@@ -203,7 +209,11 @@ interface CorpusPost { text: string; at: number | null; views: number; likes: nu
 const KW_IDENTITY = ["founder", "co-founder", "cofounder", "CEO", "CTO", "advisor", '"I built"', '"we built"', '"joined as"', "founded"];
 const KW_LAUNCH = ["launching", "presale", "mint", "airdrop", "raised", "seed", "IDO", '"CA:"', "tokenomics", "whitelist"];
 const KW_ENDORSE = ["backed", "investors", "partnership", "gem", "100x", '"proud to"'];
-const CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined)\b/i;
+// A KOL's actual product is the CALL: without these, the corpus (tuned to founder
+// claims) never surfaces their shill posts, so tokens they promoted (e.g. $DUBBZ)
+// never reach the promotions extractor and vanish from the KOL report.
+const KW_SHILL = ["aped", "sending", '"the play"', "entry", "accumulated", "conviction", "printing", "pumping", "calling", "chart", '"my bag"', "loaded"];
+const CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined|aped?|shill|calling|conviction|printing|pumping|sending it)\b/i;
 
 function parseTweet(t: any): CorpusPost {
   const text = (t.text ?? t.full_text ?? "").trim();
@@ -252,15 +262,16 @@ export async function collectCorpus(handle: string): Promise<Corpus> {
   // Layer 1: 2 pages of recent originals (drop replies/RTs).
   // Layer 2: 3 keyword searches over the whole history, in parallel.
   const p1 = await lastTweetsPage(u, key).catch(() => ({ tweets: [] as any[], next: undefined }));
-  const [p2, sId, sLa, sEn] = await Promise.all([
+  const [p2, sId, sLa, sEn, sSh] = await Promise.all([
     p1.next ? lastTweetsPage(u, key, p1.next).catch(() => ({ tweets: [] as any[] })) : Promise.resolve({ tweets: [] as any[] }),
     searchFrom(u, KW_IDENTITY, key).catch(() => []),
     searchFrom(u, KW_LAUNCH, key).catch(() => []),
     searchFrom(u, KW_ENDORSE, key).catch(() => []),
+    searchFrom(u, KW_SHILL, key).catch(() => []),
   ]);
 
   const originalsRaw = [...p1.tweets, ...p2.tweets].map(parseTweet).filter((p) => p.text && !p.isReply && !p.isRt);
-  const searchedRaw = [...sId, ...sLa, ...sEn].map(parseTweet).filter((p) => p.text && !p.isRt);
+  const searchedRaw = [...sId, ...sLa, ...sEn, ...sSh].map(parseTweet).filter((p) => p.text && !p.isRt);
 
   // Dedup by normalized text.
   const seen = new Set<string>();

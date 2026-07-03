@@ -387,7 +387,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
         <RingAlert handle={report.handle} onAudit={onAudit} />
         {/* subject identity */}
         <div className="mt-6 flex flex-wrap items-start gap-4">
-          <Avatar src={xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />
+          <Avatar src={f.avatar_url || xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-[19px] font-semibold tracking-tight text-ink">{f.display_name}</h1>

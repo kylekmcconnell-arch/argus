@@ -14,6 +14,7 @@ export interface Dossier {
   handle: string;
   display_name: string;
   avatar: string;
+  avatar_url?: string;
   bio: string;
   followers: string;
   joined: string;
@@ -87,6 +88,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     handle: ev.profile.handle,
     display_name: ev.profile.display_name,
     avatar: ev.profile.avatar,
+    avatar_url: ev.profile.avatar_url,
     bio: ev.profile.bio,
     followers: ev.profile.followers,
     joined: ev.profile.joined,
