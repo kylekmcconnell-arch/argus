@@ -9,10 +9,21 @@ import { getAnalyst } from "../lib/analyst";
 // The report library: every persisted audit (yours + Enigma's) from the shared
 // backend, searchable, newest first. Click opens the stored report (no re-run);
 // x purges the subject everywhere for a from-scratch redo.
+// The badge shows the ROLE (Founder / Project / KOL / VC …) — more useful than
+// the raw audit kind. Falls back to the kind when no role is known.
+const ROLE_LABEL: Record<string, { label: string; color: string }> = {
+  FOUNDER: { label: "founder", color: "var(--color-signal)" },
+  PROJECT: { label: "project", color: "var(--color-unverifiable)" },
+  KOL: { label: "KOL", color: "var(--color-caution)" },
+  INVESTOR: { label: "VC", color: "var(--color-pass)" },
+  ADVISOR: { label: "advisor", color: "var(--color-ink-dim)" },
+  AGENCY: { label: "agency", color: "var(--color-ink-dim)" },
+  MEMBER: { label: "member", color: "var(--color-ink-faint)" },
+};
 const KIND_META: Record<string, { label: string; color: string }> = {
   person: { label: "person", color: "var(--color-signal)" },
   token: { label: "token", color: "var(--color-caution)" },
-  investigation: { label: "invest.", color: "var(--color-unverifiable)" },
+  investigation: { label: "project", color: "var(--color-unverifiable)" }, // a token/project deep-dive
 };
 
 function ago(ts?: string): string {
@@ -33,15 +44,20 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
     void listReports().then(setReports);
   }, []);
 
-  // Images come from the audit log (the library listing itself has none).
-  const imageByRef = useMemo(() => {
-    const m = new Map<string, string>();
+  // Images + role come from the audit log (the report listing carries neither).
+  const { imageByRef, roleByRef } = useMemo(() => {
+    const imageByRef = new Map<string, string>();
+    const roleByRef = new Map<string, string>();
     for (const e of mergedLog()) {
-      const img = auditImage(e);
       const k = (e.ref ?? e.query).trim().toLowerCase().replace(/^[@$]/, "");
-      if (img && k && !m.has(k)) m.set(k, img);
+      if (!k) continue;
+      const img = auditImage(e);
+      if (img && !imageByRef.has(k)) imageByRef.set(k, img);
+      // first role: flag is the governing role (logPerson writes it first)
+      const role = (e.flags ?? []).find((f) => /^role:/i.test(f))?.slice(5).toUpperCase();
+      if (role && !roleByRef.has(k)) roleByRef.set(k, role);
     }
-    return m;
+    return { imageByRef, roleByRef };
   }, [reports]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const me = getAnalyst();
@@ -79,8 +95,11 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
         {shown.map((r) => {
           const m = r.verdict ? verdictMeta(r.verdict) : null;
           const color = m?.color ?? "var(--color-ink-faint)";
-          const km = KIND_META[r.kind] ?? KIND_META.person;
-          const img = imageByRef.get(r.ref.toLowerCase());
+          // Show the ROLE for person audits (Founder/Project/KOL/VC …); fall back
+          // to the audit kind (token / project deep-dive) otherwise.
+          const role = r.kind === "person" ? roleByRef.get(r.ref.toLowerCase().replace(/^[@$]/, "")) : undefined;
+          const km = (role && ROLE_LABEL[role]) || KIND_META[r.kind] || KIND_META.person;
+          const img = imageByRef.get(r.ref.toLowerCase().replace(/^[@$]/, ""));
           const letter = ((r.query ?? r.ref).replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
           const cardKey = `${r.kind}:${r.ref}`;
           const ledger = r.cost?.calls ?? [];
