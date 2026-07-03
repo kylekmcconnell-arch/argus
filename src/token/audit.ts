@@ -20,6 +20,7 @@ export interface NormalizedSafety {
   simChecked: boolean;
   honeypot: boolean;
   honeypotOnchain: boolean; // GoPlus / on-chain flag, independent of the honeypot.is simulation
+  serialScammerCreator: boolean; // GoPlus honeypot_with_same_creator: the deployer has shipped honeypots before
   mintable: boolean;
   freezable: boolean;
   nonTransferable: boolean;
@@ -116,6 +117,7 @@ function evmSafety(gp: GoPlusSecurity | null, sim: HoneypotSim | null): Normaliz
     simChecked: !!s,
     honeypot: t1(gp?.is_honeypot) || (s?.isHoneypot ?? false),
     honeypotOnchain: t1(gp?.is_honeypot) || t1(gp?.cannot_sell_all),
+    serialScammerCreator: t1(gp?.honeypot_with_same_creator),
     mintable: t1(gp?.is_mintable),
     freezable: false,
     nonTransferable: false,
@@ -161,6 +163,8 @@ function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
     simChecked: false,
     honeypot: !!sol?.non_transferable && sol.non_transferable === "1",
     honeypotOnchain: sol?.non_transferable === "1",
+    serialScammerCreator: false, // GoPlus's same-creator honeypot flag is EVM-only
+
     mintable,
     freezable,
     nonTransferable: sol?.non_transferable === "1",
@@ -188,7 +192,7 @@ function solanaSafety(sol: SolanaSecurity | null): NormalizedSafety {
 
 function emptySafety(): NormalizedSafety {
   return {
-    available: false, simChecked: false, honeypot: false, honeypotOnchain: false, mintable: false, freezable: false,
+    available: false, simChecked: false, honeypot: false, honeypotOnchain: false, serialScammerCreator: false, mintable: false, freezable: false,
     nonTransferable: false, ownerRenounced: false, takeBack: false, hiddenOwner: false,
     selfdestruct: false, pausable: false, openSource: false, cannotSellAll: false,
     metadataMutable: false, buyTax: 0, sellTax: 0, holderCount: 0, topHolderPct: null, lpLocked: false,
@@ -316,6 +320,9 @@ async function runTokenAudit(
     if (s.freezable) { caps.push([35, "freeze_authority_active"]); findings.push({ claim: "Freeze authority active: the team can freeze your tokens (you cannot sell).", tone: "bad", source: "goplus-sol" }); }
     if (s.takeBack || s.hiddenOwner) { caps.push([35, "reclaimable_ownership"]); findings.push({ claim: s.hiddenOwner ? "Hidden owner detected." : "Ownership can be taken back after renouncement.", tone: "bad", source: "goplus" }); }
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
+    // The deployer's OTHER tokens include honeypots — a serial-scammer signal that a
+    // clean-looking contract can't wash off. Independent of this token's own flags.
+    if (s.serialScammerCreator) { caps.push([25, "serial_scammer_creator"]); findings.push({ claim: "The wallet that deployed this token has created honeypot tokens before — a serial scammer.", tone: "bad", source: "goplus" }); }
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });
     if (s.simChecked && !s.honeypot) findings.push({ claim: `Sell simulation passed (buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%).`, tone: "good", source: "honeypot.is" });
     if (s.ownerRenounced && !s.mintable && !s.takeBack && !s.freezable) findings.push({ claim: chain === "solana" ? "Mint and freeze authority revoked." : "Ownership renounced; no mint or take-back.", tone: "good", source: "goplus" });

@@ -138,6 +138,7 @@ export function pickPair(pairs: DexPair[], wantAddress?: string): DexPair | null
 
 export interface GoPlusSecurity {
   is_honeypot?: string;
+  honeypot_with_same_creator?: string; // "1" = the deployer has shipped honeypots before
   is_mintable?: string;
   owner_address?: string;
   can_take_back_ownership?: string;
