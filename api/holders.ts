@@ -55,18 +55,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const bump = (t: "warn" | "bad") => { if (t === "bad" || tone === "good") tone = t; };
     const bits: string[] = [];
     if (d.rugged) { bump("bad"); bits.push("RugCheck flags this token as rugged"); }
-    // Connected insider clusters — the strongest distribution signal (Bubblemaps-style).
-    if (insidersDetected >= 30 && insiderClusteredPct >= 30) { bump("bad"); bits.push(`${insidersDetected.toLocaleString()} wallets funded from a common source hold ${insiderClusteredPct.toFixed(0)}% of supply — one hidden hand`); }
-    else if (insidersDetected >= 30 && insiderClusteredPct >= 12) { bump("warn"); bits.push(`${insidersDetected.toLocaleString()} connected wallets cluster ${insiderClusteredPct.toFixed(0)}% of supply`); }
-    if (creatorPct >= 15) { bump("bad"); bits.push(`the creator still holds ${creatorPct.toFixed(0)}%`); }
-    else if (creatorPct >= 7) { bump("warn"); bits.push(`the creator holds ${creatorPct.toFixed(0)}%`); }
+    // On a THIN base (young memecoins — the real diligence target) the connected
+    // clusters + top-10 are the story. On a mega-holder token the transfer graph
+    // balloons and the top-10 is exchanges, so we don't alarm on either.
     if (!large) {
+      if (insidersDetected >= 15 && insiderClusteredPct >= 30) { bump("bad"); bits.push(`${insidersDetected.toLocaleString()} wallets funded from a common source hold ${insiderClusteredPct.toFixed(0)}% of supply — one hidden hand`); }
+      else if (insidersDetected >= 15 && insiderClusteredPct >= 12) { bump("warn"); bits.push(`${insidersDetected.toLocaleString()} connected wallets cluster ${insiderClusteredPct.toFixed(0)}% of supply`); }
       if (top10 >= 60) { bump("bad"); bits.push(`top 10 wallets hold ${top10.toFixed(0)}% of a thin base of ${totalHolders.toLocaleString()} holders`); }
       else if (top10 >= 40) { bump("warn"); bits.push(`top 10 hold ${top10.toFixed(0)}% (only ${totalHolders.toLocaleString()} holders)`); }
     }
+    if (creatorPct >= 15) { bump("bad"); bits.push(`the creator still holds ${creatorPct.toFixed(0)}%`); }
+    else if (creatorPct >= 7) { bump("warn"); bits.push(`the creator holds ${creatorPct.toFixed(0)}%`); }
     const line = bits.length
       ? bits.join("; ") + "."
-      : `Broadly held: ${totalHolders.toLocaleString()} holders, top 10 hold ${top10.toFixed(0)}%${marketPct > 1 ? ` (${marketPct.toFixed(0)}% is DEX/CEX/LP, not private wallets)` : ""}.`;
+      : `Broadly held: ${totalHolders.toLocaleString()} holders, top 10 hold ${top10.toFixed(0)}%${insidersDetected >= 1000 ? " (a large linked transfer graph, expected for a liquid token)" : ""}.`;
 
     res.status(200).json({
       available: true, source: "rugcheck", mint,
