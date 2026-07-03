@@ -213,6 +213,11 @@ const KW_ENDORSE = ["backed", "investors", "partnership", "gem", "100x", '"proud
 // claims) never surfaces their shill posts, so tokens they promoted (e.g. $DUBBZ)
 // never reach the promotions extractor and vanish from the KOL report.
 const KW_SHILL = ["aped", "sending", '"the play"', "entry", "accumulated", "conviction", "printing", "pumping", "calling", "chart", '"my bag"', "loaded"];
+// A prolific caller's real output is a stream of cashtag + chart-link posts ("$X
+// here's the chart", a dexscreener/pump link) that carry no founder vocabulary, so
+// the founder/shill layers miss them and their report shows ~5 of 100s of calls.
+// Chart-link domains are near-certain calls AND hand the resolver the token page.
+const KW_CALLS = ["dexscreener.com", "pump.fun", "birdeye.so", "dextools.io", "geckoterminal.com", "photon-sol", '"CA"'];
 const CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined|aped?|shill|calling|conviction|printing|pumping|sending it)\b/i;
 
 function parseTweet(t: any): CorpusPost {
@@ -262,16 +267,17 @@ export async function collectCorpus(handle: string): Promise<Corpus> {
   // Layer 1: 2 pages of recent originals (drop replies/RTs).
   // Layer 2: 3 keyword searches over the whole history, in parallel.
   const p1 = await lastTweetsPage(u, key).catch(() => ({ tweets: [] as any[], next: undefined }));
-  const [p2, sId, sLa, sEn, sSh] = await Promise.all([
+  const [p2, sId, sLa, sEn, sSh, sCa] = await Promise.all([
     p1.next ? lastTweetsPage(u, key, p1.next).catch(() => ({ tweets: [] as any[] })) : Promise.resolve({ tweets: [] as any[] }),
     searchFrom(u, KW_IDENTITY, key).catch(() => []),
     searchFrom(u, KW_LAUNCH, key).catch(() => []),
     searchFrom(u, KW_ENDORSE, key).catch(() => []),
     searchFrom(u, KW_SHILL, key).catch(() => []),
+    searchFrom(u, KW_CALLS, key).catch(() => []),
   ]);
 
   const originalsRaw = [...p1.tweets, ...p2.tweets].map(parseTweet).filter((p) => p.text && !p.isReply && !p.isRt);
-  const searchedRaw = [...sId, ...sLa, ...sEn, ...sSh].map(parseTweet).filter((p) => p.text && !p.isRt);
+  const searchedRaw = [...sId, ...sLa, ...sEn, ...sSh, ...sCa].map(parseTweet).filter((p) => p.text && !p.isRt);
 
   // Dedup by normalized text.
   const seen = new Set<string>();
@@ -282,13 +288,17 @@ export async function collectCorpus(handle: string): Promise<Corpus> {
 
   // Score: claim keywords (dominant) + reach + slight recency.
   const now = Date.now();
+  const CASHTAG = /\$[A-Za-z][A-Za-z0-9]{1,9}\b/g;
+  const CHARTLINK = /dexscreener\.com|pump\.fun|birdeye\.so|dextools\.io|geckoterminal\.com|photon-sol|\bCA[:\s]/i;
   const score = (p: CorpusPost) => {
     const kw = (p.text.match(new RegExp(CLAIM_RE.source, "gi")) ?? []).length;
+    const cashtags = (p.text.match(CASHTAG) ?? []).length; // a call post = a cashtag, usually with a chart link
+    const call = (cashtags > 0 ? 2 : 0) + (CHARTLINK.test(p.text) ? 2 : 0);
     const reach = Math.log10(p.views + p.likes + 1);
     const recency = p.at ? Math.max(0, 1 - (now - p.at) / (365 * 864e5)) : 0; // 0..1 over a year
-    return kw * 3 + reach + recency * 0.8;
+    return kw * 3 + call + reach + recency * 0.8;
   };
-  const ranked = [...all].sort((a, b) => score(b) - score(a)).slice(0, 50);
+  const ranked = [...all].sort((a, b) => score(b) - score(a)).slice(0, 70);
   // Keep ~12 newest originals in the mix (current tone / dormancy / active shilling).
   const newest = [...originals].sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, 12);
   const rankedKeys = new Set(ranked.map((p) => p.text.slice(0, 80).toLowerCase()));

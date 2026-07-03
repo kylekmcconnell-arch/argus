@@ -103,9 +103,11 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
     "project's own token, and do not tag INVESTOR merely for trading talk. " +
     "Ventures = companies/projects they say they founded or led. " +
     "Testimonials = named people/accounts they cite as backers or endorsers. Advised " +
-    "= projects they claim to advise. Promotions = tokens/tickers they shill. Use the " +
+    "= projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller " +
+    "capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, " +
+    "listing each ticker once with its contract address and chain when a chart link or CA is present. Use the " +
     "@handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
-  const user = `Subject: ${handle}\nBio: ${bio || "(none)"}\n\nPosts (a claim-targeted corpus: recent originals + keyword-searched history, each stamped [Month Year · views]; dates let you fill venture periods, engagement shows which claims the subject pushed):\n${posts.slice(0, 50).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
+  const user = `Subject: ${handle}\nBio: ${bio || "(none)"}\n\nPosts (a claim-targeted corpus: recent originals + keyword-searched history, each stamped [Month Year · views]; dates let you fill venture periods, engagement shows which claims the subject pushed):\n${posts.slice(0, 70).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
   const tool: ToolSchema = {
     name: "record_claims",
     description: "Record the subject's self-claimed roles, ventures, endorsers, advisory seats, and promotions.",
@@ -149,7 +151,7 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
       required: ["roles", "ventures", "testimonials", "advised", "promotions"],
     },
   };
-  return structured<ExtractedClaims>(system, user, tool, 2048);
+  return structured<ExtractedClaims>(system, user, tool, 4096);
 }
 
 // Phase 4: internal contradiction scan. Given everything collected, find places

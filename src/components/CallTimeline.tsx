@@ -50,17 +50,25 @@ export function CallTimeline({ handle, ticker, address, chain }: { handle: strin
   return (
     <div className="mt-1.5">
       <div className="mb-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-ink-faint">
+        {/* What actually matters for a KOL: how far the call RAN after they called
+            it — not whether the token is alive now (most memecoins die regardless). */}
+        {d.peakPct != null && d.peakPct > 5 ? (
+          <span className="mono rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: "rgba(52,211,153,.14)", color: "var(--color-pass)" }}>
+            peaked {fmtPct(d.peakPct)} {anchorIsCall ? "after the call" : "post-launch"}
+          </span>
+        ) : anchorIsCall && d.current && d.current.pct <= 0 ? (
+          <span className="mono rounded px-1.5 py-0.5 text-[10px] font-medium" style={{ background: "rgba(244,63,94,.12)", color: "var(--color-avoid)" }}>never ran</span>
+        ) : null}
         {recent && (
           <span className="mono rounded px-1.5 py-0.5 text-[9px] font-medium" style={{ background: "rgba(232,177,42,.14)", color: "var(--color-caution)" }}>
-            shilled {daysAgo === 0 ? "today" : `${daysAgo}d ago`}
+            {daysAgo === 0 ? "today" : `${daysAgo}d ago`}
           </span>
         )}
         {anchorIsCall && callDate ? (
-          <span className="text-ink-dim">Called {callDate}, priced from that post</span>
+          <span>called {callDate}, priced from that post</span>
         ) : (
-          <span>Since launch{callDate ? ` (called ${callDate}, before indexed price history)` : ""}</span>
+          <span>since launch{callDate ? ` (called ${callDate}, before indexed price history)` : ""}</span>
         )}
-        {d.peakPct != null && d.peakPct > 5 && <span>· peak {fmtPct(d.peakPct)}</span>}
         {d.tweetUrl && <a href={d.tweetUrl} target="_blank" rel="noreferrer" className="text-signal-dim hover:underline">the call ↗</a>}
       </div>
       <div className="flex flex-wrap gap-1">

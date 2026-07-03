@@ -1309,12 +1309,12 @@ async function structured(system, user, tool, maxTokens = 2048) {
   }
 }
 async function extractClaims(handle, bio, posts) {
-  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization \u2014 a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official brand account), a GP/partner/principal at one, or an angel with NAMED, verifiable investments (led or joined specific rounds). Buying/trading tokens, 'investing in gems', or calling oneself an investor with no documented deals is NOT INVESTOR \u2014 a caller who trades is a KOL, nothing more. Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts shipping a product/token, not allocating capital); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token, and do not tag INVESTOR merely for trading talk. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
+  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization \u2014 a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official brand account), a GP/partner/principal at one, or an angel with NAMED, verifiable investments (led or joined specific rounds). Buying/trading tokens, 'investing in gems', or calling oneself an investor with no documented deals is NOT INVESTOR \u2014 a caller who trades is a KOL, nothing more. Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts shipping a product/token, not allocating capital); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token, and do not tag INVESTOR merely for trading talk. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, listing each ticker once with its contract address and chain when a chart link or CA is present. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
   const user = `Subject: ${handle}
 Bio: ${bio || "(none)"}
 
 Posts (a claim-targeted corpus: recent originals + keyword-searched history, each stamped [Month Year \xB7 views]; dates let you fill venture periods, engagement shows which claims the subject pushed):
-${posts.slice(0, 50).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
+${posts.slice(0, 70).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
   const tool = {
     name: "record_claims",
     description: "Record the subject's self-claimed roles, ventures, endorsers, advisory seats, and promotions.",
@@ -1358,7 +1358,7 @@ ${posts.slice(0, 50).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
       required: ["roles", "ventures", "testimonials", "advised", "promotions"]
     }
   };
-  return structured(system, user, tool, 2048);
+  return structured(system, user, tool, 4096);
 }
 var lvl = (s) => {
   const v = (s ?? "").toLowerCase();
@@ -1617,6 +1617,7 @@ var KW_IDENTITY = ["founder", "co-founder", "cofounder", "CEO", "CTO", "advisor"
 var KW_LAUNCH = ["launching", "presale", "mint", "airdrop", "raised", "seed", "IDO", '"CA:"', "tokenomics", "whitelist"];
 var KW_ENDORSE = ["backed", "investors", "partnership", "gem", "100x", '"proud to"'];
 var KW_SHILL = ["aped", "sending", '"the play"', "entry", "accumulated", "conviction", "printing", "pumping", "calling", "chart", '"my bag"', "loaded"];
+var KW_CALLS = ["dexscreener.com", "pump.fun", "birdeye.so", "dextools.io", "geckoterminal.com", "photon-sol", '"CA"'];
 var CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined|aped?|shill|calling|conviction|printing|pumping|sending it)\b/i;
 function parseTweet(t) {
   const text = (t.text ?? t.full_text ?? "").trim();
@@ -1658,15 +1659,16 @@ async function collectCorpus(handle) {
   const u = handle.replace(/^@/, "");
   if (!key) return { posts: [], newest: [], count: { originals: 0, searched: 0, ranked: 0 } };
   const p1 = await lastTweetsPage(u, key).catch(() => ({ tweets: [], next: void 0 }));
-  const [p2, sId, sLa, sEn, sSh] = await Promise.all([
+  const [p2, sId, sLa, sEn, sSh, sCa] = await Promise.all([
     p1.next ? lastTweetsPage(u, key, p1.next).catch(() => ({ tweets: [] })) : Promise.resolve({ tweets: [] }),
     searchFrom(u, KW_IDENTITY, key).catch(() => []),
     searchFrom(u, KW_LAUNCH, key).catch(() => []),
     searchFrom(u, KW_ENDORSE, key).catch(() => []),
-    searchFrom(u, KW_SHILL, key).catch(() => [])
+    searchFrom(u, KW_SHILL, key).catch(() => []),
+    searchFrom(u, KW_CALLS, key).catch(() => [])
   ]);
   const originalsRaw = [...p1.tweets, ...p2.tweets].map(parseTweet).filter((p) => p.text && !p.isReply && !p.isRt);
-  const searchedRaw = [...sId, ...sLa, ...sEn, ...sSh].map(parseTweet).filter((p) => p.text && !p.isRt);
+  const searchedRaw = [...sId, ...sLa, ...sEn, ...sSh, ...sCa].map(parseTweet).filter((p) => p.text && !p.isRt);
   const seen = /* @__PURE__ */ new Set();
   const dedup = (arr) => arr.filter((p) => {
     const k = p.text.slice(0, 80).toLowerCase();
@@ -1678,13 +1680,17 @@ async function collectCorpus(handle) {
   const searched = dedup(searchedRaw);
   const all = [...originals, ...searched];
   const now = Date.now();
+  const CASHTAG = /\$[A-Za-z][A-Za-z0-9]{1,9}\b/g;
+  const CHARTLINK = /dexscreener\.com|pump\.fun|birdeye\.so|dextools\.io|geckoterminal\.com|photon-sol|\bCA[:\s]/i;
   const score = (p) => {
     const kw = (p.text.match(new RegExp(CLAIM_RE.source, "gi")) ?? []).length;
+    const cashtags = (p.text.match(CASHTAG) ?? []).length;
+    const call = (cashtags > 0 ? 2 : 0) + (CHARTLINK.test(p.text) ? 2 : 0);
     const reach = Math.log10(p.views + p.likes + 1);
     const recency = p.at ? Math.max(0, 1 - (now - p.at) / (365 * 864e5)) : 0;
-    return kw * 3 + reach + recency * 0.8;
+    return kw * 3 + call + reach + recency * 0.8;
   };
-  const ranked = [...all].sort((a, b) => score(b) - score(a)).slice(0, 50);
+  const ranked = [...all].sort((a, b) => score(b) - score(a)).slice(0, 70);
   const newest = [...originals].sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, 12);
   const rankedKeys = new Set(ranked.map((p) => p.text.slice(0, 80).toLowerCase()));
   for (const p of newest) if (!rankedKeys.has(p.text.slice(0, 80).toLowerCase())) ranked.push(p);
@@ -3103,14 +3109,18 @@ async function coingeckoToken(chain, address) {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
     const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [] };
+    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null };
     if (!res.ok) return null;
     const d = await res.json();
     const tickers = d.tickers ?? [];
     const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
     const cex = new Set(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean));
     const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames };
+    const homepage = (d.links?.homepage ?? []).find((u) => typeof u === "string" && /^https?:\/\//i.test(u)) ?? null;
+    const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
+    const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
+    const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
+    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image };
   } catch {
     return null;
   }
@@ -3555,6 +3565,10 @@ async function runTokenAudit(input, emit, opts) {
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
     ...(pair.info?.socials ?? []).map((x) => ({ label: x.type, url: x.url }))
   ];
+  const hasWebsite = socials.some((x) => /^https?:\/\//i.test(x.url) && !/x\.com|twitter\.com|t\.me|discord|github/i.test(x.url));
+  const hasTwitter = socials.some((x) => /x\.com|twitter/i.test(x.url) || /twitter|^x$/i.test(x.label));
+  if (cg?.homepage && !hasWebsite) socials.push({ label: "site", url: cg.homepage });
+  if (cg?.twitter && !hasTwitter) socials.push({ label: "twitter", url: `https://x.com/${cg.twitter}` });
   let aT6 = ageDays == null ? 4 : ageDays < 1 ? 2 : ageDays < 7 ? 4 : ageDays < 30 ? 6 : ageDays < 180 ? 8 : 10;
   if (socials.length) aT6 = clamp(aT6 + 1, 0, 10);
   if (cg?.cexCount) aT6 = clamp(aT6 + 2, 0, 10);
@@ -3569,7 +3583,7 @@ async function runTokenAudit(input, emit, opts) {
     capApplied = key;
     verdict = ceiling <= 10 ? "AVOID" : band(score);
   } else verdict = band(score);
-  const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u)));
+  const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) || (cg?.twitter ? "@" + cg.twitter : null);
   const deployer = chain === "solana" ? sol?.creators?.[0]?.address ?? null : gpEvm?.creator_address || (gpEvm?.owner_address && !/^0x0+$/.test(gpEvm.owner_address) ? gpEvm.owner_address : null) || null;
   const topHolders = rawHolders.slice(0, 5).map((h) => ({
     address: h.address ?? h.account ?? "",
@@ -3587,7 +3601,7 @@ async function runTokenAudit(input, emit, opts) {
     pairAddress: pair.pairAddress,
     symbol: pair.baseToken.symbol,
     name: pair.baseToken.name,
-    imageUrl: pair.info?.imageUrl,
+    imageUrl: pair.info?.imageUrl ?? cg?.image ?? void 0,
     priceUsd: pair.priceUsd ? Number(pair.priceUsd) : void 0,
     mcap: fdv,
     liquidityUsd,

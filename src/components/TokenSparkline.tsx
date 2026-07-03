@@ -16,7 +16,7 @@ function line(points: number[], w: number, h: number, pad = 1): string {
     .join(" ");
 }
 
-export function TokenSparkline({ address, chain, pairAddress, compact }: { address: string; chain: string; pairAddress?: string; compact?: boolean }) {
+export function TokenSparkline({ address, chain, pairAddress, compact, hidePct }: { address: string; chain: string; pairAddress?: string; compact?: boolean; hidePct?: boolean }) {
   const [hist, setHist] = useState<PriceHistory | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "none">("loading");
   const ran = useRef(false);
@@ -42,10 +42,10 @@ export function TokenSparkline({ address, chain, pairAddress, compact }: { addre
     const w = 66, h = 20;
     return (
       <span className="inline-flex items-center gap-1.5">
-        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="shrink-0">
+        <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="shrink-0" role="img" aria-label="price shape">
           <polyline points={line(hist.points, w, h)} fill="none" stroke={color} strokeWidth="1.3" strokeLinejoin="round" strokeLinecap="round" />
         </svg>
-        <span className="mono text-[10.5px]" style={{ color }}>{pct(hist.changePct)}</span>
+        {!hidePct && <span className="mono text-[10.5px]" style={{ color }}>{pct(hist.changePct)}</span>}
       </span>
     );
   }

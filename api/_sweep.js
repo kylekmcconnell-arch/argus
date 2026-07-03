@@ -46,14 +46,18 @@ async function coingeckoToken(chain, address) {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
     const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [] };
+    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null };
     if (!res.ok) return null;
     const d = await res.json();
     const tickers = d.tickers ?? [];
     const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
     const cex = new Set(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean));
     const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames };
+    const homepage = (d.links?.homepage ?? []).find((u) => typeof u === "string" && /^https?:\/\//i.test(u)) ?? null;
+    const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
+    const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
+    const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
+    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image };
   } catch {
     return null;
   }
@@ -498,6 +502,10 @@ async function runTokenAudit(input, emit, opts) {
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
     ...(pair.info?.socials ?? []).map((x) => ({ label: x.type, url: x.url }))
   ];
+  const hasWebsite = socials.some((x) => /^https?:\/\//i.test(x.url) && !/x\.com|twitter\.com|t\.me|discord|github/i.test(x.url));
+  const hasTwitter = socials.some((x) => /x\.com|twitter/i.test(x.url) || /twitter|^x$/i.test(x.label));
+  if (cg?.homepage && !hasWebsite) socials.push({ label: "site", url: cg.homepage });
+  if (cg?.twitter && !hasTwitter) socials.push({ label: "twitter", url: `https://x.com/${cg.twitter}` });
   let aT6 = ageDays == null ? 4 : ageDays < 1 ? 2 : ageDays < 7 ? 4 : ageDays < 30 ? 6 : ageDays < 180 ? 8 : 10;
   if (socials.length) aT6 = clamp(aT6 + 1, 0, 10);
   if (cg?.cexCount) aT6 = clamp(aT6 + 2, 0, 10);
@@ -512,7 +520,7 @@ async function runTokenAudit(input, emit, opts) {
     capApplied = key;
     verdict = ceiling <= 10 ? "AVOID" : band(score);
   } else verdict = band(score);
-  const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u)));
+  const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) || (cg?.twitter ? "@" + cg.twitter : null);
   const deployer = chain === "solana" ? sol?.creators?.[0]?.address ?? null : gpEvm?.creator_address || (gpEvm?.owner_address && !/^0x0+$/.test(gpEvm.owner_address) ? gpEvm.owner_address : null) || null;
   const topHolders = rawHolders.slice(0, 5).map((h) => ({
     address: h.address ?? h.account ?? "",
@@ -530,7 +538,7 @@ async function runTokenAudit(input, emit, opts) {
     pairAddress: pair.pairAddress,
     symbol: pair.baseToken.symbol,
     name: pair.baseToken.name,
-    imageUrl: pair.info?.imageUrl,
+    imageUrl: pair.info?.imageUrl ?? cg?.image ?? void 0,
     priceUsd: pair.priceUsd ? Number(pair.priceUsd) : void 0,
     mcap: fdv,
     liquidityUsd,

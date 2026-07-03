@@ -22,14 +22,16 @@ async function tickerToContract(ticker: string): Promise<string | null> {
     const r = await fetch(`https://api.dexscreener.com/latest/dex/search/?q=${encodeURIComponent(sym)}`);
     const d = await r.json();
     const all: any[] = Array.isArray(d?.pairs) ? d.pairs : [];
-    const pairs = all
-      .filter((p: any) => p?.baseToken?.address && String(p?.baseToken?.symbol ?? "").toUpperCase() === sym)
-      // The real project usually has the largest market. Rank by MARKET CAP (then
-      // liquidity), NOT DEX-liquidity alone — a legit token can trade thinly on
-      // DEXes yet be huge on CEXes (e.g. $RLB / Rollbit). Liquidity-first matching
-      // was picking random same-ticker memecoins over the real project.
-      .sort((a: any, b: any) => (Number(b?.marketCap ?? b?.fdv ?? 0) - Number(a?.marketCap ?? a?.fdv ?? 0)) || (Number(b?.liquidity?.usd ?? 0) - Number(a?.liquidity?.usd ?? 0)));
-    return pairs[0]?.baseToken?.address ?? null;
+    const mc = (p: any) => Number(p?.marketCap ?? p?.fdv ?? 0);
+    const matches = all.filter((p: any) => p?.baseToken?.address && String(p?.baseToken?.symbol ?? "").toUpperCase() === sym);
+    // Reject FAKE-SUPPLY tokens: no real token's cap exceeds ~$3.5T (BTC), so a
+    // "$37 quadrillion" cap is a fabricated supply. Ranking by cap was letting one
+    // of those hijack the match (this is what broke $send). Cap-rank the sane ones,
+    // falling back to all matches (by liquidity) only if the filter empties.
+    const sane = matches.filter((p: any) => mc(p) < 1e12);
+    const pool = sane.length ? sane : matches;
+    pool.sort((a: any, b: any) => (mc(b) - mc(a)) || (Number(b?.liquidity?.usd ?? 0) - Number(a?.liquidity?.usd ?? 0)));
+    return pool[0]?.baseToken?.address ?? null;
   } catch {
     return null;
   }
@@ -47,7 +49,7 @@ const BLUECHIP = new Set([
 
 async function auditPromotions(promos: Promo[]): Promise<TokRes[]> {
   const out: TokRes[] = [];
-  for (const p of promos.slice(0, 8)) {
+  for (const p of promos.slice(0, 20)) {
     const tick = (p.ticker ?? "").replace(/^\$/, "").toUpperCase();
     // A blue-chip reference isn't a promotion — drop it before spending an audit.
     if (!p.contract_address && BLUECHIP.has(tick)) continue;
@@ -67,7 +69,8 @@ async function auditPromotions(promos: Promo[]): Promise<TokRes[]> {
     // cap because it trades on CEXes, and is NOT dead. This is distinct from the
     // ARGUS risk verdict (a token can be alive but still FAIL on risk).
     const dead = mc < 50_000 && liq < 5_000;
-    out.push({ label: d.symbol ? `$${d.symbol}` : label, address: d.address, chain: d.chain, pairAddress: d.pairAddress, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap, dead });
+    const saneMcap = d.mcap != null && d.mcap < 1e12 ? d.mcap : undefined; // never show a fabricated-supply cap
+    out.push({ label: d.symbol ? `$${d.symbol}` : label, address: d.address, chain: d.chain, pairAddress: d.pairAddress, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: saneMcap, dead });
   }
   return out;
 }
@@ -102,7 +105,6 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
 
   const resolved = (tokens ?? []).filter((t) => !t.unresolved);
   const unresolved = (tokens ?? []).filter((t) => t.unresolved);
-  const dead = resolved.filter((t) => t.dead);
   const money = (n?: number) => (n == null ? "—" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
   const assoc = associates.filter((a) => a.associate_key).slice(0, 12);
 
@@ -117,12 +119,11 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
       <div className="mt-2.5">
         <div className="flex items-baseline justify-between gap-2">
           <span className="text-[12px] font-medium text-ink">Tokens they promoted</span>
-          {resolved.length > 0 && dead.length > 0 && (
-            <span className="mono text-[11px] text-avoid">
-              {dead.length}/{resolved.length} dead
-            </span>
+          {resolved.length + unresolved.length > 0 && (
+            <span className="mono text-[11px] text-ink-faint">{resolved.length + unresolved.length} call{resolved.length + unresolved.length === 1 ? "" : "s"} priced</span>
           )}
         </div>
+        <p className="mt-0.5 text-[10.5px] leading-snug text-ink-faint">Graded on how far each call ran <span className="text-ink-dim">after it was called</span> (the peak), not whether the token is alive now — most memecoins fade regardless of who called them.</p>
         {resolved.length > 0 ? (
           <div className="mt-1.5 divide-y divide-line/60 rounded-lg border border-line">
             {resolved.map((t, i) => {
@@ -133,8 +134,8 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
                     <button onClick={() => t.address && onAudit?.(t.address)} className="mono text-ink underline-offset-2 hover:text-signal-dim hover:underline">{t.label}</button>
                     {m && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${m.color}1a`, color: m.color }}>{t.verdict}{t.score != null ? ` ${t.score}` : ""}</span>}
                     <span className="text-[11px] text-ink-faint">{t.mcap ? `mcap ${money(t.mcap)}` : `liq ${money(t.liquidityUsd)}`}</span>
-                    {t.dead && <span className="mono rounded border border-avoid/40 px-1.5 py-0.5 text-[9.5px] text-avoid">rugged / dead</span>}
-                    {t.address && t.chain && <span className="ml-auto"><TokenSparkline address={t.address} chain={t.chain} pairAddress={t.pairAddress} compact /></span>}
+                    {t.dead && <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">inactive now</span>}
+                    {t.address && t.chain && <span className="ml-auto"><TokenSparkline address={t.address} chain={t.chain} pairAddress={t.pairAddress} compact hidePct /></span>}
                   </div>
                   {t.address && t.chain && <CallTimeline handle={handle} ticker={t.label} address={t.address} chain={t.chain} />}
                 </div>
@@ -143,11 +144,6 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
           </div>
         ) : (
           !loading && resolved.length === 0 && unresolved.length === 0 && <p className="mt-1 text-[12px] text-ink-faint">No promoted tokens found.</p>
-        )}
-        {dead.length > 0 && (
-          <p className="mt-1.5 text-[12px] leading-relaxed text-avoid">
-            {dead.length} of the {resolved.length} tokens this account promoted {dead.length === 1 ? "is" : "are"} effectively dead — no market cap and no tradeable liquidity{dead.length >= resolved.length / 2 ? ", a shill-and-dump pattern" : ""}.
-          </p>
         )}
         {/* Promoted tickers we couldn't match to an on-chain contract — shown, not
             silently dropped, so a token they clearly promoted (e.g. $DUBBZ) doesn't
