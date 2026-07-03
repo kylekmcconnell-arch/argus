@@ -275,11 +275,9 @@ export function InvestigationReport({
           <HolderForensics address={token.address} chain={token.chain} holderCount={token.safety.holderCount} evmTop={token.topHolders.map((h) => ({ pct: h.percent, tag: h.tag }))} insiderPct={token.insiderPct} />
         </div>
 
-        {token.chain === "solana" && (
-          <div className="mt-3">
-            <WalletClusters mint={token.address} chain={token.chain} symbol={token.symbol} />
-          </div>
-        )}
+        <div className="mt-3">
+          <WalletClusters mint={token.address} chain={token.chain} symbol={token.symbol} />
+        </div>
 
         {token.chain !== "solana" && (
           <div className="mt-3">

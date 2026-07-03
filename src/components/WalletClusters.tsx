@@ -39,8 +39,10 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
 
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
 
-  // Solana-only (the on-chain funding primitives are Solana), needs a mint.
-  if (!mint || chain !== "solana") return null;
+  // Runs on Solana (RugCheck+Helius) and EVM (GoPlus+Etherscan) via matching
+  // endpoints that return the same shape. Needs a token address + a supported chain.
+  const SUPPORTED = new Set(["solana", "ethereum", "base", "bsc", "polygon", "arbitrum", "optimism", "avalanche"]);
+  if (!mint || !SUPPORTED.has(chain)) return null;
 
   const run = async () => {
     if (loading || data) return;
@@ -48,9 +50,12 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
     setStage(0);
     timer.current = setInterval(() => setStage((s) => Math.min(s + 1, STAGES.length - 1)), 6000);
     try {
-      const r = await fetch(`/api/cluster?mint=${encodeURIComponent(mint)}&chain=${chain}`);
+      const url = chain === "solana"
+        ? `/api/cluster?mint=${encodeURIComponent(mint)}&chain=solana`
+        : `/api/evm-cluster?address=${encodeURIComponent(mint)}&chain=${encodeURIComponent(chain)}`;
+      const r = await fetch(url);
       const d = await r.json();
-      setData(d?.available === false ? { note: d.note ?? "Clustering unavailable (Helius not configured)." } : d);
+      setData(d?.available === false ? { note: d.note ?? "Clustering unavailable (provider not configured)." } : d);
       // Feed the graph: attach every clustered wallet to the token, keyed the same
       // way the audit graphs key wallets, so a wallet that reappears as a deployer
       // or holder in another audit collapses to one node and bridges the two.

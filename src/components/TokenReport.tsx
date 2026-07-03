@@ -243,12 +243,10 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           </div>
         )}
 
-        {/* wallet clustering — how many of the "top holders" are secretly one hand? */}
-        {d.chain === "solana" && (
-          <div className="mt-4">
-            <WalletClusters mint={d.address} chain={d.chain} symbol={d.symbol} />
-          </div>
-        )}
+        {/* wallet clustering (Solana + EVM) — how many "top holders" are one hand? */}
+        <div className="mt-4">
+          <WalletClusters mint={d.address} chain={d.chain} symbol={d.symbol} />
+        </div>
 
         {/* recursive operator trace (Solana + EVM) — is this deployer an isolated
             project or one node in a serial factory sharing a funder across launches? */}
