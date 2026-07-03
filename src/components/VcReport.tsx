@@ -10,7 +10,7 @@ import { recordForensicEntities } from "../graph/store";
 // M are dead." A fund is only as good as how its bets ended. Auto-runs when the
 // subject is an INVESTOR.
 type Investment = { project: string; ticker: string | null; contract: string | null; chain: string | null; x_handle: string | null; stage: string | null; year: string | null; outcome: string | null };
-type Scored = Investment & { address?: string; chainResolved?: string; verdict?: string; score?: number | null; liquidityUsd?: number; dead?: boolean; resolved?: boolean };
+type Scored = Investment & { address?: string; chainResolved?: string; verdict?: string; score?: number | null; liquidityUsd?: number; mcap?: number; dead?: boolean; resolved?: boolean };
 
 async function tickerToContract(ticker: string): Promise<string | null> {
   const sym = ticker.replace(/^\$/, "").toUpperCase();
@@ -35,8 +35,14 @@ async function auditInvestment(inv: Investment): Promise<Scored> {
   const input = resolveInput(contract);
   const d = input.kind === "token" ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
   if (!d) return { ...inv, resolved: false };
-  const dead = d.verdict === "FAIL" || d.verdict === "AVOID" || (d.liquidityUsd ?? 0) < 500;
-  return { ...inv, address: d.address, chainResolved: d.chain, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, dead, resolved: true };
+  const liq = d.liquidityUsd ?? 0;
+  const mc = d.mcap ?? 0;
+  // "dead" means the token is actually gone: essentially no MARKET CAP and no
+  // tradeable liquidity — NOT merely a low ARGUS risk score. A real token ($IMX)
+  // can carry a FAIL/CAUTION risk verdict yet have a huge cap and be very much
+  // alive. Market cap, not the verdict, is the life signal.
+  const dead = mc < 50_000 && liq < 5_000;
+  return { ...inv, address: d.address, chainResolved: d.chain, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap, dead, resolved: true };
 }
 
 export function VcReport({ handle, name, onAudit }: { handle: string; name: string; onAudit?: (q: string) => void }) {
@@ -55,11 +61,15 @@ export function VcReport({ handle, name, onAudit }: { handle: string; name: stri
         const d = await r.json();
         const inv: Investment[] = d?.investments ?? [];
         if (!inv.length) { setState("none"); return; }
-        // Price the token investments (cap to bound), keep the rest as-is.
-        const withToken = inv.filter((i) => i.contract || i.ticker).slice(0, 12);
+        // Price the token investments up to a cap (each is an on-chain lookup), but
+        // NEVER drop the rest — token bets beyond the cap and non-token companies
+        // still list (unpriced, with their outcome), so a big portfolio shows in full.
+        const withToken = inv.filter((i) => i.contract || i.ticker);
+        const toPrice = withToken.slice(0, 16);
+        const overflow = withToken.slice(16);
         const rest = inv.filter((i) => !(i.contract || i.ticker));
-        const scored = await Promise.all(withToken.map(auditInvestment));
-        setRows([...scored, ...rest.map((i) => ({ ...i, resolved: false }))]);
+        const scored = await Promise.all(toPrice.map(auditInvestment));
+        setRows([...scored, ...overflow.map((i) => ({ ...i, resolved: false })), ...rest.map((i) => ({ ...i, resolved: false }))]);
         setState("ok");
         // Feed the shared graph: link this fund to each portfolio project/token.
         // Shared project handles + tickers bridge the fund to the founders who
@@ -96,8 +106,8 @@ export function VcReport({ handle, name, onAudit }: { handle: string; name: stri
     <div className="rounded-xl border border-line bg-panel p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <span className="text-[12px] font-medium text-ink">{rows.length} portfolio {rows.length === 1 ? "investment" : "investments"}</span>
-        {priced.length > 0 && (
-          <span className={`mono text-[11px] ${dead.length ? "text-avoid" : "text-ink-faint"}`}>{dead.length}/{priced.length} token bets dead or failing</span>
+        {priced.length > 0 && dead.length > 0 && (
+          <span className="mono text-[11px] text-avoid">{dead.length}/{priced.length} token bets dead</span>
         )}
       </div>
 
@@ -116,7 +126,7 @@ export function VcReport({ handle, name, onAudit }: { handle: string; name: stri
                 {r.ticker && <span className="mono text-[10.5px] text-ink-faint">{r.ticker}</span>}
                 {(r.stage || r.year) && <span className="text-[10.5px] text-ink-faint">{[r.stage, r.year].filter(Boolean).join(" · ")}</span>}
                 {m && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${m.color}1a`, color: m.color }}>{r.verdict}{r.score != null ? ` ${r.score}` : ""}</span>}
-                {r.resolved && <span className="text-[10.5px] text-ink-faint">liq {money(r.liquidityUsd)}</span>}
+                {r.resolved && <span className="text-[10.5px] text-ink-faint">{r.mcap ? `mcap ${money(r.mcap)}` : `liq ${money(r.liquidityUsd)}`}</span>}
                 {r.dead && <span className="mono rounded border border-avoid/40 px-1.5 py-0.5 text-[9.5px] text-avoid">dead</span>}
                 {r.address && r.chainResolved && <span className="ml-auto"><TokenSparkline address={r.address} chain={r.chainResolved} compact /></span>}
               </div>
@@ -127,7 +137,7 @@ export function VcReport({ handle, name, onAudit }: { handle: string; name: stri
       </div>
       {dead.length > 0 && (
         <p className="mt-2 text-[12px] leading-relaxed text-avoid">
-          {dead.length} of {priced.length} priceable token bets are now dead or failing — weigh the fund's judgement accordingly.
+          {dead.length} of {priced.length} priceable token bets {dead.length === 1 ? "is" : "are"} effectively dead — no market cap and no tradeable liquidity. Weigh the fund's judgement accordingly.
         </p>
       )}
     </div>
