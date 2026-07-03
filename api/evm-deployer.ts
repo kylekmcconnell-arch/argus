@@ -74,19 +74,28 @@ async function deploymentsBy(chainid: number, wallet: string, key: string): Prom
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = process.env.ETHERSCAN_API_KEY;
+  // Two entry points: ?address=<contract> resolves the contract's deployer first;
+  // ?wallet=<addr> traces that wallet DIRECTLY (this is how the operator trace
+  // walks up hop by hop — each hop is a wallet, not a contract).
   const address = typeof req.query.address === "string" ? req.query.address.trim() : "";
+  const walletQ = typeof req.query.wallet === "string" ? req.query.wallet.trim() : "";
+  const subject = walletQ || address;
   const chain = (typeof req.query.chain === "string" ? req.query.chain : "").toLowerCase();
   const chainid = CHAINID[chain];
-  if (!isAddr(address)) { res.status(400).json({ error: "valid EVM contract address required" }); return; }
-  if (!chainid) { res.status(200).json({ address, chain, available: false, note: `No Etherscan chain id for '${chain}'.` }); return; }
-  if (!key) { res.status(200).json({ address, chain, available: false, note: "Etherscan not configured; EVM deployer trail unavailable." }); return; }
+  if (!isAddr(subject)) { res.status(400).json({ error: "valid EVM address required (?address= contract or ?wallet= wallet)" }); return; }
+  if (!chainid) { res.status(200).json({ address: subject, chain, available: false, note: `No Etherscan chain id for '${chain}'.` }); return; }
+  if (!key) { res.status(200).json({ address: subject, chain, available: false, note: "Etherscan not configured; EVM deployer trail unavailable." }); return; }
 
   try {
-    // 1. Who deployed the contract.
-    const cc = await es(chainid, { module: "contract", action: "getcontractcreation", contractaddresses: address }, key);
-    const rec = Array.isArray(cc?.result) ? cc.result[0] : null;
-    const deployer: string | null = rec?.contractCreator && isAddr(rec.contractCreator) ? rec.contractCreator : null;
-    if (!deployer) { res.status(200).json({ address, chain, available: true, deployer: null, note: "Deployer not resolvable from contract-creation records." }); return; }
+    // 1. Resolve the wallet to trace. Given a wallet, it IS the subject; given a
+    //    contract, look up who deployed it.
+    let deployer: string | null = walletQ && isAddr(walletQ) ? walletQ : null;
+    if (!deployer) {
+      const cc = await es(chainid, { module: "contract", action: "getcontractcreation", contractaddresses: address }, key);
+      const rec = Array.isArray(cc?.result) ? cc.result[0] : null;
+      deployer = rec?.contractCreator && isAddr(rec.contractCreator) ? rec.contractCreator : null;
+    }
+    if (!deployer) { res.status(200).json({ address: subject, chain, available: true, deployer: null, note: "Deployer not resolvable from contract-creation records." }); return; }
 
     // 2. The deployer's funder + age, and how many contracts it has deployed.
     const [fund, deployments] = await Promise.all([
@@ -105,7 +114,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         : `The deployer was funded by an anonymous wallet (${funderAddr.slice(0, 8)}…), no CEX terminus. Shared funders across launches expose a serial operator.`;
 
     res.status(200).json({
-      address, chain, available: true,
+      address: subject, chain, available: true,
       deployer,
       funder: funderAddr ? { address: funderAddr, label: cexLabel, kind: cexLabel ? "cex" : "wallet" } : null,
       terminatesAtCex: !!cexLabel,
