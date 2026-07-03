@@ -1,11 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
-import { listReports, type ReportListing } from "../lib/reports";
+import { listReports, groupReportsByEntity, type ReportListing } from "../lib/reports";
 import { purgeSubject } from "../lib/purge";
 import { verdictMeta } from "../lib/verdict";
 import { mergedLog } from "../lib/auditlog";
 import { scanStats, totalScans, type ScanStat } from "../lib/scanstats";
 import { auditImage } from "../lib/avatars";
 import { getAnalyst } from "../lib/analyst";
+import { buildAliasResolver } from "../graph/network";
+import { getContributions } from "../graph/store";
 
 const normRef = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
 
@@ -78,34 +80,22 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
     !needle || r.ref.toLowerCase().includes(needle) || (r.query ?? "").toLowerCase().includes(needle) || (r.contributor ?? "").toLowerCase().includes(needle),
   );
 
-  return (
-    <div className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="text-[26px] font-medium tracking-[-0.02em] text-ink">Report library</h1>
-      <p className="mt-1.5 max-w-2xl text-[14px] leading-relaxed text-ink-dim">
-        Every audit persisted by you and your co-analysts — click to open the stored report instantly, no re-run.
-        Remove one to start that subject from scratch.
-      </p>
+  // Entity unification: a project wears three names — the $TOKEN audit, the
+  // @handle person audit, and the site recon are three library cards for ONE
+  // thing. Group them by the alias resolver (which unions token↔handle↔domain
+  // from the audits' OWN edges, never name similarity) so the library shows one
+  // card per project with its facets, not three unrelated rows. The token audit
+  // keys the linkage on its $SYMBOL, so a token/investigation groups by its query
+  // ($RECC); person/site group by their ref (the handle / domain).
+  const groups = useMemo(
+    () => groupReportsByEntity(shown, buildAliasResolver(getContributions())),
+    [shown],
+  ); // eslint-disable-line react-hooks/exhaustive-deps
 
-      <input
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="search by handle, token, site, or analyst…"
-        className="mono mt-5 w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[13.5px] text-ink placeholder:text-ink-faint transition focus:border-line-2 focus:outline-none"
-      />
+  const openBtn = (ev: { stopPropagation: () => void }) => ev.stopPropagation();
 
-      <div className="mt-5 mb-2.5 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-ink-faint">
-        <span>{reports == null ? "loading…" : `${shown.length} report${shown.length === 1 ? "" : "s"}`}</span>
-        {total > 0 && <span className="text-ink-faint/70">· {total.toLocaleString()} total scans</span>}
-      </div>
-
-      {reports != null && shown.length === 0 && (
-        <p className="text-[13px] text-ink-faint">
-          {needle ? "Nothing matches that search." : "No persisted reports yet — run an audit and it lands here automatically."}
-        </p>
-      )}
-
-      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-        {shown.map((r) => {
+  // A single report card (the default — unchanged behaviour for a lone audit).
+  const renderSingle = (r: ReportListing) => {
           const m = r.verdict ? verdictMeta(r.verdict) : null;
           const color = m?.color ?? "var(--color-ink-faint)";
           // Show the ROLE for person audits (Founder/Project/KOL/VC …); fall back
@@ -211,7 +201,120 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
               )}
             </div>
           );
-        })}
+  };
+
+  // A unified entity card: one project shown once, with a facet chip per audit
+  // (project / person / site). The facets are the SAME entity resolved across
+  // audit kinds — clicking a chip opens that specific stored report.
+  const KIND_ORDER = ["investigation", "token", "site", "person"] as const;
+  const renderEntity = (group: ReportListing[]) => {
+    const sorted = [...group].sort((a, b) => KIND_ORDER.indexOf(a.kind as any) - KIND_ORDER.indexOf(b.kind as any));
+    const primary = sorted[0];
+    // Display name: prefer the project token ($SYMBOL) / site / handle.
+    const proj = sorted.find((r) => r.kind === "token" || r.kind === "investigation");
+    const site = sorted.find((r) => r.kind === "site");
+    const title = proj?.query ?? site?.ref ?? primary.query ?? primary.ref;
+    // Headline verdict from the most authoritative facet that has one.
+    const scored = sorted.find((r) => r.verdict) ?? primary;
+    const m = scored.verdict ? verdictMeta(scored.verdict) : null;
+    const color = m?.color ?? "var(--color-ink-faint)";
+    const img = sorted.map((r) => imageByRef.get(r.ref.toLowerCase().replace(/^[@$]/, ""))).find(Boolean);
+    const letter = (title.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
+    const groupKey = sorted.map((r) => `${r.kind}:${r.ref}`).join("|");
+    const contributors = [...new Set(sorted.map((r) => r.contributor).filter((c) => c && c !== me && c !== "anonymous"))];
+    return (
+      <div
+        key={groupKey}
+        className="group flex flex-col rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 soft-shadow"
+      >
+        <div className="flex items-center gap-3">
+          {img ? (
+            <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-lg border border-line object-cover" />
+          ) : (
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-void text-[14px] text-signal">{letter}</span>
+          )}
+          <span className="min-w-0 flex-1">
+            <span className="flex items-center gap-1.5">
+              <span className="mono truncate text-[13px] text-ink">{title}</span>
+              <span className="mono shrink-0 rounded px-1 py-0.5 text-[8.5px] uppercase" style={{ color: "var(--color-unverifiable)", background: "var(--color-unverifiable)14" }}>project</span>
+              <span className="mono shrink-0 text-[9px] text-ink-faint">{sorted.length} facets</span>
+            </span>
+            <span className="mt-0.5 block truncate text-[10.5px] text-ink-faint">
+              {ago(primary.ts)}{contributors.length ? ` · with ${contributors.join(", ")}` : ""}
+            </span>
+          </span>
+          <span className="mono shrink-0 text-right leading-none" style={{ color }}>
+            <span className="block text-[18px] font-semibold tabular">{scored.score ?? "—"}</span>
+            <span className="block text-[8px] tracking-wider">{scored.verdict ?? ""}</span>
+          </span>
+          <span
+            role="button"
+            tabIndex={0}
+            title="Remove this whole entity everywhere (all facets: log, stored reports, graph)"
+            onClick={(ev) => {
+              ev.stopPropagation();
+              if (!window.confirm(`Delete ${title} and all ${sorted.length} of its audits (${sorted.map((r) => r.query ?? r.ref).join(", ")}) everywhere? This cannot be undone.`)) return;
+              for (const r of sorted) purgeSubject(r.ref);
+              const gone = new Set(sorted.map((r) => `${r.kind}:${r.ref}`));
+              setReports((prev) => (prev ?? []).filter((x) => !gone.has(`${x.kind}:${x.ref}`)));
+            }}
+            className="mono shrink-0 cursor-pointer rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-faint transition hover:border-avoid hover:text-avoid"
+          >
+            ×
+          </span>
+        </div>
+        {/* facet chips — each opens its own stored report */}
+        <div className="mt-2 flex flex-wrap gap-1.5 border-t border-line/60 pt-2">
+          {sorted.map((r) => {
+            const role = r.kind === "person" ? roleByRef.get(r.ref.toLowerCase().replace(/^[@$]/, "")) : undefined;
+            const km = (role && ROLE_LABEL[role]) || KIND_META[r.kind] || KIND_META.person;
+            const fm = r.verdict ? verdictMeta(r.verdict) : null;
+            return (
+              <button
+                key={`${r.kind}:${r.ref}`}
+                onClick={(ev) => { openBtn(ev); onOpen(r.ref); }}
+                title={`Open the ${km.label} report — ${r.query ?? r.ref}`}
+                className="mono inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[10px] text-ink-dim transition hover:border-signal hover:text-signal"
+              >
+                <span className="uppercase" style={{ color: km.color }}>{km.label}</span>
+                <span className="truncate text-ink-faint">{r.query ?? r.ref}</span>
+                {fm && r.score != null && <span style={{ color: fm.color }}>{r.score}</span>}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="mx-auto max-w-4xl px-6 py-10">
+      <h1 className="text-[26px] font-medium tracking-[-0.02em] text-ink">Report library</h1>
+      <p className="mt-1.5 max-w-2xl text-[14px] leading-relaxed text-ink-dim">
+        Every audit persisted by you and your co-analysts — click to open the stored report instantly, no re-run.
+        Remove one to start that subject from scratch.
+      </p>
+
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="search by handle, token, site, or analyst…"
+        className="mono mt-5 w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[13.5px] text-ink placeholder:text-ink-faint transition focus:border-line-2 focus:outline-none"
+      />
+
+      <div className="mt-5 mb-2.5 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-ink-faint">
+        <span>{reports == null ? "loading…" : `${shown.length} report${shown.length === 1 ? "" : "s"}`}</span>
+        {total > 0 && <span className="text-ink-faint/70">· {total.toLocaleString()} total scans</span>}
+      </div>
+
+      {reports != null && shown.length === 0 && (
+        <p className="text-[13px] text-ink-faint">
+          {needle ? "Nothing matches that search." : "No persisted reports yet — run an audit and it lands here automatically."}
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+        {groups.map((g) => (g.length === 1 ? renderSingle(g[0]) : renderEntity(g)))}
       </div>
     </div>
   );

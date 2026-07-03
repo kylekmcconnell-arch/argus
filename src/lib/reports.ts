@@ -51,6 +51,33 @@ export interface ReportListing {
   } | null;
 }
 
+// The identifier a report should be resolved by for entity unification. A token /
+// investigation audit keys its cross-facet linkage on its $SYMBOL (carried in the
+// query), so it groups by that; a person/site groups by its ref (handle / domain).
+// Normalized to the bare form the alias resolver's canonical() expects.
+export function entityKey(r: ReportListing): string {
+  return ((r.kind === "token" || r.kind === "investigation" ? (r.query ?? r.ref) : r.ref) ?? "")
+    .trim().toLowerCase().replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^[@$]/, "");
+}
+
+// Group report listings into entities: the $TOKEN audit, the @handle person audit
+// and the site recon of ONE project collapse into a single group. `resolve` is the
+// alias resolver (built from the graph contributions), which unions the facets from
+// the audits' own edges — never name similarity. Insertion order is preserved, so
+// a newest-first input stays newest-first. Falls back to the report's own key when
+// nothing links it, so a lone audit is just a group of one.
+export function groupReportsByEntity(reports: ReportListing[], resolve: (k: string) => string): ReportListing[][] {
+  const byKey = new Map<string, ReportListing[]>();
+  const order: string[] = [];
+  for (const r of reports) {
+    const id = entityKey(r);
+    const key = resolve(id) || id || `${r.kind}:${r.ref}`;
+    if (!byKey.has(key)) { byKey.set(key, []); order.push(key); }
+    byKey.get(key)!.push(r);
+  }
+  return order.map((k) => byKey.get(k)!);
+}
+
 // The report library: every persisted report from every analyst, newest first.
 export async function listReports(): Promise<ReportListing[]> {
   try {
