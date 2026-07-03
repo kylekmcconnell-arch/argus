@@ -202,19 +202,43 @@ export default function App() {
 
   // Owner-view transition only: the runner already logged/persisted via onComplete,
   // so this just moves the CURRENT view to the finished report (no re-logging).
-  const onLiveDone = useCallback((d: Dossier) => {
-    setDossier(d);
-    setPhase("report");
-  }, []);
-
-  const onLiveError = useCallback(() => setPhase("notfound"), []);
-
   const showCached = useCallback((ref: string, c: Cached) => {
     setQuery(ref);
     if (c.kind === "person") { setDossier(c.dossier); setPhase("report"); }
     else if (c.kind === "token") { setTokenDossier(c.dossier); setPhase("token-report"); }
     else { setInvestigation(c.inv); setPhase("investigation-report"); }
   }, []);
+
+  const onLiveDone = useCallback((d: Dossier) => {
+    setDossier(d);
+    setPhase("report");
+  }, []);
+
+  // A live audit failing usually means our long SSE stream dropped (proxy / tab
+  // throttle) — but the server persists finished audits, so recover the report
+  // before dead-ending. Poll a few times: the server upsert may land just after
+  // our stream died. Only show "not found" when nothing was produced.
+  const onLiveError = useCallback(async () => {
+    const ref = query;
+    const cached = resultCache.current.get(cacheKey(ref));
+    if (cached) { showCached(ref, cached); return; }
+    for (let attempt = 0; attempt < 4; attempt++) {
+      const rep = await fetchReport(ref);
+      if (rep?.payload && (rep.kind === "person" || rep.kind === "token" || rep.kind === "investigation")) {
+        const c = rep.kind === "investigation"
+          ? { kind: "investigation" as const, inv: rep.payload as Investigation }
+          : rep.kind === "token"
+            ? { kind: "token" as const, dossier: rep.payload as TokenDossier }
+            : { kind: "person" as const, dossier: rep.payload as Dossier };
+        resultCache.current.set(cacheKey(ref), c);
+        showCached(ref, c);
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 1500));
+    }
+    setPhase("notfound");
+  }, [query, showCached]);
+
 
   // Clicking a recent audit SHOWS the report already produced (with a Rescan
   // button), from: this session's cache → the persisted report on the backend

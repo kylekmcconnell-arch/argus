@@ -57,11 +57,13 @@ export function streamAudit(handle: string, h: LiveHandlers): () => void {
     settled = true;
     fn();
   };
-  // Just past the server's maxDuration (120s): if nothing finalized, fail loud.
+  // Just past the server's maxDuration (180s): if nothing finalized, fail loud.
+  // Must exceed the server ceiling, or a legitimately slow (but succeeding) audit
+  // gets killed client-side and dead-ends even though the server saved it.
   const watchdog = setTimeout(() => {
     settle(() => h.onError("timed out: the audit took too long and did not finish"));
     ctrl.abort();
-  }, 135000);
+  }, 195000);
 
   (async () => {
     try {
