@@ -186,6 +186,110 @@ export async function getRecentPosts(handle: string, limit = 20): Promise<string
   }
 }
 
+// ── Claim-targeted corpus ────────────────────────────────────────────────
+// Self-claims cluster in ANNOUNCEMENT posts ("launching X", "we raised", "joined
+// as advisor") that are often months old — an active account's newest 20 items
+// are mostly replies and "gm". Sampling by recency alone misses the evidence AND
+// is trivially gamed (post 20 memes, bury the shill history). So we assemble a
+// corpus built to surface claims: recent ORIGINALS (no replies/RTs) + keyword
+// search over the account's WHOLE history, ranked by claim-density + reach, each
+// stamped with its date + views so the extractor can date ventures and weight
+// what the subject actually pushed. Keywords are RETRIEVAL only — Claude still
+// reads everything and decides what's a claim (keyword lists miss non-English /
+// novel slang; their job is only to get the right posts onto its desk).
+const num = (...v: any[]): number | undefined => { for (const x of v) if (typeof x === "number") return x; return undefined; };
+interface CorpusPost { text: string; at: number | null; views: number; likes: number; isReply: boolean; isRt: boolean; }
+
+const KW_IDENTITY = ["founder", "co-founder", "cofounder", "CEO", "CTO", "advisor", '"I built"', '"we built"', '"joined as"', "founded"];
+const KW_LAUNCH = ["launching", "presale", "mint", "airdrop", "raised", "seed", "IDO", '"CA:"', "tokenomics", "whitelist"];
+const KW_ENDORSE = ["backed", "investors", "partnership", "gem", "100x", '"proud to"'];
+const CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined)\b/i;
+
+function parseTweet(t: any): CorpusPost {
+  const text = (t.text ?? t.full_text ?? "").trim();
+  const at = Date.parse(t.createdAt ?? t.created_at ?? "");
+  const isRt = /^RT @/.test(text) || !!t.retweeted_tweet || !!t.retweeted_status || t.isRetweet === true;
+  const isReply = !!(t.isReply ?? t.inReplyToId ?? t.in_reply_to_status_id ?? t.in_reply_to_user_id) || /^@\w/.test(text);
+  return {
+    text, at: Number.isFinite(at) ? at : null,
+    views: num(t.viewCount, t.view_count, t.views) ?? 0,
+    likes: num(t.likeCount, t.favorite_count, t.favoriteCount, t.likes) ?? 0,
+    isReply, isRt,
+  };
+}
+
+async function lastTweetsPage(handle: string, key: string, cursor?: string): Promise<{ tweets: any[]; next?: string }> {
+  const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(handle)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, key);
+  if (!res || !res.ok) return { tweets: [] };
+  const d = (await res.json()) as any;
+  const tweets: any[] = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
+  return { tweets, next: d.has_next_page ? d.next_cursor : undefined };
+}
+
+async function searchFrom(handle: string, terms: string[], key: string): Promise<any[]> {
+  const q = `from:${handle} (${terms.join(" OR ")})`;
+  recordTwitterapi("tweet/advanced_search");
+  const res = await twFetch(`${TWITTERAPI}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=Top`, key);
+  if (!res || !res.ok) return [];
+  const d = (await res.json()) as any;
+  return d.tweets ?? d.data?.tweets ?? [];
+}
+
+const stamp = (p: CorpusPost): string => {
+  const when = p.at ? new Date(p.at).toLocaleString("en-US", { month: "short", year: "numeric" }) : "";
+  const v = p.views >= 1000 ? `${Math.round(p.views / 1000)}k views` : p.views ? `${p.views} views` : "";
+  const meta = [when, v].filter(Boolean).join(" · ");
+  return (meta ? `[${meta}] ` : "") + p.text;
+};
+
+export interface Corpus { posts: string[]; newest: string[]; count: { originals: number; searched: number; ranked: number } }
+
+export async function collectCorpus(handle: string): Promise<Corpus> {
+  const key = env("TWITTERAPI_KEY");
+  const u = handle.replace(/^@/, "");
+  if (!key) return { posts: [], newest: [], count: { originals: 0, searched: 0, ranked: 0 } };
+
+  // Layer 1: 2 pages of recent originals (drop replies/RTs).
+  // Layer 2: 3 keyword searches over the whole history, in parallel.
+  const p1 = await lastTweetsPage(u, key).catch(() => ({ tweets: [] as any[], next: undefined }));
+  const [p2, sId, sLa, sEn] = await Promise.all([
+    p1.next ? lastTweetsPage(u, key, p1.next).catch(() => ({ tweets: [] as any[] })) : Promise.resolve({ tweets: [] as any[] }),
+    searchFrom(u, KW_IDENTITY, key).catch(() => []),
+    searchFrom(u, KW_LAUNCH, key).catch(() => []),
+    searchFrom(u, KW_ENDORSE, key).catch(() => []),
+  ]);
+
+  const originalsRaw = [...p1.tweets, ...p2.tweets].map(parseTweet).filter((p) => p.text && !p.isReply && !p.isRt);
+  const searchedRaw = [...sId, ...sLa, ...sEn].map(parseTweet).filter((p) => p.text && !p.isRt);
+
+  // Dedup by normalized text.
+  const seen = new Set<string>();
+  const dedup = (arr: CorpusPost[]) => arr.filter((p) => { const k = p.text.slice(0, 80).toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; });
+  const originals = dedup(originalsRaw);
+  const searched = dedup(searchedRaw);
+  const all = [...originals, ...searched];
+
+  // Score: claim keywords (dominant) + reach + slight recency.
+  const now = Date.now();
+  const score = (p: CorpusPost) => {
+    const kw = (p.text.match(new RegExp(CLAIM_RE.source, "gi")) ?? []).length;
+    const reach = Math.log10(p.views + p.likes + 1);
+    const recency = p.at ? Math.max(0, 1 - (now - p.at) / (365 * 864e5)) : 0; // 0..1 over a year
+    return kw * 3 + reach + recency * 0.8;
+  };
+  const ranked = [...all].sort((a, b) => score(b) - score(a)).slice(0, 50);
+  // Keep ~12 newest originals in the mix (current tone / dormancy / active shilling).
+  const newest = [...originals].sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, 12);
+  const rankedKeys = new Set(ranked.map((p) => p.text.slice(0, 80).toLowerCase()));
+  for (const p of newest) if (!rankedKeys.has(p.text.slice(0, 80).toLowerCase())) ranked.push(p);
+
+  return {
+    posts: ranked.map(stamp),
+    newest: newest.map((p) => p.text),
+    count: { originals: originals.length, searched: searched.length, ranked: ranked.length },
+  };
+}
+
 // twitterapi.io: the timestamp of the most recent tweet. Dormancy is a live-ness
 // signal — a project that stops posting for weeks is often winding down, gone
 // quiet after a raise, or abandoned. Returns null if unknown.
@@ -208,25 +312,13 @@ export async function getLastPostAt(handle: string): Promise<string | null> {
   }
 }
 
-// twitterapi.io: does `endorser` follow `subject`?  Best-effort: scan the
-// endorser's followings for the subject. Returns null if unknown.
+// twitterapi.io: does `endorser` follow `subject`? Uses the one-call relationship
+// check — accurate at ANY account size. (The old implementation scanned only the
+// endorser's FIRST 200 followings, so anyone following >200 accounts produced a
+// false "does not follow subject", quietly poisoning corroboration verdicts.)
 export async function followsSubject(endorser: string, subject: string): Promise<boolean | null> {
-  const key = env("TWITTERAPI_KEY");
-  if (!key) return null;
-  const e = endorser.replace(/^@/, "");
-  const s = subject.replace(/^@/, "").toLowerCase();
-  try {
-    recordTwitterapi("user/followings");
-    const res = await fetch(`${TWITTERAPI}/twitter/user/followings?userName=${encodeURIComponent(e)}&pageSize=200`, {
-      headers: { "x-api-key": key },
-    });
-    if (!res.ok) return null;
-    const d = (await res.json()) as any;
-    const list: any[] = d.followings ?? d.data ?? [];
-    return list.some((u) => (u.userName ?? u.screen_name ?? "").toLowerCase() === s);
-  } catch {
-    return null;
-  }
+  const rel = await checkFollow(endorser, subject); // source=endorser follows target=subject
+  return rel ? rel.following : null; // null (unknown) when the API can't answer
 }
 
 // ── Follower QUALITY: do respected accounts follow the subject? ──────────
@@ -267,7 +359,7 @@ const NOTABLE: NotableFollower[] = [
 ];
 
 // Does `source` follow `target`? One call via check_follow_relationship.
-export async function checkFollow(source: string, target: string): Promise<{ following: boolean; followedBy: boolean } | null> {
+export async function checkFollow(source: string, target: string): Promise<{ following: boolean | null; followedBy: boolean | null } | null> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
   const s = source.replace(/^@/, "");
@@ -276,8 +368,23 @@ export async function checkFollow(source: string, target: string): Promise<{ fol
     const res = await twFetch(`${TWITTERAPI}/twitter/user/check_follow_relationship?source_user_name=${encodeURIComponent(s)}&target_user_name=${encodeURIComponent(t)}`, key);
     if (!res || !res.ok) return null;
     const d = (await res.json()) as any;
-    if (d?.status === "error" || !d?.data) return null;
-    return { following: !!d.data.following, followedBy: !!d.data.followed_by };
+    if (d?.status === "error") return null;
+    const raw = d?.data ?? d ?? {};
+    // CRITICAL: a MISSING field must be `null` (unknown), NEVER coerced to false.
+    // twitterapi's field name has varied (following / is_following / follows), and
+    // `!!undefined === false` was silently asserting "does not follow subject" for
+    // accounts that genuinely follow — poisoning every corroboration verdict.
+    const pick = (...keys: string[]): boolean | null => {
+      for (const k of keys) if (typeof raw[k] === "boolean") return raw[k];
+      return null;
+    };
+    const following = pick("following", "is_following", "isFollowing", "follows", "source_following_target");
+    const followedBy = pick("followed_by", "is_followed_by", "isFollowedBy", "followed", "target_following_source");
+    if (following === null && followedBy === null) {
+      console.log("[check-follow] unrecognized shape:", JSON.stringify(raw).slice(0, 200)); // surface the real fields
+      return null;
+    }
+    return { following, followedBy };
   } catch {
     return null;
   }

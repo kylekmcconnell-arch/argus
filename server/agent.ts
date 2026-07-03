@@ -105,7 +105,7 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
     "Testimonials = named people/accounts they cite as backers or endorsers. Advised " +
     "= projects they claim to advise. Promotions = tokens/tickers they shill. Use the " +
     "@handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
-  const user = `Subject: ${handle}\nBio: ${bio || "(none)"}\n\nRecent posts:\n${posts.slice(0, 20).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
+  const user = `Subject: ${handle}\nBio: ${bio || "(none)"}\n\nPosts (a claim-targeted corpus: recent originals + keyword-searched history, each stamped [Month Year · views]; dates let you fill venture periods, engagement shows which claims the subject pushed):\n${posts.slice(0, 50).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
   const tool: ToolSchema = {
     name: "record_claims",
     description: "Record the subject's self-claimed roles, ventures, endorsers, advisory seats, and promotions.",

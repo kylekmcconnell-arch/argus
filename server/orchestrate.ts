@@ -18,7 +18,7 @@ import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapter
 import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
 import { resetCost, getCost } from "./cost";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, type DiscoveredAffiliation, type TeamMember } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPosts, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, type DiscoveredAffiliation, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
@@ -98,15 +98,18 @@ async function coldIntake(ctx: CollectContext) {
     ctx.emit({ phase: "P0 · Intake", label: "Handle history", detail: "No prior X handle on record for this account (no rebrand found; memory.lol coverage is partial).", source: "memory.lol", tone: "neutral" });
   }
 
-  const posts = await getRecentPosts(ctx.handle);
+  // Claim-targeted corpus: recent originals + keyword search over the whole
+  // history (pinned/announcement posts where claims actually live), ranked and
+  // date-stamped — not just the newest 20 items (mostly replies/gm, and gameable).
+  const corpus = await collectCorpus(ctx.handle);
+  const posts = corpus.posts;
   if (posts.length) {
-    ctx.evidence.recentActivity = posts;
-    ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
+    ctx.evidence.recentActivity = corpus.newest.length ? corpus.newest : posts; // newest originals drive tone/dormancy
+    ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Assembled a ${posts.length}-post claim corpus (${corpus.count.originals} recent originals + ${corpus.count.searched} from keyword search over full history) to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
   }
 
   // Find-wallet: a self-disclosed wallet (a 0x address or ENS/basename/.sol name)
-  // in the bio/posts. Resolving it connects this person to their on-chain
-  // footprint, feeds the on-chain forensics, and adds a wallet node to the graph.
+  // in the bio/posts. The richer corpus surfaces more contract/URL mentions.
   const foundWallets = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...posts].join(" \n "));
   if (foundWallets.length) {
     for (const w of foundWallets) {

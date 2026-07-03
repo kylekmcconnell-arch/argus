@@ -1312,8 +1312,8 @@ async function extractClaims(handle, bio, posts) {
   const user = `Subject: ${handle}
 Bio: ${bio || "(none)"}
 
-Recent posts:
-${posts.slice(0, 20).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
+Posts (a claim-targeted corpus: recent originals + keyword-searched history, each stamped [Month Year \xB7 views]; dates let you fill venture periods, engagement shows which claims the subject pushed):
+${posts.slice(0, 50).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
   const tool = {
     name: "record_claims",
     description: "Record the subject's self-claimed roles, ventures, endorsers, advisory seats, and promotions.",
@@ -1605,6 +1605,89 @@ async function getRecentPosts(handle, limit = 20) {
     return [];
   }
 }
+var num = (...v) => {
+  for (const x of v) if (typeof x === "number") return x;
+  return void 0;
+};
+var KW_IDENTITY = ["founder", "co-founder", "cofounder", "CEO", "CTO", "advisor", '"I built"', '"we built"', '"joined as"', "founded"];
+var KW_LAUNCH = ["launching", "presale", "mint", "airdrop", "raised", "seed", "IDO", '"CA:"', "tokenomics", "whitelist"];
+var KW_ENDORSE = ["backed", "investors", "partnership", "gem", "100x", '"proud to"'];
+var CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined)\b/i;
+function parseTweet(t) {
+  const text = (t.text ?? t.full_text ?? "").trim();
+  const at = Date.parse(t.createdAt ?? t.created_at ?? "");
+  const isRt = /^RT @/.test(text) || !!t.retweeted_tweet || !!t.retweeted_status || t.isRetweet === true;
+  const isReply = !!(t.isReply ?? t.inReplyToId ?? t.in_reply_to_status_id ?? t.in_reply_to_user_id) || /^@\w/.test(text);
+  return {
+    text,
+    at: Number.isFinite(at) ? at : null,
+    views: num(t.viewCount, t.view_count, t.views) ?? 0,
+    likes: num(t.likeCount, t.favorite_count, t.favoriteCount, t.likes) ?? 0,
+    isReply,
+    isRt
+  };
+}
+async function lastTweetsPage(handle, key, cursor) {
+  const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(handle)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, key);
+  if (!res || !res.ok) return { tweets: [] };
+  const d = await res.json();
+  const tweets = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
+  return { tweets, next: d.has_next_page ? d.next_cursor : void 0 };
+}
+async function searchFrom(handle, terms, key) {
+  const q = `from:${handle} (${terms.join(" OR ")})`;
+  recordTwitterapi("tweet/advanced_search");
+  const res = await twFetch(`${TWITTERAPI}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=Top`, key);
+  if (!res || !res.ok) return [];
+  const d = await res.json();
+  return d.tweets ?? d.data?.tweets ?? [];
+}
+var stamp = (p) => {
+  const when = p.at ? new Date(p.at).toLocaleString("en-US", { month: "short", year: "numeric" }) : "";
+  const v = p.views >= 1e3 ? `${Math.round(p.views / 1e3)}k views` : p.views ? `${p.views} views` : "";
+  const meta = [when, v].filter(Boolean).join(" \xB7 ");
+  return (meta ? `[${meta}] ` : "") + p.text;
+};
+async function collectCorpus(handle) {
+  const key = env("TWITTERAPI_KEY");
+  const u = handle.replace(/^@/, "");
+  if (!key) return { posts: [], newest: [], count: { originals: 0, searched: 0, ranked: 0 } };
+  const p1 = await lastTweetsPage(u, key).catch(() => ({ tweets: [], next: void 0 }));
+  const [p2, sId, sLa, sEn] = await Promise.all([
+    p1.next ? lastTweetsPage(u, key, p1.next).catch(() => ({ tweets: [] })) : Promise.resolve({ tweets: [] }),
+    searchFrom(u, KW_IDENTITY, key).catch(() => []),
+    searchFrom(u, KW_LAUNCH, key).catch(() => []),
+    searchFrom(u, KW_ENDORSE, key).catch(() => [])
+  ]);
+  const originalsRaw = [...p1.tweets, ...p2.tweets].map(parseTweet).filter((p) => p.text && !p.isReply && !p.isRt);
+  const searchedRaw = [...sId, ...sLa, ...sEn].map(parseTweet).filter((p) => p.text && !p.isRt);
+  const seen = /* @__PURE__ */ new Set();
+  const dedup = (arr) => arr.filter((p) => {
+    const k = p.text.slice(0, 80).toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const originals = dedup(originalsRaw);
+  const searched = dedup(searchedRaw);
+  const all = [...originals, ...searched];
+  const now = Date.now();
+  const score = (p) => {
+    const kw = (p.text.match(new RegExp(CLAIM_RE.source, "gi")) ?? []).length;
+    const reach = Math.log10(p.views + p.likes + 1);
+    const recency = p.at ? Math.max(0, 1 - (now - p.at) / (365 * 864e5)) : 0;
+    return kw * 3 + reach + recency * 0.8;
+  };
+  const ranked = [...all].sort((a, b) => score(b) - score(a)).slice(0, 50);
+  const newest = [...originals].sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, 12);
+  const rankedKeys = new Set(ranked.map((p) => p.text.slice(0, 80).toLowerCase()));
+  for (const p of newest) if (!rankedKeys.has(p.text.slice(0, 80).toLowerCase())) ranked.push(p);
+  return {
+    posts: ranked.map(stamp),
+    newest: newest.map((p) => p.text),
+    count: { originals: originals.length, searched: searched.length, ranked: ranked.length }
+  };
+}
 async function getLastPostAt(handle) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
@@ -1622,22 +1705,8 @@ async function getLastPostAt(handle) {
   }
 }
 async function followsSubject(endorser, subject) {
-  const key = env("TWITTERAPI_KEY");
-  if (!key) return null;
-  const e = endorser.replace(/^@/, "");
-  const s = subject.replace(/^@/, "").toLowerCase();
-  try {
-    recordTwitterapi("user/followings");
-    const res = await fetch(`${TWITTERAPI}/twitter/user/followings?userName=${encodeURIComponent(e)}&pageSize=200`, {
-      headers: { "x-api-key": key }
-    });
-    if (!res.ok) return null;
-    const d = await res.json();
-    const list = d.followings ?? d.data ?? [];
-    return list.some((u) => (u.userName ?? u.screen_name ?? "").toLowerCase() === s);
-  } catch {
-    return null;
-  }
+  const rel = await checkFollow(endorser, subject);
+  return rel ? rel.following : null;
 }
 var NOTABLE = [
   { handle: "cobie", label: "trader", size: "700K" },
@@ -1665,6 +1734,32 @@ var NOTABLE = [
   { handle: "pumpdotfun", label: "infra (Pump.fun)", size: "600K" },
   { handle: "base", label: "infra (Base)", size: "1.5M" }
 ];
+async function checkFollow(source, target) {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return null;
+  const s = source.replace(/^@/, "");
+  const t = target.replace(/^@/, "");
+  try {
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/check_follow_relationship?source_user_name=${encodeURIComponent(s)}&target_user_name=${encodeURIComponent(t)}`, key);
+    if (!res || !res.ok) return null;
+    const d = await res.json();
+    if (d?.status === "error") return null;
+    const raw = d?.data ?? d ?? {};
+    const pick = (...keys) => {
+      for (const k of keys) if (typeof raw[k] === "boolean") return raw[k];
+      return null;
+    };
+    const following = pick("following", "is_following", "isFollowing", "follows", "source_following_target");
+    const followedBy = pick("followed_by", "is_followed_by", "isFollowedBy", "followed", "target_following_source");
+    if (following === null && followedBy === null) {
+      console.log("[check-follow] unrecognized shape:", JSON.stringify(raw).slice(0, 200));
+      return null;
+    }
+    return { following, followedBy };
+  } catch {
+    return null;
+  }
+}
 var HIGH_REACH = 1e5;
 async function notableFollowers(subject) {
   const key = env("TWITTERAPI_KEY");
@@ -2657,10 +2752,11 @@ async function coldIntake(ctx) {
   } else if (hist) {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Handle history", detail: "No prior X handle on record for this account (no rebrand found; memory.lol coverage is partial).", source: "memory.lol", tone: "neutral" });
   }
-  const posts = await getRecentPosts(ctx.handle);
+  const corpus = await collectCorpus(ctx.handle);
+  const posts = corpus.posts;
   if (posts.length) {
-    ctx.evidence.recentActivity = posts;
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
+    ctx.evidence.recentActivity = corpus.newest.length ? corpus.newest : posts;
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Recent activity", detail: `Assembled a ${posts.length}-post claim corpus (${corpus.count.originals} recent originals + ${corpus.count.searched} from keyword search over full history) to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
   }
   const foundWallets = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...posts].join(" \n "));
   if (foundWallets.length) {
@@ -3069,7 +3165,7 @@ async function goplus(chainId, address) {
 
 // src/token/audit.ts
 var clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-var num = (s) => s == null || s === "" ? null : Number(s);
+var num2 = (s) => s == null || s === "" ? null : Number(s);
 var t1 = (s) => s === "1";
 var solFlag = (x) => x?.status === "1";
 function band(score) {
@@ -3110,9 +3206,9 @@ function evmSafety(gp, sim) {
     openSource: t1(gp?.is_open_source),
     cannotSellAll: t1(gp?.cannot_sell_all),
     metadataMutable: false,
-    buyTax: s?.simSuccess ? s.buyTax : (num(gp?.buy_tax) ?? 0) * 100,
-    sellTax: s?.simSuccess ? s.sellTax : (num(gp?.sell_tax) ?? 0) * 100,
-    holderCount: num(gp?.holder_count) ?? 0,
+    buyTax: s?.simSuccess ? s.buyTax : (num2(gp?.buy_tax) ?? 0) * 100,
+    sellTax: s?.simSuccess ? s.sellTax : (num2(gp?.sell_tax) ?? 0) * 100,
+    holderCount: num2(gp?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
     lpBurnedPct,
@@ -3127,7 +3223,7 @@ function evmSafety(gp, sim) {
     tradingCooldown: t1(gp?.trading_cooldown),
     externalCall: t1(gp?.external_call),
     ownerChangeBalance: t1(gp?.owner_change_balance),
-    creatorPercent: (num(gp?.creator_percent) ?? 0) * 100
+    creatorPercent: (num2(gp?.creator_percent) ?? 0) * 100
   };
 }
 function solanaSafety(sol) {
@@ -3162,7 +3258,7 @@ function solanaSafety(sol) {
     metadataMutable: solFlag(sol?.metadata_mutable),
     buyTax: 0,
     sellTax: 0,
-    holderCount: num(sol?.holder_count) ?? 0,
+    holderCount: num2(sol?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
     lpBurnedPct: 0,
