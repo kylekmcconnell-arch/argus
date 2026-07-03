@@ -25,6 +25,7 @@ const KIND_META: Record<string, { label: string; color: string }> = {
   // A token audit and a full investigation are both PROJECT deep-dives.
   token: { label: "project", color: "var(--color-unverifiable)" },
   investigation: { label: "project", color: "var(--color-unverifiable)" },
+  site: { label: "site", color: "var(--color-pass)" },
 };
 
 function ago(ts?: string): string {

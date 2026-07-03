@@ -5,7 +5,7 @@
 import { getAnalyst } from "./analyst";
 
 export async function syncReport(
-  kind: "person" | "token" | "investigation",
+  kind: "person" | "token" | "investigation" | "site",
   ref: string,
   query: string,
   payload: unknown,
@@ -34,7 +34,7 @@ export interface StoredReport {
 // One row per persisted report (no payload — heavy; fetched per-ref on open).
 export interface ReportListing {
   ref: string;
-  kind: "person" | "token" | "investigation";
+  kind: "person" | "token" | "investigation" | "site";
   query?: string;
   contributor?: string;
   verdict?: string | null;

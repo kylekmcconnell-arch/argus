@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         // cost:payload->cost lifts the per-audit spend out of the stored dossier
         // without shipping the whole heavy payload.
         const r = await fetch(
-          `${c.url}/rest/v1/${TABLE}?select=ref,kind,query,contributor,verdict,score,ts,cost:payload->cost&kind=in.%28person%2Ctoken%2Cinvestigation%29&order=ts.desc&limit=200`,
+          `${c.url}/rest/v1/${TABLE}?select=ref,kind,query,contributor,verdict,score,ts,cost:payload->cost&kind=in.%28person%2Ctoken%2Cinvestigation%2Csite%29&order=ts.desc&limit=200`,
           { headers: headers(c.key), signal: AbortSignal.timeout(10000) },
         );
         if (!r.ok) { res.status(200).json({ available: true, reports: [], error: `read ${r.status}` }); return; }
@@ -55,7 +55,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!ref) { res.status(400).json({ error: "ref required" }); return; }
       const kindF = typeof req.query.kind === "string" ? `&kind=eq.${encodeURIComponent(req.query.kind)}` : "";
       const r = await fetch(
-        `${c.url}/rest/v1/${TABLE}?select=ref,kind,query,contributor,payload,verdict,score,ts&ref=eq.${encodeURIComponent(ref)}&kind=in.%28person%2Ctoken%2Cinvestigation%29${kindF}&order=ts.desc&limit=1`,
+        `${c.url}/rest/v1/${TABLE}?select=ref,kind,query,contributor,payload,verdict,score,ts&ref=eq.${encodeURIComponent(ref)}&kind=in.%28person%2Ctoken%2Cinvestigation%2Csite%29${kindF}&order=ts.desc&limit=1`,
         { headers: headers(c.key), signal: AbortSignal.timeout(10000) },
       );
       if (!r.ok) { res.status(200).json({ available: true, report: null, error: `read ${r.status}` }); return; }

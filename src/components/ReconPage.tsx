@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { runRecon, type Recon } from "../collect/recon";
 import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
+import { syncReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
 import { fetchWebTeam, type WebPerson } from "../lib/investigation";
@@ -144,6 +145,13 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
     });
     const contrib = reconContribution(r);
     if (contrib) recordContribution(contrib);
+
+    // Persist so the recon shows in the Report library (not just the sidebar).
+    if (r.retrieval.status !== "gap") {
+      let host = r.retrieval.url;
+      try { host = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { /* keep */ }
+      void syncReport("site", host, host, { recon: r }, r.verdict?.verdict, r.verdict?.score);
+    }
   }, []);
 
   // Auto-run when opened with a URL from the main search bar.
