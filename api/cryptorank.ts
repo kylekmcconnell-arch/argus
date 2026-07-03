@@ -101,8 +101,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
   }
 
+  // If this is an impersonator, DON'T attach the real project's market data to
+  // it — return only the warning. Otherwise (no contract given, or a ticker-only
+  // match with no impersonation) fall back to the top-ranked namesake.
+  if (impersonation) { res.status(200).json({ available: true, matched: false, impersonation }); return; }
   if (!d) { const det = await cr(`/currencies/${candidates[0].id}`, key); d = det?.data ?? candidates[0]; }
-  if (!d) { res.status(200).json({ available: true, matched: false, impersonation, note: "lookup failed" }); return; }
+  if (!d) { res.status(200).json({ available: true, matched: false, note: "lookup failed" }); return; }
 
   const circ = num(d.circulatingSupply);
   const max = num(d.maxSupply) ?? num(d.totalSupply);
