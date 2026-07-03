@@ -127,23 +127,23 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
                     <span className="mono truncate text-[13px] text-ink">{r.query ?? r.ref}</span>
                     <span className="mono shrink-0 rounded px-1 py-0.5 text-[8.5px] uppercase" style={{ color: km.color, background: `${km.color}14` }}>{km.label}</span>
                   </span>
-                  <span className="block truncate text-[10.5px] text-ink-faint">
-                    {ago(r.ts)}{r.contributor && r.contributor !== me && r.contributor !== "anonymous" ? ` · by ${r.contributor}` : ""}
-                    {/* Only show a cost when it's a real, non-trivial spend.
-                        Token/project audits run keyless -> "free"; a near-zero or
-                        missing person-audit cost shows nothing (not "~$0.00"). */}
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-ink-faint">
+                    <span className="truncate">{ago(r.ts)}{r.contributor && r.contributor !== me && r.contributor !== "anonymous" ? ` · by ${r.contributor}` : ""}</span>
+                    {/* Cost as a readable pill (not faint appended text). Token/project
+                        audits run keyless -> "free"; a near-zero or missing person-audit
+                        cost shows nothing (not "~$0.00"). */}
                     {typeof r.cost?.usd === "number" && r.cost.usd >= 0.01 ? (
                       <span
                         role={ledger.length ? "button" : undefined}
                         tabIndex={ledger.length ? 0 : undefined}
                         title={ledger.length ? "Show the full call-by-call cost breakdown" : "estimated provider spend for this audit run"}
                         onClick={ledger.length ? (ev) => { ev.stopPropagation(); setCostOpen(open ? null : cardKey); } : undefined}
-                        className={`mono ${ledger.length ? "cursor-pointer underline decoration-dotted underline-offset-2 hover:text-ink" : ""}`}
+                        className={`mono shrink-0 inline-flex items-center gap-0.5 rounded-md border border-line/70 bg-void/60 px-1.5 py-[1px] text-[10.5px] text-ink-dim transition ${ledger.length ? "cursor-pointer hover:border-line-2 hover:text-ink" : ""}`}
                       >
-                        {" · ~$"}{r.cost.usd.toFixed(2)}{ledger.length ? (open ? " ▾" : " ▸") : ""}
+                        ~${r.cost.usd.toFixed(2)}{ledger.length ? (open ? " ▾" : " ▸") : ""}
                       </span>
                     ) : r.kind === "token" && (r.cost?.usd ?? 0) < 0.01 ? (
-                      " · free"
+                      <span className="mono shrink-0 rounded-md border border-line/70 px-1.5 py-[1px] text-[10.5px] text-ink-faint">free</span>
                     ) : null}
                   </span>
                 </span>
