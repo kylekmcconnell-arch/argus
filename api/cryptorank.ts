@@ -117,6 +117,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const candidates: any[] = Array.isArray(search?.data) ? search.data : [];
   if (!candidates.length) { res.status(200).json({ available: true, matched: false, note: "not listed on CryptoRank" }); return; }
 
+  // TEMP probe: discover the real cap-table routes. Remove after wiring.
+  if (q(req.query.probe)) {
+    const id = candidates[0].id;
+    const paths = [
+      `/currencies/${id}/funding-rounds`, `/currencies/${id}/fundraising`, `/currencies/${id}/rounds`,
+      `/currencies/${id}/vesting`, `/currencies/${id}/unlocks`, `/currencies/${id}/token-unlock`,
+      `/currencies/${id}/full-metrics`, `/currencies/${id}/investors`, `/currencies/${id}/funds`,
+      `/currencies/${id}?include=fundingRounds,vesting,investors,unlocks`, `/funds?currencyId=${id}`,
+    ];
+    const out: any = { id, symbol: candidates[0].symbol };
+    for (const p of paths) {
+      try {
+        const r = await fetch(`${CR}${p}`, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(9000) });
+        let sample: any = null;
+        if (r.ok) { const j = await r.json().catch(() => null); const root = j?.data ?? j; sample = Array.isArray(root) ? { arrayLen: root.length, first: root[0] } : root && typeof root === "object" ? Object.keys(root) : root; }
+        out[p] = { status: r.status, sample };
+      } catch (e) { out[p] = { error: String(e) }; }
+    }
+    res.status(200).json(out); return;
+  }
+
   // Resolve: prefer the candidate whose on-chain contract matches; else the
   // highest-ranked namesake (candidates come rank-sorted).
   let d: any = null;
