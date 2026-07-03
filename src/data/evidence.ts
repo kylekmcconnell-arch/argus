@@ -28,6 +28,7 @@ export interface SubjectProfile {
   prior_handles?: string[]; // past X usernames for the same account id (rebrands)
   last_post_at?: string;    // ISO time of the most recent tweet (dormancy signal)
   days_since_post?: number; // days since that post, computed at collect time
+  identity_emails?: string[]; // PDL-resolved emails — bridge to leaked GitHub commit emails
 }
 
 export interface AxisInput {

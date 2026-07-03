@@ -39,6 +39,15 @@ export async function enrichPerson(params: { profile?: string; name?: string; co
         url: x.company?.website || x.company?.linkedin_url || null,
       })),
       linkedin: p.linkedin_url,
+      // Emails are the strongest cross-source bridge key: a PDL-resolved email that
+      // MATCHES a leaked GitHub commit email proves the anon dev is this named person.
+      emails: [...new Set([
+        p.work_email,
+        ...(Array.isArray(p.personal_emails) ? p.personal_emails : []),
+        ...(Array.isArray(p.emails) ? p.emails.map((e: any) => (typeof e === "string" ? e : e?.address)) : []),
+      ].filter((e: any) => typeof e === "string" && e.includes("@")).map((e: string) => e.toLowerCase()))],
+      github: typeof p.github_username === "string" ? p.github_username : null,
+      location: typeof p.location_name === "string" ? p.location_name : null,
     };
   } catch {
     return null;
@@ -76,8 +85,12 @@ export const peopledatalabsAdapter: Adapter = {
       return;
     }
     ctx.evidence.profile.identity_confidence = person.linkedin ? "Probable" : ctx.evidence.profile.identity_confidence;
-    ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.`;
-    ctx.emit({ phase: "P1 · Identity", label: "Identity resolved", detail: `${person.fullName} · ${person.experience.length} employment records${person.linkedin ? ` · ${person.linkedin}` : ""}`, source: "peopledatalabs", tone: "good" });
+    // Carry the resolved emails so the graph can bridge them to leaked GitHub commit
+    // emails (an email match is a near-courtroom-grade identity confirmation).
+    if (person.emails.length) ctx.evidence.profile.identity_emails = person.emails;
+    const emailNote = person.emails.length ? ` Email on record: ${person.emails[0]}.` : "";
+    ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.${emailNote}`;
+    ctx.emit({ phase: "P1 · Identity", label: "Identity resolved", detail: `${person.fullName} · ${person.experience.length} employment records${person.emails.length ? ` · ${person.emails[0]}` : ""}${person.linkedin ? ` · ${person.linkedin}` : ""}`, source: "peopledatalabs", tone: "good" });
 
     // Integrate the career history. Two outcomes per company:
     //  - NEW: push it as a venture (an employer no other source surfaced).

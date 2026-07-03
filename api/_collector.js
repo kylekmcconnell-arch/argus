@@ -894,6 +894,11 @@ function assembleDossier(ev, live) {
       graph.edges.push({ src: pkey, dst: pr.name, type: "WORKED_ON", role: pr.role });
     }
   }
+  for (const email of ev.profile.identity_emails ?? []) {
+    const ekey = `email:${email.toLowerCase()}`;
+    if (!hasNode(ekey)) graph.nodes.push({ type: "Identity", subtype: "Email", key: ekey, label: email });
+    graph.edges.push({ src: subjectKey, dst: ekey, type: "IDENTITY_EMAIL" });
+  }
   return {
     handle: ev.profile.handle,
     display_name: ev.profile.display_name,
@@ -2134,7 +2139,16 @@ async function enrichPerson(params) {
         end: x.end_date,
         url: x.company?.website || x.company?.linkedin_url || null
       })),
-      linkedin: p.linkedin_url
+      linkedin: p.linkedin_url,
+      // Emails are the strongest cross-source bridge key: a PDL-resolved email that
+      // MATCHES a leaked GitHub commit email proves the anon dev is this named person.
+      emails: [...new Set([
+        p.work_email,
+        ...Array.isArray(p.personal_emails) ? p.personal_emails : [],
+        ...Array.isArray(p.emails) ? p.emails.map((e) => typeof e === "string" ? e : e?.address) : []
+      ].filter((e) => typeof e === "string" && e.includes("@")).map((e) => e.toLowerCase()))],
+      github: typeof p.github_username === "string" ? p.github_username : null,
+      location: typeof p.location_name === "string" ? p.location_name : null
     };
   } catch {
     return null;
@@ -2165,8 +2179,10 @@ var peopledatalabsAdapter = {
       return;
     }
     ctx.evidence.profile.identity_confidence = person.linkedin ? "Probable" : ctx.evidence.profile.identity_confidence;
-    ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.`;
-    ctx.emit({ phase: "P1 \xB7 Identity", label: "Identity resolved", detail: `${person.fullName} \xB7 ${person.experience.length} employment records${person.linkedin ? ` \xB7 ${person.linkedin}` : ""}`, source: "peopledatalabs", tone: "good" });
+    if (person.emails.length) ctx.evidence.profile.identity_emails = person.emails;
+    const emailNote = person.emails.length ? ` Email on record: ${person.emails[0]}.` : "";
+    ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.${emailNote}`;
+    ctx.emit({ phase: "P1 \xB7 Identity", label: "Identity resolved", detail: `${person.fullName} \xB7 ${person.experience.length} employment records${person.emails.length ? ` \xB7 ${person.emails[0]}` : ""}${person.linkedin ? ` \xB7 ${person.linkedin}` : ""}`, source: "peopledatalabs", tone: "good" });
     const byName = new Map(ctx.evidence.ventures.map((v) => [v.project_name.toLowerCase(), v]));
     const added = [];
     const confirmed = [];
@@ -3219,6 +3235,7 @@ function evmSafety(gp, sim) {
     simChecked: !!s,
     honeypot: t1(gp?.is_honeypot) || (s?.isHoneypot ?? false),
     honeypotOnchain: t1(gp?.is_honeypot) || t1(gp?.cannot_sell_all),
+    serialScammerCreator: t1(gp?.honeypot_with_same_creator),
     mintable: t1(gp?.is_mintable),
     freezable: false,
     nonTransferable: false,
@@ -3267,6 +3284,8 @@ function solanaSafety(sol) {
     simChecked: false,
     honeypot: !!sol?.non_transferable && sol.non_transferable === "1",
     honeypotOnchain: sol?.non_transferable === "1",
+    serialScammerCreator: false,
+    // GoPlus's same-creator honeypot flag is EVM-only
     mintable,
     freezable,
     nonTransferable: sol?.non_transferable === "1",
@@ -3306,6 +3325,7 @@ function emptySafety() {
     simChecked: false,
     honeypot: false,
     honeypotOnchain: false,
+    serialScammerCreator: false,
     mintable: false,
     freezable: false,
     nonTransferable: false,
@@ -3431,6 +3451,10 @@ async function runTokenAudit(input, emit, opts) {
       findings.push({ claim: s.hiddenOwner ? "Hidden owner detected." : "Ownership can be taken back after renouncement.", tone: "bad", source: "goplus" });
     }
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
+    if (s.serialScammerCreator) {
+      caps.push([25, "serial_scammer_creator"]);
+      findings.push({ claim: "The wallet that deployed this token has created honeypot tokens before \u2014 a serial scammer.", tone: "bad", source: "goplus" });
+    }
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });
     if (s.simChecked && !s.honeypot) findings.push({ claim: `Sell simulation passed (buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%).`, tone: "good", source: "honeypot.is" });
     if (s.ownerRenounced && !s.mintable && !s.takeBack && !s.freezable) findings.push({ claim: chain === "solana" ? "Mint and freeze authority revoked." : "Ownership renounced; no mint or take-back.", tone: "good", source: "goplus" });

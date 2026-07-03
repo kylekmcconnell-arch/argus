@@ -83,6 +83,14 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       graph.edges.push({ src: pkey, dst: pr.name, type: "WORKED_ON", role: pr.role });
     }
   }
+  // PDL-resolved emails as graph nodes, keyed IDENTICALLY to the leaked GitHub
+  // commit emails (email:<addr>) — so if a project's anon dev committed under an
+  // email PDL ties to this named person, the two audits bridge to one node.
+  for (const email of ev.profile.identity_emails ?? []) {
+    const ekey = `email:${email.toLowerCase()}`;
+    if (!hasNode(ekey)) graph.nodes.push({ type: "Identity", subtype: "Email", key: ekey, label: email } as PanoptesNode);
+    graph.edges.push({ src: subjectKey, dst: ekey, type: "IDENTITY_EMAIL" });
+  }
 
   return {
     handle: ev.profile.handle,

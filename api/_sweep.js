@@ -156,6 +156,7 @@ function evmSafety(gp, sim) {
     simChecked: !!s,
     honeypot: t1(gp?.is_honeypot) || (s?.isHoneypot ?? false),
     honeypotOnchain: t1(gp?.is_honeypot) || t1(gp?.cannot_sell_all),
+    serialScammerCreator: t1(gp?.honeypot_with_same_creator),
     mintable: t1(gp?.is_mintable),
     freezable: false,
     nonTransferable: false,
@@ -204,6 +205,8 @@ function solanaSafety(sol) {
     simChecked: false,
     honeypot: !!sol?.non_transferable && sol.non_transferable === "1",
     honeypotOnchain: sol?.non_transferable === "1",
+    serialScammerCreator: false,
+    // GoPlus's same-creator honeypot flag is EVM-only
     mintable,
     freezable,
     nonTransferable: sol?.non_transferable === "1",
@@ -243,6 +246,7 @@ function emptySafety() {
     simChecked: false,
     honeypot: false,
     honeypotOnchain: false,
+    serialScammerCreator: false,
     mintable: false,
     freezable: false,
     nonTransferable: false,
@@ -368,6 +372,10 @@ async function runTokenAudit(input, emit, opts) {
       findings.push({ claim: s.hiddenOwner ? "Hidden owner detected." : "Ownership can be taken back after renouncement.", tone: "bad", source: "goplus" });
     }
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
+    if (s.serialScammerCreator) {
+      caps.push([25, "serial_scammer_creator"]);
+      findings.push({ claim: "The wallet that deployed this token has created honeypot tokens before \u2014 a serial scammer.", tone: "bad", source: "goplus" });
+    }
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });
     if (s.simChecked && !s.honeypot) findings.push({ claim: `Sell simulation passed (buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%).`, tone: "good", source: "honeypot.is" });
     if (s.ownerRenounced && !s.mintable && !s.takeBack && !s.freezable) findings.push({ claim: chain === "solana" ? "Mint and freeze authority revoked." : "Ownership renounced; no mint or take-back.", tone: "good", source: "goplus" });
