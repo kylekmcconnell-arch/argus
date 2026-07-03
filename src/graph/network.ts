@@ -241,6 +241,7 @@ export function subjectConnections(handle: string, contributions: GraphContribut
   for (const c of contributions) {
     if (canonical(c.handle) !== me) continue;
     for (const n of c.nodes) {
+      if (isGenericKey(String(n.key))) continue; // "site"/"twitter" junk can't be a tie
       const k = canonical(n.key);
       if (k !== me) mine.set(k, { label: String(n.key), type: String(n.type) });
     }

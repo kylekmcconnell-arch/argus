@@ -8,6 +8,7 @@ import { GithubForensics } from "./GithubForensics";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
+import { RingAlert } from "./RingAlert";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -129,6 +130,7 @@ export function InvestigationReport({
 
       <div className="mx-auto max-w-4xl px-5">
         <div className="mt-4"><ServiceAlert /></div>
+        <RingAlert handle={"$" + token.symbol} onAudit={onAudit} />
         {/* headline */}
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-3">
