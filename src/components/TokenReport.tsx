@@ -8,6 +8,7 @@ import { TokenSparkline } from "./TokenSparkline";
 import { MarketIntel } from "./MarketIntel";
 import { HolderForensics } from "./HolderForensics";
 import { OperatorNetwork } from "./OperatorNetwork";
+import { WalletClusters } from "./WalletClusters";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 
@@ -224,6 +225,13 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         <div className="mt-4">
           <HolderForensics address={d.address} chain={d.chain} holderCount={d.safety.holderCount} evmTop={d.topHolders.map((h) => ({ pct: h.percent, tag: h.tag }))} insiderPct={d.insiderPct} />
         </div>
+
+        {/* wallet clustering — how many of the "top holders" are secretly one hand? */}
+        {d.chain === "solana" && (
+          <div className="mt-4">
+            <WalletClusters mint={d.address} chain={d.chain} symbol={d.symbol} />
+          </div>
+        )}
 
         {/* recursive operator trace — is this deployer an isolated project or one
             node in a serial rug factory sharing a funder across many launches? */}

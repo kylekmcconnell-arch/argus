@@ -4,6 +4,7 @@ import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
 import { OperatorNetwork } from "./OperatorNetwork";
+import { WalletClusters } from "./WalletClusters";
 import { GithubForensics } from "./GithubForensics";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
@@ -271,6 +272,12 @@ export function InvestigationReport({
         <div className="mt-3">
           <HolderForensics address={token.address} chain={token.chain} holderCount={token.safety.holderCount} evmTop={token.topHolders.map((h) => ({ pct: h.percent, tag: h.tag }))} insiderPct={token.insiderPct} />
         </div>
+
+        {token.chain === "solana" && (
+          <div className="mt-3">
+            <WalletClusters mint={token.address} chain={token.chain} symbol={token.symbol} />
+          </div>
+        )}
 
         <div className="mt-3">
           <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} onAudit={onAudit} />
