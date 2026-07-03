@@ -12,6 +12,7 @@ import { ProjectsPage } from "./components/ProjectsPage";
 import { AlertsPage } from "./components/AlertsPage";
 import { WatchlistPage } from "./components/WatchlistPage";
 import { RadarPage } from "./components/RadarPage";
+import { TrendingPage } from "./components/TrendingPage";
 import { AboutPage } from "./components/AboutPage";
 import { ApiPage } from "./components/ApiPage";
 import { ProvidersPage } from "./components/ProvidersPage";
@@ -36,7 +37,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 
 type Phase =
-  | "idle" | "radar" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
+  | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
   | "running" | "live" | "report"
   | "token-run" | "token-report"
   | "investigation" | "investigation-report"
@@ -340,7 +341,7 @@ export default function App() {
   const activeHandle = personAudit ? dossier?.handle ?? (query ? "@" + query.replace(/^@/, "") : null) : null;
   const view: NavTarget | "audit" = inAudit
     ? "audit"
-    : phase === "radar" || phase === "recon" || phase === "find" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "alerts" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
+    : phase === "radar" || phase === "trending" || phase === "recon" || phase === "find" || phase === "dossiers" || phase === "graph" || phase === "kols" || phase === "founders" || phase === "projects" || phase === "vcs" || phase === "watchlist" || phase === "alerts" || phase === "track" || phase === "admin" || phase === "about" || phase === "api" || phase === "providers" || phase === "changelog"
       ? phase
       : "idle";
 
@@ -369,6 +370,8 @@ export default function App() {
       {phase === "projects" && <ProjectsPage onAudit={onAudit} onOpenRecent={onOpenRecent} />}
 
       {phase === "radar" && <RadarPage onAudit={onAudit} />}
+
+      {phase === "trending" && <TrendingPage onOpen={onOpenRecent} />}
 
       {phase === "watchlist" && <WatchlistPage onAudit={onAudit} />}
 

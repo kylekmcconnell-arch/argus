@@ -190,6 +190,21 @@ export async function hydrateSharedLog(): Promise<void> {
   }
 }
 
+// Re-pull the community feed (bypasses the once-per-session guard). Used by the
+// Trending page to keep the live ranking fresh as other analysts' scans land.
+export async function refreshSharedLog(): Promise<void> {
+  try {
+    const r = await fetch(SYNC_URL, { signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d?.available === false || !Array.isArray(d?.entries)) return;
+    sharedCache = d.entries as LogEntry[];
+    emitLogChange();
+  } catch {
+    /* keep the last snapshot */
+  }
+}
+
 export function getSharedLog(): LogEntry[] {
   return sharedCache;
 }

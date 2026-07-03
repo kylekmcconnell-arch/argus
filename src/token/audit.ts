@@ -518,7 +518,7 @@ async function runTokenAudit(
 
   return {
     address, chain, dexId: pair.dexId, pairAddress: pair.pairAddress, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
-    imageUrl: pair.info?.imageUrl, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
+    imageUrl: pair.info?.imageUrl ?? cg?.image ?? undefined, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
     mcap: fdv, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
     verdict, score, capApplied, headline, axes, safety: s, socials,
     projectX, deployer, topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,

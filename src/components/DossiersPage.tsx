@@ -3,8 +3,11 @@ import { listReports, type ReportListing } from "../lib/reports";
 import { purgeSubject } from "../lib/purge";
 import { verdictMeta } from "../lib/verdict";
 import { mergedLog } from "../lib/auditlog";
+import { scanStats, totalScans, type ScanStat } from "../lib/scanstats";
 import { auditImage } from "../lib/avatars";
 import { getAnalyst } from "../lib/analyst";
+
+const normRef = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
 
 // The report library: every persisted audit (yours + Enigma's) from the shared
 // backend, searchable, newest first. Click opens the stored report (no re-run);
@@ -63,6 +66,13 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
   }, [reports]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const me = getAnalyst();
+  // Scan counts per subject, so each report box shows how many times it's been run.
+  const statByKey = useMemo(() => {
+    const m = new Map<string, ScanStat>();
+    for (const s of scanStats()) m.set(s.key, s);
+    return m;
+  }, [reports]); // eslint-disable-line react-hooks/exhaustive-deps
+  const total = totalScans();
   const needle = q.trim().toLowerCase();
   const shown = (reports ?? []).filter((r) =>
     !needle || r.ref.toLowerCase().includes(needle) || (r.query ?? "").toLowerCase().includes(needle) || (r.contributor ?? "").toLowerCase().includes(needle),
@@ -83,8 +93,9 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
         className="mono mt-5 w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[13.5px] text-ink placeholder:text-ink-faint transition focus:border-line-2 focus:outline-none"
       />
 
-      <div className="mt-5 mb-2.5 text-[11px] uppercase tracking-[0.16em] text-ink-faint">
-        {reports == null ? "loading…" : `${shown.length} report${shown.length === 1 ? "" : "s"}`}
+      <div className="mt-5 mb-2.5 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-ink-faint">
+        <span>{reports == null ? "loading…" : `${shown.length} report${shown.length === 1 ? "" : "s"}`}</span>
+        {total > 0 && <span className="text-ink-faint/70">· {total.toLocaleString()} total scans</span>}
       </div>
 
       {reports != null && shown.length === 0 && (
@@ -104,6 +115,7 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
           const img = imageByRef.get(r.ref.toLowerCase().replace(/^[@$]/, ""));
           const letter = ((r.query ?? r.ref).replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
           const cardKey = `${r.kind}:${r.ref}`;
+          const stat = statByKey.get(`${r.kind}:${normRef(r.ref)}`);
           const ledger = r.cost?.calls ?? [];
           const open = costOpen === cardKey;
           return (
@@ -129,6 +141,13 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
                   </span>
                   <span className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-ink-faint">
                     <span className="truncate">{ago(r.ts)}{r.contributor && r.contributor !== me && r.contributor !== "anonymous" ? ` · by ${r.contributor}` : ""}</span>
+                    {stat && stat.count > 0 && (
+                      <span className="mono shrink-0 inline-flex items-center gap-0.5 rounded-md border border-line/70 px-1.5 py-[1px] text-[10.5px] text-ink-dim" title={`Scanned ${stat.count} time${stat.count === 1 ? "" : "s"}${stat.rank <= 20 ? ` · #${stat.rank} most scanned` : ""}`}>
+                        {stat.trend === "up" && <span style={{ color: "var(--color-pass)" }}>▲</span>}
+                        {stat.trend === "down" && <span style={{ color: "var(--color-avoid)" }}>▼</span>}
+                        {stat.count}<span className="text-ink-faint">×</span>
+                      </span>
+                    )}
                     {/* Cost as a readable pill (not faint appended text). Token/project
                         audits run keyless -> "free"; a near-zero or missing person-audit
                         cost shows nothing (not "~$0.00"). */}
