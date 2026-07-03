@@ -11,7 +11,6 @@ import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
 import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
-import { OnchainReality } from "./OnchainReality";
 import { PfpCheck } from "./PfpCheck";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
@@ -300,18 +299,6 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
   const [watched, setWatched] = useState(() => isWatched(report.handle));
   // The compounding web: who else (from your past audits) this subject is tied to.
   const connections = subjectConnections(report.handle, getContributions());
-  // Candidate token symbols for the on-chain check: the project's own token often
-  // isn't the promoted ticker (RECC Finance -> the tradeable $RECC, not $RETF).
-  const symbolHints = (() => {
-    const STOP = /^(finance|protocol|labs?|capital|network|dao|fi|token|coin|money|app|official|crypto|swap|pay|world|game|games)$/i;
-    const clean = (s: string) => s.replace(/[^a-z0-9]/gi, "");
-    const out = new Set<string>();
-    const first = (f.display_name || "").split(/\s+/).map(clean).filter(Boolean).find((w) => !STOP.test(w));
-    if (first) out.add(first.toUpperCase());
-    const m = report.handle.replace(/^@/, "").match(/^([A-Za-z0-9]{2,})(finance|protocol|labs?|capital|network|dao|fi|token|coin|money|app|official|crypto|swap|pay)$/i);
-    if (m) out.add(m[1].toUpperCase());
-    return [...out].filter((s) => s.length >= 2 && s.length <= 8);
-  })();
   const [copied, setCopied] = useState(false);
   const share = () => {
     const p = new URLSearchParams({ k: "person", t: report.handle, title: report.handle, v: report.composite_verdict, sc: String(report.governing_score ?? ""), s: (f.headline || "").slice(0, 90) });
@@ -481,8 +468,13 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
         </div>
 
         {/* identity: when a named team resolved it, SHOW the team here (the note
-            would just narrate the same names); otherwise show the note. */}
-        {webTeam && webTeam.length > 0 ? (
+            would just narrate the same names); otherwise show the note.
+            NOT for KOLs: a KOL's display name colliding with a real project (e.g.
+            "@KaminoCrypto" vs the Kamino protocol) pulled that project's team in by
+            NAME and wrongly presented it as this handle's identity. A KOL is a
+            pseudonymous individual, not a project team — the name-search team is a
+            collision, and the contradictions section already explains it. */}
+        {report.governing_role !== "KOL" && webTeam && webTeam.length > 0 ? (
           <div className="mt-3">
             <div className="mb-1.5 flex flex-wrap items-center gap-2">
               <span className="mono rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: "var(--color-line-2)", color: "var(--color-ink-dim)" }}>{report.identity_confidence}</span>
@@ -798,20 +790,11 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             </Section>
           </div>
 
-          {/* Not for funds: a VC's portfolio tokens aren't "promotions", and a
-              deployer/serial-launch trail on Maker's contract says nothing about
-              Paradigm — the VC track record section covers their bets instead. */}
-          {/* Not for KOLs: the KOL report below is the richer superset (every
-              promoted token + performance + reach), so a second single-token
-              box just duplicates it. Deployer/funder forensics stay reachable on
-              each token's own audit. Also not for funds (portfolio ≠ promotion). */}
-          {report.governing_role !== "INVESTOR" && !roles.some((r) => r === "KOL") && (evidence.promotions?.length > 0 || symbolHints.length > 0 || evidence.wallets.some((w) => w.chain === "solana")) && (
-            <div className="min-w-0 lg:col-span-2">
-              <Section title="On-chain reality check" kicker="the token they promote → its deployer → the money trail + serial-launch history">
-                <OnchainReality promotions={evidence.promotions ?? []} wallets={evidence.wallets} symbolHints={symbolHints} onAudit={onAudit} />
-              </Section>
-            </div>
-          )}
+          {/* The old "On-chain reality check" (a single promoted token → deployer)
+              was removed: for KOLs the KOL report below is the richer superset, for
+              funds a portfolio token isn't a promotion, and for everyone else it
+              duplicated the token's own audit. Deployer/funder forensics live on
+              each token's audit page. */}
 
           {roles.some((r) => r === "INVESTOR") && (
             <div className="min-w-0 lg:col-span-2">

@@ -215,7 +215,6 @@ export function Sidebar({
         <NavItem icon="graph" label="Trust graph" active={view === "graph"} onClick={() => nav("graph")} />
         <NavItem icon="watch" label="Watchlist" active={view === "watchlist"} onClick={() => nav("watchlist")} badge={getWatchlist().length || undefined} />
         <NavItem icon="bell" label="Alerts" active={view === "alerts"} onClick={() => nav("alerts")} />
-        <NavItem icon="track" label="Track record" active={view === "track"} onClick={() => nav("track")} />
         <NavItem icon="admin" label="Audit log" active={view === "admin"} onClick={() => nav("admin")} />
       </nav>
 

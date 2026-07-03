@@ -31,9 +31,22 @@ async function tickerToContract(ticker: string): Promise<string | null> {
   }
 }
 
+// Major assets and stables a KOL might reference (ETH, SOL, BTC, USDC…). These
+// are NOT shills — mentioning ETH is not promoting a memecoin — and running them
+// through the memecoin rug audit produced absurd verdicts ("$ETH rugged / dead").
+// Skip them entirely from the promoted-token grade.
+const BLUECHIP = new Set([
+  "ETH", "WETH", "BTC", "WBTC", "SOL", "WSOL", "BNB", "WBNB", "MATIC", "POL", "AVAX", "WAVAX",
+  "ARB", "OP", "LINK", "UNI", "AAVE", "LDO", "MKR", "XRP", "ADA", "DOGE", "TRX", "DOT", "LTC",
+  "BCH", "ATOM", "NEAR", "APT", "SUI", "TIA", "TON", "USDC", "USDT", "DAI", "BUSD", "USDE", "FDUSD",
+]);
+
 async function auditPromotions(promos: Promo[]): Promise<TokRes[]> {
   const out: TokRes[] = [];
   for (const p of promos.slice(0, 8)) {
+    const tick = (p.ticker ?? "").replace(/^\$/, "").toUpperCase();
+    // A blue-chip reference isn't a promotion — drop it before spending an audit.
+    if (!p.contract_address && BLUECHIP.has(tick)) continue;
     let contract = p.contract_address || null;
     if (!contract && p.ticker) contract = await tickerToContract(p.ticker);
     const label = p.ticker ? (p.ticker.startsWith("$") ? p.ticker : "$" + p.ticker) : "token";
@@ -41,7 +54,13 @@ async function auditPromotions(promos: Promo[]): Promise<TokRes[]> {
     const input = resolveInput(contract);
     const d = input.kind === "token" ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
     if (!d) { out.push({ label, dead: false, unresolved: true }); continue; }
-    const dead = d.verdict === "FAIL" || d.verdict === "AVOID" || (d.liquidityUsd ?? 0) < 500;
+    if (BLUECHIP.has((d.symbol ?? "").toUpperCase())) continue; // resolved to a major asset
+    const liq = d.liquidityUsd ?? 0;
+    // "rugged / dead" means the token is actually gone — thin/collapsed liquidity —
+    // NOT merely a low ARGUS score. A token with real, deep liquidity is by
+    // definition not dead, so a failed verdict only counts as dead when liquidity
+    // is also thin (guards against tagging a $1B-liquidity asset "rugged").
+    const dead = liq < 500 || ((d.verdict === "FAIL" || d.verdict === "AVOID") && liq < 250_000);
     out.push({ label: d.symbol ? `$${d.symbol}` : label, address: d.address, chain: d.chain, pairAddress: d.pairAddress, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, dead });
   }
   return out;
@@ -76,6 +95,7 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
   }, []);
 
   const resolved = (tokens ?? []).filter((t) => !t.unresolved);
+  const unresolved = (tokens ?? []).filter((t) => t.unresolved);
   const dead = resolved.filter((t) => t.dead);
   const money = (n?: number) => (n == null ? "—" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
   const assoc = associates.filter((a) => a.associate_key).slice(0, 12);
@@ -116,11 +136,19 @@ export function KolReport({ handle, promotions, associates, onAudit }: { handle:
             })}
           </div>
         ) : (
-          !loading && <p className="mt-1 text-[12px] text-ink-faint">No promoted tokens could be resolved on-chain{tokens && tokens.length ? " (ticker-only mentions)" : ""}.</p>
+          !loading && resolved.length === 0 && unresolved.length === 0 && <p className="mt-1 text-[12px] text-ink-faint">No promoted tokens found.</p>
         )}
         {dead.length > 0 && (
           <p className="mt-1.5 text-[12px] leading-relaxed text-avoid">
             {dead.length} of the {resolved.length} tokens this account promoted are now dead or failing — a shill-and-dump pattern.
+          </p>
+        )}
+        {/* Promoted tickers we couldn't match to an on-chain contract — shown, not
+            silently dropped, so a token they clearly promoted (e.g. $DUBBZ) doesn't
+            just vanish from the list. Ticker-only, no DEX pair under that symbol. */}
+        {!loading && unresolved.length > 0 && (
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-faint">
+            Also promoted, couldn't price on-chain (ticker-only — no DEX pair found under that symbol): {unresolved.map((t) => t.label).join(", ")}.
           </p>
         )}
       </div>

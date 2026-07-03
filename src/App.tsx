@@ -16,7 +16,6 @@ import { AboutPage } from "./components/AboutPage";
 import { ApiPage } from "./components/ApiPage";
 import { ProvidersPage } from "./components/ProvidersPage";
 import { ChangelogPage } from "./components/ChangelogPage";
-import { TrackRecordPage } from "./components/TrackRecordPage";
 import { ReconPage } from "./components/ReconPage";
 import { FindWallet } from "./components/FindWallet";
 import { AdminPage } from "./components/AdminPage";
@@ -335,8 +334,6 @@ export default function App() {
       {phase === "watchlist" && <WatchlistPage onAudit={onAudit} />}
 
       {phase === "alerts" && <AlertsPage onOpen={onOpenRecent} />}
-
-      {phase === "track" && <TrackRecordPage onAudit={onAudit} />}
 
       {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} onAudit={onAudit} />}
 
