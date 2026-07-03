@@ -47,32 +47,48 @@ const BLUECHIP = new Set([
   "BCH", "ATOM", "NEAR", "APT", "SUI", "TIA", "TON", "USDC", "USDT", "DAI", "BUSD", "USDE", "FDUSD",
 ]);
 
+// Audit ONE promoted token. Returns null when it isn't a real promotion to grade
+// (a blue-chip reference, or a mention that resolves to a major asset).
+async function auditOnePromo(p: Promo): Promise<TokRes | null> {
+  const tick = (p.ticker ?? "").replace(/^\$/, "").toUpperCase();
+  // A blue-chip reference isn't a promotion — drop it before spending an audit.
+  if (!p.contract_address && BLUECHIP.has(tick)) return null;
+  let contract = p.contract_address || null;
+  if (!contract && p.ticker) contract = await tickerToContract(p.ticker);
+  const label = p.ticker ? (p.ticker.startsWith("$") ? p.ticker : "$" + p.ticker) : "token";
+  if (!contract) return { label, dead: false, unresolved: true };
+  const input = resolveInput(contract);
+  const d = input.kind === "token" ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
+  if (!d) return { label, dead: false, unresolved: true };
+  if (BLUECHIP.has((d.symbol ?? "").toUpperCase())) return null; // resolved to a major asset
+  const liq = d.liquidityUsd ?? 0;
+  const mc = d.mcap ?? 0;
+  // "rugged / dead" means the token is actually gone: essentially no MARKET CAP
+  // AND no tradeable liquidity. Market cap — not DEX liquidity — is the life
+  // signal: a real project ($RLB/Rollbit) can have thin DEX liquidity yet a large
+  // cap because it trades on CEXes, and is NOT dead. This is distinct from the
+  // ARGUS risk verdict (a token can be alive but still FAIL on risk).
+  const dead = mc < 50_000 && liq < 5_000;
+  const saneMcap = d.mcap != null && d.mcap < 1e12 ? d.mcap : undefined; // never show a fabricated-supply cap
+  return { label: d.symbol ? `$${d.symbol}` : label, address: d.address, chain: d.chain, pairAddress: d.pairAddress, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: saneMcap, dead };
+}
+
+// Run the promo audits with bounded concurrency (each is a dexscreener/rugcheck
+// round-trip; 20 in series took ~15s). A pool of 4 keeps it fast without
+// hammering the free APIs into rate limits; results stay in promo order.
 async function auditPromotions(promos: Promo[]): Promise<TokRes[]> {
-  const out: TokRes[] = [];
-  for (const p of promos.slice(0, 20)) {
-    const tick = (p.ticker ?? "").replace(/^\$/, "").toUpperCase();
-    // A blue-chip reference isn't a promotion — drop it before spending an audit.
-    if (!p.contract_address && BLUECHIP.has(tick)) continue;
-    let contract = p.contract_address || null;
-    if (!contract && p.ticker) contract = await tickerToContract(p.ticker);
-    const label = p.ticker ? (p.ticker.startsWith("$") ? p.ticker : "$" + p.ticker) : "token";
-    if (!contract) { out.push({ label, dead: false, unresolved: true }); continue; }
-    const input = resolveInput(contract);
-    const d = input.kind === "token" ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
-    if (!d) { out.push({ label, dead: false, unresolved: true }); continue; }
-    if (BLUECHIP.has((d.symbol ?? "").toUpperCase())) continue; // resolved to a major asset
-    const liq = d.liquidityUsd ?? 0;
-    const mc = d.mcap ?? 0;
-    // "rugged / dead" means the token is actually gone: essentially no MARKET CAP
-    // AND no tradeable liquidity. Market cap — not DEX liquidity — is the life
-    // signal: a real project ($RLB/Rollbit) can have thin DEX liquidity yet a large
-    // cap because it trades on CEXes, and is NOT dead. This is distinct from the
-    // ARGUS risk verdict (a token can be alive but still FAIL on risk).
-    const dead = mc < 50_000 && liq < 5_000;
-    const saneMcap = d.mcap != null && d.mcap < 1e12 ? d.mcap : undefined; // never show a fabricated-supply cap
-    out.push({ label: d.symbol ? `$${d.symbol}` : label, address: d.address, chain: d.chain, pairAddress: d.pairAddress, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: saneMcap, dead });
-  }
-  return out;
+  const list = promos.slice(0, 20);
+  const results: (TokRes | null)[] = new Array(list.length).fill(null);
+  const POOL = 4;
+  let next = 0;
+  const worker = async () => {
+    while (next < list.length) {
+      const i = next++;
+      results[i] = await auditOnePromo(list[i]).catch(() => null);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(POOL, list.length) }, worker));
+  return results.filter((r): r is TokRes => r != null);
 }
 
 export function KolReport({ handle, promotions, associates, onAudit }: { handle: string; promotions: Promo[]; associates: Assoc[]; onAudit?: (q: string) => void }) {
