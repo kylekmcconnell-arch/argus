@@ -1,41 +1,61 @@
 import { useEffect, useState } from "react";
 import { subscribeLog, refreshSharedLog } from "../lib/auditlog";
-import { scanStats, totalScans, type ScanStat } from "../lib/scanstats";
+import { scanStats, totalScans, type ScanStat, type ScanCategory } from "../lib/scanstats";
 import { verdictMeta } from "../lib/verdict";
 import { auditImage } from "../lib/avatars";
 
 const KIND_LABEL: Record<string, string> = { person: "handle", token: "token", site: "site" };
 
+const RANGES: { label: string; ms: number | null }[] = [
+  { label: "All time", ms: null },
+  { label: "1h", ms: 3_600_000 },
+  { label: "24h", ms: 86_400_000 },
+  { label: "7d", ms: 604_800_000 },
+  { label: "30d", ms: 2_592_000_000 },
+];
+const CATS: { label: string; cat: ScanCategory | null }[] = [
+  { label: "All", cat: null },
+  { label: "Founders", cat: "founder" },
+  { label: "VCs", cat: "vc" },
+  { label: "KOLs", cat: "kol" },
+  { label: "Projects", cat: "project" },
+  { label: "Sites", cat: "site" },
+];
+
 function TrendArrow({ trend }: { trend: ScanStat["trend"] }) {
-  if (trend === "up") {
-    return (
-      <span className="inline-flex items-center gap-0.5" style={{ color: "var(--color-pass)" }} title="Scan activity accelerating">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M12 5l7 9H5z" /></svg>
-      </span>
-    );
-  }
-  if (trend === "down") {
-    return (
-      <span className="inline-flex items-center gap-0.5" style={{ color: "var(--color-avoid)" }} title="Scan activity cooling">
-        <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M12 19l-7-9h14z" /></svg>
-      </span>
-    );
-  }
+  if (trend === "up") return <span className="inline-flex" style={{ color: "var(--color-pass)" }} title="Scan activity accelerating"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M12 5l7 9H5z" /></svg></span>;
+  if (trend === "down") return <span className="inline-flex" style={{ color: "var(--color-avoid)" }} title="Scan activity cooling"><svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M12 19l-7-9h14z" /></svg></span>;
   return <span className="text-ink-faint" title="Holding steady">–</span>;
+}
+
+function Chip({ label, on, onClick }: { label: string; on: boolean; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="mono rounded-md border px-2.5 py-1 text-[12px] transition"
+      style={on
+        ? { borderColor: "var(--color-signal)", color: "var(--color-signal)", background: "color-mix(in oklab, var(--color-signal) 12%, transparent)" }
+        : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}
+    >
+      {label}
+    </button>
+  );
 }
 
 export function TrendingPage({ onOpen }: { onOpen: (ref: string) => void }) {
   const [, setTick] = useState(0);
+  const [rangeMs, setRangeMs] = useState<number | null>(null);
+  const [cat, setCat] = useState<ScanCategory | null>(null);
   useEffect(() => {
     const unsub = subscribeLog(() => setTick((t) => t + 1));
-    // keep the community ranking live as other analysts' scans land
     void refreshSharedLog();
     const iv = setInterval(() => { void refreshSharedLog(); }, 45000);
     return () => { unsub(); clearInterval(iv); };
   }, []);
 
-  const stats = scanStats().slice(0, 40);
-  const total = totalScans();
+  const stats = scanStats(Date.now(), { rangeMs, category: cat }).slice(0, 40);
+  const total = totalScans(rangeMs);
+  const rangeLabel = (RANGES.find((r) => r.ms === rangeMs)?.label ?? "All time").toLowerCase();
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
@@ -53,13 +73,25 @@ export function TrendingPage({ onOpen }: { onOpen: (ref: string) => void }) {
         </div>
         <div className="text-right">
           <div className="mono text-[22px] font-semibold tabular text-ink">{total.toLocaleString()}</div>
-          <div className="text-[10px] uppercase tracking-[0.16em] text-ink-faint">total scans</div>
+          <div className="text-[10px] uppercase tracking-[0.16em] text-ink-faint">scans · {rangeLabel}</div>
         </div>
       </div>
 
-      <div className="mt-6 space-y-1.5">
+      {/* filters */}
+      <div className="mt-5 flex flex-col gap-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[10px] uppercase tracking-[0.14em] text-ink-faint">window</span>
+          {RANGES.map((r) => <Chip key={r.label} label={r.label} on={rangeMs === r.ms} onClick={() => setRangeMs(r.ms)} />)}
+        </div>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="mr-1 text-[10px] uppercase tracking-[0.14em] text-ink-faint">category</span>
+          {CATS.map((c) => <Chip key={c.label} label={c.label} on={cat === c.cat} onClick={() => setCat(c.cat)} />)}
+        </div>
+      </div>
+
+      <div className="mt-5 space-y-1.5">
         {stats.length === 0 ? (
-          <p className="text-[13px] text-ink-faint">No scans yet. Audit a handle, token, or site and it starts climbing here.</p>
+          <p className="text-[13px] text-ink-faint">No scans in this window{cat ? ` for ${CATS.find((c) => c.cat === cat)?.label.toLowerCase()}` : ""}. Widen the range or run an audit.</p>
         ) : (
           stats.map((s) => {
             const vm = s.verdict ? verdictMeta(s.verdict) : null;
@@ -74,12 +106,7 @@ export function TrendingPage({ onOpen }: { onOpen: (ref: string) => void }) {
                 title="Open the report"
                 className="group flex w-full items-center gap-3 rounded-xl border border-line bg-panel px-3 py-2.5 text-left transition hover:border-line-2 hover:bg-panel/80"
               >
-                <span
-                  className="mono w-7 shrink-0 text-center text-[15px] font-semibold tabular"
-                  style={{ color: top ? "var(--color-signal)" : "var(--color-ink-faint)" }}
-                >
-                  {s.rank}
-                </span>
+                <span className="mono w-7 shrink-0 text-center text-[15px] font-semibold tabular" style={{ color: top ? "var(--color-signal)" : "var(--color-ink-faint)" }}>{s.rank}</span>
                 {img ? (
                   <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-lg border border-line object-cover" />
                 ) : (

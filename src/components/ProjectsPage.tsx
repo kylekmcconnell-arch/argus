@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { ScoreTicker } from "./ScoreTicker";
 import { PrivateToggle } from "./PrivateToggle";
+import { ScanChip } from "./ScanChip";
 import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { getAnalyst } from "../lib/analyst";
@@ -46,6 +47,7 @@ function ProjectCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void
           {e.summary || "project / protocol"}{e.contributor && e.contributor !== me && e.contributor !== "anonymous" ? ` · ${e.contributor}` : ""}
         </span>
       </span>
+      <ScanChip kind={e.kind} refId={e.ref ?? e.query} className="mr-1" />
       <span className="mono shrink-0 text-right leading-none" style={{ color }}>
         <span className="block text-[18px] font-semibold tabular">{e.score ?? "—"}</span>
         <span className="block text-[8px] tracking-wider">{e.verdict ?? ""}</span>
