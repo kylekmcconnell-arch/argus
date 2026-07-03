@@ -32,9 +32,10 @@ export function OperatorNetwork({ deployer, chain, label, onAudit }: { deployer?
 
   useEffect(() => () => { running.current = false; }, []);
 
-  // Serial-operator tracing is a Solana / Helius capability (the on-chain funding
-  // primitives are Solana-only), and needs a deployer wallet to root the trace.
-  if (!deployer || (chain && chain !== "solana")) return null;
+  // Serial-operator tracing runs on Solana (Helius) and EVM (Etherscan) alike, and
+  // needs a deployer wallet to root the trace. Gate to chains we have endpoints for.
+  const SUPPORTED = new Set(["solana", "ethereum", "base", "bsc", "polygon", "arbitrum", "optimism", "avalanche"]);
+  if (!deployer || (chain && !SUPPORTED.has(chain))) return null;
 
   const run = async () => {
     if (running.current || loading || done) return;
@@ -44,6 +45,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit }: { deployer?
     const c = await traceOperator(deployer, {
       rootLabel: label,
       checkLiveness: true,
+      chain,
     }, (s) => setSteps((prev) => [...prev, s]));
     if (!running.current) return; // unmounted mid-run
     setCluster(c);
@@ -110,6 +112,9 @@ export function OperatorNetwork({ deployer, chain, label, onAudit }: { deployer?
   // ── result ──
   const { verdict, stats, origin, hub, tokens } = cluster;
   const tone = TONE[verdict.tone];
+  // Chain-aware explorer for wallet links (Solana vs the EVM chain in question).
+  const EXPLORER: Record<string, string> = { ethereum: "etherscan.io", base: "basescan.org", bsc: "bscscan.com", polygon: "polygonscan.com", arbitrum: "arbiscan.io", optimism: "optimistic.etherscan.io", avalanche: "snowtrace.io" };
+  const acct = (addr: string) => (chain && chain !== "solana" ? `https://${EXPLORER[chain] ?? "etherscan.io"}/address/${addr}` : `https://solscan.io/account/${addr}`);
   // Group discovered tokens under the wallet that launched them, so the cluster
   // reads as "this hand -> these deployers -> these dead tokens".
   const byDeployer = new Map<string, typeof tokens>();
@@ -134,7 +139,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit }: { deployer?
       {/* Funding spine: where the root deployer's money ultimately came from. */}
       <div className="mono mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-dim">
         <span className="rounded border border-line px-1.5 py-0.5 text-ink">{label || "deployer"} {shortAddr(cluster.rootDeployer)}</span>
-        {hub && hub !== cluster.rootDeployer && (<><span className="text-ink-faint">← funded via</span><a href={`https://solscan.io/account/${hub}`} target="_blank" rel="noreferrer" className="rounded border px-1.5 py-0.5 hover:underline" style={{ borderColor: `${tone}55`, color: tone }}>hub {shortAddr(hub)}</a></>)}
+        {hub && hub !== cluster.rootDeployer && (<><span className="text-ink-faint">← funded via</span><a href={`${acct(hub)}`} target="_blank" rel="noreferrer" className="rounded border px-1.5 py-0.5 hover:underline" style={{ borderColor: `${tone}55`, color: tone }}>hub {shortAddr(hub)}</a></>)}
         {origin && (<><span className="text-ink-faint">←</span><span className="rounded border border-line px-1.5 py-0.5" style={{ color: origin.kind === "cex" ? "var(--color-pass)" : "var(--color-ink-dim)" }}>{origin.kind === "cex" ? origin.label ?? "CEX" : `anon ${shortAddr(origin.address)}`}</span></>)}
       </div>
 
@@ -145,7 +150,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit }: { deployer?
             const toks = (byDeployer.get(w.address) ?? []);
             return (
               <div key={w.address} className="flex flex-wrap items-center gap-1.5">
-                <a href={`https://solscan.io/account/${w.address}`} target="_blank" rel="noreferrer" className="mono text-[11px] hover:underline" style={{ color: w.isRoot ? "var(--color-ink)" : "var(--color-signal)" }}>
+                <a href={acct(w.address)} target="_blank" rel="noreferrer" className="mono text-[11px] hover:underline" style={{ color: w.isRoot ? "var(--color-ink)" : "var(--color-signal)" }}>
                   {shortAddr(w.address)}{w.isRoot ? " (this token)" : ""}
                 </a>
                 {typeof w.tokensCreated === "number" && w.tokensCreated > 0 && <span className="text-[10px] text-ink-faint">{w.tokensCreated} minted</span>}

@@ -250,9 +250,9 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           </div>
         )}
 
-        {/* recursive operator trace — is this deployer an isolated project or one
-            node in a serial rug factory sharing a funder across many launches? */}
-        {d.deployer && d.chain === "solana" && (
+        {/* recursive operator trace (Solana + EVM) — is this deployer an isolated
+            project or one node in a serial factory sharing a funder across launches? */}
+        {d.deployer && (
           <div className="mt-4">
             <OperatorNetwork deployer={d.deployer} chain={d.chain} label={`$${d.symbol}`} onAudit={onAudit} />
           </div>

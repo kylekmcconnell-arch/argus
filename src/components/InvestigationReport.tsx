@@ -257,9 +257,9 @@ export function InvestigationReport({
           </Card>
         </div>
 
-        {/* Recursive operator trace: chase the deployer's money past the first hop
-            to every launch behind the same funding hand — the serial-operator web. */}
-        {token.deployer && token.chain === "solana" && (
+        {/* Recursive operator trace (Solana + EVM): chase the deployer's money past
+            the first hop to every launch behind the same funding hand. */}
+        {token.deployer && (
           <div className="mt-3">
             <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} />
           </div>

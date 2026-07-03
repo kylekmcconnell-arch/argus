@@ -36,8 +36,11 @@ export function EvmDeployer({ address, chain, symbol }: { address: string; chain
         // Feed the graph: deployer + (anon) funder keyed like the Solana forensics
         // so a wallet that recurs across audits collapses to one node and bridges.
         if (d?.available && d.deployer) {
-          const ents = [{ key: `wallet:${d.deployer.slice(2, 10)}`, type: "Identity", subtype: "Wallet", edgeType: "DEPLOYED_BY", label: shortAddr(d.deployer) }];
-          if (d.funder && d.funder.kind === "wallet") ents.push({ key: `funder:${d.funder.address.slice(2, 10)}`, type: "Identity", subtype: "FunderWallet", edgeType: "FUNDED_BY", label: shortAddr(d.funder.address) });
+          // Key wallets by raw addr.slice(0,8) — the SAME convention the token-audit
+          // graph + operator trace use — so an EVM deployer/funder that recurs across
+          // audits collapses to one node and bridges the operations.
+          const ents = [{ key: `wallet:${d.deployer.slice(0, 8)}`, type: "Identity", subtype: "Wallet", edgeType: "DEPLOYED_BY", label: shortAddr(d.deployer) }];
+          if (d.funder && d.funder.kind === "wallet") ents.push({ key: `funder:${d.funder.address.slice(0, 8)}`, type: "Identity", subtype: "FunderWallet", edgeType: "FUNDED_BY", label: shortAddr(d.funder.address) });
           recordForensicEntities(symbol ? `$${symbol}` : `token:${address}`, ents);
         }
       } catch { /* non-fatal */ }

@@ -51,6 +51,7 @@ export interface TraceOpts {
   deadlineMs?: number;  // wall-clock budget
   checkLiveness?: boolean;
   rootLabel?: string;   // e.g. "$SYMBOL" — for display only
+  chain?: string;       // "solana" (default) or an EVM chain id (ethereum/base/…)
 }
 export type TraceStep = (s: { label: string; detail?: string; tone?: "neutral" | "good" | "warn" | "bad" }) => void;
 
@@ -58,7 +59,16 @@ const short = (a: string) => a.slice(0, 4) + "…" + a.slice(-4);
 
 // ── the trace ───────────────────────────────────────────────────────────────
 export async function traceOperator(rootDeployer: string, opts: TraceOpts, onStep: TraceStep): Promise<OperatorCluster | null> {
-  if (!SOLADDR.test(rootDeployer)) return null;
+  // Chain-branch: the trace chains the same two primitives on either chain, just
+  // pointed at the chain's endpoints (Solana/Helius vs EVM/Etherscan). The server
+  // shapes are aligned (same field names) so the loop below is chain-agnostic.
+  const chainName = (opts.chain ?? "solana").toLowerCase();
+  const isSol = chainName === "solana";
+  const ADDR = isSol ? SOLADDR : /^0x[a-fA-F0-9]{40}$/;
+  if (!ADDR.test(rootDeployer)) return null;
+  const deployerEP = isSol ? "/api/deployer" : "/api/evm-deployer";
+  const funderEP = isSol ? "/api/funder" : "/api/evm-funder";
+  const cp = isSol ? "" : `&chain=${encodeURIComponent(chainName)}`;
   const maxSweeps = opts.maxSweeps ?? 3;
   const maxTraces = opts.maxTraces ?? 4;
   const maxTokens = opts.maxTokens ?? 60;
@@ -103,18 +113,25 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
     traces++;
     let d: any;
     try {
-      const r = await fetch(`/api/deployer?wallet=${encodeURIComponent(addr)}`);
+      const r = await fetch(`${deployerEP}?wallet=${encodeURIComponent(addr)}${cp}`);
       d = await r.json();
     } catch { return; }
     if (!d || d.available === false) return;
     const w = wallets.get(addr);
     if (w) {
-      if (typeof d.tokensCreated === "number") w.tokensCreated = d.tokensCreated;
+      // Solana returns tokensCreated; EVM returns deployments — either is the count.
+      const created = typeof d.tokensCreated === "number" ? d.tokensCreated : d.deployments;
+      if (typeof created === "number") w.tokensCreated = created;
       if (typeof d.walletAgeDays === "number") w.ageDays = d.walletAgeDays;
     }
-    const chain: { from: string; to: string; label: string | null; kind: "cex" | "wallet" }[] = Array.isArray(d.chain) ? d.chain : [];
-    maxHops = Math.max(maxHops, depth + chain.length);
-    for (const hop of chain) {
+    // Solana returns a full hop chain (deployer<-funder<-…<-CEX); EVM returns a
+    // single funder, so synthesize a one-hop chain from it. Uniform downstream.
+    const hops: { from: string; to: string; label: string | null; kind: "cex" | "wallet" }[] =
+      Array.isArray(d.chain) ? d.chain
+      : d.funder ? [{ from: addr, to: d.funder.address, label: d.funder.label ?? null, kind: d.funder.kind }]
+      : [];
+    maxHops = Math.max(maxHops, depth + hops.length);
+    for (const hop of hops) {
       // money flows to -> from (the recipient is FUNDED BY the funder)
       const funderRole: OperatorRole = hop.kind === "cex" ? "cex" : "funder";
       addWallet(hop.to, funderRole, depth + 1, hop.kind === "cex" ? { label: hop.label } : undefined);
@@ -122,7 +139,9 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
       if (hop.kind !== "cex") sweepQueue.push({ address: hop.to, depth: depth + 1 });
     }
     // Record where the trail ultimately lands (the root's origin is the headline).
-    if (depth === 0 && d.origin) origin = { address: d.origin.address, label: d.origin.label ?? null, kind: d.origin.kind };
+    // Solana gives an explicit origin; on EVM the single funder IS the origin.
+    const org = d.origin ?? d.funder;
+    if (depth === 0 && org) origin = { address: org.address, label: org.label ?? null, kind: org.kind };
   }
 
   // Forward-sweep a hub: every fresh deployer it seeded + those deployers' tokens.
@@ -134,7 +153,7 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
     onStep({ label: `Sweeping forward from ${short(addr)}`, detail: "every wallet this hub seeded, and which of them minted tokens…", tone: "neutral" });
     let d: any;
     try {
-      const r = await fetch(`/api/funder?wallet=${encodeURIComponent(addr)}`);
+      const r = await fetch(`${funderEP}?wallet=${encodeURIComponent(addr)}${cp}`);
       d = await r.json();
     } catch { return; }
     if (!d || d.available === false) return;
@@ -180,7 +199,7 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
   //    dexscreener reads turn "M tokens" into "K of M dead" — the real indictment.
   if (opts.checkLiveness !== false && tokens.size) {
     onStep({ label: "Checking which launches are dead", detail: "pricing the cluster's tokens on-chain…", tone: "neutral" });
-    await markLiveness([...tokens.values()], maxTokens, (mint, dead) => { const t = tokens.get(mint); if (t) t.dead = dead; });
+    await markLiveness([...tokens.values()], maxTokens, chainName, (mint, dead) => { const t = tokens.get(mint); if (t) t.dead = dead; });
   }
 
   // 4. Assemble stats + verdict.
@@ -222,13 +241,15 @@ function buildVerdict(a: { hub: string | null; hubSeeded: number; stats: Operato
 }
 
 // dexscreener tokens endpoint: up to 30 mints per call. A mint with no live pair,
-// or effectively no market cap AND no liquidity, is a dead launch.
-async function markLiveness(toks: OperatorToken[], cap: number, mark: (mint: string, dead: boolean) => void): Promise<void> {
-  const mints = toks.slice(0, cap).map((t) => t.mint).filter((m) => SOLADDR.test(m));
+// or effectively no market cap AND no liquidity, is a dead launch. Chain-scoped so
+// EVM contract addresses hit the right dexscreener chain slug.
+async function markLiveness(toks: OperatorToken[], cap: number, chain: string, mark: (mint: string, dead: boolean) => void): Promise<void> {
+  const valid = chain === "solana" ? SOLADDR : /^0x[a-fA-F0-9]{40}$/;
+  const mints = toks.slice(0, cap).map((t) => t.mint).filter((m) => valid.test(m));
   for (let i = 0; i < mints.length; i += 30) {
     const batch = mints.slice(i, i + 30);
     try {
-      const r = await fetch(`https://api.dexscreener.com/tokens/v1/solana/${batch.join(",")}`);
+      const r = await fetch(`https://api.dexscreener.com/tokens/v1/${encodeURIComponent(chain)}/${batch.join(",")}`);
       const pairs: any[] = await r.json();
       const alive = new Set<string>();
       for (const p of Array.isArray(pairs) ? pairs : []) {
