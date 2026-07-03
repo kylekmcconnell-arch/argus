@@ -2,6 +2,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { runRecon, type Recon } from "../collect/recon";
 import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
+import { ScoreTicker } from "./ScoreTicker";
 import { syncReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
@@ -89,7 +90,7 @@ const COVERAGE: Record<string, { label: string; color: string; blurb: string }> 
 
 const EXAMPLES = ["neuro-mesh.io", "stripe.com"];
 
-export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudit?: (q: string) => void }) {
+export function ReconPage({ initialUrl, onAudit, onOpenRecent }: { initialUrl?: string; onAudit?: (q: string) => void; onOpenRecent?: (ref: string) => void }) {
   const [url, setUrl] = useState(initialUrl ?? "");
   const [stages, setStages] = useState<RetrievalStage[]>([]);
   const [pivotNotes, setPivotNotes] = useState<string[]>([]);
@@ -174,7 +175,10 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
   let reconHost = "";
   try { reconHost = recon ? new URL(recon.retrieval.url).hostname.replace(/^www\./, "") : ""; } catch { /* keep empty */ }
 
+  const openRecent = onOpenRecent ?? onAudit;
   return (
+    <>
+      {openRecent && <ScoreTicker onOpen={openRecent} label="Recent site recons · click to open the report" filter={(e) => e.kind === "site"} />}
     <div className="mx-auto max-w-3xl px-6 py-12">
       <h1 className="text-[28px] font-medium tracking-[-0.02em] text-ink">Site recon</h1>
       <p className="mt-2 max-w-2xl text-[14.5px] leading-relaxed text-ink-dim">
@@ -437,6 +441,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
         </>
       )}
     </div>
+    </>
   );
 }
 
