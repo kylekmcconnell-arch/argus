@@ -39,24 +39,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const top10 = sumN(10);
     const top10NonMarket = Math.max(0, top10 - marketPct);
 
-    const nets = (d.insiderNetworks ?? []).map((n: any) => ({ size: Number(n.size ?? n.activeAccounts ?? 0), pct: supply ? (Number(n.tokenAmount ?? 0) / supply) * 100 : 0 }));
-    const insiderClusteredPct = nets.reduce((a: number, n: any) => a + n.pct, 0);
+    // Networks OVERLAP (a wallet can be in several), so summing over-counts — take
+    // the single LARGEST connected cluster as the honest "% in one hidden hand".
+    const nets = (d.insiderNetworks ?? []).map((n: any) => ({ size: Number(n.size ?? n.activeAccounts ?? 0), pct: supply ? Math.min(100, (Number(n.tokenAmount ?? 0) / supply) * 100) : 0 }));
+    const insiderClusteredPct = nets.length ? Math.min(100, Math.max(...nets.map((n: any) => n.pct))) : 0;
+    const insidersDetected = Number(d.graphInsidersDetected ?? 0);
     const creatorPct = supply ? (Number(d.creatorBalance ?? 0) / supply) * 100 : 0;
     const totalHolders = Number(d.totalHolders ?? 0);
+    // Concentration only reads as risk on a THIN base. A mega-holder token (BONK,
+    // WIF) with a high top-10 is exchanges + whales in a liquid market, not a rug —
+    // and RugCheck doesn't label every CEX, so we don't cry wolf on the top-10 alone.
+    const large = totalHolders >= 50000;
 
-    // The read: separate concentration (in real wallets) + insider clustering + dev
-    // holdings from benign market/exchange liquidity.
     let tone: "good" | "warn" | "bad" = "good";
     const bump = (t: "warn" | "bad") => { if (t === "bad" || tone === "good") tone = t; };
     const bits: string[] = [];
     if (d.rugged) { bump("bad"); bits.push("RugCheck flags this token as rugged"); }
-    if (top10NonMarket >= 40) { bump("bad"); bits.push(`top 10 non-market wallets hold ${top10NonMarket.toFixed(0)}% — highly concentrated`); }
-    else if (top10NonMarket >= 20) { bump("warn"); bits.push(`top 10 non-market wallets hold ${top10NonMarket.toFixed(0)}%`); }
-    if (insiderClusteredPct >= 15) { bump("warn"); bits.push(`${insiderClusteredPct.toFixed(0)}% of supply sits in connected insider clusters (${Number(d.graphInsidersDetected ?? 0).toLocaleString()} linked wallets)`); }
-    if (creatorPct >= 10) { bump("warn"); bits.push(`the creator still holds ${creatorPct.toFixed(0)}%`); }
+    // Connected insider clusters — the strongest distribution signal (Bubblemaps-style).
+    if (insidersDetected >= 30 && insiderClusteredPct >= 30) { bump("bad"); bits.push(`${insidersDetected.toLocaleString()} wallets funded from a common source hold ${insiderClusteredPct.toFixed(0)}% of supply — one hidden hand`); }
+    else if (insidersDetected >= 30 && insiderClusteredPct >= 12) { bump("warn"); bits.push(`${insidersDetected.toLocaleString()} connected wallets cluster ${insiderClusteredPct.toFixed(0)}% of supply`); }
+    if (creatorPct >= 15) { bump("bad"); bits.push(`the creator still holds ${creatorPct.toFixed(0)}%`); }
+    else if (creatorPct >= 7) { bump("warn"); bits.push(`the creator holds ${creatorPct.toFixed(0)}%`); }
+    if (!large) {
+      if (top10 >= 60) { bump("bad"); bits.push(`top 10 wallets hold ${top10.toFixed(0)}% of a thin base of ${totalHolders.toLocaleString()} holders`); }
+      else if (top10 >= 40) { bump("warn"); bits.push(`top 10 hold ${top10.toFixed(0)}% (only ${totalHolders.toLocaleString()} holders)`); }
+    }
     const line = bits.length
       ? bits.join("; ") + "."
-      : `Distribution looks healthy: ${totalHolders.toLocaleString()} holders, top 10 hold ${top10.toFixed(0)}%${marketPct > 1 ? ` (${marketPct.toFixed(0)}% is DEX/CEX/LP, not private wallets)` : ""}.`;
+      : `Broadly held: ${totalHolders.toLocaleString()} holders, top 10 hold ${top10.toFixed(0)}%${marketPct > 1 ? ` (${marketPct.toFixed(0)}% is DEX/CEX/LP, not private wallets)` : ""}.`;
 
     res.status(200).json({
       available: true, source: "rugcheck", mint,
