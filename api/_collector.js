@@ -813,7 +813,7 @@ var Audit = class {
       edges.push({ src: this.handle, dst: v.project_name, type: "FOUNDED", outcome: v.outcome });
     }
     for (const p of this.promotions) {
-      const key = p.contract_address || "$" + p.ticker;
+      const key = p.contract_address || "$" + (p.ticker ?? "").replace(/^\$+/, "");
       nodes.push({ type: "Company", key, was_rug: !!p.outcome_was_rug });
       edges.push({ src: this.handle, dst: key, type: "PROMOTED" });
     }
@@ -1760,7 +1760,7 @@ async function checkFollow(source, target) {
     return null;
   }
 }
-var HIGH_REACH = 1e5;
+var HIGH_REACH = 1e4;
 async function notableFollowers(subject) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
@@ -1980,7 +1980,8 @@ var xAdapter = {
       if (nf.length) {
         const over1m = nf.filter((n) => (n.count ?? 0) >= 1e6).length;
         const over100k = nf.filter((n) => (n.count ?? 0) >= 1e5).length;
-        const reach = over1m ? `${over1m} with >1M followers` : over100k ? `${over100k} with >100K followers` : "";
+        const over10k = nf.filter((n) => (n.count ?? 0) >= 1e4).length;
+        const reach = over1m ? `${over1m} with >1M followers` : over100k ? `${over100k} with >100K followers` : over10k ? `${over10k} with >10K followers` : "";
         ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `Followed by ${nf.length} notable account${nf.length === 1 ? "" : "s"}${reach ? ` (${reach})` : ""}: ${nf.slice(0, 6).map((n) => `@${n.handle}${n.size ? ` ${n.size}` : ""}`).join(", ")}${nf.length > 6 ? ", \u2026" : ""}.`, source: "twitterapi.io", tone: "good" });
       } else {
         ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "No high-reach or known accounts among the subject's recent followers.", source: "twitterapi.io", tone: "neutral" });

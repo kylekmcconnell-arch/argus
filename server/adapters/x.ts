@@ -397,7 +397,7 @@ export async function checkFollow(source: string, target: string): Promise<{ fol
 // Each follower object carries followers_count, so we bucket by reach and sort by
 // it. Now that the QPS cap is lifted (paid credits) we scan several pages; results
 // are the highest-reach + curated followers among them.
-const HIGH_REACH = 100_000;
+const HIGH_REACH = 10_000;
 
 export async function notableFollowers(subject: string): Promise<NotableFollower[]> {
   const key = env("TWITTERAPI_KEY");
@@ -761,7 +761,8 @@ export const xAdapter: Adapter = {
       if (nf.length) {
         const over1m = nf.filter((n) => (n.count ?? 0) >= 1e6).length;
         const over100k = nf.filter((n) => (n.count ?? 0) >= 1e5).length;
-        const reach = over1m ? `${over1m} with >1M followers` : over100k ? `${over100k} with >100K followers` : "";
+        const over10k = nf.filter((n) => (n.count ?? 0) >= 1e4).length;
+        const reach = over1m ? `${over1m} with >1M followers` : over100k ? `${over100k} with >100K followers` : over10k ? `${over10k} with >10K followers` : "";
         ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `Followed by ${nf.length} notable account${nf.length === 1 ? "" : "s"}${reach ? ` (${reach})` : ""}: ${nf.slice(0, 6).map((n) => `@${n.handle}${n.size ? ` ${n.size}` : ""}`).join(", ")}${nf.length > 6 ? ", …" : ""}.`, source: "twitterapi.io", tone: "good" });
       } else {
         ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "No high-reach or known accounts among the subject's recent followers.", source: "twitterapi.io", tone: "neutral" });
