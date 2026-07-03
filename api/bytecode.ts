@@ -18,15 +18,17 @@ import { createHash } from "crypto";
 
 export const config = { maxDuration: 15 };
 
-// Public, keyless RPCs per dexscreener chainId. Only chains ARGUS actually audits.
-const RPC: Record<string, string> = {
-  ethereum: "https://eth.llamarpc.com",
-  base: "https://base.llamarpc.com",
-  bsc: "https://binance.llamarpc.com",
-  polygon: "https://polygon.llamarpc.com",
-  arbitrum: "https://arbitrum.llamarpc.com",
-  optimism: "https://optimism.llamarpc.com",
-  avalanche: "https://api.avax.network/ext/bc/C/rpc",
+// Public, keyless RPCs per dexscreener chainId (publicnode primary — reliable from
+// Vercel egress — then the chain-official RPC as fallback). Tried in order until
+// one returns code; llamarpc was dropped after it 521'd from Vercel.
+const RPC: Record<string, string[]> = {
+  ethereum: ["https://ethereum-rpc.publicnode.com", "https://cloudflare-eth.com"],
+  base: ["https://base-rpc.publicnode.com", "https://mainnet.base.org"],
+  bsc: ["https://bsc-rpc.publicnode.com", "https://bsc-dataseed.binance.org"],
+  polygon: ["https://polygon-bor-rpc.publicnode.com", "https://polygon-rpc.com"],
+  arbitrum: ["https://arbitrum-one-rpc.publicnode.com", "https://arb1.arbitrum.io/rpc"],
+  optimism: ["https://optimism-rpc.publicnode.com", "https://mainnet.optimism.io"],
+  avalanche: ["https://avalanche-c-chain-rpc.publicnode.com", "https://api.avax.network/ext/bc/C/rpc"],
 };
 
 // Verified 4-byte selectors for the functions that actually enable a rug. Kept to
@@ -47,17 +49,22 @@ const KNOWN: Record<string, { name: string; risk: "bad" | "warn" | "info" }> = {
   a9059cbb: { name: "transfer(address,uint256)", risk: "info" }, // confirms it's a token
 };
 
-async function ethGetCode(url: string, address: string): Promise<string | null> {
-  try {
-    const r = await fetch(url, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getCode", params: [address, "latest"] }),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!r.ok) return null;
-    const d = (await r.json()) as any;
-    return typeof d.result === "string" ? d.result : null;
-  } catch { return null; }
+async function ethGetCode(urls: string[], address: string): Promise<string | null> {
+  for (const url of urls) {
+    try {
+      const r = await fetch(url, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "eth_getCode", params: [address, "latest"] }),
+        signal: AbortSignal.timeout(9000),
+      });
+      if (!r.ok) continue;
+      const d = (await r.json()) as any;
+      // A live RPC that simply has no code returns "0x" — that's a real answer,
+      // not a provider failure, so accept it and stop trying fallbacks.
+      if (typeof d.result === "string") return d.result;
+    } catch { /* try the next endpoint */ }
+  }
+  return null;
 }
 
 // Strip the trailing CBOR metadata Solidity appends (ipfs/bzzr hash + solc
@@ -89,11 +96,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const address = typeof req.query.address === "string" ? req.query.address.trim() : "";
   const chain = (typeof req.query.chain === "string" ? req.query.chain : "").toLowerCase();
   if (!/^0x[a-fA-F0-9]{40}$/.test(address)) { res.status(400).json({ error: "valid EVM address required" }); return; }
-  const url = RPC[chain];
-  if (!url) { res.status(200).json({ address, chain, available: false, note: chain === "solana" ? "Bytecode fingerprinting is EVM-only (Solana tokens share the one SPL program)." : `No public RPC configured for chain '${chain}'.` }); return; }
+  const urls = RPC[chain];
+  if (!urls) { res.status(200).json({ address, chain, available: false, note: chain === "solana" ? "Bytecode fingerprinting is EVM-only (Solana tokens share the one SPL program)." : `No public RPC configured for chain '${chain}'.` }); return; }
 
   try {
-    const raw = await ethGetCode(url, address);
+    const raw = await ethGetCode(urls, address);
     if (raw == null) { res.status(200).json({ address, chain, available: false, note: "RPC did not return contract code." }); return; }
     if (raw === "0x" || raw.length <= 4) { res.status(200).json({ address, chain, available: true, isContract: false, note: "No contract code at this address (an externally-owned account, not a contract token)." }); return; }
 
