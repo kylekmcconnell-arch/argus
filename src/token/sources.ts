@@ -91,14 +91,14 @@ const CG_PLATFORM: Record<string, string> = {
   optimism: "optimistic-ethereum", avalanche: "avalanche", fantom: "fantom",
 };
 const CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
-export interface CgInfo { listed: boolean; rank: number | null; mcapUsd: number | null; marketCount: number; cexCount: number; cexNames: string[]; }
+export interface CgInfo { listed: boolean; rank: number | null; mcapUsd: number | null; marketCount: number; cexCount: number; cexNames: string[]; homepage: string | null; twitter: string | null; }
 // Tier-1 CEXes carry the most weight (real listings = real diligence + KYC trail).
 const CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
 export async function coingeckoToken(chain: string, address: string): Promise<CgInfo | null> {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
     const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [] };
+    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null };
     if (!res.ok) return null;
     const d = (await res.json()) as any;
     const tickers: any[] = d.tickers ?? [];
@@ -106,7 +106,13 @@ export async function coingeckoToken(chain: string, address: string): Promise<Cg
     const cex = new Set<string>(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean) as string[]);
     // Tier-1 exchanges first, then the rest, for an honest "listed on" line.
     const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames };
+    // OFFICIAL project links — CoinGecko carries these even for blue-chips whose
+    // DexScreener pair info is bare (e.g. $UNI). Feeds the investigation's site
+    // recon + project-account audit instead of dead-ending on "no website / no X".
+    const homepage = (d.links?.homepage ?? []).find((u: any) => typeof u === "string" && /^https?:\/\//i.test(u)) ?? null;
+    const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
+    const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
+    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter };
   } catch {
     return null;
   }
