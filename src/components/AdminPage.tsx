@@ -137,11 +137,17 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
         </div>
       ) : (
         <div className="mt-4 overflow-hidden rounded-xl border border-line bg-panel">
-          {shown.map((e) => (
-            <button
+          {shown.map((e) => {
+            const currentRole = (e.flags ?? []).find((f) => /^role:/i.test(f))?.slice(5).toUpperCase() ?? "";
+            return (
+            // div (not button) so a real <select> can nest without invalid HTML
+            <div
               key={e.id}
+              role="button"
+              tabIndex={0}
               onClick={() => onAudit?.(e.query)}
-              className="flex w-full items-start gap-3 border-b border-line px-4 py-3 text-left transition last:border-0 hover:bg-panel/40"
+              onKeyDown={(ev) => { if (ev.key === "Enter") onAudit?.(e.query); }}
+              className="flex w-full cursor-pointer items-start gap-3 border-b border-line px-4 py-3 text-left transition last:border-0 hover:bg-panel/40"
             >
               <span className="mono mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase" style={{ color: KIND_META[e.kind].color, background: KIND_META[e.kind].color + "14" }}>
                 {KIND_META[e.kind].label}
@@ -157,6 +163,21 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
                   </span>
                 )}
               </span>
+              {/* manual role override — the analyst overrides a thin-evidence
+                  misclassification without a rescan (writes local + shared log) */}
+              {e.kind === "person" && (
+                <select
+                  value={currentRole || "MEMBER"}
+                  onClick={(ev) => ev.stopPropagation()}
+                  onChange={(ev) => { ev.stopPropagation(); applyRoles(e.ref ?? e.query, [ev.target.value]); setLog(getLog()); }}
+                  title="Set this subject's role (files it on the right category page). Overrides the auto-classification."
+                  className="mono mt-0.5 shrink-0 cursor-pointer rounded-md border border-line bg-panel px-1 py-0.5 text-[10px] text-ink-dim transition hover:border-line-2 hover:text-ink focus:outline-none"
+                >
+                  {["FOUNDER", "PROJECT", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"].map((r) => (
+                    <option key={r} value={r}>{r === "INVESTOR" ? "VC" : r.charAt(0) + r.slice(1).toLowerCase()}</option>
+                  ))}
+                </select>
+              )}
               <span className="flex shrink-0 flex-col items-end gap-1">
                 <span className="mono text-[11px] font-semibold uppercase" style={{ color: verdictColor(e) }}>
                   {e.verdict}{typeof e.score === "number" ? ` ${e.score}` : ""}
@@ -180,8 +201,9 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
               >
                 ×
               </span>
-            </button>
-          ))}
+            </div>
+            );
+          })}
         </div>
       )}
     </div>
