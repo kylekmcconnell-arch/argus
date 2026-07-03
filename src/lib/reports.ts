@@ -63,13 +63,21 @@ export async function listReports(): Promise<ReportListing[]> {
   }
 }
 
+// Retry once with real headroom: a cold serverless start (functions scale to zero
+// after idle) can blow past a single short timeout, and a null here wrongly sends
+// a click on a STORED audit into a fresh live re-run (or "No live dossier yet").
 export async function fetchReport(ref: string): Promise<StoredReport | null> {
-  try {
-    const r = await fetch(`/api/report?ref=${encodeURIComponent(ref.replace(/^[@$]/, ""))}`, { signal: AbortSignal.timeout(9000) });
-    if (!r.ok) return null;
-    const d = await r.json();
-    return d?.report ?? null;
-  } catch {
-    return null;
+  const url = `/api/report?ref=${encodeURIComponent(ref.replace(/^[@$]/, ""))}`;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
+      if (!r.ok) { if (attempt === 0) continue; return null; }
+      const d = await r.json();
+      return d?.report ?? null;
+    } catch {
+      if (attempt === 0) continue;
+      return null;
+    }
   }
+  return null;
 }

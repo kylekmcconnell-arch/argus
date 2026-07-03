@@ -13,18 +13,26 @@ export interface ProviderStatus {
 }
 
 // Returns provider status if the backend is reachable, else null.
-export async function probeBackend(timeoutMs = 1200): Promise<ProviderStatus[] | null> {
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    const res = await fetch("/api/providers", { signal: ctrl.signal });
-    clearTimeout(t);
-    if (!res.ok) return null;
-    const data = (await res.json()) as { providers: ProviderStatus[] };
-    return data.providers;
-  } catch {
-    return null;
+// Timeout must tolerate a COLD serverless start: Vercel scales functions to zero
+// after idle, so the first probe of the day can take several seconds. A 1.2s cap
+// would abort a perfectly healthy backend and dump the user on "No live dossier
+// yet". We give it real headroom and retry once before giving up.
+export async function probeBackend(timeoutMs = 8000): Promise<ProviderStatus[] | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      const res = await fetch("/api/providers", { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) { if (attempt === 0) continue; return null; }
+      const data = (await res.json()) as { providers: ProviderStatus[] };
+      return data.providers;
+    } catch {
+      if (attempt === 0) continue; // one cold-start retry before conceding
+      return null;
+    }
   }
+  return null;
 }
 
 export interface LiveHandlers {

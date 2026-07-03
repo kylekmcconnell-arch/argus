@@ -89,7 +89,9 @@ export default function App() {
 
   // Pull the shared community graph + audit log once on load, so this session
   // sees everyone's work (no-op when no backend is configured).
-  useEffect(() => { void hydrateCommunityGraph(); void hydrateSharedLog(); }, []);
+  // Warm the serverless backend on load (functions scale to zero after idle) so
+  // the first audit click of the day doesn't eat a cold start on the live path.
+  useEffect(() => { void hydrateCommunityGraph(); void hydrateSharedLog(); void probeBackend(); }, []);
 
   const onAudit = useCallback(async (raw: string) => {
     const resolved = resolveInput(raw);
