@@ -4,6 +4,7 @@ import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
 import { OperatorNetwork } from "./OperatorNetwork";
+import { ProjectDocs } from "./ProjectDocs";
 import { WalletClusters } from "./WalletClusters";
 import { BytecodeForensics } from "./BytecodeForensics";
 import { EvmDeployer } from "./EvmDeployer";
@@ -290,6 +291,10 @@ export function InvestigationReport({
             <BytecodeForensics address={token.address} chain={token.chain} symbol={token.symbol} />
           </div>
         )}
+
+        <div className="mt-3">
+          <ProjectDocs name={token.name} symbol={token.symbol} domain={projectDomain} />
+        </div>
 
         <div className="mt-3">
           <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} onAudit={onAudit} />

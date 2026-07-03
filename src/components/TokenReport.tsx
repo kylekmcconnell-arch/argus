@@ -8,6 +8,7 @@ import { TokenSparkline } from "./TokenSparkline";
 import { MarketIntel } from "./MarketIntel";
 import { HolderForensics } from "./HolderForensics";
 import { OperatorNetwork } from "./OperatorNetwork";
+import { ProjectDocs } from "./ProjectDocs";
 import { WalletClusters } from "./WalletClusters";
 import { BytecodeForensics } from "./BytecodeForensics";
 import { EvmDeployer } from "./EvmDeployer";
@@ -221,6 +222,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* market intelligence — rank, ATH drawdown, dilution, unlock flags */}
         <div className="mt-4">
           <MarketIntel symbol={d.symbol} contract={d.address} chain={d.chain} />
+        </div>
+
+        {/* whitepaper + security audits (with real links; absence is a flag) */}
+        <div className="mt-4">
+          <ProjectDocs name={d.name} symbol={d.symbol} domain={projectSite} />
         </div>
 
         {/* holder / distribution forensics — healthy base or a rug in a costume? */}
