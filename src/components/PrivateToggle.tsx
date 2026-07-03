@@ -33,10 +33,14 @@ export function PrivateToggle({ on, onToggle, className = "" }: { on: boolean; o
           tabIndex={0}
           role="img"
           aria-label="What is a private search?"
-          className="flex h-[14px] w-[14px] cursor-help items-center justify-center rounded-full border text-[9px] leading-none transition"
-          style={{ borderColor: "var(--color-line-2)", color: "var(--color-ink-faint)" }}
+          className="flex cursor-help items-center justify-center rounded-full outline-none transition"
+          style={{ color: "var(--color-ink-faint)" }}
         >
-          i
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 16v-4" />
+            <path d="M12 8h.01" />
+          </svg>
         </span>
         <span
           role="tooltip"
