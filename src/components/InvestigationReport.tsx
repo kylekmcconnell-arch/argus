@@ -5,6 +5,7 @@ import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
 import { OperatorNetwork } from "./OperatorNetwork";
 import { WalletClusters } from "./WalletClusters";
+import { BytecodeForensics } from "./BytecodeForensics";
 import { GithubForensics } from "./GithubForensics";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
@@ -276,6 +277,12 @@ export function InvestigationReport({
         {token.chain === "solana" && (
           <div className="mt-3">
             <WalletClusters mint={token.address} chain={token.chain} symbol={token.symbol} />
+          </div>
+        )}
+
+        {token.chain !== "solana" && (
+          <div className="mt-3">
+            <BytecodeForensics address={token.address} chain={token.chain} symbol={token.symbol} />
           </div>
         )}
 

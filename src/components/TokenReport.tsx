@@ -9,6 +9,7 @@ import { MarketIntel } from "./MarketIntel";
 import { HolderForensics } from "./HolderForensics";
 import { OperatorNetwork } from "./OperatorNetwork";
 import { WalletClusters } from "./WalletClusters";
+import { BytecodeForensics } from "./BytecodeForensics";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 
@@ -225,6 +226,14 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         <div className="mt-4">
           <HolderForensics address={d.address} chain={d.chain} holderCount={d.safety.holderCount} evmTop={d.topHolders.map((h) => ({ pct: h.percent, tag: h.tag }))} insiderPct={d.insiderPct} />
         </div>
+
+        {/* contract bytecode fingerprint (EVM) — rug-enabling code paths + is this
+            a byte-identical clone of a token we've already flagged? */}
+        {d.chain !== "solana" && (
+          <div className="mt-4">
+            <BytecodeForensics address={d.address} chain={d.chain} symbol={d.symbol} />
+          </div>
+        )}
 
         {/* wallet clustering — how many of the "top holders" are secretly one hand? */}
         {d.chain === "solana" && (
