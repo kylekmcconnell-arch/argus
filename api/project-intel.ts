@@ -17,11 +17,33 @@ const AUDITORS = [
   "Zokyo", "Beosin", "Verichains", "Sherlock", "Code4rena", "Spearbit", "Cure53",
 ];
 
+// Authoritative RDAP servers by TLD — rdap.org just 302-redirects here, and its
+// redirect to Verisign (.com/.net) is flaky from Vercel's egress, so we hit the
+// right server directly and fall back to the bootstrap.
+const RDAP_HOSTS: Record<string, string> = {
+  com: "https://rdap.verisign.com/com/v1/domain/",
+  net: "https://rdap.verisign.com/net/v1/domain/",
+  org: "https://rdap.publicinterestregistry.org/rdap/domain/",
+  io: "https://rdap.identitydigital.services/rdap/domain/",
+  xyz: "https://rdap.centralnic.com/xyz/domain/",
+  app: "https://www.registry.google/rdap/domain/",
+  dev: "https://www.registry.google/rdap/domain/",
+};
+
+async function rdapFetch(url: string): Promise<any | null> {
+  try {
+    const r = await fetch(url, { redirect: "follow", headers: { accept: "application/rdap+json" }, signal: AbortSignal.timeout(9000) });
+    return r.ok ? await r.json() : null;
+  } catch { return null; }
+}
+
 async function rdap(host: string): Promise<{ registered?: string; expires?: string; registrar?: string; ageMonths?: number } | null> {
   try {
-    const r = await fetch(`https://rdap.org/domain/${encodeURIComponent(host)}`, { redirect: "follow", headers: { accept: "application/rdap+json" }, signal: AbortSignal.timeout(9000) });
-    if (!r.ok) return null;
-    const d = (await r.json()) as any;
+    const tld = host.split(".").pop() ?? "";
+    const direct = RDAP_HOSTS[tld];
+    // Direct authoritative server first (reliable), then the rdap.org bootstrap.
+    const d = (direct && (await rdapFetch(direct + encodeURIComponent(host)))) || (await rdapFetch(`https://rdap.org/domain/${encodeURIComponent(host)}`));
+    if (!d) return null;
     const ev: Record<string, string> = {};
     for (const e of d.events ?? []) if (e.eventAction && e.eventDate) ev[e.eventAction] = e.eventDate;
     const registrarEntity = (d.entities ?? []).find((e: any) => (e.roles ?? []).includes("registrar"));
@@ -59,15 +81,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const host = domainRaw.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase();
   if (!host || !/\.[a-z]{2,}$/.test(host)) { res.status(400).json({ error: "domain required" }); return; }
 
-  const [domain, home, auditPage, securityPage] = await Promise.all([
+  const paths = ["", "/audit", "/audits", "/security", "/security-audit", "/docs"];
+  const [domain, ...fetched] = await Promise.all([
     rdap(host),
-    fetchText(`https://${host}`),
-    fetchText(`https://${host}/audit`),
-    fetchText(`https://${host}/security`),
+    ...paths.map((p) => fetchText(`https://${host}${p}`)),
   ]);
 
   // ── claimed audits: auditor name present + a plausible proof link nearby ──
-  const pages = [home, auditPage, securityPage].filter(Boolean) as { text: string; links: string[] }[];
+  const pages = fetched.filter(Boolean) as { text: string; links: string[] }[];
   const corpus = pages.map((p) => p.text).join(" ");
   const allLinks = pages.flatMap((p) => p.links);
   const audits: { auditor: string; proof: string | null }[] = [];
