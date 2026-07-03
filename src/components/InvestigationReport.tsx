@@ -141,6 +141,7 @@ export function InvestigationReport({
         {/* headline */}
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-3">
+            {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-lg border border-line object-cover" />}
             <h1 className="text-[24px] font-medium tracking-[-0.02em] text-ink">{`Investigation · $${token.symbol}`}</h1>
             <VerdictPill verdict={token.verdict} score={token.score} />
             {projectAccount && <span className="mono text-[12px] text-ink-faint">project account <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} /></span>}
@@ -354,7 +355,7 @@ export function InvestigationReport({
           <div className="mt-3">
             <Card title={`Project account · ${projectAccount.handle}`}>
               <div className="flex flex-wrap items-center gap-2">
-                <Avatar src={xAvatar(projectAccount.handle)} letter={initial(projectAccount.handle)} size={28} rounded="rounded-lg" letterClass="text-[12px]" />
+                <Avatar src={projectAccount.avatar_url || token.imageUrl || xAvatar(projectAccount.handle)} letter={initial(projectAccount.handle)} size={28} rounded="rounded-lg" letterClass="text-[12px]" />
                 <span className="text-[13.5px] font-medium text-ink">{projectAccount.display_name || projectAccount.handle}</span>
                 <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} />
                 <span className="ml-auto text-[11px] text-ink-faint">{projectAccount.followers} followers · joined {projectAccount.joined}</span>
