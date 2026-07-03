@@ -27,46 +27,6 @@ async function cr(path: string, key: string): Promise<any | null> {
   } catch { return null; }
 }
 
-// ── Cap-table intel (unlocked on the paid tier 2026-07-03) ──────────────────
-// Who funded this project and when their tokens unlock. Field names vary, so parse
-// defensively across the shapes CryptoRank has used. Tries a couple candidate paths
-// since the exact route differs by API version.
-async function fundingRounds(id: number, key: string): Promise<{ rounds: any[]; totalRaisedUsd: number | null; investors: { name: string; lead: boolean }[] } | null> {
-  for (const path of [`/currencies/${id}/funding-rounds`, `/currencies/${id}/rounds`, `/currencies/${id}/fundraising`]) {
-    const d = await cr(path, key);
-    const rows = Array.isArray(d?.data) ? d.data : Array.isArray(d) ? d : null;
-    if (rows && rows.length) {
-      const rounds = rows.map((r: any) => ({
-        type: r.type ?? r.stage ?? r.name ?? r.round ?? null,
-        date: r.date ?? r.announcedAt ?? r.createdAt ?? r.closedAt ?? null,
-        raisedUsd: num(r.raise ?? r.raised ?? r.amount ?? r.totalRaised ?? r.raisedUsd),
-        investors: (r.investors ?? r.funds ?? []).map((i: any) => ({ name: (i?.name ?? i?.fund?.name ?? (typeof i === "string" ? i : "")).trim(), lead: !!(i?.isLead ?? i?.lead ?? i?.type === "lead") })).filter((i: any) => i.name),
-      }));
-      const totalRaisedUsd = rounds.reduce((s: number, r: any) => s + (r.raisedUsd ?? 0), 0) || null;
-      // Dedup investors across rounds, keeping lead status.
-      const byName = new Map<string, { name: string; lead: boolean }>();
-      for (const r of rounds) for (const inv of r.investors) { const k = inv.name.toLowerCase(); const ex = byName.get(k); if (!ex) byName.set(k, inv); else if (inv.lead) ex.lead = true; }
-      const investors = [...byName.values()].sort((a, b) => Number(b.lead) - Number(a.lead));
-      return { rounds, totalRaisedUsd, investors };
-    }
-  }
-  return null;
-}
-
-async function vesting(id: number, key: string): Promise<{ nextUnlock: { date: string; amountUsd: number | null; percentOfSupply: number | null } | null; allocations: { name: string; percent: number | null }[] } | null> {
-  for (const path of [`/currencies/${id}/vesting`, `/currencies/${id}/unlocks`, `/currencies/${id}/token-unlock`]) {
-    const d = await cr(path, key);
-    const root = d?.data ?? d;
-    if (!root) continue;
-    const nu = root.nextUnlock ?? root.next_unlock ?? (Array.isArray(root.events) ? root.events.find((e: any) => new Date(e.date ?? e.unlockDate ?? 0).getTime() > Date.now()) : null);
-    const allocs = root.allocations ?? root.rounds ?? root.buckets ?? [];
-    const nextUnlock = nu ? { date: nu.date ?? nu.unlockDate ?? nu.at ?? "", amountUsd: num(nu.amountUsd ?? nu.usd ?? nu.valueUsd ?? nu.amount), percentOfSupply: num(nu.percent ?? nu.percentOfSupply ?? nu.pct) } : null;
-    const allocations = (Array.isArray(allocs) ? allocs : []).map((a: any) => ({ name: (a.name ?? a.type ?? a.title ?? "").trim(), percent: num(a.percent ?? a.pct ?? a.allocation) })).filter((a: any) => a.name);
-    if (nextUnlock || allocations.length) return { nextUnlock, allocations };
-  }
-  return null;
-}
-
 // Category id -> name (rarely changes; 7d cache).
 async function categoryName(id: number, key: string): Promise<string | null> {
   if (!id) return null;
@@ -117,33 +77,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const candidates: any[] = Array.isArray(search?.data) ? search.data : [];
   if (!candidates.length) { res.status(200).json({ available: true, matched: false, note: "not listed on CryptoRank" }); return; }
 
-  // TEMP v3 probe: the public API moved to v3; discover the working routes/shapes.
-  if (q(req.query.probe)) {
-    const hit = async (base: string, p: string) => {
-      try {
-        const r = await fetch(`https://api.cryptorank.io/${base}${p}`, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(9000) });
-        let sample: any = null;
-        if (r.ok) { const j = await r.json().catch(() => null); const root = j?.data ?? j; sample = Array.isArray(root) ? { len: root.length, first0: root[0] } : root && typeof root === "object" ? Object.keys(root) : root; }
-        else sample = (await r.text().catch(() => "")).slice(0, 120);
-        return { status: r.status, sample };
-      } catch (e) { return { error: String(e) }; }
-    };
-    // Resolve a v3 id via v3 search first, fall back to the v2 id.
-    const v3search = await hit("v3", `/currencies?symbol=${encodeURIComponent(symbol)}`);
-    let id = candidates[0].id;
-    try { const r = await fetch(`https://api.cryptorank.io/v3/currencies?symbol=${encodeURIComponent(symbol)}`, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(9000) }); if (r.ok) { const j: any = await r.json(); id = (j?.data ?? j)?.[0]?.id ?? id; } } catch { /* keep v2 id */ }
-    const variants = [
-      `/currencies/${id}/vesting`, `/currencies/${id}/vesting/`, `/currencies/${id}/unlocks`,
-      `/currencies/${id}/funding-rounds`, `/currencies/${id}/funding-rounds/`, `/currencies/${id}/investors`,
-      `/currencies/${id}/full-metrics`, `/currencies/${id}/team`, `/currencies/${id}/details`,
-      `/funding-rounds`, `/funding-rounds?currencyId=${id}`, `/funding-rounds/currency/${id}`,
-      `/funds`, `/funds/list`, `/funds/map`, `/vesting/${id}`, `/token-unlocks/${id}`, `/currencies/${id}/fundraising`,
-    ];
-    const out: any = { id };
-    for (const p of variants) { const rr = await hit("v3", p); if (rr.status !== 404) out[p] = rr; }
-    res.status(200).json({ id, nonced: out }); return;
-  }
-
   // Resolve: prefer the candidate whose on-chain contract matches; else the
   // highest-ranked namesake (candidates come rank-sorted).
   let d: any = null;
@@ -185,14 +118,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const price = num(d.price);
   const recoveryPct = atlValue && price ? Math.round(((price - atlValue) / atlValue) * 100) : null;
 
-  const [catName, placement, mac, rounds, vest] = await Promise.all([
+  const [catName, placement, mac] = await Promise.all([
     categoryName(d.categoryId, key),
     categoryPlacement(d.categoryId, d.rank ?? null, key),
     macro(key),
-    // Cap-table endpoints are paid-tier; only spend the call when the flag says
-    // there's something there (avoids a guaranteed-empty fetch on retail tokens).
-    d.hasFundingRounds ? fundingRounds(d.id, key) : Promise.resolve(null),
-    d.hasVesting || d.hasNextUnlock ? vesting(d.id, key) : Promise.resolve(null),
   ]);
 
   res.status(200).json({
@@ -223,9 +152,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     },
     category: catName ? { name: catName, position: placement?.position ?? null, peersRanked: placement?.peersRanked ?? null } : null,
     contracts: (d.contracts ?? []).map((c: any) => ({ chain: c.platform?.name ?? c.platform?.key ?? "?", address: c.address })),
-    // Real cap-table (paid tier): who backed it + when tokens unlock.
-    funding: rounds && (rounds.investors.length || rounds.rounds.length) ? { totalRaisedUsd: rounds.totalRaisedUsd, roundCount: rounds.rounds.length, investors: rounds.investors.slice(0, 12), rounds: rounds.rounds.slice(0, 8) } : null,
-    vesting: vest && (vest.nextUnlock || vest.allocations.length) ? { nextUnlock: vest.nextUnlock, allocations: vest.allocations.slice(0, 8) } : null,
     macro: mac,
     url: d.key ? `https://cryptorank.io/price/${d.key}` : null,
   });
