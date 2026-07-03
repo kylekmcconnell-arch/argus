@@ -10,6 +10,7 @@
 import type { Adapter, CollectContext } from "./types";
 import { env } from "../config";
 import { addGrokUsage, recordCall, recordTwitterapi } from "../cost";
+import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower } from "../../src/data/evidence";
 
@@ -17,9 +18,16 @@ const TWITTERAPI = "https://api.twitterapi.io";
 
 // Grok search via the current Responses API + tools (the legacy search_parameters
 // Live Search API was retired -> 410 Gone). Returns the model's text, or null.
-export async function grokSearch(system: string, user: string, opts?: { maxToolCalls?: number }): Promise<string | null> {
+export async function grokSearch(system: string, user: string, opts?: { maxToolCalls?: number; cacheKey?: string }): Promise<string | null> {
   const key = env("XAI_API_KEY");
   if (!key) return null;
+  // 24h read-through cache: a subject's team/affiliations don't change
+  // hour-to-hour, and live search is the dominant spend. Keyed by the CALLER's
+  // stable subject key (never the raw prompt — prompts embed volatile posts).
+  if (opts?.cacheKey) {
+    const hit = await cacheGet(opts.cacheKey);
+    if (hit) return hit;
+  }
   try {
     // COST: xAI bills live search PER SOURCE on top of tokens, and an unbounded
     // agentic loop can pull dozens of sources per call. max_tool_calls caps the
@@ -53,6 +61,7 @@ export async function grokSearch(system: string, user: string, opts?: { maxToolC
         ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ")
         : "") ??
       "";
+    if (text && opts?.cacheKey) void cacheSet(opts.cacheKey, text);
     return text || null;
   } catch {
     return null;
@@ -338,7 +347,7 @@ export async function acknowledgments(endorsers: string[], subject: string): Pro
     "You verify endorsements for a due-diligence engine, with live web and X search. For EACH listed account, decide the strongest public acknowledgment that account has ever made of @" + s + " on X, and its overall sentiment. " +
     "ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. " +
     'Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}]} — one entry per listed account, never invent posts.';
-  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1) });
+  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
   if (!text) return out;
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return out;
@@ -383,7 +392,7 @@ export async function discoverAffiliations(handle: string, name?: string, oldHan
     "For each, also report the venture's own X handle and website domain if you can find them. " +
     "Reply with ONLY compact JSON: {\"affiliations\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate\",\"year\":\"\",\"evidence\":\"one short source phrase\",\"x_handle\":\"@...\",\"domain\":\"example.com\"}]}. " +
     "Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {\"affiliations\":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role — from their own footprint AND from project accounts announcing them. Search the web and X including historical posts.`, { maxToolCalls: 6 });
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role — from their own footprint AND from project accounts announcing them. Search the web and X including historical posts.`, { maxToolCalls: 6, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -466,7 +475,7 @@ export async function findTeam(handle: string, name: string | undefined, posts: 
     "For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that live web/X search reveals — this exposes serial founders and cross-project ties. " +
     "Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"founder|cofounder|ceo|cto|engineer|advisor|backer\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If none, return {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects. Search the account's own posts and posts mentioning it.${postContext}`);
+  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects. Search the account's own posts and posts mentioning it.${postContext}`, { cacheKey: `team-x:${h}` });
   return parseTeamJSON(text, h, "X content");
 }
 
@@ -486,7 +495,7 @@ export async function findTeamOnSite(domain: string, projectName?: string): Prom
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT — do NOT downgrade a founder to advisor. " +
     "For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal — this exposes serial founders and cross-project ties. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`);
+  const text = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean || projectName}` });
   return parseTeamJSON(text, undefined, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 
@@ -504,7 +513,7 @@ export async function enrichTeamIdentities(
     "Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\"}]} — one entry per input name, fields omitted when unknown. NEVER invent. Never use em dashes.";
   const list = people.map((p) => `${p.name}${p.role ? ` (${p.role})` : ""}`).join("; ");
-  const text = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`);
+  const text = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich:${project}:${people.map((p) => p.name).sort().join("|")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];

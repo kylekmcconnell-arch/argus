@@ -5,13 +5,16 @@
 // markers and reads its recent posts' engagement to flag a paid/hollow audience.
 // twitterapi.io (TWITTERAPI_KEY). Read-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { attachPanelCost } from "./_cache";
 
 export const config = { maxDuration: 30 };
 
 const TW = "https://api.twitterapi.io";
 const HANDLE = /^[A-Za-z0-9_]{1,30}$/;
 
+let twCalls = 0; // per-invocation counter (one request handled per lambda at a time)
 async function tw(url: string, key: string): Promise<any> {
+  twCalls += 1;
   try {
     const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) });
     return r.ok ? await r.json() : null;
@@ -42,6 +45,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const handle = typeof req.query.handle === "string" ? req.query.handle.replace(/^@/, "").trim() : "";
   if (!handle || !HANDLE.test(handle)) { res.status(400).json({ error: "handle required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "twitterapi not configured." }); return; }
+  twCalls = 0;
 
   try {
     const prof = await tw(`${TW}/twitter/user/info?userName=${encodeURIComponent(handle)}`, key);
@@ -89,6 +93,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? `No strong bot/bought-engagement signal in the sample (${botPct}% of ${sampled} sampled followers flagged, ~${avgLikes} likes & ~${avgReplies} replies/post on ${totalFollowers.toLocaleString()} followers).`
         : "Could not sample followers.";
 
+    await attachPanelCost(handle, { provider: "twitterapi", op: "panel:kol-signals", calls: twCalls, usd: twCalls * 0.0002 });
     res.status(200).json({
       available: true,
       handle,

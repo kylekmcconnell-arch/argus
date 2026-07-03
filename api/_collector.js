@@ -1438,11 +1438,58 @@ IDENTITY RULE: if the evidence has a "team" array of named people tied to the pr
   return structured(system, user, tool, 3e3);
 }
 
+// server/cache.ts
+import { createHash } from "node:crypto";
+var TTL_MS = 24 * 3600 * 1e3;
+var KIND = "grokcache";
+function creds() {
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  return url && key ? { url: url.replace(/\/$/, ""), key } : null;
+}
+var headers = (key) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
+var hash = (s) => "g:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
+async function cacheGet(key) {
+  const c = creds();
+  if (!c) return null;
+  try {
+    const r = await fetch(
+      `${c.url}/rest/v1/reports?select=payload&ref=eq.${encodeURIComponent(hash(key))}&kind=eq.${KIND}&limit=1`,
+      { headers: headers(c.key), signal: AbortSignal.timeout(4e3) }
+    );
+    if (!r.ok) return null;
+    const rows = await r.json();
+    const p = rows?.[0]?.payload;
+    if (!p?.text || typeof p.at !== "number" || Date.now() - p.at > TTL_MS) return null;
+    recordCall("cache", "grok-hit", 0, "24h search cache");
+    return p.text;
+  } catch {
+    return null;
+  }
+}
+async function cacheSet(key, text) {
+  const c = creds();
+  if (!c || !text) return;
+  try {
+    await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
+      method: "POST",
+      headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ ref: hash(key), kind: KIND, query: key.slice(0, 180), payload: { text, at: Date.now() }, ts: (/* @__PURE__ */ new Date()).toISOString() }),
+      signal: AbortSignal.timeout(4e3)
+    });
+  } catch {
+  }
+}
+
 // server/adapters/x.ts
 var TWITTERAPI = "https://api.twitterapi.io";
 async function grokSearch(system, user, opts) {
   const key = env("XAI_API_KEY");
   if (!key) return null;
+  if (opts?.cacheKey) {
+    const hit = await cacheGet(opts.cacheKey);
+    if (hit) return hit;
+  }
   try {
     const call = (withCap) => fetch("https://api.x.ai/v1/responses", {
       method: "POST",
@@ -1466,6 +1513,7 @@ async function grokSearch(system, user, opts) {
     } catch {
     }
     const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o) => o.content ?? []).map((c) => c.text ?? "").join(" ") : "") ?? "";
+    if (text && opts?.cacheKey) void cacheSet(opts.cacheKey, text);
     return text || null;
   } catch {
     return null;
@@ -1658,7 +1706,7 @@ async function acknowledgments(endorsers, subject) {
   if (!key || !list.length) return out;
   const s = subject.replace(/^@/, "");
   const system = "You verify endorsements for a due-diligence engine, with live web and X search. For EACH listed account, decide the strongest public acknowledgment that account has ever made of @" + s + ' on X, and its overall sentiment. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}]} \u2014 one entry per listed account, never invent posts.';
-  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1) });
+  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
   if (!text) return out;
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return out;
@@ -1677,7 +1725,7 @@ async function discoverAffiliations(handle, name, oldHandles = []) {
   const h = handle.replace(/^@/, "");
   const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} \u2014 search posts mentioning those old handles too.` : "";
   const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Work BOTH angles: (1) what the person's own footprint shows \u2014 accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase, beyond their bio and LinkedIn; (2) reverse mentions \u2014 project/company accounts that ever NAMED, TAGGED, or ANNOUNCED this person as a founder/team member (co-founder announcements and 'meet the team' posts are often YEARS old, on the project's timeline, search historical posts). There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role \u2014 from their own footprint AND from project accounts announcing them. Search the web and X including historical posts.`, { maxToolCalls: 6 });
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role \u2014 from their own footprint AND from project accounts announcing them. Search the web and X including historical posts.`, { maxToolCalls: 6, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -1703,7 +1751,7 @@ async function findTeam(handle, name, posts = []) {
 The account's recent posts (mine these for team intros / role + advisor announcements):
 ${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "";
   const system = `You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account: founders, cofounders, core team, engineers, AND advisors/backers. Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. Be PRECISE about each person's role AT THIS project: only call someone an advisor if they are actually named as one; if they are a founder/cofounder, say so \u2014 do NOT downgrade a founder to advisor. For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that live web/X search reveals \u2014 this exposes serial founders and cross-project ties. Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"founder|cofounder|ceo|cto|engineer|advisor|backer","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If none, return {"people":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects. Search the account's own posts and posts mentioning it.${postContext}`);
+  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects. Search the account's own posts and posts mentioning it.${postContext}`, { cacheKey: `team-x:${h}` });
   return parseTeamJSON(text, h, "X content");
 }
 async function findTeamOnSite(domain, projectName) {
@@ -1711,14 +1759,14 @@ async function findTeamOnSite(domain, projectName) {
   if (!clean && !projectName) return [];
   const anchor = clean ? `website ${clean}${projectName ? ` (${projectName})` : ""}` : `project "${projectName}"`;
   const system = `You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project: founders, cofounders, the WHOLE leadership team (CEO/CTO/COO/CFO/CMO), engineering and product leads, AND advisors/backers. DIG hard and be COMPLETE: Google the project + 'team'/'leadership'/'about', open the project's LinkedIn company page and read its 'People' tab (list the employees it shows), check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people \u2014 do NOT stop at one or two; keep going until you have the full public roster you can verify. Connect each name to their X handle and LinkedIn where possible. Include ONLY real people genuinely tied to THIS specific project (match the domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT \u2014 do NOT downgrade a founder to advisor. For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal \u2014 this exposes serial founders and cross-project ties. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`);
+  const text = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean || projectName}` });
   return parseTeamJSON(text, void 0, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 async function enrichTeamIdentities(project, people) {
   if (!people.length) return [];
   const system = `You are an OSINT researcher with live web and X search. For each named team member of the given project, find their X (Twitter) handle and LinkedIn profile. Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/..."}]} \u2014 one entry per input name, fields omitted when unknown. NEVER invent. Never use em dashes.`;
   const list = people.map((p) => `${p.name}${p.role ? ` (${p.role})` : ""}`).join("; ");
-  const text = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`);
+  const text = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich:${project}:${people.map((p) => p.name).sort().join("|")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -2053,7 +2101,7 @@ var peopledatalabsAdapter = {
 
 // server/adapters/github.ts
 var GH = "https://api.github.com";
-var headers = (key) => ({
+var headers2 = (key) => ({
   authorization: `Bearer ${key}`,
   accept: "application/vnd.github+json",
   "user-agent": "argus-due-diligence"
@@ -2061,7 +2109,7 @@ var headers = (key) => ({
 async function ghJson(path, key) {
   try {
     recordCall("github", path.split("?")[0].split("/").slice(1, 3).join("/") || "api", 0);
-    const res = await fetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(8e3) });
+    const res = await fetch(GH + path, { headers: headers2(key), signal: AbortSignal.timeout(8e3) });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -2267,10 +2315,10 @@ async function tokenByContract(chain, address) {
   const key = env("COINGECKO_API_KEY");
   const platform = PLATFORM[chain.toLowerCase()] ?? chain.toLowerCase();
   const base = key ? PRO : PUBLIC;
-  const headers2 = key ? { "x-cg-pro-api-key": key } : {};
+  const headers3 = key ? { "x-cg-pro-api-key": key } : {};
   try {
     recordCall("coingecko", "contract-lookup", 0);
-    const res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers2 });
+    const res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers3 });
     if (!res.ok) return null;
     const d = await res.json();
     return {

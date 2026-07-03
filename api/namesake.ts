@@ -6,6 +6,7 @@
 // disown it? Faked affiliation is the classic memecoin rug setup; a genuinely
 // endorsed token is a different risk class entirely. Grok (web + X search).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache";
 
 export const config = { maxDuration: 60 };
 
@@ -20,6 +21,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const chain = q(req.query.chain);
   if (!symbol && !name) { res.status(400).json({ error: "symbol or name required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Grok not configured." }); return; }
+
+  // 24h cache: the namesake relationship doesn't change between report opens.
+  const cacheKey = `namesake:${symbol}:${contract}`;
+  const hit = await cacheGetJson<Record<string, unknown>>(cacheKey);
+  if (hit) { res.status(200).json({ ...hit, _cached: true }); return; }
 
   const system =
     "You are a forensic crypto researcher with live web and X search. Determine who or what the given token is NAMED AFTER and the token's actual RELATIONSHIP to that namesake. " +
@@ -47,7 +53,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const m = text.match(/\{[\s\S]*\}/);
     if (!m) { res.status(200).json({ available: true, relationship: "unclear", note: "No determination." }); return; }
     const p = JSON.parse(m[0]);
-    res.status(200).json({
+    // Fold this panel's spend into the subject's stored report (investigations
+    // are stored under the contract address), then cache the answer.
+    const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : 0;
+    await attachPanelCost(contract || symbol, { provider: "grok", op: "panel:namesake", calls: 1, usd: grokUsd(d.usage, toolCalls), meta: `${(d.usage?.input_tokens ?? 0) + (d.usage?.output_tokens ?? 0)} tok` });
+    const out = {
       available: true,
       named_after: typeof p.named_after === "string" ? p.named_after.slice(0, 80) : null,
       x_handle: typeof p.x_handle === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(p.x_handle.replace(/^@/, "")) ? "@" + p.x_handle.replace(/^@/, "") : null,
@@ -55,7 +65,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       relationship: RELS.has(p.relationship) ? p.relationship : "unclear",
       evidence: typeof p.evidence === "string" ? p.evidence.slice(0, 300) : null,
       note: typeof p.note === "string" ? p.note.slice(0, 240) : null,
-    });
+    };
+    await cacheSetJson(cacheKey, out);
+    res.status(200).json(out);
   } catch (e) {
     res.status(200).json({ available: true, error: String(e), relationship: "unclear" });
   }

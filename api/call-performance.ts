@@ -7,6 +7,7 @@
 // month later." If no call tweet is found, anchors to the token's launch instead
 // and says so. twitterapi.io (call tweet) + GeckoTerminal (price, no key).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { attachPanelCost } from "./_cache";
 
 export const config = { maxDuration: 30 };
 
@@ -46,7 +47,9 @@ async function gt(path: string): Promise<any | null> {
   }
   return gtOnce(GT_FREE, { accept: "application/json" }, path);
 }
+let twCalls = 0;
 async function tw(url: string, key: string): Promise<any | null> {
+  twCalls += 1;
   try { const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
 }
 
@@ -95,6 +98,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const network = NETWORK[chain] ?? chain;
   if (!network) { res.status(200).json({ available: true, note: "unsupported chain" }); return; }
 
+  twCalls = 0;
   try {
     const pool = await poolFor(network, address);
     if (!pool) { res.status(200).json({ available: true, note: "no pool indexed for this token" }); return; }
@@ -144,6 +148,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const curPrice = daily[daily.length - 1][4];
     const peak = Math.max(...daily.filter((c) => c[0] >= anchorSec).map((c) => c[4]), anchorPrice);
 
+    if (twCalls) await attachPanelCost(handle, { provider: "twitterapi", op: "panel:call-performance", calls: twCalls, usd: twCalls * 0.0002 });
     res.status(200).json({
       available: true,
       anchor,

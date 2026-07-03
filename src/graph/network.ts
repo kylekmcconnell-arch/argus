@@ -74,13 +74,51 @@ const GENERIC_KEYS = new Set([
 ]);
 const isGenericKey = (raw: string) => GENERIC_KEYS.has(canonical(raw));
 
+// ── Entity resolution: one project, one node ─────────────────────────────
+// $RECC (the token), @reccfinance (its X account), and recc.finance (its site)
+// are the same entity wearing three names. The proof of sameness comes from the
+// audits themselves — a token audit explicitly links its subject to the
+// project's X handle (TEAM edge) and its domain (LINKS edge) — never from name
+// similarity, which false-merges. Returns a resolver mapping any form to one id.
+export type AliasResolver = (key: string) => string;
+export function buildAliasResolver(contributions: GraphContribution[]): AliasResolver {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    if (!parent.has(x)) return x;
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    parent.set(x, r);
+    return r;
+  };
+  const union = (a: string, b: string) => {
+    if (!parent.has(a)) parent.set(a, a);
+    if (!parent.has(b)) parent.set(b, b);
+    const ra = find(a), rb = find(b);
+    // Prefer the $token id as the root (it's the anchor the audits key on).
+    if (ra !== rb) parent.set(rb, ra);
+  };
+  const DOMAIN = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i;
+  for (const c of contributions) {
+    if (!String(c.handle).startsWith("$")) continue; // token/investigation audits carry the linkage
+    const subj = canonical(c.handle);
+    for (const e of c.edges) {
+      if (canonical(e.src) !== subj) continue;
+      const dst = String(e.dst);
+      if (e.type === "TEAM" && dst.startsWith("@")) union(subj, canonical(dst));
+      else if (e.type === "LINKS" && DOMAIN.test(dst)) union(subj, canonical(dst));
+    }
+  }
+  return (key: string) => find(canonical(key));
+}
+
 export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: GraphContribution[] = []): Network {
+  const resolve = buildAliasResolver(extra);
   const map = new Map<string, NetNode>();
   const edgeMap = new Map<string, NetEdge>();
 
   const upsert = (raw: PanoptesNode, surfacedBy: string): NetNode | null => {
     if (!raw.subject && isGenericKey(String(raw.key))) return null;
-    const id = canonical(raw.key);
+    const id = resolve(raw.key);
     let n = map.get(id);
     if (!n) {
       n = {
@@ -107,8 +145,8 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   const ingestEdges = (edges: PanoptesEdge[]) => {
     for (const e of edges) {
       if (isGenericKey(String(e.src)) || isGenericKey(String(e.dst))) continue;
-      const src = canonical(e.src);
-      const dst = canonical(e.dst);
+      const src = resolve(e.src);
+      const dst = resolve(e.dst);
       const key = `${src}->${dst}:${e.type}`;
       if (edgeMap.has(key)) continue;
       edgeMap.set(key, {
@@ -121,7 +159,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   };
 
   for (const { handle, d } of dossiers) {
-    const subjId = canonical(handle);
+    const subjId = resolve(handle);
     for (const raw of d.graph.nodes) {
       const n = upsert(raw, subjId);
       if (n && raw.subject) n.verdict = d.report.composite_verdict;
@@ -130,7 +168,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   }
 
   for (const c of extra) {
-    const subjId = canonical(c.handle);
+    const subjId = resolve(c.handle);
     for (const raw of c.nodes) {
       const n = upsert(raw, subjId);
       if (n && raw.subject && c.verdict && !n.verdict) n.verdict = c.verdict;
@@ -235,14 +273,15 @@ export interface SharedTie { key: string; label: string; type: string }
 export interface SubjectConnection { other: string; otherVerdict?: string; ties: SharedTie[]; direct: boolean }
 
 export function subjectConnections(handle: string, contributions: GraphContribution[], max = 12): SubjectConnection[] {
-  const me = canonical(handle);
+  const resolve = buildAliasResolver(contributions);
+  const me = resolve(handle);
   // entities my own audits surfaced (canonical key -> display label + type)
   const mine = new Map<string, { label: string; type: string }>();
   for (const c of contributions) {
-    if (canonical(c.handle) !== me) continue;
+    if (resolve(c.handle) !== me) continue;
     for (const n of c.nodes) {
       if (isGenericKey(String(n.key))) continue; // "site"/"twitter" junk can't be a tie
-      const k = canonical(n.key);
+      const k = resolve(n.key);
       if (k !== me) mine.set(k, { label: String(n.key), type: String(n.type) });
     }
   }
@@ -254,13 +293,14 @@ export function subjectConnections(handle: string, contributions: GraphContribut
     return byOther.get(h)!;
   };
   for (const c of contributions) {
-    const other = canonical(c.handle);
+    const other = resolve(c.handle);
     if (other === me) continue;
     // direct tie: the other subject is itself one of the entities I surfaced
     if (mine.has(other)) { const e = ensure(c.handle, c.verdict); e.direct = true; }
     // shared tie: a third entity both of us touch
     for (const n of c.nodes) {
-      const k = canonical(n.key);
+      if (isGenericKey(String(n.key))) continue;
+      const k = resolve(n.key);
       if (k !== me && k !== other && mine.has(k)) {
         const e = ensure(c.handle, c.verdict);
         e.ties.set(k, { key: k, label: mine.get(k)!.label, type: mine.get(k)!.type });

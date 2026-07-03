@@ -6,6 +6,7 @@
 // profile photo so a supposedly-real founder fronted by a GAN face gets flagged.
 // Gated on ANTHROPIC_API_KEY (reuses the OCR pattern). Read-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { attachPanelCost, claudeUsd } from "./_cache";
 
 export const config = { maxDuration: 45 };
 
@@ -91,6 +92,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (!r.ok) { res.status(200).json({ available: true, imageUrl: usedUrl, note: `vision ${r.status}` }); return; }
     const d = (await r.json()) as any;
+    await attachPanelCost(handle, { provider: "claude", op: "panel:pfp-check", calls: 1, usd: claudeUsd(d.usage), meta: "vision" });
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
     const m = text.match(/\{[\s\S]*\}/);
     let parsed: any = {};

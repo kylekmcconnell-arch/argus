@@ -5,12 +5,13 @@
 // portfolio; the client then prices each token investment on-chain for a real
 // hit-rate. XAI_API_KEY.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache";
 
 export const config = { maxDuration: 120 };
 
 const q = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
-async function grok(key: string, system: string, user: string): Promise<any | null> {
+async function grok(key: string, system: string, user: string): Promise<{ parsed: any | null; usd: number }> {
   try {
     const r = await fetch("https://api.x.ai/v1/responses", {
       method: "POST",
@@ -23,13 +24,15 @@ async function grok(key: string, system: string, user: string): Promise<any | nu
       }),
       signal: AbortSignal.timeout(55000),
     });
-    if (!r.ok) return null;
+    if (!r.ok) return { parsed: null, usd: 0 };
     const d = (await r.json()) as any;
+    const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : 0;
+    const usd = grokUsd(d.usage, toolCalls);
     const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
     const m = text.match(/\{[\s\S]*\}/);
-    return m ? JSON.parse(m[0]) : null;
+    return { parsed: m ? JSON.parse(m[0]) : null, usd };
   } catch {
-    return null;
+    return { parsed: null, usd: 0 };
   }
 }
 
@@ -39,6 +42,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const name = q(req.query.name) || handle;
   if (!name) { res.status(400).json({ error: "handle or name required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Grok (XAI_API_KEY) not configured." }); return; }
+
+  // 24h cache: a fund's public portfolio doesn't change between report opens.
+  const cacheKey = `vcport:${(name || handle).toLowerCase()}`;
+  const cached = await cacheGetJson<Record<string, unknown>>(cacheKey);
+  if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
   const system =
     "You are a research analyst assembling the public investment portfolio of a crypto/tech VC, fund, or angel. " +
@@ -50,11 +58,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // Grok is nondeterministic and occasionally answers empty for a fund with a
   // famous public portfolio — one retry closes most of that gap.
-  let out = await grok(key, system, user);
-  if (!Array.isArray(out?.investments) || out.investments.length === 0) {
-    out = await grok(key, system, user);
+  let spend = 0;
+  let g = await grok(key, system, user);
+  spend += g.usd;
+  if (!Array.isArray(g.parsed?.investments) || g.parsed.investments.length === 0) {
+    g = await grok(key, system, user);
+    spend += g.usd;
   }
-  const raw: any[] = Array.isArray(out?.investments) ? out.investments : [];
+  const raw: any[] = Array.isArray(g.parsed?.investments) ? g.parsed.investments : [];
   const investments = raw
     .filter((i) => i && typeof i.project === "string" && i.project.trim())
     .slice(0, 40)
@@ -69,5 +80,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       outcome: typeof i.outcome === "string" ? i.outcome.trim().slice(0, 60) : null,
     }));
 
-  res.status(200).json({ available: true, name, count: investments.length, investments });
+  // Fold the panel spend into the KOL/VC's stored person report + cache the answer.
+  await attachPanelCost(handle || name, { provider: "grok", op: "panel:vc-portfolio", calls: spend > 0 ? (g.usd < spend ? 2 : 1) : 0, usd: spend });
+  const result = { available: true, name, count: investments.length, investments };
+  if (investments.length) await cacheSetJson(cacheKey, result);
+  res.status(200).json(result);
 }
