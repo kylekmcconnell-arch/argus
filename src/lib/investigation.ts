@@ -175,6 +175,20 @@ function founderNote(siteUrl: string | null, recon: Recon | null, founders: Foun
   return base;
 }
 
+// Knowledge fallback: resolve the token's official site / X / founder from Grok
+// when its on-chain sources (DexScreener + CoinGecko) came up empty.
+interface TokenIdentity { website: string | null; x_handle: string | null; founder: string | null; founder_handle: string | null; confidence: string }
+async function fetchTokenIdentity(symbol: string, name: string, contract: string, chain: string): Promise<TokenIdentity | null> {
+  try {
+    const p = new URLSearchParams({ symbol, name: name || "", contract: contract || "", chain: chain || "" });
+    const r = await fetch(`/api/token-identity?${p.toString()}`, { signal: AbortSignal.timeout(40000) });
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (!d || d.available === false) return null;
+    return { website: d.website ?? null, x_handle: d.x_handle ?? null, founder: d.founder ?? null, founder_handle: d.founder_handle ?? null, confidence: d.confidence ?? "low" };
+  } catch { return null; }
+}
+
 export function streamInvestigation(rootRef: string, h: InvestigationHandlers): () => void {
   let aborted = false;
   let abortLive: (() => void) | null = null;
@@ -189,9 +203,28 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
       if (aborted) return;
       if (!token) { h.onError("Could not resolve that contract on any DEX."); return; }
 
-      const projectX = token.projectX;
-      const siteUrl = token.socials.find((s) => /^https?:\/\//i.test(s.url) && !/x\.com|twitter\.com|t\.me|discord|github\.com/i.test(s.url))?.url ?? null;
+      let projectX = token.projectX;
+      let siteUrl = token.socials.find((s) => /^https?:\/\//i.test(s.url) && !/x\.com|twitter\.com|t\.me|discord|github\.com/i.test(s.url))?.url ?? null;
       h.onStep(milestone("Token audited", `$${token.symbol}: ${token.verdict} ${token.score ?? "—"}/100.${projectX ? ` Project X ${projectX}.` : " No project X linked."}${siteUrl ? ` Site ${shorten(siteUrl)}.` : " No site linked."}`, token.verdict === "PASS" ? "good" : "warn"));
+
+      // If the token's own sources (DexScreener + CoinGecko) yielded no site OR no
+      // X account, resolve the OFFICIAL identity from knowledge (Grok) so an
+      // obscure token doesn't dead-end on "no website / no team". Also surfaces the
+      // founder to seed the people section directly.
+      let resolvedFounder: FounderCandidate | null = null;
+      if (!siteUrl || !projectX) {
+        h.onHop("resolving the project's official identity");
+        h.onStep(milestone("Step 1c · Resolve identity", `On-chain sources are thin — resolving $${token.symbol}'s official site, X account, and founder from knowledge…`, "neutral"));
+        const id = await fetchTokenIdentity(token.symbol, token.name, token.address, token.chain);
+        if (!aborted && id) {
+          if (!siteUrl && id.website) siteUrl = id.website;
+          if (!projectX && id.x_handle) projectX = id.x_handle;
+          if (id.founder) resolvedFounder = { name: id.founder, handle: id.founder_handle, source: "project" };
+          const bits = [id.website && `site ${shorten(id.website)}`, id.x_handle && `X ${id.x_handle}`, id.founder && `founder ${id.founder}${id.founder_handle ? ` (${id.founder_handle})` : ""}`].filter(Boolean) as string[];
+          h.onStep(milestone("Identity resolved", bits.length ? `Resolved ${bits.join(", ")} (${id.confidence} confidence).` : "No official identity could be resolved from knowledge either.", bits.length ? "good" : "warn"));
+        }
+      }
+      if (aborted) return;
 
       // ── Hop 1b: trace who funded the deployer (Solana, Helius) ──
       // The deployer wallet is a pseudonym; its funding source often is not.
@@ -267,6 +300,11 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
 
       // ── Founders (honesty-gated; no auto-spend beyond the project account) ──
       const founders = deriveFounders(recon, projectX, projectAccount);
+      // A knowledge-resolved founder (e.g. Hayden Adams for $UNI) leads the list
+      // when the on-chain trail didn't already surface them.
+      if (resolvedFounder && !founders.some((f) => f.name.toLowerCase() === resolvedFounder!.name.toLowerCase() || (resolvedFounder!.handle && f.handle?.toLowerCase() === resolvedFounder!.handle.toLowerCase()))) {
+        founders.unshift(resolvedFounder);
+      }
       const note = founderNote(siteUrl, recon, founders);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
       h.onDone({ rootRef, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note, deployerTrail, webTeam });
