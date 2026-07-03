@@ -21,7 +21,8 @@ const PROVIDERS: Prov[] = [
   { key: "COINGECKO_API_KEY", label: "CoinGecko Pro", powers: "Higher-rate token data (free tier works without)", source: "coingecko.com/api", tier: "optional" },
   { key: "CRYPTORANK_API_KEY", label: "CryptoRank", powers: "Market intel: rank, ATH drawdown, dilution, funding/vesting/unlock flags", source: "cryptorank.io/api", tier: "optional" },
   { key: "CRUNCHBASE_API_KEY", label: "Crunchbase", powers: "Company / funding records", source: "crunchbase.com", tier: "optional" },
-  { key: "BITQUERY_API_KEY", label: "Bitquery", powers: "Alternate multi-chain on-chain data", source: "bitquery.io", tier: "optional" },
+  { key: "ETHERSCAN_API_KEY", label: "Etherscan (multichain)", powers: "EVM deployer, contract-creation & funding traces (Ethereum/Base/BSC/Arbitrum/…)", source: "etherscan.io/apis", tier: "optional" },
+  { key: "BITQUERY_API_KEY", label: "Bitquery", powers: "EVM on-chain tracing: token transfers, funders, serial-launch graphs across chains", source: "bitquery.io", tier: "optional" },
 ];
 
 // Keyless sources: always on, no key. Same shape as PROVIDERS so the UI renders
