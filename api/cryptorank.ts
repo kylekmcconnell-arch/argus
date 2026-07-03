@@ -132,6 +132,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const r = await fetch(`${CR}${p}`, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(9000) });
         let sample: any = null;
         if (r.ok) { const j = await r.json().catch(() => null); const root = j?.data ?? j; sample = Array.isArray(root) ? { arrayLen: root.length, first: root[0] } : root && typeof root === "object" ? Object.keys(root) : root; }
+        else { sample = (await r.text().catch(() => "")).slice(0, 160); }
         out[p] = { status: r.status, sample };
       } catch (e) { out[p] = { error: String(e) }; }
     }
