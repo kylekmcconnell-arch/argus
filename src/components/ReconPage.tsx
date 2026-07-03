@@ -274,6 +274,9 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
               <div className="flex items-center gap-2">
                 <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">On-chain reality check</span>
                 <span className="mono shrink-0 text-[12px]" style={{ color: TONE[recon.pivot.reconcile.tone] }}>{GLYPH[recon.pivot.reconcile.tone]}</span>
+                {recon.pivot.method === "name-search" && recon.pivot.found && (
+                  <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">ticker match · unconfirmed</span>
+                )}
               </div>
 
               {/* the claim it is checking */}
@@ -292,13 +295,15 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
 
               <p className="mt-2 text-[13.5px] font-medium leading-relaxed text-ink">{recon.pivot.reconcile.line}</p>
 
-              {/* found token -> click through to the full token audit */}
+              {/* found token -> click through to the full token audit. Wording
+                  makes clear a name-search token is being judged on its OWN,
+                  not asserted to be this project's. */}
               {recon.pivot.found && onAudit && (
                 <button
                   onClick={() => onAudit(recon.pivot!.found!.address)}
                   className="mono mt-3 rounded-lg border border-line bg-panel-2/50 px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
                 >
-                  open full token audit for {recon.pivot.found.symbol} →
+                  {recon.pivot.method === "name-search" ? `audit ${recon.pivot.found.symbol} independently →` : `open full token audit for ${recon.pivot.found.symbol} →`}
                 </button>
               )}
 
@@ -347,36 +352,52 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
             </div>
           )}
 
-          {/* team dug up via web + LinkedIn (deeper than the rendered page) */}
-          {(teamSearching || teamSearched) && (
-            <div className="mt-3 rounded-xl border border-line bg-panel p-4">
-              <div className="flex items-center gap-2">
-                <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team · web + LinkedIn search</span>
-                {teamSearching && <span className="text-[11px] text-ink-faint">digging Google / LinkedIn / Crunchbase / X…</span>}
-              </div>
-              {webTeam.length > 0 ? (
-                <div className="mt-2 space-y-1.5">
-                  {webTeam.map((p) => (
-                    <div key={p.handle ?? p.name} className="flex items-center justify-between gap-2">
-                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        <span className="text-[12.5px] text-ink">{p.name}</span>
-                        {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
-                        <span className="text-[10.5px] text-ink-faint">{p.role}</span>
-                        {p.linkedin && (
-                          <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
-                        )}
-                      </span>
-                      {p.handle && onAudit && (
-                        <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
-                      )}
-                    </div>
-                  ))}
+          {/* TEAM — the headline. Merge the names on the rendered page with the
+              deeper web/LinkedIn dig so every person shows, each enriched with a
+              handle/LinkedIn where the search found one. */}
+          {(recon.team.names.length > 0 || teamSearching || teamSearched) && (() => {
+            const merged = new Map<string, { name: string; handle?: string; role?: string; linkedin?: string; source: string }>();
+            const key = (n: string) => n.trim().toLowerCase();
+            for (const n of recon.team.names) merged.set(key(n), { name: n, source: "site" });
+            for (const p of webTeam) {
+              const ex = [...merged.values()].find((m) => key(m.name) === key(p.name));
+              if (ex) { ex.handle = ex.handle ?? p.handle; ex.role = ex.role ?? p.role; ex.linkedin = ex.linkedin ?? p.linkedin; ex.source = "site + web"; }
+              else merged.set(key(p.name), { name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, source: "web/LinkedIn" });
+            }
+            const people = [...merged.values()];
+            return (
+              <div className="mt-3 rounded-xl border border-line bg-panel p-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team · {people.length} {people.length === 1 ? "person" : "people"}</span>
+                  {teamSearching && <span className="text-[11px] text-ink-faint">digging Google / LinkedIn / Crunchbase / X…</span>}
                 </div>
-              ) : (
-                !teamSearching && <p className="mt-1.5 text-[12px] text-ink-faint">No team members could be dug up via web / LinkedIn / X search.</p>
-              )}
-            </div>
-          )}
+                {people.length > 0 ? (
+                  <div className="mt-2 space-y-1.5">
+                    {people.map((p) => (
+                      <div key={p.handle ?? p.name} className="flex items-center justify-between gap-2">
+                        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          <span className="text-[12.5px] text-ink">{p.name}</span>
+                          {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
+                          {p.role && <span className="text-[10.5px] text-ink-faint">{p.role}</span>}
+                          {p.linkedin && (
+                            <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                          )}
+                          <span className="text-[9.5px] text-ink-faint">({p.source})</span>
+                        </span>
+                        {p.handle && onAudit ? (
+                          <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
+                        ) : (
+                          <span className="mono shrink-0 text-[10.5px] text-ink-faint">named only</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  !teamSearching && <p className="mt-1.5 text-[12px] text-ink-faint">No team members named on the site or dug up via web / LinkedIn / X search.</p>
+                )}
+              </div>
+            );
+          })()}
 
           {/* commit forensics: the real devs behind the project's GitHub org */}
           {ghOrg && <GithubForensics org={ghOrg} subjectKey={reconHost || ghOrg} />}
@@ -385,13 +406,6 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
           {reconHost && <SiteHistory domain={reconHost} />}
         </>
       )}
-
-      <div className="mt-6 rounded-xl border border-line bg-panel/40 p-4 text-[12.5px] leading-relaxed text-ink-faint">
-        <span className="text-ink-dim">Why this exists:</span> an earlier audit fetched only a site's JavaScript
-        shell, never saw the team section, and reported "anonymous team." That was an overstatement — the honest
-        line was "could not render the site." Retrieval now escalates on failure, and absence is only ever asserted
-        from content actually rendered.
-      </div>
     </div>
   );
 }

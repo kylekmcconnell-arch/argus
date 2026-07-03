@@ -62,10 +62,16 @@ export function scoreProject(recon: Recon): ProjectVerdict {
   const p = recon.pivot;
   if (!p || p.method === "none" || !p.attempted) {
     verifiability = 32; // not a token project — nothing on-chain to contradict
-  } else if (p.found) {
+  } else if (p.found && p.method === "contract-on-page") {
+    // The contract was linked ON THE SITE — its on-chain health IS the project's.
     const v = p.found.verdict;
     verifiability = v === "PASS" ? 40 : v === "CAUTION" ? 26 : 8;
     reasons.push({ tone: p.reconcile.tone, text: p.reconcile.line });
+  } else if (p.found) {
+    // Name-search only — we can't confirm this token is theirs, so it must NOT
+    // move the site's score up OR down. Neutral, informational.
+    verifiability = 30;
+    reasons.push({ tone: "warn", text: p.reconcile.line });
   } else {
     verifiability = 4; // advertises a token, but it cannot be verified on-chain
     reasons.push({ tone: p.reconcile.tone, text: p.reconcile.line });

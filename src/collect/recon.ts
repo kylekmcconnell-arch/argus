@@ -93,9 +93,34 @@ export function analyzeContent(retrieval: Retrieval): Recon {
     };
   }
 
-  const socials = uniq((c.match(SOCIAL) ?? []).map((s) => s.replace(/[).,]+$/, "")))
-    .slice(0, 10)
-    .map((url) => ({ label: (url.match(/\/\/(?:www\.)?([^/]+)/)?.[1] ?? url).replace(/^www\./, ""), url }));
+  // Full social URLs, PLUS bare handles the page shows as text (@EnigmaFund) or
+  // protocol-less links (x.com/foo) — a JS-rendered site often surfaces the
+  // handle without a full anchor, so a URL-only scan wrongly reported "no socials".
+  const socialSet = new Map<string, { label: string; url: string }>();
+  for (const raw of c.match(SOCIAL) ?? []) {
+    const url = raw.replace(/[).,]+$/, "");
+    const label = (url.match(/\/\/(?:www\.)?([^/]+)/)?.[1] ?? url).replace(/^www\./, "");
+    socialSet.set(url.toLowerCase(), { label, url });
+  }
+  // protocol-less social links: x.com/foo, t.me/bar
+  for (const m of c.matchAll(/\b((?:x\.com|twitter\.com|t\.me|discord\.gg)\/[A-Za-z0-9_]{2,40})\b/gi)) {
+    const url = "https://" + m[1];
+    if (!socialSet.has(url.toLowerCase())) socialSet.set(url.toLowerCase(), { label: m[1].split("/")[0], url });
+  }
+  // bare @handles (the common JS-rendered case) — conservative: real-looking
+  // usernames, not email local-parts, capped.
+  const handles = uniq(
+    [...c.matchAll(/(?:^|[\s(:>])@([A-Za-z0-9_]{2,30})\b/g)]
+      .map((m) => m[1])
+      .filter((h) => !/^(gmail|outlook|hotmail|proton|icloud|yahoo|email|mail)$/i.test(h) && !/^\d+$/.test(h)),
+  ).slice(0, 6);
+  for (const h of handles) {
+    const url = "https://x.com/" + h;
+    if (![...socialSet.values()].some((s) => new RegExp(`/${h}$`, "i").test(s.url))) {
+      socialSet.set("@" + h.toLowerCase(), { label: "@" + h, url });
+    }
+  }
+  const socials = [...socialSet.values()].slice(0, 12);
   const funding = uniq((c.match(FUNDING) ?? []).map((s) => s.trim())).slice(0, 6);
   const tokenSignals = uniq((c.match(new RegExp(TOKEN_SIG, "gi")) ?? []).map((s) => s.toLowerCase())).slice(0, 10);
   const names = extractNames(c);
