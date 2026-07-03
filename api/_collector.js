@@ -2841,6 +2841,12 @@ async function coldIntake(ctx) {
     if (h) byHandle.set(h, rec);
     if (n) byName.set(n, rec);
   }
+  const subj = norm2(ctx.handle);
+  const accountVouchesTeam = !!domain || people.length > 0 || postRoleTeam.length > 0 || webTeam.some((t) => norm2(t.handle) === subj);
+  if (webTeam.length && !accountVouchesTeam) {
+    ctx.emit({ phase: "P1 \xB7 Team", label: "Same-name project (not this account)", detail: `Found a team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it \u2014 its handle isn't among them, it links no site, and its own posts name no team. Treated as a name collision, not the account's identity.`, source: "team-search", tone: "warn" });
+    webTeam.length = 0;
+  }
   const nameOnly = webTeam.filter((m) => !m.handle && !m.linkedin).slice(0, 15);
   if (nameOnly.length >= 1) {
     const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })));

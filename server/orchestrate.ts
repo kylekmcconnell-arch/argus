@@ -213,6 +213,22 @@ async function coldIntake(ctx: CollectContext) {
     if (n) byName.set(n, rec);
   }
 
+  // Does the ACCOUNT ITSELF vouch for this team, or was it only matched by NAME?
+  // A real project/founder account ties to its team through its OWN evidence: its
+  // handle is among them, it links its site in bio (domain), or its own posts name
+  // the people (people/postRoleTeam come from the account's content). A KOL whose
+  // display name merely COLLIDES with a project (e.g. @KaminoCrypto vs the Kamino
+  // protocol) has none of these — so a by-name team lookup returns that project's
+  // founders, and attaching them here is a false identity resolution (the exact
+  // name collision the contradictions section catches). Drop it at the source
+  // rather than present a stranger's team as this account's identity.
+  const subj = norm(ctx.handle);
+  const accountVouchesTeam = !!domain || people.length > 0 || postRoleTeam.length > 0 || webTeam.some((t) => norm(t.handle) === subj);
+  if (webTeam.length && !accountVouchesTeam) {
+    ctx.emit({ phase: "P1 · Team", label: "Same-name project (not this account)", detail: `Found a team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it — its handle isn't among them, it links no site, and its own posts name no team. Treated as a name collision, not the account's identity.`, source: "team-search", tone: "warn" });
+    webTeam.length = 0; // clear in place (shared ref with ctx.evidence.webTeam)
+  }
+
   // Actively resolve identities for members still name-only (the team page names
   // them but links nothing): one batched Grok pass finds each person's X handle
   // and LinkedIn. The co-founder of a known fund should never render "named only".
