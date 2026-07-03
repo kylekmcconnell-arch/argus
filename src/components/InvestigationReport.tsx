@@ -9,6 +9,7 @@ import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ProjectIntel } from "./ProjectIntel";
 import { MarketIntel } from "./MarketIntel";
+import { HolderForensics } from "./HolderForensics";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 
@@ -258,6 +259,10 @@ export function InvestigationReport({
             for a person-named memecoin this is THE provenance question */}
         <div className="mt-3">
           <MarketIntel symbol={token.symbol} contract={token.address} chain={token.chain} />
+        </div>
+
+        <div className="mt-3">
+          <HolderForensics address={token.address} chain={token.chain} holderCount={token.safety.holderCount} evmTop={token.topHolders.map((h) => ({ pct: h.percent, tag: h.tag }))} insiderPct={token.insiderPct} />
         </div>
 
         <div className="mt-3">

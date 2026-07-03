@@ -6,6 +6,7 @@ import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { TokenDossier } from "../token/audit";
 import { TokenSparkline } from "./TokenSparkline";
 import { MarketIntel } from "./MarketIntel";
+import { HolderForensics } from "./HolderForensics";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 
@@ -216,6 +217,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* market intelligence — rank, ATH drawdown, dilution, unlock flags */}
         <div className="mt-4">
           <MarketIntel symbol={d.symbol} contract={d.address} chain={d.chain} />
+        </div>
+
+        {/* holder / distribution forensics — healthy base or a rug in a costume? */}
+        <div className="mt-4">
+          <HolderForensics address={d.address} chain={d.chain} holderCount={d.safety.holderCount} evmTop={d.topHolders.map((h) => ({ pct: h.percent, tag: h.tag }))} insiderPct={d.insiderPct} />
         </div>
 
         {/* verdict hero */}
