@@ -63,12 +63,17 @@ export function MarketIntel({ symbol, contract, chain }: { symbol: string; contr
   const lowCirc = d.dilutionPct != null && d.dilutionPct < 50;
   const inv = d.macro?.investmentActivity ?? null;
 
+  const ddColor = dd == null ? "var(--color-ink)" : deep ? "var(--color-avoid)" : dd <= -40 ? "var(--color-caution)" : "var(--color-pass)";
+  const recovery = d.atl?.recoveryPct != null && d.atl.recoveryPct > 30 ? (d.atl.recoveryPct >= 1000 ? Math.round(d.atl.recoveryPct / 100) / 10 + "k" : String(d.atl.recoveryPct)) : null;
+
   return (
     <div className="rounded-xl border bg-panel p-4" style={{ borderColor: imp ? "var(--color-avoid)" : "var(--color-line)" }}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Market intelligence</span>
-        {d.matched && d.rank && <span className="mono rounded px-1.5 py-0.5 text-[10px] text-ink-dim" style={{ background: "var(--color-panel-2)" }}>rank #{d.rank}</span>}
-        {d.matched && d.matchedBy === "ticker" && !imp && <span className="text-[9.5px] text-ink-faint">matched by ticker</span>}
+        {d.matched && d.rank && <span className="mono rounded-full border border-line px-2 py-0.5 text-[10px] text-ink-dim">#{d.rank}</span>}
+        {d.matched && d.category?.position && d.category.peersRanked && (
+          <span className="mono rounded-full border border-line px-2 py-0.5 text-[10px] text-ink-dim">#{d.category.position}/{d.category.peersRanked} {d.category.name}</span>
+        )}
         {(d.url || imp?.url) && <a href={d.url ?? imp?.url ?? "#"} target="_blank" rel="noreferrer" className="mono ml-auto text-[10px] text-signal-dim hover:underline">CryptoRank ↗</a>}
       </div>
 
@@ -86,50 +91,45 @@ export function MarketIntel({ symbol, contract, chain }: { symbol: string; contr
 
       {d.matched && (
         <>
-          {/* ATH drawdown */}
+          {/* ATH drawdown — the hero stat */}
           {dd != null && (
-            <div className="mt-2.5">
-              <span className="mono text-[20px] font-semibold tabular" style={{ color: deep ? "var(--color-avoid)" : dd <= -40 ? "var(--color-caution)" : "var(--color-pass)" }}>{dd.toFixed(1)}%</span>
-              <span className="ml-2 text-[12px] text-ink-dim">from all-time high{d.ath?.value ? ` of $${px(d.ath.value)}` : ""}{d.ath?.date ? ` (${monthYear(d.ath.date)})` : ""}</span>
-              {d.atl?.recoveryPct != null && d.atl.recoveryPct > 30 && <span className="ml-2 text-[11px] text-ink-faint">· +{d.atl.recoveryPct >= 1000 ? Math.round(d.atl.recoveryPct / 100) / 10 + "k" : d.atl.recoveryPct}% off the bottom</span>}
+            <div className="mt-3 flex items-baseline gap-2.5">
+              <span className="mono text-[30px] font-bold leading-none tabular" style={{ color: ddColor }}>{dd.toFixed(0)}%</span>
+              <div className="min-w-0 text-[11.5px] leading-tight text-ink-faint">
+                <div>from all-time high{d.ath?.date ? <> <span className="text-ink-dim">{monthYear(d.ath.date)}</span></> : null}</div>
+                {d.ath?.value != null && <div className="mono">ATH ${px(d.ath.value)}{recovery ? <span className="text-pass"> · +{recovery}% off bottom</span> : null}</div>}
+              </div>
             </div>
           )}
 
-          <div className="mono mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11.5px] text-ink-faint">
-            <span>mcap <span className="text-ink-dim">{money(d.marketCap)}</span></span>
-            <span>FDV <span className={fdvGap ? "text-caution" : "text-ink-dim"}>{money(d.fdv)}</span></span>
-            {d.dilutionPct != null && <span>{d.dilutionPct}% circulating</span>}
-            {d.volMcapRatio != null && <span title="24h volume / market cap">vol/mcap {d.volMcapRatio}</span>}
-            {d.category?.position && d.category.peersRanked && <span>#{d.category.position} of {d.category.peersRanked} ranked {d.category.name}</span>}
+          {/* metric grid — scannable fundamentals */}
+          <div className="mt-3 grid grid-cols-2 gap-x-4 gap-y-3 sm:grid-cols-4">
+            <div><div className="mono text-[15px] font-semibold tabular text-ink">{money(d.marketCap)}</div><div className="text-[10px] uppercase tracking-wider text-ink-faint">market cap</div></div>
+            <div><div className="mono text-[15px] font-semibold tabular" style={{ color: fdvGap ? "var(--color-caution)" : "var(--color-ink)" }}>{money(d.fdv)}</div><div className="text-[10px] uppercase tracking-wider text-ink-faint">fully diluted</div></div>
+            {d.dilutionPct != null && <div><div className="mono text-[15px] font-semibold tabular" style={{ color: lowCirc ? "var(--color-caution)" : "var(--color-ink)" }}>{d.dilutionPct}%</div><div className="text-[10px] uppercase tracking-wider text-ink-faint">circulating</div></div>}
+            {d.volMcapRatio != null && <div title="24h volume / market cap"><div className="mono text-[15px] font-semibold tabular text-ink">{d.volMcapRatio}</div><div className="text-[10px] uppercase tracking-wider text-ink-faint">vol / mcap</div></div>}
           </div>
 
-          {/* cap-table flags */}
-          {f && (
-            <div className="mt-2.5 flex flex-wrap gap-1.5">
-              {f.hasNextUnlock && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(220,38,38,.14)", color: "var(--color-avoid)" }} title="A scheduled token unlock is coming — new supply hitting the market is a dump-risk signal">⚠ upcoming unlock</span>}
-              {f.hasVesting && <span className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim">vesting</span>}
-              {f.hasFundingRounds && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(22,163,74,.12)", color: "var(--color-pass)" }} title="Has disclosed funding rounds — VC-backed">VC-backed</span>}
-              {f.hasCrowdsales && <span className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim">public sale</span>}
-              {f.hasTeam && <span className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim">team listed</span>}
-            </div>
-          )}
-
-          {/* cross-chain footprint */}
-          {(d.contracts?.length ?? 0) > 1 && (
-            <div className="mt-2.5 border-t border-line/60 pt-2 text-[11px] text-ink-faint">
-              Deployed on {d.contracts!.length} chains:{" "}
-              {d.contracts!.slice(0, 6).map((c, i) => <span key={i} className="mono text-ink-dim">{c.chain}{i < Math.min(d.contracts!.length, 6) - 1 ? " · " : ""}</span>)}
+          {/* cap-table + cross-chain chips */}
+          {(f || (d.contracts?.length ?? 0) > 1) && (
+            <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line/60 pt-2.5">
+              {f?.hasNextUnlock && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(220,38,38,.14)", color: "var(--color-avoid)" }} title="A scheduled token unlock is coming — new supply hitting the market is a dump-risk signal">⚠ upcoming unlock</span>}
+              {f?.hasFundingRounds && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: "rgba(22,163,74,.12)", color: "var(--color-pass)" }} title="Has disclosed funding rounds — VC-backed">VC-backed</span>}
+              {f?.hasVesting && <span className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim">vesting</span>}
+              {f?.hasCrowdsales && <span className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim">public sale</span>}
+              {f?.hasTeam && <span className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim">team listed</span>}
+              {(d.contracts?.length ?? 0) > 1 && <span className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim" title={d.contracts!.map((c) => c.chain).join(", ")}>{d.contracts!.length} chains</span>}
             </div>
           )}
 
           {(fdvGap || lowCirc) && (
-            <p className="mt-2 text-[11.5px] leading-relaxed" style={{ color: "var(--color-caution)" }}>
+            <p className="mt-2.5 text-[11.5px] leading-relaxed" style={{ color: "var(--color-caution)" }}>
               {lowCirc ? `Only ${d.dilutionPct}% of max supply circulates` : "FDV far above market cap"} — significant locked supply still to hit the market{f?.hasNextUnlock ? ", with an unlock scheduled" : ""}.
             </p>
           )}
 
           {inv != null && (
-            <p className="mt-1.5 text-[10.5px] text-ink-faint">Market context: crypto funding activity is {inv >= 0 ? "up" : "down"} {Math.abs(inv)}% right now{d.macro?.btcDominance != null ? ` · BTC dominance ${d.macro.btcDominance.toFixed(0)}%` : ""}.</p>
+            <p className="mt-2 text-[10.5px] text-ink-faint">Macro: crypto funding {inv >= 0 ? "up" : "down"} {Math.abs(inv)}%{d.macro?.btcDominance != null ? ` · BTC dominance ${d.macro.btcDominance.toFixed(0)}%` : ""}.</p>
           )}
         </>
       )}
