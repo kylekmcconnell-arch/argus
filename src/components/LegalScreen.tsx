@@ -1,0 +1,75 @@
+import { useEffect, useRef, useState } from "react";
+
+// US legal-history screen for a resolved real name (CourtListener / RECAP). Runs
+// ONLY when the audit resolved a real identity — searching a pseudonymous handle
+// returns noise. A founder named as a party in a fraud suit / SEC action / bankruptcy
+// is a strong, off-chain diligence signal; framed as leads to verify, not proof.
+type Case = { caseName: string; court: string; date: string | null; docket: string | null; url: string | null; nameInCase: boolean };
+type Data = { available: boolean; name?: string; total?: number; cases?: Case[]; asParty?: number; note?: string };
+
+const yearOf = (d?: string | null) => (d ? d.slice(0, 4) : "");
+
+export function LegalScreen({ name, resolved }: { name?: string | null; resolved: boolean }) {
+  const [data, setData] = useState<Data | null>(null);
+  const [state, setState] = useState<"loading" | "done">("loading");
+  const ran = useRef(false);
+  const realName = (name ?? "").trim();
+  const screenable = resolved && realName.split(/\s+/).filter(Boolean).length >= 2;
+
+  useEffect(() => {
+    if (ran.current) return;
+    ran.current = true;
+    if (!screenable) { setState("done"); return; }
+    (async () => {
+      try {
+        const r = await fetch(`/api/legal-screen?name=${encodeURIComponent(realName)}`);
+        setData(await r.json());
+      } catch { /* non-fatal */ }
+      setState("done");
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (!screenable || state === "loading" || !data || data.available === false) return null;
+  const cases = data.cases ?? [];
+  const asParty = data.asParty ?? 0;
+  const flagged = asParty > 0;
+
+  if (!cases.length) {
+    return (
+      <div className="rounded-xl border border-line bg-panel px-4 py-2.5">
+        <div className="flex items-center gap-2 text-[11.5px] text-ink-faint">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-pass)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>
+          <span>No US court records found for <span className="text-ink-dim">{realName}</span> in the CourtListener / RECAP index.</span>
+        </div>
+      </div>
+    );
+  }
+
+  const color = flagged ? "var(--color-caution)" : "var(--color-ink-faint)";
+  return (
+    <div className="rounded-xl border p-4" style={{ borderColor: flagged ? `${color}55` : "var(--color-line)", background: flagged ? `${color}0d` : "var(--color-panel)" }}>
+      <div className="flex flex-wrap items-center gap-2">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M5 7h14M7 7l-3 6h6zM17 7l3 6h-6z" /></svg>
+        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Legal history</span>
+        {flagged && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${color}1a`, color }}>{asParty} case{asParty === 1 ? "" : "s"} naming them as a party</span>}
+        <a href={`https://www.courtlistener.com/?q=%22${encodeURIComponent(realName)}%22&type=r`} target="_blank" rel="noreferrer" className="mono ml-auto text-[10px] text-signal-dim hover:underline">CourtListener ↗</a>
+      </div>
+      <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
+        {data.total} US court record{data.total === 1 ? "" : "s"} mention "{realName}"{flagged ? ` — ${asParty} name them as a party` : ""}. Verify the identity match before drawing conclusions; a name is not a person.
+      </p>
+      <div className="mt-2 divide-y divide-line/60 rounded-lg border border-line">
+        {cases.slice(0, 6).map((c, i) => (
+          <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
+            {c.url ? (
+              <a href={c.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate hover:underline" style={{ color: c.nameInCase ? color : "var(--color-ink-dim)" }}>{c.caseName}</a>
+            ) : (
+              <span className="min-w-0 flex-1 truncate" style={{ color: c.nameInCase ? color : "var(--color-ink-dim)" }}>{c.caseName}</span>
+            )}
+            <span className="shrink-0 text-[10px] text-ink-faint">{c.court}{c.date ? ` · ${yearOf(c.date)}` : ""}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

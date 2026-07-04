@@ -18,6 +18,7 @@ import { VcReport } from "./VcReport";
 import { ProjectIntel } from "./ProjectIntel";
 import { purgeSubject } from "../lib/purge";
 import { ServiceAlert } from "./ServiceAlert";
+import { LegalScreen } from "./LegalScreen";
 import { RingAlert } from "./RingAlert";
 
 /* ── small primitives ─────────────────────────────────────────────── */
@@ -435,6 +436,11 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               </div>
             )}
           </div>
+        </div>
+
+        {/* legal history — US court records for a RESOLVED real name (self-gates on pseudonyms) */}
+        <div className="mt-4">
+          <LegalScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
         </div>
 
         {/* verdict hero */}
