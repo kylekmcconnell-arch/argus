@@ -118,7 +118,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try { host = new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`).hostname.replace(/^www\./, ""); } catch { /* keep raw */ }
   if (!host || !host.includes(".")) { res.status(400).json({ error: "domain required" }); return; }
 
-  const ck = `siteinfra:${host}:v1`;
+  const ck = `siteinfra:${host}:v2`;
   const cached = await cacheGetJson<any>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
