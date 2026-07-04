@@ -7,7 +7,6 @@ import { recordForensicEntities, getContributions } from "../graph/store";
 // under another ticker. Byte-identical contracts are the same trap; if the twin
 // was flagged AVOID, this one is too. Records a code:<fp> graph node so the bridge
 // forms automatically across audits. Cheap (one RPC), so it auto-runs.
-const TONE: Record<string, string> = { bad: "var(--color-avoid)", warn: "var(--color-caution)", good: "var(--color-pass)", info: "var(--color-ink-faint)" };
 type Cap = { selector: string; name: string; risk: "bad" | "warn" | "info" };
 type Data = { available: boolean; isContract?: boolean; isToken?: boolean; proxy?: boolean; implementation?: string | null; fingerprint?: string; codeSize?: number; capabilities?: Cap[]; verdict?: { tone: string; line: string }; note?: string };
 type Twin = { handle: string; verdict?: string };
@@ -65,12 +64,16 @@ export function BytecodeForensics({ address, chain, symbol }: { address: string;
   }
 
   const v = data.verdict;
-  const color = TONE[v?.tone ?? "good"];
   const badTwin = twins.find((t) => t.verdict === "AVOID" || t.verdict === "FAIL");
   const caps = data.capabilities ?? [];
+  // Capabilities in a contract are NEUTRAL facts (plenty of legit tokens can mint
+  // for emissions / pause for upgrades). Only a byte-identical clone of a KNOWN-BAD
+  // token is genuinely alarming — reserve red for that; everything else is a calm,
+  // informational panel.
+  const alarm = !!badTwin;
 
   return (
-    <div className="rounded-xl border p-4" style={{ borderColor: v?.tone === "good" && !badTwin ? "var(--color-line)" : `${badTwin ? "var(--color-avoid)" : color}55`, background: v?.tone === "good" && !badTwin ? "var(--color-panel)" : `${badTwin ? "var(--color-avoid)" : color}0d` }}>
+    <div className="rounded-xl border p-4" style={{ borderColor: alarm ? "var(--color-avoid)55" : "var(--color-line)", background: alarm ? "var(--color-avoid)0d" : "var(--color-panel)" }}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Bytecode fingerprint</span>
         {data.fingerprint && <span className="mono text-[10px] text-ink-faint">{data.fingerprint}</span>}
@@ -80,7 +83,7 @@ export function BytecodeForensics({ address, chain, symbol }: { address: string;
         {typeof data.codeSize === "number" && <span className="mono ml-auto text-[10px] text-ink-faint">{data.codeSize.toLocaleString()} bytes</span>}
       </div>
 
-      {/* Twin match is the headline when present — a known-bad clone is the strongest signal here. */}
+      {/* Twin match is the ONLY real headline here — a known-bad clone. */}
       {badTwin ? (
         <p className="mt-2 text-[12.5px] font-medium leading-relaxed" style={{ color: "var(--color-avoid)" }}>
           Byte-identical to {badTwin.handle}, which was flagged {badTwin.verdict}. This is the same contract redeployed under a new ticker.
@@ -89,17 +92,20 @@ export function BytecodeForensics({ address, chain, symbol }: { address: string;
         <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
           Shares identical code with {twins.slice(0, 3).map((t) => t.handle).join(", ")} — deployed from the same template.
         </p>
+      ) : v ? (
+        <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{v.line}</p>
       ) : null}
 
-      {v && <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: v.tone === "good" ? "var(--color-ink-dim)" : color }}>{v.line}</p>}
-
       {caps.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap gap-1.5">
-          {caps.map((c) => (
-            <span key={c.selector} title={c.selector} className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${TONE[c.risk]}1a`, color: TONE[c.risk] }}>
-              {c.name}
-            </span>
-          ))}
+        <div className="mt-2.5">
+          <div className="text-[10px] uppercase tracking-wide text-ink-faint">Callable capabilities in the code <span className="normal-case text-ink-faint/70">(neutral — confirm each is renounced/governed)</span></div>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {caps.map((c) => (
+              <span key={c.selector} title={c.selector} className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim">
+                {c.name}
+              </span>
+            ))}
+          </div>
         </div>
       )}
     </div>

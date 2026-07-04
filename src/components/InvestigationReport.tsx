@@ -148,10 +148,28 @@ export function InvestigationReport({
           <div className="flex flex-wrap items-center gap-3">
             {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-lg border border-line object-cover" />}
             <h1 className="text-[24px] font-medium tracking-[-0.02em] text-ink">{`Investigation · $${token.symbol}`}</h1>
-            <VerdictPill verdict={token.verdict} score={token.score} />
-            {projectAccount && <span className="mono text-[12px] text-ink-faint">project account <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} /></span>}
           </div>
-          <p className="mt-2 max-w-3xl text-[14px] font-medium leading-relaxed text-ink">{inv.founderNote}</p>
+          {/* Two DISTINCT scores, labelled so it's obvious what each grades. */}
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-2">
+            <span className="flex items-center gap-1.5">
+              <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Token risk</span>
+              <VerdictPill verdict={token.verdict} score={token.score} />
+            </span>
+            {projectAccount && (
+              <span className="flex items-center gap-1.5">
+                <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Project account</span>
+                <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} />
+              </span>
+            )}
+          </div>
+          {/* Lead with the TEAM when we know it — don't declare "no team" when it's named below. */}
+          {teamPeople.length > 0 ? (
+            <p className="mt-3 max-w-3xl text-[14px] font-medium leading-relaxed text-ink">
+              Built by {teamPeople.slice(0, 3).map((p) => p.name).filter(Boolean).join(", ")}{teamPeople.length > 3 ? ` +${teamPeople.length - 3} more` : ""}{projectX ? ` · project account ${projectX}` : ""} — full team below.
+            </p>
+          ) : (
+            <p className="mt-3 max-w-3xl text-[14px] font-medium leading-relaxed text-ink">{inv.founderNote}</p>
+          )}
           <p className="mono mt-1 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
 
@@ -191,9 +209,15 @@ export function InvestigationReport({
 
           {/* the people behind it (summary; the full team is its own section below) */}
           <Card title="The people behind it">
-            <p className="text-[12.5px] leading-relaxed text-ink-dim">{recon ? recon.identityLine : inv.founderNote}</p>
-            {teamPeople.length > 0 && (
-              <p className="mt-1.5 text-[11.5px] text-ink-faint">{teamPeople.length} {teamPeople.length === 1 ? "person" : "people"} surfaced across X, the site, and web/LinkedIn — see Team below.</p>
+            {teamPeople.length > 0 ? (
+              <>
+                <p className="text-[12.5px] leading-relaxed text-ink-dim">
+                  {teamPeople.length} {teamPeople.length === 1 ? "person is" : "people are"} publicly tied to this project: {teamPeople.slice(0, 4).map((p) => p.name).filter(Boolean).join(", ")}{teamPeople.length > 4 ? ", …" : ""}.
+                </p>
+                <p className="mt-1.5 text-[11.5px] text-ink-faint">Full roster with roles &amp; links in the Team section below.</p>
+              </>
+            ) : (
+              <p className="text-[12.5px] leading-relaxed text-ink-dim">{recon ? recon.identityLine : inv.founderNote}</p>
             )}
 
             {/* project account — explicitly NOT a founder */}
@@ -282,7 +306,7 @@ export function InvestigationReport({
 
         {token.chain !== "solana" && (
           <div className="mt-3">
-            <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} />
+            <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} knownDeployer={token.deployer} />
           </div>
         )}
 

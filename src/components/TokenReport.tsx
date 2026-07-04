@@ -244,7 +244,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* EVM deployer trail — who deployed it, who funded the gas, serial launcher? */}
         {d.chain !== "solana" && (
           <div className="mt-4">
-            <EvmDeployer address={d.address} chain={d.chain} symbol={d.symbol} />
+            <EvmDeployer address={d.address} chain={d.chain} symbol={d.symbol} knownDeployer={d.deployer} />
           </div>
         )}
 

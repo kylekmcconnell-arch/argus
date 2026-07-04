@@ -19,7 +19,7 @@ type Data = {
   walletAgeDays?: number | null; note?: string;
 };
 
-export function EvmDeployer({ address, chain, symbol }: { address: string; chain: string; symbol?: string }) {
+export function EvmDeployer({ address, chain, symbol, knownDeployer }: { address: string; chain: string; symbol?: string; knownDeployer?: string | null }) {
   const [data, setData] = useState<Data | null>(null);
   const [state, setState] = useState<"loading" | "done">("loading");
   const ran = useRef(false);
@@ -30,7 +30,13 @@ export function EvmDeployer({ address, chain, symbol }: { address: string; chain
     if (chain === "solana") { setState("done"); return; }
     (async () => {
       try {
-        const r = await fetch(`/api/evm-deployer?address=${encodeURIComponent(address)}&chain=${encodeURIComponent(chain)}`);
+        // If the audit already resolved the deployer (e.g. via GoPlus), trace THAT
+        // wallet directly — Etherscan's getcontractcreation is spotty on some L2s
+        // (Base), which otherwise reads as a false "deployer not resolvable".
+        const q = knownDeployer && /^0x[a-fA-F0-9]{40}$/.test(knownDeployer)
+          ? `wallet=${encodeURIComponent(knownDeployer)}`
+          : `address=${encodeURIComponent(address)}`;
+        const r = await fetch(`/api/evm-deployer?${q}&chain=${encodeURIComponent(chain)}`);
         const d: Data = await r.json();
         setData(d);
         // Feed the graph: deployer + (anon) funder keyed like the Solana forensics
