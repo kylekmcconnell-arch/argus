@@ -44,6 +44,16 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
   const SUPPORTED = new Set(["solana", "ethereum", "base", "bsc", "polygon", "arbitrum", "optimism", "avalanche"]);
   if (!mint || !SUPPORTED.has(chain)) return null;
 
+  // Bubblemaps holder-connection map (visual) for the chains it supports.
+  const BM: Record<string, string> = { solana: "sol", ethereum: "eth", base: "base", bsc: "bsc", polygon: "poly", arbitrum: "arbi", avalanche: "avax", fantom: "ftm" };
+  const bubbleUrl = BM[chain] ? `https://app.bubblemaps.io/${BM[chain]}/token/${mint}` : null;
+  const bubbleLink = bubbleUrl ? (
+    <a href={bubbleUrl} target="_blank" rel="noreferrer" className="mono inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[10px] text-ink-dim transition hover:border-signal hover:text-signal" title="Open the interactive holder bubble map on Bubblemaps">
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="7" cy="8" r="3.5" /><circle cx="17" cy="15" r="2.5" /><circle cx="16" cy="6" r="1.6" /></svg>
+      bubble map ↗
+    </a>
+  ) : null;
+
   const run = async () => {
     if (loading || data) return;
     setLoading(true);
@@ -111,6 +121,7 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
           </span>
           <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal transition group-hover:bg-signal group-hover:text-white">cluster →</span>
         </button>
+        {bubbleLink && <div className="mt-2 flex justify-end">{bubbleLink}</div>}
       </div>
     );
   }
@@ -126,7 +137,8 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
       <div className="flex items-center gap-2">
         <LinkIcon />
         <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Wallet clustering</span>
-        {data.walletsAnalyzed != null && <span className="mono ml-auto text-[10px] text-ink-faint">{data.walletsAnalyzed} holders analyzed</span>}
+        {data.walletsAnalyzed != null && <span className="mono text-[10px] text-ink-faint">{data.walletsAnalyzed} wallets analyzed</span>}
+        <span className="ml-auto">{bubbleLink}</span>
       </div>
 
       {data.note && <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: tone === "good" ? "var(--color-ink-dim)" : color }}>{data.note}</p>}

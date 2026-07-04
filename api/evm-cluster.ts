@@ -17,7 +17,7 @@ const CHAINID: Record<string, number> = {
   ethereum: 1, bsc: 56, base: 8453, polygon: 137, arbitrum: 42161,
   optimism: 10, avalanche: 43114, fantom: 250, linea: 59144, scroll: 534352,
 };
-const MAX_WALLETS = 12;
+const MAX_WALLETS = 20;
 const CHUNK = 4;
 const isAddr = (s: string) => /^0x[a-fA-F0-9]{40}$/.test(s);
 const lc = (s: string) => s.toLowerCase();

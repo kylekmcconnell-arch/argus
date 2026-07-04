@@ -19,7 +19,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 export const config = { maxDuration: 60 };
 
 const SOLADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const MAX_WALLETS = 12;   // top holders we bother to cluster (cost bound)
+const MAX_WALLETS = 20;   // top holders we bother to cluster (cost bound)
 const CHUNK = 5;          // per-wallet concurrency
 
 // CEX hot wallets + programs: a shared *exchange* funder is NOT a same-operator
