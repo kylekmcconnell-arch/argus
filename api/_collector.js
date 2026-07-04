@@ -1749,7 +1749,41 @@ var NOTABLE = [
   { handle: "punk6529", label: "investor", size: "500K" },
   { handle: "solana", label: "infra (Solana)", size: "3M" },
   { handle: "pumpdotfun", label: "infra (Pump.fun)", size: "600K" },
-  { handle: "base", label: "infra (Base)", size: "1.5M" }
+  { handle: "base", label: "infra (Base)", size: "1.5M" },
+  // Funds / VCs (a named fund following a project is a strong legitimacy signal).
+  { handle: "a16zcrypto", label: "VC (a16z crypto)", size: "800K" },
+  { handle: "paradigm", label: "VC (Paradigm)", size: "500K" },
+  { handle: "dragonfly_xyz", label: "VC (Dragonfly)", size: "150K" },
+  { handle: "multicoincap", label: "VC (Multicoin)", size: "250K" },
+  { handle: "VariantFund", label: "VC (Variant)", size: "120K" },
+  { handle: "DelphiDigital", label: "research (Delphi)", size: "300K" },
+  { handle: "FrameworkVC", label: "VC (Framework)", size: "80K" },
+  { handle: "hack_vc", label: "VC (Hack VC)", size: "60K" },
+  { handle: "PlaceholderVC", label: "VC (Placeholder)", size: "90K" },
+  { handle: "panteracapital", label: "VC (Pantera)", size: "300K" },
+  { handle: "1kxnetwork", label: "VC (1kx)", size: "80K" },
+  { handle: "electric_capital", label: "VC (Electric)", size: "120K" },
+  { handle: "robotventures", label: "VC (Robot Ventures)", size: "60K" },
+  // Founders / builders.
+  { handle: "gakonst", label: "founder (Paradigm/Foundry)", size: "200K" },
+  { handle: "danrobinson", label: "investor (Paradigm)", size: "120K" },
+  { handle: "hosseeb", label: "investor (Dragonfly)", size: "180K" },
+  { handle: "BrendanEich", label: "founder (Brave)", size: "900K" },
+  { handle: "sassal0x", label: "Ethereum advocate", size: "300K" },
+  { handle: "TheDeFiEdge", label: "researcher", size: "300K" },
+  { handle: "sreeramkannan", label: "founder (EigenLayer)", size: "100K" },
+  // Traders / KOLs.
+  { handle: "Rewkang", label: "trader (Mechanism)", size: "500K" },
+  { handle: "Pentosh1", label: "trader", size: "700K" },
+  { handle: "GiganticRebirth", label: "trader (GCR)", size: "500K" },
+  { handle: "TheCryptoDog", label: "trader", size: "800K" },
+  { handle: "Tetranode", label: "whale", size: "300K" },
+  { handle: "DeFiGod1", label: "trader", size: "300K" },
+  { handle: "gainzy222", label: "trader", size: "300K" },
+  { handle: "loomdart", label: "trader", size: "250K" },
+  { handle: "AltcoinPsycho", label: "trader", size: "500K" },
+  { handle: "smallcapscience", label: "KOL", size: "200K" },
+  { handle: "0xngmi", label: "founder (DefiLlama)", size: "150K" }
 ];
 async function checkFollow(source, target) {
   const key = env("TWITTERAPI_KEY");
@@ -1777,52 +1811,23 @@ async function checkFollow(source, target) {
     return null;
   }
 }
-var HIGH_REACH = 1e4;
-async function notableFollowers(subject, opts) {
+async function notableFollowers(subject) {
   const key = env("TWITTERAPI_KEY");
-  if (!key) return { list: [], scanned: 0, complete: false };
-  const u = subject.replace(/^@/, "");
-  const curated = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
-  const found = /* @__PURE__ */ new Map();
-  let cursor = "";
-  let scanned = 0;
-  let complete = false;
-  const start = Date.now();
-  const deadlineMs = opts?.deadlineMs ?? 5e4;
-  const PAGE_BACKSTOP = 4e3;
-  for (let page = 0; page < PAGE_BACKSTOP; page++) {
-    if (Date.now() - start > deadlineMs) break;
-    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-    const res = await twFetch(url, key);
-    if (!res || !res.ok) break;
-    const d = await res.json();
-    if (d?.status === "error") break;
-    const followers = d.followers ?? d.data?.followers ?? [];
-    if (!followers.length) {
-      complete = true;
-      break;
-    }
-    scanned += followers.length;
-    for (const f of followers) {
-      const h = String(f.userName ?? f.screen_name ?? "");
-      if (!h) continue;
-      const lk = h.toLowerCase();
-      if (found.has(lk)) continue;
-      const fc = Number(f.followers_count ?? f.followers ?? 0);
-      const cur = curated.get(lk);
-      if (cur) {
-        found.set(lk, { handle: h, label: cur.label, size: fc ? fmtFollowers(fc) : cur.size, count: fc || void 0 });
-      } else if (fc >= HIGH_REACH) {
-        found.set(lk, { handle: h, label: "high reach", size: fmtFollowers(fc), count: fc });
-      }
-    }
-    if (!d.has_next_page || !d.next_cursor) {
-      complete = true;
-      break;
-    }
-    cursor = d.next_cursor;
+  if (!key) return { list: [], checked: 0 };
+  const subj = subject.replace(/^@/, "").toLowerCase();
+  const candidates = NOTABLE.filter((n) => n.handle.toLowerCase() !== subj);
+  const hits = [];
+  const CHUNK = 10;
+  for (let i = 0; i < candidates.length; i += CHUNK) {
+    const res = await Promise.all(
+      candidates.slice(i, i + CHUNK).map(async (n) => {
+        const rel = await checkFollow(n.handle, subject);
+        return rel?.following ? n : null;
+      })
+    );
+    for (const r of res) if (r) hits.push(r);
   }
-  return { list: [...found.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 24), scanned, complete };
+  return { list: hits, checked: candidates.length };
 }
 async function acknowledgments(endorsers, subject) {
   const out = /* @__PURE__ */ new Map();
@@ -2003,19 +2008,14 @@ var xAdapter = {
       ctx.emit({ phase: "P0 \xB7 Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days \u2014 a project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
     }
     if (!ctx.evidence.notableFollowers.length) {
-      ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Scanning EVERY follower for high-reach accounts and known callers/founders/funds\u2026", source: "twitterapi.io", tone: "neutral" });
+      ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Checking which top funds, founders, and KOLs follow the subject\u2026", source: "twitterapi.io", tone: "neutral" });
       const scan = await notableFollowers(ctx.handle);
       const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
-      const coverage = scan.complete ? `all ${scan.scanned.toLocaleString()} followers scanned` : `${scan.scanned.toLocaleString()} most-recent followers scanned (time budget reached)`;
       if (nf.length) {
-        const over1m = nf.filter((n) => (n.count ?? 0) >= 1e6).length;
-        const over100k = nf.filter((n) => (n.count ?? 0) >= 1e5).length;
-        const over10k = nf.filter((n) => (n.count ?? 0) >= 1e4).length;
-        const reach = over1m ? `${over1m} with >1M followers` : over100k ? `${over100k} with >100K followers` : over10k ? `${over10k} with >10K followers` : "";
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `Followed by ${nf.length} notable account${nf.length === 1 ? "" : "s"}${reach ? ` (${reach})` : ""} \u2014 ${coverage}: ${nf.slice(0, 6).map((n) => `@${n.handle}${n.size ? ` ${n.size}` : ""}`).join(", ")}${nf.length > 6 ? ", \u2026" : ""}.`, source: "twitterapi.io", tone: "good" });
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `Followed by ${nf.length} of ${scan.checked} known accounts checked: ${nf.slice(0, 8).map((n) => `@${n.handle}${n.label ? ` (${n.label})` : ""}`).join(", ")}${nf.length > 8 ? ", \u2026" : ""}.`, source: "twitterapi.io", tone: "good" });
       } else {
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `No high-reach or known accounts among the subject's followers (${coverage}).`, source: "twitterapi.io", tone: "neutral" });
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `None of the ${scan.checked} known funds/founders/KOLs checked follow this subject.`, source: "twitterapi.io", tone: "neutral" });
       }
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);

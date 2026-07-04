@@ -377,6 +377,40 @@ const NOTABLE: NotableFollower[] = [
   { handle: "solana", label: "infra (Solana)", size: "3M" },
   { handle: "pumpdotfun", label: "infra (Pump.fun)", size: "600K" },
   { handle: "base", label: "infra (Base)", size: "1.5M" },
+  // Funds / VCs (a named fund following a project is a strong legitimacy signal).
+  { handle: "a16zcrypto", label: "VC (a16z crypto)", size: "800K" },
+  { handle: "paradigm", label: "VC (Paradigm)", size: "500K" },
+  { handle: "dragonfly_xyz", label: "VC (Dragonfly)", size: "150K" },
+  { handle: "multicoincap", label: "VC (Multicoin)", size: "250K" },
+  { handle: "VariantFund", label: "VC (Variant)", size: "120K" },
+  { handle: "DelphiDigital", label: "research (Delphi)", size: "300K" },
+  { handle: "FrameworkVC", label: "VC (Framework)", size: "80K" },
+  { handle: "hack_vc", label: "VC (Hack VC)", size: "60K" },
+  { handle: "PlaceholderVC", label: "VC (Placeholder)", size: "90K" },
+  { handle: "panteracapital", label: "VC (Pantera)", size: "300K" },
+  { handle: "1kxnetwork", label: "VC (1kx)", size: "80K" },
+  { handle: "electric_capital", label: "VC (Electric)", size: "120K" },
+  { handle: "robotventures", label: "VC (Robot Ventures)", size: "60K" },
+  // Founders / builders.
+  { handle: "gakonst", label: "founder (Paradigm/Foundry)", size: "200K" },
+  { handle: "danrobinson", label: "investor (Paradigm)", size: "120K" },
+  { handle: "hosseeb", label: "investor (Dragonfly)", size: "180K" },
+  { handle: "BrendanEich", label: "founder (Brave)", size: "900K" },
+  { handle: "sassal0x", label: "Ethereum advocate", size: "300K" },
+  { handle: "TheDeFiEdge", label: "researcher", size: "300K" },
+  { handle: "sreeramkannan", label: "founder (EigenLayer)", size: "100K" },
+  // Traders / KOLs.
+  { handle: "Rewkang", label: "trader (Mechanism)", size: "500K" },
+  { handle: "Pentosh1", label: "trader", size: "700K" },
+  { handle: "GiganticRebirth", label: "trader (GCR)", size: "500K" },
+  { handle: "TheCryptoDog", label: "trader", size: "800K" },
+  { handle: "Tetranode", label: "whale", size: "300K" },
+  { handle: "DeFiGod1", label: "trader", size: "300K" },
+  { handle: "gainzy222", label: "trader", size: "300K" },
+  { handle: "loomdart", label: "trader", size: "250K" },
+  { handle: "AltcoinPsycho", label: "trader", size: "500K" },
+  { handle: "smallcapscience", label: "KOL", size: "200K" },
+  { handle: "0xngmi", label: "founder (DefiLlama)", size: "150K" },
 ];
 
 // Does `source` follow `target`? One call via check_follow_relationship.
@@ -411,69 +445,34 @@ export async function checkFollow(source: string, target: string): Promise<{ fol
   }
 }
 
-// Follower QUALITY, surfaced two ways from a scan of the subject's followers:
-//   1. curated accounts (known callers/founders/funds) that follow them, and
-//   2. HIGH-REACH accounts — anyone with a large audience of their own, even if
-//      not on the curated list ("2 accounts with >1M followers follow them").
-// Each follower object carries followers_count, so we bucket by reach and sort by
-// it. Now that the QPS cap is lifted (paid credits) we scan several pages; results
-// are the highest-reach + curated followers among them.
-const HIGH_REACH = 10_000;
+// Notable followers, done the RIGHT way. Enumerating a follower list to spot the
+// notable accounts is the wrong algorithm: twitterapi pages newest-first with no
+// influence sort and no verified-followers endpoint, so any bounded scan of a big
+// account only sees recent followers and MISSES the notable ones — a partial,
+// useless answer. So we REVERSE the query: take our curated list of accounts that
+// actually matter (top funds / founders / KOLs / infra) and ask each one "do you
+// follow this subject?" via a single check_follow_relationship call. That is
+// COMPLETE for the set that matters (never sampled), and it's O(list) cheap calls
+// run in parallel — independent of how many followers the subject has.
+export interface NotableScan { list: NotableFollower[]; checked: number }
 
-// Result of a full follower sweep: the notable accounts found, how many followers
-// were actually scanned, and whether we reached the END (every follower) or hit
-// the time budget (truncated at the most-recent, since twitterapi pages
-// newest-first).
-export interface NotableScan { list: NotableFollower[]; scanned: number; complete: boolean }
-
-// Scan EVERY follower (paginate to exhaustion), not just the recent few. The only
-// governor is a wall-clock budget so a mega-account (hundreds of thousands of
-// followers = thousands of sequential 200-at-a-time calls) can't blow the audit's
-// 180s function cap. For the vast majority of audited subjects this reaches the
-// end and scans 100% of followers; huge accounts are capped and report coverage
-// honestly rather than silently sampling.
-export async function notableFollowers(subject: string, opts?: { deadlineMs?: number }): Promise<NotableScan> {
+export async function notableFollowers(subject: string): Promise<NotableScan> {
   const key = env("TWITTERAPI_KEY");
-  if (!key) return { list: [], scanned: 0, complete: false };
-  const u = subject.replace(/^@/, "");
-  const curated = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
-  const found = new Map<string, NotableFollower>();
-  let cursor = "";
-  let scanned = 0;
-  let complete = false;
-  const start = Date.now();
-  const deadlineMs = opts?.deadlineMs ?? 50_000; // audit-safe headroom under the 180s route cap
-  const PAGE_BACKSTOP = 4000; // hard ceiling (~800k) — the deadline governs first in practice
-
-  for (let page = 0; page < PAGE_BACKSTOP; page++) {
-    if (Date.now() - start > deadlineMs) break; // budget hit: truncated at the most-recent followers
-    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-    const res = await twFetch(url, key);
-    if (!res || !res.ok) break;
-    const d = (await res.json()) as any;
-    if (d?.status === "error") break;
-    const followers: any[] = d.followers ?? d.data?.followers ?? [];
-    if (!followers.length) { complete = true; break; }
-    scanned += followers.length;
-    for (const f of followers) {
-      const h = String(f.userName ?? f.screen_name ?? "");
-      if (!h) continue;
-      const lk = h.toLowerCase();
-      if (found.has(lk)) continue;
-      const fc = Number(f.followers_count ?? f.followers ?? 0);
-      const cur = curated.get(lk);
-      if (cur) {
-        found.set(lk, { handle: h, label: cur.label, size: fc ? fmtFollowers(fc) : cur.size, count: fc || undefined });
-      } else if (fc >= HIGH_REACH) {
-        found.set(lk, { handle: h, label: "high reach", size: fmtFollowers(fc), count: fc });
-      }
-    }
-    if (!d.has_next_page || !d.next_cursor) { complete = true; break; }
-    cursor = d.next_cursor;
+  if (!key) return { list: [], checked: 0 };
+  const subj = subject.replace(/^@/, "").toLowerCase();
+  const candidates = NOTABLE.filter((n) => n.handle.toLowerCase() !== subj);
+  const hits: NotableFollower[] = [];
+  const CHUNK = 10; // bounded concurrency (twitterapi is paid/no-QPS-cap, but stay polite)
+  for (let i = 0; i < candidates.length; i += CHUNK) {
+    const res = await Promise.all(
+      candidates.slice(i, i + CHUNK).map(async (n) => {
+        const rel = await checkFollow(n.handle, subject); // does the notable account follow the subject?
+        return rel?.following ? n : null;
+      }),
+    );
+    for (const r of res) if (r) hits.push(r);
   }
-  // Biggest audiences first; cap the surfaced list (we scan every follower, but only
-  // show the most notable ones).
-  return { list: [...found.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 24), scanned, complete };
+  return { list: hits, checked: candidates.length };
 }
 
 // ── Grok Live Search: did the endorsers publicly acknowledge the subject? ──
@@ -795,22 +794,15 @@ export const xAdapter: Adapter = {
     // 1b. follower QUALITY: which respected accounts follow the subject. The
     //     answer (who, not how many) is a credibility signal a bot farm can't fake.
     if (!ctx.evidence.notableFollowers.length) {
-      ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "Scanning EVERY follower for high-reach accounts and known callers/founders/funds…", source: "twitterapi.io", tone: "neutral" });
+      ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "Checking which top funds, founders, and KOLs follow the subject…", source: "twitterapi.io", tone: "neutral" });
       const scan = await notableFollowers(ctx.handle);
       const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
-      // Be explicit about coverage: did we read every follower, or hit the budget?
-      const coverage = scan.complete
-        ? `all ${scan.scanned.toLocaleString()} followers scanned`
-        : `${scan.scanned.toLocaleString()} most-recent followers scanned (time budget reached)`;
+      // Complete coverage: we checked every account on the curated list directly.
       if (nf.length) {
-        const over1m = nf.filter((n) => (n.count ?? 0) >= 1e6).length;
-        const over100k = nf.filter((n) => (n.count ?? 0) >= 1e5).length;
-        const over10k = nf.filter((n) => (n.count ?? 0) >= 1e4).length;
-        const reach = over1m ? `${over1m} with >1M followers` : over100k ? `${over100k} with >100K followers` : over10k ? `${over10k} with >10K followers` : "";
-        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `Followed by ${nf.length} notable account${nf.length === 1 ? "" : "s"}${reach ? ` (${reach})` : ""} — ${coverage}: ${nf.slice(0, 6).map((n) => `@${n.handle}${n.size ? ` ${n.size}` : ""}`).join(", ")}${nf.length > 6 ? ", …" : ""}.`, source: "twitterapi.io", tone: "good" });
+        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `Followed by ${nf.length} of ${scan.checked} known accounts checked: ${nf.slice(0, 8).map((n) => `@${n.handle}${n.label ? ` (${n.label})` : ""}`).join(", ")}${nf.length > 8 ? ", …" : ""}.`, source: "twitterapi.io", tone: "good" });
       } else {
-        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `No high-reach or known accounts among the subject's followers (${coverage}).`, source: "twitterapi.io", tone: "neutral" });
+        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `None of the ${scan.checked} known funds/founders/KOLs checked follow this subject.`, source: "twitterapi.io", tone: "neutral" });
       }
     }
 
