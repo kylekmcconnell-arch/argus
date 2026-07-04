@@ -12,6 +12,8 @@ export interface ResolvedProjectToken {
   rank: number | null;
   contract: string;
   chain: string;
+  homepage: string | null; // the token's official site, per CoinGecko — used to
+                            // confirm the recon'd site IS this token's project.
 }
 
 const CHAIN_MAP: Record<string, string> = {
@@ -46,13 +48,14 @@ export async function resolveProjectToken(rawName: string): Promise<ResolvedProj
 
     const c = await fetch(`https://api.coingecko.com/api/v3/coins/${cand.id}?localization=false&tickers=false&market_data=false&community_data=false&developer_data=false`, { signal: AbortSignal.timeout(8000) });
     if (!c.ok) return null;
-    const cd = (await c.json()) as { symbol?: string; name?: string; platforms?: Record<string, string> };
+    const cd = (await c.json()) as { symbol?: string; name?: string; platforms?: Record<string, string>; links?: { homepage?: string[] } };
     const plats = cd?.platforms ?? {};
     let contract = "", chain = "";
     for (const p of CHAIN_PREF) { if (plats[p]) { contract = plats[p]; chain = CHAIN_MAP[p]; break; } }
     if (!contract) { const first = Object.entries(plats).find(([, v]) => v); if (first) { contract = first[1]; chain = CHAIN_MAP[first[0]] ?? first[0]; } }
     if (!contract) return null;
+    const homepage = (Array.isArray(cd?.links?.homepage) ? cd.links!.homepage!.find((u) => typeof u === "string" && /^https?:\/\//.test(u)) : null) ?? null;
 
-    return { symbol: String(cd.symbol ?? cand.symbol ?? "").toUpperCase(), name: cd.name ?? cand.name ?? name, id: cand.id, rank: cand.market_cap_rank ?? null, contract, chain };
+    return { symbol: String(cd.symbol ?? cand.symbol ?? "").toUpperCase(), name: cd.name ?? cand.name ?? name, id: cand.id, rank: cand.market_cap_rank ?? null, contract, chain, homepage };
   } catch { return null; }
 }

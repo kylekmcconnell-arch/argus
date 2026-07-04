@@ -388,7 +388,7 @@ export default function App() {
 
       {phase === "alerts" && <AlertsPage onOpen={onOpenRecent} />}
 
-      {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialPrivate={privRef.current} onAudit={onAudit} onOpenRecent={onOpenRecent} />}
+      {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialPrivate={privRef.current} onAudit={onAudit} onInvestigate={onInvestigate} onOpenRecent={onOpenRecent} />}
 
       {phase === "find" && <FindWallet onAudit={onAudit} onReset={reset} onOpenRecent={onOpenRecent} />}
 

@@ -94,7 +94,14 @@ const COVERAGE: Record<string, { label: string; color: string; blurb: string }> 
 
 const EXAMPLES = ["neuro-mesh.io", "stripe.com"];
 
-export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }: { initialUrl?: string; initialPrivate?: boolean; onAudit?: (q: string) => void; onOpenRecent?: (ref: string) => void }) {
+// apex of a host without a public-suffix list — enough to match jup.ag against
+// www.jup.ag / station.jup.ag.
+const apexOf = (host: string) => { const p = host.toLowerCase().replace(/^www\./, "").split("."); return p.length <= 2 ? p.join(".") : p.slice(-2).join("."); };
+const hostFromUrl = (u: string) => { try { return new URL(/^https?:\/\//.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, ""); } catch { return u; } };
+// Verdict/finding text asserting an absent team — suppressed when a team IS known.
+const TEAM_ABSENCE = /\bno team\b|team not (?:established|found)|no (?:leadership|team) section|anonymous team/i;
+
+export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, onOpenRecent }: { initialUrl?: string; initialPrivate?: boolean; onAudit?: (q: string) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string) => void }) {
   const [url, setUrl] = useState(initialUrl ?? "");
   const [priv, setPriv] = useState(!!initialPrivate);
   const privRef = useRef(!!initialPrivate);
@@ -108,6 +115,7 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
   const [teamSearching, setTeamSearching] = useState(false);
   const [teamSearched, setTeamSearched] = useState(false);
   const [projToken, setProjToken] = useState<ResolvedProjectToken | null>(null);
+  const [redirecting, setRedirecting] = useState<ResolvedProjectToken | null>(null);
   const ran = useRef(false);
 
   const run = useCallback(async (raw: string) => {
@@ -121,6 +129,7 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
     setWebTeam([]);
     setTeamSearched(false);
     setProjToken(null);
+    setRedirecting(null);
     let scanHost = target;
     try { scanHost = new URL(/^https?:\/\//.test(target) ? target : `https://${target}`).hostname.replace(/^www\./, ""); } catch { /* keep */ }
     const scanId = `site:${scanHost}:${Date.now()}`;
@@ -136,11 +145,22 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
 
     // Bridge to the token. A JS-app site (jup.ag) can render too thin to surface
     // token signals, so the recon never reaches the token where the real diligence
-    // lives. If the recon didn't already find a token on-chain and this isn't a
-    // fund, resolve the project's canonical token by name and offer a one-click
-    // jump to the full on-chain report.
+    // lives. Resolve the project's canonical token by name; if the token's OFFICIAL
+    // homepage matches the site we recon'd, this IS that token's project — skip
+    // straight to the full investigation. Otherwise (weaker, name-only match) just
+    // offer a one-click bridge card.
     if (r.retrieval.status !== "gap" && !r.isFund && !r.pivot?.found) {
-      resolveProjectToken(r.title || scanHost).then((t) => { if (t) setProjToken(t); }).catch(() => { /* best-effort */ });
+      const t = await resolveProjectToken(r.title || scanHost).catch(() => null);
+      if (t) {
+        const officialHost = t.homepage ? hostFromUrl(t.homepage) : null;
+        if (onInvestigate && officialHost && apexOf(officialHost) === apexOf(scanHost)) {
+          // Provable match — run the full report instead of the thin site recon.
+          setRedirecting(t);
+          onInvestigate(t.contract, privRef.current);
+          return;
+        }
+        setProjToken(t);
+      }
     }
 
     // Dig the web + LinkedIn for the team (the render-based recon is shallow).
@@ -200,6 +220,9 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
   // The recon'd host, for deleted-content archaeology.
   let reconHost = "";
   try { reconHost = recon ? new URL(recon.retrieval.url).hostname.replace(/^www\./, "") : ""; } catch { /* keep empty */ }
+  // Don't assert "no team" when we DID identify one (via the web/LinkedIn dig or
+  // the rendered page) — the thin render missing a team section isn't its absence.
+  const teamKnown = (recon?.team.names.length ?? 0) > 0 || webTeam.length > 0;
 
   const openRecent = onOpenRecent ?? onAudit;
   return (
@@ -259,8 +282,16 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
         </div>
       )}
 
-      {/* result */}
-      {recon && (
+      {/* auto-routing: this site IS a token's official homepage → full report */}
+      {redirecting ? (
+        <div className="mt-6 rounded-xl border p-5" style={{ borderColor: "var(--color-signal)66", background: "var(--color-signal)0d" }}>
+          <div className="flex items-center gap-2 text-[13px] font-medium text-signal-lift">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
+            This is {redirecting.name}'s site — opening the full ${redirecting.symbol} report…
+          </div>
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">A site recon only reads the website; ${redirecting.symbol} is a live token ({redirecting.chain}) whose official homepage is this domain, so ARGUS is running the full on-chain investigation instead.</p>
+        </div>
+      ) : recon && (
         <>
           {/* verdict hero */}
           {recon.verdict && (() => {
@@ -285,11 +316,11 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
                       </button>
                     </div>
                     {recon.title && <div className="mt-1 truncate text-[13px] text-ink-dim">{recon.title}</div>}
-                    <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">{recon.identityLine}</p>
+                    <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">{teamKnown && TEAM_ABSENCE.test(recon.identityLine) ? "Team identified off the rendered page — see the Team section below." : recon.identityLine}</p>
                   </div>
                 </div>
                 <div className="mt-3 space-y-1.5 border-t border-line/60 pt-3">
-                  {v.reasons.map((r, i) => (
+                  {v.reasons.filter((r) => !(teamKnown && TEAM_ABSENCE.test(r.text))).map((r, i) => (
                     <div key={i} className="flex items-start gap-2.5">
                       <span className="mono mt-0.5 shrink-0 text-[12px]" style={{ color: TONE[r.tone] }}>{GLYPH[r.tone]}</span>
                       <span className="text-[13px] leading-snug text-ink-dim">{r.text}</span>
@@ -339,7 +370,7 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
           <div className="mt-3 rounded-xl border border-line bg-panel p-4">
             <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Findings</div>
             <div className="mt-2 space-y-2">
-              {recon.findings.map((f, i) => (
+              {recon.findings.filter((f) => !(teamKnown && TEAM_ABSENCE.test(f.claim))).map((f, i) => (
                 <div key={i} className="flex items-start gap-2.5">
                   <span className="mono mt-0.5 shrink-0 text-[12px]" style={{ color: TONE[f.tone] }}>{GLYPH[f.tone]}</span>
                   <span className="text-[13px] leading-snug text-ink-dim">{f.claim}</span>
