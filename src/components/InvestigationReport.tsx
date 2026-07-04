@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { verdictMeta } from "../lib/verdict";
 import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
-import { xAvatar } from "../lib/avatars";
+import { xAvatar, personAvatar } from "../lib/avatars";
 import { OperatorNetwork } from "./OperatorNetwork";
 import { SanctionsScreen } from "./SanctionsScreen";
 import { ProjectDocs } from "./ProjectDocs";
@@ -307,7 +307,7 @@ export function InvestigationReport({
                     {teamPeople.map((m) => (
                       <div key={m.handle ?? m.name} className="flex items-center justify-between gap-2">
                         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                          <Avatar src={m.handle ? xAvatar(m.handle) : null} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
+                          <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                           <span className="text-[12.5px] text-ink">{m.name}</span>
                           {m.handle && m.handle.replace(/^@/, "").toLowerCase() !== m.name.toLowerCase() && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
                           {m.role && <span className="text-[10.5px] text-ink-faint">{m.role}</span>}

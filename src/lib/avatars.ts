@@ -10,6 +10,21 @@ export function xAvatar(handle: string): string {
   return `https://unavatar.io/x/${handle.replace(/^@/, "")}`;
 }
 
+// A team member with a LinkedIn but no X handle still has a face: unavatar's
+// linkedin provider resolves the /in/<slug> profile photo. fallback=false makes
+// a miss return 404 so the Avatar cleanly drops to a letter (not a grey blob).
+export function linkedinAvatar(linkedin?: string | null): string | null {
+  if (!linkedin) return null;
+  const slug = linkedin.match(/(?:^|\/)in\/([A-Za-z0-9\-_%.]+)/i)?.[1];
+  return slug ? `https://unavatar.io/linkedin/${slug}?fallback=false` : null;
+}
+
+// Best photo for a team member: their X profile, else their LinkedIn.
+export function personAvatar(handle?: string | null, linkedin?: string | null): string | null {
+  if (handle) return xAvatar(handle);
+  return linkedinAvatar(linkedin);
+}
+
 export function faviconFor(url: string): string | null {
   try {
     const host = new URL(/^https?:\/\//.test(url) ? url : "https://" + url).hostname;

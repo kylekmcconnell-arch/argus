@@ -8,7 +8,7 @@ import { isWatched, toggleWatch } from "../lib/watchlist";
 import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
-import { xAvatar } from "../lib/avatars";
+import { xAvatar, personAvatar } from "../lib/avatars";
 import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
@@ -493,7 +493,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
                 <div key={i} className="px-4 py-2.5 text-[12.5px]">
                   <div className="flex items-start justify-between gap-3">
                     <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <Avatar src={p.handle ? xAvatar(p.handle) : null} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[9px]" />
+                      <Avatar src={personAvatar(p.handle, p.linkedin)} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                       <span className="text-ink">{p.name}</span>
                       {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
                       <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-dim">{p.role}</span>
