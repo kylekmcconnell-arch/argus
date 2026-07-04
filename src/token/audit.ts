@@ -315,10 +315,39 @@ async function runTokenAudit(
         findings.push({ claim: s.nonTransferable ? "Non-transferable token: holders cannot move it." : "Honeypot: the contract blocks selling.", tone: "bad", source: s.honeypotOnchain ? "goplus" : "sim" });
       }
     }
-    if (s.cannotSellAll) caps.push([15, "cannot_sell_all"]);
-    if (s.mintable) { caps.push([35, "mint_authority_active"]); findings.push({ claim: "Mint authority active: supply can be inflated at will.", tone: "bad", source: chain === "solana" ? "goplus-sol" : "goplus" }); }
-    if (s.freezable) { caps.push([35, "freeze_authority_active"]); findings.push({ claim: "Freeze authority active: the team can freeze your tokens (you cannot sell).", tone: "bad", source: "goplus-sol" }); }
-    if (s.takeBack || s.hiddenOwner) { caps.push([35, "reclaimable_ownership"]); findings.push({ claim: s.hiddenOwner ? "Hidden owner detected." : "Ownership can be taken back after renouncement.", tone: "bad", source: "goplus" }); }
+    if (s.cannotSellAll) caps.push([15, "cannot_sell_all"]); // honeypot-class — never relaxed
+
+    // ---- legitimacy-weighted AUTHORITY caps ----
+    // A live mint / freeze / reclaimable-ownership authority is a rug setup on an
+    // anon memecoin, but a GOVERNED ops mechanism on a real project (emissions,
+    // upgrades). The thing a rug can't fake is real centralized-exchange listings —
+    // Coinbase / Kraken / Binance run diligence a scam doesn't pass. So we weigh the
+    // authority caps against CEX presence: 3+ real CEX markets => the capability is a
+    // disclosed finding, not a disqualifier; 1-2 => soften to a CAUTION ceiling;
+    // unlisted => the full hard cap stands (conservative for the unknown). The
+    // capability is ALWAYS shown as a finding — this changes the score, not the
+    // transparency. Honeypot / non-transferable / serial-scammer caps are unaffected.
+    // "Established" = real CEX presence a rug can't buy, with market-cap floors so a
+    // couple of low-tier listings can't game it: broad listings (5+), or a few
+    // listings on a material cap, or a single listing on a large cap.
+    const cexN = cg?.cexCount ?? 0;
+    const mcap = fdv;
+    const established = cexN >= 5 || (cexN >= 3 && mcap >= 10_000_000) || (cexN >= 1 && mcap >= 100_000_000);
+    const authorityTone = established ? "warn" : "bad";
+    const govNote = established ? " On a token with real centralized-exchange listings this is typically a governed emissions/ops mechanism, not a rug setup — confirm the controller." : "";
+    if (s.mintable) {
+      if (!established) caps.push([35, "mint_authority_active"]);
+      findings.push({ claim: `Mint authority is live: supply can be minted.${govNote}`, tone: authorityTone, source: chain === "solana" ? "goplus-sol" : "goplus" });
+    }
+    if (s.freezable) {
+      if (!established) caps.push([35, "freeze_authority_active"]);
+      findings.push({ claim: `Freeze authority is live: the team can freeze token accounts.${govNote}`, tone: authorityTone, source: "goplus-sol" });
+    }
+    if (s.takeBack || s.hiddenOwner) {
+      // A hidden owner is a deception (never relaxed); reclaimable-after-renounce is an authority flag (relaxable when established).
+      if (s.hiddenOwner) { caps.push([35, "reclaimable_ownership"]); findings.push({ claim: "Hidden owner detected.", tone: "bad", source: "goplus" }); }
+      else { if (!established) caps.push([35, "reclaimable_ownership"]); findings.push({ claim: `Ownership can be reclaimed after renouncement.${govNote}`, tone: authorityTone, source: "goplus" }); }
+    }
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
     // The deployer's OTHER tokens include honeypots — a serial-scammer signal that a
     // clean-looking contract can't wash off. Independent of this token's own flags.
