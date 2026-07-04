@@ -21,6 +21,30 @@ export function verdictMeta(v: string): VerdictMeta {
   return VERDICT_META[v] ?? VERDICT_META.INCOMPLETE;
 }
 
+// How much of the verdict rests on VERIFIED data vs checks that couldn't run. A
+// PASS where every check completed is worth more than the same PASS where half
+// were skipped — this does NOT change the score, it tells the reader how far to
+// trust it. Six coverage checks (sim + source verification are EVM-only).
+export interface Confidence { level: "high" | "medium" | "low"; ran: number; total: number }
+export function tokenConfidence(p: {
+  chain: string; safetyAvailable: boolean; openSource: boolean; simChecked: boolean;
+  hasDeployer: boolean; hasCg: boolean; hasHolders: boolean;
+}): Confidence {
+  const evm = p.chain !== "solana";
+  const checks = [
+    p.safetyAvailable,                            // on-chain contract safety ran
+    !evm || p.simChecked,                         // live sell simulated (EVM; n/a Solana)
+    !evm || (p.safetyAvailable && p.openSource),  // contract source verified (EVM; n/a Solana)
+    p.hasDeployer,                                // deployer wallet resolved
+    p.hasCg,                                      // independent market corroboration
+    p.hasHolders,                                 // holder distribution available
+  ];
+  const ran = checks.filter(Boolean).length;
+  const total = checks.length;
+  const level: Confidence["level"] = ran >= total - 1 ? "high" : ran >= total - 3 ? "medium" : "low";
+  return { level, ran, total };
+}
+
 export const ROLE_META: Record<SubjectClass, { label: string; glyph: string }> = {
   [SubjectClass.FOUNDER]: { label: "Founder", glyph: "⚒" },
   [SubjectClass.PROJECT]: { label: "Project", glyph: "◭" },

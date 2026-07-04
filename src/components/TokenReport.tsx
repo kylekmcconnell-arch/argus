@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
-import { verdictMeta } from "../lib/verdict";
+import { verdictMeta, tokenConfidence } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { TokenDossier } from "../token/audit";
 import { TokenSparkline } from "./TokenSparkline";
@@ -275,7 +275,14 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           <div className="relative flex flex-wrap items-center gap-6">
             <Ring score={d.score} verdict={d.verdict} />
             <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] uppercase tracking-[0.2em] text-ink-faint">Token verdict</div>
+              <div className="mb-1 flex items-center gap-2">
+                <span className="text-[11px] uppercase tracking-[0.2em] text-ink-faint">Token verdict</span>
+                {(() => {
+                  const c = tokenConfidence({ chain: d.chain, safetyAvailable: d.safety.available, openSource: d.safety.openSource, simChecked: d.safety.simChecked, hasDeployer: !!d.deployer, hasCg: !!d.cg, hasHolders: d.topHolders.length > 0 });
+                  const cc = c.level === "high" ? "var(--color-pass)" : c.level === "low" ? "var(--color-caution)" : "var(--color-ink-faint)";
+                  return <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: `${cc}1a`, color: cc }} title={`${c.ran}/${c.total} verification checks completed — how much of this verdict rests on verified data`}>{c.level} confidence</span>;
+                })()}
+              </div>
               <div className="text-[34px] font-bold leading-none tracking-tight" style={{ color: m.color }}>{m.label}</div>
               <p className="mt-2.5 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">{d.headline}</p>
               {d.capApplied && (
