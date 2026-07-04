@@ -199,6 +199,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           </div>
         </div>
 
+        {/* what the project actually does — CoinGecko's own blurb */}
+        {d.cg?.description && (
+          <p className="mt-3 max-w-3xl text-[13px] leading-relaxed text-ink-dim">{d.cg.description}</p>
+        )}
+
         {/* price momentum */}
         {d.priceChange && (
           <div className="mt-4 grid grid-cols-4 gap-2">
