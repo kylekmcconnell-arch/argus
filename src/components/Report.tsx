@@ -19,6 +19,7 @@ import { ProjectIntel } from "./ProjectIntel";
 import { purgeSubject } from "../lib/purge";
 import { ServiceAlert } from "./ServiceAlert";
 import { LegalScreen } from "./LegalScreen";
+import { SanctionsNameScreen } from "./SanctionsNameScreen";
 import { RingAlert } from "./RingAlert";
 
 /* ── small primitives ─────────────────────────────────────────────── */
@@ -438,8 +439,9 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
           </div>
         </div>
 
-        {/* legal history — US court records for a RESOLVED real name (self-gates on pseudonyms) */}
-        <div className="mt-4">
+        {/* sanctions + legal history — screens for a RESOLVED real name (both self-gate on pseudonyms) */}
+        <div className="mt-4 space-y-2">
+          <SanctionsNameScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
           <LegalScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
         </div>
 
