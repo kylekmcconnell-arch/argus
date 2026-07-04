@@ -9,6 +9,7 @@ import { MarketIntel } from "./MarketIntel";
 import { HolderForensics } from "./HolderForensics";
 import { OperatorNetwork } from "./OperatorNetwork";
 import { ProjectDocs } from "./ProjectDocs";
+import { Unknowns } from "./Unknowns";
 import { WalletClusters } from "./WalletClusters";
 import { BytecodeForensics } from "./BytecodeForensics";
 import { EvmDeployer } from "./EvmDeployer";
@@ -227,6 +228,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* whitepaper + security audits (with real links; absence is a flag) */}
         <div className="mt-4">
           <ProjectDocs name={d.name} symbol={d.symbol} domain={projectSite} />
+        </div>
+
+        {/* negative space — what the scan couldn't confirm (unknowns are signal) */}
+        <div className="mt-4">
+          <Unknowns dossier={d} />
         </div>
 
         {/* holder / distribution forensics — healthy base or a rug in a costume? */}
