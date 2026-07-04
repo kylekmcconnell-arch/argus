@@ -296,73 +296,6 @@ export function InvestigationReport({
           </Card>
         </div>
 
-        {/* Connection web: the subject's graph + its ties to everything else you've
-            audited. The visual map that anchors the investigation. */}
-        {invGraph && invGraph.nodes.length > 1 && (
-          <div className="mt-3">
-            <Card title="Connection web · click any node to open it">
-              <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={connections} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
-            </Card>
-          </div>
-        )}
-
-        {/* Recursive operator trace (Solana + EVM): chase the deployer's money past
-            the first hop to every launch behind the same funding hand. */}
-        {token.deployer && (
-          <div className="mt-3">
-            <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} />
-          </div>
-        )}
-
-        {/* OFAC sanctions screen — deployer + top holders (a hard legal signal) */}
-        <div className="mt-3">
-          <SanctionsScreen chain={token.chain} addresses={[
-            ...(token.deployer ? [{ address: token.deployer, role: "deployer" }] : []),
-            ...token.topHolders.map((h) => ({ address: h.address, role: "top holder" })),
-          ]} />
-        </div>
-
-        {/* who the token is named after, and whether they're actually behind it —
-            for a person-named memecoin this is THE provenance question */}
-        <div className="mt-3">
-          <MarketIntel symbol={token.symbol} contract={token.address} chain={token.chain} />
-        </div>
-
-        <div className="mt-3">
-          <HolderForensics address={token.address} chain={token.chain} holderCount={token.safety.holderCount} evmTop={token.topHolders.map((h) => ({ pct: h.percent, tag: h.tag, address: h.address, isContract: h.isContract }))} insiderPct={token.insiderPct} />
-        </div>
-
-        <div className="mt-3">
-          <WalletClusters mint={token.address} chain={token.chain} symbol={token.symbol} />
-        </div>
-
-        {token.chain !== "solana" && (
-          <div className="mt-3">
-            <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} knownDeployer={token.deployer} />
-          </div>
-        )}
-
-        {token.chain !== "solana" && (
-          <div className="mt-3">
-            <BytecodeForensics address={token.address} chain={token.chain} symbol={token.symbol} />
-          </div>
-        )}
-
-        <div className="mt-3">
-          <ProjectDocs name={token.name} symbol={token.symbol} domain={projectDomain} />
-        </div>
-
-        <div className="mt-3">
-          <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} onAudit={onAudit} />
-        </div>
-
-        {/* domain age + claimed-audit verification (keyless OSINT) */}
-        {projectDomain && (
-          <div className="mt-3">
-            <ProjectIntel domain={projectDomain} />
-          </div>
-        )}
-
         {/* TEAM — the headline section, merged from every source, each clickable */}
         {(teamPeople.length > 0 || advisors.length > 0) && (
           <div className="mt-3">
@@ -431,6 +364,73 @@ export function InvestigationReport({
                   <p className="mt-2 text-[11px] leading-snug text-ink-faint">A claimed advisor who does not follow or has never acknowledged the project is a classic fake-name-drop signal.</p>
                 </div>
               )}
+            </Card>
+          </div>
+        )}
+
+        {/* Recursive operator trace (Solana + EVM): chase the deployer's money past
+            the first hop to every launch behind the same funding hand. */}
+        {token.deployer && (
+          <div className="mt-3">
+            <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} />
+          </div>
+        )}
+
+        {/* OFAC sanctions screen — deployer + top holders (a hard legal signal) */}
+        <div className="mt-3">
+          <SanctionsScreen chain={token.chain} addresses={[
+            ...(token.deployer ? [{ address: token.deployer, role: "deployer" }] : []),
+            ...token.topHolders.map((h) => ({ address: h.address, role: "top holder" })),
+          ]} />
+        </div>
+
+        {/* who the token is named after, and whether they're actually behind it —
+            for a person-named memecoin this is THE provenance question */}
+        <div className="mt-3">
+          <MarketIntel symbol={token.symbol} contract={token.address} chain={token.chain} />
+        </div>
+
+        <div className="mt-3">
+          <HolderForensics address={token.address} chain={token.chain} holderCount={token.safety.holderCount} evmTop={token.topHolders.map((h) => ({ pct: h.percent, tag: h.tag, address: h.address, isContract: h.isContract }))} insiderPct={token.insiderPct} />
+        </div>
+
+        <div className="mt-3">
+          <WalletClusters mint={token.address} chain={token.chain} symbol={token.symbol} />
+        </div>
+
+        {token.chain !== "solana" && (
+          <div className="mt-3">
+            <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} knownDeployer={token.deployer} />
+          </div>
+        )}
+
+        {token.chain !== "solana" && (
+          <div className="mt-3">
+            <BytecodeForensics address={token.address} chain={token.chain} symbol={token.symbol} />
+          </div>
+        )}
+
+        <div className="mt-3">
+          <ProjectDocs name={token.name} symbol={token.symbol} domain={projectDomain} />
+        </div>
+
+        <div className="mt-3">
+          <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} onAudit={onAudit} />
+        </div>
+
+        {/* domain age + claimed-audit verification (keyless OSINT) */}
+        {projectDomain && (
+          <div className="mt-3">
+            <ProjectIntel domain={projectDomain} />
+          </div>
+        )}
+
+        {/* Connection web: the subject's graph + its ties to everything else you've
+            audited — the deeper map, below the team. */}
+        {invGraph && invGraph.nodes.length > 1 && (
+          <div className="mt-3">
+            <Card title="Connection web · click any node to open it">
+              <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={connections} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
             </Card>
           </div>
         )}
