@@ -3,16 +3,10 @@ import { verdictMeta } from "../lib/verdict";
 import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
 import { xAvatar, personAvatar } from "../lib/avatars";
-import { OperatorNetwork } from "./OperatorNetwork";
-import { SanctionsScreen } from "./SanctionsScreen";
+import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
-import { WalletClusters } from "./WalletClusters";
-import { BytecodeForensics } from "./BytecodeForensics";
-import { EvmDeployer } from "./EvmDeployer";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
-import { MarketIntel } from "./MarketIntel";
-import { HolderForensics } from "./HolderForensics";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 import { TrustGraph } from "./TrustGraph";
@@ -366,47 +360,12 @@ export function InvestigationReport({
           </div>
         )}
 
-        {/* Recursive operator trace (Solana + EVM): chase the deployer's money past
-            the first hop to every launch behind the same funding hand. */}
-        {token.deployer && (
-          <div className="mt-3">
-            <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} />
-          </div>
-        )}
-
-        {/* OFAC sanctions screen — deployer + top holders (a hard legal signal) */}
+        {/* on-chain forensic suite — the same cluster the token report uses:
+            market intel, holders, clustering, operator trace, EVM deployer +
+            bytecode, and the OFAC sanctions screen, in one canonical order. */}
         <div className="mt-3">
-          <SanctionsScreen chain={token.chain} addresses={[
-            ...(token.deployer ? [{ address: token.deployer, role: "deployer" }] : []),
-            ...token.topHolders.map((h) => ({ address: h.address, role: "top holder" })),
-          ]} />
+          <OnChainForensics token={token} onAudit={onAudit} />
         </div>
-
-        {/* who the token is named after, and whether they're actually behind it —
-            for a person-named memecoin this is THE provenance question */}
-        <div className="mt-3">
-          <MarketIntel symbol={token.symbol} contract={token.address} chain={token.chain} />
-        </div>
-
-        <div className="mt-3">
-          <HolderForensics address={token.address} chain={token.chain} holderCount={token.safety.holderCount} evmTop={token.topHolders.map((h) => ({ pct: h.percent, tag: h.tag, address: h.address, isContract: h.isContract }))} insiderPct={token.insiderPct} />
-        </div>
-
-        <div className="mt-3">
-          <WalletClusters mint={token.address} chain={token.chain} symbol={token.symbol} />
-        </div>
-
-        {token.chain !== "solana" && (
-          <div className="mt-3">
-            <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} knownDeployer={token.deployer} />
-          </div>
-        )}
-
-        {token.chain !== "solana" && (
-          <div className="mt-3">
-            <BytecodeForensics address={token.address} chain={token.chain} symbol={token.symbol} />
-          </div>
-        )}
 
         {/* token provenance: who it's named after, and whether they're behind it */}
         <div className="mt-3">

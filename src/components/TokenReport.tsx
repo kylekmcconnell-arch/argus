@@ -5,16 +5,10 @@ import { verdictMeta, tokenConfidence } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { TokenDossier } from "../token/audit";
 import { TokenSparkline } from "./TokenSparkline";
-import { MarketIntel } from "./MarketIntel";
-import { HolderForensics } from "./HolderForensics";
-import { OperatorNetwork } from "./OperatorNetwork";
+import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
-import { SanctionsScreen } from "./SanctionsScreen";
-import { WalletClusters } from "./WalletClusters";
-import { BytecodeForensics } from "./BytecodeForensics";
-import { EvmDeployer } from "./EvmDeployer";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 
@@ -233,9 +227,9 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           <TokenSparkline address={d.address} chain={d.chain} pairAddress={d.pairAddress} />
         </div>
 
-        {/* market intelligence — rank, ATH drawdown, dilution, unlock flags */}
+        {/* on-chain forensic suite — the same cluster the investigation report uses */}
         <div className="mt-4">
-          <MarketIntel symbol={d.symbol} contract={d.address} chain={d.chain} />
+          <OnChainForensics token={d} onAudit={onAudit} />
         </div>
 
         {/* unified project research: news & press, documents & resources, domain
@@ -248,39 +242,6 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         <div className="mt-4">
           <Unknowns dossier={d} />
         </div>
-
-        {/* holder / distribution forensics — healthy base or a rug in a costume? */}
-        <div className="mt-4">
-          <HolderForensics address={d.address} chain={d.chain} holderCount={d.safety.holderCount} evmTop={d.topHolders.map((h) => ({ pct: h.percent, tag: h.tag, address: h.address, isContract: h.isContract }))} insiderPct={d.insiderPct} />
-        </div>
-
-        {/* EVM deployer trail — who deployed it, who funded the gas, serial launcher? */}
-        {d.chain !== "solana" && (
-          <div className="mt-4">
-            <EvmDeployer address={d.address} chain={d.chain} symbol={d.symbol} knownDeployer={d.deployer} />
-          </div>
-        )}
-
-        {/* contract bytecode fingerprint (EVM) — rug-enabling code paths + is this
-            a byte-identical clone of a token we've already flagged? */}
-        {d.chain !== "solana" && (
-          <div className="mt-4">
-            <BytecodeForensics address={d.address} chain={d.chain} symbol={d.symbol} />
-          </div>
-        )}
-
-        {/* wallet clustering (Solana + EVM) — how many "top holders" are one hand? */}
-        <div className="mt-4">
-          <WalletClusters mint={d.address} chain={d.chain} symbol={d.symbol} />
-        </div>
-
-        {/* recursive operator trace (Solana + EVM) — is this deployer an isolated
-            project or one node in a serial factory sharing a funder across launches? */}
-        {d.deployer && (
-          <div className="mt-4">
-            <OperatorNetwork deployer={d.deployer} chain={d.chain} label={`$${d.symbol}`} onAudit={onAudit} />
-          </div>
-        )}
 
         {/* verdict hero */}
         <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow" style={{ borderColor: `${m.color}55` }}>
@@ -310,14 +271,6 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* adversarial review — auto-run second opinion that stress-tests the verdict */}
         <div className="mt-3">
           <SecondOpinion dossier={d} />
-        </div>
-
-        {/* OFAC sanctions screen — deployer + top holders (a hard legal signal) */}
-        <div className="mt-3">
-          <SanctionsScreen chain={d.chain} addresses={[
-            ...(d.deployer ? [{ address: d.deployer, role: "deployer" }] : []),
-            ...d.topHolders.map((h) => ({ address: h.address, role: "top holder" })),
-          ]} />
         </div>
 
         {!gp && (
