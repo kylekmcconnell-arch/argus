@@ -238,7 +238,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
 
         {/* holder / distribution forensics — healthy base or a rug in a costume? */}
         <div className="mt-4">
-          <HolderForensics address={d.address} chain={d.chain} holderCount={d.safety.holderCount} evmTop={d.topHolders.map((h) => ({ pct: h.percent, tag: h.tag }))} insiderPct={d.insiderPct} />
+          <HolderForensics address={d.address} chain={d.chain} holderCount={d.safety.holderCount} evmTop={d.topHolders.map((h) => ({ pct: h.percent, tag: h.tag, address: h.address, isContract: h.isContract }))} insiderPct={d.insiderPct} />
         </div>
 
         {/* EVM deployer trail — who deployed it, who funded the gas, serial launcher? */}

@@ -297,7 +297,7 @@ export function InvestigationReport({
         </div>
 
         <div className="mt-3">
-          <HolderForensics address={token.address} chain={token.chain} holderCount={token.safety.holderCount} evmTop={token.topHolders.map((h) => ({ pct: h.percent, tag: h.tag }))} insiderPct={token.insiderPct} />
+          <HolderForensics address={token.address} chain={token.chain} holderCount={token.safety.holderCount} evmTop={token.topHolders.map((h) => ({ pct: h.percent, tag: h.tag, address: h.address, isContract: h.isContract }))} insiderPct={token.insiderPct} />
         </div>
 
         <div className="mt-3">

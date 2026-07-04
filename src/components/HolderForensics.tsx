@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { labelAddress, explorerAddr } from "../lib/addressLabels";
 
 // Holder / distribution forensics — is the ownership a healthy base or a rug
 // wearing a costume? Solana pulls the rich RugCheck view (total holders, top-10
@@ -33,7 +34,7 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
   address: string;
   chain: string;
   holderCount: number;
-  evmTop: { pct: number; tag?: string }[];
+  evmTop: { pct: number; tag?: string; address?: string; isContract?: boolean }[];
   insiderPct: number;
 }) {
   const [d, setD] = useState<Holders | null>(null);
@@ -128,13 +129,22 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
       </div>
       {top.length > 0 && (
         <div className="mt-3 divide-y divide-line/60 rounded-lg border border-line">
-          {top.map((h, i) => (
-            <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
-              <span className="mono w-4 shrink-0 text-ink-faint">{i + 1}</span>
-              <span className="truncate text-ink-dim">{h.tag || "wallet"}</span>
-              <span className="mono ml-auto shrink-0 tabular text-ink">{h.pct.toFixed(1)}%</span>
-            </div>
-          ))}
+          {top.map((h, i) => {
+            const lab = labelAddress(h.address, { tag: h.tag, isContract: h.isContract });
+            const color = lab.kind === "burn" || lab.market ? "var(--color-pass)" : lab.kind === "contract" ? "var(--color-ink-dim)" : "var(--color-ink-dim)";
+            return (
+              <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
+                <span className="mono w-4 shrink-0 text-ink-faint">{i + 1}</span>
+                {h.address ? (
+                  <a href={explorerAddr(h.address, chain)} target="_blank" rel="noreferrer" className="mono truncate hover:underline" style={{ color }}>{lab.text}</a>
+                ) : (
+                  <span className="mono truncate" style={{ color }}>{lab.text}</span>
+                )}
+                {lab.market && <span className="mono shrink-0 rounded px-1.5 py-0.5 text-[9px]" style={{ background: "var(--color-pass)1a", color: "var(--color-pass)" }}>{lab.kind === "burn" ? "burned" : "market/custody"}</span>}
+                <span className="mono ml-auto shrink-0 tabular text-ink">{h.pct.toFixed(1)}%</span>
+              </div>
+            );
+          })}
         </div>
       )}
       <p className="mt-2.5 text-[11px] leading-relaxed text-ink-faint">
