@@ -59,22 +59,33 @@ async function fingerprints(host: string): Promise<Fingerprint[]> {
   return out;
 }
 
+// Cert/CDN apexes that show up as co-tenants on SHARED certificates — never a
+// sign of shared operation, so they must not become graph bridges.
+const SHARED_CERT = /cloudflaressl|cloudflare|herokussl|herokuapp|herokudns|incapsula|edgekey|edgesuite|akamai|fastly|sni\.|amazonaws|azureedge|googleusercontent|sucuri|stackpath|gcorelabs|myshopify|wixsite|squarespace|pantheonsite|netlify|vercel\.app|github\.io|firebaseapp|web\.app|zendesk|statuspage|readthedocs|gitbook|framer\.website|webflow\.io/i;
+
 async function ctSiblings(host: string): Promise<{ siblings: string[]; subdomainCount: number }> {
   const target = apex(host);
   try {
     const r = await fetch(`https://api.certspotter.com/v1/issuances?domain=${encodeURIComponent(target)}&include_subdomains=true&expand=dns_names`, { signal: AbortSignal.timeout(12000) });
     if (!r.ok) return { siblings: [], subdomainCount: 0 };
     const rows = (await r.json()) as { dns_names?: string[] }[];
-    const names = new Set<string>();
-    for (const row of rows) for (const n of row.dns_names ?? []) names.add(n.replace(/^\*\./, "").toLowerCase());
     const siblings = new Set<string>();
-    let sub = 0;
-    for (const n of names) {
-      if (n.includes("*")) continue;
-      if (apex(n) === target) sub++;
-      else siblings.add(apex(n));
+    const subdomains = new Set<string>();
+    // Work PER CERTIFICATE. A cert the operator controls lists their own apexes;
+    // a shared/multi-tenant cert bundles many unrelated ones. So a co-registration
+    // only counts when the target and the sibling share a cert that lists FEW
+    // other apexes — a fat SAN cert (many unrelated apexes) is a shared cert, not
+    // evidence of one operator, and is discarded.
+    for (const row of rows) {
+      const names = (row.dns_names ?? []).map((n) => n.replace(/^\*\./, "").toLowerCase()).filter((n) => n && !n.includes("*"));
+      const apexes = new Set(names.map(apex));
+      for (const n of names) if (apex(n) === target) subdomains.add(n);
+      if (!apexes.has(target)) continue;
+      const others = [...apexes].filter((a) => a !== target && !SHARED_CERT.test(a));
+      if (others.length === 0 || others.length > 4) continue; // 0 = own cert; >4 = shared cert
+      for (const o of others) siblings.add(o);
     }
-    return { siblings: [...siblings].slice(0, 15), subdomainCount: sub };
+    return { siblings: [...siblings].slice(0, 12), subdomainCount: subdomains.size };
   } catch { return { siblings: [], subdomainCount: 0 }; }
 }
 
