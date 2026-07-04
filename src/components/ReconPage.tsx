@@ -11,6 +11,7 @@ import { recordContribution } from "../graph/store";
 import { fetchWebTeam, type WebPerson } from "../lib/investigation";
 import { GithubForensics } from "./GithubForensics";
 import { SiteHistory } from "./SiteHistory";
+import { SiteInfra } from "./SiteInfra";
 import { ProjectXAccount } from "./ProjectXAccount";
 
 // A clean plain-text DD summary for pasting into a chat / channel.
@@ -449,6 +450,9 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
 
           {/* commit forensics: the real devs behind the project's GitHub org */}
           {ghOrg && <GithubForensics org={ghOrg} subjectKey={reconHost || ghOrg} />}
+
+          {/* off-chain operator linking: shared analytics IDs / co-registered domains / hosting */}
+          {reconHost && <SiteInfra domain={reconHost} record={!priv} onAudit={onAudit} />}
 
           {/* deleted-content archaeology: what the site removed over time */}
           {reconHost && <SiteHistory domain={reconHost} />}

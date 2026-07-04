@@ -278,7 +278,11 @@ export interface SubjectConnection { other: string; otherVerdict?: string; ties:
 export function tieStrength(rawKey: string): "hard" | "medium" | "weak" {
   const k = String(rawKey).toLowerCase();
   if (/^(code:|email:|wallet:|funder:|mint:)/.test(k)) return "hard";
-  if (/^(holder|amm|dex|pool|lp|market)/.test(k)) return "weak";
+  // Shared analytics / monetization property: you control that account, so an
+  // unrelated project can't legitimately carry your GA/GTM/AdSense/Pixel ID.
+  if (/^(ga:|gtm:|adsense:|fbpixel:)/.test(k)) return "hard";
+  // Shared hosting IP / favicon: real but circumstantial (CDNs, reused templates).
+  if (/^(holder|amm|dex|pool|lp|market|ip:|favicon:)/.test(k)) return "weak";
   return "medium"; // shared @handle / domain / company
 }
 
@@ -322,6 +326,11 @@ function tieLabel(rawKey: string): string {
   if (k.startsWith("wallet:")) return "a deployer wallet";
   if (k.startsWith("funder:")) return "a funding wallet";
   if (k.startsWith("mint:")) return "a token";
+  if (k.startsWith("ga:") || k.startsWith("gtm:")) return "an analytics ID";
+  if (k.startsWith("adsense:")) return "an AdSense account";
+  if (k.startsWith("fbpixel:")) return "a Meta Pixel";
+  if (k.startsWith("ip:")) return "a hosting IP";
+  if (k.startsWith("favicon:")) return "a favicon";
   return "an entity";
 }
 
