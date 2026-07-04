@@ -11,6 +11,7 @@ import { OperatorNetwork } from "./OperatorNetwork";
 import { ProjectDocs } from "./ProjectDocs";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
+import { SanctionsScreen } from "./SanctionsScreen";
 import { WalletClusters } from "./WalletClusters";
 import { BytecodeForensics } from "./BytecodeForensics";
 import { EvmDeployer } from "./EvmDeployer";
@@ -297,6 +298,14 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* adversarial review — auto-run second opinion that stress-tests the verdict */}
         <div className="mt-3">
           <SecondOpinion dossier={d} />
+        </div>
+
+        {/* OFAC sanctions screen — deployer + top holders (a hard legal signal) */}
+        <div className="mt-3">
+          <SanctionsScreen chain={d.chain} addresses={[
+            ...(d.deployer ? [{ address: d.deployer, role: "deployer" }] : []),
+            ...d.topHolders.map((h) => ({ address: h.address, role: "top holder" })),
+          ]} />
         </div>
 
         {!gp && (

@@ -4,6 +4,7 @@ import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
 import { xAvatar } from "../lib/avatars";
 import { OperatorNetwork } from "./OperatorNetwork";
+import { SanctionsScreen } from "./SanctionsScreen";
 import { ProjectDocs } from "./ProjectDocs";
 import { WalletClusters } from "./WalletClusters";
 import { BytecodeForensics } from "./BytecodeForensics";
@@ -289,6 +290,14 @@ export function InvestigationReport({
             <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} />
           </div>
         )}
+
+        {/* OFAC sanctions screen — deployer + top holders (a hard legal signal) */}
+        <div className="mt-3">
+          <SanctionsScreen chain={token.chain} addresses={[
+            ...(token.deployer ? [{ address: token.deployer, role: "deployer" }] : []),
+            ...token.topHolders.map((h) => ({ address: h.address, role: "top holder" })),
+          ]} />
+        </div>
 
         {/* who the token is named after, and whether they're actually behind it —
             for a person-named memecoin this is THE provenance question */}
