@@ -5,6 +5,7 @@ import { Avatar } from "./Avatar";
 import { xAvatar, personAvatar } from "../lib/avatars";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
+import { ProjectLinks } from "./ProjectLinks";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
@@ -176,6 +177,13 @@ export function InvestigationReport({
             const blurb = token.cg?.description || projectAccount?.bio || null;
             return blurb ? <p className="mt-2 max-w-3xl text-[13px] leading-relaxed text-ink-dim">{blurb}</p> : null;
           })()}
+          {/* official website + socials */}
+          <ProjectLinks
+            className="mt-3"
+            website={projectDomain}
+            xHandle={projectX ?? token.cg?.twitter}
+            links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
+          />
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
 

@@ -7,6 +7,7 @@ import type { TokenDossier } from "../token/audit";
 import { TokenSparkline } from "./TokenSparkline";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
+import { ProjectLinks } from "./ProjectLinks";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
 import { ServiceAlert } from "./ServiceAlert";
@@ -187,10 +188,8 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
               <span className="rounded border border-line px-1.5 py-0.5 text-ink-dim capitalize">{d.chain}</span>
               <span>{d.dexId}</span>
               <span className="mono">{d.address.slice(0, 6)}…{d.address.slice(-4)}</span>
-              {d.socials.map((x) => (
-                <a key={x.url} href={x.url} target="_blank" rel="noreferrer" className="text-signal-dim hover:text-signal">{x.label}</a>
-              ))}
             </div>
+            <ProjectLinks className="mt-2" website={projectSite} xHandle={d.projectX ?? d.cg?.twitter} links={d.socials} />
           </div>
           <div className="flex gap-5 text-right">
             <div><div className="text-[10px] uppercase tracking-wider text-ink-faint">mcap</div><div className="mono text-[14px] text-ink">{money(d.mcap)}</div></div>
