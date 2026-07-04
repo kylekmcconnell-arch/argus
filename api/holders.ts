@@ -32,7 +32,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const labelOf = (h: any) => ka[h.address] || ka[h.owner] || null;
     const top = (d.topHolders ?? []).slice(0, 10).map((h: any) => {
       const lab = labelOf(h);
-      return { addr: short(h.owner || h.address), pct: Number(h.pct ?? 0), insider: !!h.insider, label: lab?.name ?? (h.insider ? "insider" : null), market: !!(lab?.type && MARKET.test(lab.type)) };
+      return { addr: short(h.owner || h.address), owner: String(h.owner || h.address || ""), pct: Number(h.pct ?? 0), insider: !!h.insider, label: lab?.name ?? (h.insider ? "insider" : null), market: !!(lab?.type && MARKET.test(lab.type)) };
     });
     const sumN = (n: number) => top.slice(0, n).reduce((a: number, x: any) => a + x.pct, 0);
     const marketPct = top.filter((h: any) => h.market).reduce((a: number, h: any) => a + h.pct, 0);

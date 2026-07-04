@@ -5,7 +5,7 @@ import { labelAddress, explorerAddr } from "../lib/addressLabels";
 // wearing a costume? Solana pulls the rich RugCheck view (total holders, top-10
 // concentration with DEX/CEX/LP separated out, connected insider clusters, creator
 // holdings, LP-lock). EVM falls back to the on-chain audit's own holder fields.
-type RcTop = { addr: string; pct: number; insider: boolean; label: string | null; market: boolean };
+type RcTop = { addr: string; owner?: string; pct: number; insider: boolean; label: string | null; market: boolean };
 interface Holders {
   available: boolean;
   totalHolders: number;
@@ -95,7 +95,11 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
             {d.top.slice(0, 8).map((h, i) => (
               <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
                 <span className="mono w-4 shrink-0 text-ink-faint">{i + 1}</span>
-                <span className="mono truncate text-ink-dim">{h.addr}</span>
+                {h.owner ? (
+                  <a href={explorerAddr(h.owner, "solana")} target="_blank" rel="noreferrer" className="mono truncate text-ink-dim hover:text-signal hover:underline">{h.addr}</a>
+                ) : (
+                  <span className="mono truncate text-ink-dim">{h.addr}</span>
+                )}
                 {h.label && <span className="mono shrink-0 rounded px-1.5 py-0.5 text-[9px]" style={{ background: h.market ? "var(--color-pass)1a" : "var(--color-caution)1a", color: h.market ? "var(--color-pass)" : "var(--color-caution)" }}>{h.label}</span>}
                 {h.insider && !h.label && <span className="mono shrink-0 rounded px-1.5 py-0.5 text-[9px]" style={{ background: "var(--color-avoid)1a", color: "var(--color-avoid)" }}>insider</span>}
                 <span className="mono ml-auto shrink-0 tabular text-ink">{h.pct.toFixed(1)}%</span>
