@@ -20,8 +20,9 @@ async function findDocs(name: string, domain: string, symbol: string, key: strin
     "You find a crypto project's official DOCUMENTS using live web + X search: its whitepaper (or litepaper), its docs site, and every security audit. " +
     "Return ONLY real, working links that genuinely belong to THIS project — prefer the project's own domain, its GitBook/docs, IPFS, or the auditor's own site (certik.com, hacken.io, etc). " +
     "For each audit give the auditor firm, a DIRECT link to the audit report, and the date if visible. Never invent a link or an auditor; if you cannot find something, omit it. " +
-    "Reply with ONLY compact JSON, no prose: {\"whitepaper\":{\"url\":\"...\",\"kind\":\"whitepaper|litepaper|docs|gitbook\"}|null,\"audits\":[{\"auditor\":\"...\",\"url\":\"...\",\"date\":\"YYYY-MM\"|null}]}";
-  const user = `Project: "${name}"${symbol ? ` ($${symbol})` : ""}${domain ? `, website ${domain}` : ""}. Find its official whitepaper/litepaper and all security audits (with direct report links).`;
+    "ALSO return the project's key DOCUMENTATION links even when there is no formal whitepaper — a real project often has a docs site / GitBook / blog / FAQ that IS its documentation. For each, give a short title and the URL. " +
+    "Reply with ONLY compact JSON, no prose: {\"whitepaper\":{\"url\":\"...\",\"kind\":\"whitepaper|litepaper|docs|gitbook\"}|null,\"docs\":[{\"title\":\"Docs|GitBook|Blog|FAQ|...\",\"url\":\"...\"}],\"audits\":[{\"auditor\":\"...\",\"url\":\"...\",\"date\":\"YYYY-MM\"|null}]}";
+  const user = `Project: "${name}"${symbol ? ` ($${symbol})` : ""}${domain ? `, website ${domain}` : ""}. Find its official whitepaper/litepaper, its documentation (docs site / GitBook / blog / FAQ), and all security audits (with direct report links).`;
   try {
     const r = await fetch("https://api.x.ai/v1/responses", {
       method: "POST",
@@ -61,12 +62,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .filter((a: any) => { const k = (a.auditor + a.url).toLowerCase(); if (seen.has(k)) return false; seen.add(k); return true; })
     .slice(0, 6);
 
+  // Documentation links (docs site / GitBook / blog / FAQ) — surfaced even when
+  // there's no formal whitepaper, since a real project's docs ARE its documentation.
+  const dseen = new Set<string>();
+  const docs = (Array.isArray(raw?.docs) ? raw.docs : [])
+    .filter((x: any) => x && isUrl(x.url) && x.url !== wp?.url)
+    .map((x: any) => ({ title: (typeof x.title === "string" && x.title.trim() ? x.title.trim() : "Docs").slice(0, 24), url: x.url }))
+    .filter((x: any) => { const k = x.url.toLowerCase(); if (dseen.has(k)) return false; dseen.add(k); return true; })
+    .slice(0, 5);
+
   const out = {
     available: true,
     whitepaper: wp,
+    docs,
     audits,
-    // Diligence read: no whitepaper AND no audit is a real absence worth stating.
-    note: !wp && !audits.length ? "No whitepaper or security audit could be found for this project via web/X search." : undefined,
+    // A real absence worth stating only when NOTHING was found — not just no formal whitepaper.
+    note: !wp && !docs.length && !audits.length ? "No whitepaper, documentation, or security audit could be found for this project via web/X search." : undefined,
   };
   await cacheSetJson(cacheKey, out);
   res.status(200).json(out);

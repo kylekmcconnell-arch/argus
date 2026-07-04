@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 // project has both; their ABSENCE is diligence signal in itself. Auto-runs on token,
 // investigation, and site reports (Grok web+X search, 24h-cached server-side).
 type Audit = { auditor: string; url: string; date: string | null };
-type Data = { available: boolean; whitepaper?: { url: string; kind: string } | null; audits?: Audit[]; note?: string };
+type Doc = { title: string; url: string };
+type Data = { available: boolean; whitepaper?: { url: string; kind: string } | null; docs?: Doc[]; audits?: Audit[]; note?: string };
 
 const enc = encodeURIComponent;
 const hostOf = (u: string) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
@@ -34,7 +35,8 @@ export function ProjectDocs({ name, symbol, domain }: { name?: string | null; sy
 
   const wp = data.whitepaper;
   const audits = data.audits ?? [];
-  const nothing = !wp && !audits.length;
+  const docs = data.docs ?? [];
+  const nothing = !wp && !docs.length && !audits.length;
 
   return (
     <div className="rounded-xl border p-4" style={{ borderColor: nothing ? "var(--color-caution)55" : "var(--color-line)", background: nothing ? "var(--color-caution)0d" : "var(--color-panel)" }}>
@@ -55,6 +57,20 @@ export function ProjectDocs({ name, symbol, domain }: { name?: string | null; sy
               <a href={wp.url} target="_blank" rel="noreferrer" className="mono mt-0.5 inline-flex max-w-full items-center gap-1 truncate text-[12.5px] text-signal hover:underline">
                 {hostOf(wp.url)} <span className="text-ink-faint">↗</span>
               </a>
+            </div>
+          )}
+          {docs.length > 0 && (
+            <div>
+              <div className="text-[10px] uppercase tracking-wide text-ink-faint">Documentation</div>
+              <div className="mt-1 flex flex-wrap gap-1.5">
+                {docs.map((x) => (
+                  <a key={x.url} href={x.url} target="_blank" rel="noreferrer" title={x.url} className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px] text-ink transition hover:border-signal hover:text-signal">
+                    <span className="font-medium">{x.title}</span>
+                    <span className="mono text-[9.5px] text-ink-faint">{hostOf(x.url)}</span>
+                    <span className="text-ink-faint">↗</span>
+                  </a>
+                ))}
+              </div>
             </div>
           )}
           {audits.length > 0 && (
