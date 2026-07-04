@@ -400,13 +400,38 @@ export async function checkFollow(source: string, target: string): Promise<{ fol
 // Either way the answer is complete for the set that matters, never sampled.
 export interface NotableScan { list: NotableFollower[]; checked: number }
 
+// AUTO-GROW: every person ARGUS has audited and PASSed is a verified-legit account
+// — a real founder / fund / KOL whose follow is a credibility signal. Fold them
+// into the reference set so it compounds past the hand-curated core (toward 1000+)
+// accurately and stays current, without hand-typing. Cached (the set moves slowly).
+async function dynamicNotable(): Promise<{ handle: string; label: string }[]> {
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  if (!url || !key) return [];
+  const cached = await cacheGet("notable:dynamic");
+  if (cached) { try { return JSON.parse(cached); } catch { /* refetch */ } }
+  try {
+    const r = await fetch(`${url}/rest/v1/reports?select=ref,score&kind=eq.person&verdict=eq.PASS&order=score.desc&limit=600`, {
+      headers: { apikey: key, authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000),
+    });
+    if (!r.ok) return [];
+    const rows = (await r.json()) as { ref: string; score: number }[];
+    const accts = rows
+      .filter((x) => x && typeof x.ref === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(x.ref))
+      .map((x) => ({ handle: x.ref.replace(/^@/, ""), label: "ARGUS-verified" }));
+    await cacheSet("notable:dynamic", JSON.stringify(accts));
+    return accts;
+  } catch { return []; }
+}
+
 export async function notableFollowers(subject: string, opts?: { followerCount?: number }): Promise<NotableScan> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return { list: [], checked: 0 };
   const subj = subject.replace(/^@/, "").toLowerCase();
-  // Dedup the reference set (handles are hand-maintained; a few repeat across groups).
+  // Dedup the combined reference set: the hand-curated core FIRST (so its richer
+  // labels win), then the auto-grown ARGUS-verified accounts.
   const seen = new Set<string>();
-  const candidates = NOTABLE_ACCOUNTS.filter((n) => {
+  const candidates = [...NOTABLE_ACCOUNTS, ...(await dynamicNotable())].filter((n) => {
     const lk = n.handle.toLowerCase();
     if (lk === subj || seen.has(lk)) return false;
     seen.add(lk); return true;
@@ -442,18 +467,23 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
   }
 
   // Large / unknown-size subject: reverse-check the reference set (one call each).
+  // Cap the calls to bound per-audit cost — the hand-curated core comes first, so
+  // the cap keeps the highest-signal accounts. (The enumerate path above has no
+  // such cap: matching the FULL set in-memory is free, so small subjects get 100%.)
+  const REVERSE_CAP = 500;
+  const toCheck = candidates.slice(0, REVERSE_CAP);
   const hits: NotableFollower[] = [];
   const CHUNK = 15;
-  for (let i = 0; i < candidates.length; i += CHUNK) {
+  for (let i = 0; i < toCheck.length; i += CHUNK) {
     const res = await Promise.all(
-      candidates.slice(i, i + CHUNK).map(async (n) => {
+      toCheck.slice(i, i + CHUNK).map(async (n) => {
         const rel = await checkFollow(n.handle, subject); // does the notable account follow the subject?
         return rel?.following ? ({ handle: n.handle, label: n.label, size: "" } as NotableFollower) : null;
       }),
     );
     for (const r of res) if (r) hits.push(r);
   }
-  return { list: hits, checked: total };
+  return { list: hits, checked: toCheck.length };
 }
 
 // ── Grok Live Search: did the endorsers publicly acknowledge the subject? ──

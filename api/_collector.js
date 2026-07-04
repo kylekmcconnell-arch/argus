@@ -2142,12 +2142,37 @@ async function checkFollow(source, target) {
     return null;
   }
 }
+async function dynamicNotable() {
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  if (!url || !key) return [];
+  const cached = await cacheGet("notable:dynamic");
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {
+    }
+  }
+  try {
+    const r = await fetch(`${url}/rest/v1/reports?select=ref,score&kind=eq.person&verdict=eq.PASS&order=score.desc&limit=600`, {
+      headers: { apikey: key, authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    const accts = rows.filter((x) => x && typeof x.ref === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(x.ref)).map((x) => ({ handle: x.ref.replace(/^@/, ""), label: "ARGUS-verified" }));
+    await cacheSet("notable:dynamic", JSON.stringify(accts));
+    return accts;
+  } catch {
+    return [];
+  }
+}
 async function notableFollowers(subject, opts) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return { list: [], checked: 0 };
   const subj = subject.replace(/^@/, "").toLowerCase();
   const seen = /* @__PURE__ */ new Set();
-  const candidates = NOTABLE_ACCOUNTS.filter((n) => {
+  const candidates = [...NOTABLE_ACCOUNTS, ...await dynamicNotable()].filter((n) => {
     const lk = n.handle.toLowerCase();
     if (lk === subj || seen.has(lk)) return false;
     seen.add(lk);
@@ -2182,18 +2207,20 @@ async function notableFollowers(subject, opts) {
     }
     return { list: hits2, checked: total };
   }
+  const REVERSE_CAP = 500;
+  const toCheck = candidates.slice(0, REVERSE_CAP);
   const hits = [];
   const CHUNK = 15;
-  for (let i = 0; i < candidates.length; i += CHUNK) {
+  for (let i = 0; i < toCheck.length; i += CHUNK) {
     const res = await Promise.all(
-      candidates.slice(i, i + CHUNK).map(async (n) => {
+      toCheck.slice(i, i + CHUNK).map(async (n) => {
         const rel = await checkFollow(n.handle, subject);
         return rel?.following ? { handle: n.handle, label: n.label, size: "" } : null;
       })
     );
     for (const r of res) if (r) hits.push(r);
   }
-  return { list: hits, checked: total };
+  return { list: hits, checked: toCheck.length };
 }
 async function acknowledgments(endorsers, subject) {
   const out = /* @__PURE__ */ new Map();
