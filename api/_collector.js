@@ -1488,6 +1488,397 @@ async function cacheSet(key, text) {
   }
 }
 
+// server/adapters/notableAccounts.ts
+var NOTABLE_ACCOUNTS = [
+  // ── Venture funds / firm accounts ─────────────────────────────────────────
+  { handle: "a16zcrypto", label: "VC \xB7 a16z crypto" },
+  { handle: "paradigm", label: "VC \xB7 Paradigm" },
+  { handle: "dragonfly_xyz", label: "VC \xB7 Dragonfly" },
+  { handle: "multicoincap", label: "VC \xB7 Multicoin" },
+  { handle: "VariantFund", label: "VC \xB7 Variant" },
+  { handle: "FrameworkVC", label: "VC \xB7 Framework" },
+  { handle: "hack_vc", label: "VC \xB7 Hack VC" },
+  { handle: "PlaceholderVC", label: "VC \xB7 Placeholder" },
+  { handle: "panteracapital", label: "VC \xB7 Pantera" },
+  { handle: "1kxnetwork", label: "VC \xB7 1kx" },
+  { handle: "electric_capital", label: "VC \xB7 Electric Capital" },
+  { handle: "robotventures", label: "VC \xB7 Robot Ventures" },
+  { handle: "polychaincap", label: "VC \xB7 Polychain" },
+  { handle: "coinbaseventures", label: "VC \xB7 Coinbase Ventures" },
+  { handle: "binancelabs", label: "VC \xB7 Binance Labs" },
+  { handle: "HashKey_Capital", label: "VC \xB7 HashKey" },
+  { handle: "sequoia", label: "VC \xB7 Sequoia" },
+  { handle: "USV", label: "VC \xB7 Union Square Ventures" },
+  { handle: "IOSG_VC", label: "VC \xB7 IOSG" },
+  { handle: "hypersphere_x", label: "VC \xB7 Hypersphere" },
+  { handle: "standardcrypto", label: "VC \xB7 Standard Crypto" },
+  { handle: "blockchaincap", label: "VC \xB7 Blockchain Capital" },
+  { handle: "galaxyhq", label: "VC \xB7 Galaxy" },
+  { handle: "DelphiVentures", label: "VC \xB7 Delphi Ventures" },
+  { handle: "DCGco", label: "VC \xB7 Digital Currency Group" },
+  { handle: "gumi_cryptos", label: "VC \xB7 gumi Cryptos" },
+  { handle: "SygnumOfficial", label: "VC \xB7 Sygnum" },
+  { handle: "L2IV", label: "VC \xB7 L2 Iterative" },
+  { handle: "maven11", label: "VC \xB7 Maven 11" },
+  { handle: "nascentxyz", label: "VC \xB7 Nascent" },
+  { handle: "bankless_vc", label: "VC \xB7 Bankless Ventures" },
+  { handle: "SpartanGroup", label: "VC \xB7 Spartan" },
+  { handle: "TheSpartanGroup", label: "VC \xB7 Spartan" },
+  { handle: "6thmancapital", label: "VC \xB7 6th Man Ventures" },
+  { handle: "archetypevc", label: "VC \xB7 Archetype" },
+  { handle: "slowfund", label: "VC \xB7 Slow Ventures" },
+  { handle: "portal_ventures", label: "VC \xB7 Portal Ventures" },
+  { handle: "figmentcapital", label: "VC \xB7 Figment Capital" },
+  { handle: "reforgevc", label: "VC \xB7 Reforge" },
+  { handle: "foundationcap", label: "VC \xB7 Foundation Capital" },
+  { handle: "castle_isl", label: "VC \xB7 Castle Island" },
+  { handle: "lightspeedvp", label: "VC \xB7 Lightspeed" },
+  { handle: "tribecap", label: "VC \xB7 Tribe Capital" },
+  { handle: "roundtripcrypto", label: "VC \xB7 Round13" },
+  { handle: "fabric_vc", label: "VC \xB7 Fabric Ventures" },
+  { handle: "gsr_io", label: "market maker \xB7 GSR" },
+  { handle: "wintermute_t", label: "market maker \xB7 Wintermute" },
+  { handle: "jump_", label: "market maker \xB7 Jump" },
+  { handle: "amberGroup_HQ", label: "market maker \xB7 Amber" },
+  { handle: "cumberland_io", label: "market maker \xB7 Cumberland" },
+  { handle: "flowtraders", label: "market maker \xB7 Flow Traders" },
+  { handle: "mechanismcap", label: "fund \xB7 Mechanism" },
+  { handle: "dcfgod", label: "fund \xB7 DCF God" },
+  { handle: "arca", label: "fund \xB7 Arca" },
+  { handle: "republiccrypto", label: "VC \xB7 Republic Crypto" },
+  { handle: "animocabrands", label: "VC \xB7 Animoca" },
+  { handle: "shima_capital", label: "VC \xB7 Shima" },
+  { handle: "big_brain_hodl", label: "VC \xB7 Big Brain" },
+  { handle: "collab_currency", label: "VC \xB7 Collab+Currency" },
+  { handle: "roninvc", label: "VC \xB7 Ronin" },
+  // ── VC partners / notable investors (individuals) ─────────────────────────
+  { handle: "cdixon", label: "investor \xB7 a16z" },
+  { handle: "balajis", label: "investor \xB7 Balaji" },
+  { handle: "cyounessi1", label: "investor \xB7 Standard Crypto" },
+  { handle: "hosseeb", label: "investor \xB7 Dragonfly" },
+  { handle: "danrobinson", label: "investor \xB7 Paradigm" },
+  { handle: "gakonst", label: "founder \xB7 Paradigm/Foundry" },
+  { handle: "cburniske", label: "investor \xB7 Placeholder" },
+  { handle: "twobitidiot", label: "founder \xB7 Messari (Ryan Selkis)" },
+  { handle: "avichal", label: "investor \xB7 Electric Capital" },
+  { handle: "Maria_Shen", label: "investor \xB7 Electric Capital" },
+  { handle: "TarunChitra", label: "founder \xB7 Gauntlet" },
+  { handle: "ljin18", label: "investor \xB7 Variant" },
+  { handle: "jessewldn", label: "investor \xB7 Haun" },
+  { handle: "kmoney_69", label: "investor \xB7 Placeholder" },
+  { handle: "spencernoon", label: "investor \xB7 Variant" },
+  { handle: "arjunblj", label: "investor \xB7 Reverie" },
+  { handle: "TusharJain_", label: "investor \xB7 Multicoin" },
+  { handle: "KyleSamani", label: "investor \xB7 Multicoin" },
+  { handle: "santiagoroel", label: "investor \xB7 Amber/Delphi" },
+  { handle: "Anup_Bagchi", label: "investor" },
+  { handle: "0xMaki", label: "investor \xB7 founder (Sushi)" },
+  { handle: "ChrisBurniske", label: "investor \xB7 Placeholder" },
+  { handle: "RobHadick", label: "investor \xB7 Dragonfly" },
+  { handle: "Rewkang", label: "investor \xB7 Mechanism" },
+  { handle: "adam_tehc", label: "investor" },
+  { handle: "dberenzon", label: "investor" },
+  { handle: "packyM", label: "investor \xB7 Not Boring" },
+  { handle: "nlw", label: "media \xB7 The Breakdown" },
+  { handle: "lawmaster", label: "investor \xB7 Framework (Vance Spencer)" },
+  { handle: "MikeDudas", label: "investor \xB7 6MV" },
+  { handle: "iamDCinvestor", label: "investor \xB7 ETH OG" },
+  { handle: "AriDavidPaul", label: "investor \xB7 BlockTower" },
+  { handle: "APompliano", label: "investor \xB7 Pomp" },
+  { handle: "RaoulGMI", label: "investor \xB7 Real Vision" },
+  { handle: "novogratz", label: "investor \xB7 Galaxy (Mike Novogratz)" },
+  { handle: "cathiedwood", label: "investor \xB7 ARK" },
+  { handle: "woonomic", label: "analyst \xB7 Willy Woo" },
+  // ── Founders / builders ───────────────────────────────────────────────────
+  { handle: "VitalikButerin", label: "founder \xB7 Ethereum" },
+  { handle: "aeyakovenko", label: "founder \xB7 Solana" },
+  { handle: "rajgokal", label: "founder \xB7 Solana" },
+  { handle: "jessepollak", label: "founder \xB7 Base" },
+  { handle: "haydenzadams", label: "founder \xB7 Uniswap" },
+  { handle: "StaniKulechov", label: "founder \xB7 Aave" },
+  { handle: "sreeramkannan", label: "founder \xB7 EigenLayer" },
+  { handle: "smokey_eth", label: "founder \xB7 Berachain" },
+  { handle: "0xngmi", label: "founder \xB7 DefiLlama" },
+  { handle: "gabrielhaines", label: "founder" },
+  { handle: "brendaneich", label: "founder \xB7 Brave" },
+  { handle: "sassal0x", label: "Ethereum advocate" },
+  { handle: "econoar", label: "founder \xB7 Eric Conner" },
+  { handle: "drakefjustin", label: "researcher \xB7 Ethereum Foundation" },
+  { handle: "dannyryan", label: "researcher \xB7 Ethereum Foundation" },
+  { handle: "TimBeiko", label: "Ethereum core" },
+  { handle: "epolynya", label: "researcher \xB7 rollups" },
+  { handle: "el33th4xor", label: "founder \xB7 Ava Labs (Emin G\xFCn Sirer)" },
+  { handle: "zhusu", label: "founder \xB7 3AC (Su Zhu)" },
+  { handle: "MacroCephalopod", label: "founder \xB7 Reserve" },
+  { handle: "robertleshner", label: "founder \xB7 Compound" },
+  { handle: "kaiynne", label: "founder \xB7 Synthetix" },
+  { handle: "AndreCronjeTech", label: "founder \xB7 Yearn/Fantom" },
+  { handle: "bantg", label: "founder \xB7 Yearn" },
+  { handle: "danielesesta", label: "founder \xB7 Wonderland/Abracadabra" },
+  { handle: "kaledora", label: "founder" },
+  { handle: "eric_wallach", label: "founder" },
+  { handle: "0xSisyphus", label: "trader/founder" },
+  { handle: "MustStopMurad", label: "founder \xB7 Memecoin thesis" },
+  { handle: "shawmakesmagic", label: "founder \xB7 ai16z/eliza" },
+  { handle: "everythingempt0", label: "trader/founder" },
+  { handle: "0xzerebro", label: "founder \xB7 AI agent" },
+  { handle: "luna_virtuals", label: "founder \xB7 Virtuals" },
+  { handle: "punk9059", label: "founder" },
+  { handle: "0xMert_", label: "founder \xB7 Helius" },
+  { handle: "rogercrypto", label: "founder" },
+  { handle: "toly", label: "founder \xB7 Solana" },
+  { handle: "kayceecrypto", label: "founder" },
+  { handle: "loomdart", label: "trader \xB7 OG" },
+  { handle: "cobie", label: "trader \xB7 UpOnly (Cobie)" },
+  { handle: "ledgerstatus", label: "trader \xB7 OG" },
+  { handle: "dcfgod", label: "trader" },
+  { handle: "cyrusof", label: "founder" },
+  { handle: "0xdesigner", label: "builder/designer" },
+  { handle: "transmissions11", label: "engineer \xB7 Paradigm" },
+  { handle: "boredGenius", label: "engineer \xB7 dYdX" },
+  { handle: "antonio_m_juliano", label: "founder \xB7 dYdX" },
+  { handle: "0age", label: "engineer \xB7 Uniswap" },
+  { handle: "haydenzadams", label: "founder \xB7 Uniswap" },
+  { handle: "monosarin", label: "founder \xB7 Polymarket (Shayne Coplan)" },
+  { handle: "shayne_coplan", label: "founder \xB7 Polymarket" },
+  { handle: "gavofyork", label: "founder \xB7 Polkadot/Parity" },
+  { handle: "rune_christensen", label: "founder \xB7 MakerDAO/Sky" },
+  { handle: "kaiynne", label: "founder \xB7 Synthetix" },
+  { handle: "coopahtroopa", label: "builder \xB7 music/NFTs" },
+  { handle: "cryptopunk7213", label: "founder \xB7 Compound (Robert Leshner alt)" },
+  // ── KOLs / callers / traders ──────────────────────────────────────────────
+  { handle: "blknoiz06", label: "caller \xB7 Ansem" },
+  { handle: "CryptoKaleo", label: "caller \xB7 Kaleo" },
+  { handle: "inversebrah", label: "KOL" },
+  { handle: "CryptoCred", label: "trader" },
+  { handle: "HsakaTrades", label: "trader \xB7 Hsaka" },
+  { handle: "notthreadguy", label: "KOL" },
+  { handle: "theunipcs", label: "caller \xB7 Bonk guy" },
+  { handle: "CryptoGodJohn", label: "caller" },
+  { handle: "frankdegods", label: "founder/KOL \xB7 DeGods" },
+  { handle: "GiganticRebirth", label: "trader \xB7 GCR" },
+  { handle: "Pentosh1", label: "trader" },
+  { handle: "TheCryptoDog", label: "trader" },
+  { handle: "Tetranode", label: "whale" },
+  { handle: "DeFiGod1", label: "trader" },
+  { handle: "gainzy222", label: "trader" },
+  { handle: "AltcoinPsycho", label: "trader" },
+  { handle: "smallcapscience", label: "KOL" },
+  { handle: "SmartestMoney_", label: "trader" },
+  { handle: "CredibleCrypto", label: "trader" },
+  { handle: "CryptoMessiah", label: "trader" },
+  { handle: "IamNomad", label: "trader" },
+  { handle: "AltcoinGordon", label: "KOL" },
+  { handle: "CryptoTony__", label: "trader" },
+  { handle: "rektcapital", label: "analyst" },
+  { handle: "CryptoDonAlt", label: "trader \xB7 DonAlt" },
+  { handle: "koroushak", label: "trader" },
+  { handle: "TheFlowHorse", label: "trader \xB7 Flood" },
+  { handle: "MacnBTC", label: "trader" },
+  { handle: "0xWangarian", label: "trader" },
+  { handle: "IncomeSharks", label: "trader" },
+  { handle: "PostyXBT", label: "trader" },
+  { handle: "0x_Kun", label: "trader" },
+  { handle: "cobie", label: "trader \xB7 Cobie" },
+  { handle: "0xSisyphus", label: "trader" },
+  { handle: "loomdart", label: "trader" },
+  { handle: "shahh", label: "trader" },
+  { handle: "CL207", label: "trader" },
+  { handle: "satsdart", label: "trader" },
+  { handle: "cozypront", label: "trader" },
+  { handle: "0xngmi", label: "founder/analyst" },
+  { handle: "eth_daddy", label: "trader" },
+  { handle: "ThinkingUSD", label: "trader \xB7 Flood" },
+  { handle: "poordart", label: "trader" },
+  { handle: "gainzy", label: "trader" },
+  { handle: "hentaavi", label: "trader" },
+  { handle: "iloveponzi", label: "trader" },
+  { handle: "mesawine1", label: "trader" },
+  { handle: "0xShual", label: "trader" },
+  { handle: "greg16676935420", label: "KOL \xB7 Greg" },
+  { handle: "notlarrylink", label: "KOL" },
+  { handle: "chooserich", label: "KOL" },
+  { handle: "traderpow", label: "trader" },
+  { handle: "MoonOverlord", label: "trader" },
+  { handle: "cryptoyieldinfo", label: "analyst" },
+  { handle: "TashaKKK", label: "KOL" },
+  { handle: "zoomerfren", label: "KOL" },
+  // ── Protocols / infra (official accounts) ─────────────────────────────────
+  { handle: "solana", label: "infra \xB7 Solana" },
+  { handle: "ethereum", label: "infra \xB7 Ethereum" },
+  { handle: "base", label: "infra \xB7 Base" },
+  { handle: "arbitrum", label: "infra \xB7 Arbitrum" },
+  { handle: "optimism", label: "infra \xB7 Optimism" },
+  { handle: "0xPolygon", label: "infra \xB7 Polygon" },
+  { handle: "avax", label: "infra \xB7 Avalanche" },
+  { handle: "Uniswap", label: "protocol \xB7 Uniswap" },
+  { handle: "aave", label: "protocol \xB7 Aave" },
+  { handle: "chainlink", label: "infra \xB7 Chainlink" },
+  { handle: "MakerDAO", label: "protocol \xB7 Maker/Sky" },
+  { handle: "LidoFinance", label: "protocol \xB7 Lido" },
+  { handle: "eigenlayer", label: "protocol \xB7 EigenLayer" },
+  { handle: "pumpdotfun", label: "infra \xB7 Pump.fun" },
+  { handle: "jito_sol", label: "infra \xB7 Jito" },
+  { handle: "heliuslabs", label: "infra \xB7 Helius" },
+  { handle: "JupiterExchange", label: "protocol \xB7 Jupiter" },
+  { handle: "RaydiumProtocol", label: "protocol \xB7 Raydium" },
+  { handle: "DriftProtocol", label: "protocol \xB7 Drift" },
+  { handle: "KaminoFinance", label: "protocol \xB7 Kamino" },
+  { handle: "MarginFi", label: "protocol \xB7 marginfi" },
+  { handle: "tensor_hq", label: "protocol \xB7 Tensor" },
+  { handle: "MagicEden", label: "protocol \xB7 Magic Eden" },
+  { handle: "phantom", label: "infra \xB7 Phantom" },
+  { handle: "MetaMask", label: "infra \xB7 MetaMask" },
+  { handle: "dYdX", label: "protocol \xB7 dYdX" },
+  { handle: "GMX_IO", label: "protocol \xB7 GMX" },
+  { handle: "PendleIntern", label: "protocol \xB7 Pendle" },
+  { handle: "ethena_labs", label: "protocol \xB7 Ethena" },
+  { handle: "MorphoLabs", label: "protocol \xB7 Morpho" },
+  { handle: "CurveFinance", label: "protocol \xB7 Curve" },
+  { handle: "convexfinance", label: "protocol \xB7 Convex" },
+  { handle: "friedtech", label: "infra" },
+  { handle: "monad_xyz", label: "infra \xB7 Monad" },
+  { handle: "berachain", label: "infra \xB7 Berachain" },
+  { handle: "SuiNetwork", label: "infra \xB7 Sui" },
+  { handle: "Aptos", label: "infra \xB7 Aptos" },
+  { handle: "celestia", label: "infra \xB7 Celestia" },
+  { handle: "hyperliquid_x", label: "protocol \xB7 Hyperliquid" },
+  { handle: "VirtualsProtocol", label: "protocol \xB7 Virtuals" },
+  // ── Exchanges ─────────────────────────────────────────────────────────────
+  { handle: "coinbase", label: "exchange \xB7 Coinbase" },
+  { handle: "binance", label: "exchange \xB7 Binance" },
+  { handle: "krakenfx", label: "exchange \xB7 Kraken" },
+  { handle: "okx", label: "exchange \xB7 OKX" },
+  { handle: "Bybit_Official", label: "exchange \xB7 Bybit" },
+  { handle: "coinbasewallet", label: "infra \xB7 Coinbase Wallet" },
+  { handle: "brian_armstrong", label: "founder \xB7 Coinbase" },
+  { handle: "cz_binance", label: "founder \xB7 Binance" },
+  { handle: "cryptohayes", label: "founder \xB7 BitMEX (Arthur Hayes)" },
+  { handle: "SBF_FTX", label: "founder \xB7 FTX (defunct)" },
+  { handle: "jespow", label: "founder \xB7 Kraken" },
+  { handle: "tyler", label: "founder \xB7 Gemini (Winklevoss)" },
+  { handle: "cameron", label: "founder \xB7 Gemini (Winklevoss)" },
+  // ── Researchers / analysts / media / security ─────────────────────────────
+  { handle: "MessariCrypto", label: "research \xB7 Messari" },
+  { handle: "DelphiDigital", label: "research \xB7 Delphi" },
+  { handle: "tokenterminal", label: "research \xB7 Token Terminal" },
+  { handle: "DefiLlama", label: "data \xB7 DefiLlama" },
+  { handle: "nansen_ai", label: "data \xB7 Nansen" },
+  { handle: "ArkhamIntel", label: "data \xB7 Arkham" },
+  { handle: "lookonchain", label: "on-chain analyst" },
+  { handle: "spotonchain", label: "on-chain analyst" },
+  { handle: "zachxbt", label: "investigator \xB7 ZachXBT" },
+  { handle: "tayvano_", label: "security \xB7 MyCrypto (Tay)" },
+  { handle: "officer_cia", label: "security researcher" },
+  { handle: "samczsun", label: "security \xB7 Paradigm" },
+  { handle: "bantg", label: "engineer \xB7 Yearn" },
+  { handle: "peckshield", label: "security \xB7 PeckShield" },
+  { handle: "CertiK", label: "security \xB7 CertiK" },
+  { handle: "RugDocIO", label: "security \xB7 RugDoc" },
+  { handle: "WatcherGuru", label: "media" },
+  { handle: "Cointelegraph", label: "media" },
+  { handle: "CoinDesk", label: "media" },
+  { handle: "TheBlock__", label: "media \xB7 The Block" },
+  { handle: "BanklessHQ", label: "media \xB7 Bankless" },
+  { handle: "laurashin", label: "media \xB7 Unchained" },
+  { handle: "wublockchain", label: "media \xB7 Wu Blockchain" },
+  { handle: "DegenerateNews", label: "media" },
+  { handle: "unusual_whales", label: "data/flow" },
+  // ── Expansion batch: more founders / L1-L2 leaders ────────────────────────
+  { handle: "zhuoxun_yin", label: "founder \xB7 Manta" },
+  { handle: "0xkyle__", label: "researcher" },
+  { handle: "dabit3", label: "developer advocate (Nader)" },
+  { handle: "austingriffith", label: "builder \xB7 Ethereum (scaffold-eth)" },
+  { handle: "PatrickAlphaC", label: "developer educator" },
+  { handle: "hudsonjameson", label: "Ethereum community" },
+  { handle: "vladtenev", label: "founder \xB7 Robinhood" },
+  { handle: "jack", label: "founder \xB7 Block/Twitter" },
+  { handle: "elonmusk", label: "founder \xB7 Tesla/X" },
+  { handle: "saylor", label: "founder \xB7 MicroStrategy (Michael Saylor)" },
+  { handle: "APompliano", label: "investor \xB7 Pomp" },
+  { handle: "TylerDurden", label: "media \xB7 ZeroHedge" },
+  { handle: "DavidGokhshtein", label: "KOL \xB7 Gokhshtein" },
+  { handle: "scottmelker", label: "KOL \xB7 Wolf of All Streets" },
+  { handle: "TheCryptoLark", label: "KOL \xB7 Lark Davis" },
+  { handle: "IvanOnTech", label: "KOL \xB7 Ivan" },
+  { handle: "AltCryptoGems", label: "KOL" },
+  { handle: "CryptoWendyO", label: "KOL" },
+  { handle: "girlgone_crypto", label: "KOL" },
+  { handle: "CryptoTubers", label: "KOL" },
+  { handle: "PeterLBrandt", label: "trader \xB7 legacy TA" },
+  { handle: "cryptomanran", label: "KOL" },
+  { handle: "EllioTrades", label: "KOL" },
+  { handle: "sassal0x", label: "Ethereum advocate" },
+  { handle: "milesdeutscher", label: "KOL \xB7 analyst" },
+  { handle: "CryptoBusy", label: "KOL" },
+  { handle: "Ashcryptoreal", label: "KOL" },
+  { handle: "cobie", label: "trader \xB7 Cobie" },
+  { handle: "0xLouisT", label: "founder/investor" },
+  { handle: "DeFianceCapital", label: "fund \xB7 DeFiance" },
+  { handle: "arthur_0x", label: "founder \xB7 DeFiance (Arthur Cheong)" },
+  { handle: "ThreeSigmaXYZ", label: "research \xB7 Three Sigma" },
+  { handle: "tokenbrice", label: "DeFi analyst" },
+  { handle: "DefiIgnas", label: "DeFi researcher" },
+  { handle: "thedefiedge", label: "DeFi researcher" },
+  { handle: "Dynamo_Patrick", label: "DeFi researcher" },
+  { handle: "korpi87", label: "DeFi researcher" },
+  { handle: "0xLoke", label: "DeFi researcher" },
+  { handle: "0x_Todd", label: "researcher" },
+  { handle: "route2fi", label: "DeFi researcher" },
+  { handle: "stacy_muur", label: "DeFi researcher" },
+  { handle: "TheDeFiSaint", label: "DeFi analyst" },
+  { handle: "0xMinion", label: "researcher" },
+  { handle: "MrBlocks_", label: "researcher" },
+  { handle: "Flowslikeosmo", label: "researcher" },
+  { handle: "CryptoKoryo", label: "data analyst" },
+  { handle: "0xfoobar", label: "engineer/researcher" },
+  { handle: "cygaar_dev", label: "engineer" },
+  { handle: "pcaversaccio", label: "security engineer" },
+  { handle: "brockelmore", label: "engineer \xB7 Paradigm" },
+  { handle: "andyfeng21", label: "founder \xB7 EigenLayer" },
+  { handle: "ryanberckmans", label: "researcher" },
+  { handle: "poopmandefi", label: "trader" },
+  { handle: "yashhsm", label: "trader" },
+  { handle: "0xdoge_", label: "trader" },
+  { handle: "0xraceralt", label: "trader" },
+  { handle: "0xSweep", label: "trader" },
+  { handle: "cryptorinweb3", label: "KOL" },
+  { handle: "moon_shiller", label: "KOL" },
+  { handle: "0xUnihax0r", label: "trader" },
+  { handle: "himgajria", label: "investor" },
+  { handle: "lightcrypto", label: "trader" },
+  { handle: "gainzy222", label: "trader" },
+  { handle: "0xTindorr", label: "trader" },
+  { handle: "0xngmi", label: "founder \xB7 DefiLlama" },
+  { handle: "adamscochran", label: "investor \xB7 Cinneamhain" },
+  { handle: "TheOneandOmsy", label: "trader" },
+  { handle: "ColeGarnerHODL", label: "analyst" },
+  { handle: "checkmatey_", label: "on-chain analyst \xB7 Glassnode" },
+  { handle: "_Checkmatey", label: "on-chain analyst" },
+  { handle: "glassnode", label: "data \xB7 Glassnode" },
+  { handle: "santimentfeed", label: "data \xB7 Santiment" },
+  { handle: "intotheblock", label: "data \xB7 IntoTheBlock" },
+  { handle: "coinmetrics", label: "data \xB7 Coin Metrics" },
+  { handle: "nic__carter", label: "investor \xB7 Castle Island" },
+  { handle: "lopp", label: "Bitcoin \xB7 Jameson Lopp" },
+  { handle: "adam3us", label: "founder \xB7 Blockstream (Adam Back)" },
+  { handle: "aantonop", label: "Bitcoin educator" },
+  { handle: "pete_rizzo_", label: "Bitcoin historian" },
+  { handle: "DocumentingBTC", label: "Bitcoin media" },
+  { handle: "matt_odell", label: "Bitcoin \xB7 Odell" },
+  { handle: "gladstein", label: "Bitcoin \xB7 HRF" },
+  { handle: "prestonpysh", label: "investor \xB7 Bitcoin" },
+  { handle: "dergigi", label: "Bitcoin author" },
+  { handle: "TuurDemeester", label: "investor \xB7 Bitcoin" },
+  { handle: "MartyBent", label: "Bitcoin \xB7 TFTC" },
+  { handle: "Excellion", label: "Bitcoin \xB7 Samson Mow" },
+  { handle: "ErikVoorhees", label: "founder \xB7 ShapeShift" },
+  { handle: "brian_armstrong", label: "founder \xB7 Coinbase" },
+  { handle: "haydenzadams", label: "founder \xB7 Uniswap" },
+  { handle: "danheld", label: "Bitcoin educator" },
+  { handle: "CryptoCobain", label: "trader \xB7 Cobie alt" }
+];
+
 // server/adapters/x.ts
 var TWITTERAPI = "https://api.twitterapi.io";
 async function grokSearch(system, user, opts) {
@@ -1725,66 +2116,6 @@ async function followsSubject(endorser, subject) {
   const rel = await checkFollow(endorser, subject);
   return rel ? rel.following : null;
 }
-var NOTABLE = [
-  { handle: "cobie", label: "trader", size: "700K" },
-  { handle: "CryptoKaleo", label: "caller", size: "700K" },
-  { handle: "blknoiz06", label: "caller", size: "750K" },
-  { handle: "inversebrah", label: "KOL", size: "300K" },
-  { handle: "CryptoCred", label: "trader", size: "400K" },
-  { handle: "HsakaTrades", label: "trader", size: "450K" },
-  { handle: "notthreadguy", label: "KOL", size: "250K" },
-  { handle: "theunipcs", label: "caller", size: "250K" },
-  { handle: "CryptoGodJohn", label: "caller", size: "400K" },
-  { handle: "frankdegods", label: "founder/KOL", size: "350K" },
-  { handle: "0xMert_", label: "infra (Helius)", size: "250K" },
-  { handle: "aeyakovenko", label: "founder (Solana)", size: "470K" },
-  { handle: "rajgokal", label: "founder (Solana)", size: "250K" },
-  { handle: "VitalikButerin", label: "founder (Ethereum)", size: "5.6M" },
-  { handle: "jessepollak", label: "founder (Base)", size: "350K" },
-  { handle: "haydenzadams", label: "founder (Uniswap)", size: "300K" },
-  { handle: "StaniKulechov", label: "founder (Aave)", size: "270K" },
-  { handle: "cz_binance", label: "founder (Binance)", size: "9M" },
-  { handle: "cdixon", label: "investor (a16z)", size: "900K" },
-  { handle: "balajis", label: "investor", size: "1M" },
-  { handle: "punk6529", label: "investor", size: "500K" },
-  { handle: "solana", label: "infra (Solana)", size: "3M" },
-  { handle: "pumpdotfun", label: "infra (Pump.fun)", size: "600K" },
-  { handle: "base", label: "infra (Base)", size: "1.5M" },
-  // Funds / VCs (a named fund following a project is a strong legitimacy signal).
-  { handle: "a16zcrypto", label: "VC (a16z crypto)", size: "800K" },
-  { handle: "paradigm", label: "VC (Paradigm)", size: "500K" },
-  { handle: "dragonfly_xyz", label: "VC (Dragonfly)", size: "150K" },
-  { handle: "multicoincap", label: "VC (Multicoin)", size: "250K" },
-  { handle: "VariantFund", label: "VC (Variant)", size: "120K" },
-  { handle: "DelphiDigital", label: "research (Delphi)", size: "300K" },
-  { handle: "FrameworkVC", label: "VC (Framework)", size: "80K" },
-  { handle: "hack_vc", label: "VC (Hack VC)", size: "60K" },
-  { handle: "PlaceholderVC", label: "VC (Placeholder)", size: "90K" },
-  { handle: "panteracapital", label: "VC (Pantera)", size: "300K" },
-  { handle: "1kxnetwork", label: "VC (1kx)", size: "80K" },
-  { handle: "electric_capital", label: "VC (Electric)", size: "120K" },
-  { handle: "robotventures", label: "VC (Robot Ventures)", size: "60K" },
-  // Founders / builders.
-  { handle: "gakonst", label: "founder (Paradigm/Foundry)", size: "200K" },
-  { handle: "danrobinson", label: "investor (Paradigm)", size: "120K" },
-  { handle: "hosseeb", label: "investor (Dragonfly)", size: "180K" },
-  { handle: "BrendanEich", label: "founder (Brave)", size: "900K" },
-  { handle: "sassal0x", label: "Ethereum advocate", size: "300K" },
-  { handle: "TheDeFiEdge", label: "researcher", size: "300K" },
-  { handle: "sreeramkannan", label: "founder (EigenLayer)", size: "100K" },
-  // Traders / KOLs.
-  { handle: "Rewkang", label: "trader (Mechanism)", size: "500K" },
-  { handle: "Pentosh1", label: "trader", size: "700K" },
-  { handle: "GiganticRebirth", label: "trader (GCR)", size: "500K" },
-  { handle: "TheCryptoDog", label: "trader", size: "800K" },
-  { handle: "Tetranode", label: "whale", size: "300K" },
-  { handle: "DeFiGod1", label: "trader", size: "300K" },
-  { handle: "gainzy222", label: "trader", size: "300K" },
-  { handle: "loomdart", label: "trader", size: "250K" },
-  { handle: "AltcoinPsycho", label: "trader", size: "500K" },
-  { handle: "smallcapscience", label: "KOL", size: "200K" },
-  { handle: "0xngmi", label: "founder (DefiLlama)", size: "150K" }
-];
 async function checkFollow(source, target) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
@@ -1811,23 +2142,58 @@ async function checkFollow(source, target) {
     return null;
   }
 }
-async function notableFollowers(subject) {
+async function notableFollowers(subject, opts) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return { list: [], checked: 0 };
   const subj = subject.replace(/^@/, "").toLowerCase();
-  const candidates = NOTABLE.filter((n) => n.handle.toLowerCase() !== subj);
+  const seen = /* @__PURE__ */ new Set();
+  const candidates = NOTABLE_ACCOUNTS.filter((n) => {
+    const lk = n.handle.toLowerCase();
+    if (lk === subj || seen.has(lk)) return false;
+    seen.add(lk);
+    return true;
+  });
+  const total = candidates.length;
+  const fc = opts?.followerCount ?? Infinity;
+  const enumPages = Math.ceil(fc / 200);
+  if (Number.isFinite(fc) && enumPages <= Math.min(total, 150)) {
+    const set = new Map(candidates.map((n) => [n.handle.toLowerCase(), n]));
+    const hits2 = [];
+    const got = /* @__PURE__ */ new Set();
+    const u = subject.replace(/^@/, "");
+    let cursor = "";
+    for (let page = 0; page < enumPages + 2; page++) {
+      const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+      const res = await twFetch(url, key);
+      if (!res || !res.ok) break;
+      const d = await res.json();
+      const followers = d.followers ?? d.data?.followers ?? [];
+      if (!followers.length) break;
+      for (const f of followers) {
+        const h = String(f.userName ?? f.screen_name ?? "").toLowerCase();
+        const m = set.get(h);
+        if (m && !got.has(h)) {
+          got.add(h);
+          hits2.push({ handle: m.handle, label: m.label, size: "" });
+        }
+      }
+      if (!d.has_next_page || !d.next_cursor) break;
+      cursor = d.next_cursor;
+    }
+    return { list: hits2, checked: total };
+  }
   const hits = [];
-  const CHUNK = 10;
+  const CHUNK = 15;
   for (let i = 0; i < candidates.length; i += CHUNK) {
     const res = await Promise.all(
       candidates.slice(i, i + CHUNK).map(async (n) => {
         const rel = await checkFollow(n.handle, subject);
-        return rel?.following ? n : null;
+        return rel?.following ? { handle: n.handle, label: n.label, size: "" } : null;
       })
     );
     for (const r of res) if (r) hits.push(r);
   }
-  return { list: hits, checked: candidates.length };
+  return { list: hits, checked: total };
 }
 async function acknowledgments(endorsers, subject) {
   const out = /* @__PURE__ */ new Map();
@@ -2009,7 +2375,9 @@ var xAdapter = {
     }
     if (!ctx.evidence.notableFollowers.length) {
       ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Checking which top funds, founders, and KOLs follow the subject\u2026", source: "twitterapi.io", tone: "neutral" });
-      const scan = await notableFollowers(ctx.handle);
+      const fcm = (ctx.evidence.profile.followers ?? "").match(/([\d.]+)\s*([KMB]?)/i);
+      const followerCount = fcm ? Number(fcm[1]) * (/m/i.test(fcm[2]) ? 1e6 : /b/i.test(fcm[2]) ? 1e9 : /k/i.test(fcm[2]) ? 1e3 : 1) : void 0;
+      const scan = await notableFollowers(ctx.handle, { followerCount });
       const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
       if (nf.length) {

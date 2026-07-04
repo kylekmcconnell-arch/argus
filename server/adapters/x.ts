@@ -13,6 +13,7 @@ import { addGrokUsage, recordCall, recordTwitterapi } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower } from "../../src/data/evidence";
+import { NOTABLE_ACCOUNTS } from "./notableAccounts";
 
 const TWITTERAPI = "https://api.twitterapi.io";
 
@@ -352,66 +353,6 @@ export async function followsSubject(endorser: string, subject: string): Promise
 
 // Curated, deliberately small, high-signal set. Labels/sizes are for context and
 // may drift; the point is WHO. Grow this list as the trust graph matures.
-const NOTABLE: NotableFollower[] = [
-  { handle: "cobie", label: "trader", size: "700K" },
-  { handle: "CryptoKaleo", label: "caller", size: "700K" },
-  { handle: "blknoiz06", label: "caller", size: "750K" },
-  { handle: "inversebrah", label: "KOL", size: "300K" },
-  { handle: "CryptoCred", label: "trader", size: "400K" },
-  { handle: "HsakaTrades", label: "trader", size: "450K" },
-  { handle: "notthreadguy", label: "KOL", size: "250K" },
-  { handle: "theunipcs", label: "caller", size: "250K" },
-  { handle: "CryptoGodJohn", label: "caller", size: "400K" },
-  { handle: "frankdegods", label: "founder/KOL", size: "350K" },
-  { handle: "0xMert_", label: "infra (Helius)", size: "250K" },
-  { handle: "aeyakovenko", label: "founder (Solana)", size: "470K" },
-  { handle: "rajgokal", label: "founder (Solana)", size: "250K" },
-  { handle: "VitalikButerin", label: "founder (Ethereum)", size: "5.6M" },
-  { handle: "jessepollak", label: "founder (Base)", size: "350K" },
-  { handle: "haydenzadams", label: "founder (Uniswap)", size: "300K" },
-  { handle: "StaniKulechov", label: "founder (Aave)", size: "270K" },
-  { handle: "cz_binance", label: "founder (Binance)", size: "9M" },
-  { handle: "cdixon", label: "investor (a16z)", size: "900K" },
-  { handle: "balajis", label: "investor", size: "1M" },
-  { handle: "punk6529", label: "investor", size: "500K" },
-  { handle: "solana", label: "infra (Solana)", size: "3M" },
-  { handle: "pumpdotfun", label: "infra (Pump.fun)", size: "600K" },
-  { handle: "base", label: "infra (Base)", size: "1.5M" },
-  // Funds / VCs (a named fund following a project is a strong legitimacy signal).
-  { handle: "a16zcrypto", label: "VC (a16z crypto)", size: "800K" },
-  { handle: "paradigm", label: "VC (Paradigm)", size: "500K" },
-  { handle: "dragonfly_xyz", label: "VC (Dragonfly)", size: "150K" },
-  { handle: "multicoincap", label: "VC (Multicoin)", size: "250K" },
-  { handle: "VariantFund", label: "VC (Variant)", size: "120K" },
-  { handle: "DelphiDigital", label: "research (Delphi)", size: "300K" },
-  { handle: "FrameworkVC", label: "VC (Framework)", size: "80K" },
-  { handle: "hack_vc", label: "VC (Hack VC)", size: "60K" },
-  { handle: "PlaceholderVC", label: "VC (Placeholder)", size: "90K" },
-  { handle: "panteracapital", label: "VC (Pantera)", size: "300K" },
-  { handle: "1kxnetwork", label: "VC (1kx)", size: "80K" },
-  { handle: "electric_capital", label: "VC (Electric)", size: "120K" },
-  { handle: "robotventures", label: "VC (Robot Ventures)", size: "60K" },
-  // Founders / builders.
-  { handle: "gakonst", label: "founder (Paradigm/Foundry)", size: "200K" },
-  { handle: "danrobinson", label: "investor (Paradigm)", size: "120K" },
-  { handle: "hosseeb", label: "investor (Dragonfly)", size: "180K" },
-  { handle: "BrendanEich", label: "founder (Brave)", size: "900K" },
-  { handle: "sassal0x", label: "Ethereum advocate", size: "300K" },
-  { handle: "TheDeFiEdge", label: "researcher", size: "300K" },
-  { handle: "sreeramkannan", label: "founder (EigenLayer)", size: "100K" },
-  // Traders / KOLs.
-  { handle: "Rewkang", label: "trader (Mechanism)", size: "500K" },
-  { handle: "Pentosh1", label: "trader", size: "700K" },
-  { handle: "GiganticRebirth", label: "trader (GCR)", size: "500K" },
-  { handle: "TheCryptoDog", label: "trader", size: "800K" },
-  { handle: "Tetranode", label: "whale", size: "300K" },
-  { handle: "DeFiGod1", label: "trader", size: "300K" },
-  { handle: "gainzy222", label: "trader", size: "300K" },
-  { handle: "loomdart", label: "trader", size: "250K" },
-  { handle: "AltcoinPsycho", label: "trader", size: "500K" },
-  { handle: "smallcapscience", label: "KOL", size: "200K" },
-  { handle: "0xngmi", label: "founder (DefiLlama)", size: "150K" },
-];
 
 // Does `source` follow `target`? One call via check_follow_relationship.
 export async function checkFollow(source: string, target: string): Promise<{ following: boolean | null; followedBy: boolean | null } | null> {
@@ -445,34 +386,74 @@ export async function checkFollow(source: string, target: string): Promise<{ fol
   }
 }
 
-// Notable followers, done the RIGHT way. Enumerating a follower list to spot the
-// notable accounts is the wrong algorithm: twitterapi pages newest-first with no
-// influence sort and no verified-followers endpoint, so any bounded scan of a big
-// account only sees recent followers and MISSES the notable ones — a partial,
-// useless answer. So we REVERSE the query: take our curated list of accounts that
-// actually matter (top funds / founders / KOLs / infra) and ask each one "do you
-// follow this subject?" via a single check_follow_relationship call. That is
-// COMPLETE for the set that matters (never sampled), and it's O(list) cheap calls
-// run in parallel — independent of how many followers the subject has.
+// Notable followers, done RIGHT. Enumerating a follower list to spot the notable
+// accounts is the wrong algorithm on a big account: twitterapi pages newest-first
+// with no influence sort / no verified-followers endpoint, so a bounded scan only
+// sees recent followers and MISSES the notable ones — a partial, useless answer.
+//
+// So we HYBRID over the reference set of ~250 accounts that actually matter (top
+// funds / founders / KOLs / infra), picking the cheaper COMPLETE path:
+//   - small/medium subject: enumerating its followers costs followerCount/200 calls
+//     and matches the ENTIRE reference set for free (in-memory) — so read them all.
+//   - large subject: reverse-check the reference set — one check_follow_relationship
+//     call per account ("does @paradigm follow this subject?"), run in parallel.
+// Either way the answer is complete for the set that matters, never sampled.
 export interface NotableScan { list: NotableFollower[]; checked: number }
 
-export async function notableFollowers(subject: string): Promise<NotableScan> {
+export async function notableFollowers(subject: string, opts?: { followerCount?: number }): Promise<NotableScan> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return { list: [], checked: 0 };
   const subj = subject.replace(/^@/, "").toLowerCase();
-  const candidates = NOTABLE.filter((n) => n.handle.toLowerCase() !== subj);
+  // Dedup the reference set (handles are hand-maintained; a few repeat across groups).
+  const seen = new Set<string>();
+  const candidates = NOTABLE_ACCOUNTS.filter((n) => {
+    const lk = n.handle.toLowerCase();
+    if (lk === subj || seen.has(lk)) return false;
+    seen.add(lk); return true;
+  });
+  const total = candidates.length;
+
+  // Enumerate only when it FULLY covers the subject's followers AND is cheaper than
+  // reverse-checking (capped at 150 pages / ~30k followers for audit-time safety).
+  const fc = opts?.followerCount ?? Infinity;
+  const enumPages = Math.ceil(fc / 200);
+  if (Number.isFinite(fc) && enumPages <= Math.min(total, 150)) {
+    const set = new Map(candidates.map((n) => [n.handle.toLowerCase(), n]));
+    const hits: NotableFollower[] = [];
+    const got = new Set<string>();
+    const u = subject.replace(/^@/, "");
+    let cursor = "";
+    for (let page = 0; page < enumPages + 2; page++) {
+      const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+      const res = await twFetch(url, key);
+      if (!res || !res.ok) break;
+      const d = (await res.json()) as any;
+      const followers: any[] = d.followers ?? d.data?.followers ?? [];
+      if (!followers.length) break;
+      for (const f of followers) {
+        const h = String(f.userName ?? f.screen_name ?? "").toLowerCase();
+        const m = set.get(h);
+        if (m && !got.has(h)) { got.add(h); hits.push({ handle: m.handle, label: m.label, size: "" }); }
+      }
+      if (!d.has_next_page || !d.next_cursor) break;
+      cursor = d.next_cursor;
+    }
+    return { list: hits, checked: total };
+  }
+
+  // Large / unknown-size subject: reverse-check the reference set (one call each).
   const hits: NotableFollower[] = [];
-  const CHUNK = 10; // bounded concurrency (twitterapi is paid/no-QPS-cap, but stay polite)
+  const CHUNK = 15;
   for (let i = 0; i < candidates.length; i += CHUNK) {
     const res = await Promise.all(
       candidates.slice(i, i + CHUNK).map(async (n) => {
         const rel = await checkFollow(n.handle, subject); // does the notable account follow the subject?
-        return rel?.following ? n : null;
+        return rel?.following ? ({ handle: n.handle, label: n.label, size: "" } as NotableFollower) : null;
       }),
     );
     for (const r of res) if (r) hits.push(r);
   }
-  return { list: hits, checked: candidates.length };
+  return { list: hits, checked: total };
 }
 
 // ── Grok Live Search: did the endorsers publicly acknowledge the subject? ──
@@ -795,7 +776,11 @@ export const xAdapter: Adapter = {
     //     answer (who, not how many) is a credibility signal a bot farm can't fake.
     if (!ctx.evidence.notableFollowers.length) {
       ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "Checking which top funds, founders, and KOLs follow the subject…", source: "twitterapi.io", tone: "neutral" });
-      const scan = await notableFollowers(ctx.handle);
+      // Parse the profile's follower count ("12.4K"/"1.2M") so the hybrid can pick
+      // enumerate-vs-reverse-check; unknown → reverse-check (safe default).
+      const fcm = (ctx.evidence.profile.followers ?? "").match(/([\d.]+)\s*([KMB]?)/i);
+      const followerCount = fcm ? Number(fcm[1]) * (/m/i.test(fcm[2]) ? 1e6 : /b/i.test(fcm[2]) ? 1e9 : /k/i.test(fcm[2]) ? 1e3 : 1) : undefined;
+      const scan = await notableFollowers(ctx.handle, { followerCount });
       const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
       // Complete coverage: we checked every account on the curated list directly.
