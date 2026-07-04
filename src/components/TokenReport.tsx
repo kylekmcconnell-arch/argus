@@ -10,6 +10,7 @@ import { HolderForensics } from "./HolderForensics";
 import { OperatorNetwork } from "./OperatorNetwork";
 import { ProjectDocs } from "./ProjectDocs";
 import { Unknowns } from "./Unknowns";
+import { SecondOpinion } from "./SecondOpinion";
 import { WalletClusters } from "./WalletClusters";
 import { BytecodeForensics } from "./BytecodeForensics";
 import { EvmDeployer } from "./EvmDeployer";
@@ -284,6 +285,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
               )}
             </div>
           </div>
+        </div>
+
+        {/* adversarial review — auto-run second opinion that stress-tests the verdict */}
+        <div className="mt-3">
+          <SecondOpinion dossier={d} />
         </div>
 
         {!gp && (
