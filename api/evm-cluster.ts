@@ -156,7 +156,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ? `Analyzed ${set.length} top holders; found no on-chain links between them (independently funded, no direct transfers). No hidden common ownership detected.`
       : `${clusters.length} coordinated wallet group${clusters.length === 1 ? "" : "s"} among the top holders. The largest is ${top.size} wallets controlling a combined ${top.combinedPct.toFixed(1)}% of supply${top.sharedFunders.length ? `, seeded by one funder (${top.sharedFunders[0].slice(0, 8)}…)` : " via direct transfers"}${top.includesCreator ? ", including the token's creator" : ""}. A holder chart shows these as separate wallets; on-chain they are one hand.`;
 
-    res.status(200).json({ address, chain, available: true, walletsAnalyzed: set.length, clusters, note });
+    // Full analyzed set + edges for the client bubble map.
+    const walletCluster = new Map<string, number>();
+    clusters.forEach((c, i) => c.wallets.forEach((w) => walletCluster.set(w.address, i)));
+    const allWallets = set.map((w) => ({ address: w, pct: pctOf.get(w) ?? 0, cluster: walletCluster.has(w) ? walletCluster.get(w)! : null, isCreator: w === creator }));
+    const edges = links.map((l) => ({ a: l.a, b: l.b, type: l.type }));
+
+    res.status(200).json({ address, chain, available: true, walletsAnalyzed: set.length, clusters, allWallets, edges, note });
   } catch (e) {
     res.status(200).json({ address, chain, available: true, clusters: [], error: String(e), note: "EVM wallet clustering failed." });
   }

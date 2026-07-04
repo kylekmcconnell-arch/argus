@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { shortAddr } from "../lib/wallets";
 import { recordForensicEntities } from "../graph/store";
+import { HolderBubbleMap } from "./HolderBubbleMap";
 
 // Wallet identity clustering (/api/cluster). "Top 10 hold 40%" is only alarming
 // once you know how many of those ten are the same hand — a team that splits its
@@ -142,6 +143,10 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
       </div>
 
       {data.note && <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: tone === "good" ? "var(--color-ink-dim)" : color }}>{data.note}</p>}
+
+      {Array.isArray(data.allWallets) && data.allWallets.length >= 2 && (
+        <HolderBubbleMap wallets={data.allWallets} edges={data.edges ?? []} chain={chain} />
+      )}
 
       {clusters.length > 0 && (
         <div className="mt-3 space-y-2.5 border-t border-line pt-2.5">
