@@ -17,6 +17,9 @@ import { MarketIntel } from "./MarketIntel";
 import { HolderForensics } from "./HolderForensics";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
+import { TrustGraph } from "./TrustGraph";
+import { investigationContribution, getContributions } from "../graph/store";
+import { subjectConnections } from "../graph/network";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -121,6 +124,11 @@ export function InvestigationReport({
     onAudit(handle);
   };
 
+  // The connection web: this token's own subgraph (deployer → funder trail, project
+  // account, site) plus every cross-audit tie to other subjects you've scanned.
+  const invGraph = investigationContribution(inv);
+  const connections = subjectConnections("$" + token.symbol, getContributions());
+
   return (
     <div className="relative min-h-full pb-24">
       <div className="grid-bg absolute inset-0 top-0 -z-10 h-60" />
@@ -171,7 +179,12 @@ export function InvestigationReport({
           ) : (
             <p className="mt-3 max-w-3xl text-[14px] font-medium leading-relaxed text-ink">{inv.founderNote}</p>
           )}
-          <p className="mono mt-1 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
+          {/* What the project actually IS — CoinGecko's own blurb, else the project's X bio. */}
+          {(() => {
+            const blurb = token.cg?.description || projectAccount?.bio || null;
+            return blurb ? <p className="mt-2 max-w-3xl text-[13px] leading-relaxed text-ink-dim">{blurb}</p> : null;
+          })()}
+          <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
 
         <div className="mt-5 grid gap-3 lg:grid-cols-2">
@@ -282,6 +295,16 @@ export function InvestigationReport({
             )}
           </Card>
         </div>
+
+        {/* Connection web: the subject's graph + its ties to everything else you've
+            audited. The visual map that anchors the investigation. */}
+        {invGraph && invGraph.nodes.length > 1 && (
+          <div className="mt-3">
+            <Card title="Connection web · click any node to open it">
+              <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={connections} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
+            </Card>
+          </div>
+        )}
 
         {/* Recursive operator trace (Solana + EVM): chase the deployer's money past
             the first hop to every launch behind the same funding hand. */}

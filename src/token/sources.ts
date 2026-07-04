@@ -91,14 +91,35 @@ const CG_PLATFORM: Record<string, string> = {
   optimism: "optimistic-ethereum", avalanche: "avalanche", fantom: "fantom",
 };
 const CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
-export interface CgInfo { listed: boolean; rank: number | null; mcapUsd: number | null; marketCount: number; cexCount: number; cexNames: string[]; homepage: string | null; twitter: string | null; image: string | null; }
+export interface CgInfo { listed: boolean; rank: number | null; mcapUsd: number | null; marketCount: number; cexCount: number; cexNames: string[]; homepage: string | null; twitter: string | null; image: string | null; description: string | null; }
+
+// CoinGecko's description.en is the project's own blurb — the "what it actually
+// does" a report should lead with. Strip HTML + markdown links to plain text and
+// keep the first couple of sentences.
+function cleanBlurb(raw: unknown): string | null {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  let s = raw
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1") // [text](url) -> text
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/[*_`>#]+/g, " ")
+    .replace(/&amp;/g, "&").replace(/&[a-z]+;/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!s) return null;
+  // First 1–2 sentences, capped, without cutting mid-word.
+  const sentences = s.match(/[^.!?]+[.!?]+/g);
+  if (sentences && sentences.length) s = sentences.slice(0, 2).join(" ").trim();
+  if (s.length > 300) s = s.slice(0, 297).replace(/\s+\S*$/, "") + "…";
+  return s;
+}
 // Tier-1 CEXes carry the most weight (real listings = real diligence + KYC trail).
 const CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
 export async function coingeckoToken(chain: string, address: string): Promise<CgInfo | null> {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
     const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null };
+    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
     if (!res.ok) return null;
     const d = (await res.json()) as any;
     const tickers: any[] = d.tickers ?? [];
@@ -113,7 +134,7 @@ export async function coingeckoToken(chain: string, address: string): Promise<Cg
     const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
     const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
     const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image };
+    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image, description: cleanBlurb(d.description?.en) };
   } catch {
     return null;
   }

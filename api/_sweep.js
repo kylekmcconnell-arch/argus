@@ -41,12 +41,21 @@ var CG_PLATFORM = {
   fantom: "fantom"
 };
 var CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
+function cleanBlurb(raw) {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  let s = raw.replace(/<[^>]+>/g, " ").replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1").replace(/https?:\/\/\S+/g, "").replace(/[*_`>#]+/g, " ").replace(/&amp;/g, "&").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+  if (!s) return null;
+  const sentences = s.match(/[^.!?]+[.!?]+/g);
+  if (sentences && sentences.length) s = sentences.slice(0, 2).join(" ").trim();
+  if (s.length > 300) s = s.slice(0, 297).replace(/\s+\S*$/, "") + "\u2026";
+  return s;
+}
 var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
 async function coingeckoToken(chain, address) {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
     const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null };
+    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
     if (!res.ok) return null;
     const d = await res.json();
     const tickers = d.tickers ?? [];
@@ -57,7 +66,7 @@ async function coingeckoToken(chain, address) {
     const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
     const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
     const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image };
+    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image, description: cleanBlurb(d.description?.en) };
   } catch {
     return null;
   }
@@ -359,17 +368,27 @@ async function runTokenAudit(input, emit, opts) {
       }
     }
     if (s.cannotSellAll) caps.push([15, "cannot_sell_all"]);
+    const cexN = cg?.cexCount ?? 0;
+    const mcap = fdv;
+    const established = cexN >= 5 || cexN >= 3 && mcap >= 1e7 || cexN >= 1 && mcap >= 1e8;
+    const authorityTone = established ? "warn" : "bad";
+    const govNote = established ? " On a token with real centralized-exchange listings this is typically a governed emissions/ops mechanism, not a rug setup \u2014 confirm the controller." : "";
     if (s.mintable) {
-      caps.push([35, "mint_authority_active"]);
-      findings.push({ claim: "Mint authority active: supply can be inflated at will.", tone: "bad", source: chain === "solana" ? "goplus-sol" : "goplus" });
+      if (!established) caps.push([35, "mint_authority_active"]);
+      findings.push({ claim: `Mint authority is live: supply can be minted.${govNote}`, tone: authorityTone, source: chain === "solana" ? "goplus-sol" : "goplus" });
     }
     if (s.freezable) {
-      caps.push([35, "freeze_authority_active"]);
-      findings.push({ claim: "Freeze authority active: the team can freeze your tokens (you cannot sell).", tone: "bad", source: "goplus-sol" });
+      if (!established) caps.push([35, "freeze_authority_active"]);
+      findings.push({ claim: `Freeze authority is live: the team can freeze token accounts.${govNote}`, tone: authorityTone, source: "goplus-sol" });
     }
     if (s.takeBack || s.hiddenOwner) {
-      caps.push([35, "reclaimable_ownership"]);
-      findings.push({ claim: s.hiddenOwner ? "Hidden owner detected." : "Ownership can be taken back after renouncement.", tone: "bad", source: "goplus" });
+      if (s.hiddenOwner) {
+        caps.push([35, "reclaimable_ownership"]);
+        findings.push({ claim: "Hidden owner detected.", tone: "bad", source: "goplus" });
+      } else {
+        if (!established) caps.push([35, "reclaimable_ownership"]);
+        findings.push({ claim: `Ownership can be reclaimed after renouncement.${govNote}`, tone: authorityTone, source: "goplus" });
+      }
     }
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
     if (s.serialScammerCreator) {
@@ -530,7 +549,7 @@ async function runTokenAudit(input, emit, opts) {
   } else verdict = band(score);
   const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) || (cg?.twitter ? "@" + cg.twitter : null);
   const deployer = chain === "solana" ? sol?.creators?.[0]?.address ?? null : gpEvm?.creator_address || (gpEvm?.owner_address && !/^0x0+$/.test(gpEvm.owner_address) ? gpEvm.owner_address : null) || null;
-  const topHolders = rawHolders.slice(0, 5).map((h) => ({
+  const topHolders = rawHolders.slice(0, 10).map((h) => ({
     address: h.address ?? h.account ?? "",
     percent: Number(h.percent) * 100,
     tag: h.tag || void 0,
