@@ -8,7 +8,7 @@ import { TokenSparkline } from "./TokenSparkline";
 import { MarketIntel } from "./MarketIntel";
 import { HolderForensics } from "./HolderForensics";
 import { OperatorNetwork } from "./OperatorNetwork";
-import { ProjectDocs } from "./ProjectDocs";
+import { ProjectResearch } from "./ProjectResearch";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
 import { SanctionsScreen } from "./SanctionsScreen";
@@ -117,6 +117,12 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
   const isSol = d.chain === "solana";
   const topSum = d.topHolders.reduce((a, h) => a + h.percent, 0);
   const projectSite = d.socials.find((x) => x.label === "site" && /^https?:\/\//i.test(x.url))?.url;
+  const projectDomain = projectSite ? projectSite.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase() : null;
+  // The project's GitHub org (from its socials), for commit forensics — same
+  // derivation the investigation report uses.
+  const ghOrg = d.socials
+    .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
+    .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
   const otherLinks = d.socials.filter((x) => x.label !== "site" && !/x\.com|twitter\.com/i.test(x.url));
   const [watched, setWatched] = useState(() => isWatched(d.address));
   const [copied, setCopied] = useState(false);
@@ -232,9 +238,10 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           <MarketIntel symbol={d.symbol} contract={d.address} chain={d.chain} />
         </div>
 
-        {/* whitepaper + security audits (with real links; absence is a flag) */}
+        {/* unified project research: news & press, documents & resources, domain
+            intelligence, and GitHub forensics — the same cluster every report uses */}
         <div className="mt-4">
-          <ProjectDocs name={d.name} symbol={d.symbol} domain={projectSite} />
+          <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} />
         </div>
 
         {/* negative space — what the scan couldn't confirm (unknowns are signal) */}

@@ -5,14 +5,12 @@ import { Avatar } from "./Avatar";
 import { xAvatar, personAvatar } from "../lib/avatars";
 import { OperatorNetwork } from "./OperatorNetwork";
 import { SanctionsScreen } from "./SanctionsScreen";
-import { ProjectDocs } from "./ProjectDocs";
+import { ProjectResearch } from "./ProjectResearch";
 import { WalletClusters } from "./WalletClusters";
 import { BytecodeForensics } from "./BytecodeForensics";
 import { EvmDeployer } from "./EvmDeployer";
-import { GithubForensics } from "./GithubForensics";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
-import { ProjectIntel } from "./ProjectIntel";
 import { MarketIntel } from "./MarketIntel";
 import { HolderForensics } from "./HolderForensics";
 import { ServiceAlert } from "./ServiceAlert";
@@ -410,20 +408,16 @@ export function InvestigationReport({
           </div>
         )}
 
-        <div className="mt-3">
-          <ProjectDocs name={token.name} symbol={token.symbol} domain={projectDomain} />
-        </div>
-
+        {/* token provenance: who it's named after, and whether they're behind it */}
         <div className="mt-3">
           <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} onAudit={onAudit} />
         </div>
 
-        {/* domain age + claimed-audit verification (keyless OSINT) */}
-        {projectDomain && (
-          <div className="mt-3">
-            <ProjectIntel domain={projectDomain} />
-          </div>
-        )}
+        {/* unified project research: news & press, documents & resources, domain
+            intelligence, and GitHub forensics — the same cluster every report uses */}
+        <div className="mt-3">
+          <ProjectResearch name={token.name} symbol={token.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${token.symbol}`} newsHandle={projectX} />
+        </div>
 
         {/* Connection web: the subject's graph + its ties to everything else you've
             audited — the deeper map, below the team. */}
@@ -432,13 +426,6 @@ export function InvestigationReport({
             <Card title="Connection web · click any node to open it">
               <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={connections} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
             </Card>
-          </div>
-        )}
-
-        {/* commit forensics: the real devs behind the project's GitHub org */}
-        {ghOrg && (
-          <div className="mt-3">
-            <GithubForensics org={ghOrg} subjectKey={`$${token.symbol}`} />
           </div>
         )}
 

@@ -9,7 +9,7 @@ import { syncReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
 import { fetchWebTeam, type WebPerson } from "../lib/investigation";
-import { GithubForensics } from "./GithubForensics";
+import { ProjectResearch } from "./ProjectResearch";
 import { SiteHistory } from "./SiteHistory";
 import { SiteInfra } from "./SiteInfra";
 import { ProjectXAccount } from "./ProjectXAccount";
@@ -448,8 +448,9 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
             );
           })()}
 
-          {/* commit forensics: the real devs behind the project's GitHub org */}
-          {ghOrg && <GithubForensics org={ghOrg} subjectKey={reconHost || ghOrg} />}
+          {/* unified project research: news & press, documents & resources, domain
+              intelligence, and GitHub forensics — the same cluster every report uses */}
+          {reconHost && <ProjectResearch name={recon.title || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg} />}
 
           {/* off-chain operator linking: shared analytics IDs / co-registered domains / hosting */}
           {reconHost && <SiteInfra domain={reconHost} record={!priv} onAudit={onAudit} />}
