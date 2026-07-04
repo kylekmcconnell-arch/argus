@@ -10,6 +10,7 @@ import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
 import { fetchWebTeam, type WebPerson } from "../lib/investigation";
 import { ProjectResearch } from "./ProjectResearch";
+import { resolveProjectToken, type ResolvedProjectToken } from "../lib/resolveProjectToken";
 import { SiteHistory } from "./SiteHistory";
 import { SiteInfra } from "./SiteInfra";
 import { ProjectXAccount } from "./ProjectXAccount";
@@ -106,6 +107,7 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
   const [webTeam, setWebTeam] = useState<WebPerson[]>([]);
   const [teamSearching, setTeamSearching] = useState(false);
   const [teamSearched, setTeamSearched] = useState(false);
+  const [projToken, setProjToken] = useState<ResolvedProjectToken | null>(null);
   const ran = useRef(false);
 
   const run = useCallback(async (raw: string) => {
@@ -118,6 +120,7 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
     setPivotNotes([]);
     setWebTeam([]);
     setTeamSearched(false);
+    setProjToken(null);
     let scanHost = target;
     try { scanHost = new URL(/^https?:\/\//.test(target) ? target : `https://${target}`).hostname.replace(/^www\./, ""); } catch { /* keep */ }
     const scanId = `site:${scanHost}:${Date.now()}`;
@@ -130,6 +133,15 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
     setRecon(r);
     setRunning(false);
     endScan(scanId);
+
+    // Bridge to the token. A JS-app site (jup.ag) can render too thin to surface
+    // token signals, so the recon never reaches the token where the real diligence
+    // lives. If the recon didn't already find a token on-chain and this isn't a
+    // fund, resolve the project's canonical token by name and offer a one-click
+    // jump to the full on-chain report.
+    if (r.retrieval.status !== "gap" && !r.isFund && !r.pivot?.found) {
+      resolveProjectToken(r.title || scanHost).then((t) => { if (t) setProjToken(t); }).catch(() => { /* best-effort */ });
+    }
 
     // Dig the web + LinkedIn for the team (the render-based recon is shallow).
     if (r.retrieval.status !== "gap") {
@@ -287,6 +299,25 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
               </div>
             );
           })()}
+
+          {/* token bridge — a site recon only reads the website; if the project has
+              a real token, one click opens the full on-chain report where the depth is */}
+          {projToken && (
+            <button
+              onClick={() => onAudit?.(projToken.contract)}
+              className="mt-3 w-full rounded-xl border p-4 text-left transition hover:brightness-110"
+              style={{ borderColor: "var(--color-signal)66", background: "var(--color-signal)0d" }}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
+                <span className="text-[12.5px] font-medium text-signal-lift">This project has a live token — ${projToken.symbol}{projToken.rank ? ` · CoinGecko #${projToken.rank}` : ""} · {projToken.chain}</span>
+                <span className="mono ml-auto text-[11px] text-signal">open full on-chain report →</span>
+              </div>
+              <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
+                The site recon only reads the website. Open the ${projToken.symbol} report for market intelligence, holder distribution, wallet clustering, deployer &amp; bytecode forensics, and the sanctions screen.
+              </p>
+            </button>
+          )}
 
           {/* the project's official X account — searched, resolved, broken down */}
           {reconHost && (recon.title || reconHost) && (
@@ -450,7 +481,7 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onOpenRecent }:
 
           {/* unified project research: news & press, documents & resources, domain
               intelligence, and GitHub forensics — the same cluster every report uses */}
-          {reconHost && <ProjectResearch name={recon.title || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} />}
+          {reconHost && <ProjectResearch name={(recon.title || reconHost).split(/[:|–—·]/)[0].trim() || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} />}
 
           {/* off-chain operator linking: shared analytics IDs / co-registered domains / hosting */}
           {reconHost && <SiteInfra domain={reconHost} record={!priv} onAudit={onAudit} />}
