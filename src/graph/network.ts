@@ -272,6 +272,59 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
 export interface SharedTie { key: string; label: string; type: string }
 export interface SubjectConnection { other: string; otherVerdict?: string; ties: SharedTie[]; direct: boolean }
 
+// How strong is a shared tie as evidence of "same operator"? The key prefix tells
+// us: on-chain infra + a leaked identity are near-proof; a shared person/site is
+// strong-but-not-proof (people work on many projects); holder overlap is weak.
+export function tieStrength(rawKey: string): "hard" | "medium" | "weak" {
+  const k = String(rawKey).toLowerCase();
+  if (/^(code:|email:|wallet:|funder:|mint:)/.test(k)) return "hard";
+  if (/^(holder|amm|dex|pool|lp|market)/.test(k)) return "weak";
+  return "medium"; // shared @handle / domain / company
+}
+
+export interface Reconciliation {
+  severity: "avoid" | "caution";
+  line: string;
+  via: SubjectConnection[]; // the bad connections that drove the override, hardest first
+}
+
+// Verdict reconciliation: the contract-level audit can't see that this subject
+// shares its deployer / funder / bytecode / dev-email with an already-FAILED
+// subject. When it does, that connection should OVERRIDE a clean headline — a
+// hard infra tie to a rug means AVOID regardless of how the contract scans.
+const BAD_VERDICTS = new Set(["FAIL", "AVOID"]);
+export function reconcileVerdict(handle: string, contributions: GraphContribution[]): Reconciliation | null {
+  const bad = subjectConnections(handle, contributions, 24).filter((c) => c.otherVerdict && BAD_VERDICTS.has(c.otherVerdict));
+  if (!bad.length) return null;
+  const strongestOf = (c: SubjectConnection): "hard" | "medium" | "weak" => {
+    if (c.direct) return "hard"; // the flagged subject IS an entity this audit surfaced
+    let best: "hard" | "medium" | "weak" = "weak";
+    for (const t of c.ties) { const s = tieStrength(t.label); if (s === "hard") return "hard"; if (s === "medium") best = "medium"; }
+    return best;
+  };
+  const hard = bad.filter((c) => strongestOf(c) === "hard");
+  const medium = bad.filter((c) => strongestOf(c) === "medium");
+  if (hard.length) {
+    const c = hard[0];
+    const how = c.direct ? "was surfaced directly in this audit" : `shares ${c.ties.map((t) => tieLabel(t.label)).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join(" + ")}`;
+    return { severity: "avoid", line: `Byte/infra-identical link to ${c.other} (${c.otherVerdict}): it ${how}. A shared deployer, funder, contract fingerprint, or dev email with a failed subject is the same operation.`, via: hard };
+  }
+  if (medium.length) {
+    const c = medium[0];
+    return { severity: "caution", line: `Shares a team member or domain with ${c.other} (${c.otherVerdict}). Not proof of the same operation, but the overlap warrants caution.`, via: medium };
+  }
+  return null; // weak-only (holder overlap) — RingAlert still warns, no verdict override
+}
+function tieLabel(rawKey: string): string {
+  const k = String(rawKey).toLowerCase();
+  if (k.startsWith("code:")) return "a contract fingerprint";
+  if (k.startsWith("email:")) return "a dev email";
+  if (k.startsWith("wallet:")) return "a deployer wallet";
+  if (k.startsWith("funder:")) return "a funding wallet";
+  if (k.startsWith("mint:")) return "a token";
+  return "an entity";
+}
+
 export function subjectConnections(handle: string, contributions: GraphContribution[], max = 12): SubjectConnection[] {
   const resolve = buildAliasResolver(contributions);
   const me = resolve(handle);

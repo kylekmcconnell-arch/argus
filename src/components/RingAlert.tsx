@@ -1,36 +1,52 @@
 import { useEffect, useState } from "react";
 import { getContributions, subscribeGraph } from "../graph/store";
-import { subjectConnections, type SubjectConnection } from "../graph/network";
+import { subjectConnections, reconcileVerdict, type SubjectConnection, type Reconciliation } from "../graph/network";
 
 // The graph's payoff, made automatic: when a report renders, check its subject
 // against the ACCUMULATED community graph (every audit you and your co-analysts
-// ever ran) and raise a loud alert if it connects to flagged subjects — a shared
-// deployer wallet, a shared team member, a shared funder. This is intelligence
-// no single audit contains; it only exists because prior audits compounded.
+// ever ran). A HARD infra tie (shared deployer / funder / bytecode / dev-email)
+// to a failed subject OVERRIDES the headline — the contract-level verdict can't
+// see that this is the same operation as a known rug. Weaker ties still warn.
 const BAD = new Set(["FAIL", "AVOID"]);
 
-function badConnections(handle: string): SubjectConnection[] {
-  return subjectConnections(handle, getContributions(), 24).filter(
-    (c) => c.otherVerdict && BAD.has(c.otherVerdict),
-  );
+function compute(handle: string): { conns: SubjectConnection[]; recon: Reconciliation | null } {
+  const contribs = getContributions();
+  const conns = subjectConnections(handle, contribs, 24).filter((c) => c.otherVerdict && BAD.has(c.otherVerdict));
+  return { conns, recon: reconcileVerdict(handle, contribs) };
 }
 
 export function RingAlert({ handle, onAudit }: { handle: string; onAudit?: (q: string) => void }) {
-  const [conns, setConns] = useState<SubjectConnection[]>(() => badConnections(handle));
+  const [{ conns, recon }, setState] = useState(() => compute(handle));
   // The community graph hydrates async on app load — recompute when it lands.
   useEffect(() => {
-    setConns(badConnections(handle));
-    return subscribeGraph(() => setConns(badConnections(handle)));
+    setState(compute(handle));
+    return subscribeGraph(() => setState(compute(handle)));
   }, [handle]);
 
   if (!conns.length) return null;
 
+  // A hard/medium tie to a failed subject reframes the whole report as a REVISED
+  // VERDICT that supersedes the contract-level headline.
+  const override = recon;
+  const color = override?.severity === "caution" ? "var(--color-caution)" : "var(--color-avoid)";
+  const bg = override?.severity === "caution" ? "rgba(232,177,42,0.08)" : "rgba(220,38,38,0.08)";
+
   return (
-    <div className="mb-4 rounded-xl border px-4 py-3" style={{ borderColor: "var(--color-avoid)", background: "rgba(220,38,38,0.08)" }}>
-      <div className="flex items-center gap-2 text-[13.5px] font-semibold" style={{ color: "var(--color-avoid)" }}>
-        <span className="text-[15px]">⚠</span>
-        Connected to {conns.length === 1 ? "a flagged subject" : `${conns.length} flagged subjects`} in the shared graph
-      </div>
+    <div className="mb-4 rounded-xl border px-4 py-3" style={{ borderColor: color, background: bg }}>
+      {override ? (
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mono rounded px-2 py-0.5 text-[12px] font-bold" style={{ background: color, color: "#fff" }}>REVISED: {override.severity === "caution" ? "CAUTION" : "AVOID"}</span>
+            <span className="text-[10px] uppercase tracking-wider" style={{ color }}>network reconciliation overrides the contract score</span>
+          </div>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed" style={{ color }}>{override.line}</p>
+        </div>
+      ) : (
+        <div className="flex items-center gap-2 text-[13.5px] font-semibold" style={{ color: "var(--color-avoid)" }}>
+          <span className="text-[15px]">⚠</span>
+          Connected to {conns.length === 1 ? "a flagged subject" : `${conns.length} flagged subjects`} in the shared graph
+        </div>
+      )}
       <div className="mt-2 space-y-1.5">
         {conns.slice(0, 4).map((c) => (
           <div key={c.other} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-ink-dim">
