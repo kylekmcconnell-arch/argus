@@ -1778,22 +1778,31 @@ async function checkFollow(source, target) {
   }
 }
 var HIGH_REACH = 1e4;
-async function notableFollowers(subject) {
+async function notableFollowers(subject, opts) {
   const key = env("TWITTERAPI_KEY");
-  if (!key) return [];
+  if (!key) return { list: [], scanned: 0, complete: false };
   const u = subject.replace(/^@/, "");
   const curated = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
   const found = /* @__PURE__ */ new Map();
   let cursor = "";
-  const MAX_PAGES = 8;
-  for (let page = 0; page < MAX_PAGES; page++) {
+  let scanned = 0;
+  let complete = false;
+  const start = Date.now();
+  const deadlineMs = opts?.deadlineMs ?? 5e4;
+  const PAGE_BACKSTOP = 4e3;
+  for (let page = 0; page < PAGE_BACKSTOP; page++) {
+    if (Date.now() - start > deadlineMs) break;
     const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
     const res = await twFetch(url, key);
     if (!res || !res.ok) break;
     const d = await res.json();
     if (d?.status === "error") break;
     const followers = d.followers ?? d.data?.followers ?? [];
-    if (!followers.length) break;
+    if (!followers.length) {
+      complete = true;
+      break;
+    }
+    scanned += followers.length;
     for (const f of followers) {
       const h = String(f.userName ?? f.screen_name ?? "");
       if (!h) continue;
@@ -1807,10 +1816,13 @@ async function notableFollowers(subject) {
         found.set(lk, { handle: h, label: "high reach", size: fmtFollowers(fc), count: fc });
       }
     }
-    if (!d.has_next_page || !d.next_cursor) break;
+    if (!d.has_next_page || !d.next_cursor) {
+      complete = true;
+      break;
+    }
     cursor = d.next_cursor;
   }
-  return [...found.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 16);
+  return { list: [...found.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 24), scanned, complete };
 }
 async function acknowledgments(endorsers, subject) {
   const out = /* @__PURE__ */ new Map();
@@ -1991,17 +2003,19 @@ var xAdapter = {
       ctx.emit({ phase: "P0 \xB7 Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days \u2014 a project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
     }
     if (!ctx.evidence.notableFollowers.length) {
-      ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Scanning followers for high-reach accounts and known callers/founders/funds\u2026", source: "twitterapi.io", tone: "neutral" });
-      const nf = await notableFollowers(ctx.handle);
+      ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Scanning EVERY follower for high-reach accounts and known callers/founders/funds\u2026", source: "twitterapi.io", tone: "neutral" });
+      const scan = await notableFollowers(ctx.handle);
+      const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
+      const coverage = scan.complete ? `all ${scan.scanned.toLocaleString()} followers scanned` : `${scan.scanned.toLocaleString()} most-recent followers scanned (time budget reached)`;
       if (nf.length) {
         const over1m = nf.filter((n) => (n.count ?? 0) >= 1e6).length;
         const over100k = nf.filter((n) => (n.count ?? 0) >= 1e5).length;
         const over10k = nf.filter((n) => (n.count ?? 0) >= 1e4).length;
         const reach = over1m ? `${over1m} with >1M followers` : over100k ? `${over100k} with >100K followers` : over10k ? `${over10k} with >10K followers` : "";
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `Followed by ${nf.length} notable account${nf.length === 1 ? "" : "s"}${reach ? ` (${reach})` : ""}: ${nf.slice(0, 6).map((n) => `@${n.handle}${n.size ? ` ${n.size}` : ""}`).join(", ")}${nf.length > 6 ? ", \u2026" : ""}.`, source: "twitterapi.io", tone: "good" });
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `Followed by ${nf.length} notable account${nf.length === 1 ? "" : "s"}${reach ? ` (${reach})` : ""} \u2014 ${coverage}: ${nf.slice(0, 6).map((n) => `@${n.handle}${n.size ? ` ${n.size}` : ""}`).join(", ")}${nf.length > 6 ? ", \u2026" : ""}.`, source: "twitterapi.io", tone: "good" });
       } else {
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "No high-reach or known accounts among the subject's recent followers.", source: "twitterapi.io", tone: "neutral" });
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `No high-reach or known accounts among the subject's followers (${coverage}).`, source: "twitterapi.io", tone: "neutral" });
       }
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);

@@ -420,23 +420,41 @@ export async function checkFollow(source: string, target: string): Promise<{ fol
 // are the highest-reach + curated followers among them.
 const HIGH_REACH = 10_000;
 
-export async function notableFollowers(subject: string): Promise<NotableFollower[]> {
+// Result of a full follower sweep: the notable accounts found, how many followers
+// were actually scanned, and whether we reached the END (every follower) or hit
+// the time budget (truncated at the most-recent, since twitterapi pages
+// newest-first).
+export interface NotableScan { list: NotableFollower[]; scanned: number; complete: boolean }
+
+// Scan EVERY follower (paginate to exhaustion), not just the recent few. The only
+// governor is a wall-clock budget so a mega-account (hundreds of thousands of
+// followers = thousands of sequential 200-at-a-time calls) can't blow the audit's
+// 180s function cap. For the vast majority of audited subjects this reaches the
+// end and scans 100% of followers; huge accounts are capped and report coverage
+// honestly rather than silently sampling.
+export async function notableFollowers(subject: string, opts?: { deadlineMs?: number }): Promise<NotableScan> {
   const key = env("TWITTERAPI_KEY");
-  if (!key) return [];
+  if (!key) return { list: [], scanned: 0, complete: false };
   const u = subject.replace(/^@/, "");
   const curated = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
   const found = new Map<string, NotableFollower>();
   let cursor = "";
-  const MAX_PAGES = 8; // ~1600 most-recent followers
+  let scanned = 0;
+  let complete = false;
+  const start = Date.now();
+  const deadlineMs = opts?.deadlineMs ?? 50_000; // audit-safe headroom under the 180s route cap
+  const PAGE_BACKSTOP = 4000; // hard ceiling (~800k) — the deadline governs first in practice
 
-  for (let page = 0; page < MAX_PAGES; page++) {
+  for (let page = 0; page < PAGE_BACKSTOP; page++) {
+    if (Date.now() - start > deadlineMs) break; // budget hit: truncated at the most-recent followers
     const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
     const res = await twFetch(url, key);
     if (!res || !res.ok) break;
     const d = (await res.json()) as any;
     if (d?.status === "error") break;
     const followers: any[] = d.followers ?? d.data?.followers ?? [];
-    if (!followers.length) break;
+    if (!followers.length) { complete = true; break; }
+    scanned += followers.length;
     for (const f of followers) {
       const h = String(f.userName ?? f.screen_name ?? "");
       if (!h) continue;
@@ -450,11 +468,12 @@ export async function notableFollowers(subject: string): Promise<NotableFollower
         found.set(lk, { handle: h, label: "high reach", size: fmtFollowers(fc), count: fc });
       }
     }
-    if (!d.has_next_page || !d.next_cursor) break;
+    if (!d.has_next_page || !d.next_cursor) { complete = true; break; }
     cursor = d.next_cursor;
   }
-  // Biggest audiences first; cap the list.
-  return [...found.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 16);
+  // Biggest audiences first; cap the surfaced list (we scan every follower, but only
+  // show the most notable ones).
+  return { list: [...found.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 24), scanned, complete };
 }
 
 // ── Grok Live Search: did the endorsers publicly acknowledge the subject? ──
@@ -776,17 +795,22 @@ export const xAdapter: Adapter = {
     // 1b. follower QUALITY: which respected accounts follow the subject. The
     //     answer (who, not how many) is a credibility signal a bot farm can't fake.
     if (!ctx.evidence.notableFollowers.length) {
-      ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "Scanning followers for high-reach accounts and known callers/founders/funds…", source: "twitterapi.io", tone: "neutral" });
-      const nf = await notableFollowers(ctx.handle);
+      ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "Scanning EVERY follower for high-reach accounts and known callers/founders/funds…", source: "twitterapi.io", tone: "neutral" });
+      const scan = await notableFollowers(ctx.handle);
+      const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
+      // Be explicit about coverage: did we read every follower, or hit the budget?
+      const coverage = scan.complete
+        ? `all ${scan.scanned.toLocaleString()} followers scanned`
+        : `${scan.scanned.toLocaleString()} most-recent followers scanned (time budget reached)`;
       if (nf.length) {
         const over1m = nf.filter((n) => (n.count ?? 0) >= 1e6).length;
         const over100k = nf.filter((n) => (n.count ?? 0) >= 1e5).length;
         const over10k = nf.filter((n) => (n.count ?? 0) >= 1e4).length;
         const reach = over1m ? `${over1m} with >1M followers` : over100k ? `${over100k} with >100K followers` : over10k ? `${over10k} with >10K followers` : "";
-        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `Followed by ${nf.length} notable account${nf.length === 1 ? "" : "s"}${reach ? ` (${reach})` : ""}: ${nf.slice(0, 6).map((n) => `@${n.handle}${n.size ? ` ${n.size}` : ""}`).join(", ")}${nf.length > 6 ? ", …" : ""}.`, source: "twitterapi.io", tone: "good" });
+        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `Followed by ${nf.length} notable account${nf.length === 1 ? "" : "s"}${reach ? ` (${reach})` : ""} — ${coverage}: ${nf.slice(0, 6).map((n) => `@${n.handle}${n.size ? ` ${n.size}` : ""}`).join(", ")}${nf.length > 6 ? ", …" : ""}.`, source: "twitterapi.io", tone: "good" });
       } else {
-        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: "No high-reach or known accounts among the subject's recent followers.", source: "twitterapi.io", tone: "neutral" });
+        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `No high-reach or known accounts among the subject's followers (${coverage}).`, source: "twitterapi.io", tone: "neutral" });
       }
     }
 
