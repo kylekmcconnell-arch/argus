@@ -123,7 +123,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!name && !symbol && !domain) { res.status(400).json({ error: "name, symbol, or domain required" }); return; }
   const key = process.env.XAI_API_KEY;
 
-  const cacheKey = `docs:${(name || symbol || domain).toLowerCase()}:${domain}:v2`;
+  const cacheKey = `docs:${(name || symbol || domain).toLowerCase()}:${domain}:v3`;
   const cached = await cacheGetJson<any>(cacheKey);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
@@ -148,8 +148,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Merge on-site crawl (authoritative first) with Grok, dedupe by URL, validate
   // category, and cap per-category so one blog can't flood the panel.
   const norm = (u: string) => u.toLowerCase().replace(/\/$/, "");
+  // A bare homepage (no path) is not a resource — Grok sometimes labels it "about".
+  const bareRoot = (u: string) => { try { const p = new URL(u).pathname; return p === "" || p === "/"; } catch { return false; } };
   const grokRes: Resource[] = (Array.isArray(raw?.resources) ? raw.resources : [])
-    .filter((x: any) => x && isUrl(x.url) && typeof x.category === "string" && CATS[x.category])
+    .filter((x: any) => x && isUrl(x.url) && !bareRoot(x.url) && typeof x.category === "string" && CATS[x.category])
     .map((x: any) => ({ category: x.category, title: (typeof x.title === "string" && x.title.trim() ? x.title.trim() : CATS[x.category]).slice(0, 40), url: x.url }));
   const urlSeen = new Set<string>([wp ? norm(wp.url) : ""]);
   const perCat: Record<string, number> = {};
