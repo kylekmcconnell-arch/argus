@@ -8,6 +8,8 @@ import { TokenSparkline } from "./TokenSparkline";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
+import { MethodologyChecklist } from "./MethodologyChecklist";
+import { tokenChecks } from "../lib/scanChecklist";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
 import { ServiceAlert } from "./ServiceAlert";
@@ -434,6 +436,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
             </div>
           </section>
         )}
+
+        {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
+        <div className="mt-5">
+          <MethodologyChecklist checks={tokenChecks(d)} />
+        </div>
 
         <div className="mt-8 rounded-xl border border-line bg-panel/40 p-5">
           <div className="mb-2 flex items-center gap-2 text-[12px] text-ink-dim"><ArgusMark size={16} /> How this verdict was reached</div>

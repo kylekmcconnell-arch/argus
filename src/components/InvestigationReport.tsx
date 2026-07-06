@@ -6,6 +6,8 @@ import { xAvatar, personAvatar } from "../lib/avatars";
 import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
+import { MethodologyChecklist } from "./MethodologyChecklist";
+import { tokenChecks } from "../lib/scanChecklist";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
@@ -427,6 +429,11 @@ export function InvestigationReport({
             </Card>
           </div>
         )}
+
+        {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
+        <div className="mt-4">
+          <MethodologyChecklist checks={tokenChecks(token)} />
+        </div>
 
         <div className="mt-4 rounded-xl border border-line bg-panel/40 p-4 text-[12px] leading-relaxed text-ink-faint">
           <span className="text-ink-dim">How to read this:</span> the token and site recon run keyless and free; the project account is backgrounded automatically (one live people-audit). Per-founder deep-dives are one-click and capped at {MAX_FOUNDER_AUDITS} per investigation to bound cost. ARGUS never invents a founder: names without a verified handle are shown but not audited, and a project account is never treated as a person behind the project.

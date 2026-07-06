@@ -13,6 +13,8 @@ import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
+import { MethodologyChecklist } from "./MethodologyChecklist";
+import { personChecks } from "../lib/scanChecklist";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
@@ -855,6 +857,16 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
                 <TrustGraph nodes={graph.nodes} edges={graph.edges} connections={connections} onAudit={onAudit} onOpenProject={onOpenProject} />
               </Card>
             </Section>
+          </div>
+
+          {/* transparent scan methodology — what ARGUS checked on this person */}
+          <div className="min-w-0 lg:col-span-2">
+            <MethodologyChecklist checks={personChecks({
+              identityConfidence: report.identity_confidence ?? undefined,
+              realName: (f.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
+              roles,
+              hasAssociates: (evidence.associates?.length ?? 0) > 0,
+            })} />
           </div>
         </div>
 
