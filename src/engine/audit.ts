@@ -63,6 +63,8 @@ export interface Finding {
 
 export interface Venture {
   project_name: string;
+  x_handle?: string;   // the venture's own X account (canonical bridge key)
+  domain?: string;     // the venture's website host (secondary bridge key)
   role: string;
   period: string;
   outcome: VentureOutcome;
@@ -487,8 +489,9 @@ export class Audit {
       edges.push({ src: this.handle, dst: a.associate_key, type: "ASSOCIATES_WITH", relation: a.relation });
     }
     for (const v of this.ventures) {
-      nodes.push({ type: "Company", key: v.project_name, outcome: v.outcome });
-      edges.push({ src: this.handle, dst: v.project_name, type: "FOUNDED", outcome: v.outcome });
+      const key = canonicalEntityKey({ handle: v.x_handle, domain: v.domain, name: v.project_name });
+      nodes.push({ type: "Company", key, label: v.project_name, outcome: v.outcome });
+      edges.push({ src: this.handle, dst: key, type: "FOUNDED", outcome: v.outcome });
     }
     for (const p of this.promotions) {
       // Strip an existing $ before re-prefixing — a ticker stored as "$SUSHI"
@@ -510,8 +513,8 @@ export class Audit {
       }
     }
     for (const p of this.advisedProjects) {
-      const key = p.project_handle || p.project_name;
-      nodes.push({ type: "Company", key, outcome: p.project_outcome });
+      const key = canonicalEntityKey({ handle: p.project_handle, name: p.project_name });
+      nodes.push({ type: "Company", key, label: p.project_name, outcome: p.project_outcome });
       edges.push({ src: this.handle, dst: key, type: "ADVISED", verdict: p.corroboration_verdict, outcome: p.project_outcome });
     }
     for (const c of this.clientEngagements) {
@@ -552,4 +555,18 @@ export function normalizeHandle(raw: string): string {
   const m = raw.match(HANDLE_TAIL);
   if (m) return "@" + m[1].toLowerCase();
   throw new Error(`cannot normalize handle: ${raw}`);
+}
+
+// The graph bridges two audits only when they emit the SAME node key for the same
+// entity — so an entity must resolve to a stable identifier, never a fuzzy name
+// ("Deks" vs "Deks Protocol" never merge). Prefer the X handle (matches how token/
+// recon audits key a project's account, so a person→project→token web connects),
+// then the domain host, and only fall back to a normalized name. Exported so every
+// contribution builder can key entities the same way.
+export function canonicalEntityKey(opts: { handle?: string | null; domain?: string | null; name?: string | null }): string {
+  const h = (opts.handle ?? "").replace(/^@/, "").trim().toLowerCase();
+  if (/^[a-z0-9_]{2,30}$/.test(h)) return "@" + h;
+  const d = (opts.domain ?? "").replace(/^https?:\/\//i, "").replace(/^www\./, "").replace(/\/.*$/, "").trim().toLowerCase();
+  if (d && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return d;
+  return (opts.name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }

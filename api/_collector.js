@@ -130,10 +130,11 @@ var PROFILES = {
       F5_reputation_integrity: 18,
       F6_network_quality: 12
     },
-    caps: { prior_rug_as_principal: 10 },
+    caps: { prior_rug_as_principal: 10, operates_manipulation_tooling: 10 },
     flags: [
       "serial failure pattern: repeated silent shutdowns with no exits",
       "any prior rug or exit scam as a named principal",
+      "builds or operates tooling for undetectable token manipulation (bundlers, mixers, volume fakers, multi-wallet snipe bots): the means and motive to rug",
       "claimed exits unverifiable against acquirer or press",
       "no prior backer or acquirer re-backed the new venture despite a claimed exit",
       "GitHub or product substance absent despite a builder persona"
@@ -679,6 +680,8 @@ var Audit = class {
     const keys = [];
     if (role === "FOUNDER" /* FOUNDER */) {
       if (this.ventures.some((v) => v.outcome === "Rug" /* RUG */)) keys.push("prior_rug_as_principal");
+      if (this.findings.some((f) => f.finding_type === "ManipulationTooling" && f.verification_status === "Verified"))
+        keys.push("operates_manipulation_tooling");
     } else if (role === "KOL" /* KOL */) {
       if (this.wallets.some(
         (w) => w.sold_into_own_promo && (w.link_tier === "SelfDoxxed" || w.link_tier === "InvestigatorAttributed")
@@ -809,8 +812,9 @@ var Audit = class {
       edges.push({ src: this.handle, dst: a.associate_key, type: "ASSOCIATES_WITH", relation: a.relation });
     }
     for (const v of this.ventures) {
-      nodes.push({ type: "Company", key: v.project_name, outcome: v.outcome });
-      edges.push({ src: this.handle, dst: v.project_name, type: "FOUNDED", outcome: v.outcome });
+      const key = canonicalEntityKey({ handle: v.x_handle, domain: v.domain, name: v.project_name });
+      nodes.push({ type: "Company", key, label: v.project_name, outcome: v.outcome });
+      edges.push({ src: this.handle, dst: key, type: "FOUNDED", outcome: v.outcome });
     }
     for (const p of this.promotions) {
       const key = p.contract_address || "$" + (p.ticker ?? "").replace(/^\$+/, "");
@@ -830,8 +834,8 @@ var Audit = class {
       }
     }
     for (const p of this.advisedProjects) {
-      const key = p.project_handle || p.project_name;
-      nodes.push({ type: "Company", key, outcome: p.project_outcome });
+      const key = canonicalEntityKey({ handle: p.project_handle, name: p.project_name });
+      nodes.push({ type: "Company", key, label: p.project_name, outcome: p.project_outcome });
       edges.push({ src: this.handle, dst: key, type: "ADVISED", verdict: p.corroboration_verdict, outcome: p.project_outcome });
     }
     for (const c of this.clientEngagements) {
@@ -859,6 +863,13 @@ function normalizeHandle(raw) {
   const m = raw.match(HANDLE_TAIL);
   if (m) return "@" + m[1].toLowerCase();
   throw new Error(`cannot normalize handle: ${raw}`);
+}
+function canonicalEntityKey(opts) {
+  const h = (opts.handle ?? "").replace(/^@/, "").trim().toLowerCase();
+  if (/^[a-z0-9_]{2,30}$/.test(h)) return "@" + h;
+  const d = (opts.domain ?? "").replace(/^https?:\/\//i, "").replace(/^www\./, "").replace(/\/.*$/, "").trim().toLowerCase();
+  if (d && /^[a-z0-9.-]+\.[a-z]{2,}$/.test(d)) return d;
+  return (opts.name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
 }
 
 // src/data/dossier.ts
@@ -1896,7 +1907,7 @@ async function grokSearch(system, user, opts) {
         model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
         input: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [{ type: "web_search" }, { type: "x_search" }],
-        ...withCap ? { max_tool_calls: opts?.maxToolCalls ?? 4 } : {}
+        ...withCap ? { max_tool_calls: opts?.maxToolCalls ?? 6 } : {}
       }),
       signal: AbortSignal.timeout(45e3)
     });
@@ -2001,6 +2012,20 @@ async function getRecentPosts(handle, limit = 20) {
     const d = await res.json();
     const tweets = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
     return tweets.map((t) => t.text ?? t.full_text ?? "").filter(Boolean).slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+async function getRecentPostsMeta(handle, limit = 40) {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return [];
+  const u = handle.replace(/^@/, "");
+  try {
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
+    if (!res || !res.ok) return [];
+    const d = await res.json();
+    const tweets = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
+    return tweets.map((t) => ({ text: t.text ?? t.full_text ?? "", createdAt: Date.parse(t.createdAt ?? t.created_at ?? "") })).filter((t) => t.text && Number.isFinite(t.createdAt)).slice(0, limit);
   } catch {
     return [];
   }
@@ -2248,7 +2273,7 @@ async function discoverAffiliations(handle, name, oldHandles = []) {
   const h = handle.replace(/^@/, "");
   const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} \u2014 search posts mentioning those old handles too.` : "";
   const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Work BOTH angles: (1) what the person's own footprint shows \u2014 accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase, beyond their bio and LinkedIn; (2) reverse mentions \u2014 project/company accounts that ever NAMED, TAGGED, or ANNOUNCED this person as a founder/team member (co-founder announcements and 'meet the team' posts are often YEARS old, on the project's timeline, search historical posts). There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role \u2014 from their own footprint AND from project accounts announcing them. Search the web and X including historical posts.`, { maxToolCalls: 6, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role \u2014 from their own footprint AND from project accounts announcing them. Be exhaustive: a serial operator often has 5-15 ventures across years; keep searching until you have run down every lead. Search the web and X including historical posts.`, { maxToolCalls: 10, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -2358,6 +2383,52 @@ function parseTeamJSON(text, selfHandle, source) {
     }).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 16);
   } catch {
     return [];
+  }
+}
+async function searchAdverseSignals(handle, kind, ticker) {
+  const h = handle.replace(/^@/, "");
+  const subject = kind === "project" ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}` : `the person behind X account @${h}`;
+  const system = `You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, or general community complaints/FUD. Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. Be STRICT and grounded: report ONLY complaints that actually exist with a real source. For EACH, grade credibility: 'evidenced' = backed by on-chain proof, receipts, or many consistent first-hand reports; 'reported' = a real named complaint but unverified; 'rumor' = vague unbacked FUD. Count distinct independent sources. Do NOT invent, do NOT infer guilt, do NOT repeat the subject's own marketing. If there are no real complaints, return an empty list. Reply with ONLY compact JSON: {"signals":[{"category":"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud","claim":"","source":"","source_url":"","independent_source_count":1,"credibility":"evidenced|reported|rumor"}]}. Never use em dashes.`;
+  const text = await grokSearch(system, `Subject: ${subject}. Find real, sourced complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. Grade each by credibility and count independent sources.`);
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const parsed = JSON.parse(m[0]);
+    const cats = /* @__PURE__ */ new Set(["rug", "slow_rug", "liquidity_pull", "drain", "scam_accusation", "fud"]);
+    const out = Array.isArray(parsed.signals) ? parsed.signals : [];
+    return out.filter((s) => s && typeof s.claim === "string" && s.claim.trim() && cats.has(s.category)).map((s) => ({
+      category: s.category,
+      claim: s.claim.trim(),
+      source: (s.source || "unattributed").toString().trim(),
+      source_url: typeof s.source_url === "string" && /^https?:\/\//.test(s.source_url) ? s.source_url : void 0,
+      independent_source_count: Math.max(1, Math.min(50, Number(s.independent_source_count) || 1)),
+      credibility: s.credibility === "evidenced" ? "evidenced" : s.credibility === "rumor" ? "rumor" : "reported"
+    })).slice(0, 12);
+  } catch {
+    return [];
+  }
+}
+async function detectManipulationTooling(handle, name) {
+  const h = handle.replace(/^@/, "");
+  const system = `You are a forensic researcher with live web and X search. Determine whether the given person BUILDS, OWNS, or OPERATES any tool whose primary use is undetectable market manipulation of crypto tokens: token BUNDLERS (buy/sell a token across many wallets to disguise concentration), wallet MIXERS / privacy 'cash' tools (move funds without a public trace), VOLUME FAKERS / wash-trading generators, or multi-wallet SNIPE bots. Ground the finding in the operator's OWN public product pages, docs, or posts, not rumor. Report their role (founder|ceo|operator|builder|affiliate) and each qualifying tool with a short evidence phrase and URL if found. Legitimate general token-creation or analytics tools do NOT count; only tools built to hide manipulation. Reply with ONLY compact JSON: {"operates":true|false,"role":"","tools":[{"name":"","kind":"bundler|mixer|volume_faker|snipe_bot|multi_wallet|other","url":"","evidence":""}]}. If none, return {"operates":false,"role":"","tools":[]}. NEVER invent. Never use em dashes.`;
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Do they build, own, or operate any token bundler, wallet mixer, volume faker, or multi-wallet snipe tool? Cite their own product pages.`);
+  if (!text) return null;
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try {
+    const parsed = JSON.parse(m[0]);
+    const kinds = /* @__PURE__ */ new Set(["bundler", "mixer", "volume_faker", "snipe_bot", "multi_wallet", "other"]);
+    const tools = (Array.isArray(parsed.tools) ? parsed.tools : []).filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => ({
+      name: t.name.trim(),
+      kind: kinds.has(t.kind) ? t.kind : "other",
+      url: typeof t.url === "string" && /^https?:\/\//.test(t.url) ? t.url : void 0,
+      evidence: (t.evidence || "").toString().trim()
+    })).slice(0, 8);
+    if (!tools.length) return { operates: false, role: "", tools: [] };
+    return { operates: true, role: (parsed.role || "operator").toString().trim(), tools };
+  } catch {
+    return null;
   }
 }
 function fmtFollowers(n) {
@@ -2517,8 +2588,133 @@ ${corpus}`,
   });
 }
 
+// server/adapters/dexscreener.ts
+var BASE = "https://api.dexscreener.com";
+async function lookupToken(address) {
+  try {
+    recordCall("dexscreener", "token-pairs", 0);
+    const res = await fetch(`${BASE}/latest/dex/tokens/${address}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const pairs = data.pairs ?? [];
+    if (!pairs.length) return { address };
+    const top = pairs.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
+    return {
+      address,
+      chain: top.chainId,
+      symbol: top.baseToken?.symbol,
+      priceUsd: top.priceUsd ? Number(top.priceUsd) : void 0,
+      liquidityUsd: top.liquidity?.usd,
+      volume24h: top.volume?.h24,
+      fdv: top.fdv,
+      pairCreatedAt: top.pairCreatedAt
+    };
+  } catch {
+    return null;
+  }
+}
+async function detectTokenLifecycle(ticker, knownAddress) {
+  const sym = ticker.replace(/^\$/, "").trim();
+  if (!sym) return null;
+  try {
+    const res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const pairs = (data.pairs ?? []).filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
+    if (!pairs.length) return null;
+    const byAddr = /* @__PURE__ */ new Map();
+    for (const p of pairs) {
+      const a = p.baseToken?.address;
+      if (!a) continue;
+      let arr = byAddr.get(a);
+      if (!arr) {
+        arr = [];
+        byAddr.set(a, arr);
+      }
+      arr.push(p);
+    }
+    const generations = [...byAddr.entries()].map(([address, ps]) => {
+      const created = ps.map((p) => p.pairCreatedAt).filter((x) => typeof x === "number");
+      const top = ps.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
+      return {
+        address,
+        chain: top.chainId,
+        firstLaunch: created.length ? Math.min(...created) : void 0,
+        liquidityUsd: ps.reduce((s, p) => s + (p.liquidity?.usd ?? 0), 0),
+        priceUsd: top.priceUsd ? Number(top.priceUsd) : void 0,
+        h24: top.priceChange?.h24
+      };
+    }).sort((a, b) => (a.firstLaunch ?? 0) - (b.firstLaunch ?? 0));
+    const migrated = generations.length >= 2;
+    const canon = knownAddress && generations.find((g) => g.address.toLowerCase() === knownAddress.toLowerCase()) || generations[generations.length - 1];
+    let dive = null;
+    if (canon) {
+      const nearZeroLiq = canon.liquidityUsd < 5e3;
+      const crashed = (canon.h24 ?? 0) < -60;
+      if (nearZeroLiq || crashed) {
+        dive = {
+          address: canon.address,
+          detail: `liquidity $${Math.round(canon.liquidityUsd).toLocaleString()}${canon.h24 != null ? `, ${Math.round(canon.h24)}% 24h` : ""}${nearZeroLiq ? " \u2014 effectively dead" : ""}`
+        };
+      }
+    }
+    return { ticker: sym, generations, migrated, dive };
+  } catch {
+    return null;
+  }
+}
+var dexscreenerAdapter = {
+  id: "dexscreener",
+  label: "DexScreener",
+  available: () => true,
+  // keyless
+  async run(ctx) {
+    const promos = ctx.evidence.promotions.filter((p) => p.contract_address);
+    if (!promos.length) return;
+    ctx.emit({ phase: "On-chain", label: "DEX liquidity scan", detail: `Resolving ${promos.length} promoted token(s) on DexScreener\u2026`, tone: "neutral" });
+    for (const p of promos) {
+      const snap = await lookupToken(p.contract_address);
+      if (!snap) continue;
+      const thin = (snap.liquidityUsd ?? 0) < 1e4;
+      p.perf_current = snap.priceUsd;
+      ctx.emit({
+        phase: "On-chain",
+        label: `$${snap.symbol ?? p.ticker}`,
+        detail: `liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}, 24h vol $${Math.round(snap.volume24h ?? 0).toLocaleString()}${thin ? " \u2014 thin liquidity, rug-risk flag" : ""}`,
+        source: "dexscreener",
+        tone: thin ? "warn" : "neutral"
+      });
+    }
+  }
+};
+
+// src/lib/cadence.ts
+var DAY = 864e5;
+var median = (xs) => {
+  if (!xs.length) return 0;
+  const s = [...xs].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2;
+};
+function analyzeCadence(posts, now) {
+  const times = posts.map((p) => p.createdAt).filter((t) => Number.isFinite(t)).sort((a, b) => b - a);
+  if (times.length < 4) return null;
+  const gaps = [];
+  for (let i = 0; i < times.length - 1; i++) gaps.push((times[i] - times[i + 1]) / DAY);
+  const medianGapDays = median(gaps);
+  const recentGapDays = gaps[0];
+  const daysSinceLast = (now - times[0]) / DAY;
+  const half = Math.floor(gaps.length / 2);
+  const recentMedian = median(gaps.slice(0, half || 1));
+  const olderMedian = median(gaps.slice(half)) || medianGapDays;
+  const decaying = olderMedian > 0 && recentMedian >= olderMedian * 3 && recentMedian - olderMedian >= 3;
+  const silent = daysSinceLast >= Math.max(21, medianGapDays * 4);
+  const summary = silent ? `Silent ${Math.round(daysSinceLast)}d (typical gap ~${medianGapDays.toFixed(1)}d): went quiet.` : decaying ? `Cadence thinning: recent gaps ~${recentMedian.toFixed(1)}d vs ~${olderMedian.toFixed(1)}d earlier.` : `Posting steady (~${medianGapDays.toFixed(1)}d gap, last post ${Math.round(daysSinceLast)}d ago).`;
+  return { postsAnalyzed: times.length, daysSinceLast, medianGapDays, recentGapDays, decaying, silent, summary };
+}
+
 // server/adapters/peopledatalabs.ts
-var BASE = "https://api.peopledatalabs.com/v5";
+var BASE2 = "https://api.peopledatalabs.com/v5";
 async function enrichPerson(params) {
   const key = env("PDL_API_KEY");
   if (!key) return null;
@@ -2528,7 +2724,7 @@ async function enrichPerson(params) {
   if (params.company) qs.set("company", params.company);
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
   try {
-    const res = await fetch(`${BASE}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
+    const res = await fetch(`${BASE2}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
     if (!res.ok) {
       recordPdlMatch(false);
       return null;
@@ -2733,13 +2929,13 @@ var githubAdapter = {
 };
 
 // server/adapters/crunchbase.ts
-var BASE2 = "https://api.crunchbase.com/api/v4";
+var BASE3 = "https://api.crunchbase.com/api/v4";
 async function lookupOrganization(name) {
   const key = env("CRUNCHBASE_API_KEY");
   if (!key) return null;
   try {
     recordCall("crunchbase", "org-search", 0, "plan-billed");
-    const res = await fetch(`${BASE2}/searches/organizations`, {
+    const res = await fetch(`${BASE3}/searches/organizations`, {
       method: "POST",
       headers: { "X-cb-user-key": key, "content-type": "application/json" },
       body: JSON.stringify({
@@ -2779,56 +2975,6 @@ var crunchbaseAdapter = {
       if (org.investors?.length) v.investors = Array.from(/* @__PURE__ */ new Set([...v.investors ?? [], ...org.investors]));
       if (org.acquirer && !v.acquirer) v.acquirer = org.acquirer;
       ctx.emit({ phase: "Founder", label: v.project_name, detail: `verified \xB7 ${org.rounds ?? 0} rounds, backers: ${(org.investors ?? []).slice(0, 3).join(", ") || "n/a"}`, source: "crunchbase", tone: "good" });
-    }
-  }
-};
-
-// server/adapters/dexscreener.ts
-var BASE3 = "https://api.dexscreener.com";
-async function lookupToken(address) {
-  try {
-    recordCall("dexscreener", "token-pairs", 0);
-    const res = await fetch(`${BASE3}/latest/dex/tokens/${address}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const pairs = data.pairs ?? [];
-    if (!pairs.length) return { address };
-    const top = pairs.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
-    return {
-      address,
-      chain: top.chainId,
-      symbol: top.baseToken?.symbol,
-      priceUsd: top.priceUsd ? Number(top.priceUsd) : void 0,
-      liquidityUsd: top.liquidity?.usd,
-      volume24h: top.volume?.h24,
-      fdv: top.fdv,
-      pairCreatedAt: top.pairCreatedAt
-    };
-  } catch {
-    return null;
-  }
-}
-var dexscreenerAdapter = {
-  id: "dexscreener",
-  label: "DexScreener",
-  available: () => true,
-  // keyless
-  async run(ctx) {
-    const promos = ctx.evidence.promotions.filter((p) => p.contract_address);
-    if (!promos.length) return;
-    ctx.emit({ phase: "On-chain", label: "DEX liquidity scan", detail: `Resolving ${promos.length} promoted token(s) on DexScreener\u2026`, tone: "neutral" });
-    for (const p of promos) {
-      const snap = await lookupToken(p.contract_address);
-      if (!snap) continue;
-      const thin = (snap.liquidityUsd ?? 0) < 1e4;
-      p.perf_current = snap.priceUsd;
-      ctx.emit({
-        phase: "On-chain",
-        label: `$${snap.symbol ?? p.ticker}`,
-        detail: `liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}, 24h vol $${Math.round(snap.volume24h ?? 0).toLocaleString()}${thin ? " \u2014 thin liquidity, rug-risk flag" : ""}`,
-        source: "dexscreener",
-        tone: thin ? "warn" : "neutral"
-      });
     }
   }
 };
@@ -3359,6 +3505,11 @@ async function coldIntake(ctx) {
     }).map((v) => {
       const rec = {
         project_name: v.name,
+        // Canonical bridge keys — the venture's own X account / domain. Without
+        // these the graph keys the project on its fuzzy name and never connects
+        // it to the same project seen in another audit.
+        x_handle: v.x_handle,
+        domain: v.domain,
         role: v.role,
         period: v.year ?? "",
         outcome: "Active" /* ACTIVE */,
@@ -3413,6 +3564,171 @@ function axisCatalog(roles) {
   }
   return out;
 }
+var handleFrom = (s) => s?.match(/@([A-Za-z0-9_]{2,30})/)?.[1];
+function toFinding(sig, aboutHandle) {
+  const verification = sig.credibility === "evidenced" && sig.independent_source_count >= 2 ? "Verified" : sig.credibility === "rumor" ? "Rumor" : "Reported";
+  const finding_type = sig.category === "drain" || sig.category === "rug" || sig.category === "liquidity_pull" ? "InvestigatorCallout" : "DeceptionFinding";
+  return {
+    finding_type,
+    claim: `@${aboutHandle.replace(/^@/, "")}: ${sig.claim}`,
+    source_url: sig.source_url ?? "",
+    source_date: "",
+    source_author: sig.source,
+    verification_status: verification,
+    independent_source_count: sig.independent_source_count,
+    polarity: -1
+  };
+}
+async function adverseSignalsAndTooling(ctx) {
+  const { evidence } = ctx;
+  const self = ctx.handle.replace(/^@/, "").toLowerCase();
+  const ticker = evidence.promotions.find((p) => p.ticker)?.ticker;
+  const projectTargets = evidence.ventures.map((v) => ({ name: v.project_name, handle: handleFrom(v.evidence_url) ?? handleFrom(v.notes) })).filter((v) => v.handle && v.handle.toLowerCase() !== self).slice(0, 4);
+  const associateTargets = evidence.associates.map((a) => a.associate_handle).filter((h) => h && h.replace(/^@/, "").toLowerCase() !== self).slice(0, 4);
+  ctx.emit({ phase: "Adverse", label: "Scam / rug sweep", detail: `Searching for rug, slow-rug, liquidity-pull, drain, and FUD signals across the subject${ticker ? `, $${ticker.replace(/^\$/, "")}` : ""}, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}\u2026`, source: "grok", tone: "neutral" });
+  const [tooling, subjectSigs, projectSigs, assocSigs] = await Promise.all([
+    detectManipulationTooling(ctx.handle, evidence.profile.display_name),
+    searchAdverseSignals(ctx.handle, "person", ticker),
+    Promise.all(projectTargets.map((p) => searchAdverseSignals(p.handle, "project"))),
+    Promise.all(associateTargets.map((h) => searchAdverseSignals(h, "person")))
+  ]);
+  if (tooling?.operates && tooling.tools.length) {
+    const list = tooling.tools.map((t) => `${t.name} (${t.kind.replace(/_/g, " ")})`).join(", ");
+    evidence.findings.push({
+      finding_type: "ManipulationTooling",
+      claim: `Subject ${tooling.role || "operates"} tooling built for undetectable token manipulation: ${list}.`,
+      source_url: tooling.tools.find((t) => t.url)?.url ?? "",
+      source_date: "",
+      source_author: "own product pages",
+      verification_status: "Verified",
+      independent_source_count: tooling.tools.length,
+      polarity: -1
+    });
+    for (const t of tooling.tools) {
+      evidence.clientEngagements.push({
+        client_name: t.name,
+        service_type: `manipulation_tooling:${t.kind}`,
+        manipulation_service_flag: true,
+        evidence_url: t.url,
+        notes: t.evidence
+      });
+    }
+    ctx.emit({ phase: "Adverse", label: "Manipulation tooling", detail: `Subject builds/operates ${list}. Tools designed to bundle, mix, or fake volume undetectably.`, source: "grok", tone: "bad" });
+  }
+  const pushSigs = (sigs, about) => {
+    let verified = 0;
+    for (const s of sigs) {
+      const f = toFinding(s, about);
+      evidence.findings.push(f);
+      if (f.verification_status === "Verified") verified++;
+    }
+    return verified;
+  };
+  let totalSigs = 0, totalVerified = 0;
+  totalVerified += pushSigs(subjectSigs, self);
+  totalSigs += subjectSigs.length;
+  projectSigs.forEach((sigs, i) => {
+    totalVerified += pushSigs(sigs, projectTargets[i].handle);
+    totalSigs += sigs.length;
+  });
+  assocSigs.forEach((sigs, i) => {
+    totalVerified += pushSigs(sigs, associateTargets[i]);
+    totalSigs += sigs.length;
+  });
+  if (totalSigs) {
+    const worst = totalVerified ? "bad" : "warn";
+    const top = [...subjectSigs, ...projectSigs.flat(), ...assocSigs.flat()].sort((a, b) => b.independent_source_count - a.independent_source_count).slice(0, 3).map((s) => `${s.category.replace(/_/g, " ")}: ${s.claim}`).join(" \xB7 ");
+    ctx.emit({ phase: "Adverse", label: `${totalSigs} adverse signal${totalSigs === 1 ? "" : "s"}`, detail: `${totalVerified} multi-source / evidenced. ${top}`, source: "grok", tone: worst });
+  } else {
+    ctx.emit({ phase: "Adverse", label: "No adverse signals", detail: "No credible rug/scam/drain/FUD complaints surfaced for the subject, its projects, or associates.", source: "grok", tone: "good" });
+  }
+  if (projectTargets.length >= 2) {
+    const teams = await Promise.all(projectTargets.map((p) => findTeam(p.handle, p.name)));
+    const appearances = /* @__PURE__ */ new Map();
+    teams.forEach((team, i) => {
+      for (const member of team) {
+        if (!member.handle) continue;
+        const key = member.handle.replace(/^@/, "").toLowerCase();
+        if (key === self) continue;
+        const rec = appearances.get(key) ?? { name: member.name, projects: /* @__PURE__ */ new Set() };
+        rec.projects.add(projectTargets[i].name);
+        appearances.set(key, rec);
+      }
+    });
+    const overlaps = [...appearances.entries()].filter(([, r]) => r.projects.size >= 2);
+    if (overlaps.length) {
+      const haveAssoc = new Set(evidence.associates.map((a) => a.associate_handle.replace(/^@/, "").toLowerCase()));
+      for (const [key, r] of overlaps) {
+        const projList = [...r.projects].join(", ");
+        if (haveAssoc.has(key)) {
+          const existing = evidence.associates.find((a) => a.associate_handle.replace(/^@/, "").toLowerCase() === key);
+          if (existing) existing.notes = [existing.notes, `also on: ${projList}`].filter(Boolean).join(" \xB7 ");
+        } else {
+          evidence.associates.push({ associate_handle: "@" + key, relation: "cross-project overlap", notes: `appears across ${projList}` });
+        }
+      }
+      ctx.emit({ phase: "Adverse", label: `${overlaps.length} cross-project overlap${overlaps.length === 1 ? "" : "s"}`, detail: overlaps.slice(0, 5).map(([k, r]) => `@${k} (${[...r.projects].join(", ")})`).join(" \xB7 "), source: "grok", tone: "warn" });
+    }
+  }
+}
+async function tokenLifecycle(ctx) {
+  const { evidence } = ctx;
+  const promos = evidence.promotions.filter((p) => p.ticker).slice(0, 3);
+  if (!promos.length) return;
+  await Promise.all(
+    promos.map(async (p) => {
+      const sig = await detectTokenLifecycle(p.ticker, p.contract_address);
+      if (!sig) return;
+      if (sig.dive) {
+        evidence.findings.push({
+          finding_type: "TokenCollapse",
+          claim: `$${sig.ticker} launched and collapsed to near-zero (${sig.dive.detail}).`,
+          source_url: `https://dexscreener.com/search?q=${encodeURIComponent(sig.dive.address)}`,
+          source_date: "",
+          source_author: "dexscreener",
+          verification_status: "Verified",
+          independent_source_count: 1,
+          polarity: -1
+        });
+        ctx.emit({ phase: "Token", label: `$${sig.ticker} collapse`, detail: `${sig.dive.detail}. The dive-after-launch pattern.`, source: "dexscreener", tone: "bad" });
+      }
+      if (sig.migrated) {
+        const gens = sig.generations.length;
+        evidence.findings.push({
+          finding_type: "TokenMigration",
+          claim: `$${sig.ticker} has ${gens} distinct same-ticker contracts on-chain (possible migration/relaunch; unverified same-team).`,
+          source_url: "",
+          source_date: "",
+          source_author: "dexscreener",
+          verification_status: "Reported",
+          independent_source_count: 1,
+          polarity: -1
+        });
+        ctx.emit({ phase: "Token", label: `$${sig.ticker} migration?`, detail: `${gens} same-ticker contracts on-chain. A relaunch restarts the chart; watch what happened right after. (Heuristic: could be an unrelated same-ticker token.)`, source: "dexscreener", tone: "warn" });
+      }
+    })
+  );
+}
+async function postCadence(ctx) {
+  const posts = await getRecentPostsMeta(ctx.handle);
+  const report = analyzeCadence(posts, Date.now());
+  if (!report) return;
+  if (report.silent || report.decaying) {
+    ctx.evidence.findings.push({
+      finding_type: "CadenceDecay",
+      claim: `@${ctx.handle.replace(/^@/, "")}: ${report.summary}`,
+      source_url: "",
+      source_date: "",
+      source_author: "twitterapi.io",
+      verification_status: "Verified",
+      independent_source_count: 1,
+      polarity: -1
+    });
+    ctx.emit({ phase: "Cadence", label: report.silent ? "Went quiet" : "Cadence thinning", detail: report.summary, source: "twitterapi.io", tone: report.silent ? "bad" : "warn" });
+  } else {
+    ctx.emit({ phase: "Cadence", label: "Posting steady", detail: report.summary, source: "twitterapi.io", tone: "neutral" });
+  }
+}
 async function runAudit(rawHandle, emit) {
   resetCost();
   const fixture = findSubject(rawHandle);
@@ -3438,6 +3754,22 @@ async function runAudit(rawHandle, emit) {
       emit({ phase: "Collect", label: `${a.label} error`, detail: String(e), tone: "warn" });
     }
   }
+  const signalPasses = [
+    tokenLifecycle(ctx).catch((e) => {
+      emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
+    })
+  ];
+  if (env("TWITTERAPI_KEY")) {
+    signalPasses.push(postCadence(ctx).catch((e) => {
+      emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" });
+    }));
+  }
+  if (analystAvailable() || env("XAI_API_KEY")) {
+    signalPasses.push(adverseSignalsAndTooling(ctx).catch((e) => {
+      emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
+    }));
+  }
+  await Promise.all(signalPasses);
   if (!evidence.roles.length) {
     const route = classifySubject(evidence.profile.bio);
     evidence.roles = route.applicable_classes.length ? route.applicable_classes : ["MEMBER" /* MEMBER */];

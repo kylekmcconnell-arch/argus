@@ -41,7 +41,7 @@ export async function grokSearch(system: string, user: string, opts?: { maxToolC
         model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
         input: [{ role: "system", content: system }, { role: "user", content: user }],
         tools: [{ type: "web_search" }, { type: "x_search" }],
-        ...(withCap ? { max_tool_calls: opts?.maxToolCalls ?? 4 } : {}),
+        ...(withCap ? { max_tool_calls: opts?.maxToolCalls ?? 6 } : {}),
       }),
       signal: AbortSignal.timeout(45000),
     });
@@ -571,7 +571,7 @@ export async function discoverAffiliations(handle: string, name?: string, oldHan
     "For each, also report the venture's own X handle and website domain if you can find them. " +
     "Reply with ONLY compact JSON: {\"affiliations\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate\",\"year\":\"\",\"evidence\":\"one short source phrase\",\"x_handle\":\"@...\",\"domain\":\"example.com\"}]}. " +
     "Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {\"affiliations\":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role — from their own footprint AND from project accounts announcing them. Search the web and X including historical posts.`, { maxToolCalls: 6, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role — from their own footprint AND from project accounts announcing them. Be exhaustive: a serial operator often has 5-15 ventures across years; keep searching until you have run down every lead. Search the web and X including historical posts.`, { maxToolCalls: 10, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];

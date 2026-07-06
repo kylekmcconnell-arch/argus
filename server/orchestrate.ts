@@ -324,6 +324,11 @@ async function coldIntake(ctx: CollectContext) {
       .map((v) => {
         const rec = {
           project_name: v.name,
+          // Canonical bridge keys — the venture's own X account / domain. Without
+          // these the graph keys the project on its fuzzy name and never connects
+          // it to the same project seen in another audit.
+          x_handle: v.x_handle,
+          domain: v.domain,
           role: v.role,
           period: v.year ?? "",
           outcome: VentureOutcome.ACTIVE,
