@@ -34,10 +34,11 @@ export const PROFILES: Record<SubjectClass, Profile> = {
       F5_reputation_integrity: 18,
       F6_network_quality: 12,
     },
-    caps: { prior_rug_as_principal: 10 },
+    caps: { prior_rug_as_principal: 10, operates_manipulation_tooling: 10 },
     flags: [
       "serial failure pattern: repeated silent shutdowns with no exits",
       "any prior rug or exit scam as a named principal",
+      "builds or operates tooling for undetectable token manipulation (bundlers, mixers, volume fakers, multi-wallet snipe bots): the means and motive to rug",
       "claimed exits unverifiable against acquirer or press",
       "no prior backer or acquirer re-backed the new venture despite a claimed exit",
       "GitHub or product substance absent despite a builder persona",

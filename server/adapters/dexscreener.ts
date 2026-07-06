@@ -45,6 +45,87 @@ export async function lookupToken(address: string): Promise<DexTokenSnapshot | n
   }
 }
 
+// ── Token-lifecycle / migration-dive detection ──
+// The playbook's "a migration restarts the chart, then it dives to zero" signal.
+// A relaunch mints a NEW contract under the SAME ticker, so we search DexScreener
+// by ticker and group pairs into "generations" by base-token address. Two solid
+// caveats are baked in: a same-ticker COLLISION from an unrelated token is
+// possible, so multi-generation is only a HEURISTIC migration flag (reported as
+// "possible"); whereas the COLLAPSE of a single generation (real launch, now
+// near-zero liquidity / crashed) is a self-contained, reliable signal.
+export interface TokenGeneration {
+  address: string;
+  chain?: string;
+  firstLaunch?: number; // earliest pairCreatedAt (epoch ms) across its pairs
+  liquidityUsd: number; // summed across its pairs
+  priceUsd?: number;
+  h24?: number; // 24h price change %
+}
+
+export interface LifecycleSignal {
+  ticker: string;
+  generations: TokenGeneration[]; // oldest first
+  migrated: boolean; // >=2 distinct same-ticker contracts on-chain (heuristic)
+  dive: { address: string; detail: string } | null; // launched, then collapsed
+}
+
+export async function detectTokenLifecycle(ticker: string, knownAddress?: string): Promise<LifecycleSignal | null> {
+  const sym = ticker.replace(/^\$/, "").trim();
+  if (!sym) return null;
+  try {
+    const res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`);
+    if (!res.ok) return null;
+    const data = (await res.json()) as { pairs?: any[] };
+    const pairs = (data.pairs ?? []).filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
+    if (!pairs.length) return null;
+
+    const byAddr = new Map<string, any[]>();
+    for (const p of pairs) {
+      const a = p.baseToken?.address;
+      if (!a) continue;
+      let arr = byAddr.get(a);
+      if (!arr) { arr = []; byAddr.set(a, arr); }
+      arr.push(p);
+    }
+
+    const generations: TokenGeneration[] = [...byAddr.entries()]
+      .map(([address, ps]) => {
+        const created = ps.map((p) => p.pairCreatedAt).filter((x): x is number => typeof x === "number");
+        const top = ps.reduce((a, b) => ((b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a));
+        return {
+          address,
+          chain: top.chainId,
+          firstLaunch: created.length ? Math.min(...created) : undefined,
+          liquidityUsd: ps.reduce((s, p) => s + (p.liquidity?.usd ?? 0), 0),
+          priceUsd: top.priceUsd ? Number(top.priceUsd) : undefined,
+          h24: top.priceChange?.h24,
+        };
+      })
+      .sort((a, b) => (a.firstLaunch ?? 0) - (b.firstLaunch ?? 0));
+
+    const migrated = generations.length >= 2;
+    // Judge the collapse on the known/canonical token if we have it, else the
+    // most recent generation (the post-relaunch chart the playbook cares about).
+    const canon =
+      (knownAddress && generations.find((g) => g.address.toLowerCase() === knownAddress.toLowerCase())) ||
+      generations[generations.length - 1];
+    let dive: { address: string; detail: string } | null = null;
+    if (canon) {
+      const nearZeroLiq = canon.liquidityUsd < 5000;
+      const crashed = (canon.h24 ?? 0) < -60;
+      if (nearZeroLiq || crashed) {
+        dive = {
+          address: canon.address,
+          detail: `liquidity $${Math.round(canon.liquidityUsd).toLocaleString()}${canon.h24 != null ? `, ${Math.round(canon.h24)}% 24h` : ""}${nearZeroLiq ? " — effectively dead" : ""}`,
+        };
+      }
+    }
+    return { ticker: sym, generations, migrated, dive };
+  } catch {
+    return null;
+  }
+}
+
 export const dexscreenerAdapter: Adapter = {
   id: "dexscreener",
   label: "DexScreener",

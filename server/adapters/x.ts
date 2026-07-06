@@ -193,6 +193,28 @@ export async function getRecentPosts(handle: string, limit = 20): Promise<string
   }
 }
 
+// Same source as getRecentPosts, but keeps the timestamp so cadence can be
+// analyzed (getRecentPosts is text-only for claim mining). Pulls a deeper window
+// since cadence needs history, not just the latest handful.
+import type { PostMeta } from "../../src/lib/cadence";
+export async function getRecentPostsMeta(handle: string, limit = 40): Promise<PostMeta[]> {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return [];
+  const u = handle.replace(/^@/, "");
+  try {
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
+    if (!res || !res.ok) return [];
+    const d = (await res.json()) as any;
+    const tweets: any[] = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
+    return tweets
+      .map((t) => ({ text: t.text ?? t.full_text ?? "", createdAt: Date.parse(t.createdAt ?? t.created_at ?? "") }))
+      .filter((t) => t.text && Number.isFinite(t.createdAt))
+      .slice(0, limit);
+  } catch {
+    return [];
+  }
+}
+
 // ── Claim-targeted corpus ────────────────────────────────────────────────
 // Self-claims cluster in ANNOUNCEMENT posts ("launching X", "we raised", "joined
 // as advisor") that are often months old — an active account's newest 20 items
@@ -751,6 +773,99 @@ function parseTeamJSON(text: string | null, selfHandle: string | undefined, sour
       .slice(0, 16);
   } catch {
     return [];
+  }
+}
+
+// ── Adverse-signal sweep ──
+// The playbook's scam/rug/fud search, generalized. Runs over a HANDLE (a founder
+// or a project account) and optionally a TICKER, asking Grok to surface only
+// real, sourced community/investigator complaints: rug / slow-rug / liquidity
+// pull / wallet drains / scam accusations / general FUD. Pressure-testing RECC
+// showed the signal often attaches to the founder's TOOL company, not the token,
+// so this is called per-handle AND per-project, never only per-ticker.
+export type AdverseCategory = "rug" | "slow_rug" | "liquidity_pull" | "drain" | "scam_accusation" | "fud";
+export interface AdverseSignal {
+  category: AdverseCategory;
+  claim: string;        // one-line summary of the complaint / accusation
+  source: string;       // who said it / where (e.g. "Trustpilot", "@handle", "Discord")
+  source_url?: string;
+  independent_source_count: number; // distinct sources making the claim
+  credibility: "evidenced" | "reported" | "rumor"; // evidenced = on-chain/receipts; rumor = unbacked FUD
+}
+
+export async function searchAdverseSignals(handle: string, kind: "person" | "project", ticker?: string): Promise<AdverseSignal[]> {
+  const h = handle.replace(/^@/, "");
+  const subject = kind === "project"
+    ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}`
+    : `the person behind X account @${h}`;
+  const system =
+    "You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, or general community complaints/FUD. " +
+    "Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. " +
+    "Be STRICT and grounded: report ONLY complaints that actually exist with a real source. For EACH, grade credibility: 'evidenced' = backed by on-chain proof, receipts, or many consistent first-hand reports; 'reported' = a real named complaint but unverified; 'rumor' = vague unbacked FUD. Count distinct independent sources. " +
+    "Do NOT invent, do NOT infer guilt, do NOT repeat the subject's own marketing. If there are no real complaints, return an empty list. " +
+    "Reply with ONLY compact JSON: {\"signals\":[{\"category\":\"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud\",\"claim\":\"\",\"source\":\"\",\"source_url\":\"\",\"independent_source_count\":1,\"credibility\":\"evidenced|reported|rumor\"}]}. Never use em dashes.";
+  const text = await grokSearch(system, `Subject: ${subject}. Find real, sourced complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. Grade each by credibility and count independent sources.`);
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const parsed = JSON.parse(m[0]);
+    const cats = new Set<AdverseCategory>(["rug", "slow_rug", "liquidity_pull", "drain", "scam_accusation", "fud"]);
+    const out: any[] = Array.isArray(parsed.signals) ? parsed.signals : [];
+    return out
+      .filter((s) => s && typeof s.claim === "string" && s.claim.trim() && cats.has(s.category))
+      .map((s): AdverseSignal => ({
+        category: s.category as AdverseCategory,
+        claim: s.claim.trim(),
+        source: (s.source || "unattributed").toString().trim(),
+        source_url: typeof s.source_url === "string" && /^https?:\/\//.test(s.source_url) ? s.source_url : undefined,
+        independent_source_count: Math.max(1, Math.min(50, Number(s.independent_source_count) || 1)),
+        credibility: s.credibility === "evidenced" ? "evidenced" : s.credibility === "rumor" ? "rumor" : "reported",
+      }))
+      .slice(0, 12);
+  } catch {
+    return [];
+  }
+}
+
+// ── Manipulation-tooling flag ──
+// The strongest, most objective signal from the RECC test: a founder who BUILDS
+// or OPERATES the means to rug / wash-trade. Detects ties to token bundlers,
+// wallet mixers, volume-fakers, multi-wallet snipe bots, and the like, grounded
+// in the operator's OWN public product pages (e.g. Smithii's Solana Bundler +
+// Mixoor mixer), not rumor.
+export type ToolingKind = "bundler" | "mixer" | "volume_faker" | "snipe_bot" | "multi_wallet" | "other";
+export interface ManipulationTool { name: string; kind: ToolingKind; url?: string; evidence: string }
+export interface ToolingFlag { operates: boolean; role: string; tools: ManipulationTool[] }
+
+export async function detectManipulationTooling(handle: string, name?: string): Promise<ToolingFlag | null> {
+  const h = handle.replace(/^@/, "");
+  const system =
+    "You are a forensic researcher with live web and X search. Determine whether the given person BUILDS, OWNS, or OPERATES any tool whose primary use is undetectable market manipulation of crypto tokens: token BUNDLERS (buy/sell a token across many wallets to disguise concentration), wallet MIXERS / privacy 'cash' tools (move funds without a public trace), VOLUME FAKERS / wash-trading generators, or multi-wallet SNIPE bots. " +
+    "Ground the finding in the operator's OWN public product pages, docs, or posts, not rumor. Report their role (founder|ceo|operator|builder|affiliate) and each qualifying tool with a short evidence phrase and URL if found. Legitimate general token-creation or analytics tools do NOT count; only tools built to hide manipulation. " +
+    "Reply with ONLY compact JSON: {\"operates\":true|false,\"role\":\"\",\"tools\":[{\"name\":\"\",\"kind\":\"bundler|mixer|volume_faker|snipe_bot|multi_wallet|other\",\"url\":\"\",\"evidence\":\"\"}]}. If none, return {\"operates\":false,\"role\":\"\",\"tools\":[]}. NEVER invent. Never use em dashes.";
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Do they build, own, or operate any token bundler, wallet mixer, volume faker, or multi-wallet snipe tool? Cite their own product pages.`);
+  if (!text) return null;
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return null;
+  try {
+    const parsed = JSON.parse(m[0]);
+    const kinds = new Set<ToolingKind>(["bundler", "mixer", "volume_faker", "snipe_bot", "multi_wallet", "other"]);
+    const tools: ManipulationTool[] = (Array.isArray(parsed.tools) ? parsed.tools : [])
+      .filter((t: any) => t && typeof t.name === "string" && t.name.trim())
+      .map((t: any) => ({
+        name: t.name.trim(),
+        kind: kinds.has(t.kind) ? t.kind : "other",
+        url: typeof t.url === "string" && /^https?:\/\//.test(t.url) ? t.url : undefined,
+        evidence: (t.evidence || "").toString().trim(),
+      }))
+      .slice(0, 8);
+    // Only a positive when there is at least one concrete tool; a bare
+    // operates:true with no tool is treated as no finding.
+    if (!tools.length) return { operates: false, role: "", tools: [] };
+    return { operates: true, role: (parsed.role || "operator").toString().trim(), tools };
+  } catch {
+    return null;
   }
 }
 
