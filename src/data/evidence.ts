@@ -94,6 +94,10 @@ export interface CollectedEvidence {
   notableFollowers: NotableFollower[]; // respected accounts that follow the subject
   contradictions: Contradiction[]; // internal contradictions across materials
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
+  // Second-hop: the people behind the subject's top ventures (subject → venture →
+  // its team). `key` is the venture's canonical graph key so the edges attach to
+  // the same node the venture already occupies.
+  ventureTeams?: { key: string; name: string; people: { name: string; handle?: string; role?: string }[] }[];
 }
 
 export function emptyEvidence(handle: string): CollectedEvidence {

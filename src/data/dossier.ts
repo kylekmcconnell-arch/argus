@@ -4,6 +4,7 @@
 import {
   Audit,
   SubjectClass,
+  canonicalEntityKey,
   type AuditReport,
   type PanoptesNode,
   type PanoptesEdge,
@@ -73,16 +74,36 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   const subjectKey = (graph.nodes.find((n) => (n as { subject?: boolean }).subject)?.key as string) ?? ev.profile.handle;
   const hasNode = (key: string) => graph.nodes.some((n) => String(n.key).toLowerCase() === key.toLowerCase());
   for (const p of ev.webTeam ?? []) {
-    const pkey = p.handle ?? p.name;
+    if (!p.handle && !p.name) continue;
+    // Canonical key (@handle when known) so a team member bridges to their own
+    // audit, and their other projects merge onto those projects' nodes.
+    const pkey = canonicalEntityKey({ handle: p.handle, name: p.name });
     if (!pkey) continue;
-    if (!hasNode(pkey)) graph.nodes.push({ type: "Person", key: pkey, role: p.role });
+    if (!hasNode(pkey)) graph.nodes.push({ type: "Person", key: pkey, label: p.name, role: p.role } as PanoptesNode);
     graph.edges.push({ src: subjectKey, dst: pkey, type: "TEAM", role: p.role });
     for (const pr of p.projects ?? []) {
       if (!pr.name) continue;
-      if (!hasNode(pr.name)) graph.nodes.push({ type: "Company", key: pr.name });
-      graph.edges.push({ src: pkey, dst: pr.name, type: "WORKED_ON", role: pr.role });
+      const prKey = canonicalEntityKey({ name: pr.name });
+      if (!prKey) continue;
+      if (!hasNode(prKey)) graph.nodes.push({ type: "Company", key: prKey, label: pr.name } as PanoptesNode);
+      graph.edges.push({ src: pkey, dst: prKey, type: "WORKED_ON", role: pr.role });
     }
   }
+  // Second hop: the people behind the subject's ventures (subject → venture →
+  // its team). Keyed canonically so a venture's team member bridges to their own
+  // audit, and merges onto the subject's associate node when they're the same
+  // person — turning the star into a web.
+  for (const vt of ev.ventureTeams ?? []) {
+    if (!vt.key) continue;
+    if (!hasNode(vt.key)) graph.nodes.push({ type: "Company", key: vt.key, label: vt.name } as PanoptesNode);
+    for (const person of vt.people) {
+      const pk = canonicalEntityKey({ handle: person.handle, name: person.name });
+      if (!pk) continue;
+      if (!hasNode(pk)) graph.nodes.push({ type: "Person", key: pk, label: person.name, role: person.role } as PanoptesNode);
+      graph.edges.push({ src: pk, dst: vt.key, type: "WORKED_ON", role: person.role });
+    }
+  }
+
   // PDL-resolved emails as graph nodes, keyed IDENTICALLY to the leaked GitHub
   // commit emails (email:<addr>) — so if a project's anon dev committed under an
   // email PDL ties to this named person, the two audits bridge to one node.

@@ -895,14 +895,27 @@ function assembleDossier(ev, live) {
   const subjectKey = graph.nodes.find((n) => n.subject)?.key ?? ev.profile.handle;
   const hasNode = (key) => graph.nodes.some((n) => String(n.key).toLowerCase() === key.toLowerCase());
   for (const p of ev.webTeam ?? []) {
-    const pkey = p.handle ?? p.name;
+    if (!p.handle && !p.name) continue;
+    const pkey = canonicalEntityKey({ handle: p.handle, name: p.name });
     if (!pkey) continue;
-    if (!hasNode(pkey)) graph.nodes.push({ type: "Person", key: pkey, role: p.role });
+    if (!hasNode(pkey)) graph.nodes.push({ type: "Person", key: pkey, label: p.name, role: p.role });
     graph.edges.push({ src: subjectKey, dst: pkey, type: "TEAM", role: p.role });
     for (const pr of p.projects ?? []) {
       if (!pr.name) continue;
-      if (!hasNode(pr.name)) graph.nodes.push({ type: "Company", key: pr.name });
-      graph.edges.push({ src: pkey, dst: pr.name, type: "WORKED_ON", role: pr.role });
+      const prKey = canonicalEntityKey({ name: pr.name });
+      if (!prKey) continue;
+      if (!hasNode(prKey)) graph.nodes.push({ type: "Company", key: prKey, label: pr.name });
+      graph.edges.push({ src: pkey, dst: prKey, type: "WORKED_ON", role: pr.role });
+    }
+  }
+  for (const vt of ev.ventureTeams ?? []) {
+    if (!vt.key) continue;
+    if (!hasNode(vt.key)) graph.nodes.push({ type: "Company", key: vt.key, label: vt.name });
+    for (const person of vt.people) {
+      const pk = canonicalEntityKey({ handle: person.handle, name: person.name });
+      if (!pk) continue;
+      if (!hasNode(pk)) graph.nodes.push({ type: "Person", key: pk, label: person.name, role: person.role });
+      graph.edges.push({ src: pk, dst: vt.key, type: "WORKED_ON", role: person.role });
     }
   }
   for (const email of ev.profile.identity_emails ?? []) {
@@ -3583,7 +3596,7 @@ async function adverseSignalsAndTooling(ctx) {
   const { evidence } = ctx;
   const self = ctx.handle.replace(/^@/, "").toLowerCase();
   const ticker = evidence.promotions.find((p) => p.ticker)?.ticker;
-  const projectTargets = evidence.ventures.map((v) => ({ name: v.project_name, handle: handleFrom(v.evidence_url) ?? handleFrom(v.notes) })).filter((v) => v.handle && v.handle.toLowerCase() !== self).slice(0, 4);
+  const projectTargets = evidence.ventures.map((v) => ({ name: v.project_name, handle: (v.x_handle ? v.x_handle.replace(/^@/, "") : void 0) ?? handleFrom(v.evidence_url) ?? handleFrom(v.notes) })).filter((v) => v.handle && v.handle.toLowerCase() !== self).slice(0, 4);
   const associateTargets = evidence.associates.map((a) => a.associate_handle).filter((h) => h && h.replace(/^@/, "").toLowerCase() !== self).slice(0, 4);
   ctx.emit({ phase: "Adverse", label: "Scam / rug sweep", detail: `Searching for rug, slow-rug, liquidity-pull, drain, and FUD signals across the subject${ticker ? `, $${ticker.replace(/^\$/, "")}` : ""}, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}\u2026`, source: "grok", tone: "neutral" });
   const [tooling, subjectSigs, projectSigs, assocSigs] = await Promise.all([
@@ -3644,6 +3657,15 @@ async function adverseSignalsAndTooling(ctx) {
   }
   if (projectTargets.length >= 2) {
     const teams = await Promise.all(projectTargets.map((p) => findTeam(p.handle, p.name)));
+    ctx.evidence.ventureTeams = projectTargets.map((p, i) => ({
+      key: canonicalEntityKey({ handle: p.handle, name: p.name }),
+      name: p.name,
+      people: (teams[i] ?? []).filter((m) => (m.handle || m.name) && m.handle?.replace(/^@/, "").toLowerCase() !== self).slice(0, 8).map((m) => ({ name: m.name, handle: m.handle, role: m.role }))
+    })).filter((vt) => vt.people.length > 0);
+    if (ctx.evidence.ventureTeams.length) {
+      const total = ctx.evidence.ventureTeams.reduce((n, vt) => n + vt.people.length, 0);
+      ctx.emit({ phase: "Network", label: "Venture teams mapped", detail: `${total} people across ${ctx.evidence.ventureTeams.length} venture${ctx.evidence.ventureTeams.length === 1 ? "" : "s"} wired into the graph \u2014 subject \u2192 venture \u2192 the people behind it.`, source: "grok", tone: "good" });
+    }
     const appearances = /* @__PURE__ */ new Map();
     teams.forEach((team, i) => {
       for (const member of team) {

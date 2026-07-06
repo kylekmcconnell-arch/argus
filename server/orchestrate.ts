@@ -10,7 +10,7 @@
 //    fixture dossier unchanged, so the demo always works.
 // The engine always owns caps, banding and the composite verdict.
 
-import { getProfile, classifySubject, SubjectClass, VentureOutcome } from "../src/engine";
+import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEntityKey } from "../src/engine";
 import { env } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
@@ -427,7 +427,7 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
   // Targets: the subject (as person), and the top discovered ventures (as
   // projects), each with a recoverable @handle so the search is grounded.
   const projectTargets = evidence.ventures
-    .map((v) => ({ name: v.project_name, handle: handleFrom(v.evidence_url) ?? handleFrom(v.notes) }))
+    .map((v) => ({ name: v.project_name, handle: (v.x_handle ? v.x_handle.replace(/^@/, "") : undefined) ?? handleFrom(v.evidence_url) ?? handleFrom(v.notes) }))
     .filter((v) => v.handle && v.handle.toLowerCase() !== self)
     .slice(0, 4);
   const associateTargets = evidence.associates
@@ -507,6 +507,24 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
   //    subject's ventures is the internal co-occurrence the playbook looks for.
   if (projectTargets.length >= 2) {
     const teams = await Promise.all(projectTargets.map((p) => findTeam(p.handle!, p.name)));
+    // Feed the FULL second hop into the graph: subject → venture → each of its
+    // people. These teams were already fetched for the Venn below; wiring them as
+    // venture→person edges (keyed canonically) is what turns the graph from a
+    // shallow star into a web, and cross-links a venture's team member to the
+    // subject's associates / another audit automatically. (The Venn overlap logic
+    // that follows is unchanged — it still flags people recurring across ventures.)
+    ctx.evidence.ventureTeams = projectTargets.map((p, i) => ({
+      key: canonicalEntityKey({ handle: p.handle, name: p.name }),
+      name: p.name,
+      people: (teams[i] ?? [])
+        .filter((m) => (m.handle || m.name) && m.handle?.replace(/^@/, "").toLowerCase() !== self)
+        .slice(0, 8)
+        .map((m) => ({ name: m.name, handle: m.handle, role: m.role })),
+    })).filter((vt) => vt.people.length > 0);
+    if (ctx.evidence.ventureTeams.length) {
+      const total = ctx.evidence.ventureTeams.reduce((n, vt) => n + vt.people.length, 0);
+      ctx.emit({ phase: "Network", label: "Venture teams mapped", detail: `${total} people across ${ctx.evidence.ventureTeams.length} venture${ctx.evidence.ventureTeams.length === 1 ? "" : "s"} wired into the graph — subject → venture → the people behind it.`, source: "grok", tone: "good" });
+    }
     const appearances = new Map<string, { name: string; projects: Set<string> }>();
     teams.forEach((team, i) => {
       for (const member of team) {
