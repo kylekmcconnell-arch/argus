@@ -8,6 +8,7 @@ import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
+import { AddInfo } from "./AddInfo";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
@@ -433,6 +434,11 @@ export function InvestigationReport({
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="mt-4">
           <MethodologyChecklist checks={tokenChecks(token)} />
+        </div>
+
+        {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
+        <div className="mt-3">
+          <AddInfo subject={`$${token.symbol}`} />
         </div>
 
         <div className="mt-4 rounded-xl border border-line bg-panel/40 p-4 text-[12px] leading-relaxed text-ink-faint">

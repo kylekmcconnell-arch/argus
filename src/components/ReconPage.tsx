@@ -11,6 +11,7 @@ import { recordContribution } from "../graph/store";
 import { fetchWebTeam, type WebPerson } from "../lib/investigation";
 import { ProjectResearch } from "./ProjectResearch";
 import { resolveProjectToken, type ResolvedProjectToken } from "../lib/resolveProjectToken";
+import { AddInfo } from "./AddInfo";
 import { SiteHistory } from "./SiteHistory";
 import { SiteInfra } from "./SiteInfra";
 import { ProjectXAccount } from "./ProjectXAccount";
@@ -519,6 +520,9 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, 
 
           {/* deleted-content archaeology: what the site removed over time */}
           {reconHost && <SiteHistory domain={reconHost} />}
+
+          {/* analyst augmentation — add a piece the recon missed (verified before publish) */}
+          {reconHost && <AddInfo subject={reconHost} />}
         </>
       )}
     </div>

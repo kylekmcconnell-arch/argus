@@ -10,6 +10,7 @@ import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
+import { AddInfo } from "./AddInfo";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
 import { ServiceAlert } from "./ServiceAlert";
@@ -440,6 +441,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="mt-5">
           <MethodologyChecklist checks={tokenChecks(d)} />
+        </div>
+
+        {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
+        <div className="mt-3">
+          <AddInfo subject={`$${d.symbol}`} />
         </div>
 
         <div className="mt-8 rounded-xl border border-line bg-panel/40 p-5">

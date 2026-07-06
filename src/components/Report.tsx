@@ -15,6 +15,7 @@ import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { personChecks } from "../lib/scanChecklist";
+import { AddInfo } from "./AddInfo";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
@@ -867,6 +868,11 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               roles,
               hasAssociates: (evidence.associates?.length ?? 0) > 0,
             })} />
+          </div>
+
+          {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
+          <div className="min-w-0 lg:col-span-2">
+            <AddInfo subject={report.handle} />
           </div>
         </div>
 
