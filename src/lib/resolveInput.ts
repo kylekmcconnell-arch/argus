@@ -27,11 +27,17 @@ export function resolveInput(raw: string): ResolvedInput {
     return { kind: "token", ref: s, via: "solana" };
   }
 
-  // A website / project URL -> site recon. X/Twitter links stay handles.
-  if (!/x\.com|twitter\.com/i.test(s)) {
-    if (HTTP_URL.test(s)) return { kind: "site", ref: s };
-    if (!s.startsWith("@") && DOMAIN.test(s) && !NAME_SERVICE.test(s)) return { kind: "site", ref: s };
-  }
+  // An X/Twitter profile URL -> extract the handle (x.com/VulcanForged ->
+  // VulcanForged), never send the whole URL to the handle audit. Skip non-profile
+  // paths (home, intent, search, etc.).
+  const NOISE = /^(home|explore|notifications|messages|i|intent|search|hashtag|settings|share|status|about|tos|privacy)$/i;
+  const xUrl = s.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,30})/i);
+  if (xUrl && !NOISE.test(xUrl[1])) return { kind: "handle", ref: xUrl[1] };
 
-  return { kind: "handle", ref: s };
+  // A website / project URL -> site recon.
+  if (HTTP_URL.test(s)) return { kind: "site", ref: s };
+  if (!s.startsWith("@") && DOMAIN.test(s) && !NAME_SERVICE.test(s)) return { kind: "site", ref: s };
+
+  // A bare handle -> strip the leading @ so downstream gets the clean username.
+  return { kind: "handle", ref: s.replace(/^@/, "") };
 }

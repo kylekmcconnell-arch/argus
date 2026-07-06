@@ -8,7 +8,19 @@ import { isWatched, toggleWatch } from "../lib/watchlist";
 import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
-import { xAvatar } from "../lib/avatars";
+import { xAvatar, personAvatar } from "../lib/avatars";
+import { explorer, shortAddr, walletTier } from "../lib/wallets";
+import { IdentitySweep } from "./IdentitySweep";
+import { PfpCheck } from "./PfpCheck";
+import { KolReport } from "./KolReport";
+import { NewsSection } from "./NewsSection";
+import { VcReport } from "./VcReport";
+import { ProjectIntel } from "./ProjectIntel";
+import { purgeSubject } from "../lib/purge";
+import { ServiceAlert } from "./ServiceAlert";
+import { LegalScreen } from "./LegalScreen";
+import { SanctionsNameScreen } from "./SanctionsNameScreen";
+import { RingAlert } from "./RingAlert";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -74,6 +86,20 @@ function Section({ title, kicker, children }: { title: string; kicker?: string; 
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
     <div className={`rounded-xl border border-line bg-panel/70 ${className}`}>{children}</div>
+  );
+}
+
+// Copy a full wallet address (the row shows a truncated form).
+function CopyAddr({ text }: { text: string }) {
+  const [done, setDone] = useState(false);
+  return (
+    <button
+      onClick={() => navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); })}
+      className="shrink-0 text-[10.5px] text-ink-faint transition hover:text-ink"
+      title="Copy full address"
+    >
+      {done ? "copied" : "copy"}
+    </button>
   );
 }
 
@@ -269,7 +295,7 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
 
 export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onOpenProject?: (name: string, domain?: string) => void }) {
   const f = dossier;
-  const { report, graph, founderSummary, evidence } = dossier;
+  const { report, graph, founderSummary, evidence, webTeam } = dossier;
   const roles = report.roles as SubjectClass[];
   const m = verdictMeta(report.composite_verdict);
   const [watched, setWatched] = useState(() => isWatched(report.handle));
@@ -327,6 +353,12 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             {f.live ? "● LIVE" : "CURATED"}
           </span>
           <div className="ml-auto flex items-center gap-2">
+            {onAudit && (
+              <button onClick={() => onAudit(report.handle)} title="Run this audit again, fresh" className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
+                Rescan
+              </button>
+            )}
             <button onClick={share} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copied ? "Copied ✓" : "Share"}</button>
             <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
               {watched ? "★ Watching" : "☆ Watch"}
@@ -337,14 +369,27 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             >
               New audit
             </button>
+            <button
+              onClick={() => {
+                if (!window.confirm(`Delete ${report.handle} everywhere (audit log, stored report, trust graph)? This cannot be undone. You can always audit it again later.`)) return;
+                purgeSubject(report.handle);
+                onReset();
+              }}
+              title="Remove this report everywhere and start from scratch"
+              className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-faint transition hover:border-avoid hover:text-avoid"
+            >
+              Delete
+            </button>
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-5xl px-5">
+        <div className="mt-4"><ServiceAlert /></div>
+        <RingAlert handle={report.handle} onAudit={onAudit} />
         {/* subject identity */}
         <div className="mt-6 flex flex-wrap items-start gap-4">
-          <Avatar src={xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />
+          <Avatar src={f.avatar_url || xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <h1 className="text-[19px] font-semibold tracking-tight text-ink">{f.display_name}</h1>
@@ -354,6 +399,12 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-ink-faint">
               <span><span className="text-ink-dim">{f.followers}</span> followers</span>
               <span>joined {f.joined}</span>
+              {typeof f.days_since_post === "number" && (
+                <span className={f.days_since_post >= 21 ? "text-avoid" : "text-ink-faint"}>
+                  {f.days_since_post >= 21 ? "⚠ " : ""}
+                  {f.days_since_post === 0 ? "posted today" : f.days_since_post === 1 ? "posted yesterday" : `last posted ${f.days_since_post}d ago`}
+                </span>
+              )}
               <span className="flex items-center gap-1.5">
                 {roles.map((r) => (
                   <span key={r} className="rounded border border-line px-1.5 py-0.5 text-ink-dim">
@@ -365,7 +416,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             {/* follower quality: high-reach + known accounts that follow this subject */}
             {f.notableFollowers.length > 0 && (
               <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                <span className="text-[11px] text-ink-faint">Followed by</span>
+                <span className="text-[11px] text-ink-faint">Top followers</span>
                 {f.notableFollowers.slice(0, 10).map((n) => {
                   const big = (n.count ?? 0) >= 1e6;
                   return (
@@ -386,6 +437,12 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               </div>
             )}
           </div>
+        </div>
+
+        {/* sanctions + legal history — screens for a RESOLVED real name (both self-gate on pseudonyms) */}
+        <div className="mt-4 space-y-2">
+          <SanctionsNameScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
+          <LegalScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
         </div>
 
         {/* verdict hero */}
@@ -418,20 +475,78 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
           </div>
         </div>
 
-        {/* identity callout */}
-        <div className="mt-3 flex items-start gap-3 rounded-xl border border-line bg-panel/40 px-4 py-3">
-          <span className="mono mt-0.5 rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-line-2)", color: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-ink-dim)" }}>
-            {report.identity_confidence}
-          </span>
-          <div className="min-w-0">
-            <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.identity_note}</p>
+        {/* identity: when a named team resolved it, SHOW the team here (the note
+            would just narrate the same names); otherwise show the note.
+            NOT for KOLs: a KOL's display name colliding with a real project (e.g.
+            "@KaminoCrypto" vs the Kamino protocol) pulled that project's team in by
+            NAME and wrongly presented it as this handle's identity. A KOL is a
+            pseudonymous individual, not a project team — the name-search team is a
+            collision, and the contradictions section already explains it. */}
+        {report.governing_role !== "KOL" && webTeam && webTeam.length > 0 ? (
+          <div className="mt-3">
+            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+              <span className="mono rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: "var(--color-line-2)", color: "var(--color-ink-dim)" }}>{report.identity_confidence}</span>
+              <span className="text-[11px] text-ink-faint">identity resolved through the named team · click a handle to audit them</span>
+            </div>
+            <Card className="divide-y divide-line/60">
+              {webTeam.map((p, i) => (
+                <div key={i} className="px-4 py-2.5 text-[12.5px]">
+                  <div className="flex items-start justify-between gap-3">
+                    <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                      <Avatar src={personAvatar(p.handle, p.linkedin)} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[9px]" />
+                      <span className="text-ink">{p.name}</span>
+                      {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
+                      <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-dim">{p.role}</span>
+                      {p.linkedin && (
+                        <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                      )}
+                      {p.evidence && <span className="text-[10.5px] text-ink-faint">· {p.evidence}</span>}
+                      <span className="text-[9.5px] text-ink-faint">({p.source})</span>
+                    </span>
+                    {p.handle && onAudit ? (
+                      <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
+                    ) : (
+                      <span className="mono shrink-0 text-[10.5px] text-ink-faint">named only</span>
+                    )}
+                  </div>
+                  {p.projects && p.projects.length > 0 && (
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-[26px] text-[10.5px] text-ink-faint">
+                      <span>also:</span>
+                      {p.projects.map((pr, j) => (
+                        onOpenProject ? (
+                          <button key={j} onClick={() => onOpenProject(pr.name)} title="Dig everyone on this project" className="rounded border border-line px-1.5 py-0.5 text-ink-dim transition hover:border-signal-dim hover:text-signal-dim">
+                            {pr.name}{pr.role ? <span className="text-ink-faint"> · {pr.role}</span> : null}
+                          </button>
+                        ) : (
+                          <span key={j} className="rounded border border-line px-1.5 py-0.5 text-ink-dim">{pr.name}{pr.role ? ` · ${pr.role}` : ""}</span>
+                        )
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </Card>
             {f.prior_handles && f.prior_handles.length > 0 && (
               <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: "var(--color-caution)" }}>
                 ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
               </p>
             )}
           </div>
-        </div>
+        ) : (
+          <div className="mt-3 flex items-start gap-3 rounded-xl border border-line bg-panel/40 px-4 py-3">
+            <span className="mono mt-0.5 rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-line-2)", color: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-ink-dim)" }}>
+              {report.identity_confidence}
+            </span>
+            <div className="min-w-0">
+              <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.identity_note}</p>
+              {f.prior_handles && f.prior_handles.length > 0 && (
+                <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: "var(--color-caution)" }}>
+                  ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
+                </p>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* contradictions — claims that do not match the evidence */}
         {f.contradictions.length > 0 && (
@@ -515,8 +630,59 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
           })()}
         </Section>
 
+
         {/* signature modules */}
         <div className="grid gap-3 lg:grid-cols-2">
+          {evidence.wallets.length > 0 && (
+            <div className="min-w-0">
+              <Section title="Wallets & on-chain links" kicker="addresses tied to them · ranked by attribution strength">
+                <Card className="divide-y divide-line/60">
+                  {[...evidence.wallets]
+                    .sort((a, b) => walletTier(a).rank - walletTier(b).rank)
+                    .map((w, i) => {
+                      const t = walletTier(w);
+                      const flags = [
+                        w.sold_into_own_promo ? "sold into own promo" : "",
+                        w.scam_adjacent_flow ? "scam-adjacent flow" : "",
+                      ].filter(Boolean);
+                      return (
+                        <div key={i} className="px-4 py-2.5 text-[12.5px]">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] uppercase tracking-wide text-ink-faint">
+                              {w.chain === "solana" ? "SOL" : "EVM"}
+                            </span>
+                            <a href={explorer(w)} target="_blank" rel="noreferrer" className="mono truncate text-signal underline-offset-2 hover:underline">{shortAddr(w.address)}</a>
+                            <CopyAddr text={w.address} />
+                            {w.link_evidence_url && (
+                              <a href={w.link_evidence_url} target="_blank" rel="noreferrer" className="shrink-0 text-[10.5px] text-signal-dim hover:underline">proof</a>
+                            )}
+                            <span className="mono ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px]" style={{ color: t.color, border: `1px solid ${t.color}40` }}>
+                              {t.label}
+                            </span>
+                          </div>
+                          {(w.notes || w.activity_summary) && (
+                            <div className="mt-1 text-[11px] leading-snug text-ink-faint">
+                              {[w.notes, w.activity_summary].filter(Boolean).join(" · ")}
+                            </div>
+                          )}
+                          {(flags.length > 0 || w.positive_signals) && (
+                            <div className="mt-1.5 flex flex-wrap gap-1">
+                              {flags.map((fl) => (
+                                <span key={fl} className="mono rounded border border-avoid/40 px-1 py-0.5 text-[9.5px] text-avoid">{fl}</span>
+                              ))}
+                              {w.positive_signals && (
+                                <span className="mono rounded border border-pass/40 px-1 py-0.5 text-[9.5px] text-pass">{w.positive_signals}</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </Card>
+              </Section>
+            </div>
+          )}
+
           {evidence.ventures.length > 0 && (
             <div className="min-w-0">
               <Section title="Ventures & affiliations" kicker="every company tied to them · corroborated where possible">
@@ -625,6 +791,58 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               </Section>
             </div>
           )}
+
+          <div className="min-w-0 lg:col-span-2">
+            <Section title="Profile photo" kicker="is the face real, or AI-generated / stock / a logo standing in for a person?">
+              <PfpCheck handle={report.handle} brand={(webTeam?.length ?? 0) > 0} />
+            </Section>
+          </div>
+
+          {/* The old "On-chain reality check" (a single promoted token → deployer)
+              was removed: for KOLs the KOL report below is the richer superset, for
+              funds a portfolio token isn't a promotion, and for everyone else it
+              duplicated the token's own audit. Deployer/funder forensics live on
+              each token's audit page. */}
+
+          {roles.some((r) => r === "INVESTOR") && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="VC track record" kicker="their portfolio → each token bet priced on-chain: a fund graded on how its bets ended">
+                <VcReport handle={report.handle} name={f.display_name || report.handle} onAudit={onAudit} />
+              </Section>
+            </div>
+          )}
+
+          {roles.some((r) => r === "KOL") && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="KOL report" kicker="a promoter's threat model: did their shilled tokens rug, and is their reach real?">
+                <KolReport handle={report.handle} promotions={evidence.promotions ?? []} associates={evidence.associates ?? []} onAudit={onAudit} />
+              </Section>
+            </div>
+          )}
+
+          {(() => {
+            // PROJECT accounts: domain age + audit-claim check from the bio link.
+            const dom = (f.bio.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1] ?? "").toLowerCase();
+            return roles.some((r) => r === "PROJECT") && dom ? (
+              <div className="min-w-0 lg:col-span-2">
+                <Section title="Project intelligence" kicker="domain age + claimed security audits — an established brand on a fresh domain is a contradiction">
+                  <ProjectIntel domain={dom} />
+                </Section>
+              </div>
+            ) : null;
+          })()}
+
+          <div className="min-w-0 lg:col-span-2">
+            <Section title="In the news" kicker="recent press — funding, launches, hacks, exits; an empty trail is itself a signal">
+              <NewsSection query={f.display_name || report.handle} handle={report.handle} />
+            </Section>
+          </div>
+
+          <div className="min-w-0 lg:col-span-2">
+            <Section title="Identity continuity" kicker="rebrands + the same handle across GitHub, Farcaster, Reddit, Telegram">
+              <IdentitySweep handle={report.handle} auto />
+            </Section>
+          </div>
 
           <div className="min-w-0 lg:col-span-2">
             <Section title="Connection web" kicker="click any node to open it · subject → projects → the people behind them">

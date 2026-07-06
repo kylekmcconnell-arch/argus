@@ -3,6 +3,7 @@ var PROVIDERS = [
   { id: "grok", label: "Grok (X content)", env: ["XAI_API_KEY"], free: false, feeds: "testimonial acknowledgment, recent activity, sentiment" },
   { id: "twitterapi", label: "twitterapi.io (X follow graph)", env: ["TWITTERAPI_KEY"], free: false, feeds: "follower/following graph, profile, account age" },
   { id: "coingecko", label: "CoinGecko", env: ["COINGECKO_API_KEY"], free: true, feeds: "token price/mcap, call performance (K2)" },
+  { id: "cryptorank", label: "CryptoRank", env: ["CRYPTORANK_API_KEY"], free: false, feeds: "market intel: rank, ATH drawdown, dilution, unlock/vesting flags" },
   { id: "dexscreener", label: "DexScreener", env: [], free: true, feeds: "live DEX liquidity/volume, rug signals" },
   { id: "crunchbase", label: "Crunchbase", env: ["CRUNCHBASE_API_KEY"], free: false, feeds: "ventures, investors, repeat backing (F2/F3/I2)" },
   { id: "peopledatalabs", label: "People Data Labs", env: ["PDL_API_KEY"], free: false, feeds: "identity, off-LinkedIn career history (F1/F2)" },
@@ -33,6 +34,7 @@ var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
 // src/engine/taxonomy.ts
 var SubjectClass = /* @__PURE__ */ ((SubjectClass2) => {
   SubjectClass2["FOUNDER"] = "FOUNDER";
+  SubjectClass2["PROJECT"] = "PROJECT";
   SubjectClass2["KOL"] = "KOL";
   SubjectClass2["INVESTOR"] = "INVESTOR";
   SubjectClass2["ADVISOR"] = "ADVISOR";
@@ -146,6 +148,35 @@ var PROFILES = {
       "X history"
     ]
   },
+  ["PROJECT" /* PROJECT */]: {
+    label: "Project / Protocol",
+    lens: "Evaluated as an organization, not a person: a token, protocol, product, or company's own brand account. The question is whether a real team ships a real product with honest tokenomics, or whether it is a hype shell built to exit.",
+    axes: {
+      P1_team_and_identity: 16,
+      P2_product_substance: 24,
+      P3_token_conduct: 20,
+      P4_backing_and_partners: 14,
+      P5_traction_and_liveness: 14,
+      P6_transparency_integrity: 12
+    },
+    caps: { team_prior_rug: 10, abandoned_or_dormant: 25 },
+    flags: [
+      "no named team behind a project raising money or holding a token",
+      "the team (or its members) rugged or abandoned a prior project",
+      "product is vaporware: no working app, no GitHub, no verifiable users",
+      "token conduct: insider/team dumping, unlocked liquidity, broken tokenomics promises",
+      "scrubbed history: team/advisors/audits removed from the site over time",
+      "dormant: the account has gone silent for weeks while the token still trades"
+    ],
+    sources: [
+      "the project website + its Wayback history",
+      "GitHub / on-chain contract activity",
+      "DexScreener / on-chain token conduct",
+      "named team + their track record",
+      "backer / partner confirmations",
+      "X posting cadence"
+    ]
+  },
   ["KOL" /* KOL */]: {
     label: "KOL / Promoter",
     lens: "Evaluated against the roster KB and on-chain behaviour. The question is whether their calls create value for followers or extract it.",
@@ -174,7 +205,7 @@ var PROFILES = {
     ]
   },
   ["INVESTOR" /* INVESTOR */]: {
-    label: "Investor / Fund",
+    label: "Venture Capital / Fund",
     lens: "Evaluated against fund databases and the reality of claimed relationships. The question is whether the track record and endorsements are real.",
     axes: {
       I1_identity_legitimacy: 15,
@@ -333,6 +364,8 @@ function scoreAxis(testimonials, axisWeight) {
 
 // src/engine/router.ts
 var PATTERNS = {
+  // Professional capital allocation only. Bare "investing"/"angel" bio talk is
+  // retail/KOL noise, not a fund — those words deliberately do NOT score here.
   ["INVESTOR" /* INVESTOR */]: [
     /\bventure\b/i,
     /\bcapital\b/i,
@@ -342,8 +375,7 @@ var PATTERNS = {
     /\bgeneral partner\b/i,
     /\blimited partner\b/i,
     /\bportfolio\b/i,
-    /\bangel\b/i,
-    /\binvest(or|ing|ments?)\b/i,
+    /\bangel investor\b/i,
     /\blaunchpad\b/i,
     /\baccelerator\b/i
   ],
@@ -357,6 +389,25 @@ var PATTERNS = {
     /\bwe'?re building\b/i,
     /\bcreator of\b/i,
     /\bfounded\b/i
+  ],
+  // A project/protocol's OWN brand account: an organization, not a person. Uses
+  // "we/our", describes one product/token it ships. Distinct from a KOL (who
+  // promotes OTHERS' tokens) and a founder (an individual).
+  ["PROJECT" /* PROJECT */]: [
+    /\bprotocol\b/i,
+    /\bnetwork\b/i,
+    /\bdApp\b/i,
+    /\becosystem\b/i,
+    /\bDAO\b/i,
+    /\bplatform\b/i,
+    /\bthe official\b/i,
+    /\bofficial account\b/i,
+    /\bwe'?re building\b/i,
+    /\bour (?:token|protocol|platform|app|mission|community)\b/i,
+    /\b\$[A-Z]{2,6} token\b/i,
+    /\bpowered by\b/i,
+    /\bmainnet\b/i,
+    /\btestnet\b/i
   ],
   ["ADVISOR" /* ADVISOR */]: [
     /\badvisor\b/i,
@@ -762,7 +813,7 @@ var Audit = class {
       edges.push({ src: this.handle, dst: v.project_name, type: "FOUNDED", outcome: v.outcome });
     }
     for (const p of this.promotions) {
-      const key = p.contract_address || "$" + p.ticker;
+      const key = p.contract_address || "$" + (p.ticker ?? "").replace(/^\$+/, "");
       nodes.push({ type: "Company", key, was_rug: !!p.outcome_was_rug });
       edges.push({ src: this.handle, dst: key, type: "PROMOTED" });
     }
@@ -829,27 +880,51 @@ function assembleDossier(ev, live) {
     }
   });
   const report = a.finalize();
+  const graph = a.toPanoptes();
+  const subjectKey = graph.nodes.find((n) => n.subject)?.key ?? ev.profile.handle;
+  const hasNode = (key) => graph.nodes.some((n) => String(n.key).toLowerCase() === key.toLowerCase());
+  for (const p of ev.webTeam ?? []) {
+    const pkey = p.handle ?? p.name;
+    if (!pkey) continue;
+    if (!hasNode(pkey)) graph.nodes.push({ type: "Person", key: pkey, role: p.role });
+    graph.edges.push({ src: subjectKey, dst: pkey, type: "TEAM", role: p.role });
+    for (const pr of p.projects ?? []) {
+      if (!pr.name) continue;
+      if (!hasNode(pr.name)) graph.nodes.push({ type: "Company", key: pr.name });
+      graph.edges.push({ src: pkey, dst: pr.name, type: "WORKED_ON", role: pr.role });
+    }
+  }
+  for (const email of ev.profile.identity_emails ?? []) {
+    const ekey = `email:${email.toLowerCase()}`;
+    if (!hasNode(ekey)) graph.nodes.push({ type: "Identity", subtype: "Email", key: ekey, label: email });
+    graph.edges.push({ src: subjectKey, dst: ekey, type: "IDENTITY_EMAIL" });
+  }
   return {
     handle: ev.profile.handle,
     display_name: ev.profile.display_name,
     avatar: ev.profile.avatar,
+    avatar_url: ev.profile.avatar_url,
     bio: ev.profile.bio,
     followers: ev.profile.followers,
     joined: ev.profile.joined,
+    days_since_post: ev.profile.days_since_post,
     identity_note: ev.profile.identity_note,
     prior_handles: ev.profile.prior_handles,
     headline: ev.headline,
     live,
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
+    webTeam: ev.webTeam ?? [],
     report,
-    graph: a.toPanoptes(),
+    graph,
     founderSummary: ev.roles.includes("FOUNDER" /* FOUNDER */) ? a.founderSummary() : void 0,
     evidence: {
       ventures: a.getVentures(),
       testimonials: a.getTestimonials(),
       advised: a.getAdvisedProjects(),
-      associates: a.getAssociates()
+      associates: a.getAssociates(),
+      wallets: a.getWallets(),
+      promotions: a.getPromotions()
     }
   };
 }
@@ -1115,10 +1190,88 @@ function emptyEvidence(handle) {
     associates: [],
     findings: [],
     axes: [],
+    webTeam: [],
     headline: "",
     recentActivity: [],
     notableFollowers: [],
     contradictions: []
+  };
+}
+
+// server/cost.ts
+var PRICE = {
+  grokIn: 0.2 / 1e6,
+  grokOut: 0.5 / 1e6,
+  grokSource: 25 / 1e3,
+  claudeIn: 3 / 1e6,
+  claudeOut: 15 / 1e6,
+  twitterapiCall: 2e-4,
+  pdlMatch: 0.1,
+  heliusCall: 1e-4
+};
+var EST_SOURCES_PER_SEARCH = 5;
+var ledger = /* @__PURE__ */ new Map();
+var grok = { in: 0, out: 0, calls: 0, sources: 0 };
+var claude = { in: 0, out: 0, calls: 0 };
+function resetCost() {
+  ledger = /* @__PURE__ */ new Map();
+  grok = { in: 0, out: 0, calls: 0, sources: 0 };
+  claude = { in: 0, out: 0, calls: 0 };
+}
+function recordCall(provider, op, usd = 0, meta) {
+  const key = `${provider}|${op}`;
+  const cur = ledger.get(key);
+  if (cur) {
+    cur.calls += 1;
+    cur.usd += usd;
+    if (meta) cur.meta = meta;
+  } else {
+    ledger.set(key, { provider, op, calls: 1, usd, meta });
+  }
+}
+function recordTwitterapi(op) {
+  recordCall("twitterapi", op, PRICE.twitterapiCall);
+}
+function addGrokUsage(u, toolCalls, op = "live-search") {
+  const tin = u?.input_tokens ?? 0;
+  const tout = u?.output_tokens ?? 0;
+  const sources = typeof u?.num_sources_used === "number" ? u.num_sources_used : (toolCalls ?? 0) * EST_SOURCES_PER_SEARCH;
+  grok.calls += 1;
+  grok.in += tin;
+  grok.out += tout;
+  grok.sources += sources;
+  recordCall("grok", op, tin * PRICE.grokIn + tout * PRICE.grokOut + sources * PRICE.grokSource, `${tin + tout} tok \xB7 ~${sources} sources`);
+}
+function addClaudeUsage(u, op = "analysis") {
+  const tin = u?.input_tokens ?? 0;
+  const tout = u?.output_tokens ?? 0;
+  claude.calls += 1;
+  claude.in += tin;
+  claude.out += tout;
+  recordCall("claude", op, tin * PRICE.claudeIn + tout * PRICE.claudeOut, `${tin + tout} tok`);
+}
+function recordPdlMatch(matched) {
+  recordCall("peopledatalabs", "person/enrich", matched ? PRICE.pdlMatch : 0, matched ? "per-match est" : "no match (free)");
+}
+function recordHelius(op) {
+  recordCall("helius", op, PRICE.heliusCall);
+}
+var round4 = (n) => Math.round(n * 1e4) / 1e4;
+function getCost() {
+  const lines = [...ledger.values()].map((l) => ({ ...l, usd: round4(l.usd) })).sort((a, b) => b.usd - a.usd || b.calls - a.calls);
+  const grokUsd = lines.filter((l) => l.provider === "grok").reduce((a, l) => a + l.usd, 0);
+  const claudeUsd = lines.filter((l) => l.provider === "claude").reduce((a, l) => a + l.usd, 0);
+  const total = lines.reduce((a, l) => a + l.usd, 0);
+  const round2 = (n) => Math.round(n * 100) / 100;
+  return {
+    usd: round2(total),
+    grokUsd: round2(grokUsd),
+    claudeUsd: round2(claudeUsd),
+    grokCalls: grok.calls,
+    claudeCalls: claude.calls,
+    sources: grok.sources,
+    estimated: true,
+    calls: lines
   };
 }
 
@@ -1152,6 +1305,7 @@ async function structured(system, user, tool, maxTokens = 2048) {
       return null;
     }
     const data = await res.json();
+    addClaudeUsage(data.usage, tool.name);
     const block = data.content.find((b) => b.type === "tool_use");
     return block?.input ?? null;
   } catch (e) {
@@ -1160,12 +1314,12 @@ async function structured(system, user, tool, maxTokens = 2048) {
   }
 }
 async function extractClaims(handle, bio, posts) {
-  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
+  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization \u2014 a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official brand account), a GP/partner/principal at one, or an angel with NAMED, verifiable investments (led or joined specific rounds). Buying/trading tokens, 'investing in gems', or calling oneself an investor with no documented deals is NOT INVESTOR \u2014 a caller who trades is a KOL, nothing more. Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts shipping a product/token, not allocating capital); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token, and do not tag INVESTOR merely for trading talk. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, listing each ticker once with its contract address and chain when a chart link or CA is present. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
   const user = `Subject: ${handle}
 Bio: ${bio || "(none)"}
 
-Recent posts:
-${posts.slice(0, 20).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
+Posts (a claim-targeted corpus: recent originals + keyword-searched history, each stamped [Month Year \xB7 views]; dates let you fill venture periods, engagement shows which claims the subject pushed):
+${posts.slice(0, 70).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
   const tool = {
     name: "record_claims",
     description: "Record the subject's self-claimed roles, ventures, endorsers, advisory seats, and promotions.",
@@ -1209,14 +1363,14 @@ ${posts.slice(0, 20).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
       required: ["roles", "ventures", "testimonials", "advised", "promotions"]
     }
   };
-  return structured(system, user, tool, 2048);
+  return structured(system, user, tool, 4096);
 }
 var lvl = (s) => {
   const v = (s ?? "").toLowerCase();
   return v === "high" ? "high" : v === "low" ? "low" : "medium";
 };
 async function scanContradictions(handle, evidenceJson) {
-  const system = "You are ARGUS contradiction analysis. From everything collected about a subject, find INTERNAL CONTRADICTIONS: where the subject's own stated claims conflict with each other or with the collected evidence. Examples: claims a team of N but only one builder is found; claims an audit but no auditor or verification exists; claims a named backer who never acknowledges them; a stated launch/founding date that conflicts with the account age, domain age, or on-chain history; claims 'doxxed' but no real identity resolves; claims locked liquidity that on-chain shows unlocked; a partnership the partner never confirmed; a venture in the bio that discovery found no evidence for. Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes.";
+  const system = "You are ARGUS contradiction analysis. From everything collected about a subject, find INTERNAL CONTRADICTIONS: where the subject's own stated claims conflict with each other or with the collected evidence. Examples: claims a team of N but only one builder is found; claims an audit but no auditor or verification exists; claims a named backer who never acknowledges them; a stated launch/founding date that conflicts with the account age, domain age, or on-chain history; claims 'doxxed' but no real identity resolves; claims locked liquidity that on-chain shows unlocked; a partnership the partner never confirmed; a venture in the bio that discovery found no evidence for. Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes. SCOPE RULES \u2014 these are NOT contradictions: (1) ARGUS's OWN analysis metadata (fields like identity_confidence, identity_note, verdicts, evidence notes such as 'single-source lead, unverified') disagreeing with other ARGUS fields \u2014 only the SUBJECT's outward claims vs external facts count; a low-confidence evidence note is a gap, not a conflict. (2) Normal vertical integration: a project's token running on its own chain, its dApp on its own platform, or its products naming each other is how ecosystems work, not circularity. (3) Marketing self-description ('#1', 'leading') vs modest traction is puffery to note in scoring, not a contradiction, unless it conflicts with a specific verifiable fact.";
   const user = `Subject: ${handle}
 
 Collected evidence (JSON):
@@ -1259,7 +1413,11 @@ Axes to score (axis | weight | role):
 Collected evidence (JSON):
 ${evidenceJson}
 
-Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.`;
+Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.
+
+ACTIVITY RULE: weigh posting cadence. profile.days_since_post is how long the account has been silent. For a PROJECT/token, going quiet for weeks (roughly 21+ days) is a real liveness flag (abandoned, winding down, or quiet after a raise) and should temper traction/execution axes; for an individual it is a milder signal. Recent, steady posting is mildly positive, not a free pass.
+
+IDENTITY RULE: if the evidence has a "team" array of named people tied to the project (especially any with a LinkedIn, or a named founder/CEO/CTO), the project's real-world identity is RESOLVED. A pseudonymous brand/company handle run on behalf of a publicly named team is NORMAL and is NOT an anonymity red flag: do not score identity/backing axes as if the operators were anonymous, and do NOT write a headline that calls the founder identity "unresolved", "unnamed", or "anonymous" when named leaders are present. Only treat identity as unresolved when the evidence genuinely names no one behind the project.`;
   const tool = {
     name: "record_verdict",
     description: "Record the per-axis scores, headline, and identity note.",
@@ -1279,7 +1437,7 @@ Score every listed axis, write the composite headline (one sentence on what gove
           }
         },
         headline: { type: "string" },
-        identity_note: { type: "string" }
+        identity_note: { type: "string", description: "Identity resolution. Distinguish the ACCOUNT OPERATOR from the project's TEAM: if named team members are present in the evidence (especially with a LinkedIn), acknowledge them by name and do NOT claim 'no linked real-world identity' or 'zero credentials' \u2014 instead say the account/operator is pseudonymous while N named people are publicly tied to the project (list a few). Only say no one is identified if the evidence truly has no named people." }
       },
       required: ["axes", "headline", "identity_note"]
     }
@@ -1287,31 +1445,480 @@ Score every listed axis, write the composite headline (one sentence on what gove
   return structured(system, user, tool, 3e3);
 }
 
+// server/cache.ts
+import { createHash } from "node:crypto";
+var TTL_MS = 24 * 3600 * 1e3;
+var KIND = "grokcache";
+function creds() {
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  return url && key ? { url: url.replace(/\/$/, ""), key } : null;
+}
+var headers = (key) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
+var hash = (s) => "g:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
+async function cacheGet(key) {
+  const c = creds();
+  if (!c) return null;
+  try {
+    const r = await fetch(
+      `${c.url}/rest/v1/reports?select=payload&ref=eq.${encodeURIComponent(hash(key))}&kind=eq.${KIND}&limit=1`,
+      { headers: headers(c.key), signal: AbortSignal.timeout(4e3) }
+    );
+    if (!r.ok) return null;
+    const rows = await r.json();
+    const p = rows?.[0]?.payload;
+    if (!p?.text || typeof p.at !== "number" || Date.now() - p.at > TTL_MS) return null;
+    recordCall("cache", "grok-hit", 0, "24h search cache");
+    return p.text;
+  } catch {
+    return null;
+  }
+}
+async function cacheSet(key, text) {
+  const c = creds();
+  if (!c || !text) return;
+  try {
+    await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
+      method: "POST",
+      headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify({ ref: hash(key), kind: KIND, query: key.slice(0, 180), payload: { text, at: Date.now() }, ts: (/* @__PURE__ */ new Date()).toISOString() }),
+      signal: AbortSignal.timeout(4e3)
+    });
+  } catch {
+  }
+}
+
+// server/adapters/notableAccounts.ts
+var NOTABLE_ACCOUNTS = [
+  // ── Venture funds / firm accounts ─────────────────────────────────────────
+  { handle: "a16zcrypto", label: "VC \xB7 a16z crypto" },
+  { handle: "paradigm", label: "VC \xB7 Paradigm" },
+  { handle: "dragonfly_xyz", label: "VC \xB7 Dragonfly" },
+  { handle: "multicoincap", label: "VC \xB7 Multicoin" },
+  { handle: "VariantFund", label: "VC \xB7 Variant" },
+  { handle: "FrameworkVC", label: "VC \xB7 Framework" },
+  { handle: "hack_vc", label: "VC \xB7 Hack VC" },
+  { handle: "PlaceholderVC", label: "VC \xB7 Placeholder" },
+  { handle: "panteracapital", label: "VC \xB7 Pantera" },
+  { handle: "1kxnetwork", label: "VC \xB7 1kx" },
+  { handle: "electric_capital", label: "VC \xB7 Electric Capital" },
+  { handle: "robotventures", label: "VC \xB7 Robot Ventures" },
+  { handle: "polychaincap", label: "VC \xB7 Polychain" },
+  { handle: "coinbaseventures", label: "VC \xB7 Coinbase Ventures" },
+  { handle: "binancelabs", label: "VC \xB7 Binance Labs" },
+  { handle: "HashKey_Capital", label: "VC \xB7 HashKey" },
+  { handle: "sequoia", label: "VC \xB7 Sequoia" },
+  { handle: "USV", label: "VC \xB7 Union Square Ventures" },
+  { handle: "IOSG_VC", label: "VC \xB7 IOSG" },
+  { handle: "hypersphere_x", label: "VC \xB7 Hypersphere" },
+  { handle: "standardcrypto", label: "VC \xB7 Standard Crypto" },
+  { handle: "blockchaincap", label: "VC \xB7 Blockchain Capital" },
+  { handle: "galaxyhq", label: "VC \xB7 Galaxy" },
+  { handle: "DelphiVentures", label: "VC \xB7 Delphi Ventures" },
+  { handle: "DCGco", label: "VC \xB7 Digital Currency Group" },
+  { handle: "gumi_cryptos", label: "VC \xB7 gumi Cryptos" },
+  { handle: "SygnumOfficial", label: "VC \xB7 Sygnum" },
+  { handle: "L2IV", label: "VC \xB7 L2 Iterative" },
+  { handle: "maven11", label: "VC \xB7 Maven 11" },
+  { handle: "nascentxyz", label: "VC \xB7 Nascent" },
+  { handle: "bankless_vc", label: "VC \xB7 Bankless Ventures" },
+  { handle: "SpartanGroup", label: "VC \xB7 Spartan" },
+  { handle: "TheSpartanGroup", label: "VC \xB7 Spartan" },
+  { handle: "6thmancapital", label: "VC \xB7 6th Man Ventures" },
+  { handle: "archetypevc", label: "VC \xB7 Archetype" },
+  { handle: "slowfund", label: "VC \xB7 Slow Ventures" },
+  { handle: "portal_ventures", label: "VC \xB7 Portal Ventures" },
+  { handle: "figmentcapital", label: "VC \xB7 Figment Capital" },
+  { handle: "reforgevc", label: "VC \xB7 Reforge" },
+  { handle: "foundationcap", label: "VC \xB7 Foundation Capital" },
+  { handle: "castle_isl", label: "VC \xB7 Castle Island" },
+  { handle: "lightspeedvp", label: "VC \xB7 Lightspeed" },
+  { handle: "tribecap", label: "VC \xB7 Tribe Capital" },
+  { handle: "roundtripcrypto", label: "VC \xB7 Round13" },
+  { handle: "fabric_vc", label: "VC \xB7 Fabric Ventures" },
+  { handle: "gsr_io", label: "market maker \xB7 GSR" },
+  { handle: "wintermute_t", label: "market maker \xB7 Wintermute" },
+  { handle: "jump_", label: "market maker \xB7 Jump" },
+  { handle: "amberGroup_HQ", label: "market maker \xB7 Amber" },
+  { handle: "cumberland_io", label: "market maker \xB7 Cumberland" },
+  { handle: "flowtraders", label: "market maker \xB7 Flow Traders" },
+  { handle: "mechanismcap", label: "fund \xB7 Mechanism" },
+  { handle: "dcfgod", label: "fund \xB7 DCF God" },
+  { handle: "arca", label: "fund \xB7 Arca" },
+  { handle: "republiccrypto", label: "VC \xB7 Republic Crypto" },
+  { handle: "animocabrands", label: "VC \xB7 Animoca" },
+  { handle: "shima_capital", label: "VC \xB7 Shima" },
+  { handle: "big_brain_hodl", label: "VC \xB7 Big Brain" },
+  { handle: "collab_currency", label: "VC \xB7 Collab+Currency" },
+  { handle: "roninvc", label: "VC \xB7 Ronin" },
+  // ── VC partners / notable investors (individuals) ─────────────────────────
+  { handle: "cdixon", label: "investor \xB7 a16z" },
+  { handle: "balajis", label: "investor \xB7 Balaji" },
+  { handle: "cyounessi1", label: "investor \xB7 Standard Crypto" },
+  { handle: "hosseeb", label: "investor \xB7 Dragonfly" },
+  { handle: "danrobinson", label: "investor \xB7 Paradigm" },
+  { handle: "gakonst", label: "founder \xB7 Paradigm/Foundry" },
+  { handle: "cburniske", label: "investor \xB7 Placeholder" },
+  { handle: "twobitidiot", label: "founder \xB7 Messari (Ryan Selkis)" },
+  { handle: "avichal", label: "investor \xB7 Electric Capital" },
+  { handle: "Maria_Shen", label: "investor \xB7 Electric Capital" },
+  { handle: "TarunChitra", label: "founder \xB7 Gauntlet" },
+  { handle: "ljin18", label: "investor \xB7 Variant" },
+  { handle: "jessewldn", label: "investor \xB7 Haun" },
+  { handle: "kmoney_69", label: "investor \xB7 Placeholder" },
+  { handle: "spencernoon", label: "investor \xB7 Variant" },
+  { handle: "arjunblj", label: "investor \xB7 Reverie" },
+  { handle: "TusharJain_", label: "investor \xB7 Multicoin" },
+  { handle: "KyleSamani", label: "investor \xB7 Multicoin" },
+  { handle: "santiagoroel", label: "investor \xB7 Amber/Delphi" },
+  { handle: "Anup_Bagchi", label: "investor" },
+  { handle: "0xMaki", label: "investor \xB7 founder (Sushi)" },
+  { handle: "ChrisBurniske", label: "investor \xB7 Placeholder" },
+  { handle: "RobHadick", label: "investor \xB7 Dragonfly" },
+  { handle: "Rewkang", label: "investor \xB7 Mechanism" },
+  { handle: "adam_tehc", label: "investor" },
+  { handle: "dberenzon", label: "investor" },
+  { handle: "packyM", label: "investor \xB7 Not Boring" },
+  { handle: "nlw", label: "media \xB7 The Breakdown" },
+  { handle: "lawmaster", label: "investor \xB7 Framework (Vance Spencer)" },
+  { handle: "MikeDudas", label: "investor \xB7 6MV" },
+  { handle: "iamDCinvestor", label: "investor \xB7 ETH OG" },
+  { handle: "AriDavidPaul", label: "investor \xB7 BlockTower" },
+  { handle: "APompliano", label: "investor \xB7 Pomp" },
+  { handle: "RaoulGMI", label: "investor \xB7 Real Vision" },
+  { handle: "novogratz", label: "investor \xB7 Galaxy (Mike Novogratz)" },
+  { handle: "cathiedwood", label: "investor \xB7 ARK" },
+  { handle: "woonomic", label: "analyst \xB7 Willy Woo" },
+  // ── Founders / builders ───────────────────────────────────────────────────
+  { handle: "VitalikButerin", label: "founder \xB7 Ethereum" },
+  { handle: "aeyakovenko", label: "founder \xB7 Solana" },
+  { handle: "rajgokal", label: "founder \xB7 Solana" },
+  { handle: "jessepollak", label: "founder \xB7 Base" },
+  { handle: "haydenzadams", label: "founder \xB7 Uniswap" },
+  { handle: "StaniKulechov", label: "founder \xB7 Aave" },
+  { handle: "sreeramkannan", label: "founder \xB7 EigenLayer" },
+  { handle: "smokey_eth", label: "founder \xB7 Berachain" },
+  { handle: "0xngmi", label: "founder \xB7 DefiLlama" },
+  { handle: "gabrielhaines", label: "founder" },
+  { handle: "brendaneich", label: "founder \xB7 Brave" },
+  { handle: "sassal0x", label: "Ethereum advocate" },
+  { handle: "econoar", label: "founder \xB7 Eric Conner" },
+  { handle: "drakefjustin", label: "researcher \xB7 Ethereum Foundation" },
+  { handle: "dannyryan", label: "researcher \xB7 Ethereum Foundation" },
+  { handle: "TimBeiko", label: "Ethereum core" },
+  { handle: "epolynya", label: "researcher \xB7 rollups" },
+  { handle: "el33th4xor", label: "founder \xB7 Ava Labs (Emin G\xFCn Sirer)" },
+  { handle: "zhusu", label: "founder \xB7 3AC (Su Zhu)" },
+  { handle: "MacroCephalopod", label: "founder \xB7 Reserve" },
+  { handle: "robertleshner", label: "founder \xB7 Compound" },
+  { handle: "kaiynne", label: "founder \xB7 Synthetix" },
+  { handle: "AndreCronjeTech", label: "founder \xB7 Yearn/Fantom" },
+  { handle: "bantg", label: "founder \xB7 Yearn" },
+  { handle: "danielesesta", label: "founder \xB7 Wonderland/Abracadabra" },
+  { handle: "kaledora", label: "founder" },
+  { handle: "eric_wallach", label: "founder" },
+  { handle: "0xSisyphus", label: "trader/founder" },
+  { handle: "MustStopMurad", label: "founder \xB7 Memecoin thesis" },
+  { handle: "shawmakesmagic", label: "founder \xB7 ai16z/eliza" },
+  { handle: "everythingempt0", label: "trader/founder" },
+  { handle: "0xzerebro", label: "founder \xB7 AI agent" },
+  { handle: "luna_virtuals", label: "founder \xB7 Virtuals" },
+  { handle: "punk9059", label: "founder" },
+  { handle: "0xMert_", label: "founder \xB7 Helius" },
+  { handle: "rogercrypto", label: "founder" },
+  { handle: "toly", label: "founder \xB7 Solana" },
+  { handle: "kayceecrypto", label: "founder" },
+  { handle: "loomdart", label: "trader \xB7 OG" },
+  { handle: "cobie", label: "trader \xB7 UpOnly (Cobie)" },
+  { handle: "ledgerstatus", label: "trader \xB7 OG" },
+  { handle: "dcfgod", label: "trader" },
+  { handle: "cyrusof", label: "founder" },
+  { handle: "0xdesigner", label: "builder/designer" },
+  { handle: "transmissions11", label: "engineer \xB7 Paradigm" },
+  { handle: "boredGenius", label: "engineer \xB7 dYdX" },
+  { handle: "antonio_m_juliano", label: "founder \xB7 dYdX" },
+  { handle: "0age", label: "engineer \xB7 Uniswap" },
+  { handle: "haydenzadams", label: "founder \xB7 Uniswap" },
+  { handle: "monosarin", label: "founder \xB7 Polymarket (Shayne Coplan)" },
+  { handle: "shayne_coplan", label: "founder \xB7 Polymarket" },
+  { handle: "gavofyork", label: "founder \xB7 Polkadot/Parity" },
+  { handle: "rune_christensen", label: "founder \xB7 MakerDAO/Sky" },
+  { handle: "kaiynne", label: "founder \xB7 Synthetix" },
+  { handle: "coopahtroopa", label: "builder \xB7 music/NFTs" },
+  { handle: "cryptopunk7213", label: "founder \xB7 Compound (Robert Leshner alt)" },
+  // ── KOLs / callers / traders ──────────────────────────────────────────────
+  { handle: "blknoiz06", label: "caller \xB7 Ansem" },
+  { handle: "CryptoKaleo", label: "caller \xB7 Kaleo" },
+  { handle: "inversebrah", label: "KOL" },
+  { handle: "CryptoCred", label: "trader" },
+  { handle: "HsakaTrades", label: "trader \xB7 Hsaka" },
+  { handle: "notthreadguy", label: "KOL" },
+  { handle: "theunipcs", label: "caller \xB7 Bonk guy" },
+  { handle: "CryptoGodJohn", label: "caller" },
+  { handle: "frankdegods", label: "founder/KOL \xB7 DeGods" },
+  { handle: "GiganticRebirth", label: "trader \xB7 GCR" },
+  { handle: "Pentosh1", label: "trader" },
+  { handle: "TheCryptoDog", label: "trader" },
+  { handle: "Tetranode", label: "whale" },
+  { handle: "DeFiGod1", label: "trader" },
+  { handle: "gainzy222", label: "trader" },
+  { handle: "AltcoinPsycho", label: "trader" },
+  { handle: "smallcapscience", label: "KOL" },
+  { handle: "SmartestMoney_", label: "trader" },
+  { handle: "CredibleCrypto", label: "trader" },
+  { handle: "CryptoMessiah", label: "trader" },
+  { handle: "IamNomad", label: "trader" },
+  { handle: "AltcoinGordon", label: "KOL" },
+  { handle: "CryptoTony__", label: "trader" },
+  { handle: "rektcapital", label: "analyst" },
+  { handle: "CryptoDonAlt", label: "trader \xB7 DonAlt" },
+  { handle: "koroushak", label: "trader" },
+  { handle: "TheFlowHorse", label: "trader \xB7 Flood" },
+  { handle: "MacnBTC", label: "trader" },
+  { handle: "0xWangarian", label: "trader" },
+  { handle: "IncomeSharks", label: "trader" },
+  { handle: "PostyXBT", label: "trader" },
+  { handle: "0x_Kun", label: "trader" },
+  { handle: "cobie", label: "trader \xB7 Cobie" },
+  { handle: "0xSisyphus", label: "trader" },
+  { handle: "loomdart", label: "trader" },
+  { handle: "shahh", label: "trader" },
+  { handle: "CL207", label: "trader" },
+  { handle: "satsdart", label: "trader" },
+  { handle: "cozypront", label: "trader" },
+  { handle: "0xngmi", label: "founder/analyst" },
+  { handle: "eth_daddy", label: "trader" },
+  { handle: "ThinkingUSD", label: "trader \xB7 Flood" },
+  { handle: "poordart", label: "trader" },
+  { handle: "gainzy", label: "trader" },
+  { handle: "hentaavi", label: "trader" },
+  { handle: "iloveponzi", label: "trader" },
+  { handle: "mesawine1", label: "trader" },
+  { handle: "0xShual", label: "trader" },
+  { handle: "greg16676935420", label: "KOL \xB7 Greg" },
+  { handle: "notlarrylink", label: "KOL" },
+  { handle: "chooserich", label: "KOL" },
+  { handle: "traderpow", label: "trader" },
+  { handle: "MoonOverlord", label: "trader" },
+  { handle: "cryptoyieldinfo", label: "analyst" },
+  { handle: "TashaKKK", label: "KOL" },
+  { handle: "zoomerfren", label: "KOL" },
+  // ── Protocols / infra (official accounts) ─────────────────────────────────
+  { handle: "solana", label: "infra \xB7 Solana" },
+  { handle: "ethereum", label: "infra \xB7 Ethereum" },
+  { handle: "base", label: "infra \xB7 Base" },
+  { handle: "arbitrum", label: "infra \xB7 Arbitrum" },
+  { handle: "optimism", label: "infra \xB7 Optimism" },
+  { handle: "0xPolygon", label: "infra \xB7 Polygon" },
+  { handle: "avax", label: "infra \xB7 Avalanche" },
+  { handle: "Uniswap", label: "protocol \xB7 Uniswap" },
+  { handle: "aave", label: "protocol \xB7 Aave" },
+  { handle: "chainlink", label: "infra \xB7 Chainlink" },
+  { handle: "MakerDAO", label: "protocol \xB7 Maker/Sky" },
+  { handle: "LidoFinance", label: "protocol \xB7 Lido" },
+  { handle: "eigenlayer", label: "protocol \xB7 EigenLayer" },
+  { handle: "pumpdotfun", label: "infra \xB7 Pump.fun" },
+  { handle: "jito_sol", label: "infra \xB7 Jito" },
+  { handle: "heliuslabs", label: "infra \xB7 Helius" },
+  { handle: "JupiterExchange", label: "protocol \xB7 Jupiter" },
+  { handle: "RaydiumProtocol", label: "protocol \xB7 Raydium" },
+  { handle: "DriftProtocol", label: "protocol \xB7 Drift" },
+  { handle: "KaminoFinance", label: "protocol \xB7 Kamino" },
+  { handle: "MarginFi", label: "protocol \xB7 marginfi" },
+  { handle: "tensor_hq", label: "protocol \xB7 Tensor" },
+  { handle: "MagicEden", label: "protocol \xB7 Magic Eden" },
+  { handle: "phantom", label: "infra \xB7 Phantom" },
+  { handle: "MetaMask", label: "infra \xB7 MetaMask" },
+  { handle: "dYdX", label: "protocol \xB7 dYdX" },
+  { handle: "GMX_IO", label: "protocol \xB7 GMX" },
+  { handle: "PendleIntern", label: "protocol \xB7 Pendle" },
+  { handle: "ethena_labs", label: "protocol \xB7 Ethena" },
+  { handle: "MorphoLabs", label: "protocol \xB7 Morpho" },
+  { handle: "CurveFinance", label: "protocol \xB7 Curve" },
+  { handle: "convexfinance", label: "protocol \xB7 Convex" },
+  { handle: "friedtech", label: "infra" },
+  { handle: "monad_xyz", label: "infra \xB7 Monad" },
+  { handle: "berachain", label: "infra \xB7 Berachain" },
+  { handle: "SuiNetwork", label: "infra \xB7 Sui" },
+  { handle: "Aptos", label: "infra \xB7 Aptos" },
+  { handle: "celestia", label: "infra \xB7 Celestia" },
+  { handle: "hyperliquid_x", label: "protocol \xB7 Hyperliquid" },
+  { handle: "VirtualsProtocol", label: "protocol \xB7 Virtuals" },
+  // ── Exchanges ─────────────────────────────────────────────────────────────
+  { handle: "coinbase", label: "exchange \xB7 Coinbase" },
+  { handle: "binance", label: "exchange \xB7 Binance" },
+  { handle: "krakenfx", label: "exchange \xB7 Kraken" },
+  { handle: "okx", label: "exchange \xB7 OKX" },
+  { handle: "Bybit_Official", label: "exchange \xB7 Bybit" },
+  { handle: "coinbasewallet", label: "infra \xB7 Coinbase Wallet" },
+  { handle: "brian_armstrong", label: "founder \xB7 Coinbase" },
+  { handle: "cz_binance", label: "founder \xB7 Binance" },
+  { handle: "cryptohayes", label: "founder \xB7 BitMEX (Arthur Hayes)" },
+  { handle: "SBF_FTX", label: "founder \xB7 FTX (defunct)" },
+  { handle: "jespow", label: "founder \xB7 Kraken" },
+  { handle: "tyler", label: "founder \xB7 Gemini (Winklevoss)" },
+  { handle: "cameron", label: "founder \xB7 Gemini (Winklevoss)" },
+  // ── Researchers / analysts / media / security ─────────────────────────────
+  { handle: "MessariCrypto", label: "research \xB7 Messari" },
+  { handle: "DelphiDigital", label: "research \xB7 Delphi" },
+  { handle: "tokenterminal", label: "research \xB7 Token Terminal" },
+  { handle: "DefiLlama", label: "data \xB7 DefiLlama" },
+  { handle: "nansen_ai", label: "data \xB7 Nansen" },
+  { handle: "ArkhamIntel", label: "data \xB7 Arkham" },
+  { handle: "lookonchain", label: "on-chain analyst" },
+  { handle: "spotonchain", label: "on-chain analyst" },
+  { handle: "zachxbt", label: "investigator \xB7 ZachXBT" },
+  { handle: "tayvano_", label: "security \xB7 MyCrypto (Tay)" },
+  { handle: "officer_cia", label: "security researcher" },
+  { handle: "samczsun", label: "security \xB7 Paradigm" },
+  { handle: "bantg", label: "engineer \xB7 Yearn" },
+  { handle: "peckshield", label: "security \xB7 PeckShield" },
+  { handle: "CertiK", label: "security \xB7 CertiK" },
+  { handle: "RugDocIO", label: "security \xB7 RugDoc" },
+  { handle: "WatcherGuru", label: "media" },
+  { handle: "Cointelegraph", label: "media" },
+  { handle: "CoinDesk", label: "media" },
+  { handle: "TheBlock__", label: "media \xB7 The Block" },
+  { handle: "BanklessHQ", label: "media \xB7 Bankless" },
+  { handle: "laurashin", label: "media \xB7 Unchained" },
+  { handle: "wublockchain", label: "media \xB7 Wu Blockchain" },
+  { handle: "DegenerateNews", label: "media" },
+  { handle: "unusual_whales", label: "data/flow" },
+  // ── Expansion batch: more founders / L1-L2 leaders ────────────────────────
+  { handle: "zhuoxun_yin", label: "founder \xB7 Manta" },
+  { handle: "0xkyle__", label: "researcher" },
+  { handle: "dabit3", label: "developer advocate (Nader)" },
+  { handle: "austingriffith", label: "builder \xB7 Ethereum (scaffold-eth)" },
+  { handle: "PatrickAlphaC", label: "developer educator" },
+  { handle: "hudsonjameson", label: "Ethereum community" },
+  { handle: "vladtenev", label: "founder \xB7 Robinhood" },
+  { handle: "jack", label: "founder \xB7 Block/Twitter" },
+  { handle: "elonmusk", label: "founder \xB7 Tesla/X" },
+  { handle: "saylor", label: "founder \xB7 MicroStrategy (Michael Saylor)" },
+  { handle: "APompliano", label: "investor \xB7 Pomp" },
+  { handle: "TylerDurden", label: "media \xB7 ZeroHedge" },
+  { handle: "DavidGokhshtein", label: "KOL \xB7 Gokhshtein" },
+  { handle: "scottmelker", label: "KOL \xB7 Wolf of All Streets" },
+  { handle: "TheCryptoLark", label: "KOL \xB7 Lark Davis" },
+  { handle: "IvanOnTech", label: "KOL \xB7 Ivan" },
+  { handle: "AltCryptoGems", label: "KOL" },
+  { handle: "CryptoWendyO", label: "KOL" },
+  { handle: "girlgone_crypto", label: "KOL" },
+  { handle: "CryptoTubers", label: "KOL" },
+  { handle: "PeterLBrandt", label: "trader \xB7 legacy TA" },
+  { handle: "cryptomanran", label: "KOL" },
+  { handle: "EllioTrades", label: "KOL" },
+  { handle: "sassal0x", label: "Ethereum advocate" },
+  { handle: "milesdeutscher", label: "KOL \xB7 analyst" },
+  { handle: "CryptoBusy", label: "KOL" },
+  { handle: "Ashcryptoreal", label: "KOL" },
+  { handle: "cobie", label: "trader \xB7 Cobie" },
+  { handle: "0xLouisT", label: "founder/investor" },
+  { handle: "DeFianceCapital", label: "fund \xB7 DeFiance" },
+  { handle: "arthur_0x", label: "founder \xB7 DeFiance (Arthur Cheong)" },
+  { handle: "ThreeSigmaXYZ", label: "research \xB7 Three Sigma" },
+  { handle: "tokenbrice", label: "DeFi analyst" },
+  { handle: "DefiIgnas", label: "DeFi researcher" },
+  { handle: "thedefiedge", label: "DeFi researcher" },
+  { handle: "Dynamo_Patrick", label: "DeFi researcher" },
+  { handle: "korpi87", label: "DeFi researcher" },
+  { handle: "0xLoke", label: "DeFi researcher" },
+  { handle: "0x_Todd", label: "researcher" },
+  { handle: "route2fi", label: "DeFi researcher" },
+  { handle: "stacy_muur", label: "DeFi researcher" },
+  { handle: "TheDeFiSaint", label: "DeFi analyst" },
+  { handle: "0xMinion", label: "researcher" },
+  { handle: "MrBlocks_", label: "researcher" },
+  { handle: "Flowslikeosmo", label: "researcher" },
+  { handle: "CryptoKoryo", label: "data analyst" },
+  { handle: "0xfoobar", label: "engineer/researcher" },
+  { handle: "cygaar_dev", label: "engineer" },
+  { handle: "pcaversaccio", label: "security engineer" },
+  { handle: "brockelmore", label: "engineer \xB7 Paradigm" },
+  { handle: "andyfeng21", label: "founder \xB7 EigenLayer" },
+  { handle: "ryanberckmans", label: "researcher" },
+  { handle: "poopmandefi", label: "trader" },
+  { handle: "yashhsm", label: "trader" },
+  { handle: "0xdoge_", label: "trader" },
+  { handle: "0xraceralt", label: "trader" },
+  { handle: "0xSweep", label: "trader" },
+  { handle: "cryptorinweb3", label: "KOL" },
+  { handle: "moon_shiller", label: "KOL" },
+  { handle: "0xUnihax0r", label: "trader" },
+  { handle: "himgajria", label: "investor" },
+  { handle: "lightcrypto", label: "trader" },
+  { handle: "gainzy222", label: "trader" },
+  { handle: "0xTindorr", label: "trader" },
+  { handle: "0xngmi", label: "founder \xB7 DefiLlama" },
+  { handle: "adamscochran", label: "investor \xB7 Cinneamhain" },
+  { handle: "TheOneandOmsy", label: "trader" },
+  { handle: "ColeGarnerHODL", label: "analyst" },
+  { handle: "checkmatey_", label: "on-chain analyst \xB7 Glassnode" },
+  { handle: "_Checkmatey", label: "on-chain analyst" },
+  { handle: "glassnode", label: "data \xB7 Glassnode" },
+  { handle: "santimentfeed", label: "data \xB7 Santiment" },
+  { handle: "intotheblock", label: "data \xB7 IntoTheBlock" },
+  { handle: "coinmetrics", label: "data \xB7 Coin Metrics" },
+  { handle: "nic__carter", label: "investor \xB7 Castle Island" },
+  { handle: "lopp", label: "Bitcoin \xB7 Jameson Lopp" },
+  { handle: "adam3us", label: "founder \xB7 Blockstream (Adam Back)" },
+  { handle: "aantonop", label: "Bitcoin educator" },
+  { handle: "pete_rizzo_", label: "Bitcoin historian" },
+  { handle: "DocumentingBTC", label: "Bitcoin media" },
+  { handle: "matt_odell", label: "Bitcoin \xB7 Odell" },
+  { handle: "gladstein", label: "Bitcoin \xB7 HRF" },
+  { handle: "prestonpysh", label: "investor \xB7 Bitcoin" },
+  { handle: "dergigi", label: "Bitcoin author" },
+  { handle: "TuurDemeester", label: "investor \xB7 Bitcoin" },
+  { handle: "MartyBent", label: "Bitcoin \xB7 TFTC" },
+  { handle: "Excellion", label: "Bitcoin \xB7 Samson Mow" },
+  { handle: "ErikVoorhees", label: "founder \xB7 ShapeShift" },
+  { handle: "brian_armstrong", label: "founder \xB7 Coinbase" },
+  { handle: "haydenzadams", label: "founder \xB7 Uniswap" },
+  { handle: "danheld", label: "Bitcoin educator" },
+  { handle: "CryptoCobain", label: "trader \xB7 Cobie alt" }
+];
+
 // server/adapters/x.ts
 var TWITTERAPI = "https://api.twitterapi.io";
-async function grokSearch(system, user) {
+async function grokSearch(system, user, opts) {
   const key = env("XAI_API_KEY");
   if (!key) return null;
+  if (opts?.cacheKey) {
+    const hit = await cacheGet(opts.cacheKey);
+    if (hit) return hit;
+  }
   try {
-    const res = await fetch("https://api.x.ai/v1/responses", {
+    const call = (withCap) => fetch("https://api.x.ai/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
         model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
         input: [{ role: "system", content: system }, { role: "user", content: user }],
-        tools: [{ type: "web_search" }, { type: "x_search" }]
+        tools: [{ type: "web_search" }, { type: "x_search" }],
+        ...withCap ? { max_tool_calls: opts?.maxToolCalls ?? 4 } : {}
       }),
       signal: AbortSignal.timeout(45e3)
     });
+    let res = await call(true);
+    if (res.status === 400) res = await call(false);
     if (!res.ok) return null;
     const d = await res.json();
+    try {
+      const toolCalls = Array.isArray(d.output) ? d.output.filter((o) => /search|tool/.test(String(o.type ?? ""))).length : void 0;
+      console.log("[grok-usage]", JSON.stringify({ in: d.usage?.input_tokens, out: d.usage?.output_tokens, toolCalls }));
+      addGrokUsage(d.usage, toolCalls);
+    } catch {
+    }
     const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o) => o.content ?? []).map((c) => c.text ?? "").join(" ") : "") ?? "";
+    if (text && opts?.cacheKey) void cacheSet(opts.cacheKey, text);
     return text || null;
   } catch {
     return null;
   }
 }
 async function twFetch(url, key, tries = 2) {
+  recordTwitterapi(url.match(/\/twitter\/([a-z_/]+)/i)?.[1] ?? "other");
   let last = null;
   for (let i = 0; i < tries; i++) {
     const res = await fetch(url, { headers: { "x-api-key": key } });
@@ -1320,6 +1927,17 @@ async function twFetch(url, key, tries = 2) {
     await new Promise((r) => setTimeout(r, res.status === 429 ? 1200 : 700 * (i + 1)));
   }
   return last;
+}
+function pickWebsite(p) {
+  const cands = [
+    p?.profile_bio?.entities?.url?.urls?.[0]?.expanded_url,
+    p?.entities?.url?.urls?.[0]?.expanded_url,
+    p?.url,
+    p?.profile_url,
+    p?.website,
+    p?.link
+  ].filter((x) => typeof x === "string" && /^https?:\/\//i.test(x));
+  return cands[0];
 }
 async function getProfile2(handle) {
   const key = env("TWITTERAPI_KEY");
@@ -1340,12 +1958,16 @@ async function getProfile2(handle) {
       }
       const p = d.data ?? d;
       if (!p || p.name == null && p.followers == null && p.followers_count == null && p.description == null) return null;
+      const rawImg = p.profilePicture ?? p.profile_image_url_https ?? p.profile_image_url ?? p.profile_image;
+      const image = typeof rawImg === "string" ? rawImg.replace(/_normal\.(jpg|jpeg|png|gif|webp)$/i, "_400x400.$1") : void 0;
       return {
         handle: "@" + u,
         name: p.name,
         bio: p.description,
         followers: p.followers ?? p.followers_count,
-        createdAt: p.createdAt ?? p.created_at
+        createdAt: p.createdAt ?? p.created_at,
+        website: pickWebsite(p),
+        image
       };
     } catch {
       return null;
@@ -1356,6 +1978,7 @@ async function getProfile2(handle) {
 async function handleHistory(handle) {
   const u = handle.replace(/^@/, "");
   try {
+    recordCall("memory.lol", "tw-history", 0);
     const res = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8e3) });
     if (!res.ok) return null;
     const d = await res.json();
@@ -1382,105 +2005,250 @@ async function getRecentPosts(handle, limit = 20) {
     return [];
   }
 }
+var num = (...v) => {
+  for (const x of v) if (typeof x === "number") return x;
+  return void 0;
+};
+var KW_IDENTITY = ["founder", "co-founder", "cofounder", "CEO", "CTO", "advisor", '"I built"', '"we built"', '"joined as"', "founded"];
+var KW_LAUNCH = ["launching", "presale", "mint", "airdrop", "raised", "seed", "IDO", '"CA:"', "tokenomics", "whitelist"];
+var KW_ENDORSE = ["backed", "investors", "partnership", "gem", "100x", '"proud to"'];
+var KW_SHILL = ["aped", "sending", '"the play"', "entry", "accumulated", "conviction", "printing", "pumping", "calling", "chart", '"my bag"', "loaded"];
+var KW_CALLS = ["dexscreener.com", "pump.fun", "birdeye.so", "dextools.io", "geckoterminal.com", "photon-sol", '"CA"'];
+var CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined|aped?|shill|calling|conviction|printing|pumping|sending it)\b/i;
+function parseTweet(t) {
+  const text = (t.text ?? t.full_text ?? "").trim();
+  const at = Date.parse(t.createdAt ?? t.created_at ?? "");
+  const isRt = /^RT @/.test(text) || !!t.retweeted_tweet || !!t.retweeted_status || t.isRetweet === true;
+  const isReply = !!(t.isReply ?? t.inReplyToId ?? t.in_reply_to_status_id ?? t.in_reply_to_user_id) || /^@\w/.test(text);
+  return {
+    text,
+    at: Number.isFinite(at) ? at : null,
+    views: num(t.viewCount, t.view_count, t.views) ?? 0,
+    likes: num(t.likeCount, t.favorite_count, t.favoriteCount, t.likes) ?? 0,
+    isReply,
+    isRt
+  };
+}
+async function lastTweetsPage(handle, key, cursor) {
+  const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(handle)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, key);
+  if (!res || !res.ok) return { tweets: [] };
+  const d = await res.json();
+  const tweets = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
+  return { tweets, next: d.has_next_page ? d.next_cursor : void 0 };
+}
+async function searchFrom(handle, terms, key) {
+  const q = `from:${handle} (${terms.join(" OR ")})`;
+  recordTwitterapi("tweet/advanced_search");
+  const res = await twFetch(`${TWITTERAPI}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=Top`, key);
+  if (!res || !res.ok) return [];
+  const d = await res.json();
+  return d.tweets ?? d.data?.tweets ?? [];
+}
+var stamp = (p) => {
+  const when = p.at ? new Date(p.at).toLocaleString("en-US", { month: "short", year: "numeric" }) : "";
+  const v = p.views >= 1e3 ? `${Math.round(p.views / 1e3)}k views` : p.views ? `${p.views} views` : "";
+  const meta = [when, v].filter(Boolean).join(" \xB7 ");
+  return (meta ? `[${meta}] ` : "") + p.text;
+};
+async function collectCorpus(handle) {
+  const key = env("TWITTERAPI_KEY");
+  const u = handle.replace(/^@/, "");
+  if (!key) return { posts: [], newest: [], count: { originals: 0, searched: 0, ranked: 0 } };
+  const p1 = await lastTweetsPage(u, key).catch(() => ({ tweets: [], next: void 0 }));
+  const [p2, sId, sLa, sEn, sSh, sCa] = await Promise.all([
+    p1.next ? lastTweetsPage(u, key, p1.next).catch(() => ({ tweets: [] })) : Promise.resolve({ tweets: [] }),
+    searchFrom(u, KW_IDENTITY, key).catch(() => []),
+    searchFrom(u, KW_LAUNCH, key).catch(() => []),
+    searchFrom(u, KW_ENDORSE, key).catch(() => []),
+    searchFrom(u, KW_SHILL, key).catch(() => []),
+    searchFrom(u, KW_CALLS, key).catch(() => [])
+  ]);
+  const originalsRaw = [...p1.tweets, ...p2.tweets].map(parseTweet).filter((p) => p.text && !p.isReply && !p.isRt);
+  const searchedRaw = [...sId, ...sLa, ...sEn, ...sSh, ...sCa].map(parseTweet).filter((p) => p.text && !p.isRt);
+  const seen = /* @__PURE__ */ new Set();
+  const dedup = (arr) => arr.filter((p) => {
+    const k = p.text.slice(0, 80).toLowerCase();
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  const originals = dedup(originalsRaw);
+  const searched = dedup(searchedRaw);
+  const all = [...originals, ...searched];
+  const now = Date.now();
+  const CASHTAG = /\$[A-Za-z][A-Za-z0-9]{1,9}\b/g;
+  const CHARTLINK = /dexscreener\.com|pump\.fun|birdeye\.so|dextools\.io|geckoterminal\.com|photon-sol|\bCA[:\s]/i;
+  const score = (p) => {
+    const kw = (p.text.match(new RegExp(CLAIM_RE.source, "gi")) ?? []).length;
+    const cashtags = (p.text.match(CASHTAG) ?? []).length;
+    const call = (cashtags > 0 ? 2 : 0) + (CHARTLINK.test(p.text) ? 2 : 0);
+    const reach = Math.log10(p.views + p.likes + 1);
+    const recency = p.at ? Math.max(0, 1 - (now - p.at) / (365 * 864e5)) : 0;
+    return kw * 3 + call + reach + recency * 0.8;
+  };
+  const ranked = [...all].sort((a, b) => score(b) - score(a)).slice(0, 70);
+  const newest = [...originals].sort((a, b) => (b.at ?? 0) - (a.at ?? 0)).slice(0, 12);
+  const rankedKeys = new Set(ranked.map((p) => p.text.slice(0, 80).toLowerCase()));
+  for (const p of newest) if (!rankedKeys.has(p.text.slice(0, 80).toLowerCase())) ranked.push(p);
+  return {
+    posts: ranked.map(stamp),
+    newest: newest.map((p) => p.text),
+    count: { originals: originals.length, searched: searched.length, ranked: ranked.length }
+  };
+}
+async function getLastPostAt(handle) {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return null;
+  const u = handle.replace(/^@/, "");
+  try {
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
+    if (!res || !res.ok) return null;
+    const d = await res.json();
+    const tweets = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
+    const times = tweets.map((t) => Date.parse(t.createdAt ?? t.created_at ?? "")).filter((n) => Number.isFinite(n));
+    if (!times.length) return null;
+    return new Date(Math.max(...times)).toISOString();
+  } catch {
+    return null;
+  }
+}
 async function followsSubject(endorser, subject) {
+  const rel = await checkFollow(endorser, subject);
+  return rel ? rel.following : null;
+}
+async function checkFollow(source, target) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
-  const e = endorser.replace(/^@/, "");
-  const s = subject.replace(/^@/, "").toLowerCase();
+  const s = source.replace(/^@/, "");
+  const t = target.replace(/^@/, "");
   try {
-    const res = await fetch(`${TWITTERAPI}/twitter/user/followings?userName=${encodeURIComponent(e)}&pageSize=200`, {
-      headers: { "x-api-key": key }
-    });
-    if (!res.ok) return null;
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/check_follow_relationship?source_user_name=${encodeURIComponent(s)}&target_user_name=${encodeURIComponent(t)}`, key);
+    if (!res || !res.ok) return null;
     const d = await res.json();
-    const list = d.followings ?? d.data ?? [];
-    return list.some((u) => (u.userName ?? u.screen_name ?? "").toLowerCase() === s);
-  } catch {
-    return null;
-  }
-}
-var NOTABLE = [
-  { handle: "cobie", label: "trader", size: "700K" },
-  { handle: "CryptoKaleo", label: "caller", size: "700K" },
-  { handle: "blknoiz06", label: "caller", size: "750K" },
-  { handle: "inversebrah", label: "KOL", size: "300K" },
-  { handle: "CryptoCred", label: "trader", size: "400K" },
-  { handle: "HsakaTrades", label: "trader", size: "450K" },
-  { handle: "notthreadguy", label: "KOL", size: "250K" },
-  { handle: "theunipcs", label: "caller", size: "250K" },
-  { handle: "CryptoGodJohn", label: "caller", size: "400K" },
-  { handle: "frankdegods", label: "founder/KOL", size: "350K" },
-  { handle: "0xMert_", label: "infra (Helius)", size: "250K" },
-  { handle: "aeyakovenko", label: "founder (Solana)", size: "470K" },
-  { handle: "rajgokal", label: "founder (Solana)", size: "250K" },
-  { handle: "VitalikButerin", label: "founder (Ethereum)", size: "5.6M" },
-  { handle: "jessepollak", label: "founder (Base)", size: "350K" },
-  { handle: "haydenzadams", label: "founder (Uniswap)", size: "300K" },
-  { handle: "StaniKulechov", label: "founder (Aave)", size: "270K" },
-  { handle: "cz_binance", label: "founder (Binance)", size: "9M" },
-  { handle: "cdixon", label: "investor (a16z)", size: "900K" },
-  { handle: "balajis", label: "investor", size: "1M" },
-  { handle: "punk6529", label: "investor", size: "500K" },
-  { handle: "solana", label: "infra (Solana)", size: "3M" },
-  { handle: "pumpdotfun", label: "infra (Pump.fun)", size: "600K" },
-  { handle: "base", label: "infra (Base)", size: "1.5M" }
-];
-var HIGH_REACH = 1e5;
-async function notableFollowers(subject) {
-  const key = env("TWITTERAPI_KEY");
-  if (!key) return [];
-  const u = subject.replace(/^@/, "");
-  const curated = new Map(NOTABLE.map((n) => [n.handle.toLowerCase(), n]));
-  const found = /* @__PURE__ */ new Map();
-  let cursor = "";
-  const MAX_PAGES = 8;
-  for (let page = 0; page < MAX_PAGES; page++) {
-    const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
-    const res = await twFetch(url, key);
-    if (!res || !res.ok) break;
-    const d = await res.json();
-    if (d?.status === "error") break;
-    const followers = d.followers ?? d.data?.followers ?? [];
-    if (!followers.length) break;
-    for (const f of followers) {
-      const h = String(f.userName ?? f.screen_name ?? "");
-      if (!h) continue;
-      const lk = h.toLowerCase();
-      if (found.has(lk)) continue;
-      const fc = Number(f.followers_count ?? f.followers ?? 0);
-      const cur = curated.get(lk);
-      if (cur) {
-        found.set(lk, { handle: h, label: cur.label, size: fc ? fmtFollowers(fc) : cur.size, count: fc || void 0 });
-      } else if (fc >= HIGH_REACH) {
-        found.set(lk, { handle: h, label: "high reach", size: fmtFollowers(fc), count: fc });
-      }
+    if (d?.status === "error") return null;
+    const raw = d?.data ?? d ?? {};
+    const pick = (...keys) => {
+      for (const k of keys) if (typeof raw[k] === "boolean") return raw[k];
+      return null;
+    };
+    const following = pick("following", "is_following", "isFollowing", "follows", "source_following_target");
+    const followedBy = pick("followed_by", "is_followed_by", "isFollowedBy", "followed", "target_following_source");
+    if (following === null && followedBy === null) {
+      console.log("[check-follow] unrecognized shape:", JSON.stringify(raw).slice(0, 200));
+      return null;
     }
-    if (!d.has_next_page || !d.next_cursor) break;
-    cursor = d.next_cursor;
-  }
-  return [...found.values()].sort((a, b) => (b.count ?? 0) - (a.count ?? 0)).slice(0, 16);
-}
-async function acknowledgment(endorser, subject) {
-  const key = env("XAI_API_KEY");
-  if (!key) return null;
-  const e = endorser.replace(/^@/, "");
-  const s = subject.replace(/^@/, "");
-  const system = "You verify endorsements for a due-diligence engine, with live web and X search. Decide the strongest public acknowledgment @" + e + " has ever made of @" + s + ' on X, and overall sentiment. Reply with ONLY a compact JSON object {"ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}.';
-  const text = await grokSearch(system, `Has @${e} ever publicly acknowledged @${s} on X? Search @${e}'s posts.`);
-  if (!text) return null;
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return null;
-  try {
-    const parsed = JSON.parse(m[0]);
-    return { ack: parsed.ack ?? "none", sentiment: parsed.sentiment ?? "none" };
+    return { following, followedBy };
   } catch {
     return null;
   }
 }
-async function discoverAffiliations(handle, name) {
+async function dynamicNotable() {
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  if (!url || !key) return [];
+  const cached = await cacheGet("notable:dynamic");
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch {
+    }
+  }
+  try {
+    const r = await fetch(`${url}/rest/v1/reports?select=ref,score&kind=eq.person&verdict=eq.PASS&order=score.desc&limit=600`, {
+      headers: { apikey: key, authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    const accts = rows.filter((x) => x && typeof x.ref === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(x.ref)).map((x) => ({ handle: x.ref.replace(/^@/, ""), label: "ARGUS-verified" }));
+    await cacheSet("notable:dynamic", JSON.stringify(accts));
+    return accts;
+  } catch {
+    return [];
+  }
+}
+async function notableFollowers(subject, opts) {
+  const key = env("TWITTERAPI_KEY");
+  if (!key) return { list: [], checked: 0 };
+  const subj = subject.replace(/^@/, "").toLowerCase();
+  const seen = /* @__PURE__ */ new Set();
+  const candidates = [...NOTABLE_ACCOUNTS, ...await dynamicNotable()].filter((n) => {
+    const lk = n.handle.toLowerCase();
+    if (lk === subj || seen.has(lk)) return false;
+    seen.add(lk);
+    return true;
+  });
+  const total = candidates.length;
+  const fc = opts?.followerCount ?? Infinity;
+  const enumPages = Math.ceil(fc / 200);
+  if (Number.isFinite(fc) && enumPages <= Math.min(total, 150)) {
+    const set = new Map(candidates.map((n) => [n.handle.toLowerCase(), n]));
+    const hits2 = [];
+    const got = /* @__PURE__ */ new Set();
+    const u = subject.replace(/^@/, "");
+    let cursor = "";
+    for (let page = 0; page < enumPages + 2; page++) {
+      const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
+      const res = await twFetch(url, key);
+      if (!res || !res.ok) break;
+      const d = await res.json();
+      const followers = d.followers ?? d.data?.followers ?? [];
+      if (!followers.length) break;
+      for (const f of followers) {
+        const h = String(f.userName ?? f.screen_name ?? "").toLowerCase();
+        const m = set.get(h);
+        if (m && !got.has(h)) {
+          got.add(h);
+          hits2.push({ handle: m.handle, label: m.label, size: "" });
+        }
+      }
+      if (!d.has_next_page || !d.next_cursor) break;
+      cursor = d.next_cursor;
+    }
+    return { list: hits2, checked: total };
+  }
+  const REVERSE_CAP = 500;
+  const toCheck = candidates.slice(0, REVERSE_CAP);
+  const hits = [];
+  const CHUNK = 15;
+  for (let i = 0; i < toCheck.length; i += CHUNK) {
+    const res = await Promise.all(
+      toCheck.slice(i, i + CHUNK).map(async (n) => {
+        const rel = await checkFollow(n.handle, subject);
+        return rel?.following ? { handle: n.handle, label: n.label, size: "" } : null;
+      })
+    );
+    for (const r of res) if (r) hits.push(r);
+  }
+  return { list: hits, checked: toCheck.length };
+}
+async function acknowledgments(endorsers, subject) {
+  const out = /* @__PURE__ */ new Map();
+  const key = env("XAI_API_KEY");
+  const list = [...new Set(endorsers.map((e) => e.replace(/^@/, "")).filter(Boolean))];
+  if (!key || !list.length) return out;
+  const s = subject.replace(/^@/, "");
+  const system = "You verify endorsements for a due-diligence engine, with live web and X search. For EACH listed account, decide the strongest public acknowledgment that account has ever made of @" + s + ' on X, and its overall sentiment. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}]} \u2014 one entry per listed account, never invent posts.';
+  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
+  if (!text) return out;
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return out;
+  try {
+    const arr = JSON.parse(m[0]).results ?? [];
+    for (const r of arr) {
+      const h = typeof r?.handle === "string" ? r.handle.replace(/^@/, "").toLowerCase() : "";
+      if (!h) continue;
+      out.set(h, { ack: r.ack ?? "none", sentiment: r.sentiment ?? "none" });
+    }
+  } catch {
+  }
+  return out;
+}
+async function discoverAffiliations(handle, name, oldHandles = []) {
   const h = handle.replace(/^@/, "");
-  const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Look beyond their own bio and LinkedIn: accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase. There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Search the web and X, including team and accelerator pages.`);
+  const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} \u2014 search posts mentioning those old handles too.` : "";
+  const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Work BOTH angles: (1) what the person's own footprint shows \u2014 accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase, beyond their bio and LinkedIn; (2) reverse mentions \u2014 project/company accounts that ever NAMED, TAGGED, or ANNOUNCED this person as a founder/team member (co-founder announcements and 'meet the team' posts are often YEARS old, on the project's timeline, search historical posts). There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role \u2014 from their own footprint AND from project accounts announcing them. Search the web and X including historical posts.`, { maxToolCalls: 6, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -1499,55 +2267,95 @@ async function discoverAffiliations(handle, name) {
     return [];
   }
 }
-async function discoverByMentions(handle, name, oldHandles = []) {
-  const h = handle.replace(/^@/, "");
-  const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} \u2014 search posts mentioning those old handles too, since their history may live under them.` : "";
-  const system = `You are a forensic due-diligence researcher with live X (Twitter) search. Find every company, crypto project, fund, or DAO ACCOUNT that has publicly NAMED, TAGGED, ANNOUNCED, or referred to the given person as a founder, co-founder, team member, or employee. Search X thoroughly INCLUDING OLDER / HISTORICAL posts, not just recent ones \u2014 co-founder announcements and 'meet the team' posts are often years old. There MUST be a real post tying the project to this exact person. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"the post / what it said","x_handle":"@projectAccount","domain":"example.com"}]}. Include ONLY ties backed by a real post you found. If none, return {"affiliations":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Which project or company accounts on X have ever named, tagged, or announced this person as a founder, co-founder, or team member? Search historical posts too, going back years.`);
-  if (!text) return [];
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return [];
-  try {
-    const parsed = JSON.parse(m[0]);
-    const out = Array.isArray(parsed.affiliations) ? parsed.affiliations : [];
-    return out.filter((v) => v && typeof v.name === "string" && v.name.trim()).map((v) => ({
-      name: v.name.trim(),
-      role: v.role || "affiliate",
-      year: v.year,
-      evidence: v.evidence,
-      x_handle: v.x_handle && /^@?[A-Za-z0-9_]{2,30}$/.test(v.x_handle) ? "@" + v.x_handle.replace(/^@/, "") : void 0,
-      domain: v.domain && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(v.domain) ? v.domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : void 0
-    })).slice(0, 10);
-  } catch {
-    return [];
-  }
-}
 async function findTeam(handle, name, posts = []) {
   const h = handle.replace(/^@/, "");
   const postContext = posts.length ? `
 
 The account's recent posts (mine these for team intros / role + advisor announcements):
 ${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "";
-  const system = `You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account, in two groups: (1) TEAM \u2014 founders, cofounders, and core team members; and (2) ADVISORS \u2014 people the project names as advisors, mentors, or backers (a frequent scam vector when the named advisor never actually agreed). Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. For each person give name, X handle if found, role, a short evidence phrase, and kind ('team' or 'advisor'). Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","role":"founder|cofounder|ceo|cto|engineer|advisor|backer|team","kind":"team|advisor","evidence":""}]}. If none, return {"people":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, AND advisors/backers of this project? Search the account's own posts and the posts that mention it.${postContext}`);
+  const system = `You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account: founders, cofounders, core team, engineers, AND advisors/backers. Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. Be PRECISE about each person's role AT THIS project: only call someone an advisor if they are actually named as one; if they are a founder/cofounder, say so \u2014 do NOT downgrade a founder to advisor. For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that live web/X search reveals \u2014 this exposes serial founders and cross-project ties. Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"founder|cofounder|ceo|cto|engineer|advisor|backer","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If none, return {"people":[]}. NEVER invent. Never use em dashes.`;
+  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects. Search the account's own posts and posts mentioning it.${postContext}`, { cacheKey: `team-x:${h}` });
+  return parseTeamJSON(text, h, "X content");
+}
+async function findTeamOnSite(domain, projectName) {
+  const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  if (!clean && !projectName) return [];
+  const anchor = clean ? `website ${clean}${projectName ? ` (${projectName})` : ""}` : `project "${projectName}"`;
+  const system = `You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project: founders, cofounders, the WHOLE leadership team (CEO/CTO/COO/CFO/CMO), engineering and product leads, AND advisors/backers. DIG hard and be COMPLETE: Google the project + 'team'/'leadership'/'about', open the project's LinkedIn company page and read its 'People' tab (list the employees it shows), check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people \u2014 do NOT stop at one or two; keep going until you have the full public roster you can verify. Connect each name to their X handle and LinkedIn where possible. Include ONLY real people genuinely tied to THIS specific project (match the domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT \u2014 do NOT downgrade a founder to advisor. For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal \u2014 this exposes serial founders and cross-project ties. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
+  const text = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean || projectName}` });
+  return parseTeamJSON(text, void 0, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
+}
+async function enrichTeamIdentities(project, people) {
+  if (!people.length) return [];
+  const system = `You are an OSINT researcher with live web and X search. For each named team member of the given project, find their X (Twitter) handle and LinkedIn profile. Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/..."}]} \u2014 one entry per input name, fields omitted when unknown. NEVER invent. Never use em dashes.`;
+  const list = people.map((p) => `${p.name}${p.role ? ` (${p.role})` : ""}`).join("; ");
+  const text = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich:${project}:${people.map((p) => p.name).sort().join("|")}` });
+  if (!text) return [];
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) return [];
+  try {
+    const arr = JSON.parse(m[0]).people ?? [];
+    return arr.filter((p) => p && typeof p.name === "string" && p.name.trim()).map((p) => ({
+      name: p.name.trim(),
+      handle: typeof p.handle === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(p.handle.replace(/^@/, "")) ? "@" + p.handle.replace(/^@/, "") : void 0,
+      linkedin: typeof p.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(p.linkedin) ? p.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0
+    }));
+  } catch {
+    return [];
+  }
+}
+var ROLE_RE = /\b(co-?founders?|founders?|ceo|cto|coo|cfo|cmo|chief\s+\w+\s+officer|lead\s+(?:dev|developer|engineer)|core\s+(?:dev|team)|head\s+of\s+\w+|advisors?|our\s+(?:founder|ceo|cto|coo|team|dev|lead))\b/i;
+function scanPostsForRoles(posts) {
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (m) => {
+    const k = (m.handle ?? m.name).toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(m);
+  };
+  for (const raw of posts.slice(0, 25)) {
+    const p = String(raw ?? "");
+    const rm = p.match(ROLE_RE);
+    if (!rm) continue;
+    const role = rm[0].toLowerCase().replace(/^our\s+/, "");
+    const kind = /advisor/i.test(role) ? "advisor" : "team";
+    for (const hm of p.matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
+      add({ name: "@" + hm[1], handle: "@" + hm[1], role, kind, evidence: `role word "${role}" in the account's own post`, source: "post role-scan" });
+    }
+    const RW = "co-?founders?|founders?|ceo|cto|coo|cfo|cmo|advisors?";
+    const nm = p.match(new RegExp(`([A-Z][a-z]+\\s+[A-Z][a-z]+)[^.\\n]{0,18}\\b(?:${RW})\\b|\\b(?:${RW})\\b[^.\\n]{0,12}([A-Z][a-z]+\\s+[A-Z][a-z]+)`, "i"));
+    const name = nm ? nm[1] || nm[2] : void 0;
+    if (name && /^[A-Z][a-z]+\s+[A-Z][a-z]+$/.test(name)) {
+      add({ name, role, kind, evidence: `named next to the role word "${role}" in the account's own post`, source: "post role-scan" });
+    }
+  }
+  return out.slice(0, 12);
+}
+function parseTeamJSON(text, selfHandle, source) {
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
     const parsed = JSON.parse(m[0]);
-    const out = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
-    const self = h.toLowerCase();
-    return out.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => {
+    const arr = Array.isArray(parsed.people) ? parsed.people : Array.isArray(parsed.team) ? parsed.team : [];
+    const self = (selfHandle ?? "").replace(/^@/, "").toLowerCase();
+    return arr.filter((t) => t && typeof t.name === "string" && t.name.trim()).map((t) => {
       const role = (t.role || "team").toString();
       const kind = t.kind === "advisor" || /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
+      const linkedin = typeof t.linkedin === "string" && /linkedin\.com\/(in|company)\//i.test(t.linkedin) ? t.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
+      const projects = Array.isArray(t.projects) ? t.projects.filter((p) => p && typeof p.name === "string" && p.name.trim()).map((p) => ({ name: p.name.trim().slice(0, 60), role: typeof p.role === "string" && p.role.trim() ? p.role.trim().slice(0, 40) : void 0 })).slice(0, 6) : void 0;
       return {
         name: t.name.trim(),
         handle: t.handle && /^@?[A-Za-z0-9_]{2,30}$/.test(t.handle) ? "@" + t.handle.replace(/^@/, "") : void 0,
         role,
-        evidence: t.evidence,
-        kind
+        kind,
+        linkedin,
+        evidence: typeof t.evidence === "string" ? t.evidence : void 0,
+        source,
+        projects: projects && projects.length ? projects : void 0
       };
-    }).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 14);
+    }).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 16);
   } catch {
     return [];
   }
@@ -1584,24 +2392,34 @@ var xAdapter = {
         ctx.emit({ phase: "P0 \xB7 Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts.`, source: "twitterapi.io", tone: "neutral" });
       }
     }
+    const lastPostAt = await getLastPostAt(ctx.handle);
+    if (lastPostAt) {
+      const days = Math.floor((Date.now() - Date.parse(lastPostAt)) / 864e5);
+      ctx.evidence.profile.last_post_at = lastPostAt;
+      ctx.evidence.profile.days_since_post = days;
+      const dormant = days >= 21;
+      ctx.emit({ phase: "P0 \xB7 Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days \u2014 a project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
+    }
     if (!ctx.evidence.notableFollowers.length) {
-      ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Scanning followers for high-reach accounts and known callers/founders/funds\u2026", source: "twitterapi.io", tone: "neutral" });
-      const nf = await notableFollowers(ctx.handle);
+      ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Checking which top funds, founders, and KOLs follow the subject\u2026", source: "twitterapi.io", tone: "neutral" });
+      const fcm = (ctx.evidence.profile.followers ?? "").match(/([\d.]+)\s*([KMB]?)/i);
+      const followerCount = fcm ? Number(fcm[1]) * (/m/i.test(fcm[2]) ? 1e6 : /b/i.test(fcm[2]) ? 1e9 : /k/i.test(fcm[2]) ? 1e3 : 1) : void 0;
+      const scan = await notableFollowers(ctx.handle, { followerCount });
+      const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
       if (nf.length) {
-        const over1m = nf.filter((n) => (n.count ?? 0) >= 1e6).length;
-        const over100k = nf.filter((n) => (n.count ?? 0) >= 1e5).length;
-        const reach = over1m ? `${over1m} with >1M followers` : over100k ? `${over100k} with >100K followers` : "";
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `Followed by ${nf.length} notable account${nf.length === 1 ? "" : "s"}${reach ? ` (${reach})` : ""}: ${nf.slice(0, 6).map((n) => `@${n.handle}${n.size ? ` ${n.size}` : ""}`).join(", ")}${nf.length > 6 ? ", \u2026" : ""}.`, source: "twitterapi.io", tone: "good" });
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `Followed by ${nf.length} of ${scan.checked} known accounts checked: ${nf.slice(0, 8).map((n) => `@${n.handle}${n.label ? ` (${n.label})` : ""}`).join(", ")}${nf.length > 8 ? ", \u2026" : ""}.`, source: "twitterapi.io", tone: "good" });
       } else {
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "No high-reach or known accounts among the subject's recent followers.", source: "twitterapi.io", tone: "neutral" });
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `None of the ${scan.checked} known funds/founders/KOLs checked follow this subject.`, source: "twitterapi.io", tone: "neutral" });
       }
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);
+    const ackMap = await acknowledgments(claims.map((t) => t.claimed_endorser_handle || t.project_handle), ctx.handle);
     await Promise.all(
       claims.map(async (t) => {
         const endorser = t.claimed_endorser_handle || t.project_handle;
-        const [follows, ack] = await Promise.all([followsSubject(endorser, ctx.handle), acknowledgment(endorser, ctx.handle)]);
+        const follows = await followsSubject(endorser, ctx.handle);
+        const ack = ackMap.get(String(endorser).replace(/^@/, "").toLowerCase()) ?? null;
         if (follows !== null) t.follows_subject = follows;
         if (ack) {
           t.public_acknowledgment = ack.ack;
@@ -1617,6 +2435,88 @@ var xAdapter = {
   }
 };
 
+// server/adapters/teampage.ts
+function candidateUrls(domain) {
+  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  if (!d) return [];
+  const paths = ["team", "about", "about-us", "team-members", "our-team", "company", "people", "leadership"];
+  const urls = [];
+  for (const host of [d, `docs.${d}`, `www.${d}`]) {
+    for (const p of paths) {
+      urls.push(`https://${host}/${p}`);
+      urls.push(`https://${host}/${p}.md`);
+    }
+  }
+  return urls;
+}
+function htmlToText(html) {
+  return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
+}
+async function fetchPage(url) {
+  try {
+    recordCall("site-fetch", "team-page", 0);
+    const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
+    if (!r.ok) return null;
+    const ct = r.headers.get("content-type") ?? "";
+    if (!/html|markdown|text\/plain/i.test(ct)) return null;
+    const raw = await r.text();
+    const text = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
+    if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) return null;
+    return { url, text };
+  } catch {
+    return null;
+  }
+}
+async function fetchTeamPage(domain, projectName) {
+  const urls = candidateUrls(domain);
+  if (!urls.length) return [];
+  const pages = (await Promise.all(urls.map(fetchPage))).filter(Boolean);
+  if (!pages.length) return [];
+  pages.sort((a, b) => (/team/i.test(b.url) ? 1 : 0) - (/team/i.test(a.url) ? 1 : 0) || b.text.length - a.text.length);
+  const corpus = pages.slice(0, 2).map((p) => `PAGE ${p.url}:
+${p.text.slice(0, 6e3)}`).join("\n\n");
+  const system = "You extract a crypto/tech project's team roster from the text of its own team/about page. List EVERY named person with a role: founders, executives (CEO/CTO/COO/CFO/CMO), core team, engineering/product leads, and named advisors. Use the exact role the page states. Capture any X/Twitter handle and LinkedIn URL shown next to a person. Do NOT invent people or roles; include only names actually present in the text. Never use em dashes.";
+  const tool = {
+    name: "record_team",
+    description: "Record the named people listed on the project's team/about page.",
+    input_schema: {
+      type: "object",
+      properties: {
+        people: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              name: { type: "string" },
+              role: { type: "string" },
+              twitter: { type: "string", description: "@handle if shown" },
+              linkedin: { type: "string", description: "linkedin.com/in/... if shown" }
+            },
+            required: ["name", "role"]
+          }
+        }
+      },
+      required: ["people"]
+    }
+  };
+  const out = await structured(
+    system,
+    `Project${projectName ? ` ${projectName}` : ""} team page text:
+
+${corpus}`,
+    tool,
+    2048
+  );
+  if (!out?.people?.length) return [];
+  return out.people.filter((p) => p.name && p.name.trim()).map((p) => {
+    const role = (p.role || "team").toString();
+    const kind = /advisor|advis|backer|mentor/i.test(role) ? "advisor" : "team";
+    const handle = p.twitter && /^@?[A-Za-z0-9_]{2,30}$/.test(p.twitter.replace(/^@/, "")) ? "@" + p.twitter.replace(/^@/, "") : void 0;
+    const linkedin = p.linkedin && /linkedin\.com\/(in|company)\//i.test(p.linkedin) ? p.linkedin.replace(/^https?:\/\//, "").replace(/\/$/, "") : void 0;
+    return { name: p.name.trim(), handle, role, kind, linkedin, evidence: "listed on the project's own team page", source: "team page" };
+  });
+}
+
 // server/adapters/peopledatalabs.ts
 var BASE = "https://api.peopledatalabs.com/v5";
 async function enrichPerson(params) {
@@ -1629,9 +2529,13 @@ async function enrichPerson(params) {
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
   try {
     const res = await fetch(`${BASE}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      recordPdlMatch(false);
+      return null;
+    }
     const d = await res.json();
     const p = d.data;
+    recordPdlMatch(!!p);
     if (!p) return null;
     return {
       fullName: p.full_name,
@@ -1644,7 +2548,16 @@ async function enrichPerson(params) {
         end: x.end_date,
         url: x.company?.website || x.company?.linkedin_url || null
       })),
-      linkedin: p.linkedin_url
+      linkedin: p.linkedin_url,
+      // Emails are the strongest cross-source bridge key: a PDL-resolved email that
+      // MATCHES a leaked GitHub commit email proves the anon dev is this named person.
+      emails: [...new Set([
+        p.work_email,
+        ...Array.isArray(p.personal_emails) ? p.personal_emails : [],
+        ...Array.isArray(p.emails) ? p.emails.map((e) => typeof e === "string" ? e : e?.address) : []
+      ].filter((e) => typeof e === "string" && e.includes("@")).map((e) => e.toLowerCase()))],
+      github: typeof p.github_username === "string" ? p.github_username : null,
+      location: typeof p.location_name === "string" ? p.location_name : null
     };
   } catch {
     return null;
@@ -1675,8 +2588,10 @@ var peopledatalabsAdapter = {
       return;
     }
     ctx.evidence.profile.identity_confidence = person.linkedin ? "Probable" : ctx.evidence.profile.identity_confidence;
-    ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.`;
-    ctx.emit({ phase: "P1 \xB7 Identity", label: "Identity resolved", detail: `${person.fullName} \xB7 ${person.experience.length} employment records${person.linkedin ? ` \xB7 ${person.linkedin}` : ""}`, source: "peopledatalabs", tone: "good" });
+    if (person.emails.length) ctx.evidence.profile.identity_emails = person.emails;
+    const emailNote = person.emails.length ? ` Email on record: ${person.emails[0]}.` : "";
+    ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.${emailNote}`;
+    ctx.emit({ phase: "P1 \xB7 Identity", label: "Identity resolved", detail: `${person.fullName} \xB7 ${person.experience.length} employment records${person.emails.length ? ` \xB7 ${person.emails[0]}` : ""}${person.linkedin ? ` \xB7 ${person.linkedin}` : ""}`, source: "peopledatalabs", tone: "good" });
     const byName = new Map(ctx.evidence.ventures.map((v) => [v.project_name.toLowerCase(), v]));
     const added = [];
     const confirmed = [];
@@ -1720,14 +2635,15 @@ var peopledatalabsAdapter = {
 
 // server/adapters/github.ts
 var GH = "https://api.github.com";
-var headers = (key) => ({
+var headers2 = (key) => ({
   authorization: `Bearer ${key}`,
   accept: "application/vnd.github+json",
   "user-agent": "argus-due-diligence"
 });
 async function ghJson(path, key) {
   try {
-    const res = await fetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(8e3) });
+    recordCall("github", path.split("?")[0].split("/").slice(1, 3).join("/") || "api", 0);
+    const res = await fetch(GH + path, { headers: headers2(key), signal: AbortSignal.timeout(8e3) });
     if (!res.ok) return null;
     return await res.json();
   } catch {
@@ -1822,6 +2738,7 @@ async function lookupOrganization(name) {
   const key = env("CRUNCHBASE_API_KEY");
   if (!key) return null;
   try {
+    recordCall("crunchbase", "org-search", 0, "plan-billed");
     const res = await fetch(`${BASE2}/searches/organizations`, {
       method: "POST",
       headers: { "X-cb-user-key": key, "content-type": "application/json" },
@@ -1870,6 +2787,7 @@ var crunchbaseAdapter = {
 var BASE3 = "https://api.dexscreener.com";
 async function lookupToken(address) {
   try {
+    recordCall("dexscreener", "token-pairs", 0);
     const res = await fetch(`${BASE3}/latest/dex/tokens/${address}`);
     if (!res.ok) return null;
     const data = await res.json();
@@ -1931,9 +2849,10 @@ async function tokenByContract(chain, address) {
   const key = env("COINGECKO_API_KEY");
   const platform = PLATFORM[chain.toLowerCase()] ?? chain.toLowerCase();
   const base = key ? PRO : PUBLIC;
-  const headers2 = key ? { "x-cg-pro-api-key": key } : {};
+  const headers3 = key ? { "x-cg-pro-api-key": key } : {};
   try {
-    const res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers2 });
+    recordCall("coingecko", "contract-lookup", 0);
+    const res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers3 });
     if (!res.ok) return null;
     const d = await res.json();
     return {
@@ -2000,6 +2919,7 @@ async function searchMentions(query) {
   const token = await getToken();
   if (!token) return [];
   try {
+    recordCall("reddit", "search", 0);
     const res = await fetch(`https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=15&t=year`, {
       headers: { authorization: `Bearer ${token}`, "user-agent": "argus-dd/1.0" }
     });
@@ -2047,6 +2967,7 @@ async function heliusWalletActivity(address) {
   const key = env("HELIUS_API_KEY");
   if (!key) return null;
   try {
+    recordHelius("address-transactions");
     const res = await fetch(`https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${key}&limit=50`);
     if (!res.ok) return null;
     const txs = await res.json();
@@ -2084,6 +3005,7 @@ var CDX = "https://web.archive.org/cdx/search/cdx";
 async function newestSnapshot(urlPath) {
   try {
     const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-1`;
+    recordCall("wayback", "cdx-search", 0);
     const res = await fetch(CDX + qs, { signal: AbortSignal.timeout(4e3) });
     if (!res.ok) return null;
     const rows = await res.json();
@@ -2108,6 +3030,7 @@ async function archivedAffiliation(domain, name) {
     if (!snap) continue;
     try {
       const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
+      recordCall("wayback", "snapshot-fetch", 0);
       const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(5e3) });
       if (!res.ok) continue;
       const text = (await res.text()).toLowerCase();
@@ -2131,6 +3054,93 @@ function nameNeedles(name) {
   return [...out];
 }
 
+// server/adapters/wallet.ts
+var ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
+var NAME_IN_TEXT = /\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b/gi;
+async function getJson(url) {
+  try {
+    recordCall("wallet-resolve", new URL(url).host, 0);
+    const r = await fetch(url, { signal: AbortSignal.timeout(9e3) });
+    return r.ok ? await r.json() : null;
+  } catch {
+    return null;
+  }
+}
+async function web3bio(name) {
+  const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);
+  const arr = Array.isArray(d) ? d : d ? [d] : [];
+  return arr.find((x) => x && typeof x.address === "string" && x.address)?.address ?? null;
+}
+async function ensideas(name) {
+  const d = await getJson(`https://api.ensideas.com/ens/resolve/${encodeURIComponent(name)}`);
+  return d && typeof d.address === "string" && /^0x[a-fA-F0-9]{40}$/.test(d.address) ? d.address : null;
+}
+async function snsResolve(name) {
+  const j = await getJson(`https://sns-sdk-proxy.bonfida.workers.dev/resolve/${encodeURIComponent(name.replace(/\.sol$/i, ""))}`);
+  return j && typeof j.result === "string" ? j.result : null;
+}
+async function resolveName(name) {
+  const lower = name.toLowerCase();
+  if (lower.endsWith(".sol")) {
+    const a2 = await snsResolve(lower);
+    return a2 ? { address: a2, chain: "solana" } : null;
+  }
+  let a = await web3bio(lower);
+  if (!a && /\.eth$/i.test(lower)) a = await ensideas(lower);
+  return a ? { address: a, chain: a.startsWith("0x") ? "evm" : "solana" } : null;
+}
+async function farcasterWallets(handle) {
+  const u = handle.replace(/^@/, "");
+  const ud = await getJson(`https://api.warpcast.com/v2/user-by-username?username=${encodeURIComponent(u)}`);
+  const fid = ud?.result?.user?.fid;
+  if (!fid) return [];
+  const vd = await getJson(`https://api.warpcast.com/v2/verifications?fid=${fid}`);
+  const verifs = vd?.result?.verifications ?? [];
+  return verifs.filter((v) => typeof v.address === "string" && /^0x[a-fA-F0-9]{40}$/.test(v.address)).map((v) => ({ address: v.address, chain: "evm", source: `Farcaster verified wallet (@${u})`, tier: "InvestigatorAttributed" }));
+}
+async function resolveWalletsFromText(text) {
+  if (!text) return [];
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (address, chain, source) => {
+    if (!address) return;
+    const k = address.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push({ address, chain, source, tier: "SelfDoxxed" });
+  };
+  for (const m of text.matchAll(ADDR_IN_TEXT)) add(m[0], "evm", "0x address self-disclosed in X bio/posts");
+  const names = /* @__PURE__ */ new Set();
+  for (const m of text.matchAll(NAME_IN_TEXT)) names.add(m[0].toLowerCase());
+  for (const nm of [...names].slice(0, 6)) {
+    const r = await resolveName(nm);
+    add(r?.address ?? null, r?.chain ?? "evm", `${nm} (self-disclosed in X bio/posts)`);
+  }
+  return out.slice(0, 6);
+}
+async function resolveForHandle(handle, text, opts = {}) {
+  const u = handle.replace(/^@/, "").toLowerCase();
+  const out = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (w) => {
+    if (!w) return;
+    const k = w.address.toLowerCase();
+    if (seen.has(k)) return;
+    seen.add(k);
+    out.push(w);
+  };
+  const [fromText, fromFc] = await Promise.all([resolveWalletsFromText(text), farcasterWallets(handle)]);
+  fromText.forEach(add);
+  fromFc.forEach(add);
+  if (opts.includePossible) {
+    for (const nm of [`${u}.eth`, `${u}.base.eth`]) {
+      const r = await resolveName(nm);
+      if (r) add({ address: r.address, chain: r.chain, source: `${nm} (handle-name match, unconfirmed)`, tier: "InvestigatorAttributed" });
+    }
+  }
+  return out.slice(0, 8);
+}
+
 // server/orchestrate.ts
 var ADAPTERS = [
   xAdapter,
@@ -2151,13 +3161,20 @@ function parseOutcome(s) {
 }
 function asRoles(roles) {
   const valid = new Set(Object.values(SubjectClass));
-  return roles.filter((r) => valid.has(r)).map((r) => r);
+  let out = roles.filter((r) => valid.has(r)).map((r) => r);
+  if (out.includes("INVESTOR" /* INVESTOR */) && out.includes("PROJECT" /* PROJECT */)) {
+    out = out.filter((r) => r !== "PROJECT" /* PROJECT */);
+  }
+  return out;
 }
 async function coldIntake(ctx) {
+  let siteUrl;
   const prof = await getProfile2(ctx.handle);
   if (prof) {
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
+    if (prof.image) ctx.evidence.profile.avatar_url = prof.image;
     ctx.evidence.profile.bio = prof.bio ?? "";
+    siteUrl = prof.website;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);
@@ -2174,10 +3191,18 @@ async function coldIntake(ctx) {
   } else if (hist) {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Handle history", detail: "No prior X handle on record for this account (no rebrand found; memory.lol coverage is partial).", source: "memory.lol", tone: "neutral" });
   }
-  const posts = await getRecentPosts(ctx.handle);
+  const corpus = await collectCorpus(ctx.handle);
+  const posts = corpus.posts;
   if (posts.length) {
-    ctx.evidence.recentActivity = posts;
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
+    ctx.evidence.recentActivity = corpus.newest.length ? corpus.newest : posts;
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Recent activity", detail: `Assembled a ${posts.length}-post claim corpus (${corpus.count.originals} recent originals + ${corpus.count.searched} from keyword search over full history) to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
+  }
+  const foundWallets = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...posts].join(" \n "));
+  if (foundWallets.length) {
+    for (const w of foundWallets) {
+      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: w.tier, notes: w.source });
+    }
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Wallet resolved", detail: `${foundWallets.length} wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}\u2026 (${w.chain}, ${w.source.includes("Farcaster") ? "Farcaster" : "self-disclosed"})`).join(", ")}. Running on-chain forensics.`, source: "find-wallet", tone: "good" });
   }
   if (!analystAvailable()) return;
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify\u2026", tone: "neutral" });
@@ -2210,11 +3235,84 @@ async function coldIntake(ctx) {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} \u2014 now verifying each.`, source: "claude", tone: "neutral" });
   }
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts\u2026", source: "grok", tone: "neutral" });
-  const [bySubject, byMentions, people] = await Promise.all([
-    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
-    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
-    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity)
+  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
+  const [bySubject, people, siteTeam, pageTeam] = await Promise.all([
+    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
+    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
+    // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
+    // domain or a project name — a big public project's roster lives off-X, and
+    // many project accounts (e.g. @VulcanForged) put no plain domain in the bio.
+    domain || ctx.evidence.profile.display_name ? findTeamOnSite(domain, ctx.evidence.profile.display_name) : Promise.resolve([]),
+    // Read the project's own /team page directly (Grok's summary can miss it).
+    fetchTeamPage(teamDomain, ctx.evidence.profile.display_name)
   ]);
+  const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
+  const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
+  const norm2 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
+  const byHandle = /* @__PURE__ */ new Map();
+  const byName = /* @__PURE__ */ new Map();
+  for (const t of [...pageTeam, ...siteTeam, ...people, ...postRoleTeam]) {
+    const h = t.handle ? norm2(t.handle) : "";
+    const n = norm2(t.name);
+    if (!h && !n) continue;
+    const existing = h && byHandle.get(h) || n && byName.get(n) || null;
+    if (existing) {
+      if (!existing.handle && t.handle) {
+        existing.handle = t.handle;
+        byHandle.set(norm2(t.handle), existing);
+      }
+      if (!existing.linkedin && t.linkedin) existing.linkedin = t.linkedin;
+      if ((!existing.projects || !existing.projects.length) && t.projects?.length) existing.projects = t.projects;
+      continue;
+    }
+    const rec = { name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects };
+    webTeam.push(rec);
+    if (h) byHandle.set(h, rec);
+    if (n) byName.set(n, rec);
+  }
+  const subj = norm2(ctx.handle);
+  const accountVouchesTeam = !!domain || people.length > 0 || postRoleTeam.length > 0 || webTeam.some((t) => norm2(t.handle) === subj);
+  if (webTeam.length && !accountVouchesTeam) {
+    ctx.emit({ phase: "P1 \xB7 Team", label: "Same-name project (not this account)", detail: `Found a team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it \u2014 its handle isn't among them, it links no site, and its own posts name no team. Treated as a name collision, not the account's identity.`, source: "team-search", tone: "warn" });
+    webTeam.length = 0;
+  }
+  const nameOnly = webTeam.filter((m) => !m.handle && !m.linkedin).slice(0, 15);
+  if (nameOnly.length >= 1) {
+    const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })));
+    let linked = 0;
+    for (const f of found) {
+      const m = byName.get(norm2(f.name));
+      if (!m) continue;
+      if (!m.handle && f.handle) {
+        m.handle = f.handle;
+        linked++;
+      }
+      if (!m.linkedin && f.linkedin) {
+        m.linkedin = f.linkedin;
+        if (!f.handle) linked++;
+      }
+    }
+    if (linked) ctx.emit({ phase: "P1 \xB7 Team", label: "Identities linked", detail: `Resolved X/LinkedIn for ${linked} of ${nameOnly.length} name-only team members.`, source: "grok", tone: "good" });
+  }
+  if (webTeam.length) {
+    ctx.emit({ phase: "P1 \xB7 Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
+    const isLeader = (r) => /founder|cofounder|co-founder|ceo|cto|coo|president|chief/i.test(r ?? "");
+    const leaders = webTeam.filter((t) => isLeader(t.role));
+    const leaderWithLinkedin = leaders.some((t) => !!t.linkedin);
+    const rank = { Unverified: 0, Probable: 1, Confirmed: 2 };
+    const cur = ctx.evidence.profile.identity_confidence;
+    if (cur !== "SuspectedImpersonation") {
+      const target = leaderWithLinkedin ? "Confirmed" : leaders.length || webTeam.length >= 2 ? "Probable" : null;
+      if (target && (rank[target] ?? 0) > (rank[cur ?? "Unverified"] ?? 0)) {
+        ctx.evidence.profile.identity_confidence = target;
+        ctx.emit({ phase: "P1 \xB7 Team", label: `Identity ${target.toLowerCase()}`, detail: `Project identity resolved through its named team${leaderWithLinkedin ? " (LinkedIn-corroborated leadership)" : ""}; a brand handle over a public team is not an anonymity flag.`, source: "team-search", tone: "good" });
+      }
+    }
+  } else if (domain) {
+    ctx.emit({ phase: "P1 \xB7 Team", label: "No named team", detail: `Dug ${domain} and the account's posts; no individual team members could be attributed. For a project raising money, an unnamed team is itself a flag.`, source: "team-search", tone: "warn" });
+  }
   if (people.length) {
     const teamList = people.filter((p) => p.kind === "team");
     const advisorList = people.filter((p) => p.kind === "advisor");
@@ -2244,7 +3342,7 @@ async function coldIntake(ctx) {
     if (namedOnly.length) ctx.emit({ phase: "P0 \xB7 Intake", label: "Named only", detail: `Also named without a handle (not auditable): ${namedOnly.slice(0, 5).join(", ")}.`, source: "grok", tone: "neutral" });
   }
   const mergedMap = /* @__PURE__ */ new Map();
-  for (const v of [...bySubject, ...byMentions]) {
+  for (const v of bySubject) {
     const k = v.name.toLowerCase();
     const ex = mergedMap.get(k);
     if (!ex) mergedMap.set(k, v);
@@ -2280,10 +3378,10 @@ async function coldIntake(ctx) {
         const corrob = [];
         const subjectU = ctx.handle.replace(/^@/, "").toLowerCase();
         const xHandle = v.x_handle ?? (v.evidence?.match(/@([A-Za-z0-9_]{2,30})/g) ?? []).map((s) => s.slice(1)).find((u) => u.toLowerCase() !== subjectU);
-        const domain = v.domain ?? v.evidence?.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|app|finance|org|net|co|ai|gg|so))\b/i)?.[1];
+        const domain2 = v.domain ?? v.evidence?.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|app|finance|org|net|co|ai|gg|so))\b/i)?.[1];
         try {
-          if (domain) {
-            const arch = await archivedAffiliation(domain, ctx.evidence.profile.display_name);
+          if (domain2) {
+            const arch = await archivedAffiliation(domain2, ctx.evidence.profile.display_name);
             if (arch) {
               corrob.push(`archived ${arch.where} page (${arch.year})`);
               rec.evidence_url = arch.url;
@@ -2316,6 +3414,7 @@ function axisCatalog(roles) {
   return out;
 }
 async function runAudit(rawHandle, emit) {
+  resetCost();
   const fixture = findSubject(rawHandle);
   const liveProviders = ADAPTERS.filter((a) => KEYED.has(a.id) && a.available());
   const anyLive = liveProviders.length > 0 || analystAvailable();
@@ -2344,13 +3443,17 @@ async function runAudit(rawHandle, emit) {
     evidence.roles = route.applicable_classes.length ? route.applicable_classes : ["MEMBER" /* MEMBER */];
     emit({ phase: "P0 \xB7 Routing", label: "Classify roles", detail: `Routed to ${evidence.roles.join(", ")} (${route.confidence} confidence).`, tone: "neutral" });
   }
+  const { identity_confidence: _ic, identity_note: _in, ...profileForLlm } = evidence.profile;
   const baseEvidence = {
-    profile: evidence.profile,
+    profile: profileForLlm,
     ventures: evidence.ventures,
     testimonials: evidence.testimonials,
     advised: evidence.advised,
     promotions: evidence.promotions,
     wallets: evidence.wallets,
+    // The named people behind the project (from the site + LinkedIn + X content),
+    // so identity/founder scoring reflects the team we actually found.
+    team: (evidence.webTeam ?? []).map((p) => ({ name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, otherProjects: p.projects })),
     findings: evidence.findings,
     notableFollowers: evidence.notableFollowers,
     recentActivity: evidence.recentActivity.slice(0, 12)
@@ -2385,7 +3488,11 @@ async function runAudit(rawHandle, emit) {
   }
   emit({ phase: "Finalize", label: "Govern composite", detail: "Applying caps and selecting the governing role.", tone: "neutral" });
   await delay(300);
-  return assembleDossier(evidence, true);
+  const dossier = assembleDossier(evidence, true);
+  const cost = getCost();
+  dossier.cost = cost;
+  emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches \u2248${cost.sources} sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
+  return dossier;
 }
 
 // src/token/sources.ts
@@ -2422,19 +3529,32 @@ var CG_PLATFORM = {
   fantom: "fantom"
 };
 var CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
+function cleanBlurb(raw) {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  let s = raw.replace(/<[^>]+>/g, " ").replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1").replace(/https?:\/\/\S+/g, "").replace(/[*_`>#]+/g, " ").replace(/&amp;/g, "&").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+  if (!s) return null;
+  const sentences = s.match(/[^.!?]+[.!?]+/g);
+  if (sentences && sentences.length) s = sentences.slice(0, 2).join(" ").trim();
+  if (s.length > 300) s = s.slice(0, 297).replace(/\s+\S*$/, "") + "\u2026";
+  return s;
+}
 var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
 async function coingeckoToken(chain, address) {
   const plat = CG_PLATFORM[chain] ?? chain;
   try {
     const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [] };
+    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
     if (!res.ok) return null;
     const d = await res.json();
     const tickers = d.tickers ?? [];
     const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
     const cex = new Set(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean));
     const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames };
+    const homepage = (d.links?.homepage ?? []).find((u) => typeof u === "string" && /^https?:\/\//i.test(u)) ?? null;
+    const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
+    const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
+    const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
+    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image, description: cleanBlurb(d.description?.en) };
   } catch {
     return null;
   }
@@ -2503,7 +3623,7 @@ async function goplus(chainId, address) {
 
 // src/token/audit.ts
 var clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-var num = (s) => s == null || s === "" ? null : Number(s);
+var num2 = (s) => s == null || s === "" ? null : Number(s);
 var t1 = (s) => s === "1";
 var solFlag = (x) => x?.status === "1";
 function band(score) {
@@ -2533,6 +3653,7 @@ function evmSafety(gp, sim) {
     simChecked: !!s,
     honeypot: t1(gp?.is_honeypot) || (s?.isHoneypot ?? false),
     honeypotOnchain: t1(gp?.is_honeypot) || t1(gp?.cannot_sell_all),
+    serialScammerCreator: t1(gp?.honeypot_with_same_creator),
     mintable: t1(gp?.is_mintable),
     freezable: false,
     nonTransferable: false,
@@ -2544,9 +3665,9 @@ function evmSafety(gp, sim) {
     openSource: t1(gp?.is_open_source),
     cannotSellAll: t1(gp?.cannot_sell_all),
     metadataMutable: false,
-    buyTax: s?.simSuccess ? s.buyTax : (num(gp?.buy_tax) ?? 0) * 100,
-    sellTax: s?.simSuccess ? s.sellTax : (num(gp?.sell_tax) ?? 0) * 100,
-    holderCount: num(gp?.holder_count) ?? 0,
+    buyTax: s?.simSuccess ? s.buyTax : (num2(gp?.buy_tax) ?? 0) * 100,
+    sellTax: s?.simSuccess ? s.sellTax : (num2(gp?.sell_tax) ?? 0) * 100,
+    holderCount: num2(gp?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
     lpBurnedPct,
@@ -2561,7 +3682,7 @@ function evmSafety(gp, sim) {
     tradingCooldown: t1(gp?.trading_cooldown),
     externalCall: t1(gp?.external_call),
     ownerChangeBalance: t1(gp?.owner_change_balance),
-    creatorPercent: (num(gp?.creator_percent) ?? 0) * 100
+    creatorPercent: (num2(gp?.creator_percent) ?? 0) * 100
   };
 }
 function solanaSafety(sol) {
@@ -2581,6 +3702,8 @@ function solanaSafety(sol) {
     simChecked: false,
     honeypot: !!sol?.non_transferable && sol.non_transferable === "1",
     honeypotOnchain: sol?.non_transferable === "1",
+    serialScammerCreator: false,
+    // GoPlus's same-creator honeypot flag is EVM-only
     mintable,
     freezable,
     nonTransferable: sol?.non_transferable === "1",
@@ -2596,7 +3719,7 @@ function solanaSafety(sol) {
     metadataMutable: solFlag(sol?.metadata_mutable),
     buyTax: 0,
     sellTax: 0,
-    holderCount: num(sol?.holder_count) ?? 0,
+    holderCount: num2(sol?.holder_count) ?? 0,
     topHolderPct,
     lpLocked,
     lpBurnedPct: 0,
@@ -2620,6 +3743,7 @@ function emptySafety() {
     simChecked: false,
     honeypot: false,
     honeypotOnchain: false,
+    serialScammerCreator: false,
     mintable: false,
     freezable: false,
     nonTransferable: false,
@@ -2732,19 +3856,33 @@ async function runTokenAudit(input, emit, opts) {
       }
     }
     if (s.cannotSellAll) caps.push([15, "cannot_sell_all"]);
+    const cexN = cg?.cexCount ?? 0;
+    const mcap = fdv;
+    const established = cexN >= 5 || cexN >= 3 && mcap >= 1e7 || cexN >= 1 && mcap >= 1e8;
+    const authorityTone = established ? "warn" : "bad";
+    const govNote = established ? " On a token with real centralized-exchange listings this is typically a governed emissions/ops mechanism, not a rug setup \u2014 confirm the controller." : "";
     if (s.mintable) {
-      caps.push([35, "mint_authority_active"]);
-      findings.push({ claim: "Mint authority active: supply can be inflated at will.", tone: "bad", source: chain === "solana" ? "goplus-sol" : "goplus" });
+      if (!established) caps.push([35, "mint_authority_active"]);
+      findings.push({ claim: `Mint authority is live: supply can be minted.${govNote}`, tone: authorityTone, source: chain === "solana" ? "goplus-sol" : "goplus" });
     }
     if (s.freezable) {
-      caps.push([35, "freeze_authority_active"]);
-      findings.push({ claim: "Freeze authority active: the team can freeze your tokens (you cannot sell).", tone: "bad", source: "goplus-sol" });
+      if (!established) caps.push([35, "freeze_authority_active"]);
+      findings.push({ claim: `Freeze authority is live: the team can freeze token accounts.${govNote}`, tone: authorityTone, source: "goplus-sol" });
     }
     if (s.takeBack || s.hiddenOwner) {
-      caps.push([35, "reclaimable_ownership"]);
-      findings.push({ claim: s.hiddenOwner ? "Hidden owner detected." : "Ownership can be taken back after renouncement.", tone: "bad", source: "goplus" });
+      if (s.hiddenOwner) {
+        caps.push([35, "reclaimable_ownership"]);
+        findings.push({ claim: "Hidden owner detected.", tone: "bad", source: "goplus" });
+      } else {
+        if (!established) caps.push([35, "reclaimable_ownership"]);
+        findings.push({ claim: `Ownership can be reclaimed after renouncement.${govNote}`, tone: authorityTone, source: "goplus" });
+      }
     }
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
+    if (s.serialScammerCreator) {
+      caps.push([25, "serial_scammer_creator"]);
+      findings.push({ claim: "The wallet that deployed this token has created honeypot tokens before \u2014 a serial scammer.", tone: "bad", source: "goplus" });
+    }
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });
     if (s.simChecked && !s.honeypot) findings.push({ claim: `Sell simulation passed (buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%).`, tone: "good", source: "honeypot.is" });
     if (s.ownerRenounced && !s.mintable && !s.takeBack && !s.freezable) findings.push({ claim: chain === "solana" ? "Mint and freeze authority revoked." : "Ownership renounced; no mint or take-back.", tone: "good", source: "goplus" });
@@ -2879,6 +4017,10 @@ async function runTokenAudit(input, emit, opts) {
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
     ...(pair.info?.socials ?? []).map((x) => ({ label: x.type, url: x.url }))
   ];
+  const hasWebsite = socials.some((x) => /^https?:\/\//i.test(x.url) && !/x\.com|twitter\.com|t\.me|discord|github/i.test(x.url));
+  const hasTwitter = socials.some((x) => /x\.com|twitter/i.test(x.url) || /twitter|^x$/i.test(x.label));
+  if (cg?.homepage && !hasWebsite) socials.push({ label: "site", url: cg.homepage });
+  if (cg?.twitter && !hasTwitter) socials.push({ label: "twitter", url: `https://x.com/${cg.twitter}` });
   let aT6 = ageDays == null ? 4 : ageDays < 1 ? 2 : ageDays < 7 ? 4 : ageDays < 30 ? 6 : ageDays < 180 ? 8 : 10;
   if (socials.length) aT6 = clamp(aT6 + 1, 0, 10);
   if (cg?.cexCount) aT6 = clamp(aT6 + 2, 0, 10);
@@ -2893,9 +4035,9 @@ async function runTokenAudit(input, emit, opts) {
     capApplied = key;
     verdict = ceiling <= 10 ? "AVOID" : band(score);
   } else verdict = band(score);
-  const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u)));
+  const projectX = handleFromUrl((pair.info?.socials ?? []).find((x) => /twitter|x/i.test(x.type))?.url) || handleFromUrl((pair.info?.websites ?? []).map((w) => w.url).find((u) => /x\.com|twitter\.com/i.test(u))) || (cg?.twitter ? "@" + cg.twitter : null);
   const deployer = chain === "solana" ? sol?.creators?.[0]?.address ?? null : gpEvm?.creator_address || (gpEvm?.owner_address && !/^0x0+$/.test(gpEvm.owner_address) ? gpEvm.owner_address : null) || null;
-  const topHolders = rawHolders.slice(0, 5).map((h) => ({
+  const topHolders = rawHolders.slice(0, 10).map((h) => ({
     address: h.address ?? h.account ?? "",
     percent: Number(h.percent) * 100,
     tag: h.tag || void 0,
@@ -2908,9 +4050,10 @@ async function runTokenAudit(input, emit, opts) {
     address,
     chain,
     dexId: pair.dexId,
+    pairAddress: pair.pairAddress,
     symbol: pair.baseToken.symbol,
     name: pair.baseToken.name,
-    imageUrl: pair.info?.imageUrl,
+    imageUrl: pair.info?.imageUrl ?? cg?.image ?? void 0,
     priceUsd: pair.priceUsd ? Number(pair.priceUsd) : void 0,
     mcap: fdv,
     liquidityUsd,
@@ -2951,14 +4094,17 @@ function buildGraph(symbol, verdict, projectX, deployer, holders, socials) {
     nodes.push({ type: "Identity", subtype: "Wallet", key: k });
     edges.push({ src: center, dst: k, type: "DEPLOYED_BY" });
   }
-  holders.slice(0, 4).forEach((h, i) => {
-    const k = (h.tag || "holder") + ":" + h.address.slice(0, 6) + i;
+  holders.slice(0, 4).forEach((h) => {
+    const k = (h.tag || "holder") + ":" + h.address.slice(0, 8);
     nodes.push({ type: "Identity", subtype: "Wallet", key: k, concentration: h.percent });
     edges.push({ src: center, dst: k, type: "HELD_BY", verdict: h.percent > 25 ? "Contradicted" : void 0 });
   });
-  socials.slice(0, 2).forEach((x) => {
-    nodes.push({ type: "Company", key: x.label });
-    edges.push({ src: center, dst: x.label, type: "LINKS" });
+  socials.slice(0, 3).forEach((x) => {
+    const xh = x.url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i)?.[1];
+    const key = xh ? "@" + xh : x.url.match(/^https?:\/\/(?:www\.)?([^/]+)/i)?.[1];
+    if (!key || projectX && key.toLowerCase() === projectX.toLowerCase()) return;
+    nodes.push({ type: "Company", key });
+    edges.push({ src: center, dst: key, type: "LINKS" });
   });
   return { nodes, edges };
 }
@@ -2990,11 +4136,12 @@ function resolveInput(raw) {
   if (!s.startsWith("@") && !/twitter\.com|x\.com/i.test(s) && SOLANA.test(s) && s.length >= 32) {
     return { kind: "token", ref: s, via: "solana" };
   }
-  if (!/x\.com|twitter\.com/i.test(s)) {
-    if (HTTP_URL.test(s)) return { kind: "site", ref: s };
-    if (!s.startsWith("@") && DOMAIN.test(s) && !NAME_SERVICE.test(s)) return { kind: "site", ref: s };
-  }
-  return { kind: "handle", ref: s };
+  const NOISE = /^(home|explore|notifications|messages|i|intent|search|hashtag|settings|share|status|about|tos|privacy)$/i;
+  const xUrl = s.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,30})/i);
+  if (xUrl && !NOISE.test(xUrl[1])) return { kind: "handle", ref: xUrl[1] };
+  if (HTTP_URL.test(s)) return { kind: "site", ref: s };
+  if (!s.startsWith("@") && DOMAIN.test(s) && !NAME_SERVICE.test(s)) return { kind: "site", ref: s };
+  return { kind: "handle", ref: s.replace(/^@/, "") };
 }
 export {
   auditToken,

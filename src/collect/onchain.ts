@@ -148,11 +148,21 @@ export async function pivotOnChain(
 }
 
 function reconcile(claim: TokenClaim, d: TokenDossier, viaSearch = false): OnChainPivot["reconcile"] {
+  // NAME-SEARCH is a ticker match, NOT a confirmed link to this project. Many
+  // tokens share a ticker, and the highest-liquidity one is often a totally
+  // different (frequently legitimate) project. So a name-search match is
+  // presented NEUTRALLY and NEVER inherits the matched token's verdict — judging
+  // a site by a random same-ticker token's health would be defamatory and wrong.
+  if (viaSearch) {
+    return {
+      tone: "warn",
+      line: `A token trading as ${claim.ticker} exists on-chain (${d.symbol} on ${d.chain}, liquidity ${money(d.liquidityUsd)}). This is a ticker match only — the site links no contract to confirm it is this project's token, and many projects share a ticker. Open its audit to judge that token on its own.`,
+    };
+  }
+
   const onChainFdv = d.mcap ?? undefined;
   const claimFdvNum = parseMoney(claim.fdv);
-  const lead = viaSearch
-    ? `A DEX-listed token matching ticker ${claim.ticker} exists (matched by name search — confirm it is this project's): ${d.symbol} on ${d.chain}, ${d.verdict} (${d.score ?? "—"}), liquidity ${money(d.liquidityUsd)}, FDV ${money(onChainFdv)}.`
-    : `On-chain: ${d.symbol} on ${d.chain}, ${d.verdict} (${d.score ?? "—"}), liquidity ${money(d.liquidityUsd)}, FDV ${money(onChainFdv)}.`;
+  const lead = `On-chain: ${d.symbol} on ${d.chain}, ${d.verdict} (${d.score ?? "—"}), liquidity ${money(d.liquidityUsd)}, FDV ${money(onChainFdv)}.`;
   const parts: string[] = [lead];
   let tone: OnChainPivot["reconcile"]["tone"] = d.verdict === "PASS" ? "good" : d.verdict === "CAUTION" ? "warn" : "bad";
 

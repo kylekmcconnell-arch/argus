@@ -2,9 +2,18 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { runRecon, type Recon } from "../collect/recon";
 import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
+import { ScoreTicker } from "./ScoreTicker";
+import { PrivateToggle } from "./PrivateToggle";
+import { beginScan, endScan } from "../lib/activescans";
+import { syncReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
 import { fetchWebTeam, type WebPerson } from "../lib/investigation";
+import { ProjectResearch } from "./ProjectResearch";
+import { resolveProjectToken, type ResolvedProjectToken } from "../lib/resolveProjectToken";
+import { SiteHistory } from "./SiteHistory";
+import { SiteInfra } from "./SiteInfra";
+import { ProjectXAccount } from "./ProjectXAccount";
 
 // A clean plain-text DD summary for pasting into a chat / channel.
 function reconReportText(r: Recon): string {
@@ -85,8 +94,18 @@ const COVERAGE: Record<string, { label: string; color: string; blurb: string }> 
 
 const EXAMPLES = ["neuro-mesh.io", "stripe.com"];
 
-export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudit?: (q: string) => void }) {
+// apex of a host without a public-suffix list — enough to match jup.ag against
+// www.jup.ag / station.jup.ag.
+const apexOf = (host: string) => { const p = host.toLowerCase().replace(/^www\./, "").split("."); return p.length <= 2 ? p.join(".") : p.slice(-2).join("."); };
+const hostFromUrl = (u: string) => { try { return new URL(/^https?:\/\//.test(u) ? u : `https://${u}`).hostname.replace(/^www\./, ""); } catch { return u; } };
+// Verdict/finding text asserting an absent team — suppressed when a team IS known.
+const TEAM_ABSENCE = /\bno team\b|team not (?:established|found)|no (?:leadership|team) section|anonymous team/i;
+
+export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, onOpenRecent }: { initialUrl?: string; initialPrivate?: boolean; onAudit?: (q: string) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string) => void }) {
   const [url, setUrl] = useState(initialUrl ?? "");
+  const [priv, setPriv] = useState(!!initialPrivate);
+  const privRef = useRef(!!initialPrivate);
+  const togglePriv = (v: boolean) => { setPriv(v); privRef.current = v; };
   const [stages, setStages] = useState<RetrievalStage[]>([]);
   const [pivotNotes, setPivotNotes] = useState<string[]>([]);
   const [recon, setRecon] = useState<Recon | null>(null);
@@ -95,6 +114,8 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
   const [webTeam, setWebTeam] = useState<WebPerson[]>([]);
   const [teamSearching, setTeamSearching] = useState(false);
   const [teamSearched, setTeamSearched] = useState(false);
+  const [projToken, setProjToken] = useState<ResolvedProjectToken | null>(null);
+  const [redirecting, setRedirecting] = useState<ResolvedProjectToken | null>(null);
   const ran = useRef(false);
 
   const run = useCallback(async (raw: string) => {
@@ -107,6 +128,12 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
     setPivotNotes([]);
     setWebTeam([]);
     setTeamSearched(false);
+    setProjToken(null);
+    setRedirecting(null);
+    let scanHost = target;
+    try { scanHost = new URL(/^https?:\/\//.test(target) ? target : `https://${target}`).hostname.replace(/^www\./, ""); } catch { /* keep */ }
+    const scanId = `site:${scanHost}:${Date.now()}`;
+    beginScan({ id: scanId, label: scanHost, kind: "site", ref: scanHost, pct: 10 });
     const r = await runRecon(
       target,
       (s) => setStages((prev) => [...prev, s]),
@@ -114,6 +141,27 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
     );
     setRecon(r);
     setRunning(false);
+    endScan(scanId);
+
+    // Bridge to the token. A JS-app site (jup.ag) can render too thin to surface
+    // token signals, so the recon never reaches the token where the real diligence
+    // lives. Resolve the project's canonical token by name; if the token's OFFICIAL
+    // homepage matches the site we recon'd, this IS that token's project — skip
+    // straight to the full investigation. Otherwise (weaker, name-only match) just
+    // offer a one-click bridge card.
+    if (r.retrieval.status !== "gap" && !r.isFund && !r.pivot?.found) {
+      const t = await resolveProjectToken(r.title || scanHost).catch(() => null);
+      if (t) {
+        const officialHost = t.homepage ? hostFromUrl(t.homepage) : null;
+        if (onInvestigate && officialHost && apexOf(officialHost) === apexOf(scanHost)) {
+          // Provable match — run the full report instead of the thin site recon.
+          setRedirecting(t);
+          onInvestigate(t.contract, privRef.current);
+          return;
+        }
+        setProjToken(t);
+      }
+    }
 
     // Dig the web + LinkedIn for the team (the render-based recon is shallow).
     if (r.retrieval.status !== "gap") {
@@ -122,10 +170,18 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
         .then((people) => setWebTeam(people))
         .finally(() => { setTeamSearching(false); setTeamSearched(true); });
     }
+    // Private recon: show the result but leave no trace — skip log, graph, persist.
+    if (privRef.current) return;
+
+    // Log/persist under the bare host (enigma-fund.com), NOT the full URL —
+    // the report library and the Dossiers delete both key on host, so logging
+    // the raw URL orphaned the sidebar row (purge never matched it to remove it).
+    let logHost = r.retrieval.url;
+    try { logHost = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { /* keep */ }
     logAudit({
       kind: "site",
-      query: r.retrieval.url,
-      ref: r.retrieval.url,
+      query: logHost,
+      ref: logHost,
       verdict: r.verdict?.verdict ?? r.retrieval.status,
       score: r.verdict?.score ?? null,
       coverage: r.retrieval.status,
@@ -141,6 +197,13 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
     });
     const contrib = reconContribution(r);
     if (contrib) recordContribution(contrib);
+
+    // Persist so the recon shows in the Report library (not just the sidebar).
+    if (r.retrieval.status !== "gap") {
+      let host = r.retrieval.url;
+      try { host = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { /* keep */ }
+      void syncReport("site", host, host, { recon: r }, r.verdict?.verdict, r.verdict?.score);
+    }
   }, []);
 
   // Auto-run when opened with a URL from the main search bar.
@@ -150,7 +213,21 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
     run(initialUrl);
   }, [initialUrl, run]);
 
+  // The project's GitHub org (from its site's links), for commit forensics.
+  const ghOrg = (recon?.socials ?? [])
+    .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
+    .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
+  // The recon'd host, for deleted-content archaeology.
+  let reconHost = "";
+  try { reconHost = recon ? new URL(recon.retrieval.url).hostname.replace(/^www\./, "") : ""; } catch { /* keep empty */ }
+  // Don't assert "no team" when we DID identify one (via the web/LinkedIn dig or
+  // the rendered page) — the thin render missing a team section isn't its absence.
+  const teamKnown = (recon?.team.names.length ?? 0) > 0 || webTeam.length > 0;
+
+  const openRecent = onOpenRecent ?? onAudit;
   return (
+    <>
+      {openRecent && <ScoreTicker onOpen={openRecent} label="Recent site recons · click to open the report" filter={(e) => e.kind === "site"} />}
     <div className="mx-auto max-w-3xl px-6 py-12">
       <h1 className="text-[28px] font-medium tracking-[-0.02em] text-ink">Site recon</h1>
       <p className="mt-2 max-w-2xl text-[14.5px] leading-relaxed text-ink-dim">
@@ -171,6 +248,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
             className="mono w-full bg-transparent px-1.5 py-2.5 text-[13.5px] text-ink outline-none placeholder:text-ink-faint"
           />
         </div>
+        <PrivateToggle on={priv} onToggle={togglePriv} className="shrink-0 py-2.5" />
         <button
           onClick={() => run(url)}
           disabled={running}
@@ -204,8 +282,16 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
         </div>
       )}
 
-      {/* result */}
-      {recon && (
+      {/* auto-routing: this site IS a token's official homepage → full report */}
+      {redirecting ? (
+        <div className="mt-6 rounded-xl border p-5" style={{ borderColor: "var(--color-signal)66", background: "var(--color-signal)0d" }}>
+          <div className="flex items-center gap-2 text-[13px] font-medium text-signal-lift">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
+            This is {redirecting.name}'s site — opening the full ${redirecting.symbol} report…
+          </div>
+          <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">A site recon only reads the website; ${redirecting.symbol} is a live token ({redirecting.chain}) whose official homepage is this domain, so ARGUS is running the full on-chain investigation instead.</p>
+        </div>
+      ) : recon && (
         <>
           {/* verdict hero */}
           {recon.verdict && (() => {
@@ -230,11 +316,11 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
                       </button>
                     </div>
                     {recon.title && <div className="mt-1 truncate text-[13px] text-ink-dim">{recon.title}</div>}
-                    <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">{recon.identityLine}</p>
+                    <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">{teamKnown && TEAM_ABSENCE.test(recon.identityLine) ? "Team identified off the rendered page — see the Team section below." : recon.identityLine}</p>
                   </div>
                 </div>
                 <div className="mt-3 space-y-1.5 border-t border-line/60 pt-3">
-                  {v.reasons.map((r, i) => (
+                  {v.reasons.filter((r) => !(teamKnown && TEAM_ABSENCE.test(r.text))).map((r, i) => (
                     <div key={i} className="flex items-start gap-2.5">
                       <span className="mono mt-0.5 shrink-0 text-[12px]" style={{ color: TONE[r.tone] }}>{GLYPH[r.tone]}</span>
                       <span className="text-[13px] leading-snug text-ink-dim">{r.text}</span>
@@ -245,11 +331,46 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
             );
           })()}
 
+          {/* token bridge — a site recon only reads the website; if the project has
+              a real token, one click opens the full on-chain report where the depth is */}
+          {projToken && (
+            <button
+              onClick={() => onAudit?.(projToken.contract)}
+              className="mt-3 w-full rounded-xl border p-4 text-left transition hover:brightness-110"
+              style={{ borderColor: "var(--color-signal)66", background: "var(--color-signal)0d" }}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
+                <span className="text-[12.5px] font-medium text-signal-lift">This project has a live token — ${projToken.symbol}{projToken.rank ? ` · CoinGecko #${projToken.rank}` : ""} · {projToken.chain}</span>
+                <span className="mono ml-auto text-[11px] text-signal">open full on-chain report →</span>
+              </div>
+              <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
+                The site recon only reads the website. Open the ${projToken.symbol} report for market intelligence, holder distribution, wallet clustering, deployer &amp; bytecode forensics, and the sanctions screen.
+              </p>
+            </button>
+          )}
+
+          {/* the project's official X account — searched, resolved, broken down */}
+          {reconHost && (recon.title || reconHost) && (
+            <div className="mt-3">
+              <ProjectXAccount
+                name={recon.title || reconHost.replace(/\.[a-z]+$/, "")}
+                domain={reconHost}
+                seedHandle={(() => {
+                  const x = recon.socials.find((s) => /x\.com|twitter\.com/i.test(s.url));
+                  const seg = x?.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1] ?? (x?.label.startsWith("@") ? x.label.slice(1) : undefined);
+                  return seg && !/status|home|intent|share|i$/i.test(seg) ? seg : undefined;
+                })()}
+                onAudit={onAudit}
+              />
+            </div>
+          )}
+
           {/* findings ledger */}
           <div className="mt-3 rounded-xl border border-line bg-panel p-4">
             <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Findings</div>
             <div className="mt-2 space-y-2">
-              {recon.findings.map((f, i) => (
+              {recon.findings.filter((f) => !(teamKnown && TEAM_ABSENCE.test(f.claim))).map((f, i) => (
                 <div key={i} className="flex items-start gap-2.5">
                   <span className="mono mt-0.5 shrink-0 text-[12px]" style={{ color: TONE[f.tone] }}>{GLYPH[f.tone]}</span>
                   <span className="text-[13px] leading-snug text-ink-dim">{f.claim}</span>
@@ -264,6 +385,9 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
               <div className="flex items-center gap-2">
                 <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">On-chain reality check</span>
                 <span className="mono shrink-0 text-[12px]" style={{ color: TONE[recon.pivot.reconcile.tone] }}>{GLYPH[recon.pivot.reconcile.tone]}</span>
+                {recon.pivot.method === "name-search" && recon.pivot.found && (
+                  <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">ticker match · unconfirmed</span>
+                )}
               </div>
 
               {/* the claim it is checking */}
@@ -282,13 +406,15 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
 
               <p className="mt-2 text-[13.5px] font-medium leading-relaxed text-ink">{recon.pivot.reconcile.line}</p>
 
-              {/* found token -> click through to the full token audit */}
+              {/* found token -> click through to the full token audit. Wording
+                  makes clear a name-search token is being judged on its OWN,
+                  not asserted to be this project's. */}
               {recon.pivot.found && onAudit && (
                 <button
                   onClick={() => onAudit(recon.pivot!.found!.address)}
                   className="mono mt-3 rounded-lg border border-line bg-panel-2/50 px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
                 >
-                  open full token audit for {recon.pivot.found.symbol} →
+                  {recon.pivot.method === "name-search" ? `audit ${recon.pivot.found.symbol} independently →` : `open full token audit for ${recon.pivot.found.symbol} →`}
                 </button>
               )}
 
@@ -309,7 +435,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
           )}
 
           {/* extracted entities */}
-          {(recon.socials.length > 0 || recon.funding.length > 0 || recon.tokenSignals.length > 0) && (
+          {(recon.socials.length > 0 || recon.funding.length > 0 || (recon.tokenSignals.length > 0 && !recon.isFund)) && (
             <div className="mt-3 grid gap-3 sm:grid-cols-2">
               {recon.socials.length > 0 && (
                 <Card title="Socials">
@@ -327,7 +453,7 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
                   </div>
                 </Card>
               )}
-              {recon.tokenSignals.length > 0 && (
+              {recon.tokenSignals.length > 0 && !recon.isFund && (
                 <Card title="Token signals">
                   <div className="flex flex-wrap gap-1.5">
                     {recon.tokenSignals.map((t) => <span key={t} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim">{t}</span>)}
@@ -337,46 +463,66 @@ export function ReconPage({ initialUrl, onAudit }: { initialUrl?: string; onAudi
             </div>
           )}
 
-          {/* team dug up via web + LinkedIn (deeper than the rendered page) */}
-          {(teamSearching || teamSearched) && (
-            <div className="mt-3 rounded-xl border border-line bg-panel p-4">
-              <div className="flex items-center gap-2">
-                <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team · web + LinkedIn search</span>
-                {teamSearching && <span className="text-[11px] text-ink-faint">digging Google / LinkedIn / Crunchbase / X…</span>}
-              </div>
-              {webTeam.length > 0 ? (
-                <div className="mt-2 space-y-1.5">
-                  {webTeam.map((p) => (
-                    <div key={p.handle ?? p.name} className="flex items-center justify-between gap-2">
-                      <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                        <span className="text-[12.5px] text-ink">{p.name}</span>
-                        {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
-                        <span className="text-[10.5px] text-ink-faint">{p.role}</span>
-                        {p.linkedin && (
-                          <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
-                        )}
-                      </span>
-                      {p.handle && onAudit && (
-                        <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
-                      )}
-                    </div>
-                  ))}
+          {/* TEAM — the headline. Merge the names on the rendered page with the
+              deeper web/LinkedIn dig so every person shows, each enriched with a
+              handle/LinkedIn where the search found one. */}
+          {(recon.team.names.length > 0 || teamSearching || teamSearched) && (() => {
+            const merged = new Map<string, { name: string; handle?: string; role?: string; linkedin?: string; source: string }>();
+            const key = (n: string) => n.trim().toLowerCase();
+            for (const n of recon.team.names) merged.set(key(n), { name: n, source: "site" });
+            for (const p of webTeam) {
+              const ex = [...merged.values()].find((m) => key(m.name) === key(p.name));
+              if (ex) { ex.handle = ex.handle ?? p.handle; ex.role = ex.role ?? p.role; ex.linkedin = ex.linkedin ?? p.linkedin; ex.source = "site + web"; }
+              else merged.set(key(p.name), { name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, source: "web/LinkedIn" });
+            }
+            const people = [...merged.values()];
+            return (
+              <div className="mt-3 rounded-xl border border-line bg-panel p-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team · {people.length} {people.length === 1 ? "person" : "people"}</span>
+                  {teamSearching && <span className="text-[11px] text-ink-faint">digging Google / LinkedIn / Crunchbase / X…</span>}
                 </div>
-              ) : (
-                !teamSearching && <p className="mt-1.5 text-[12px] text-ink-faint">No team members could be dug up via web / LinkedIn / X search.</p>
-              )}
-            </div>
-          )}
+                {people.length > 0 ? (
+                  <div className="mt-2 space-y-1.5">
+                    {people.map((p) => (
+                      <div key={p.handle ?? p.name} className="flex items-center justify-between gap-2">
+                        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                          <span className="text-[12.5px] text-ink">{p.name}</span>
+                          {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
+                          {p.role && <span className="text-[10.5px] text-ink-faint">{p.role}</span>}
+                          {p.linkedin && (
+                            <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                          )}
+                          <span className="text-[9.5px] text-ink-faint">({p.source})</span>
+                        </span>
+                        {p.handle && onAudit ? (
+                          <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
+                        ) : (
+                          <span className="mono shrink-0 text-[10.5px] text-ink-faint">named only</span>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  !teamSearching && <p className="mt-1.5 text-[12px] text-ink-faint">No team members named on the site or dug up via web / LinkedIn / X search.</p>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* unified project research: news & press, documents & resources, domain
+              intelligence, and GitHub forensics — the same cluster every report uses */}
+          {reconHost && <ProjectResearch name={(recon.title || reconHost).split(/[:|–—·]/)[0].trim() || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} />}
+
+          {/* off-chain operator linking: shared analytics IDs / co-registered domains / hosting */}
+          {reconHost && <SiteInfra domain={reconHost} record={!priv} onAudit={onAudit} />}
+
+          {/* deleted-content archaeology: what the site removed over time */}
+          {reconHost && <SiteHistory domain={reconHost} />}
         </>
       )}
-
-      <div className="mt-6 rounded-xl border border-line bg-panel/40 p-4 text-[12.5px] leading-relaxed text-ink-faint">
-        <span className="text-ink-dim">Why this exists:</span> an earlier audit fetched only a site's JavaScript
-        shell, never saw the team section, and reported "anonymous team." That was an overstatement — the honest
-        line was "could not render the site." Retrieval now escalates on failure, and absence is only ever asserted
-        from content actually rendered.
-      </div>
     </div>
+    </>
   );
 }
 

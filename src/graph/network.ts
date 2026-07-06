@@ -39,7 +39,7 @@ export interface Network {
   edges: NetEdge[];
   bridges: NetNode[];      // shared across >= 2 audited subjects
   serialActors: NetNode[]; // tied to >= 2 rugs / deceptions
-  cabals: { subjects: string[]; via: NetNode[] }[];
+  cabals: { subjects: string[]; via: NetNode[]; score?: number; holderOnly?: boolean }[];
 }
 
 // Entity resolution: normalize a raw node key to a canonical id so that
@@ -62,12 +62,63 @@ const isBad = (n?: NetNode) => isRuggy(n) || (!!n && n.subject && (n.verdict ===
 // {nodes, edges} shape Panoptes uses, with an optional verdict on the subject.
 export interface GraphContribution { handle: string; nodes: PanoptesNode[]; edges: PanoptesEdge[]; verdict?: string }
 
+// Generic labels that older audits recorded as literal node keys ("site",
+// "twitter", …). They collapse to one node via canonical() and fake-bridge
+// EVERY audit into one blob cabal. Filtered on ingest so even old stored
+// contributions can't pollute the network.
+const GENERIC_KEYS = new Set([
+  "site", "website", "web", "twitter", "x", "telegram", "discord", "github",
+  "docs", "documentation", "medium", "linktree", "whitepaper", "mail", "email",
+  "youtube", "tiktok", "instagram", "reddit", "facebook", "warpcast", "farcaster",
+  "coingecko", "dexscreener", "linkedin", "blog", "other", "unknown",
+]);
+const isGenericKey = (raw: string) => GENERIC_KEYS.has(canonical(raw));
+
+// ── Entity resolution: one project, one node ─────────────────────────────
+// $RECC (the token), @reccfinance (its X account), and recc.finance (its site)
+// are the same entity wearing three names. The proof of sameness comes from the
+// audits themselves — a token audit explicitly links its subject to the
+// project's X handle (TEAM edge) and its domain (LINKS edge) — never from name
+// similarity, which false-merges. Returns a resolver mapping any form to one id.
+export type AliasResolver = (key: string) => string;
+export function buildAliasResolver(contributions: GraphContribution[]): AliasResolver {
+  const parent = new Map<string, string>();
+  const find = (x: string): string => {
+    if (!parent.has(x)) return x;
+    let r = x;
+    while (parent.get(r) !== r) r = parent.get(r)!;
+    parent.set(x, r);
+    return r;
+  };
+  const union = (a: string, b: string) => {
+    if (!parent.has(a)) parent.set(a, a);
+    if (!parent.has(b)) parent.set(b, b);
+    const ra = find(a), rb = find(b);
+    // Prefer the $token id as the root (it's the anchor the audits key on).
+    if (ra !== rb) parent.set(rb, ra);
+  };
+  const DOMAIN = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i;
+  for (const c of contributions) {
+    if (!String(c.handle).startsWith("$")) continue; // token/investigation audits carry the linkage
+    const subj = canonical(c.handle);
+    for (const e of c.edges) {
+      if (canonical(e.src) !== subj) continue;
+      const dst = String(e.dst);
+      if (e.type === "TEAM" && dst.startsWith("@")) union(subj, canonical(dst));
+      else if (e.type === "LINKS" && DOMAIN.test(dst)) union(subj, canonical(dst));
+    }
+  }
+  return (key: string) => find(canonical(key));
+}
+
 export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: GraphContribution[] = []): Network {
+  const resolve = buildAliasResolver(extra);
   const map = new Map<string, NetNode>();
   const edgeMap = new Map<string, NetEdge>();
 
-  const upsert = (raw: PanoptesNode, surfacedBy: string): NetNode => {
-    const id = canonical(raw.key);
+  const upsert = (raw: PanoptesNode, surfacedBy: string): NetNode | null => {
+    if (!raw.subject && isGenericKey(String(raw.key))) return null;
+    const id = resolve(raw.key);
     let n = map.get(id);
     if (!n) {
       n = {
@@ -93,8 +144,9 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
 
   const ingestEdges = (edges: PanoptesEdge[]) => {
     for (const e of edges) {
-      const src = canonical(e.src);
-      const dst = canonical(e.dst);
+      if (isGenericKey(String(e.src)) || isGenericKey(String(e.dst))) continue;
+      const src = resolve(e.src);
+      const dst = resolve(e.dst);
       const key = `${src}->${dst}:${e.type}`;
       if (edgeMap.has(key)) continue;
       edgeMap.set(key, {
@@ -107,19 +159,19 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   };
 
   for (const { handle, d } of dossiers) {
-    const subjId = canonical(handle);
+    const subjId = resolve(handle);
     for (const raw of d.graph.nodes) {
       const n = upsert(raw, subjId);
-      if (raw.subject) n.verdict = d.report.composite_verdict;
+      if (n && raw.subject) n.verdict = d.report.composite_verdict;
     }
     ingestEdges(d.graph.edges);
   }
 
   for (const c of extra) {
-    const subjId = canonical(c.handle);
+    const subjId = resolve(c.handle);
     for (const raw of c.nodes) {
       const n = upsert(raw, subjId);
-      if (raw.subject && c.verdict && !n.verdict) n.verdict = c.verdict;
+      if (n && raw.subject && c.verdict && !n.verdict) n.verdict = c.verdict;
     }
     ingestEdges(c.edges);
   }
@@ -153,22 +205,60 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   const bridges = nodes.filter((n) => n.flags.includes("bridge")).sort((a, b) => b.subjects.length - a.subjects.length);
   const serialActors = nodes.filter((n) => !n.subject && n.flags.includes("serial")).sort((a, b) => b.rugLinks - a.rugLinks);
 
-  // cabals: connected components (union-find) that contain >= 2 audited subjects
+  // ── cabals v2: shared entities between audited subjects, weighted by how hard
+  // the tie is to fake. A shared NAMED person/company or a shared deployer/funder
+  // wallet is strong evidence of coordination; overlapping top-holders is weak
+  // (exchanges and market makers hold everything). Calling a "cabal" requires at
+  // least one strong tie, or three-plus holder overlaps. Each qualifying subject
+  // cluster is its own cabal, strongest first — never one blob.
+  const isHolderVia = (n: NetNode) => /^holder:/i.test(n.key);
+  const isWalletVia = (n: NetNode) => !isHolderVia(n) && (/^(wallet|funder):/i.test(n.key) || n.type === "Identity");
+  const isNamedVia = (n: NetNode) => (n.type === "Person" || n.type === "Company") && !isHolderVia(n) && !isWalletVia(n);
+
+  // Union subjects ONLY through shared via-entities (a node surfaced by >= 2
+  // subjects), so unrelated subjects that merely coexist in one component don't
+  // get lumped together.
   const parent = new Map<string, string>();
   const find = (x: string): string => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x)!)!); x = parent.get(x)!; } return x; };
-  for (const n of nodes) parent.set(n.id, n.id);
-  for (const e of edges) { const a = find(e.src), b = find(e.dst); if (a !== b) parent.set(a, b); }
-  const comp = new Map<string, string[]>();
-  for (const n of nodes) { const r = find(n.id); (comp.get(r) ?? comp.set(r, []).get(r)!).push(n.id); }
-  const cabals: Network["cabals"] = [];
-  for (const ids of comp.values()) {
-    const members = ids.map((id) => byId.get(id)!);
-    const subj = members.filter((m) => m.subject);
-    if (subj.length < 2) continue;
-    const via = members.filter((m) => !m.subject && (m.subjects.length >= 2 || m.wasRug || m.inCabal)).sort((a, b) => b.subjects.length - a.subjects.length);
-    if (via.length === 0) continue;
-    cabals.push({ subjects: subj.map((s) => s.key), via });
+  const subjectIds = nodes.filter((n) => n.subject).map((n) => n.id);
+  for (const id of subjectIds) parent.set(id, id);
+  const sharedVias = nodes.filter((n) => !n.subject && n.subjects.length >= 2);
+  const viasByCluster = new Map<string, NetNode[]>();
+  for (const v of sharedVias) {
+    const present = v.subjects.filter((s) => parent.has(s));
+    for (let i = 1; i < present.length; i++) {
+      const a = find(present[0]), b = find(present[i]);
+      if (a !== b) parent.set(a, b);
+    }
   }
+  const clusters = new Map<string, string[]>();
+  for (const id of subjectIds) { const r = find(id); (clusters.get(r) ?? clusters.set(r, []).get(r)!).push(id); }
+  for (const v of sharedVias) {
+    const present = v.subjects.filter((s) => parent.has(s));
+    if (present.length < 2) continue;
+    const r = find(present[0]);
+    (viasByCluster.get(r) ?? viasByCluster.set(r, []).get(r)!).push(v);
+  }
+
+  const cabals: Network["cabals"] = [];
+  for (const [root, ids] of clusters) {
+    if (ids.length < 2) continue;
+    const via = (viasByCluster.get(root) ?? []).sort((a, b) => {
+      const w = (n: NetNode) => (isNamedVia(n) ? 3 : isWalletVia(n) ? 2 : 1);
+      return w(b) - w(a) || b.subjects.length - a.subjects.length;
+    });
+    const named = via.filter(isNamedVia).length;
+    const wallets = via.filter(isWalletVia).length;
+    const holders = via.filter(isHolderVia).length;
+    if (named + wallets === 0 && holders < 3) continue; // holder overlap alone isn't a cabal
+    cabals.push({
+      subjects: ids.map((id) => byId.get(id)!.key),
+      via,
+      score: (named + wallets) * 2 + holders,
+      holderOnly: named + wallets === 0,
+    });
+  }
+  cabals.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
   return { nodes, edges, bridges, serialActors, cabals };
 }
@@ -182,14 +272,78 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
 export interface SharedTie { key: string; label: string; type: string }
 export interface SubjectConnection { other: string; otherVerdict?: string; ties: SharedTie[]; direct: boolean }
 
+// How strong is a shared tie as evidence of "same operator"? The key prefix tells
+// us: on-chain infra + a leaked identity are near-proof; a shared person/site is
+// strong-but-not-proof (people work on many projects); holder overlap is weak.
+export function tieStrength(rawKey: string): "hard" | "medium" | "weak" {
+  const k = String(rawKey).toLowerCase();
+  if (/^(code:|email:|wallet:|funder:|mint:)/.test(k)) return "hard";
+  // Shared analytics / monetization property: you control that account, so an
+  // unrelated project can't legitimately carry your GA/GTM/AdSense/Pixel ID.
+  if (/^(ga:|gtm:|adsense:|fbpixel:)/.test(k)) return "hard";
+  // Shared hosting IP / favicon: real but circumstantial (CDNs, reused templates).
+  if (/^(holder|amm|dex|pool|lp|market|ip:|favicon:)/.test(k)) return "weak";
+  return "medium"; // shared @handle / domain / company
+}
+
+export interface Reconciliation {
+  severity: "avoid" | "caution";
+  line: string;
+  via: SubjectConnection[]; // the bad connections that drove the override, hardest first
+}
+
+// Verdict reconciliation: the contract-level audit can't see that this subject
+// shares its deployer / funder / bytecode / dev-email with an already-FAILED
+// subject. When it does, that connection should OVERRIDE a clean headline — a
+// hard infra tie to a rug means AVOID regardless of how the contract scans.
+const BAD_VERDICTS = new Set(["FAIL", "AVOID"]);
+export function reconcileVerdict(handle: string, contributions: GraphContribution[]): Reconciliation | null {
+  const bad = subjectConnections(handle, contributions, 24).filter((c) => c.otherVerdict && BAD_VERDICTS.has(c.otherVerdict));
+  if (!bad.length) return null;
+  const strongestOf = (c: SubjectConnection): "hard" | "medium" | "weak" => {
+    if (c.direct) return "hard"; // the flagged subject IS an entity this audit surfaced
+    let best: "hard" | "medium" | "weak" = "weak";
+    for (const t of c.ties) { const s = tieStrength(t.label); if (s === "hard") return "hard"; if (s === "medium") best = "medium"; }
+    return best;
+  };
+  const hard = bad.filter((c) => strongestOf(c) === "hard");
+  const medium = bad.filter((c) => strongestOf(c) === "medium");
+  if (hard.length) {
+    const c = hard[0];
+    const how = c.direct ? "was surfaced directly in this audit" : `shares ${c.ties.map((t) => tieLabel(t.label)).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join(" + ")}`;
+    return { severity: "avoid", line: `Byte/infra-identical link to ${c.other} (${c.otherVerdict}): it ${how}. A shared deployer, funder, contract fingerprint, or dev email with a failed subject is the same operation.`, via: hard };
+  }
+  if (medium.length) {
+    const c = medium[0];
+    return { severity: "caution", line: `Shares a team member or domain with ${c.other} (${c.otherVerdict}). Not proof of the same operation, but the overlap warrants caution.`, via: medium };
+  }
+  return null; // weak-only (holder overlap) — RingAlert still warns, no verdict override
+}
+function tieLabel(rawKey: string): string {
+  const k = String(rawKey).toLowerCase();
+  if (k.startsWith("code:")) return "a contract fingerprint";
+  if (k.startsWith("email:")) return "a dev email";
+  if (k.startsWith("wallet:")) return "a deployer wallet";
+  if (k.startsWith("funder:")) return "a funding wallet";
+  if (k.startsWith("mint:")) return "a token";
+  if (k.startsWith("ga:") || k.startsWith("gtm:")) return "an analytics ID";
+  if (k.startsWith("adsense:")) return "an AdSense account";
+  if (k.startsWith("fbpixel:")) return "a Meta Pixel";
+  if (k.startsWith("ip:")) return "a hosting IP";
+  if (k.startsWith("favicon:")) return "a favicon";
+  return "an entity";
+}
+
 export function subjectConnections(handle: string, contributions: GraphContribution[], max = 12): SubjectConnection[] {
-  const me = canonical(handle);
+  const resolve = buildAliasResolver(contributions);
+  const me = resolve(handle);
   // entities my own audits surfaced (canonical key -> display label + type)
   const mine = new Map<string, { label: string; type: string }>();
   for (const c of contributions) {
-    if (canonical(c.handle) !== me) continue;
+    if (resolve(c.handle) !== me) continue;
     for (const n of c.nodes) {
-      const k = canonical(n.key);
+      if (isGenericKey(String(n.key))) continue; // "site"/"twitter" junk can't be a tie
+      const k = resolve(n.key);
       if (k !== me) mine.set(k, { label: String(n.key), type: String(n.type) });
     }
   }
@@ -201,13 +355,14 @@ export function subjectConnections(handle: string, contributions: GraphContribut
     return byOther.get(h)!;
   };
   for (const c of contributions) {
-    const other = canonical(c.handle);
+    const other = resolve(c.handle);
     if (other === me) continue;
     // direct tie: the other subject is itself one of the entities I surfaced
     if (mine.has(other)) { const e = ensure(c.handle, c.verdict); e.direct = true; }
     // shared tie: a third entity both of us touch
     for (const n of c.nodes) {
-      const k = canonical(n.key);
+      if (isGenericKey(String(n.key))) continue;
+      const k = resolve(n.key);
       if (k !== me && k !== other && mine.has(k)) {
         const e = ensure(c.handle, c.verdict);
         e.ties.set(k, { key: k, label: mine.get(k)!.label, type: mine.get(k)!.type });

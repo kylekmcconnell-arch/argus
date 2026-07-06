@@ -13,18 +13,26 @@ export interface ProviderStatus {
 }
 
 // Returns provider status if the backend is reachable, else null.
-export async function probeBackend(timeoutMs = 1200): Promise<ProviderStatus[] | null> {
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), timeoutMs);
-    const res = await fetch("/api/providers", { signal: ctrl.signal });
-    clearTimeout(t);
-    if (!res.ok) return null;
-    const data = (await res.json()) as { providers: ProviderStatus[] };
-    return data.providers;
-  } catch {
-    return null;
+// Timeout must tolerate a COLD serverless start: Vercel scales functions to zero
+// after idle, so the first probe of the day can take several seconds. A 1.2s cap
+// would abort a perfectly healthy backend and dump the user on "No live dossier
+// yet". We give it real headroom and retry once before giving up.
+export async function probeBackend(timeoutMs = 8000): Promise<ProviderStatus[] | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), timeoutMs);
+      const res = await fetch("/api/providers", { signal: ctrl.signal });
+      clearTimeout(t);
+      if (!res.ok) { if (attempt === 0) continue; return null; }
+      const data = (await res.json()) as { providers: ProviderStatus[] };
+      return data.providers;
+    } catch {
+      if (attempt === 0) continue; // one cold-start retry before conceding
+      return null;
+    }
   }
+  return null;
 }
 
 export interface LiveHandlers {
@@ -41,7 +49,7 @@ export interface LiveHandlers {
 // `error` event; without guarding for that the UI hangs on "working…" forever.
 // We track whether a terminal handler has fired, surface an error if the stream
 // closes early, and run a watchdog just past the function's own 120s ceiling.
-export function streamAudit(handle: string, h: LiveHandlers): () => void {
+export function streamAudit(handle: string, priv: boolean, h: LiveHandlers): () => void {
   const ctrl = new AbortController();
   let settled = false;
   const settle = (fn: () => void) => {
@@ -49,15 +57,17 @@ export function streamAudit(handle: string, h: LiveHandlers): () => void {
     settled = true;
     fn();
   };
-  // Just past the server's maxDuration (120s): if nothing finalized, fail loud.
+  // Just past the server's maxDuration (180s): if nothing finalized, fail loud.
+  // Must exceed the server ceiling, or a legitimately slow (but succeeding) audit
+  // gets killed client-side and dead-ends even though the server saved it.
   const watchdog = setTimeout(() => {
     settle(() => h.onError("timed out: the audit took too long and did not finish"));
     ctrl.abort();
-  }, 135000);
+  }, 195000);
 
   (async () => {
     try {
-      const res = await fetch(`/api/audit?handle=${encodeURIComponent(handle)}`, {
+      const res = await fetch(`/api/audit?handle=${encodeURIComponent(handle)}${priv ? "&private=1" : ""}`, {
         signal: ctrl.signal,
         headers: { accept: "text/event-stream" },
       });

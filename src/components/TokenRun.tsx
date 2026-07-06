@@ -1,11 +1,12 @@
 import { useEffect, useState } from "react";
 import { AuditConsole } from "./AuditConsole";
-import { auditToken, type TokenDossier } from "../token/audit";
+import { startTokenScan, subscribeScanRuns, getScanRun } from "../lib/scanrunner";
 import type { ResolvedInput } from "../lib/resolveInput";
-import type { TraceStep } from "../data/evidence";
+import type { TokenDossier } from "../token/audit";
 
-// Runs the live token audit (DexScreener + GoPlus, client-side) and streams its
-// trace into the shared console, then hands back the dossier.
+// A VIEW onto the background token scan — not the owner of the run. Navigating
+// away unmounts this but does NOT stop the audit; the runner keeps going and the
+// result still lands in the library.
 export function TokenRun({
   input,
   onDone,
@@ -15,35 +16,29 @@ export function TokenRun({
   onDone: (d: TokenDossier) => void;
   onError: () => void;
 }) {
-  const [steps, setSteps] = useState<TraceStep[]>([]);
+  const [, setTick] = useState(0);
 
   useEffect(() => {
-    let cancelled = false;
-    setSteps([]);
-    (async () => {
-      try {
-        const d = await auditToken(input, (s) => {
-          if (!cancelled) setSteps((prev) => [...prev, s]);
-        });
-        if (cancelled) return;
-        if (!d) onError();
-        else setTimeout(() => onDone(d), 500);
-      } catch {
-        if (!cancelled) onError();
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [input, onDone, onError]);
+    startTokenScan(input); // idempotent: re-attaches if already running
+    const unsub = subscribeScanRuns(() => setTick((t) => t + 1));
+    return unsub; // detach the view only — the run continues in the background
+  }, [input]);
 
-  const pct = Math.min(92, steps.length * 18);
+  const run = getScanRun("token", input.ref);
+
+  useEffect(() => {
+    if (!run) return;
+    if (run.status === "done" && run.result) onDone(run.result as TokenDossier);
+    else if (run.status === "error") onError();
+  }, [run?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const label = input.ref.length > 20 ? input.ref.slice(0, 8) + "…" + input.ref.slice(-4) : input.ref;
   return (
     <AuditConsole
-      handle={input.ref.length > 20 ? input.ref.slice(0, 8) + "…" + input.ref.slice(-4) : input.ref}
-      subtitle="live token audit · DexScreener + GoPlus · no keys"
-      steps={steps}
-      pct={pct}
+      handle={label}
+      subtitle="live token audit · DexScreener + GoPlus · runs in the background if you navigate away"
+      steps={run?.steps ?? []}
+      pct={run?.pct ?? 0}
       working
       mode="live"
     />

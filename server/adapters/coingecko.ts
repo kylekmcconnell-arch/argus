@@ -2,6 +2,7 @@
 // used for call-performance (K2). Free Demo key works; gated on COINGECKO_API_KEY.
 
 import type { Adapter, CollectContext } from "./types";
+import { recordCall } from "../cost";
 import { env } from "../config";
 
 const PRO = "https://pro-api.coingecko.com/api/v3";
@@ -24,6 +25,7 @@ export async function tokenByContract(chain: string, address: string) {
   const base = key ? PRO : PUBLIC;
   const headers: Record<string, string> = key ? { "x-cg-pro-api-key": key } : {};
   try {
+    recordCall("coingecko", "contract-lookup", 0);
     const res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers });
     if (!res.ok) return null;
     const d = (await res.json()) as any;

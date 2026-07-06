@@ -1,15 +1,20 @@
-// A local, accumulating record of the entities every real audit surfaces. Each
-// token audit and recorded site recon contributes its Panoptes subgraph here;
-// the trust graph then unifies them, so the network compounds with use — audit
-// two tokens that share a deployer and they connect, even across sessions. This
-// is the seed of the data asset, kept in localStorage until there is a backend.
+// An accumulating record of the entities every real audit surfaces. Each token
+// audit and recorded site recon contributes its Panoptes subgraph here; the
+// trust graph then unifies them, so the network compounds with use — audit two
+// tokens that share a deployer and they connect, even across sessions.
+//
+// localStorage is the synchronous working cache. When a shared backend is
+// configured (/api/graph, gated on Supabase env), every contribution also syncs
+// up and the COMMUNITY graph hydrates down on load — so Kyle's and Enigma's
+// audits compound into one network. With no backend it stays local-only.
 import type { GraphContribution } from "./network";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import type { Dossier } from "../data/dossier";
 import type { Investigation, WebPerson } from "../lib/investigation";
 
 const KEY = "argus:graphstore";
-const CAP = 80; // most recent contributions
+const CAP = 150; // working-cache size (the shared backend holds the full community set)
+const SYNC_URL = "/api/graph";
 
 export function getContributions(): GraphContribution[] {
   try {
@@ -29,10 +34,127 @@ export function recordContribution(c: GraphContribution): void {
   } catch {
     /* storage unavailable — non-fatal */
   }
+  void syncContribution(c); // push to the shared graph (no-op if no backend)
+  emitGraphChange();
 }
 
 export function clearContributions(): void {
   try { localStorage.removeItem(KEY); } catch { /* noop */ }
+  emitGraphChange();
+}
+
+// Remove ONE subject's contribution (local cache + the shared graph) — the
+// per-subject counterpart to clearContributions, used by the report purge.
+export function removeContribution(handle: string): void {
+  const key = handle.trim().toLowerCase().replace(/^[@$]/, "");
+  try {
+    const all = getContributions().filter((x) => canonicalKey(x) !== key);
+    localStorage.setItem(KEY, JSON.stringify(all));
+  } catch { /* noop */ }
+  void fetch(`/api/graph?handle=${encodeURIComponent(handle)}`, { method: "DELETE" }).catch(() => { /* offline */ });
+  emitGraphChange();
+}
+
+// Merge extra nodes/edges INTO the subject's existing contribution (not a replace),
+// so a forensic panel that runs after the audit can attach its findings to the
+// same subject — keeping them "mine" for subjectConnections. Creates the
+// contribution if none exists yet.
+function mergeContribution(handle: string, addNodes: PanoptesNode[], addEdges: PanoptesEdge[]): void {
+  try {
+    const all = getContributions();
+    const hk = handle.trim().toLowerCase().replace(/^[@$]/, "");
+    const existing = all.find((c) => canonicalKey(c) === hk);
+    if (!existing) {
+      recordContribution({ handle, nodes: [{ type: "Person", key: handle, subject: true } as PanoptesNode, ...addNodes], edges: addEdges });
+      return;
+    }
+    const haveN = new Set(existing.nodes.map((n) => String(n.key).toLowerCase()));
+    for (const n of addNodes) { const k = String(n.key).toLowerCase(); if (!haveN.has(k)) { haveN.add(k); existing.nodes.push(n); } }
+    const haveE = new Set(existing.edges.map((e) => `${e.src}|${e.dst}|${e.type}`.toLowerCase()));
+    for (const e of addEdges) { const k = `${e.src}|${e.dst}|${e.type}`.toLowerCase(); if (!haveE.has(k)) { haveE.add(k); existing.edges.push(e); } }
+    localStorage.setItem(KEY, JSON.stringify(all.slice(0, CAP)));
+    void syncContribution(existing);
+    emitGraphChange();
+  } catch {
+    /* non-fatal */
+  }
+}
+
+// Attach forensic entities a panel discovered (leaked dev emails, prior handles,
+// cross-platform accounts, seeded deployers) to the subject in the graph. Uses
+// consistent keys (email:… / platform:username / wallet:…) so the SAME entity
+// collapses across audits — two projects sharing a dev email or a funder bridge
+// automatically. This is what turns the panels' findings into the compounding web.
+export interface ForensicEntity { key: string; type: string; subtype?: string; edgeType: string; label?: string }
+export function recordForensicEntities(subjectKey: string, entities: ForensicEntity[]): void {
+  const clean = entities.filter((e) => e && e.key && e.key.trim());
+  if (!clean.length || !subjectKey) return;
+  const nodes: PanoptesNode[] = [];
+  const edges: PanoptesEdge[] = [];
+  for (const e of clean) {
+    nodes.push({ type: e.type, key: e.key, ...(e.subtype ? { subtype: e.subtype } : {}), ...(e.label ? { label: e.label } : {}) } as PanoptesNode);
+    edges.push({ src: subjectKey, dst: e.key, type: e.edgeType });
+  }
+  mergeContribution(subjectKey, nodes, edges);
+}
+
+// ── shared backend: sync up, hydrate down ──────────────────────────────────
+// Views read getContributions() synchronously; the community hydrate is async,
+// so notify subscribers (e.g. the Trust graph page) to re-read once it lands.
+type GraphListener = () => void;
+const listeners = new Set<GraphListener>();
+export function subscribeGraph(cb: GraphListener): () => void {
+  listeners.add(cb);
+  return () => { listeners.delete(cb); };
+}
+function emitGraphChange(): void {
+  for (const cb of [...listeners]) { try { cb(); } catch { /* */ } }
+}
+
+async function syncContribution(c: GraphContribution): Promise<boolean> {
+  try {
+    // No keepalive: it caps the body at 64KB, which a large subgraph can exceed.
+    const r = await fetch(SYNC_URL, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(c),
+    });
+    if (!r.ok) return false;
+    const d = await r.json().catch(() => ({}));
+    return d?.ok === true;
+  } catch {
+    return false; // offline or no backend — the local cache still holds it
+  }
+}
+
+let hydrated = false;
+// Pull the community graph and merge it into the local cache. Local-only entries
+// (recorded in a prior session whose POST never landed) win for their own
+// subjects AND get backfilled up, so the shared graph self-heals. Runs once per
+// session, on app mount. No-op when no backend is configured.
+export async function hydrateCommunityGraph(): Promise<void> {
+  if (hydrated) return;
+  hydrated = true;
+  try {
+    const r = await fetch(SYNC_URL, { signal: AbortSignal.timeout(9000) });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d?.available === false) return; // backend not configured — stay local-only
+    const remote: GraphContribution[] = Array.isArray(d?.contributions) ? d.contributions : [];
+    const local = getContributions();
+    const remoteKeys = new Set(remote.map(canonicalKey));
+    const localOnly = local.filter((c) => !remoteKeys.has(canonicalKey(c)));
+    if (remote.length) {
+      const merged = [...localOnly, ...remote].slice(0, CAP);
+      localStorage.setItem(KEY, JSON.stringify(merged));
+      emitGraphChange();
+    }
+    // Backfill contributions that exist locally but not in the shared graph
+    // (a POST that failed/was cancelled in a past session). Best-effort.
+    for (const c of localOnly) void syncContribution(c);
+  } catch {
+    /* no backend / offline — stay local-only */
+  }
 }
 
 function canonicalKey(c: GraphContribution): string {
@@ -67,6 +189,59 @@ export function projectPeopleContribution(projectName: string, people: WebPerson
     edges.push({ src: key, dst: projectName, type: "WORKED_ON" });
   }
   return { handle: projectName, nodes, edges };
+}
+
+// A find-wallet resolution contributes the clue (as its subject) wired to each
+// wallet it resolved, so the result compounds: a handle resolved to a wallet here
+// bridges to any token audit whose deployer/holder graph touches that same wallet,
+// and to a later people-audit of the same handle. Wallet keys match the audit
+// engine's `${chain}:${address}` so the nodes collapse to one.
+export function walletContribution(
+  clue: string,
+  wallets: { address: string; chain: string }[],
+): GraphContribution | null {
+  if (!wallets.length) return null;
+  const handleLike = /^@?[A-Za-z0-9_]{2,30}$/.test(clue) && !clue.includes(".");
+  const subjectKey = handleLike ? "@" + clue.replace(/^@/, "") : clue;
+  const nodes: PanoptesNode[] = [{ type: handleLike ? "Person" : "Identity", key: subjectKey, subject: true }];
+  const edges: PanoptesEdge[] = [];
+  for (const w of wallets) {
+    const key = `${w.chain}:${w.address}`;
+    nodes.push({ type: "Identity", subtype: "Wallet", key, address: w.address });
+    edges.push({ src: subjectKey, dst: key, type: "CONTROLS_WALLET" });
+  }
+  return { handle: subjectKey, nodes, edges };
+}
+
+// Every full wallet address ARGUS has already surfaced across all contributions,
+// with the entities it is tied to. This is the index a partial-address clue
+// (0x71C0…A04e) is matched against — a best effort against the accumulated graph,
+// since there is no public "search by partial address" service.
+export function knownAddresses(): { address: string; chain: "evm" | "solana"; tiedTo: string[] }[] {
+  const EVM = /0x[a-fA-F0-9]{40}/;
+  const SOL = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/;
+  const byAddr = new Map<string, { address: string; chain: "evm" | "solana"; tiedTo: Set<string> }>();
+  const tie = (addr: string, chain: "evm" | "solana", label: string) => {
+    const k = addr.toLowerCase();
+    let e = byAddr.get(k);
+    if (!e) { e = { address: addr, chain, tiedTo: new Set() }; byAddr.set(k, e); }
+    if (label) e.tiedTo.add(label);
+  };
+  for (const c of getContributions()) {
+    const owner = c.handle;
+    for (const n of c.nodes) {
+      const fromAddr = typeof (n as { address?: unknown }).address === "string" ? String((n as { address?: unknown }).address) : "";
+      const fromKey = String(n.key ?? "");
+      const label = `${owner}${n.type ? ` (${n.type}${(n as { subtype?: unknown }).subtype ? `/${(n as { subtype?: unknown }).subtype}` : ""})` : ""}`;
+      for (const src of [fromAddr, fromKey]) {
+        const evm = src.match(EVM);
+        if (evm) { tie(evm[0], "evm", label); continue; }
+        const sol = src.replace(/^\w+:/, "").match(SOL);
+        if (sol && !src.startsWith("0x")) tie(sol[0], "solana", label);
+      }
+    }
+  }
+  return [...byAddr.values()].map((e) => ({ address: e.address, chain: e.chain, tiedTo: [...e.tiedTo] }));
 }
 
 // Convenience: a full investigation contributes its token subgraph PLUS the

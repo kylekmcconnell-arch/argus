@@ -54,6 +54,39 @@ export const PROFILES: Record<SubjectClass, Profile> = {
     ],
   },
 
+  [SubjectClass.PROJECT]: {
+    label: "Project / Protocol",
+    lens:
+      "Evaluated as an organization, not a person: a token, protocol, product, or " +
+      "company's own brand account. The question is whether a real team ships a real " +
+      "product with honest tokenomics, or whether it is a hype shell built to exit.",
+    axes: {
+      P1_team_and_identity: 16,
+      P2_product_substance: 24,
+      P3_token_conduct: 20,
+      P4_backing_and_partners: 14,
+      P5_traction_and_liveness: 14,
+      P6_transparency_integrity: 12,
+    },
+    caps: { team_prior_rug: 10, abandoned_or_dormant: 25 },
+    flags: [
+      "no named team behind a project raising money or holding a token",
+      "the team (or its members) rugged or abandoned a prior project",
+      "product is vaporware: no working app, no GitHub, no verifiable users",
+      "token conduct: insider/team dumping, unlocked liquidity, broken tokenomics promises",
+      "scrubbed history: team/advisors/audits removed from the site over time",
+      "dormant: the account has gone silent for weeks while the token still trades",
+    ],
+    sources: [
+      "the project website + its Wayback history",
+      "GitHub / on-chain contract activity",
+      "DexScreener / on-chain token conduct",
+      "named team + their track record",
+      "backer / partner confirmations",
+      "X posting cadence",
+    ],
+  },
+
   [SubjectClass.KOL]: {
     label: "KOL / Promoter",
     lens:
@@ -85,7 +118,7 @@ export const PROFILES: Record<SubjectClass, Profile> = {
   },
 
   [SubjectClass.INVESTOR]: {
-    label: "Investor / Fund",
+    label: "Venture Capital / Fund",
     lens:
       "Evaluated against fund databases and the reality of claimed relationships. " +
       "The question is whether the track record and endorsements are real.",

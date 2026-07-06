@@ -79,6 +79,18 @@ export async function fetchWebTeam(siteUrl: string, projectName: string, recon: 
   try {
     const host = new URL(siteUrl).hostname.replace(/^www\./, "");
     const qs = new URLSearchParams({ domain: host, name: projectName || "", names: (recon?.team.names ?? []).slice(0, 8).join(",") });
+    // The project's own X handle (from the site's social links) unlocks the
+    // X-content angle of the team search — the team named in its own posts.
+    const NOISE = /^(home|share|intent|i|status|explore|search|hashtag|messages)$/i;
+    const xh = (recon?.socials ?? [])
+      .map((s) => s.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1])
+      .find((h) => h && !NOISE.test(h));
+    if (xh) qs.set("x", xh);
+    // GitHub org from the site's links unlocks the org-members/contributors angle.
+    const ghOrg = (recon?.socials ?? [])
+      .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
+      .find((g) => g && !/^(orgs|sponsors|topics|features|about)$/i.test(g));
+    if (ghOrg) qs.set("gh", ghOrg);
     const res = await fetch(`/api/recon-team?${qs}`);
     if (!res.ok) return [];
     const d = await res.json();
@@ -133,17 +145,15 @@ function deriveFounders(recon: Recon | null, projectX: string | null, projectAcc
     }
   }
 
-  // 2. Handles the PROJECT ACCOUNT itself surfaces — its bio/headline (e.g. a
-  //    backing VC named "by @EnigmaFund") and the analyst's structured claims.
-  //    These are observed @handles, never synthesized, so they are auditable.
+  // 2. TEAM the project account explicitly names as its own (relation "team:…").
+  //    We do NOT pull generic @-mentions, non-team associates, or "advised"
+  //    projects: for a project account those are partners / integrations / other
+  //    PROJECTS (e.g. @moonpay, @0xPolygon, @FireblocksHQ for Uniswap), not the
+  //    people behind it. The real team comes from the site + web/LinkedIn search.
   if (projectAccount) {
-    const text = `${projectAccount.bio ?? ""} ${projectAccount.headline ?? ""}`;
-    for (const m of text.matchAll(/@([A-Za-z0-9_]{2,30})\b/g)) add("@" + m[1], "@" + m[1], "project");
-    // Team (relation "team:…") and advisors (relationship "advisor") get their own
-    // dedicated sections, so keep them out of the generic surfaced-people list.
-    for (const a of projectAccount.evidence.associates) if (a.associate_key && !/^team:/i.test(a.relation ?? "")) add(a.associate_key, a.associate_key, "project");
-    for (const t of projectAccount.evidence.testimonials) if (t.claimed_endorser_handle && t.claimed_relationship !== "advisor") add(t.claimed_endorser_handle, t.claimed_endorser_handle, "project");
-    for (const p of projectAccount.evidence.advised) if (p.project_handle) add(p.project_handle, p.project_handle, "project");
+    for (const a of projectAccount.evidence.associates) {
+      if (a.associate_key && /^team:/i.test(a.relation ?? "")) add(a.associate_key, a.associate_key, "project");
+    }
   }
   return out.slice(0, 10);
 }
@@ -163,6 +173,20 @@ function founderNote(siteUrl: string | null, recon: Recon | null, founders: Foun
   return base;
 }
 
+// Knowledge fallback: resolve the token's official site / X / founder from Grok
+// when its on-chain sources (DexScreener + CoinGecko) came up empty.
+interface TokenIdentity { website: string | null; x_handle: string | null; founder: string | null; founder_handle: string | null; confidence: string }
+async function fetchTokenIdentity(symbol: string, name: string, contract: string, chain: string): Promise<TokenIdentity | null> {
+  try {
+    const p = new URLSearchParams({ symbol, name: name || "", contract: contract || "", chain: chain || "" });
+    const r = await fetch(`/api/token-identity?${p.toString()}`, { signal: AbortSignal.timeout(40000) });
+    if (!r.ok) return null;
+    const d = await r.json();
+    if (!d || d.available === false) return null;
+    return { website: d.website ?? null, x_handle: d.x_handle ?? null, founder: d.founder ?? null, founder_handle: d.founder_handle ?? null, confidence: d.confidence ?? "low" };
+  } catch { return null; }
+}
+
 export function streamInvestigation(rootRef: string, h: InvestigationHandlers): () => void {
   let aborted = false;
   let abortLive: (() => void) | null = null;
@@ -177,9 +201,28 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
       if (aborted) return;
       if (!token) { h.onError("Could not resolve that contract on any DEX."); return; }
 
-      const projectX = token.projectX;
-      const siteUrl = token.socials.find((s) => /^https?:\/\//i.test(s.url) && !/x\.com|twitter\.com|t\.me|discord|github\.com/i.test(s.url))?.url ?? null;
+      let projectX = token.projectX;
+      let siteUrl = token.socials.find((s) => /^https?:\/\//i.test(s.url) && !/x\.com|twitter\.com|t\.me|discord|github\.com/i.test(s.url))?.url ?? null;
       h.onStep(milestone("Token audited", `$${token.symbol}: ${token.verdict} ${token.score ?? "—"}/100.${projectX ? ` Project X ${projectX}.` : " No project X linked."}${siteUrl ? ` Site ${shorten(siteUrl)}.` : " No site linked."}`, token.verdict === "PASS" ? "good" : "warn"));
+
+      // If the token's own sources (DexScreener + CoinGecko) yielded no site OR no
+      // X account, resolve the OFFICIAL identity from knowledge (Grok) so an
+      // obscure token doesn't dead-end on "no website / no team". Also surfaces the
+      // founder to seed the people section directly.
+      let resolvedFounder: FounderCandidate | null = null;
+      if (!siteUrl || !projectX) {
+        h.onHop("resolving the project's official identity");
+        h.onStep(milestone("Step 1c · Resolve identity", `On-chain sources are thin — resolving $${token.symbol}'s official site, X account, and founder from knowledge…`, "neutral"));
+        const id = await fetchTokenIdentity(token.symbol, token.name, token.address, token.chain);
+        if (!aborted && id) {
+          if (!siteUrl && id.website) siteUrl = id.website;
+          if (!projectX && id.x_handle) projectX = id.x_handle;
+          if (id.founder) resolvedFounder = { name: id.founder, handle: id.founder_handle, source: "project" };
+          const bits = [id.website && `site ${shorten(id.website)}`, id.x_handle && `X ${id.x_handle}`, id.founder && `founder ${id.founder}${id.founder_handle ? ` (${id.founder_handle})` : ""}`].filter(Boolean) as string[];
+          h.onStep(milestone("Identity resolved", bits.length ? `Resolved ${bits.join(", ")} (${id.confidence} confidence).` : "No official identity could be resolved from knowledge either.", bits.length ? "good" : "warn"));
+        }
+      }
+      if (aborted) return;
 
       // ── Hop 1b: trace who funded the deployer (Solana, Helius) ──
       // The deployer wallet is a pseudonym; its funding source often is not.
@@ -237,7 +280,10 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
           h.onHop("backgrounding the project's X account");
           h.onStep(milestone("Step 3 · Background the project account", `Live people-audit of ${projectX}. This is the project's own account, not a named founder.`, "neutral"));
           projectAccount = await new Promise<Dossier | null>((resolve) => {
-            abortLive = streamAudit(projectX, {
+            // PRIVATE: the project account is audited AS PART OF this investigation
+            // and shown inside it — it must NOT be saved as a separate standalone
+            // report (that's what made @Uniswap appear as a loose "PERSON" card).
+            abortLive = streamAudit(projectX, true, {
               onStep: (s) => { if (!aborted) h.onStep(s); },
               onDone: (d) => resolve(d),
               onError: () => resolve(null),
@@ -255,6 +301,11 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
 
       // ── Founders (honesty-gated; no auto-spend beyond the project account) ──
       const founders = deriveFounders(recon, projectX, projectAccount);
+      // A knowledge-resolved founder (e.g. Hayden Adams for $UNI) leads the list
+      // when the on-chain trail didn't already surface them.
+      if (resolvedFounder && !founders.some((f) => f.name.toLowerCase() === resolvedFounder!.name.toLowerCase() || (resolvedFounder!.handle && f.handle?.toLowerCase() === resolvedFounder!.handle.toLowerCase()))) {
+        founders.unshift(resolvedFounder);
+      }
       const note = founderNote(siteUrl, recon, founders);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
       h.onDone({ rootRef, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note, deployerTrail, webTeam });

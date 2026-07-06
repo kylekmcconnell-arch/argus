@@ -19,12 +19,16 @@ export interface SubjectProfile {
   handle: string;
   display_name: string;
   avatar: string;
+  avatar_url?: string; // real X profile photo URL, when resolved (else derive from handle)
   bio: string;
   followers: string;
   joined: string;
   identity_confidence: IdentityConfidence;
   identity_note: string;
   prior_handles?: string[]; // past X usernames for the same account id (rebrands)
+  last_post_at?: string;    // ISO time of the most recent tweet (dormancy signal)
+  days_since_post?: number; // days since that post, computed at collect time
+  identity_emails?: string[]; // PDL-resolved emails — bridge to leaked GitHub commit emails
 }
 
 export interface AxisInput {
@@ -60,6 +64,19 @@ export interface TraceStep {
   tone: "neutral" | "good" | "warn" | "bad";
 }
 
+// A person behind the project, dug from the website (web/LinkedIn), the account's
+// own posts (role-word scan), or its X content. Named-only people are kept — a
+// real name with a role is signal even without an X handle to audit.
+export interface WebTeamMember {
+  name: string;
+  handle?: string;
+  role: string;
+  linkedin?: string;
+  evidence?: string;
+  source: string; // where it came from: web/LinkedIn search, post role-scan, X content
+  projects?: { name: string; role?: string }[]; // their OTHER projects (serial-founder web)
+}
+
 export interface CollectedEvidence {
   profile: SubjectProfile;
   roles: SubjectClass[];
@@ -76,6 +93,7 @@ export interface CollectedEvidence {
   recentActivity: string[]; // recent post text, fuel for claim extraction
   notableFollowers: NotableFollower[]; // respected accounts that follow the subject
   contradictions: Contradiction[]; // internal contradictions across materials
+  webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
 }
 
 export function emptyEvidence(handle: string): CollectedEvidence {
@@ -101,6 +119,7 @@ export function emptyEvidence(handle: string): CollectedEvidence {
     associates: [],
     findings: [],
     axes: [],
+    webTeam: [],
     headline: "",
     recentActivity: [],
     notableFollowers: [],

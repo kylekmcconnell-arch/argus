@@ -1,9 +1,17 @@
 import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
-import { verdictMeta } from "../lib/verdict";
+import { verdictMeta, tokenConfidence } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { TokenDossier } from "../token/audit";
+import { TokenSparkline } from "./TokenSparkline";
+import { OnChainForensics } from "./OnChainForensics";
+import { ProjectResearch } from "./ProjectResearch";
+import { ProjectLinks } from "./ProjectLinks";
+import { Unknowns } from "./Unknowns";
+import { SecondOpinion } from "./SecondOpinion";
+import { ServiceAlert } from "./ServiceAlert";
+import { RingAlert } from "./RingAlert";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -104,6 +112,12 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
   const isSol = d.chain === "solana";
   const topSum = d.topHolders.reduce((a, h) => a + h.percent, 0);
   const projectSite = d.socials.find((x) => x.label === "site" && /^https?:\/\//i.test(x.url))?.url;
+  const projectDomain = projectSite ? projectSite.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase() : null;
+  // The project's GitHub org (from its socials), for commit forensics — same
+  // derivation the investigation report uses.
+  const ghOrg = d.socials
+    .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
+    .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
   const otherLinks = d.socials.filter((x) => x.label !== "site" && !/x\.com|twitter\.com/i.test(x.url));
   const [watched, setWatched] = useState(() => isWatched(d.address));
   const [copied, setCopied] = useState(false);
@@ -141,6 +155,10 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           <span className="mono text-[11px] text-ink-faint">/ token</span>
           <span className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
           <div className="ml-auto flex items-center gap-2">
+            <button onClick={() => onAudit(d.address)} title="Run this audit again, fresh" className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
+              Rescan
+            </button>
             <button onClick={copyReport} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copiedTxt ? "Copied ✓" : "Copy report"}</button>
             <button onClick={share} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copied ? "Copied ✓" : "Share"}</button>
             <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
@@ -152,6 +170,8 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
       </header>
 
       <div className="mx-auto max-w-5xl px-5">
+        <div className="mt-4"><ServiceAlert /></div>
+        <RingAlert handle={"$" + d.symbol} onAudit={onAudit} />
         {/* token identity */}
         <div className="mt-6 flex flex-wrap items-center gap-4">
           {d.imageUrl ? (
@@ -168,10 +188,8 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
               <span className="rounded border border-line px-1.5 py-0.5 text-ink-dim capitalize">{d.chain}</span>
               <span>{d.dexId}</span>
               <span className="mono">{d.address.slice(0, 6)}…{d.address.slice(-4)}</span>
-              {d.socials.map((x) => (
-                <a key={x.url} href={x.url} target="_blank" rel="noreferrer" className="text-signal-dim hover:text-signal">{x.label}</a>
-              ))}
             </div>
+            <ProjectLinks className="mt-2" website={projectSite} xHandle={d.projectX ?? d.cg?.twitter} links={d.socials} />
           </div>
           <div className="flex gap-5 text-right">
             <div><div className="text-[10px] uppercase tracking-wider text-ink-faint">mcap</div><div className="mono text-[14px] text-ink">{money(d.mcap)}</div></div>
@@ -179,6 +197,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
             <div><div className="text-[10px] uppercase tracking-wider text-ink-faint">24h vol</div><div className="mono text-[14px] text-ink">{money(d.vol24)}</div></div>
           </div>
         </div>
+
+        {/* what the project actually does — CoinGecko's own blurb */}
+        {d.cg?.description && (
+          <p className="mt-3 max-w-3xl text-[13px] leading-relaxed text-ink-dim">{d.cg.description}</p>
+        )}
 
         {/* price momentum */}
         {d.priceChange && (
@@ -194,13 +217,45 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           </div>
         )}
 
+        {/* price performance history */}
+        <div className="mt-4 rounded-xl border border-line bg-panel p-4">
+          <div className="mb-2 flex items-baseline justify-between">
+            <div className="text-[12.5px] font-medium text-ink">Price performance</div>
+            <div className="text-[10px] uppercase tracking-wider text-ink-faint">GeckoTerminal</div>
+          </div>
+          <TokenSparkline address={d.address} chain={d.chain} pairAddress={d.pairAddress} />
+        </div>
+
+        {/* on-chain forensic suite — the same cluster the investigation report uses */}
+        <div className="mt-4">
+          <OnChainForensics token={d} onAudit={onAudit} />
+        </div>
+
+        {/* unified project research: news & press, documents & resources, domain
+            intelligence, and GitHub forensics — the same cluster every report uses */}
+        <div className="mt-4">
+          <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} />
+        </div>
+
+        {/* negative space — what the scan couldn't confirm (unknowns are signal) */}
+        <div className="mt-4">
+          <Unknowns dossier={d} />
+        </div>
+
         {/* verdict hero */}
         <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow" style={{ borderColor: `${m.color}55` }}>
           <div className="absolute right-0 top-0 h-full w-1/2" style={{ background: `radial-gradient(400px 200px at 100% 0%, ${m.glow}, transparent 70%)` }} />
           <div className="relative flex flex-wrap items-center gap-6">
             <Ring score={d.score} verdict={d.verdict} />
             <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] uppercase tracking-[0.2em] text-ink-faint">Token verdict</div>
+              <div className="mb-1 flex items-center gap-2">
+                <span className="text-[11px] uppercase tracking-[0.2em] text-ink-faint">Token verdict</span>
+                {(() => {
+                  const c = tokenConfidence({ chain: d.chain, safetyAvailable: d.safety.available, openSource: d.safety.openSource, simChecked: d.safety.simChecked, hasDeployer: !!d.deployer, hasCg: !!d.cg, hasHolders: d.topHolders.length > 0 });
+                  const cc = c.level === "high" ? "var(--color-pass)" : c.level === "low" ? "var(--color-caution)" : "var(--color-ink-faint)";
+                  return <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: `${cc}1a`, color: cc }} title={`${c.ran}/${c.total} verification checks completed — how much of this verdict rests on verified data`}>{c.level} confidence</span>;
+                })()}
+              </div>
               <div className="text-[34px] font-bold leading-none tracking-tight" style={{ color: m.color }}>{m.label}</div>
               <p className="mt-2.5 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">{d.headline}</p>
               {d.capApplied && (
@@ -210,6 +265,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
               )}
             </div>
           </div>
+        </div>
+
+        {/* adversarial review — auto-run second opinion that stress-tests the verdict */}
+        <div className="mt-3">
+          <SecondOpinion dossier={d} />
         </div>
 
         {!gp && (

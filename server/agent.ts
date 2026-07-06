@@ -6,6 +6,7 @@
 // Gated on ANTHROPIC_API_KEY. With no key, callers fall back to heuristics.
 
 import { ANALYST_MODEL, env } from "./config";
+import { addClaudeUsage } from "./cost";
 import type { Contradiction } from "../src/data/evidence";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -53,7 +54,9 @@ export async function structured<T>(
     }
     const data = (await res.json()) as {
       content: { type: string; name?: string; input?: unknown }[];
+      usage?: { input_tokens?: number; output_tokens?: number };
     };
+    addClaudeUsage(data.usage, tool.name); // per-audit cost accounting, one ledger line per tool
     const block = data.content.find((b) => b.type === "tool_use");
     return (block?.input as T) ?? null;
   } catch (e) {
@@ -78,12 +81,33 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
   const system =
     "You are ARGUS intake. From a subject's own bio and recent posts, extract the " +
     "claims they make about themselves so they can be verified later. Capture CLAIMS " +
-    "ONLY, never judge truth. Roles drawn from: FOUNDER, KOL, INVESTOR, ADVISOR, " +
-    "AGENCY, MEMBER. Ventures = companies/projects they say they founded or led. " +
+    "ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, " +
+    "ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: " +
+    "PROJECT = the account IS an organization — a token, protocol, product, company, " +
+    "or DAO's own brand/official handle (usually named after the project, speaks as " +
+    "'we/our', ships and promotes its OWN single token/product). " +
+    "FOUNDER = an individual PERSON who founded or leads a project (a personal account, " +
+    "speaks as 'I'). " +
+    "KOL = an influencer/caller whose activity is promoting OTHER people's tokens across " +
+    "MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. " +
+    "INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its " +
+    "official brand account), a GP/partner/principal at one, or an angel with NAMED, " +
+    "verifiable investments (led or joined specific rounds). Buying/trading tokens, " +
+    "'investing in gems', or calling oneself an investor with no documented deals is NOT " +
+    "INVESTOR — a caller who trades is a KOL, nothing more. " +
+    "Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an " +
+    "investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts " +
+    "shipping a product/token, not allocating capital); an individual builder is FOUNDER; " +
+    "only tag KOL when they shill multiple external tokens they did not build. A subject " +
+    "can hold several roles, but do not tag KOL merely for hype words or for promoting the " +
+    "project's own token, and do not tag INVESTOR merely for trading talk. " +
+    "Ventures = companies/projects they say they founded or led. " +
     "Testimonials = named people/accounts they cite as backers or endorsers. Advised " +
-    "= projects they claim to advise. Promotions = tokens/tickers they shill. Use the " +
+    "= projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller " +
+    "capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, " +
+    "listing each ticker once with its contract address and chain when a chart link or CA is present. Use the " +
     "@handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
-  const user = `Subject: ${handle}\nBio: ${bio || "(none)"}\n\nRecent posts:\n${posts.slice(0, 20).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
+  const user = `Subject: ${handle}\nBio: ${bio || "(none)"}\n\nPosts (a claim-targeted corpus: recent originals + keyword-searched history, each stamped [Month Year · views]; dates let you fill venture periods, engagement shows which claims the subject pushed):\n${posts.slice(0, 70).map((p, i) => `${i + 1}. ${p}`).join("\n") || "(none)"}`;
   const tool: ToolSchema = {
     name: "record_claims",
     description: "Record the subject's self-claimed roles, ventures, endorsers, advisory seats, and promotions.",
@@ -127,7 +151,7 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
       required: ["roles", "ventures", "testimonials", "advised", "promotions"],
     },
   };
-  return structured<ExtractedClaims>(system, user, tool, 2048);
+  return structured<ExtractedClaims>(system, user, tool, 4096);
 }
 
 // Phase 4: internal contradiction scan. Given everything collected, find places
@@ -143,7 +167,8 @@ export async function scanContradictions(handle: string, evidenceJson: string): 
   const system =
     "You are ARGUS contradiction analysis. From everything collected about a subject, find INTERNAL CONTRADICTIONS: where the subject's own stated claims conflict with each other or with the collected evidence. " +
     "Examples: claims a team of N but only one builder is found; claims an audit but no auditor or verification exists; claims a named backer who never acknowledges them; a stated launch/founding date that conflicts with the account age, domain age, or on-chain history; claims 'doxxed' but no real identity resolves; claims locked liquidity that on-chain shows unlocked; a partnership the partner never confirmed; a venture in the bio that discovery found no evidence for. " +
-    "Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes.";
+    "Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes. " +
+    "SCOPE RULES — these are NOT contradictions: (1) ARGUS's OWN analysis metadata (fields like identity_confidence, identity_note, verdicts, evidence notes such as 'single-source lead, unverified') disagreeing with other ARGUS fields — only the SUBJECT's outward claims vs external facts count; a low-confidence evidence note is a gap, not a conflict. (2) Normal vertical integration: a project's token running on its own chain, its dApp on its own platform, or its products naming each other is how ecosystems work, not circularity. (3) Marketing self-description ('#1', 'leading') vs modest traction is puffery to note in scoring, not a contradiction, unless it conflicts with a specific verifiable fact.";
   const user = `Subject: ${handle}\n\nCollected evidence (JSON):\n${evidenceJson}`;
   const tool: ToolSchema = {
     name: "record_contradictions",
@@ -203,7 +228,20 @@ export async function analyzeSubject(
     axisCatalog.map((a) => `- ${a.axis} | max ${a.weight} | ${a.role}`).join("\n") +
     `\n\nCollected evidence (JSON):\n${evidenceJson}\n\n` +
     `Score every listed axis, write the composite headline (one sentence on what ` +
-    `governs the verdict), and an identity note.`;
+    `governs the verdict), and an identity note.\n\n` +
+    `ACTIVITY RULE: weigh posting cadence. profile.days_since_post is how long the ` +
+    `account has been silent. For a PROJECT/token, going quiet for weeks (roughly ` +
+    `21+ days) is a real liveness flag (abandoned, winding down, or quiet after a ` +
+    `raise) and should temper traction/execution axes; for an individual it is a ` +
+    `milder signal. Recent, steady posting is mildly positive, not a free pass.\n\n` +
+    `IDENTITY RULE: if the evidence has a "team" array of named people tied to the ` +
+    `project (especially any with a LinkedIn, or a named founder/CEO/CTO), the ` +
+    `project's real-world identity is RESOLVED. A pseudonymous brand/company handle ` +
+    `run on behalf of a publicly named team is NORMAL and is NOT an anonymity red ` +
+    `flag: do not score identity/backing axes as if the operators were anonymous, ` +
+    `and do NOT write a headline that calls the founder identity "unresolved", ` +
+    `"unnamed", or "anonymous" when named leaders are present. Only treat identity ` +
+    `as unresolved when the evidence genuinely names no one behind the project.`;
   const tool: ToolSchema = {
     name: "record_verdict",
     description: "Record the per-axis scores, headline, and identity note.",
@@ -223,7 +261,7 @@ export async function analyzeSubject(
           },
         },
         headline: { type: "string" },
-        identity_note: { type: "string" },
+        identity_note: { type: "string", description: "Identity resolution. Distinguish the ACCOUNT OPERATOR from the project's TEAM: if named team members are present in the evidence (especially with a LinkedIn), acknowledge them by name and do NOT claim 'no linked real-world identity' or 'zero credentials' — instead say the account/operator is pseudonymous while N named people are publicly tied to the project (list a few). Only say no one is identified if the evidence truly has no named people." },
       },
       required: ["axes", "headline", "identity_note"],
     },

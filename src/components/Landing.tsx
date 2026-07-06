@@ -1,18 +1,22 @@
 import { useState } from "react";
 import { HeroBackdrop } from "./ArgusMark";
-import { SUBJECTS } from "../data/subjects";
-import { ROLE_META } from "../lib/verdict";
+import { ScoreTicker, recentScored } from "./ScoreTicker";
+import { PrivateToggle } from "./PrivateToggle";
 
 // Origami-style hero: centered heading + chat-style input + quick-start dossiers,
 // over a faint line-art backdrop. Calm and static, matching origami.chat.
-export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => void; onAbout: () => void }) {
+export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: string, priv?: boolean) => void; onAbout: () => void; onOpenRecent?: (ref: string) => void }) {
   const [value, setValue] = useState("");
+  const [priv, setPriv] = useState(false);
+  const hasScores = onOpenRecent && recentScored(1).length > 0;
 
   return (
     <div className="relative flex min-h-full flex-col">
       <HeroBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[440px] w-full opacity-50" />
 
-      <div className="relative z-10 mx-auto flex w-full max-w-2xl flex-1 flex-col items-center px-6 pt-[13vh]">
+      {onOpenRecent && <ScoreTicker onOpen={onOpenRecent} />}
+
+      <div className={`relative z-10 mx-auto flex w-full max-w-2xl flex-1 flex-col items-center px-6 ${hasScores ? "pt-[7vh]" : "pt-[13vh]"}`}>
         <h1 className="text-center text-[34px] font-medium leading-[1.1] tracking-[-0.02em] text-ink">
           Who is actually behind the handle?
         </h1>
@@ -26,7 +30,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => voi
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (value.trim()) onAudit(value.trim());
+            if (value.trim()) onAudit(value.trim(), priv);
           }}
           className="mt-7 w-full rounded-xl border border-line bg-panel p-2.5 soft-shadow transition focus-within:border-line-2"
         >
@@ -41,8 +45,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => voi
             />
           </div>
           <div className="mt-2 flex items-center gap-2 px-1">
-            <span className="rounded-md border border-line px-2 py-1 text-[11.5px] text-ink-dim">Multi-class</span>
-            <span className="rounded-md border border-line px-2 py-1 text-[11.5px] text-ink-dim">API-only</span>
+            <PrivateToggle on={priv} onToggle={setPriv} />
             <button type="submit" className="btn-primary ml-auto flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] font-medium">
               Run audit
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -50,32 +53,8 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => voi
           </div>
         </form>
 
-        {/* quick start */}
-        <div className="mt-8 w-full">
-          <div className="mb-2.5 text-center text-[11px] uppercase tracking-[0.18em] text-ink-faint">Or try a live dossier</div>
-          <div className="grid grid-cols-2 gap-2.5">
-            {SUBJECTS.map((s) => (
-              <button
-                key={s.handle}
-                onClick={() => onAudit(s.handle)}
-                className="group flex items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2.5 text-left transition hover:border-line-2 hover:shadow-sm"
-              >
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-panel-2 text-[14px] text-signal">
-                  {s.avatar}
-                </span>
-                <span className="min-w-0 flex-1">
-                  <span className="mono block truncate text-[13px] text-ink">{s.handle}</span>
-                  <span className="block truncate text-[11px] text-ink-faint">
-                    {s.roles.map((r) => ROLE_META[r].label).join(" · ")}
-                  </span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
-
         {/* live token samples */}
-        <div className="mt-5 w-full">
+        <div className="mt-8 w-full">
           <div className="mb-2.5 text-center text-[11px] uppercase tracking-[0.18em] text-ink-faint">Or audit a token, live on-chain</div>
           <div className="flex flex-wrap justify-center gap-2">
             {[
@@ -85,7 +64,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string) => voi
             ].map((t) => (
               <button
                 key={t.sym}
-                onClick={() => onAudit(t.addr)}
+                onClick={() => onAudit(t.addr, priv)}
                 className="mono rounded-full border border-line bg-panel px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
               >
                 {t.sym}

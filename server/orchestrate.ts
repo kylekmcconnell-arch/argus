@@ -17,8 +17,10 @@ import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
+import { resetCost, getCost } from "./cost";
 
-import { xAdapter, getProfile as xProfile, getRecentPosts, getRecentPostsMeta, fmtFollowers, discoverAffiliations, discoverByMentions, findTeam, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal } from "./adapters/x";
+import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
+import { fetchTeamPage } from "./adapters/teampage";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
@@ -29,6 +31,7 @@ import { coingeckoAdapter } from "./adapters/coingecko";
 import { redditAdapter } from "./adapters/reddit";
 import { onchainAdapter } from "./adapters/onchain";
 import { archivedAffiliation } from "./adapters/wayback";
+import { resolveForHandle } from "./adapters/wallet";
 
 const ADAPTERS: Adapter[] = [
   xAdapter,
@@ -55,17 +58,28 @@ function parseOutcome(s?: string): VentureOutcome {
 
 function asRoles(roles: string[]): SubjectClass[] {
   const valid = new Set(Object.values(SubjectClass) as string[]);
-  return roles.filter((r) => valid.has(r)).map((r) => r as SubjectClass);
+  let out = roles.filter((r) => valid.has(r)).map((r) => r as SubjectClass);
+  // Deterministic backstop for a rule the LLM applies inconsistently: a fund IS
+  // an organization, so it sometimes tags INVESTOR+PROJECT — but PROJECT is for
+  // accounts shipping a product/token, and the combo files funds under Projects.
+  // The INVESTOR track fully covers the org case, so PROJECT is dropped.
+  if (out.includes(SubjectClass.INVESTOR) && out.includes(SubjectClass.PROJECT)) {
+    out = out.filter((r) => r !== SubjectClass.PROJECT);
+  }
+  return out;
 }
 
 // Cold handle: resolve the profile, pull recent posts, and extract self-claims
 // so the verification adapters have something to check. Without this an unknown
 // subject has no ventures/endorsements/advisory seats to verify.
 async function coldIntake(ctx: CollectContext) {
+  let siteUrl: string | undefined;
   const prof = await xProfile(ctx.handle);
   if (prof) {
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
+    if (prof.image) ctx.evidence.profile.avatar_url = prof.image; // real X photo → reliable avatar
     ctx.evidence.profile.bio = prof.bio ?? "";
+    siteUrl = prof.website;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);
@@ -88,10 +102,24 @@ async function coldIntake(ctx: CollectContext) {
     ctx.emit({ phase: "P0 · Intake", label: "Handle history", detail: "No prior X handle on record for this account (no rebrand found; memory.lol coverage is partial).", source: "memory.lol", tone: "neutral" });
   }
 
-  const posts = await getRecentPosts(ctx.handle);
+  // Claim-targeted corpus: recent originals + keyword search over the whole
+  // history (pinned/announcement posts where claims actually live), ranked and
+  // date-stamped — not just the newest 20 items (mostly replies/gm, and gameable).
+  const corpus = await collectCorpus(ctx.handle);
+  const posts = corpus.posts;
   if (posts.length) {
-    ctx.evidence.recentActivity = posts;
-    ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Pulled ${posts.length} recent posts to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
+    ctx.evidence.recentActivity = corpus.newest.length ? corpus.newest : posts; // newest originals drive tone/dormancy
+    ctx.emit({ phase: "P0 · Intake", label: "Recent activity", detail: `Assembled a ${posts.length}-post claim corpus (${corpus.count.originals} recent originals + ${corpus.count.searched} from keyword search over full history) to mine for self-claims.`, source: "twitterapi.io", tone: "neutral" });
+  }
+
+  // Find-wallet: a self-disclosed wallet (a 0x address or ENS/basename/.sol name)
+  // in the bio/posts. The richer corpus surfaces more contract/URL mentions.
+  const foundWallets = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...posts].join(" \n "));
+  if (foundWallets.length) {
+    for (const w of foundWallets) {
+      ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: w.tier, notes: w.source });
+    }
+    ctx.emit({ phase: "P0 · Intake", label: "Wallet resolved", detail: `${foundWallets.length} wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}… (${w.chain}, ${w.source.includes("Farcaster") ? "Farcaster" : "self-disclosed"})`).join(", ")}. Running on-chain forensics.`, source: "find-wallet", tone: "good" });
   }
 
   if (!analystAvailable()) return;
@@ -135,11 +163,114 @@ async function coldIntake(ctx: CollectContext) {
   // parallel keeps wall-clock to one). Subject-first finds what they claim/built;
   // reverse-mention finds projects whose OWN timeline named them; team-from-X
   // mines THIS account's posts for the people behind it (the project-account case).
-  const [bySubject, byMentions, people] = await Promise.all([
-    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name),
-    discoverByMentions(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
+  // The project's own website (from its X bio link, or a domain in the bio text)
+  // is where the team page actually lives — mine it like Site recon would.
+  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  // When no domain is in the bio, guess one from the handle so we can still fetch
+  // the project's own team page (handle "VulcanForged" -> vulcanforged.com, whose
+  // docs.* /team is the canonical roster). Failed guesses just fetch nothing.
+  const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
+  // discoverAffiliations now covers the reverse-mention angle too (was a second
+  // Grok search call — merged to halve intake search spend).
+  const [bySubject, people, siteTeam, pageTeam] = await Promise.all([
+    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
+    // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
+    // domain or a project name — a big public project's roster lives off-X, and
+    // many project accounts (e.g. @VulcanForged) put no plain domain in the bio.
+    domain || ctx.evidence.profile.display_name
+      ? findTeamOnSite(domain, ctx.evidence.profile.display_name)
+      : Promise.resolve([] as TeamMember[]),
+    // Read the project's own /team page directly (Grok's summary can miss it).
+    fetchTeamPage(teamDomain, ctx.evidence.profile.display_name),
   ]);
+
+  // Auto-pivot team: merge everyone found across the website search, the account's
+  // own X content, and a deterministic post role-word scan (founder/CEO/CTO...).
+  // Named-only people are KEPT here (a real name + role is signal even with no
+  // handle to audit) — this is what a plain handle audit used to drop.
+  const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
+  const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
+  // MERGE duplicates instead of dropping them: the team page gives the
+  // authoritative name+role but no links; Grok gives the same person WITH their
+  // @handle/LinkedIn. Keep the first occurrence and fill its missing fields from
+  // later duplicates, so a page-roster name still gets its identity links.
+  const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
+  const byHandle = new Map<string, (typeof webTeam)[number]>();
+  const byName = new Map<string, (typeof webTeam)[number]>();
+  for (const t of [...pageTeam, ...siteTeam, ...people, ...postRoleTeam]) {
+    const h = t.handle ? norm(t.handle) : "";
+    const n = norm(t.name);
+    if (!h && !n) continue;
+    const existing = (h && byHandle.get(h)) || (n && byName.get(n)) || null;
+    if (existing) {
+      if (!existing.handle && t.handle) { existing.handle = t.handle; byHandle.set(norm(t.handle), existing); }
+      if (!existing.linkedin && t.linkedin) existing.linkedin = t.linkedin;
+      if ((!existing.projects || !existing.projects.length) && t.projects?.length) existing.projects = t.projects;
+      continue;
+    }
+    const rec = { name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects };
+    webTeam.push(rec);
+    if (h) byHandle.set(h, rec);
+    if (n) byName.set(n, rec);
+  }
+
+  // Does the ACCOUNT ITSELF vouch for this team, or was it only matched by NAME?
+  // A real project/founder account ties to its team through its OWN evidence: its
+  // handle is among them, it links its site in bio (domain), or its own posts name
+  // the people (people/postRoleTeam come from the account's content). A KOL whose
+  // display name merely COLLIDES with a project (e.g. @KaminoCrypto vs the Kamino
+  // protocol) has none of these — so a by-name team lookup returns that project's
+  // founders, and attaching them here is a false identity resolution (the exact
+  // name collision the contradictions section catches). Drop it at the source
+  // rather than present a stranger's team as this account's identity.
+  const subj = norm(ctx.handle);
+  const accountVouchesTeam = !!domain || people.length > 0 || postRoleTeam.length > 0 || webTeam.some((t) => norm(t.handle) === subj);
+  if (webTeam.length && !accountVouchesTeam) {
+    ctx.emit({ phase: "P1 · Team", label: "Same-name project (not this account)", detail: `Found a team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it — its handle isn't among them, it links no site, and its own posts name no team. Treated as a name collision, not the account's identity.`, source: "team-search", tone: "warn" });
+    webTeam.length = 0; // clear in place (shared ref with ctx.evidence.webTeam)
+  }
+
+  // Actively resolve identities for members still name-only (the team page names
+  // them but links nothing): one batched Grok pass finds each person's X handle
+  // and LinkedIn. The co-founder of a known fund should never render "named only".
+  const nameOnly = webTeam.filter((m) => !m.handle && !m.linkedin).slice(0, 15);
+  if (nameOnly.length >= 1) {
+    const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })));
+    let linked = 0;
+    for (const f of found) {
+      const m = byName.get(norm(f.name));
+      if (!m) continue;
+      if (!m.handle && f.handle) { m.handle = f.handle; linked++; }
+      if (!m.linkedin && f.linkedin) { m.linkedin = f.linkedin; if (!f.handle) linked++; }
+    }
+    if (linked) ctx.emit({ phase: "P1 · Team", label: "Identities linked", detail: `Resolved X/LinkedIn for ${linked} of ${nameOnly.length} name-only team members.`, source: "grok", tone: "good" });
+  }
+  if (webTeam.length) {
+    ctx.emit({ phase: "P1 · Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
+    // A named team resolves the PROJECT's real-world identity even when the X
+    // handle itself is a corporate/brand account (e.g. @VulcanForged). Without
+    // this, a brand handle stays "Unverified" and the founder verdict gets
+    // capped as if anonymous, contradicting a report that names the CEO. Raise
+    // the identity floor: a LinkedIn-corroborated leader -> Confirmed, otherwise
+    // a named leader / two named people -> Probable. Only ever raises, and never
+    // overrides a suspected-impersonation finding.
+    const isLeader = (r?: string) => /founder|cofounder|co-founder|ceo|cto|coo|president|chief/i.test(r ?? "");
+    const leaders = webTeam.filter((t) => isLeader(t.role));
+    const leaderWithLinkedin = leaders.some((t) => !!t.linkedin);
+    const rank: Record<string, number> = { Unverified: 0, Probable: 1, Confirmed: 2 };
+    const cur = ctx.evidence.profile.identity_confidence;
+    if (cur !== "SuspectedImpersonation") {
+      const target = leaderWithLinkedin ? "Confirmed" : leaders.length || webTeam.length >= 2 ? "Probable" : null;
+      if (target && (rank[target] ?? 0) > (rank[cur ?? "Unverified"] ?? 0)) {
+        ctx.evidence.profile.identity_confidence = target as typeof cur;
+        ctx.emit({ phase: "P1 · Team", label: `Identity ${target.toLowerCase()}`, detail: `Project identity resolved through its named team${leaderWithLinkedin ? " (LinkedIn-corroborated leadership)" : ""}; a brand handle over a public team is not an anonymity flag.`, source: "team-search", tone: "good" });
+      }
+    }
+  } else if (domain) {
+    ctx.emit({ phase: "P1 · Team", label: "No named team", detail: `Dug ${domain} and the account's posts; no individual team members could be attributed. For a project raising money, an unnamed team is itself a flag.`, source: "team-search", tone: "warn" });
+  }
 
   // People named in the account's X content, routed by kind:
   //  - TEAM -> associates (the investigation lists them as backgroundable people).
@@ -176,7 +307,7 @@ async function coldIntake(ctx: CollectContext) {
     if (namedOnly.length) ctx.emit({ phase: "P0 · Intake", label: "Named only", detail: `Also named without a handle (not auditable): ${namedOnly.slice(0, 5).join(", ")}.`, source: "grok", tone: "neutral" });
   }
   const mergedMap = new Map<string, DiscoveredAffiliation>();
-  for (const v of [...bySubject, ...byMentions]) {
+  for (const v of bySubject) {
     const k = v.name.toLowerCase();
     const ex = mergedMap.get(k);
     // Keep the richest record: prefer an X handle / domain (so corroboration can run).
@@ -470,6 +601,7 @@ async function postCadence(ctx: CollectContext) {
 }
 
 export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier | null> {
+  resetCost(); // fresh per-audit provider-spend ledger
   const fixture = findSubject(rawHandle);
   const liveProviders = ADAPTERS.filter((a) => KEYED.has(a.id) && a.available());
   const anyLive = liveProviders.length > 0 || analystAvailable();
@@ -525,13 +657,20 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
     emit({ phase: "P0 · Routing", label: "Classify roles", detail: `Routed to ${evidence.roles.join(", ")} (${route.confidence} confidence).`, tone: "neutral" });
   }
 
+  // Strip ARGUS's OWN analysis fields (identity_confidence/identity_note) from
+  // what the LLMs see: the analyst writes identity_note fresh, and the
+  // contradiction scanner must never "contradict" our metadata against itself.
+  const { identity_confidence: _ic, identity_note: _in, ...profileForLlm } = evidence.profile;
   const baseEvidence = {
-    profile: evidence.profile,
+    profile: profileForLlm,
     ventures: evidence.ventures,
     testimonials: evidence.testimonials,
     advised: evidence.advised,
     promotions: evidence.promotions,
     wallets: evidence.wallets,
+    // The named people behind the project (from the site + LinkedIn + X content),
+    // so identity/founder scoring reflects the team we actually found.
+    team: (evidence.webTeam ?? []).map((p) => ({ name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, otherProjects: p.projects })),
     findings: evidence.findings,
     notableFollowers: evidence.notableFollowers,
     recentActivity: evidence.recentActivity.slice(0, 12),
@@ -572,5 +711,10 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
 
   emit({ phase: "Finalize", label: "Govern composite", detail: "Applying caps and selecting the governing role.", tone: "neutral" });
   await delay(300);
-  return assembleDossier(evidence, true);
+  const dossier = assembleDossier(evidence, true);
+  // Attach what this run actually spent, so the report library can show it.
+  const cost = getCost();
+  dossier.cost = cost;
+  emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches ≈${cost.sources} sources · Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
+  return dossier;
 }

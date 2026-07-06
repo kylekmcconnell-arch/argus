@@ -2,7 +2,17 @@ import { useRef, useState } from "react";
 import { verdictMeta } from "../lib/verdict";
 import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
-import { xAvatar } from "../lib/avatars";
+import { xAvatar, personAvatar } from "../lib/avatars";
+import { OnChainForensics } from "./OnChainForensics";
+import { ProjectResearch } from "./ProjectResearch";
+import { ProjectLinks } from "./ProjectLinks";
+import { TokenSparkline } from "./TokenSparkline";
+import { NamesakeCheck } from "./NamesakeCheck";
+import { ServiceAlert } from "./ServiceAlert";
+import { RingAlert } from "./RingAlert";
+import { TrustGraph } from "./TrustGraph";
+import { investigationContribution, getContributions } from "../graph/store";
+import { subjectConnections } from "../graph/network";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -41,17 +51,28 @@ export function InvestigationReport({
   onReset,
   onOpenToken,
   onOpenProjectAccount,
+  onReAudit,
 }: {
   inv: Investigation;
   onAudit: (q: string) => void;
   onReset: () => void;
   onOpenToken: () => void;
   onOpenProjectAccount: () => void;
+  onReAudit?: () => void;
 }) {
   const [spent, setSpent] = useState(0);
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
   const tm = verdictMeta(token.verdict);
+  // The project's GitHub org (from its site links), for commit forensics.
+  // The project's own website (first non-social link) → domain intelligence.
+  const projectDomain = [...(recon?.socials ?? []), ...(token.socials ?? [])]
+    .map((s) => s.url)
+    .find((u) => /^https?:\/\//i.test(u) && !/x\.com|twitter\.com|t\.me|telegram|discord|github\.com|medium\.com|linktr\.ee/i.test(u))
+    ?.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "") ?? null;
+  const ghOrg = (recon?.socials ?? [])
+    .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
+    .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
   // Unified team: members named in the project's X content (associates) merged
   // with people dug up via the web/LinkedIn search, deduped by handle so a
   // pseudonymous handle gets enriched with its real name + LinkedIn.
@@ -96,6 +117,11 @@ export function InvestigationReport({
     onAudit(handle);
   };
 
+  // The connection web: this token's own subgraph (deployer → funder trail, project
+  // account, site) plus every cross-audit tie to other subjects you've scanned.
+  const invGraph = investigationContribution(inv);
+  const connections = subjectConnections("$" + token.symbol, getContributions());
+
   return (
     <div className="relative min-h-full pb-24">
       <div className="grid-bg absolute inset-0 top-0 -z-10 h-60" />
@@ -106,20 +132,59 @@ export function InvestigationReport({
             Home
           </button>
           <span className="mono text-[11px] text-ink-faint">/ investigation</span>
-          <span className="mono ml-auto rounded border px-1.5 py-0.5 text-[10px] tracking-wider" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
+          {onReAudit && (
+            <button onClick={onReAudit} title="Run this investigation again, fresh" className="ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
+              Rescan
+            </button>
+          )}
+          <span className={`mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider ${onReAudit ? "" : "ml-auto"}`} style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
         </div>
       </header>
 
       <div className="mx-auto max-w-4xl px-5">
+        <div className="mt-4"><ServiceAlert /></div>
+        <RingAlert handle={"$" + token.symbol} onAudit={onAudit} />
         {/* headline */}
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-3">
+            {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-lg border border-line object-cover" />}
             <h1 className="text-[24px] font-medium tracking-[-0.02em] text-ink">{`Investigation · $${token.symbol}`}</h1>
-            <VerdictPill verdict={token.verdict} score={token.score} />
-            {projectAccount && <span className="mono text-[12px] text-ink-faint">project account <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} /></span>}
           </div>
-          <p className="mt-2 max-w-3xl text-[14px] font-medium leading-relaxed text-ink">{inv.founderNote}</p>
-          <p className="mono mt-1 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
+          {/* Two DISTINCT scores, labelled so it's obvious what each grades. */}
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-2">
+            <span className="flex items-center gap-1.5">
+              <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Token risk</span>
+              <VerdictPill verdict={token.verdict} score={token.score} />
+            </span>
+            {projectAccount && (
+              <span className="flex items-center gap-1.5">
+                <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Project account</span>
+                <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} />
+              </span>
+            )}
+          </div>
+          {/* Lead with the TEAM when we know it — don't declare "no team" when it's named below. */}
+          {teamPeople.length > 0 ? (
+            <p className="mt-3 max-w-3xl text-[14px] font-medium leading-relaxed text-ink">
+              Built by {teamPeople.slice(0, 3).map((p) => p.name).filter(Boolean).join(", ")}{teamPeople.length > 3 ? ` +${teamPeople.length - 3} more` : ""}{projectX ? ` · project account ${projectX}` : ""} — full team below.
+            </p>
+          ) : (
+            <p className="mt-3 max-w-3xl text-[14px] font-medium leading-relaxed text-ink">{inv.founderNote}</p>
+          )}
+          {/* What the project actually IS — CoinGecko's own blurb, else the project's X bio. */}
+          {(() => {
+            const blurb = token.cg?.description || projectAccount?.bio || null;
+            return blurb ? <p className="mt-2 max-w-3xl text-[13px] leading-relaxed text-ink-dim">{blurb}</p> : null;
+          })()}
+          {/* official website + socials */}
+          <ProjectLinks
+            className="mt-3"
+            website={projectDomain}
+            xHandle={projectX ?? token.cg?.twitter}
+            links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
+          />
+          <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
 
         <div className="mt-5 grid gap-3 lg:grid-cols-2">
@@ -134,6 +199,10 @@ export function InvestigationReport({
               <span>liq <span className="mono text-ink-dim">{money(token.liquidityUsd)}</span></span>
               <span>mc <span className="mono text-ink-dim">{money(token.mcap)}</span></span>
               <span>chain <span className="mono text-ink-dim capitalize">{token.chain}</span></span>
+            </div>
+            {/* price history — the shape of the chart IS forensic context (pump, dump, drawdown) */}
+            <div className="mt-3 border-t border-line/60 pt-2.5">
+              <TokenSparkline address={token.address} chain={token.chain} pairAddress={token.pairAddress} />
             </div>
             {/* CEX listings — real centralized-exchange listings are a strong legitimacy signal */}
             {token.cg?.cexNames && token.cg.cexNames.length > 0 ? (
@@ -154,9 +223,15 @@ export function InvestigationReport({
 
           {/* the people behind it (summary; the full team is its own section below) */}
           <Card title="The people behind it">
-            <p className="text-[12.5px] leading-relaxed text-ink-dim">{recon ? recon.identityLine : inv.founderNote}</p>
-            {teamPeople.length > 0 && (
-              <p className="mt-1.5 text-[11.5px] text-ink-faint">{teamPeople.length} {teamPeople.length === 1 ? "person" : "people"} surfaced across X, the site, and web/LinkedIn — see Team below.</p>
+            {teamPeople.length > 0 ? (
+              <>
+                <p className="text-[12.5px] leading-relaxed text-ink-dim">
+                  {teamPeople.length} {teamPeople.length === 1 ? "person is" : "people are"} publicly tied to this project: {teamPeople.slice(0, 4).map((p) => p.name).filter(Boolean).join(", ")}{teamPeople.length > 4 ? ", …" : ""}.
+                </p>
+                <p className="mt-1.5 text-[11.5px] text-ink-faint">Full roster with roles &amp; links in the Team section below.</p>
+              </>
+            ) : (
+              <p className="text-[12.5px] leading-relaxed text-ink-dim">{recon ? recon.identityLine : inv.founderNote}</p>
             )}
 
             {/* project account — explicitly NOT a founder */}
@@ -232,7 +307,7 @@ export function InvestigationReport({
                     {teamPeople.map((m) => (
                       <div key={m.handle ?? m.name} className="flex items-center justify-between gap-2">
                         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                          <Avatar src={m.handle ? xAvatar(m.handle) : null} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
+                          <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                           <span className="text-[12.5px] text-ink">{m.name}</span>
                           {m.handle && m.handle.replace(/^@/, "").toLowerCase() !== m.name.toLowerCase() && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
                           {m.role && <span className="text-[10.5px] text-ink-faint">{m.role}</span>}
@@ -293,12 +368,40 @@ export function InvestigationReport({
           </div>
         )}
 
+        {/* on-chain forensic suite — the same cluster the token report uses:
+            market intel, holders, clustering, operator trace, EVM deployer +
+            bytecode, and the OFAC sanctions screen, in one canonical order. */}
+        <div className="mt-3">
+          <OnChainForensics token={token} onAudit={onAudit} />
+        </div>
+
+        {/* token provenance: who it's named after, and whether they're behind it */}
+        <div className="mt-3">
+          <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} onAudit={onAudit} />
+        </div>
+
+        {/* unified project research: news & press, documents & resources, domain
+            intelligence, and GitHub forensics — the same cluster every report uses */}
+        <div className="mt-3">
+          <ProjectResearch name={token.name} symbol={token.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${token.symbol}`} newsHandle={projectX} />
+        </div>
+
+        {/* Connection web: the subject's graph + its ties to everything else you've
+            audited — the deeper map, below the team. */}
+        {invGraph && invGraph.nodes.length > 1 && (
+          <div className="mt-3">
+            <Card title="Connection web · click any node to open it">
+              <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={connections} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
+            </Card>
+          </div>
+        )}
+
         {/* project account dossier detail */}
         {projectAccount && (
           <div className="mt-3">
             <Card title={`Project account · ${projectAccount.handle}`}>
               <div className="flex flex-wrap items-center gap-2">
-                <Avatar src={xAvatar(projectAccount.handle)} letter={initial(projectAccount.handle)} size={28} rounded="rounded-lg" letterClass="text-[12px]" />
+                <Avatar src={projectAccount.avatar_url || token.imageUrl || xAvatar(projectAccount.handle)} letter={initial(projectAccount.handle)} size={28} rounded="rounded-lg" letterClass="text-[12px]" />
                 <span className="text-[13.5px] font-medium text-ink">{projectAccount.display_name || projectAccount.handle}</span>
                 <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} />
                 <span className="ml-auto text-[11px] text-ink-faint">{projectAccount.followers} followers · joined {projectAccount.joined}</span>

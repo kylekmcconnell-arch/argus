@@ -6,6 +6,7 @@
 
 export enum SubjectClass {
   FOUNDER = "FOUNDER",
+  PROJECT = "PROJECT",
   KOL = "KOL",
   INVESTOR = "INVESTOR",
   ADVISOR = "ADVISOR",

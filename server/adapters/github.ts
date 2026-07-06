@@ -10,6 +10,7 @@
 // trusted. Evidence discipline over reach.
 
 import type { Adapter, CollectContext } from "./types";
+import { recordCall } from "../cost";
 import { env } from "../config";
 import { VentureOutcome } from "../../src/engine";
 
@@ -22,6 +23,7 @@ const headers = (key: string) => ({
 
 async function ghJson<T>(path: string, key: string): Promise<T | null> {
   try {
+    recordCall("github", path.split("?")[0].split("/").slice(1, 3).join("/") || "api", 0);
     const res = await fetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(8000) });
     if (!res.ok) return null;
     return (await res.json()) as T;

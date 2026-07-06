@@ -67,10 +67,14 @@ export function NetworkGraph({
   net,
   onOpenSubject,
   height = 520,
+  highlight = null,
 }: {
   net: Network;
   onOpenSubject?: (handle: string) => void;
   height?: number;
+  // Node ids to spotlight (e.g. one role category); everything else fades.
+  // A live hover-focus takes precedence while active.
+  highlight?: Set<string> | null;
 }) {
   const W = 900, H = 560;
   const base = useMemo(() => settle(net, W, H), [net]);
@@ -138,7 +142,7 @@ export function NetworkGraph({
     void e;
   };
 
-  const dim = (id: string) => (focusSet ? !focusSet.has(id) : false);
+  const dim = (id: string) => (focusSet ? !focusSet.has(id) : highlight ? !highlight.has(id) : false);
 
   return (
     <div className="relative overflow-hidden rounded-xl border border-line bg-panel/30" style={{ height }}>
@@ -169,7 +173,11 @@ export function NetworkGraph({
           {/* edges */}
           {net.edges.map((e, i) => {
             const a = pos(e.src), b = pos(e.dst);
-            const faded = focusSet ? !(focusSet.has(e.src) && focusSet.has(e.dst)) : false;
+            const faded = focusSet
+              ? !(focusSet.has(e.src) && focusSet.has(e.dst))
+              : highlight
+                ? !(highlight.has(e.src) || highlight.has(e.dst))
+                : false;
             const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 - Math.hypot(b.x - a.x, b.y - a.y) * 0.08;
             const stroke = e.rug ? "var(--color-avoid)" : e.verdict === "Unconfirmed" ? "var(--color-line-2)" : "var(--color-line-2)";
             return (
@@ -192,7 +200,7 @@ export function NetworkGraph({
             const c = nodeColor(n);
             const faded = dim(n.id);
             const flagged = n.flags.includes("serial") || n.flags.includes("hub") || n.flags.includes("bridge");
-            const showLabel = n.subject || n.flags.includes("bridge") || n.flags.includes("hub") || hover === n.id || (focusSet?.has(n.id) ?? false);
+            const showLabel = n.subject || n.flags.includes("bridge") || n.flags.includes("hub") || hover === n.id || (focusSet?.has(n.id) ?? false) || (highlight?.has(n.id) ?? false);
             return (
               <g
                 key={n.id}

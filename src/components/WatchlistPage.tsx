@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from "react";
-import { getWatchlist, removeWatch, rebaseline, type WatchItem, type WatchSnapshot } from "../lib/watchlist";
+import { getWatchlist, removeWatch, rebaseline, hydrateSharedWatchlist, type WatchItem, type WatchSnapshot } from "../lib/watchlist";
 import { auditToken } from "../token/audit";
-import { findSubject, buildReport } from "../data/subjects";
+import { fetchReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 
 const RANK: Record<string, number> = { PASS: 0, CAUTION: 1, FAIL: 2, AVOID: 3, UNVERIFIABLE_IDENTITY: 3 };
@@ -13,10 +13,11 @@ async function check(item: WatchItem): Promise<WatchSnapshot | null> {
     const d = await auditToken({ kind: "token", ref: item.id, via: item.via ?? "evm" });
     return d ? { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap } : null;
   }
-  const f = findSubject(item.id);
-  if (!f) return null;
-  const r = buildReport(f).report;
-  return { verdict: r.composite_verdict, score: r.governing_score };
+  // Person watches read the latest PERSISTED report (a rescan updates it);
+  // there is no cheap live re-check for a person, so stored-latest is the truth.
+  const rep = await fetchReport(item.id);
+  const r = (rep?.payload as { report?: { composite_verdict?: string; governing_score?: number | null } } | undefined)?.report;
+  return r?.composite_verdict ? { verdict: r.composite_verdict, score: r.governing_score ?? null } : null;
 }
 
 function money(n?: number): string {
@@ -47,8 +48,24 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
   }, []);
 
   useEffect(() => {
-    recheck();
+    // shared watchlist first (co-analyst watches merge in), then re-check
+    void hydrateSharedWatchlist().then(recheck);
   }, [recheck]);
+
+  // Manual sweep — server-side drift + ring check, writes the Alerts feed.
+  // Deliberately on-demand only: nothing runs in the background.
+  const [sweep, setSweep] = useState<"idle" | "running" | string>("idle");
+  const onSweep = async () => {
+    setSweep("running");
+    try {
+      const r = await fetch("/api/sweep", { signal: AbortSignal.timeout(115000) });
+      const d = await r.json();
+      setSweep(d?.error ? `failed: ${String(d.error).slice(0, 80)}` : `checked ${d.checked} · ${d.alerts?.length ?? 0} new alert${(d.alerts?.length ?? 0) === 1 ? "" : "s"}`);
+      recheck();
+    } catch {
+      setSweep("failed: network");
+    }
+  };
 
   const drop = (id: string) => {
     removeWatch(id);
@@ -66,7 +83,19 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
           <h1 className="text-[26px] font-medium tracking-[-0.02em] text-ink">Watchlist</h1>
           <p className="mt-1.5 text-[14px] text-ink-dim">Saved audits, re-checked live. Drift since you last looked is flagged.</p>
         </div>
-        <button onClick={recheck} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">Re-check all</button>
+        <div className="flex shrink-0 items-center gap-2">
+          {sweep !== "idle" && sweep !== "running" && <span className="text-[11px] text-ink-faint">{sweep}</span>}
+          <button
+            onClick={onSweep}
+            disabled={sweep === "running"}
+            title="Run a one-off server sweep of the shared watchlist: on-chain drift + ring check against the trust graph. Writes the Alerts feed. Manual only — nothing runs in the background."
+            className="mono rounded-lg border px-3 py-1.5 text-[12.5px] transition disabled:opacity-60"
+            style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
+          >
+            {sweep === "running" ? "sweeping…" : "Sweep now"}
+          </button>
+          <button onClick={recheck} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">Re-check all</button>
+        </div>
       </div>
 
       {rows.length === 0 ? (

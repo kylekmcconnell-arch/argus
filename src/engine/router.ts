@@ -7,14 +7,25 @@
 import { SubjectClass } from "./taxonomy";
 
 const PATTERNS: Record<SubjectClass, RegExp[]> = {
+  // Professional capital allocation only. Bare "investing"/"angel" bio talk is
+  // retail/KOL noise, not a fund — those words deliberately do NOT score here.
   [SubjectClass.INVESTOR]: [
     /\bventure\b/i, /\bcapital\b/i, /\bVC\b/i, /\bfund\b/i, /\bGP\b/i,
     /\bgeneral partner\b/i, /\blimited partner\b/i, /\bportfolio\b/i,
-    /\bangel\b/i, /\binvest(or|ing|ments?)\b/i, /\blaunchpad\b/i, /\baccelerator\b/i,
+    /\bangel investor\b/i, /\blaunchpad\b/i, /\baccelerator\b/i,
   ],
   [SubjectClass.FOUNDER]: [
     /\bfounder\b/i, /\bco-?founder\b/i, /\bCEO\b/i, /\bCTO\b/i, /\bbuilding\b/i,
     /\bbuilder\b/i, /\bwe'?re building\b/i, /\bcreator of\b/i, /\bfounded\b/i,
+  ],
+  // A project/protocol's OWN brand account: an organization, not a person. Uses
+  // "we/our", describes one product/token it ships. Distinct from a KOL (who
+  // promotes OTHERS' tokens) and a founder (an individual).
+  [SubjectClass.PROJECT]: [
+    /\bprotocol\b/i, /\bnetwork\b/i, /\bdApp\b/i, /\becosystem\b/i, /\bDAO\b/i,
+    /\bplatform\b/i, /\bthe official\b/i, /\bofficial account\b/i, /\bwe'?re building\b/i,
+    /\bour (?:token|protocol|platform|app|mission|community)\b/i, /\b\$[A-Z]{2,6} token\b/i,
+    /\bpowered by\b/i, /\bmainnet\b/i, /\btestnet\b/i,
   ],
   [SubjectClass.ADVISOR]: [
     /\badvisor\b/i, /\badviser\b/i, /\badvisory\b/i, /\bboard member\b/i,
