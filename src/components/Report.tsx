@@ -12,6 +12,7 @@ import { xAvatar, personAvatar } from "../lib/avatars";
 import { explorer, shortAddr, walletTier } from "../lib/wallets";
 import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
+import { PersonGithub } from "./PersonGithub";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
@@ -797,6 +798,10 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               <PfpCheck handle={report.handle} brand={(webTeam?.length ?? 0) > 0} />
             </Section>
           </div>
+
+          {/* code footprint — resolve the subject's GitHub from their handle/name/bio
+              and analyse it (self-hides when no account is confidently matched) */}
+          <PersonGithub className="min-w-0 lg:col-span-2" handle={report.handle} name={f.display_name} bio={f.bio} />
 
           {/* The old "On-chain reality check" (a single promoted token → deployer)
               was removed: for KOLs the KOL report below is the richer superset, for
