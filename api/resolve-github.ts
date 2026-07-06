@@ -49,38 +49,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cached = await cacheGetJson<any>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
-  const hlow = handle.toLowerCase();
-  const nlow = name.toLowerCase();
-  const scores = new Map<string, { score: number; why: string[]; user?: GhUser }>();
-  const bump = (login: string, pts: number, why: string) => {
-    if (!login || !LOGIN_RE.test(login) || RESERVED.test(login)) return;
-    const e = scores.get(login.toLowerCase()) ?? { score: 0, why: [] };
-    e.score += pts; e.why.push(why); scores.set(login.toLowerCase(), e);
-  };
+  try {
+    const hlow = handle.toLowerCase();
+    const nlow = name.toLowerCase();
+    const scores = new Map<string, { score: number; why: string[]; user?: GhUser }>();
+    const entry = (login: string) => { const k = login.toLowerCase(); let e = scores.get(k); if (!e) { e = { score: 0, why: [] }; scores.set(k, e); } return e; };
+    const bump = (login: string, pts: number, why: string) => {
+      if (!login || !LOGIN_RE.test(login) || RESERVED.test(login)) return;
+      const e = entry(login); e.score += pts; e.why.push(why);
+    };
 
-  // 1. A github.com/<login> link in the X bio — they linked it themselves.
-  const bioLink = bio.match(/github\.com\/([A-Za-z0-9-]{1,39})/i)?.[1];
-  if (bioLink) bump(bioLink, 3, "linked from the X bio");
+    // 1. A github.com/<login> link in the X bio — they linked it themselves.
+    const bioLink = bio.match(/github\.com\/([A-Za-z0-9-]{1,39})/i)?.[1];
+    if (bioLink) bump(bioLink, 3, "linked from the X bio");
 
-  // 2. Candidates: same-username, the bio-link login, and a bio-search for the handle.
-  const candidates = new Set<string>([handle, bioLink, ...(handle ? await searchBio(handle, key) : [])].filter(Boolean) as string[]);
-  for (const login of candidates) {
-    if (!LOGIN_RE.test(login) || RESERVED.test(login)) continue;
-    const u = await ghUser(login, key);
-    if (!u) continue;
-    if (login.toLowerCase() === hlow) bump(u.login, 1, "same username as the X handle");
-    if (u.twitter_username && u.twitter_username.toLowerCase().replace(/^@/, "") === hlow) bump(u.login, 3, "GitHub profile links to the same X account");
-    if (nlow && u.name && (u.name.toLowerCase().includes(nlow) || nlow.includes(u.name.toLowerCase()))) bump(u.login, 1, "name matches");
-    if (bio && u.bio && handle && u.bio.toLowerCase().includes(hlow)) bump(u.login, 2, "X handle appears in the GitHub bio");
-    scores.get(u.login.toLowerCase())!.user = u;
+    // 2. Candidates: same-username, the bio-link login, and a bio-search for the handle.
+    const candidates = new Set<string>([handle, bioLink, ...(handle ? await searchBio(handle, key) : [])].filter(Boolean) as string[]);
+    for (const login of candidates) {
+      if (!LOGIN_RE.test(login) || RESERVED.test(login)) continue;
+      const u = await ghUser(login, key);
+      if (!u || !LOGIN_RE.test(u.login) || RESERVED.test(u.login)) continue;
+      if (u.login.toLowerCase() === hlow) bump(u.login, 1, "same username as the X handle");
+      if (u.twitter_username && u.twitter_username.toLowerCase().replace(/^@/, "") === hlow) bump(u.login, 3, "GitHub profile links to the same X account");
+      if (nlow && u.name && (u.name.toLowerCase().includes(nlow) || nlow.includes(u.name.toLowerCase()))) bump(u.login, 1, "name matches");
+      if (bio && u.bio && handle && u.bio.toLowerCase().includes(hlow)) bump(u.login, 2, "X handle appears in the GitHub bio");
+      entry(u.login).user = u; // attach the fetched profile to whatever entry exists
+    }
+
+    // Pick the strongest candidate that clears the corroboration bar (>=2 = a strong
+    // signal, or two weak ones — never a same-username coincidence alone).
+    const best = [...scores.values()].filter((v) => v.score >= 2 && v.user).sort((a, b) => b.score - a.score)[0];
+    const out = best?.user
+      ? { available: true, login: best.user.login, name: best.user.name ?? null, followers: best.user.followers ?? 0, repos: best.user.public_repos ?? 0, url: best.user.html_url ?? `https://github.com/${best.user.login}`, why: [...new Set(best.why)], confidence: best.score >= 3 ? "high" : "medium" }
+      : { available: false, note: "No GitHub account could be confidently matched to this person." };
+    await cacheSetJson(ck, out);
+    res.status(200).json(out);
+  } catch (e) {
+    res.status(200).json({ available: false, error: String(e), note: "GitHub resolution failed." });
   }
-
-  // Pick the strongest candidate that clears the corroboration bar (>=2 = a strong
-  // signal, or two weak ones — never a same-username coincidence alone).
-  const best = [...scores.entries()].map(([, v]) => v).filter((v) => v.score >= 2 && v.user).sort((a, b) => b.score - a.score)[0];
-  const out = best?.user
-    ? { available: true, login: best.user.login, name: best.user.name ?? null, followers: best.user.followers ?? 0, repos: best.user.public_repos ?? 0, url: best.user.html_url ?? `https://github.com/${best.user.login}`, why: [...new Set(best.why)], confidence: best.score >= 3 ? "high" : "medium" }
-    : { available: false, note: "No GitHub account could be confidently matched to this person." };
-  await cacheSetJson(ck, out);
-  res.status(200).json(out);
 }
