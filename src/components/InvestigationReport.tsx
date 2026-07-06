@@ -9,6 +9,7 @@ import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
 import { AddInfo } from "./AddInfo";
+import { LinkEntity } from "./LinkEntity";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
@@ -439,6 +440,11 @@ export function InvestigationReport({
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
         <div className="mt-3">
           <AddInfo subject={`$${token.symbol}`} />
+        </div>
+
+        {/* hard link — manually bridge this subject to another entity in the graph */}
+        <div className="mt-3">
+          <LinkEntity subject={`$${token.symbol}`} />
         </div>
 
         <div className="mt-4 rounded-xl border border-line bg-panel/40 p-4 text-[12px] leading-relaxed text-ink-faint">

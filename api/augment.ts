@@ -21,7 +21,7 @@ function creds() {
 }
 const headers = (key: string) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
 
-type Augmentation = { type: string; value: string; label: string; url?: string; detail?: string; by: string; at: number };
+type Augmentation = { type: string; value: string; label: string; url?: string; detail?: string; graphKey?: string; rel?: string; kind?: string; by: string; at: number };
 
 async function listAug(ref: string): Promise<Augmentation[]> {
   const c = creds();
@@ -49,7 +49,9 @@ async function saveAug(ref: string, subject: string, items: Augmentation[]): Pro
 }
 
 // ── independent verification per type ──────────────────────────────────────
-async function verify(type: string, value: string): Promise<{ ok: boolean; label: string; url?: string; detail?: string; reason?: string } | null> {
+// graphKey mirrors how the audit engine keys the same entity, so a manual link
+// bridges to any real audit of that entity in the trust graph.
+async function verify(type: string, value: string): Promise<{ ok: boolean; label: string; url?: string; detail?: string; graphKey?: string; reason?: string } | null> {
   const v = value.trim();
   try {
     if (type === "github") {
@@ -59,21 +61,22 @@ async function verify(type: string, value: string): Promise<{ ok: boolean; label
       const r = await fetch(`https://api.github.com/users/${encodeURIComponent(login)}`, { headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), accept: "application/vnd.github+json", "user-agent": "argus-due-diligence" }, signal: AbortSignal.timeout(8000) });
       if (!r.ok) return { ok: false, label: login, reason: "no GitHub account at that username" };
       const u = (await r.json()) as { login: string; name?: string; public_repos?: number; followers?: number; html_url?: string };
-      return { ok: true, label: `github.com/${u.login}`, url: u.html_url ?? `https://github.com/${u.login}`, detail: `${u.public_repos ?? 0} repos · ${u.followers ?? 0} followers${u.name ? ` · ${u.name}` : ""}` };
+      return { ok: true, label: `github.com/${u.login}`, url: u.html_url ?? `https://github.com/${u.login}`, detail: `${u.public_repos ?? 0} repos · ${u.followers ?? 0} followers${u.name ? ` · ${u.name}` : ""}`, graphKey: `github.com/${u.login.toLowerCase()}` };
     }
     if (type === "website") {
       let url = v; if (!/^https?:\/\//i.test(url)) url = `https://${url}`;
       let host = ""; try { host = new URL(url).hostname; } catch { return { ok: false, label: v, reason: "not a valid URL" }; }
       const r = await fetch(url, { redirect: "follow", signal: AbortSignal.timeout(8000), headers: { "user-agent": "Mozilla/5.0 (ARGUS)" } });
       if (!r.ok) return { ok: false, label: host, reason: `site returned ${r.status}` };
-      return { ok: true, label: host.replace(/^www\./, ""), url: `https://${host}`, detail: "resolves live" };
+      const bare = host.replace(/^www\./, "").toLowerCase();
+      return { ok: true, label: bare, url: `https://${host}`, detail: "resolves live", graphKey: bare };
     }
     if (type === "x") {
       const h = v.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,30})/i)?.[1] || v.replace(/^@/, "");
       if (!/^[A-Za-z0-9_]{1,30}$/.test(h)) return { ok: false, label: h, reason: "not a valid X handle" };
       const r = await fetch(`https://unavatar.io/x/${h}?fallback=false`, { signal: AbortSignal.timeout(8000) });
       if (!r.ok) return { ok: false, label: `@${h}`, reason: "no X account at that handle" };
-      return { ok: true, label: `@${h}`, url: `https://x.com/${h}`, detail: "account exists" };
+      return { ok: true, label: `@${h}`, url: `https://x.com/${h}`, detail: "account exists", graphKey: `@${h.toLowerCase()}` };
     }
     if (type === "contract" || type === "wallet") {
       const addr = v.replace(/^\s+|\s+$/g, "");
@@ -83,7 +86,7 @@ async function verify(type: string, value: string): Promise<{ ok: boolean; label
       const r = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${encodeURIComponent(addr)}`, { signal: AbortSignal.timeout(8000) });
       const d = r.ok ? ((await r.json()) as { pairs?: { chainId?: string; baseToken?: { symbol?: string } }[] }) : null;
       const pair = d?.pairs?.[0];
-      if (pair) return { ok: true, label: pair.baseToken?.symbol ? `$${pair.baseToken.symbol}` : addr.slice(0, 8) + "…", url: `https://dexscreener.com/${pair.chainId}/${addr}`, detail: `trades on ${pair.chainId}` };
+      if (pair) return { ok: true, label: pair.baseToken?.symbol ? `$${pair.baseToken.symbol}` : addr.slice(0, 8) + "…", url: `https://dexscreener.com/${pair.chainId}/${addr}`, detail: `trades on ${pair.chainId}`, graphKey: pair.baseToken?.symbol ? `$${pair.baseToken.symbol.toUpperCase()}` : addr };
       return { ok: false, label: addr.slice(0, 8) + "…", reason: "no on-chain token found for this address" };
     }
     return { ok: false, label: v, reason: "unsupported type" };
@@ -109,10 +112,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!v || !v.ok) { res.status(200).json({ verified: false, reason: v?.reason ?? "could not verify" }); return; }
 
   const by = (typeof req.query.by === "string" ? req.query.by : "").trim().slice(0, 40) || "analyst";
-  const item: Augmentation = { type, value: value.trim(), label: v.label, url: v.url, detail: v.detail, by, at: Date.now() };
+  // A `rel` turns this into a hard LINK — a manual association to another entity
+  // that becomes a bridging edge in the trust graph (the client wires it via the
+  // returned graphKey). Without a rel it's a plain augmentation.
+  const rel = (typeof req.query.rel === "string" ? req.query.rel : "").trim().slice(0, 40);
+  const item: Augmentation = rel
+    ? { type: "link", kind: type, value: value.trim(), label: v.label, url: v.url, detail: v.detail, graphKey: v.graphKey, rel, by, at: Date.now() }
+    : { type, value: value.trim(), label: v.label, url: v.url, detail: v.detail, graphKey: v.graphKey, by, at: Date.now() };
   const items = await listAug(ref);
-  // Replace any prior addition of the same type+value; keep newest first, cap 20.
-  const deduped = [item, ...items.filter((i) => !(i.type === item.type && norm(i.value) === norm(item.value)))].slice(0, 20);
+  // Replace any prior addition of the same type+value; keep newest first, cap 24.
+  const deduped = [item, ...items.filter((i) => !((i.type === item.type || (i.type === "link" && item.type === "link" && i.rel === item.rel)) && norm(i.value) === norm(item.value)))].slice(0, 24);
   await saveAug(ref, subject, deduped);
   res.status(200).json({ verified: true, item, items: deduped });
 }

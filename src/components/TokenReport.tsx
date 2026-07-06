@@ -11,6 +11,7 @@ import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
 import { AddInfo } from "./AddInfo";
+import { LinkEntity } from "./LinkEntity";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
 import { ServiceAlert } from "./ServiceAlert";
@@ -446,6 +447,11 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
         <div className="mt-3">
           <AddInfo subject={`$${d.symbol}`} />
+        </div>
+
+        {/* hard link — manually bridge this subject to another entity in the graph */}
+        <div className="mt-3">
+          <LinkEntity subject={`$${d.symbol}`} />
         </div>
 
         <div className="mt-8 rounded-xl border border-line bg-panel/40 p-5">

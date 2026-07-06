@@ -16,6 +16,7 @@ import { PersonGithub } from "./PersonGithub";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { personChecks } from "../lib/scanChecklist";
 import { AddInfo } from "./AddInfo";
+import { LinkEntity } from "./LinkEntity";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
@@ -873,6 +874,11 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
           {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
           <div className="min-w-0 lg:col-span-2">
             <AddInfo subject={report.handle} />
+          </div>
+
+          {/* hard link — manually bridge this person to another entity in the graph */}
+          <div className="min-w-0 lg:col-span-2">
+            <LinkEntity subject={report.handle} />
           </div>
         </div>
 

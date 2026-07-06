@@ -12,6 +12,7 @@ import { fetchWebTeam, type WebPerson } from "../lib/investigation";
 import { ProjectResearch } from "./ProjectResearch";
 import { resolveProjectToken, type ResolvedProjectToken } from "../lib/resolveProjectToken";
 import { AddInfo } from "./AddInfo";
+import { LinkEntity } from "./LinkEntity";
 import { SiteHistory } from "./SiteHistory";
 import { SiteInfra } from "./SiteInfra";
 import { ProjectXAccount } from "./ProjectXAccount";
@@ -523,6 +524,9 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, 
 
           {/* analyst augmentation — add a piece the recon missed (verified before publish) */}
           {reconHost && <AddInfo subject={reconHost} />}
+
+          {/* hard link — manually bridge this site to another entity in the graph */}
+          {reconHost && <LinkEntity subject={reconHost} />}
         </>
       )}
     </div>
