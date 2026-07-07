@@ -8,6 +8,8 @@ import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
+import { ArkhamName } from "./ArkhamName";
+import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { AddInfo } from "./AddInfo";
 import { LinkEntity } from "./LinkEntity";
 import { TokenSparkline } from "./TokenSparkline";
@@ -67,6 +69,8 @@ export function InvestigationReport({
   const [spent, setSpent] = useState(0);
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
+  // Arkham entity labels for the deployer + funder wallets.
+  const arkham = useArkhamLabels([token.deployer, deployerTrail?.funder?.address]);
   const tm = verdictMeta(token.verdict);
   // The project's GitHub org (from its site links), for commit forensics.
   // The project's own website (first non-social link) → domain intelligence.
@@ -260,7 +264,7 @@ export function InvestigationReport({
             {token.deployer && (
               <div className="mt-2.5 border-t border-line/60 pt-2.5 text-[11.5px] text-ink-faint">
                 <div>
-                  Deployed by <span className="mono text-ink-dim">{shortAddr(token.deployer)}</span>
+                  Deployed by <ArkhamName address={token.deployer} chain={token.chain} labels={arkham} fallback={shortAddr(token.deployer)} className="text-ink-dim" />
                   {deployerTrail?.walletAgeDays != null && <> · wallet <span className="text-ink-dim">{deployerTrail.walletAgeDays}d</span> old</>}
                   {deployerTrail?.tokensCreated != null && <> · <span className="text-ink-dim">{deployerTrail.tokensCreated}</span> tokens minted</>}
                 </div>
@@ -286,7 +290,7 @@ export function InvestigationReport({
                     {deployerTrail.funder.label ? (
                       <span className="mono rounded px-1.5 py-0.5" style={{ background: "rgba(22,163,74,0.10)", color: "var(--color-pass)" }}>{deployerTrail.funder.label}</span>
                     ) : (
-                      <span className="mono text-ink-dim">{shortAddr(deployerTrail.funder.address)}</span>
+                      <ArkhamName address={deployerTrail.funder.address} chain={token.chain} labels={arkham} fallback={shortAddr(deployerTrail.funder.address)} className="text-ink-dim" />
                     )}
                   </div>
                 ) : null}
