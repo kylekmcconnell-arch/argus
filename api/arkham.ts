@@ -12,7 +12,16 @@ import { cacheGetJson, cacheSetJson } from "./_cache.js";
 
 export const config = { maxDuration: 20 };
 
-const ARKHAM = "https://api.arkm.com/intelligence/address/";
+const ARKHAM_INTEL = "https://api.arkm.com/intelligence/address/";
+const ARKHAM_RISK = "https://api.arkm.com/risk/address/";
+
+export type ArkhamRisk = {
+  level: string;        // NONE | LOW | MEDIUM | HIGH | SEVERE
+  category?: string;    // hacker | privacy | sanctioned | …
+  score: number;        // 0-100
+  incomingUsd?: number; // $ received, risk-weighted (exposure to bad sources)
+  isSeed: boolean;      // this address IS a flagged bad actor (hacker/mixer/sanctioned)
+};
 
 export type ArkhamLabel = {
   name: string;
@@ -22,24 +31,31 @@ export type ArkhamLabel = {
   website?: string;
   isCex: boolean;
   isContract: boolean;
+  risk?: ArkhamRisk;  // present only when the wallet carries real risk (level != NONE or a seed)
 };
 
+const getJson = (url: string, key: string) =>
+  fetch(url, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(9000) })
+    .then((r) => (r.ok ? r.json() : null))
+    .catch(() => null);
+
 async function lookup(addr: string, key: string): Promise<ArkhamLabel | null> {
-  const ck = `arkham:${addr.toLowerCase()}:v1`;
+  const ck = `arkham:${addr.toLowerCase()}:v2`;
   const cached = await cacheGetJson<ArkhamLabel | { none: true }>(ck);
   if (cached) return (cached as { none?: true }).none ? null : (cached as ArkhamLabel);
   try {
-    // api.arkhamintelligence.com 307-redirects to api.arkm.com; hit it directly.
-    const r = await fetch(`${ARKHAM}${encodeURIComponent(addr)}`, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(9000) });
-    if (!r.ok) return null;
-    const d = (await r.json()) as {
-      arkhamEntity?: { name?: string; type?: string; twitter?: string; website?: string } | null;
-      arkhamLabel?: { name?: string } | null;
-      contract?: boolean;
-    };
+    // Entity label + risk score in parallel (api.arkhamintelligence.com 307s to arkm).
+    const [d, rk] = await Promise.all([
+      getJson(`${ARKHAM_INTEL}${encodeURIComponent(addr)}`, key) as Promise<{ arkhamEntity?: { name?: string; type?: string; twitter?: string; website?: string } | null; arkhamLabel?: { name?: string } | null; contract?: boolean } | null>,
+      getJson(`${ARKHAM_RISK}${encodeURIComponent(addr)}`, key) as Promise<{ risk_level?: string; greatest_risk_category?: string; max_score?: number; risk_weighted_incoming_usd?: number; is_seed?: boolean } | null>,
+    ]);
     const e = d?.arkhamEntity, lbl = d?.arkhamLabel;
     const name = e?.name || lbl?.name || "";
-    if (!name) { await cacheSetJson(ck, { none: true }); return null; }
+    // Only keep risk that actually matters — an elevated level or a flagged seed.
+    const risk: ArkhamRisk | undefined = rk && ((rk.risk_level && rk.risk_level !== "NONE") || rk.is_seed)
+      ? { level: String(rk.risk_level ?? "NONE"), category: rk.greatest_risk_category || undefined, score: Number(rk.max_score ?? 0), incomingUsd: rk.risk_weighted_incoming_usd ? Number(rk.risk_weighted_incoming_usd) : undefined, isSeed: !!rk.is_seed }
+      : undefined;
+    if (!name && !risk) { await cacheSetJson(ck, { none: true }); return null; }
     const out: ArkhamLabel = {
       name,
       type: e?.type,
@@ -48,6 +64,7 @@ async function lookup(addr: string, key: string): Promise<ArkhamLabel | null> {
       website: typeof e?.website === "string" && e.website ? e.website : undefined,
       isCex: e?.type === "cex",
       isContract: !!d?.contract,
+      risk,
     };
     await cacheSetJson(ck, out);
     return out;
@@ -63,7 +80,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const results = await Promise.all(addrs.map((a) => lookup(a, key).then((l) => [a.toLowerCase(), l] as const)));
     const labels: Record<string, ArkhamLabel> = {};
-    for (const [a, l] of results) if (l && l.name) labels[a] = l;
+    for (const [a, l] of results) if (l && (l.name || l.risk)) labels[a] = l;
     res.status(200).json({ available: true, labels });
   } catch (e) {
     res.status(200).json({ available: false, error: String(e), note: "Arkham lookup failed." });

@@ -5,7 +5,12 @@ import { arkhamOf, type ArkhamLabel } from "../lib/useArkhamLabels";
 // "Vitalik Buterin" + a type chip + their Twitter), falling back to whatever the
 // caller already showed (a curated label or the short address). Drop-in across the
 // forensic surfaces so a named wallet reads the same everywhere.
-const typeColor = (ak: ArkhamLabel) => (ak.isCex ? "var(--color-pass)" : ak.type === "individual" ? "var(--color-signal)" : "var(--color-signal)");
+const typeColor = (ak: ArkhamLabel) => (ak.isCex ? "var(--color-pass)" : "var(--color-signal)");
+
+// Risk level → color. LOW = caution; MEDIUM/HIGH/SEVERE (and any flagged seed) = avoid.
+const HIGH = new Set(["MEDIUM", "HIGH", "SEVERE", "CRITICAL"]);
+const riskColor = (r: { level: string; isSeed: boolean }) => (r.isSeed || HIGH.has(r.level.toUpperCase()) ? "var(--color-avoid)" : "var(--color-caution)");
+const usd = (n?: number) => (n == null ? "" : n >= 1e9 ? `$${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? `$${(n / 1e6).toFixed(1)}M` : n >= 1e3 ? `$${Math.round(n / 1e3)}K` : `$${Math.round(n)}`);
 
 export function ArkhamName({ address, chain, labels, fallback, className }: {
   address?: string | null;
@@ -16,16 +21,23 @@ export function ArkhamName({ address, chain, labels, fallback, className }: {
 }) {
   const ak = arkhamOf(labels, address ?? undefined);
   const href = address ? explorerAddr(address, chain) : undefined;
-  const color = ak ? (ak.isCex ? "var(--color-pass)" : "var(--color-ink)") : undefined;
-  const text = ak?.name ?? fallback;
+  const color = ak?.name ? (ak.isCex ? "var(--color-pass)" : "var(--color-ink)") : undefined;
+  const text = ak?.name || fallback;
+  const rc = ak?.risk ? riskColor(ak.risk) : undefined;
+  const riskLabel = ak?.risk ? (ak.risk.isSeed ? `${ak.risk.category ?? "flagged"} source` : `${ak.risk.level.toLowerCase()} risk${ak.risk.category ? ` · ${ak.risk.category}` : ""}`) : "";
   return (
     <span className="inline-flex min-w-0 items-center gap-1.5">
       {href ? (
-        <a href={href} target="_blank" rel="noreferrer" className={`mono truncate hover:underline ${className ?? ""}`} style={color ? { color } : undefined} title={ak ? `Arkham: ${ak.name}${ak.sublabel ? ` · ${ak.sublabel}` : ""}` : address ?? undefined}>{text}</a>
+        <a href={href} target="_blank" rel="noreferrer" className={`mono truncate hover:underline ${className ?? ""}`} style={color ? { color } : undefined} title={ak?.name ? `Arkham: ${ak.name}${ak.sublabel ? ` · ${ak.sublabel}` : ""}` : address ?? undefined}>{text}</a>
       ) : (
         <span className={`mono truncate ${className ?? ""}`} style={color ? { color } : undefined}>{text}</span>
       )}
       {ak?.type && <span className="mono shrink-0 rounded px-1 py-0.5 text-[9px]" style={{ background: typeColor(ak) + "1a", color: typeColor(ak) }}>{ak.type}{ak.sublabel ? ` · ${ak.sublabel}` : ""}</span>}
+      {ak?.risk && rc && (
+        <span className="mono shrink-0 rounded px-1 py-0.5 text-[9px]" style={{ background: rc + "1a", color: rc }} title={ak.risk.incomingUsd ? `${usd(ak.risk.incomingUsd)} risk-weighted inflow (Arkham)` : "Arkham risk score"}>
+          ⚠ {riskLabel}{ak.risk.incomingUsd && ak.risk.incomingUsd >= 1e5 ? ` · ${usd(ak.risk.incomingUsd)}` : ""}
+        </span>
+      )}
       {ak?.twitter && <a href={ak.twitter} target="_blank" rel="noreferrer" className="mono shrink-0 text-[9.5px] text-signal-dim hover:underline" title="Arkham-linked X account">𝕏↗</a>}
     </span>
   );

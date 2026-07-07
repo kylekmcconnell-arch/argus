@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 // wallets they already show (deployer, funder, top holders, cluster members) and
 // upgrade "0x1a2b…" to who the wallet actually belongs to. Best-effort: empty
 // until it resolves, and stays empty if Arkham isn't configured.
+export type ArkhamRisk = { level: string; category?: string; score: number; incomingUsd?: number; isSeed: boolean };
 export type ArkhamLabel = {
   name: string;
   type?: string;
@@ -13,6 +14,7 @@ export type ArkhamLabel = {
   website?: string;
   isCex: boolean;
   isContract: boolean;
+  risk?: ArkhamRisk;
 };
 
 export function useArkhamLabels(addresses: (string | undefined | null)[]): Record<string, ArkhamLabel> {
