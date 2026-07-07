@@ -164,6 +164,58 @@ async function notifyPending(subject: string, item: Augmentation): Promise<void>
   if (rk && to) { try { await fetch("https://api.resend.com/emails", { method: "POST", headers: { authorization: `Bearer ${rk}`, "content-type": "application/json" }, body: JSON.stringify({ from: "ARGUS <onboarding@resend.dev>", to: [to], subject: `ARGUS: pending edit on ${subject}`, text: line }), signal: AbortSignal.timeout(8000) }); } catch { /* */ } }
 }
 
+// Self-learning: when an analyst approves a fact the scan MISSED, ask why and what
+// to change so it's caught next time. Grounded only in the approved fact — a
+// pipeline improvement suggestion, surfaced to the operator (not auto-applied).
+async function diagnose(subject: string, item: Augmentation): Promise<{ reason: string; fix: string } | null> {
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) return null;
+  const fact = `${item.rel ? `a "${item.rel}" relationship to ` : ""}${item.kind ?? item.type}: ${item.label}${item.detail ? ` (${item.detail})` : ""}`;
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({
+        model: process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6",
+        max_tokens: 400,
+        system: "You are ARGUS, an automated crypto due-diligence engine, improving your OWN pipeline. An analyst just approved a true fact that your automated scan of a subject FAILED to surface. Diagnose it. Reply with ONLY compact JSON {\"reason\":\"...\",\"fix\":\"...\"}: reason = the single most likely reason an automated scan missed this, one sentence; fix = ONE concrete, specific, implementable change to the scan pipeline that would catch this class of thing next time — name the data source, search, or check to add or adjust, one actionable sentence. No text outside the JSON.",
+        messages: [{ role: "user", content: `Subject: ${subject}\nMissed fact (analyst-verified): ${fact}` }],
+      }),
+      signal: AbortSignal.timeout(22000),
+    });
+    if (!r.ok) return null;
+    const d = (await r.json()) as { content?: { text?: string }[] };
+    const text = (d.content ?? []).map((b) => b.text ?? "").join(" ");
+    const m = text.match(/\{[\s\S]*\}/);
+    if (!m) return null;
+    const j = JSON.parse(m[0]) as { reason?: string; fix?: string };
+    if (!j.reason && !j.fix) return null;
+    return { reason: String(j.reason ?? "").slice(0, 400), fix: String(j.fix ?? "").slice(0, 400) };
+  } catch { return null; }
+}
+
+type Learning = { subject: string; label: string; kind: string; reason: string; fix: string; at: number };
+const LEARN_REF = "learnings:v1";
+async function listLearnings(): Promise<Learning[]> {
+  const c = creds();
+  if (!c) return [];
+  try {
+    const r = await fetch(`${c.url}/rest/v1/reports?select=payload&ref=eq.${encodeURIComponent(LEARN_REF)}&kind=eq.learning&limit=1`, { headers: headers(c.key), signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return [];
+    const rows = await r.json();
+    const items = rows?.[0]?.payload?.items;
+    return Array.isArray(items) ? items : [];
+  } catch { return []; }
+}
+async function saveLearning(entry: Learning): Promise<void> {
+  const c = creds();
+  if (!c) return;
+  const items = [entry, ...(await listLearnings())].slice(0, 60);
+  try {
+    await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, { method: "POST", headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ ref: LEARN_REF, kind: "learning", query: "self-learning", payload: { items }, ts: new Date().toISOString() }), signal: AbortSignal.timeout(6000) });
+  } catch { /* */ }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = typeof req.query.action === "string" ? req.query.action : "";
 
@@ -172,6 +224,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const secret = process.env.ARGUS_ADMIN_SECRET;
     if (!secret || req.query.secret !== secret) { res.status(403).json({ error: "forbidden" }); return; }
     if (action === "pending-all") { res.status(200).json({ ok: true, pending: await listAllPending() }); return; }
+    if (action === "learnings") { res.status(200).json({ ok: true, learnings: await listLearnings() }); return; }
+    if (action === "diagnose") {
+      const ref2 = typeof req.query.ref === "string" ? req.query.ref : "";
+      const id = typeof req.query.id === "string" ? req.query.id : "";
+      const row = ref2 ? await loadRow(ref2) : null;
+      const it = row?.items.find((i) => i.id === id) ?? null;
+      if (!row || !it) { res.status(200).json({ ok: false, reason: "not found" }); return; }
+      const dg = await diagnose(row.subject, it);
+      if (dg) await saveLearning({ subject: row.subject, label: it.label, kind: it.rel ? `link:${it.rel}` : it.type, reason: dg.reason, fix: dg.fix, at: Date.now() });
+      res.status(200).json({ ok: true, diagnosis: dg });
+      return;
+    }
     if (action === "approve" || action === "deny") {
       const ref2 = typeof req.query.ref === "string" ? req.query.ref : "";
       const id = typeof req.query.id === "string" ? req.query.id : "";

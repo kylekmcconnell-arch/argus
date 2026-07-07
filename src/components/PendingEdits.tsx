@@ -7,6 +7,7 @@ import { recordForensicEntities } from "../graph/store";
 // trust graph); Deny → it's dropped. Gated by the shared admin secret (stored
 // locally, sent as ?secret= — matches the two-trusted-analysts model).
 type Pending = { id: string; ref: string; subject: string; type: string; kind?: string; rel?: string; value: string; label: string; url?: string; detail?: string; graphKey?: string; why?: string; by: string; at: number };
+type Learning = { subject: string; label: string; kind: string; reason: string; fix: string; at: number };
 
 const REL_EDGE: Record<string, string> = { same_operator: "SAME_OPERATOR", associate: "ASSOCIATES_WITH", runs: "FOUNDED", team: "TEAM", advisor: "ADVISED", other: "LINKED" };
 const REL_LABEL: Record<string, string> = { same_operator: "same operator", associate: "associate", runs: "founded / runs", team: "team overlap", advisor: "advisor / backer", other: "connected" };
@@ -18,9 +19,14 @@ export function PendingEdits() {
   const [secret, setSecret] = useState(() => { try { return localStorage.getItem("argus:adminsecret") ?? ""; } catch { return ""; } });
   const [input, setInput] = useState("");
   const [items, setItems] = useState<Pending[]>([]);
+  const [learnings, setLearnings] = useState<Learning[]>([]);
   const [state, setState] = useState<"idle" | "loading" | "denied" | "error">("idle");
   const [busy, setBusy] = useState<string | null>(null);
   const ran = useRef(false);
+
+  const loadLearnings = async (s: string) => {
+    try { const r = await fetch(`/api/augment?action=learnings&secret=${enc(s)}`); const d = await r.json(); if (Array.isArray(d?.learnings)) setLearnings(d.learnings); } catch { /* */ }
+  };
 
   const load = async (s: string) => {
     if (!s) return;
@@ -31,6 +37,7 @@ export function PendingEdits() {
       const d = await r.json();
       setItems(Array.isArray(d?.pending) ? d.pending : []);
       setState("idle");
+      loadLearnings(s);
     } catch { setState("error"); }
   };
 
@@ -44,9 +51,13 @@ export function PendingEdits() {
       const r = await fetch(`/api/augment?action=${action}&ref=${enc(it.ref)}&id=${enc(it.id)}&secret=${enc(secret)}`);
       const d = await r.json();
       if (d?.ok) {
-        // Approving a LINK publishes the bridging edge into the trust graph now.
-        if (action === "approve" && it.type === "link" && it.graphKey) {
-          recordForensicEntities(it.subject, [{ key: it.graphKey, type: NODE_TYPE[it.kind ?? ""] ?? "Company", edgeType: REL_EDGE[it.rel ?? "other"] ?? "LINKED", label: it.label }]);
+        if (action === "approve") {
+          // A LINK publishes its bridging edge into the trust graph on approval.
+          if (it.type === "link" && it.graphKey) {
+            recordForensicEntities(it.subject, [{ key: it.graphKey, type: NODE_TYPE[it.kind ?? ""] ?? "Company", edgeType: REL_EDGE[it.rel ?? "other"] ?? "LINKED", label: it.label }]);
+          }
+          // Self-learning: ask why the scan missed this + how to fix it (best-effort).
+          fetch(`/api/augment?action=diagnose&ref=${enc(it.ref)}&id=${enc(it.id)}&secret=${enc(secret)}`).then(() => loadLearnings(secret)).catch(() => { /* */ });
         }
         setItems((prev) => prev.filter((x) => !(x.ref === it.ref && x.id === it.id)));
       }
@@ -93,6 +104,27 @@ export function PendingEdits() {
               </span>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* self-learning: what ARGUS concluded it missed + the fix it proposes */}
+      {learnings.length > 0 && (
+        <div className="mt-4 border-t border-line/60 pt-3">
+          <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">What ARGUS learned · {learnings.length} proposed fix{learnings.length === 1 ? "" : "es"}</div>
+          <div className="mt-2 space-y-2">
+            {learnings.slice(0, 12).map((l, i) => (
+              <div key={i} className="rounded-lg border border-line bg-panel-2/30 px-3 py-2">
+                <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
+                  <span className="mono text-[9.5px] text-ink-faint">{l.subject}</span>
+                  <span className="mono rounded px-1 text-[9px]" style={{ background: "var(--color-line)", color: "var(--color-ink-dim)" }}>{l.kind}</span>
+                  <span className="text-ink-dim">missed {l.label}</span>
+                  <span className="ml-auto text-[9.5px] text-ink-faint">{ago(l.at)}</span>
+                </div>
+                <p className="mt-1 text-[11.5px] leading-snug text-ink-faint"><span className="text-ink-dim">why:</span> {l.reason}</p>
+                <p className="mt-0.5 text-[11.5px] leading-snug" style={{ color: "var(--color-signal-dim)" }}><span className="text-ink-dim">fix:</span> {l.fix}</p>
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

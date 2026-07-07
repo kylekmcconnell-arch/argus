@@ -12,6 +12,7 @@ import { ArkhamName } from "./ArkhamName";
 import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { AddInfo } from "./AddInfo";
 import { LinkEntity } from "./LinkEntity";
+import { AskReport } from "./AskReport";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
@@ -439,6 +440,21 @@ export function InvestigationReport({
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="mt-4">
           <MethodologyChecklist checks={tokenChecks(token)} />
+        </div>
+
+        {/* ask-the-report chat — grounded in this investigation's own evidence */}
+        <div className="mt-3">
+          <AskReport subject={`$${token.symbol}`} context={[
+            inv.founderNote,
+            token.headline,
+            `verdict ${token.verdict} ${token.score ?? ""}`,
+            teamPeople.length ? `team: ${teamPeople.map((p) => p.name + (p.handle ? ` ${p.handle}` : "")).join(", ")}` : "",
+            projectX ? `project X account ${projectX}` : "",
+            token.deployer ? `deployer wallet ${token.deployer}` : "",
+            deployerTrail?.funder ? `funder ${deployerTrail.funder.label ?? deployerTrail.funder.address}` : "",
+            connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
+            invGraph ? `graph entities: ${[...new Set(invGraph.nodes.map((n) => String(n.key)))].slice(0, 30).join(", ")}` : "",
+          ].filter(Boolean).join(" | ")} />
         </div>
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}

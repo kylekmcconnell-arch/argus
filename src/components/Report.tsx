@@ -17,6 +17,7 @@ import { MethodologyChecklist } from "./MethodologyChecklist";
 import { personChecks } from "../lib/scanChecklist";
 import { AddInfo } from "./AddInfo";
 import { LinkEntity } from "./LinkEntity";
+import { AskReport } from "./AskReport";
 import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
@@ -869,6 +870,17 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
               roles,
               hasAssociates: (evidence.associates?.length ?? 0) > 0,
             })} />
+          </div>
+
+          {/* ask-the-report chat — grounded in this person's own evidence */}
+          <div className="min-w-0 lg:col-span-2">
+            <AskReport subject={report.handle} context={[
+              f.headline,
+              `roles: ${roles.join(", ")}`,
+              connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
+              (evidence.ventures ?? []).length ? `ventures: ${evidence.ventures.map((v) => v.project_name).join(", ")}` : "",
+              (webTeam ?? []).length ? `team/associates: ${webTeam.map((p) => p.name).join(", ")}` : "",
+            ].filter(Boolean).join(" | ")} />
           </div>
 
           {/* analyst augmentation — add a piece the scan missed (verified before publish) */}

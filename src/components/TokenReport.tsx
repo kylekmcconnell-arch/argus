@@ -12,6 +12,7 @@ import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
 import { AddInfo } from "./AddInfo";
 import { LinkEntity } from "./LinkEntity";
+import { AskReport } from "./AskReport";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
 import { ServiceAlert } from "./ServiceAlert";
@@ -442,6 +443,19 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="mt-5">
           <MethodologyChecklist checks={tokenChecks(d)} />
+        </div>
+
+        {/* ask-the-report chat — grounded in this token's own evidence */}
+        <div className="mt-3">
+          <AskReport subject={`$${d.symbol}`} context={[
+            `${d.name} ($${d.symbol}) on ${d.chain}`,
+            d.headline,
+            `verdict ${d.verdict} ${d.score ?? ""}`,
+            d.deployer ? `deployer ${d.deployer}` : "",
+            d.cg ? `${d.cg.cexCount} CEX listings${d.cg.rank ? `, rank #${d.cg.rank}` : ""}` : "not on CoinGecko",
+            projectSite ? `site ${projectSite}` : "",
+            d.projectX ? `project X ${d.projectX}` : "",
+          ].filter(Boolean).join(" | ")} />
         </div>
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
