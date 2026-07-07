@@ -11,6 +11,7 @@ import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
 import { AddInfo } from "./AddInfo";
+import { Counterparties } from "./Counterparties";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
 import { Unknowns } from "./Unknowns";
@@ -234,6 +235,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
         <div className="mt-4">
           <OnChainForensics token={d} onAudit={onAudit} />
+          {d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} /></div>}
         </div>
 
         {/* unified project research: news & press, documents & resources, domain

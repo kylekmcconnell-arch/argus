@@ -14,6 +14,7 @@ import { AddInfo } from "./AddInfo";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
 import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
+import { Counterparties } from "./Counterparties";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
@@ -384,6 +385,7 @@ export function InvestigationReport({
         <div className="mt-3">
           <OnChainForensics token={token} onAudit={onAudit} />
           <ArkhamGraphBridge subject={`$${token.symbol}`} labels={arkham} />
+          {token.deployer && <Counterparties address={token.deployer} subject={`$${token.symbol}`} chain={token.chain} />}
         </div>
 
         {/* token provenance: who it's named after, and whether they're behind it */}
