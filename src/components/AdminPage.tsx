@@ -2,6 +2,7 @@ import { useState } from "react";
 import { getLog, clearLog, logStats, mergedLog, applyRoles, type LogEntry } from "../lib/auditlog";
 import { purgeSubject } from "../lib/purge";
 import { verdictMeta } from "../lib/verdict";
+import { PendingEdits } from "./PendingEdits";
 
 // Re-file every audited person under the CURRENT role taxonomy without
 // rerunning a single audit: batch the stored summaries through /api/reclassify
@@ -108,6 +109,9 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
           )}
         </div>
       </div>
+
+      {/* analyst edits awaiting approval */}
+      <div className="mt-5"><PendingEdits /></div>
 
       {/* stats */}
       <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">

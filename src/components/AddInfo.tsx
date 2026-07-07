@@ -4,8 +4,8 @@ import { useEffect, useRef, useState } from "react";
 // verification (ARGUS confirms the GitHub/site/handle/contract actually exists on
 // source) is what keeps this from being a way to feed the report false "facts" —
 // only things that check out go live, and they're shared across analysts.
-type Aug = { type: string; value: string; label: string; url?: string; detail?: string; by: string; at: number };
-type SubmitState = "idle" | "submitting" | "verified" | "rejected";
+type Aug = { type: string; status?: "live" | "pending"; why?: string; value: string; label: string; url?: string; detail?: string; by: string; at: number };
+type SubmitState = "idle" | "submitting" | "live" | "pending" | "rejected";
 
 const TYPES: { key: string; label: string; placeholder: string }[] = [
   { key: "github", label: "GitHub", placeholder: "github.com/username  or  username" },
@@ -43,29 +43,35 @@ export function AddInfo({ subject }: { subject: string }) {
       const d = await r.json();
       if (d?.verified) {
         setItems(d.items ?? []);
-        setState("verified"); setValue("");
-        setTimeout(() => setState("idle"), 2500);
+        setValue("");
+        if (d.status === "pending") { setState("pending"); setReason(d.why ?? "held for review"); }
+        else { setState("live"); setTimeout(() => setState("idle"), 2500); }
       } else {
         setState("rejected"); setReason(d?.reason ?? "could not be verified");
       }
     } catch { setState("rejected"); setReason("network error"); }
   };
 
+  // Live additions show on the report; pending ones are awaiting approval.
+  const live = items.filter((it) => it.status !== "pending");
+  const pending = items.filter((it) => it.status === "pending");
+
   return (
     <div className="rounded-xl border border-line bg-panel">
       <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-4 py-3 text-left">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
         <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Add missing info</span>
-        {items.length > 0 && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: "var(--color-pass)14", color: "var(--color-pass)" }}>{items.length} verified addition{items.length === 1 ? "" : "s"}</span>}
+        {live.length > 0 && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: "var(--color-pass)14", color: "var(--color-pass)" }}>{live.length} published</span>}
+        {pending.length > 0 && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: "var(--color-caution)14", color: "var(--color-caution)" }}>{pending.length} pending</span>}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-faint)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-auto transition-transform" style={{ transform: open ? "rotate(180deg)" : "none" }}><path d="M6 9l6 6 6-6" /></svg>
       </button>
 
       {open && (
         <div className="border-t border-line/60 p-4">
           {/* published additions */}
-          {items.length > 0 && (
+          {live.length > 0 && (
             <div className="mb-3 space-y-1.5">
-              {items.map((it, i) => (
+              {live.map((it, i) => (
                 <div key={i} className="flex items-center gap-2 text-[12px]">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-pass)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                   <span className="mono text-[9.5px] uppercase text-ink-faint">{ICON[it.type] ?? it.type}</span>
@@ -98,10 +104,11 @@ export function AddInfo({ subject }: { subject: string }) {
           </div>
 
           {/* status line */}
-          {state === "submitting" && <p className="mt-2 text-[11.5px] text-ink-faint">Submitted — verifying it exists on source before publishing…</p>}
-          {state === "verified" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-pass)" }}>✓ Verified and published to the report.</p>}
-          {state === "rejected" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-caution)" }}>⚠ Not published — {reason}. ARGUS only publishes additions it can independently verify.</p>}
-          {state === "idle" && <p className="mt-2 text-[10.5px] leading-snug text-ink-faint">Add something the scan missed. ARGUS confirms it exists on source (the GitHub resolves, the site loads, the token trades) before it goes live — a claim it can't verify is never published.</p>}
+          {state === "submitting" && <p className="mt-2 text-[11.5px] text-ink-faint">Submitted — verifying it exists on source, then checking it can be proven…</p>}
+          {state === "live" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-pass)" }}>✓ Verified and published live.</p>}
+          {state === "pending" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-caution)" }}>⏳ Submitted for review — {reason}. It exists, but ARGUS couldn't auto-prove it's this subject's, so it's held pending your approval (you've been notified).</p>}
+          {state === "rejected" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-caution)" }}>⚠ Rejected — {reason}. The target has to actually exist on source.</p>}
+          {state === "idle" && <p className="mt-2 text-[10.5px] leading-snug text-ink-faint">Add something the scan missed. If ARGUS can prove it (e.g. the GitHub links back to this X) it publishes live; if it only verifies the thing exists but can't tie it to this subject, it's held for your approval. A target that doesn't exist is rejected.</p>}
         </div>
       )}
     </div>

@@ -1,18 +1,23 @@
-// Analyst augmentations: add a missing piece to a scan, verify it, publish it.
-//   GET /api/augment?subject=<key>                                   → list published additions
-//   GET /api/augment?subject=<key>&type=<t>&value=<v>&by=<who>       → verify + (if valid) publish
+// Analyst edits — Wikipedia-style propose → verify → publish-or-hold.
+//   GET /api/augment?subject=<key>                              → list published (live) additions
+//   GET /api/augment?subject=<key>&type=<t>&value=<v>[&rel=]    → verify + corroborate; publish live or hold pending
+//   GET /api/augment?action=pending-all&secret=<s>             → (admin) every pending edit across subjects
+//   GET /api/augment?action=approve|deny&ref=<r>&id=<i>&secret=<s>  → (admin) publish / drop a pending edit
 //
-// Enigma's memo: after a scan, the analyst should be able to add something ARGUS
-// missed ("here's his GitHub"), have it verified, then pushed live. The rule that
-// keeps this from being a manipulation vector: ARGUS INDEPENDENTLY verifies the
-// submission EXISTS on-source (the GitHub account resolves, the site loads, the
-// contract trades) — it never trusts the claim itself. Only verified additions
-// persist, shared across analysts via the reports table.
+// Two gates keep this from being a manipulation vector:
+//   1. VERIFY — the submission must EXIST on-source (the GitHub resolves, the site
+//      loads, the token trades). A non-existent target is rejected outright.
+//   2. CORROBORATE — can we PROVE it belongs to this subject, not just that it
+//      exists? If yes (e.g. the GitHub's own profile links back to this X account),
+//      it publishes live. If not, it's held PENDING and an approval notice fires;
+//      a human approves/denies in AdminOps. Correct-but-unprovable never auto-
+//      publishes, and it's never silently dropped.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 export const config = { maxDuration: 20 };
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/^[@$]/, "").replace(/\/$/, "");
+const genId = (disc: string, value: string) => `${disc}_${norm(value).replace(/[^a-z0-9]+/g, "")}`.slice(0, 48);
 
 function creds() {
   const url = process.env.SUPABASE_URL;
@@ -21,7 +26,8 @@ function creds() {
 }
 const headers = (key: string) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
 
-type Augmentation = { type: string; value: string; label: string; url?: string; detail?: string; graphKey?: string; rel?: string; kind?: string; by: string; at: number };
+type Status = "live" | "pending";
+type Augmentation = { id?: string; status?: Status; why?: string; type: string; value: string; label: string; url?: string; detail?: string; graphKey?: string; rel?: string; kind?: string; by: string; at: number };
 
 async function listAug(ref: string): Promise<Augmentation[]> {
   const c = creds();
@@ -32,6 +38,32 @@ async function listAug(ref: string): Promise<Augmentation[]> {
     const rows = await r.json();
     const items = rows?.[0]?.payload?.items;
     return Array.isArray(items) ? items : [];
+  } catch { return []; }
+}
+
+async function loadRow(ref: string): Promise<{ subject: string; items: Augmentation[] } | null> {
+  const c = creds();
+  if (!c) return null;
+  try {
+    const r = await fetch(`${c.url}/rest/v1/reports?select=query,payload&ref=eq.${encodeURIComponent(ref)}&kind=eq.augmentation&limit=1`, { headers: headers(c.key), signal: AbortSignal.timeout(5000) });
+    if (!r.ok) return null;
+    const rows = await r.json();
+    if (!rows?.[0]) return null;
+    const items = rows[0].payload?.items;
+    return { subject: rows[0].query ?? ref, items: Array.isArray(items) ? items : [] };
+  } catch { return null; }
+}
+
+async function listAllPending(): Promise<(Augmentation & { ref: string; subject: string })[]> {
+  const c = creds();
+  if (!c) return [];
+  try {
+    const r = await fetch(`${c.url}/rest/v1/reports?select=ref,query,payload&kind=eq.augmentation&order=ts.desc&limit=300`, { headers: headers(c.key), signal: AbortSignal.timeout(7000) });
+    if (!r.ok) return [];
+    const rows = (await r.json()) as { ref: string; query: string; payload?: { items?: Augmentation[] } }[];
+    const out: (Augmentation & { ref: string; subject: string })[] = [];
+    for (const row of rows) for (const it of row.payload?.items ?? []) if (it.status === "pending") out.push({ ...it, ref: row.ref, subject: row.query });
+    return out.sort((a, b) => b.at - a.at);
   } catch { return []; }
 }
 
@@ -95,14 +127,75 @@ async function verify(type: string, value: string): Promise<{ ok: boolean; label
   }
 }
 
+// The GitHub account's self-declared X handle — the one path we can auto-prove an
+// addition belongs to the subject (the account itself points back at this X).
+async function ghTwitter(login: string): Promise<string | null> {
+  try {
+    const key = process.env.GITHUB_TOKEN;
+    const r = await fetch(`https://api.github.com/users/${encodeURIComponent(login)}`, { headers: { ...(key ? { authorization: `Bearer ${key}` } : {}), accept: "application/vnd.github+json", "user-agent": "argus" }, signal: AbortSignal.timeout(7000) });
+    if (!r.ok) return null;
+    const u = (await r.json()) as { twitter_username?: string | null };
+    return u.twitter_username ? u.twitter_username.toLowerCase().replace(/^@/, "") : null;
+  } catch { return null; }
+}
+
+// Corroboration: prove the addition is THIS subject's, not just that it exists.
+async function corroborate(effectiveType: string, subject: string, graphKey?: string): Promise<{ ok: boolean; why: string }> {
+  const subj = norm(subject);
+  const subjectIsHandle = /^[a-z0-9_]{2,30}$/.test(subj);
+  if (effectiveType === "github" && subjectIsHandle) {
+    const login = (graphKey ?? "").replace(/^github\.com\//, "");
+    if (login) { const tw = await ghTwitter(login); if (tw && tw === subj) return { ok: true, why: "the GitHub profile links back to this same X account" }; }
+    return { ok: false, why: "the account exists, but nothing on it ties it to this subject" };
+  }
+  if (effectiveType === "link") return { ok: false, why: "a relationship claim can't be independently proven" };
+  return { ok: false, why: "verified to exist, but not corroborated as this subject's" };
+}
+
+// Best-effort, env-gated notice for a pending edit. A generic webhook (Slack /
+// Discord / Zapier→email) and/or a Resend email; if neither is set it just queues,
+// visible in the AdminOps approval view.
+async function notifyPending(subject: string, item: Augmentation): Promise<void> {
+  const summary = `${item.rel ? `link (${item.rel}) → ` : ""}${item.label}${item.detail ? ` — ${item.detail}` : ""}`;
+  const line = `ARGUS pending edit on ${subject}: ${summary} (by ${item.by}). ${item.why ?? ""} Approve or deny in AdminOps.`;
+  const hook = process.env.ARGUS_EDIT_WEBHOOK;
+  if (hook) { try { await fetch(hook, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: line, subject, item }), signal: AbortSignal.timeout(6000) }); } catch { /* */ } }
+  const rk = process.env.RESEND_API_KEY, to = process.env.ARGUS_ADMIN_EMAIL;
+  if (rk && to) { try { await fetch("https://api.resend.com/emails", { method: "POST", headers: { authorization: `Bearer ${rk}`, "content-type": "application/json" }, body: JSON.stringify({ from: "ARGUS <onboarding@resend.dev>", to: [to], subject: `ARGUS: pending edit on ${subject}`, text: line }), signal: AbortSignal.timeout(8000) }); } catch { /* */ } }
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const action = typeof req.query.action === "string" ? req.query.action : "";
+
+  // ── Admin actions ──
+  if (action) {
+    const secret = process.env.ARGUS_ADMIN_SECRET;
+    if (!secret || req.query.secret !== secret) { res.status(403).json({ error: "forbidden" }); return; }
+    if (action === "pending-all") { res.status(200).json({ ok: true, pending: await listAllPending() }); return; }
+    if (action === "approve" || action === "deny") {
+      const ref2 = typeof req.query.ref === "string" ? req.query.ref : "";
+      const id = typeof req.query.id === "string" ? req.query.id : "";
+      const row = ref2 ? await loadRow(ref2) : null;
+      if (!row) { res.status(200).json({ ok: false, reason: "not found" }); return; }
+      const target = row.items.find((i) => i.id === id) ?? null;
+      const items2 = action === "approve"
+        ? row.items.map((i) => (i.id === id ? { ...i, status: "live" as Status } : i))
+        : row.items.filter((i) => i.id !== id);
+      await saveAug(ref2, row.subject, items2);
+      res.status(200).json({ ok: true, action, item: target ? { ...target, status: action === "approve" ? "live" : "denied" } : null });
+      return;
+    }
+    res.status(400).json({ error: "unknown action" });
+    return;
+  }
+
   const subject = typeof req.query.subject === "string" ? req.query.subject.trim() : "";
   if (!subject) { res.status(400).json({ error: "subject required" }); return; }
   const ref = "aug:" + norm(subject).slice(0, 120);
   const type = (typeof req.query.type === "string" ? req.query.type : "").toLowerCase();
   const value = typeof req.query.value === "string" ? req.query.value.slice(0, 200) : "";
 
-  // List mode.
+  // List mode — return everything; the client shows live and counts pending.
   if (!type || !value) { res.status(200).json({ subject, items: await listAug(ref) }); return; }
 
   const TYPES = ["github", "website", "x", "contract", "wallet"];
@@ -112,16 +205,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!v || !v.ok) { res.status(200).json({ verified: false, reason: v?.reason ?? "could not verify" }); return; }
 
   const by = (typeof req.query.by === "string" ? req.query.by : "").trim().slice(0, 40) || "analyst";
-  // A `rel` turns this into a hard LINK — a manual association to another entity
-  // that becomes a bridging edge in the trust graph (the client wires it via the
-  // returned graphKey). Without a rel it's a plain augmentation.
   const rel = (typeof req.query.rel === "string" ? req.query.rel : "").trim().slice(0, 40);
-  const item: Augmentation = rel
-    ? { type: "link", kind: type, value: value.trim(), label: v.label, url: v.url, detail: v.detail, graphKey: v.graphKey, rel, by, at: Date.now() }
-    : { type, value: value.trim(), label: v.label, url: v.url, detail: v.detail, graphKey: v.graphKey, by, at: Date.now() };
+  const effectiveType = rel ? "link" : type;
+
+  // Corroborated → live; verified-but-unprovable → pending (+ notify).
+  const corr = await corroborate(effectiveType, subject, v.graphKey);
+  const status: Status = corr.ok ? "live" : "pending";
+  const id = genId(effectiveType + (rel ? ":" + rel : ""), value);
+  const base = { id, status, why: corr.why, value: value.trim(), label: v.label, url: v.url, detail: v.detail, graphKey: v.graphKey, by, at: Date.now() };
+  const item: Augmentation = rel ? { ...base, type: "link", kind: type, rel } : { ...base, type };
+
   const items = await listAug(ref);
   // Replace any prior addition of the same type+value; keep newest first, cap 24.
   const deduped = [item, ...items.filter((i) => !((i.type === item.type || (i.type === "link" && item.type === "link" && i.rel === item.rel)) && norm(i.value) === norm(item.value)))].slice(0, 24);
   await saveAug(ref, subject, deduped);
-  res.status(200).json({ verified: true, item, items: deduped });
+  if (status === "pending") await notifyPending(subject, item);
+
+  res.status(200).json({ verified: true, status, why: corr.why, item, items: deduped });
 }
