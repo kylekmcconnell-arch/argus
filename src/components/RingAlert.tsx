@@ -23,10 +23,10 @@ export function RingAlert({ handle, onAudit }: { handle: string; onAudit?: (q: s
     return subscribeGraph(() => setState(compute(handle)));
   }, [handle]);
 
-  if (!conns.length) return null;
+  if (!conns.length && !recon) return null;
 
-  // A hard/medium tie to a failed subject reframes the whole report as a REVISED
-  // VERDICT that supersedes the contract-level headline.
+  // A hard/medium tie to a failed subject — or Arkham exposure to a flagged bad
+  // actor — reframes the report as a REVISED VERDICT over the contract headline.
   const override = recon;
   const color = override?.severity === "caution" ? "var(--color-caution)" : "var(--color-avoid)";
   const bg = override?.severity === "caution" ? "rgba(232,177,42,0.08)" : "rgba(220,38,38,0.08)";
@@ -40,6 +40,13 @@ export function RingAlert({ handle, onAudit }: { handle: string; onAudit?: (q: s
             <span className="text-[10px] uppercase tracking-wider" style={{ color }}>network reconciliation overrides the contract score</span>
           </div>
           <p className="mt-1.5 text-[12.5px] leading-relaxed" style={{ color }}>{override.line}</p>
+          {override.riskEntities && override.riskEntities.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {override.riskEntities.slice(0, 6).map((e) => (
+                <span key={e.key} className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${color}1a`, color }}>{e.label}</span>
+              ))}
+            </div>
+          )}
         </div>
       ) : (
         <div className="flex items-center gap-2 text-[13.5px] font-semibold" style={{ color: "var(--color-avoid)" }}>
@@ -47,6 +54,7 @@ export function RingAlert({ handle, onAudit }: { handle: string; onAudit?: (q: s
           Connected to {conns.length === 1 ? "a flagged subject" : `${conns.length} flagged subjects`} in the shared graph
         </div>
       )}
+      {conns.length > 0 && (
       <div className="mt-2 space-y-1.5">
         {conns.slice(0, 4).map((c) => (
           <div key={c.other} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-ink-dim">
@@ -70,9 +78,11 @@ export function RingAlert({ handle, onAudit }: { handle: string; onAudit?: (q: s
         ))}
         {conns.length > 4 && <div className="text-[11px] text-ink-faint">+{conns.length - 4} more — see the Trust graph.</div>}
       </div>
+      )}
       <p className="mt-1.5 text-[11.5px] text-ink-faint">
-        From the accumulated audit graph (yours + co-analysts'). A shared deployer, funder, or team member with a
-        failed subject is a serial-operator signal no single audit can see.
+        {conns.length > 0
+          ? "From the accumulated audit graph (yours + co-analysts'). A shared deployer, funder, or team member with a failed subject is a serial-operator signal no single audit can see."
+          : "Arkham risk + counterparty data on this subject's own wallets. Exposure to a hacker, mixer, or sanctioned entity is a serial-operator / laundering signal the contract score can't see."}
       </p>
     </div>
   );

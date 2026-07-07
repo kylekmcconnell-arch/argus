@@ -55,4 +55,21 @@ describe("reconcileVerdict", () => {
     ];
     expect(reconcileVerdict("$GOOD", g)).toBeNull();
   });
+
+  it("overrides to AVOID on Arkham exposure to a flagged bad actor (risk: node)", () => {
+    // No connection to any failed SUBJECT — the override fires off the risk label alone.
+    const g: GraphContribution[] = [
+      { handle: "$GOOD", verdict: "PASS", nodes: [N("Company", "$GOOD", { subject: true }), N("Identity", "risk:lazarus-group", { subtype: "risk-avoid", label: "Lazarus Group · hacker source" })], edges: [E("$GOOD", "risk:lazarus-group", "TRANSACTS_WITH")] },
+    ];
+    const r = reconcileVerdict("$GOOD", g);
+    expect(r?.severity).toBe("avoid");
+    expect(r?.riskEntities?.[0].label).toContain("Lazarus");
+  });
+
+  it("downgrades to CAUTION for a lower-tier risk flag", () => {
+    const g: GraphContribution[] = [
+      { handle: "$GOOD", verdict: "PASS", nodes: [N("Company", "$GOOD", { subject: true }), N("Identity", "risk:some-mixer", { subtype: "risk-caution", label: "Some Mixer · privacy" })], edges: [E("$GOOD", "risk:some-mixer", "TRANSACTS_WITH")] },
+    ];
+    expect(reconcileVerdict("$GOOD", g)?.severity).toBe("caution");
+  });
 });

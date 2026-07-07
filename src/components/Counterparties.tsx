@@ -33,9 +33,15 @@ export function Counterparties({ address, subject }: { address?: string | null; 
             .filter((c) => !c.isCex && (RISKY.has((c.type ?? "").toLowerCase()) || c.usd >= 10000))
             .map((c) => {
               const slug = c.name.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 40);
-              return { key: `arkham:${slug}`, type: "Identity", edgeType: "TRANSACTS_WITH", label: `${c.name}${RISKY.has((c.type ?? "").toLowerCase()) ? ` · ${c.type}` : ""}` };
+              const t = (c.type ?? "").toLowerCase();
+              const risky = RISKY.has(t);
+              // Transacting with a hacker / mixer / sanctioned entity keys on `risk:`
+              // so it overrides the verdict; a normal named counterparty just bridges.
+              return risky
+                ? { key: `risk:${slug}`, type: "Identity", subtype: ["hacker", "sanctioned"].includes(t) ? "risk-avoid" : "risk-caution", edgeType: "TRANSACTS_WITH", label: `${c.name} · ${c.type}` }
+                : { key: `arkham:${slug}`, type: "Identity", edgeType: "TRANSACTS_WITH", label: c.name };
             })
-            .filter((e) => e.key !== "arkham:" && !seen.has(e.key) && seen.add(e.key));
+            .filter((e) => e.key !== "arkham:" && e.key !== "risk:" && !seen.has(e.key) && seen.add(e.key));
           if (ents.length) recordForensicEntities(subject, ents);
         }
       } catch { /* non-fatal */ }
