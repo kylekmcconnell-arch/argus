@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { labelAddress, explorerAddr } from "../lib/addressLabels";
+import { labelAddress } from "../lib/addressLabels";
+import { useArkhamLabels } from "../lib/useArkhamLabels";
+import { ArkhamName } from "./ArkhamName";
 
 // Holder / distribution forensics — is the ownership a healthy base or a rug
 // wearing a costume? Solana pulls the rich RugCheck view (total holders, top-10
@@ -39,6 +41,8 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
 }) {
   const [d, setD] = useState<Holders | null>(null);
   const [state, setState] = useState<"loading" | "sol" | "evm">(chain === "solana" ? "loading" : "evm");
+  // Arkham entity labels for every holder wallet shown — names the anonymous ones.
+  const arkham = useArkhamLabels([...evmTop.map((h) => h.address), ...(d?.top ?? []).map((h) => h.owner)]);
 
   useEffect(() => {
     if (chain !== "solana") { setState("evm"); return; }
@@ -95,11 +99,7 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
             {d.top.slice(0, 8).map((h, i) => (
               <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
                 <span className="mono w-4 shrink-0 text-ink-faint">{i + 1}</span>
-                {h.owner ? (
-                  <a href={explorerAddr(h.owner, "solana")} target="_blank" rel="noreferrer" className="mono truncate text-ink-dim hover:text-signal hover:underline">{h.addr}</a>
-                ) : (
-                  <span className="mono truncate text-ink-dim">{h.addr}</span>
-                )}
+                <ArkhamName address={h.owner} chain="solana" labels={arkham} fallback={h.addr} className="text-ink-dim" />
                 {h.label && <span className="mono shrink-0 rounded px-1.5 py-0.5 text-[9px]" style={{ background: h.market ? "var(--color-pass)1a" : "var(--color-caution)1a", color: h.market ? "var(--color-pass)" : "var(--color-caution)" }}>{h.label}</span>}
                 {h.insider && !h.label && <span className="mono shrink-0 rounded px-1.5 py-0.5 text-[9px]" style={{ background: "var(--color-avoid)1a", color: "var(--color-avoid)" }}>insider</span>}
                 <span className="mono ml-auto shrink-0 tabular text-ink">{h.pct.toFixed(1)}%</span>
@@ -135,15 +135,11 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
         <div className="mt-3 divide-y divide-line/60 rounded-lg border border-line">
           {top.map((h, i) => {
             const lab = labelAddress(h.address, { tag: h.tag, isContract: h.isContract });
-            const color = lab.kind === "burn" || lab.market ? "var(--color-pass)" : lab.kind === "contract" ? "var(--color-ink-dim)" : "var(--color-ink-dim)";
+            const color = lab.kind === "burn" || lab.market ? "var(--color-pass)" : "var(--color-ink-dim)";
             return (
               <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
                 <span className="mono w-4 shrink-0 text-ink-faint">{i + 1}</span>
-                {h.address ? (
-                  <a href={explorerAddr(h.address, chain)} target="_blank" rel="noreferrer" className="mono truncate hover:underline" style={{ color }}>{lab.text}</a>
-                ) : (
-                  <span className="mono truncate" style={{ color }}>{lab.text}</span>
-                )}
+                <ArkhamName address={h.address} chain={chain} labels={arkham} fallback={lab.text} className={color === "var(--color-pass)" ? "" : "text-ink-dim"} />
                 {lab.market && <span className="mono shrink-0 rounded px-1.5 py-0.5 text-[9px]" style={{ background: "var(--color-pass)1a", color: "var(--color-pass)" }}>{lab.kind === "burn" ? "burned" : "market/custody"}</span>}
                 <span className="mono ml-auto shrink-0 tabular text-ink">{h.pct.toFixed(1)}%</span>
               </div>
