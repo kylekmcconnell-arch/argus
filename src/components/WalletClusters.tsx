@@ -2,6 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { shortAddr } from "../lib/wallets";
 import { recordForensicEntities } from "../graph/store";
 import { HolderBubbleMap } from "./HolderBubbleMap";
+import { useArkhamLabels } from "../lib/useArkhamLabels";
+import { ArkhamName } from "./ArkhamName";
+import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
 
 // Wallet identity clustering (/api/cluster). "Top 10 hold 40%" is only alarming
 // once you know how many of those ten are the same hand — a team that splits its
@@ -39,6 +42,9 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
+
+  // Arkham entity labels + risk for the cluster wallets and their shared funders.
+  const arkham = useArkhamLabels(data ? [...(data.clusters ?? []).flatMap((c: any) => [...(c.wallets ?? []).map((w: any) => w.address), ...(c.sharedFunders ?? [])])] : []);
 
   // Runs on Solana (RugCheck+Helius) and EVM (GoPlus+Etherscan) via matching
   // endpoints that return the same shape. Needs a token address + a supported chain.
@@ -148,6 +154,8 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
         <HolderBubbleMap wallets={data.allWallets} edges={data.edges ?? []} chain={chain} />
       )}
 
+      {symbol && <ArkhamGraphBridge subject={`$${symbol}`} labels={arkham} />}
+
       {clusters.length > 0 && (
         <div className="mt-3 space-y-2.5 border-t border-line pt-2.5">
           {clusters.map((c, i) => (
@@ -157,14 +165,14 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
                 <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${color}1a`, color }}>{c.combinedPct.toFixed(1)}% of supply combined</span>
                 {c.includesCreator && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: "var(--color-avoid)1a", color: "var(--color-avoid)" }}>incl. creator</span>}
                 {c.sharedFunders.length > 0 && (
-                  <span className="text-[10px] text-ink-faint">seeded by <a href={`https://solscan.io/account/${c.sharedFunders[0]}`} target="_blank" rel="noreferrer" className="mono text-signal hover:underline">{shortAddr(c.sharedFunders[0])}</a></span>
+                  <span className="inline-flex items-center gap-1 text-[10px] text-ink-faint">seeded by <ArkhamName address={c.sharedFunders[0]} chain={chain} labels={arkham} fallback={shortAddr(c.sharedFunders[0])} className="text-[10px]" /></span>
                 )}
               </div>
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {c.wallets.map((w) => (
-                  <a key={w.address} href={`https://solscan.io/account/${w.address}`} target="_blank" rel="noreferrer" title={`${w.address} · ${w.pct.toFixed(2)}%`} className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink transition hover:border-signal hover:text-signal">
-                    {w.isCreator ? "★ " : ""}{shortAddr(w.address)} <span className="text-ink-faint">{w.pct.toFixed(1)}%</span>
-                  </a>
+                  <span key={w.address} title={`${w.address} · ${w.pct.toFixed(2)}%`} className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[10px]">
+                    {w.isCreator ? "★" : ""}<ArkhamName address={w.address} chain={chain} labels={arkham} fallback={shortAddr(w.address)} className="text-[10px] text-ink" /><span className="text-ink-faint">{w.pct.toFixed(1)}%</span>
+                  </span>
                 ))}
               </div>
             </div>

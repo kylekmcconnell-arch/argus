@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { shortAddr } from "../lib/wallets";
 import { traceOperator, type OperatorCluster } from "../lib/operatorTrace";
+import { useArkhamLabels, arkhamOf } from "../lib/useArkhamLabels";
+import { ArkhamName } from "./ArkhamName";
+import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
 
 // The recursive collector's face. Where FunderSweep does a single forward hop off
 // one wallet, this traces the whole operator: up from the deployer to the topmost
@@ -31,6 +34,10 @@ export function OperatorNetwork({ deployer, chain, label, onAudit }: { deployer?
   const running = useRef(false);
 
   useEffect(() => () => { running.current = false; }, []);
+
+  // Arkham entity labels + risk for every wallet in the traced cluster.
+  const arkham = useArkhamLabels(cluster ? [cluster.rootDeployer, cluster.hub, cluster.origin?.address, ...cluster.wallets.map((w) => w.address)] : []);
+  const nameOf = (addr?: string | null) => (addr ? arkhamOf(arkham, addr)?.name ?? shortAddr(addr) : "");
 
   // Serial-operator tracing runs on Solana (Helius) and EVM (Etherscan) alike, and
   // needs a deployer wallet to root the trace. Gate to chains we have endpoints for.
@@ -136,10 +143,12 @@ export function OperatorNetwork({ deployer, chain, label, onAudit }: { deployer?
 
       <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: verdict.tone === "good" ? "var(--color-ink-dim)" : tone }}>{verdict.line}</p>
 
+      {label && <ArkhamGraphBridge subject={label} labels={arkham} />}
+
       {/* Funding spine: where the root deployer's money ultimately came from. */}
       <div className="mono mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-dim">
-        <span className="rounded border border-line px-1.5 py-0.5 text-ink">{label || "deployer"} {shortAddr(cluster.rootDeployer)}</span>
-        {hub && hub !== cluster.rootDeployer && (<><span className="text-ink-faint">← funded via</span><a href={`${acct(hub)}`} target="_blank" rel="noreferrer" className="rounded border px-1.5 py-0.5 hover:underline" style={{ borderColor: `${tone}55`, color: tone }}>hub {shortAddr(hub)}</a></>)}
+        <span className="rounded border border-line px-1.5 py-0.5 text-ink">{label || "deployer"} {nameOf(cluster.rootDeployer)}</span>
+        {hub && hub !== cluster.rootDeployer && (<><span className="text-ink-faint">← funded via</span><a href={`${acct(hub)}`} target="_blank" rel="noreferrer" className="rounded border px-1.5 py-0.5 hover:underline" style={{ borderColor: `${tone}55`, color: tone }}>hub {nameOf(hub)}</a></>)}
         {origin && (<><span className="text-ink-faint">←</span><span className="rounded border border-line px-1.5 py-0.5" style={{ color: origin.kind === "cex" ? "var(--color-pass)" : "var(--color-ink-dim)" }}>{origin.kind === "cex" ? origin.label ?? "CEX" : `anon ${shortAddr(origin.address)}`}</span></>)}
       </div>
 
@@ -150,9 +159,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit }: { deployer?
             const toks = (byDeployer.get(w.address) ?? []);
             return (
               <div key={w.address} className="flex flex-wrap items-center gap-1.5">
-                <a href={acct(w.address)} target="_blank" rel="noreferrer" className="mono text-[11px] hover:underline" style={{ color: w.isRoot ? "var(--color-ink)" : "var(--color-signal)" }}>
-                  {shortAddr(w.address)}{w.isRoot ? " (this token)" : ""}
-                </a>
+                <ArkhamName address={w.address} chain={chain ?? "ethereum"} labels={arkham} fallback={`${shortAddr(w.address)}${w.isRoot ? " (this token)" : ""}`} className="text-[11px]" />
                 {typeof w.tokensCreated === "number" && w.tokensCreated > 0 && <span className="text-[10px] text-ink-faint">{w.tokensCreated} minted</span>}
                 {toks.slice(0, 6).map((t) => (
                   <button

@@ -13,6 +13,7 @@ import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { AddInfo } from "./AddInfo";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
+import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
 import { TokenSparkline } from "./TokenSparkline";
 import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
@@ -382,6 +383,7 @@ export function InvestigationReport({
             bytecode, and the OFAC sanctions screen, in one canonical order. */}
         <div className="mt-3">
           <OnChainForensics token={token} onAudit={onAudit} />
+          <ArkhamGraphBridge subject={`$${token.symbol}`} labels={arkham} />
         </div>
 
         {/* token provenance: who it's named after, and whether they're behind it */}
