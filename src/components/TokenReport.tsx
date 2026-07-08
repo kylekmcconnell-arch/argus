@@ -13,6 +13,7 @@ import { tokenChecks } from "../lib/scanChecklist";
 import { AddInfo } from "./AddInfo";
 import { Counterparties } from "./Counterparties";
 import { RiskPaths } from "./RiskPaths";
+import { Holdings } from "./Holdings";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
 import { Unknowns } from "./Unknowns";
@@ -238,6 +239,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           <OnChainForensics token={d} onAudit={onAudit} />
           {d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} /></div>}
           {d.deployer && <div className="mt-3"><RiskPaths address={d.deployer} /></div>}
+          {d.deployer && <div className="mt-3"><Holdings address={d.deployer} symbol={d.symbol} /></div>}
         </div>
 
         {/* unified project research: news & press, documents & resources, domain
