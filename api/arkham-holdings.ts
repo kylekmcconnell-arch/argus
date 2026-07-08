@@ -60,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const usd = num(t?.usd);
         if (usd < 1) continue; // ignore dust
         chainHas = true;
-        const sym = String(t?.symbol ?? "?").toUpperCase();
+        const sym = (String(t?.symbol ?? "").trim() || "?").toUpperCase();
         const idKey = String(t?.id || sym).toLowerCase();
         const ex = byToken.get(idKey);
         if (ex) { ex.usd += usd; ex.balance += num(t?.balance); }
