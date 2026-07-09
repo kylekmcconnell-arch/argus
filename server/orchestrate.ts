@@ -21,6 +21,7 @@ import { resetCost, getCost } from "./cost";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
+import { checkSiteSubstance } from "./adapters/sitecheck";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
@@ -270,6 +271,34 @@ async function coldIntake(ctx: CollectContext) {
     }
   } else if (domain) {
     ctx.emit({ phase: "P1 · Team", label: "No named team", detail: `Dug ${domain} and the account's posts; no individual team members could be attributed. For a project raising money, an unnamed team is itself a flag.`, source: "team-search", tone: "warn" });
+  }
+
+  // ── Site substance: is the project's OWN website actually a live product, or
+  //    still a coming-soon / waitlist page? Only run on a REAL resolved domain
+  //    (never a handle-guess) so a failed guess can't false-flag "unreachable".
+  if (domain) {
+    const site = await checkSiteSubstance(domain).catch(() => null);
+    if (site) {
+      ctx.evidence.profile.website = site.url;
+      if (site.status === "coming_soon" || site.status === "unreachable") {
+        const notLive = site.status === "unreachable" ? "does not resolve" : "is not live yet";
+        ctx.evidence.findings.push({
+          finding_type: "SiteNotLive",
+          claim: `The project's own website (${domain}) ${notLive}: ${site.detail}. No live product surface despite the account promoting a token.`,
+          source_url: site.url,
+          source_date: "",
+          source_author: "site-fetch",
+          verification_status: "Verified",
+          independent_source_count: 1,
+          polarity: -1,
+        });
+        ctx.emit({ phase: "P2 · Substance", label: "Website not live", detail: `${domain} ${notLive} — ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
+      } else if (site.status === "client_rendered") {
+        ctx.emit({ phase: "P2 · Substance", label: "Website live (app)", detail: `${domain} serves a client-rendered app; ${site.detail}.`, source: "site-fetch", tone: "neutral" });
+      } else {
+        ctx.emit({ phase: "P2 · Substance", label: "Website live", detail: `${domain} is a live site — ${site.detail}.`, source: "site-fetch", tone: "good" });
+      }
+    }
   }
 
   // People named in the account's X content, routed by kind:
