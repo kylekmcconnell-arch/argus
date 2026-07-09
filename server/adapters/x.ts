@@ -446,7 +446,7 @@ async function dynamicNotable(): Promise<{ handle: string; label: string }[]> {
   } catch { return []; }
 }
 
-export async function notableFollowers(subject: string, opts?: { followerCount?: number }): Promise<NotableScan> {
+export async function notableFollowers(subject: string, opts?: { followerCount?: number; budgetMs?: number }): Promise<NotableScan> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return { list: [], checked: 0 };
   const subj = subject.replace(/^@/, "").toLowerCase();
@@ -496,16 +496,25 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
   const toCheck = candidates.slice(0, REVERSE_CAP);
   const hits: NotableFollower[] = [];
   const CHUNK = 15;
+  // Wall-clock guard: on a large account the free-tier 429 backoff can drag each
+  // chunk out, and 34 chunks can eat the whole serverless budget — killing the
+  // ENTIRE audit at maxDuration with no result saved. Cap this one pass so it
+  // always returns (partial, honestly counted) rather than sinking the audit.
+  const deadline = Date.now() + (opts?.budgetMs ?? 45_000);
+  let checked = 0;
   for (let i = 0; i < toCheck.length; i += CHUNK) {
+    if (Date.now() > deadline) break; // out of time — return what we have, core-first
+    const slice = toCheck.slice(i, i + CHUNK);
     const res = await Promise.all(
-      toCheck.slice(i, i + CHUNK).map(async (n) => {
+      slice.map(async (n) => {
         const rel = await checkFollow(n.handle, subject); // does the notable account follow the subject?
         return rel?.following ? ({ handle: n.handle, label: n.label, size: "" } as NotableFollower) : null;
       }),
     );
+    checked += slice.length;
     for (const r of res) if (r) hits.push(r);
   }
-  return { list: hits, checked: toCheck.length };
+  return { list: hits, checked };
 }
 
 // ── Grok Live Search: did the endorsers publicly acknowledge the subject? ──

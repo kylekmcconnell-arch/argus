@@ -79,6 +79,10 @@ export default function App() {
   const [investigationInput, setInvestigationInput] = useState<string | null>(boot.phase === "investigation" ? boot.query : null);
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
   const [viewedProject, setViewedProject] = useState<{ name: string; domain?: string } | null>(null);
+  // When a LIVE audit genuinely fails (vs. simply having no curated fixture), we
+  // carry the real reason so the failure page tells the truth and offers a retry,
+  // instead of the "no live dossier / demo" copy that implies nothing ever ran.
+  const [liveError, setLiveError] = useState<string | null>(null);
 
   // Session cache of completed audits, so clicking a recent audit SHOWS the
   // result it already produced (with a Rescan button) instead of re-running it.
@@ -119,6 +123,7 @@ export default function App() {
     // handle: use the RESOLVED username (e.g. extracted from an x.com URL), not raw.
     const handle = resolved.ref;
     setQuery(handle);
+    setLiveError(null);
     const providers = await probeBackend();
     if (providers) {
       // Start the background run NOW (before the view mounts) so it survives an
@@ -256,6 +261,10 @@ export default function App() {
       }
       await new Promise((r) => setTimeout(r, 1500));
     }
+    // Nothing was persisted — this is a real live failure. Surface WHY (timeout,
+    // stream drop, backend error) so the user can retry instead of being told the
+    // engine "ships with curated audits" as if it never tried.
+    setLiveError(getRun(ref)?.error ?? "The live audit didn't finish.");
     setPhase("notfound");
   }, [query, showCached]);
 
@@ -317,6 +326,7 @@ export default function App() {
     setInvestigationInput(null);
     setInvestigation(null);
     setQuery("");
+    setLiveError(null);
   }, []);
 
   // from the investigation report: open the full on-chain token report
@@ -432,6 +442,27 @@ export default function App() {
                 ARGUS doesn't index yet. Double-check the address, or try one of the live samples on the home screen.
               </p>
             </>
+          ) : liveError ? (
+            <>
+              <div className="mono text-[13px] text-signal">@{query.replace(/^@/, "")}</div>
+              <h2 className="mt-3 text-2xl font-medium tracking-tight text-ink">The live audit didn't finish</h2>
+              <p className="mt-2 max-w-md text-[14px] leading-relaxed text-ink-dim">
+                ARGUS collected against this handle but the run ended before a report was assembled — usually a
+                timeout on a very large account, or a dropped connection. Nothing was saved. Retrying often
+                clears it, since slow providers are cached on the second pass.
+              </p>
+              <div className="mono mt-3 max-w-md break-words rounded-lg border border-line/60 bg-panel/50 px-3 py-2 text-[11px] text-ink-faint">
+                {liveError}
+              </div>
+              <div className="mt-6 flex items-center gap-3">
+                <button onClick={() => onAudit(query, privRef.current)} className="btn-primary px-5 py-2.5 text-[13px] font-medium">
+                  Retry audit
+                </button>
+                <button onClick={reset} className="text-[13px] text-ink-dim hover:text-ink">
+                  Back to home
+                </button>
+              </div>
+            </>
           ) : (
             <>
               <div className="mono text-[13px] text-signal">@{query.replace(/^@/, "")}</div>
@@ -440,11 +471,16 @@ export default function App() {
                 This demo ships with curated worked audits. With provider keys configured, ARGUS resolves any
                 handle on demand. Pick a dossier from the rail, or paste a token contract for a live audit.
               </p>
+              <button onClick={reset} className="btn-primary mt-6 px-5 py-2.5 text-[13px] font-medium">
+                Back to home
+              </button>
             </>
           )}
-          <button onClick={reset} className="btn-primary mt-6 px-5 py-2.5 text-[13px] font-medium">
-            Back to home
-          </button>
+          {resolveInput(query).kind === "token" && (
+            <button onClick={reset} className="btn-primary mt-6 px-5 py-2.5 text-[13px] font-medium">
+              Back to home
+            </button>
+          )}
         </div>
       )}
     </AppShell>
