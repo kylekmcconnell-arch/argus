@@ -561,39 +561,28 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
 // heuristic, reported as "possible".
 async function tokenLifecycle(ctx: CollectContext) {
   const { evidence } = ctx;
-  const promos = evidence.promotions.filter((p) => p.ticker).slice(0, 3);
+  // ONLY analyze tokens the subject verifiably owns — i.e. a contract the subject
+  // actually posted. A ticker alone can't attribute on-chain conduct: "$WORLD"
+  // (a common word) matches dozens of unrelated copycat tokens, and blaming their
+  // collapses / counting them as "the subject's contracts" is exactly the false
+  // signal that mislabels a real project by ticker collision.
+  const promos = evidence.promotions.filter((p) => p.ticker && p.contract_address).slice(0, 3);
   if (!promos.length) return;
   await Promise.all(
     promos.map(async (p) => {
       const sig = await detectTokenLifecycle(p.ticker, p.contract_address);
-      if (!sig) return;
-      if (sig.dive) {
-        evidence.findings.push({
-          finding_type: "TokenCollapse",
-          claim: `$${sig.ticker} launched and collapsed to near-zero (${sig.dive.detail}).`,
-          source_url: `https://dexscreener.com/search?q=${encodeURIComponent(sig.dive.address)}`,
-          source_date: "",
-          source_author: "dexscreener",
-          verification_status: "Verified",
-          independent_source_count: 1,
-          polarity: -1,
-        });
-        ctx.emit({ phase: "Token", label: `$${sig.ticker} collapse`, detail: `${sig.dive.detail}. The dive-after-launch pattern.`, source: "dexscreener", tone: "bad" });
-      }
-      if (sig.migrated) {
-        const gens = sig.generations.length;
-        evidence.findings.push({
-          finding_type: "TokenMigration",
-          claim: `$${sig.ticker} has ${gens} distinct same-ticker contracts on-chain (possible migration/relaunch; unverified same-team).`,
-          source_url: "",
-          source_date: "",
-          source_author: "dexscreener",
-          verification_status: "Reported",
-          independent_source_count: 1,
-          polarity: -1,
-        });
-        ctx.emit({ phase: "Token", label: `$${sig.ticker} migration?`, detail: `${gens} same-ticker contracts on-chain. A relaunch restarts the chart; watch what happened right after. (Heuristic: could be an unrelated same-ticker token.)`, source: "dexscreener", tone: "warn" });
-      }
+      if (!sig?.dive) return; // dive is now gated on the verified contract inside detect
+      evidence.findings.push({
+        finding_type: "TokenCollapse",
+        claim: `$${sig.ticker} (${p.contract_address!.slice(0, 8)}…) launched and collapsed to near-zero (${sig.dive.detail}).`,
+        source_url: `https://dexscreener.com/search?q=${encodeURIComponent(sig.dive.address)}`,
+        source_date: "",
+        source_author: "dexscreener",
+        verification_status: "Verified",
+        independent_source_count: 1,
+        polarity: -1,
+      });
+      ctx.emit({ phase: "Token", label: `$${sig.ticker} collapse`, detail: `${sig.dive.detail}. The dive-after-launch pattern.`, source: "dexscreener", tone: "bad" });
     }),
   );
 }

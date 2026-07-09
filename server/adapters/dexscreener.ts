@@ -104,11 +104,14 @@ export async function detectTokenLifecycle(ticker: string, knownAddress?: string
       .sort((a, b) => (a.firstLaunch ?? 0) - (b.firstLaunch ?? 0));
 
     const migrated = generations.length >= 2;
-    // Judge the collapse on the known/canonical token if we have it, else the
-    // most recent generation (the post-relaunch chart the playbook cares about).
-    const canon =
-      (knownAddress && generations.find((g) => g.address.toLowerCase() === knownAddress.toLowerCase())) ||
-      generations[generations.length - 1];
+    // Judge the collapse ONLY on the subject's VERIFIED contract. A bare ticker
+    // search returns every same-symbol token — a common word like "WORLD" collides
+    // with dozens of unrelated copycats — so picking "the most recent generation"
+    // as a fallback attributes a random impersonator's rug to the subject. No known
+    // contract → no collapse attribution. (Ticker collision is not provenance.)
+    const canon = knownAddress
+      ? generations.find((g) => g.address.toLowerCase() === knownAddress.toLowerCase())
+      : null;
     let dive: { address: string; detail: string } | null = null;
     if (canon) {
       const nearZeroLiq = canon.liquidityUsd < 5000;
