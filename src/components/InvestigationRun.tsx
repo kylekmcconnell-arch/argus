@@ -13,7 +13,7 @@ export function InvestigationRun({
   onError,
 }: {
   input: RunnableTokenInput;
-  onDone: (inv: Investigation) => void;
+  onDone: (inv: Investigation, priv: boolean, scanId: string) => void;
   onError: () => void;
 }) {
   const [, setTick] = useState(0);
@@ -27,7 +27,7 @@ export function InvestigationRun({
 
   useEffect(() => {
     if (!run) return;
-    if (run.status === "done" && run.result) onDone(run.result as Investigation);
+    if (run.status === "done" && run.result) onDone(run.result as Investigation, run.priv, run.id);
     else if (run.status === "error") onError();
   }, [run?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 

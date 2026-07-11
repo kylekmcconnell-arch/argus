@@ -29,6 +29,7 @@ import { LegalScreen } from "./LegalScreen";
 import { SanctionsNameScreen } from "./SanctionsNameScreen";
 import { RingAlert } from "./RingAlert";
 import { useArgusAuth } from "../auth-context";
+import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -358,7 +359,7 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
 
 /* ── main report ──────────────────────────────────────────────────── */
 
-export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string) => void; onOpenBrief?: () => void }) {
+export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void }) {
   const { role } = useArgusAuth();
   const f = dossier;
   const { report, graph, founderSummary, evidence, webTeam } = dossier;
@@ -380,15 +381,33 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const m = verdictMeta(presentedVerdict);
   const scoredVerdictMeta = verdictMeta(report.composite_verdict);
   const readinessColor = readiness.status === "ready" ? "var(--color-pass)" : "var(--color-caution)";
-  const versionContext = f.versionContext;
-  const livePersistence = (f as Dossier & {
-    persistence?: { state?: string; reportVersionId?: string | null };
-  }).persistence;
-  const panelReportVersionId = versionContext?.reportVersionId
-    ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId ?? undefined : undefined);
+  const versionContext = f.versionContext ?? f.viewVersionContext;
+  const embeddedFacet = Boolean(f.viewVersionContext || f.viewPersistence);
+  const livePersistence = f.viewPersistence ?? f.persistence;
+  const panelCostToken = !versionContext && livePersistence?.state === "persisted"
+    ? livePersistence.panelCostToken ?? undefined
+    : undefined;
+  const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
+  const currentIntelligenceEnabled = Boolean(
+    versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
+  );
+  const persistencePending = !versionContext && livePersistence?.state === "pending";
+  const persistenceFailed = !versionContext && livePersistence?.state === "failed";
+  const persistenceMissingCapability = !versionContext
+    && livePersistence?.state === "persisted"
+    && !panelCostToken;
+  const showCurrentIntelligence = versionContext
+    ? currentIntelligenceEnabled
+    : !persistencePending && !persistenceFailed && !persistenceMissingCapability;
+  const canRecordCurrentIntelligence = !versionContext && livePersistence?.state !== "private";
+  const canMutateWorkspace = !versionContext && livePersistence?.state !== "private";
+  const canShare = !embeddedFacet && Boolean(
+    f.versionContext?.reportVersionId
+    || (f.persistence?.state === "persisted" && f.persistence.reportVersionId),
+  );
   const canArchive = role === "owner" && Boolean(
-    versionContext?.reportVersionId
-    || (livePersistence?.state === "persisted" && livePersistence.reportVersionId),
+    f.versionContext?.reportVersionId
+    || (f.persistence?.state === "persisted" && f.persistence.reportVersionId),
   );
   const attestationLabel = versionContext?.attestationState === "server_collected"
     ? "server-collected snapshot"
@@ -441,7 +460,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       const response = await fetch("/api/share", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "person", ref: report.handle }),
+        body: JSON.stringify({
+          kind: "person",
+          ref: report.handle,
+          reportVersionId: f.versionContext?.reportVersionId
+            ?? (f.persistence?.state === "persisted" ? f.persistence.reportVersionId : undefined),
+        }),
       });
       const body = (await response.json().catch(() => ({}))) as { url?: unknown; message?: unknown };
       if (!response.ok || typeof body.url !== "string") {
@@ -457,13 +481,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       setTimeout(() => setShareState("idle"), 3000);
     }
   };
-  const watch = () =>
+  const watch = () => {
+    if (!canMutateWorkspace) return;
     setWatched(
       toggleWatch({
         id: report.handle, kind: "person", label: report.handle, addedAt: 0,
         snapshot: { verdict: report.composite_verdict, score: report.governing_score },
       }),
     );
+  };
 
   const corroborationRows = [
     ...evidence.testimonials.map((t) => ({
@@ -493,13 +519,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <span
             className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider"
             style={
-              f.live
+              versionContext || !f.live
+                ? { borderColor: "var(--color-line-2)", color: "var(--color-ink-faint)" }
+                : f.live
                 ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" }
                 : { borderColor: "var(--color-line-2)", color: "var(--color-ink-faint)" }
             }
-            title={f.live ? "Collected live from data providers" : "Curated dossier (no provider keys configured)"}
+            title={versionContext ? `Frozen immutable report version ${versionContext.version}` : f.live ? "Collected live from data providers" : "Curated dossier (no provider keys configured)"}
           >
-            {f.live ? "● LIVE" : "CURATED"}
+            {versionContext ? `SNAPSHOT v${versionContext.version}` : f.live ? "● LIVE SCAN" : "CURATED"}
           </span>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {onRescan && (
@@ -518,18 +546,22 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 Case brief
               </button>
             )}
-            <button
-              onClick={() => void share()}
-              disabled={shareState === "creating"}
-              aria-live="polite"
-              title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"}
-              className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:cursor-wait disabled:opacity-60"
-            >
-              {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share"}
-            </button>
-            <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
-              {watched ? "★ Watching" : "☆ Watch"}
-            </button>
+            {canShare && (
+              <button
+                onClick={() => void share()}
+                disabled={shareState === "creating"}
+                aria-live="polite"
+                title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:cursor-wait disabled:opacity-60"
+              >
+                {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share"}
+              </button>
+            )}
+            {canMutateWorkspace && (
+              <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
+                {watched ? "★ Watching" : "☆ Watch"}
+              </button>
+            )}
             <button
               onClick={onReset}
               className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
@@ -559,8 +591,33 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       </header>
 
       <div className="mx-auto max-w-5xl px-5">
-        <div className="mt-4"><ServiceAlert /></div>
-        <RingAlert handle={report.handle} onAudit={onAudit} />
+        {!versionContext && <div className="mt-4"><ServiceAlert /></div>}
+        {versionContext && (
+          <div className="mt-4">
+            <SnapshotEvidenceControl
+              snapshotVersion={versionContext.version}
+              capturedAt={versionContext.createdAt}
+              currentIntelligenceEnabled={currentIntelligenceEnabled}
+              onLoadCurrentIntelligence={() => setCurrentIntelligenceVersionId(versionContext.reportVersionId)}
+            />
+          </div>
+        )}
+        {!versionContext && showCurrentIntelligence && (
+          <div className="mt-4">
+            <LiveSupplementalNotice private={livePersistence?.state === "private"} persisted={livePersistence?.state === "persisted"} />
+          </div>
+        )}
+        {persistencePending && (
+          <div className="mt-4 rounded-xl border border-line bg-panel px-4 py-3 text-[11.5px] text-ink-dim" role="status">
+            Saving the immutable audit before post-scan intelligence runs…
+          </div>
+        )}
+        {(persistenceFailed || persistenceMissingCapability) && (
+          <div className="mt-4 rounded-xl border border-caution/40 bg-caution/5 px-4 py-3 text-[11.5px] text-caution" role="alert">
+            Post-scan intelligence is paused because this audit is not safely bound to an immutable version. Rescan before spending on supplemental providers.
+          </div>
+        )}
+        {showCurrentIntelligence && <RingAlert handle={report.handle} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
         {/* subject identity */}
         <div className="mt-6 flex flex-wrap items-start gap-4">
           <Avatar src={f.avatar_url || xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />
@@ -711,10 +768,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {/* Supplemental live checks are deliberately separated from the frozen
             score. They self-gate on a resolved real name and never imply broad
             legal or sanctions clearance. */}
-        <div className="mt-3 space-y-2">
-          <SanctionsNameScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
-          <LegalScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
-        </div>
+        {showCurrentIntelligence && (
+          <div className="mt-3 space-y-2">
+            <SanctionsNameScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
+            <LegalScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
+          </div>
+        )}
 
         {/* identity: when a named team resolved it, SHOW the team here (the note
             would just narrate the same names); otherwise show the note.
@@ -755,7 +814,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       <span>also:</span>
                       {p.projects.map((pr, j) => (
                         onOpenProject ? (
-                          <button key={j} onClick={() => onOpenProject(pr.name)} title="Dig everyone on this project" className="rounded border border-line px-1.5 py-0.5 text-ink-dim transition hover:border-signal-dim hover:text-signal-dim">
+                          <button key={j} onClick={() => onOpenProject(pr.name, undefined, panelCostToken)} title="Dig everyone on this project" className="rounded border border-line px-1.5 py-0.5 text-ink-dim transition hover:border-signal-dim hover:text-signal-dim">
                             {pr.name}{pr.role ? <span className="text-ink-faint"> · {pr.role}</span> : null}
                           </button>
                         ) : (
@@ -812,7 +871,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         )}
 
         {/* connections — the compounding web: other audited subjects tied to this one */}
-        {connections.length > 0 && (
+        {showCurrentIntelligence && connections.length > 0 && (
           <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
             <Card className="divide-y divide-line/60">
               {connections.map((c) => {
@@ -831,7 +890,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                             <span key={t.key}>
                               {ti > 0 && ", "}
                               {onOpenProject && t.type === "Company" ? (
-                                <button onClick={() => onOpenProject(t.label)} className="text-ink underline-offset-2 transition hover:text-signal-dim hover:underline">{t.label}</button>
+                                <button onClick={() => onOpenProject(t.label, undefined, panelCostToken)} className="text-ink underline-offset-2 transition hover:text-signal-dim hover:underline">{t.label}</button>
                               ) : (
                                 <span className="text-ink">{t.label}</span>
                               )}
@@ -938,7 +997,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                           style={{ background: v.outcome === "Rug" ? "var(--color-avoid)" : v.outcome === "Acquisition" || v.outcome === "IPO" ? "var(--color-pass)" : "var(--color-ink-faint)" }}
                         />
                         {onOpenProject ? (
-                          <button onClick={() => onOpenProject(v.project_name)} className="truncate text-left text-ink underline-offset-2 transition hover:text-signal-dim hover:underline" title="See everyone who worked on this">{v.project_name}</button>
+                          <button onClick={() => onOpenProject(v.project_name, undefined, panelCostToken)} className="truncate text-left text-ink underline-offset-2 transition hover:text-signal-dim hover:underline" title="See everyone who worked on this">{v.project_name}</button>
                         ) : (
                           <span className="truncate text-ink">{v.project_name}</span>
                         )}
@@ -1033,15 +1092,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
-          <div className="min-w-0 lg:col-span-2">
-            <Section title="Profile photo" kicker="is the face real, or AI-generated / stock / a logo standing in for a person?">
-              <PfpCheck handle={report.handle} brand={(webTeam?.length ?? 0) > 0} reportVersionId={panelReportVersionId} />
-            </Section>
-          </div>
+          {showCurrentIntelligence && panelCostToken && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="Profile photo" kicker="current supplemental check · not part of the scored evidence verdict">
+                <PfpCheck handle={report.handle} brand={(webTeam?.length ?? 0) > 0} panelCostToken={panelCostToken} />
+              </Section>
+            </div>
+          )}
 
           {/* code footprint — resolve the subject's GitHub from their handle/name/bio
               and analyse it (self-hides when no account is confidently matched) */}
-          <PersonGithub className="min-w-0 lg:col-span-2" handle={report.handle} name={f.display_name} bio={f.bio} />
+          {showCurrentIntelligence && panelCostToken && <PersonGithub className="min-w-0 lg:col-span-2" handle={report.handle} name={f.display_name} bio={f.bio} record={canRecordCurrentIntelligence} />}
 
           {/* The old "On-chain reality check" (a single promoted token → deployer)
               was removed: for KOLs the KOL report below is the richer superset, for
@@ -1049,18 +1110,18 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               duplicated the token's own audit. Deployer/funder forensics live on
               each token's audit page. */}
 
-          {roles.some((r) => r === "INVESTOR") && (
+          {showCurrentIntelligence && panelCostToken && roles.some((r) => r === "INVESTOR") && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="VC track record" kicker="their portfolio → each token bet priced on-chain: a fund graded on how its bets ended">
-                <VcReport handle={report.handle} name={f.display_name || report.handle} reportVersionId={panelReportVersionId} onAudit={onAudit} />
+                <VcReport handle={report.handle} name={f.display_name || report.handle} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} onAudit={onAudit} />
               </Section>
             </div>
           )}
 
-          {roles.some((r) => r === "KOL") && (
+          {showCurrentIntelligence && panelCostToken && roles.some((r) => r === "KOL") && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="KOL report" kicker="a promoter's threat model: did their shilled tokens rug, and is their reach real?">
-                <KolReport handle={report.handle} promotions={evidence.promotions ?? []} associates={evidence.associates ?? []} reportVersionId={panelReportVersionId} onAudit={onAudit} />
+                <KolReport handle={report.handle} promotions={evidence.promotions ?? []} associates={evidence.associates ?? []} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} onAudit={onAudit} />
               </Section>
             </div>
           )}
@@ -1068,7 +1129,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           {(() => {
             // PROJECT accounts: domain age + audit-claim check from the bio link.
             const dom = (f.bio.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1] ?? "").toLowerCase();
-            return roles.some((r) => r === "PROJECT") && dom ? (
+            return showCurrentIntelligence && roles.some((r) => r === "PROJECT") && dom ? (
               <div className="min-w-0 lg:col-span-2">
                 <Section title="Project intelligence" kicker="domain age + claimed security audits — an established brand on a fresh domain is a contradiction">
                   <ProjectIntel domain={dom} />
@@ -1077,22 +1138,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             ) : null;
           })()}
 
-          <div className="min-w-0 lg:col-span-2">
-            <Section title="In the news" kicker="recent press — funding, launches, hacks, exits; an empty trail is itself a signal">
-              <NewsSection query={f.display_name || report.handle} handle={report.handle} />
-            </Section>
-          </div>
+          {showCurrentIntelligence && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="In the news" kicker="current supplemental search · not part of the stored score">
+                <NewsSection query={f.display_name || report.handle} handle={report.handle} />
+              </Section>
+            </div>
+          )}
 
-          <div className="min-w-0 lg:col-span-2">
-            <Section title="Identity continuity" kicker="rebrands + the same handle across GitHub, Farcaster, Reddit, Telegram">
-              <IdentitySweep handle={report.handle} auto />
-            </Section>
-          </div>
+          {showCurrentIntelligence && panelCostToken && (
+            <div className="min-w-0 lg:col-span-2">
+              <Section title="Identity continuity" kicker="current supplemental search · not part of the stored score">
+                <IdentitySweep handle={report.handle} auto record={canRecordCurrentIntelligence} />
+              </Section>
+            </div>
+          )}
 
           <div className="min-w-0 lg:col-span-2">
             <Section title="Connection web" kicker="click any node to open it · subject → projects → the people behind them">
               <Card className="p-2">
-                <TrustGraph nodes={graph.nodes} edges={graph.edges} connections={connections} onAudit={onAudit} onOpenProject={onOpenProject} />
+                <TrustGraph nodes={graph.nodes} edges={graph.edges} connections={showCurrentIntelligence ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} />
               </Card>
             </Section>
           </div>
@@ -1107,21 +1172,25 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <AskReport subject={report.handle} context={[
               f.headline,
               `roles: ${roles.join(", ")}`,
-              connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
+              !versionContext && connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
               (evidence.ventures ?? []).length ? `ventures: ${evidence.ventures.map((v) => v.project_name).join(", ")}` : "",
               (webTeam ?? []).length ? `team/associates: ${webTeam.map((p) => p.name).join(", ")}` : "",
             ].filter(Boolean).join(" | ")} />
           </div>
 
           {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
-          <div className="min-w-0 lg:col-span-2">
-            <AddInfo subject={report.handle} subjectKind="person" canonicalRef={report.handle} subjectGraphKey={report.handle} />
-          </div>
+          {showCurrentIntelligence && canMutateWorkspace && (
+            <div className="min-w-0 lg:col-span-2">
+              <AddInfo subject={report.handle} subjectKind="person" canonicalRef={report.handle} subjectGraphKey={report.handle} />
+            </div>
+          )}
 
           {/* hard link — manually bridge this person to another entity in the graph */}
-          <div className="min-w-0 lg:col-span-2">
-            <LinkEntity subject={report.handle} subjectKind="person" canonicalRef={report.handle} graphSubjectKey={report.handle} />
-          </div>
+          {showCurrentIntelligence && canMutateWorkspace && (
+            <div className="min-w-0 lg:col-span-2">
+              <LinkEntity subject={report.handle} subjectKind="person" canonicalRef={report.handle} graphSubjectKey={report.handle} />
+            </div>
+          )}
         </div>
 
         {/* findings ledger */}

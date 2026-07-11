@@ -52,6 +52,7 @@ export interface TraceOpts {
   checkLiveness?: boolean;
   rootLabel?: string;   // e.g. "$SYMBOL" — for display only
   chain?: string;       // "solana" (default) or an EVM chain id (ethereum/base/…)
+  record?: boolean;     // false for historical overlays that must not mutate the graph
 }
 export type TraceStep = (s: { label: string; detail?: string; tone?: "neutral" | "good" | "warn" | "bad" }) => void;
 
@@ -248,7 +249,7 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
     origin, hub, stats, verdict, budgetExhausted,
   };
 
-  recordCluster(cluster);
+  if (opts.record !== false) recordCluster(cluster);
   return cluster;
 }
 

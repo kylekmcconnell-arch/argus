@@ -21,6 +21,7 @@ import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
+import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -86,7 +87,11 @@ const TONE_RANK: Record<string, number> = { bad: 3, warn: 2, good: 1 };
 const TONE_GLYPH: Record<string, string> = { bad: "✗", warn: "⚠", good: "✓" };
 
 // A clean plain-text DD summary for pasting into a chat / channel.
-function tokenReportText(d: TokenDossier, readiness: DecisionReadiness): string {
+function tokenReportText(
+  d: TokenDossier,
+  readiness: DecisionReadiness,
+  evidence?: { reportVersionId?: string; version?: number; privateSession?: boolean },
+): string {
   const moneyShort = (n?: number) => (n == null ? "—" : n >= 1e9 ? "$" + (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(0) + "K" : "$" + Math.round(n));
   const age = d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : "?";
   const qualifiesPass = d.verdict === "PASS" && readiness.status !== "ready";
@@ -95,6 +100,16 @@ function tokenReportText(d: TokenDossier, readiness: DecisionReadiness): string 
     .sort((a, b) => (TONE_RANK[b.tone] ?? 0) - (TONE_RANK[a.tone] ?? 0))
     .slice(0, 6)
     .map((f) => `${TONE_GLYPH[f.tone] ?? "·"} ${f.claim}`);
+  const exactLink = evidence?.reportVersionId
+    ? `${location.origin}/?version=${encodeURIComponent(evidence.reportVersionId)}`
+    : `${location.origin}/?t=${encodeURIComponent(d.address)}`;
+  const provenance = evidence?.version
+    ? `— ARGUS immutable snapshot v${evidence.version}`
+    : evidence?.reportVersionId
+      ? "— ARGUS immutable scan"
+      : evidence?.privateSession
+        ? "— private live ARGUS session"
+        : "— live ARGUS analysis";
   return [
     `$${d.symbol} — ${presentedVerdict} · ${d.chain}${d.capApplied ? ` (cap: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
     `${readiness.successful}/${readiness.applicable} evidence outcomes recorded · ${readiness.unresolved} unresolved · ${readiness.coveragePercent}% coverage`,
@@ -105,8 +120,8 @@ function tokenReportText(d: TokenDossier, readiness: DecisionReadiness): string 
     "",
     `liq ${moneyShort(d.liquidityUsd)} · mc ${moneyShort(d.mcap)} · age ${age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} CEX` : ""}`,
     d.address,
-    `${location.origin}/?t=${d.address}`,
-    "— audited live by ARGUS",
+    exactLink,
+    provenance,
   ].join("\n");
 }
 
@@ -120,10 +135,34 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 }
 
 export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void }) {
+  const versionContext = d.versionContext ?? d.viewVersionContext;
+  const embeddedFacet = Boolean(d.viewVersionContext || d.viewPersistence);
+  const livePersistence = d.viewPersistence ?? d.persistence;
+  const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
+  const currentIntelligenceEnabled = Boolean(
+    versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
+  );
+  const persistencePending = !versionContext && livePersistence?.state === "pending";
+  const persistenceFailed = !versionContext && livePersistence?.state === "failed";
+  const panelCostToken = !versionContext && livePersistence?.state === "persisted"
+    ? livePersistence.panelCostToken ?? undefined
+    : undefined;
+  const persistenceMissingCapability = !versionContext
+    && livePersistence?.state === "persisted"
+    && !panelCostToken;
+  const showCurrentIntelligence = versionContext
+    ? currentIntelligenceEnabled
+    : !persistencePending && !persistenceFailed && !persistenceMissingCapability;
+  const canRecordCurrentIntelligence = !versionContext && livePersistence?.state !== "private";
+  const canMutateWorkspace = !versionContext && livePersistence?.state !== "private";
+  const canShare = !embeddedFacet && Boolean(
+    d.versionContext?.reportVersionId
+    || (d.persistence?.state === "persisted" && d.persistence.reportVersionId),
+  );
   const m = verdictMeta(d.verdict);
   const tokenSubjectGraphKey = String(d.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
-  const checks = d.versionContext
-    ? d.versionContext.checks
+  const checks = versionContext
+    ? versionContext.checks
     : tokenChecks(d);
   const readiness = deriveDecisionReadiness(checks);
   const qualifiesPass = d.verdict === "PASS" && readiness.status !== "ready";
@@ -153,7 +192,12 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
   const [copiedTxt, setCopiedTxt] = useState(false);
   const copyReport = () => {
-    navigator.clipboard?.writeText(tokenReportText(d, readiness));
+    navigator.clipboard?.writeText(tokenReportText(d, readiness, {
+      reportVersionId: versionContext?.reportVersionId
+        ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId ?? undefined : undefined),
+      version: versionContext?.version,
+      privateSession: livePersistence?.state === "private",
+    }));
     setCopiedTxt(true);
     setTimeout(() => setCopiedTxt(false), 1500);
   };
@@ -164,7 +208,12 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       const response = await fetch("/api/share", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ kind: "token", ref: d.address }),
+        body: JSON.stringify({
+          kind: "token",
+          ref: d.address,
+          reportVersionId: d.versionContext?.reportVersionId
+            ?? (d.persistence?.state === "persisted" ? d.persistence.reportVersionId : undefined),
+        }),
       });
       const body = (await response.json().catch(() => ({}))) as { url?: unknown; message?: unknown };
       if (!response.ok || typeof body.url !== "string") {
@@ -180,7 +229,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       setTimeout(() => setShareState("idle"), 3000);
     }
   };
-  const watch = () =>
+  const watch = () => {
+    if (!canMutateWorkspace) return;
     setWatched(
       toggleWatch({
         id: d.address, kind: "token", label: "$" + d.symbol, chain: d.chain,
@@ -188,6 +238,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         snapshot: { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap },
       }),
     );
+  };
 
   return (
     <div className="relative min-h-full pb-24">
@@ -200,7 +251,14 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             Audits
           </button>
           <span className="mono text-[11px] text-ink-faint">/ token</span>
-          <span className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
+          <span
+            className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider"
+            style={versionContext
+              ? { borderColor: "var(--color-line-2)", color: "var(--color-ink-faint)" }
+              : { borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
+          >
+            {versionContext ? `SNAPSHOT v${versionContext.version}` : "● LIVE SCAN"}
+          </span>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             <button onClick={onRescan} title="Run this audit again, fresh" className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
@@ -217,26 +275,55 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               </button>
             )}
             <button onClick={copyReport} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copiedTxt ? "Copied ✓" : "Copy report"}</button>
-            <button
-              onClick={() => void share()}
-              disabled={shareState === "creating"}
-              aria-live="polite"
-              title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"}
-              className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:cursor-wait disabled:opacity-60"
-            >
-              {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share"}
-            </button>
-            <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
-              {watched ? "★ Watching" : "☆ Watch"}
-            </button>
+            {canShare && (
+              <button
+                onClick={() => void share()}
+                disabled={shareState === "creating"}
+                aria-live="polite"
+                title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"}
+                className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:cursor-wait disabled:opacity-60"
+              >
+                {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share"}
+              </button>
+            )}
+            {canMutateWorkspace && (
+              <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
+                {watched ? "★ Watching" : "☆ Watch"}
+              </button>
+            )}
             <button onClick={onReset} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">New audit</button>
           </div>
         </div>
       </header>
 
       <div className="mx-auto max-w-5xl px-5">
-        <div className="mt-4"><ServiceAlert /></div>
-        <RingAlert handle={"$" + d.symbol} onAudit={onAudit} />
+        {!versionContext && <div className="mt-4"><ServiceAlert /></div>}
+        {versionContext && (
+          <div className="mt-4">
+            <SnapshotEvidenceControl
+              snapshotVersion={versionContext.version}
+              capturedAt={versionContext.createdAt}
+              currentIntelligenceEnabled={currentIntelligenceEnabled}
+              onLoadCurrentIntelligence={() => setCurrentIntelligenceVersionId(versionContext.reportVersionId)}
+            />
+          </div>
+        )}
+        {!versionContext && showCurrentIntelligence && (
+          <div className="mt-4">
+            <LiveSupplementalNotice private={livePersistence?.state === "private"} persisted={livePersistence?.state === "persisted"} />
+          </div>
+        )}
+        {persistencePending && (
+          <div className="mt-4 rounded-xl border border-line bg-panel px-4 py-3 text-[11.5px] text-ink-dim" role="status">
+            Saving the immutable scan before post-scan intelligence runs…
+          </div>
+        )}
+        {(persistenceFailed || persistenceMissingCapability) && (
+          <div className="mt-4 rounded-xl border border-caution/40 bg-caution/5 px-4 py-3 text-[11.5px] text-caution" role="alert">
+            Post-scan intelligence is paused because this report could not be saved. Rescan before spending on supplemental providers.
+          </div>
+        )}
+        {showCurrentIntelligence && <RingAlert handle={"$" + d.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
         {/* token identity */}
         <div className="mt-6 flex flex-wrap items-center gap-4">
           {d.imageUrl ? (
@@ -338,27 +425,33 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
 
         {/* price performance history */}
-        <div className="mt-4 rounded-xl border border-line bg-panel p-4">
-          <div className="mb-2 flex items-baseline justify-between">
-            <div className="text-[12.5px] font-medium text-ink">Price performance</div>
-            <div className="text-[10px] uppercase tracking-wider text-ink-faint">GeckoTerminal</div>
+        {showCurrentIntelligence && (
+          <div className="mt-4 rounded-xl border border-line bg-panel p-4">
+            <div className="mb-2 flex items-baseline justify-between">
+              <div className="text-[12.5px] font-medium text-ink">Current price performance</div>
+              <div className="text-[10px] uppercase tracking-wider text-ink-faint">live supplement · GeckoTerminal</div>
+            </div>
+            <TokenSparkline address={d.address} chain={d.chain} pairAddress={d.pairAddress} />
           </div>
-          <TokenSparkline address={d.address} chain={d.chain} pairAddress={d.pairAddress} />
-        </div>
+        )}
 
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
-        <div className="mt-4">
-          <OnChainForensics token={d} onAudit={onAudit} />
-          {d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} /></div>}
-          {d.deployer && <div className="mt-3"><RiskPaths address={d.deployer} /></div>}
-          {d.deployer && <div className="mt-3"><Holdings address={d.deployer} symbol={d.symbol} /></div>}
-        </div>
+        {showCurrentIntelligence && panelCostToken && (
+          <div className="mt-4">
+            <OnChainForensics token={d} onAudit={onAudit} record={canRecordCurrentIntelligence} />
+            {d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} record={canRecordCurrentIntelligence} /></div>}
+            {d.deployer && <div className="mt-3"><RiskPaths address={d.deployer} /></div>}
+            {d.deployer && <div className="mt-3"><Holdings address={d.deployer} symbol={d.symbol} /></div>}
+          </div>
+        )}
 
         {/* unified project research: news & press, documents & resources, domain
             intelligence, and GitHub forensics — the same cluster every report uses */}
-        <div className="mt-4">
-          <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} />
-        </div>
+        {showCurrentIntelligence && (
+          <div className="mt-4">
+            <ProjectResearch name={d.name} symbol={d.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${d.symbol}`} newsHandle={d.projectX} record={canRecordCurrentIntelligence} {...(panelCostToken ? { panelCostToken } : {})} />
+          </div>
+        )}
 
         {/* negative space — what the scan couldn't confirm (unknowns are signal) */}
         <div className="mt-4">
@@ -366,9 +459,11 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         </div>
 
         {/* adversarial review — auto-run second opinion that stress-tests the verdict */}
-        <div className="mt-3">
-          <SecondOpinion dossier={d} />
-        </div>
+        {showCurrentIntelligence && panelCostToken && (
+          <div className="mt-3">
+            <SecondOpinion dossier={d} panelCostToken={panelCostToken} />
+          </div>
+        )}
 
         {!gp && (
           <div className="mt-3 rounded-xl border border-line bg-panel/40 px-4 py-3 text-[12.5px] text-ink-dim">
@@ -553,14 +648,18 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         </div>
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
-        <div className="mt-3">
-          <AddInfo subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} subjectGraphKey={tokenSubjectGraphKey} />
-        </div>
+        {showCurrentIntelligence && canMutateWorkspace && (
+          <div className="mt-3">
+            <AddInfo subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} subjectGraphKey={tokenSubjectGraphKey} />
+          </div>
+        )}
 
         {/* hard link — manually bridge this subject to another entity in the graph */}
-        <div className="mt-3">
-          <LinkEntity subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} graphSubjectKey={tokenSubjectGraphKey} />
-        </div>
+        {showCurrentIntelligence && canMutateWorkspace && (
+          <div className="mt-3">
+            <LinkEntity subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} graphSubjectKey={tokenSubjectGraphKey} />
+          </div>
+        )}
 
         <div className="mt-8 rounded-xl border border-line bg-panel/40 p-5">
           <div className="mb-2 flex items-center gap-2 text-[12px] text-ink-dim"><ArgusMark size={16} /> How this verdict was reached</div>

@@ -35,7 +35,7 @@ function LinkIcon({ live }: { live?: boolean }) {
   );
 }
 
-export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: string; symbol?: string }) {
+export function WalletClusters({ mint, chain, symbol, record = true }: { mint: string; chain: string; symbol?: string; record?: boolean }) {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState(0);
@@ -82,7 +82,7 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
         key: `wallet:${w.address.slice(0, 8)}`, type: "Identity", subtype: "Wallet",
         edgeType: "CLUSTER_HOLDER", label: shortAddr(w.address),
       })));
-      if (ents.length) recordForensicEntities(subjectKey, ents);
+      if (record && ents.length) recordForensicEntities(subjectKey, ents);
     } catch {
       setData({ note: "Clustering failed." });
     } finally {
@@ -154,7 +154,7 @@ export function WalletClusters({ mint, chain, symbol }: { mint: string; chain: s
         <HolderBubbleMap wallets={data.allWallets} edges={data.edges ?? []} chain={chain} />
       )}
 
-      {symbol && <ArkhamGraphBridge subject={`$${symbol}`} labels={arkham} />}
+      {record && symbol && <ArkhamGraphBridge subject={`$${symbol}`} labels={arkham} />}
 
       {clusters.length > 0 && (
         <div className="mt-3 space-y-2.5 border-t border-line pt-2.5">

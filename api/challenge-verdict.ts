@@ -9,7 +9,7 @@
 // upholding / softening / hardening it. It never invents facts.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 // @ts-ignore — bundled JS sibling
-import { attachPanelCost, claudeUsd } from "./_cache.js";
+import { attachPanelCost, claudeUsd, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 30 };
@@ -26,7 +26,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const verdict = s(body.verdict).slice(0, 20);
   const score = body.score == null ? "n/a" : String(body.score);
   const evidence = s(body.evidence).slice(0, 6000);
-  const reportVersionId = s(body.reportVersionId) || undefined;
+  const panelToken = req.headers["x-argus-panel-token"];
+  const panelTokenValue = Array.isArray(panelToken) ? panelToken[0] : panelToken;
+  const panelCostVersionId = resolvePanelCostVersion(
+    auth.organizationId,
+    panelTokenValue,
+  );
+  if (!panelCostVersionId) { res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." }); return; }
   if (!verdict || !evidence) { res.status(400).json({ error: "verdict and evidence required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Claude not configured; adversarial review unavailable." }); return; }
 
@@ -48,7 +54,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (!r.ok) { res.status(200).json({ available: true, note: `claude ${r.status}` }); return; }
     const d = (await r.json()) as any;
-    await attachPanelCost(auth.organizationId, reportVersionId, { provider: "claude", op: "panel:challenge-verdict", calls: 1, usd: claudeUsd(d.usage) });
+    await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "claude", op: "panel:challenge-verdict", calls: 1, usd: claudeUsd(d.usage) });
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
     const m = text.match(/\{[\s\S]*\}/);
     let parsed: any = {};

@@ -17,6 +17,8 @@ export function ProjectResearch({
   githubOrg,
   subjectKey,
   newsHandle,
+  record = true,
+  panelCostToken,
 }: {
   name?: string | null;
   symbol?: string | null;
@@ -24,6 +26,8 @@ export function ProjectResearch({
   githubOrg?: string | null;
   subjectKey?: string;
   newsHandle?: string | null;
+  record?: boolean;
+  panelCostToken?: string;
 }) {
   const newsQuery = (name || symbol || domain || "").toString().trim();
   return (
@@ -34,9 +38,9 @@ export function ProjectResearch({
           <NewsSection query={newsQuery} handle={newsHandle ?? undefined} />
         </div>
       )}
-      <ProjectDocs name={name} symbol={symbol} domain={domain} />
+      <ProjectDocs name={name} symbol={symbol} domain={domain} panelCostToken={panelCostToken} />
       {domain && <ProjectIntel domain={domain} />}
-      {githubOrg && <GithubForensics org={githubOrg} subjectKey={subjectKey} />}
+      {githubOrg && <GithubForensics org={githubOrg} subjectKey={subjectKey} record={record} />}
     </div>
   );
 }

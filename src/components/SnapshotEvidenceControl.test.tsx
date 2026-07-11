@@ -1,0 +1,77 @@
+// @vitest-environment jsdom
+
+import { act } from "react";
+import { createRoot, type Root } from "react-dom/client";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
+
+(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+
+function SnapshotHarness() {
+  return (
+    <SnapshotEvidenceControl
+      snapshotVersion={4}
+      capturedAt="2026-07-11T14:30:00.000Z"
+    />
+  );
+}
+
+let container: HTMLDivElement;
+let root: Root;
+
+beforeEach(async () => {
+  container = document.createElement("div");
+  document.body.appendChild(container);
+  root = createRoot(container);
+  await act(async () => root.render(<SnapshotHarness />));
+});
+
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+});
+
+describe("SnapshotEvidenceControl", () => {
+  it("keeps current panels paused behind an explicit snapshot control", () => {
+    expect(container.querySelector("section")?.getAttribute("aria-label")).toBe("Snapshot v4 evidence mode");
+    expect(container.textContent).toContain("SNAPSHOT v4");
+    expect(container.textContent).toContain("Current intelligence panels are paused.");
+    expect(container.textContent).toContain("not part of the stored verdict");
+    expect(container.querySelector("time")?.getAttribute("dateTime")).toBe("2026-07-11T14:30:00.000Z");
+    expect(container.querySelector("time")?.textContent).toContain("captured");
+    expect(container.querySelector<HTMLButtonElement>("button")?.textContent?.trim()).toBe("Load current intelligence");
+    expect(container.querySelector("[role='status']")).toBeNull();
+  });
+
+  it("labels enabled intelligence as current and outside the stored verdict", async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>("button")?.click());
+
+    expect(container.querySelector("button")).toBeNull();
+    expect(container.querySelector("[role='status']")?.textContent?.trim()).toBe(
+      "Current intelligence · fetched now · not part of snapshot v4 · does not change stored verdict",
+    );
+  });
+});
+
+describe("LiveSupplementalNotice", () => {
+  it("keeps live post-scan evidence outside the immutable share and verdict", async () => {
+    await act(async () => root.render(<LiveSupplementalNotice persisted />));
+
+    expect(container.querySelector("[role='status']")?.textContent).toContain("fetched after the core scan");
+    expect(container.textContent).toContain("not included in the immutable Share payload or scored verdict");
+  });
+
+  it("labels private supplemental evidence as session-only", async () => {
+    await act(async () => root.render(<LiveSupplementalNotice private />));
+
+    expect(container.textContent).toContain("fetched during this private session");
+    expect(container.textContent).toContain("not saved to a case");
+  });
+
+  it("does not imply an immutable share exists before persistence", async () => {
+    await act(async () => root.render(<LiveSupplementalNotice />));
+
+    expect(container.textContent).toContain("not included in a saved Share payload");
+    expect(container.textContent).not.toContain("immutable Share payload");
+  });
+});

@@ -16,8 +16,8 @@ jobs:
           cache: npm
       - run: npm ci
 
-      - name: Typecheck (server)
-        run: npx tsc -p server/tsconfig.json
+      - name: Typecheck
+        run: npm run typecheck
 
       - name: Tests (engine port fidelity + golden-set calibration)
         run: npm test

@@ -13,7 +13,7 @@ export function TokenRun({
   onError,
 }: {
   input: RunnableTokenInput;
-  onDone: (d: TokenDossier) => void;
+  onDone: (d: TokenDossier, priv: boolean, scanId: string) => void;
   onError: () => void;
 }) {
   const [, setTick] = useState(0);
@@ -27,7 +27,7 @@ export function TokenRun({
 
   useEffect(() => {
     if (!run) return;
-    if (run.status === "done" && run.result) onDone(run.result as TokenDossier);
+    if (run.status === "done" && run.result) onDone(run.result as TokenDossier, run.priv, run.id);
     else if (run.status === "error") onError();
   }, [run?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 

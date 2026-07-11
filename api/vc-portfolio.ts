@@ -5,7 +5,7 @@
 // portfolio; the client then prices each token investment on-chain for a real
 // hit-rate. XAI_API_KEY.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache.js";
+import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 120 };
@@ -43,7 +43,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = process.env.XAI_API_KEY;
   const handle = q(req.query.handle).replace(/^@/, "");
   const name = q(req.query.name) || handle;
-  const reportVersionId = q(req.query.reportVersionId) || undefined;
+  const panelToken = req.headers["x-argus-panel-token"];
+  const panelTokenValue = Array.isArray(panelToken) ? panelToken[0] : panelToken;
+  const panelCostVersionId = resolvePanelCostVersion(
+    auth.organizationId,
+    panelTokenValue,
+  );
+  if (!panelCostVersionId) { res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." }); return; }
   if (!name) { res.status(400).json({ error: "handle or name required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Grok (XAI_API_KEY) not configured." }); return; }
 
@@ -98,7 +104,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }));
 
   // Fold the panel spend into the KOL/VC's stored person report + cache the answer.
-  await attachPanelCost(auth.organizationId, reportVersionId, { provider: "grok", op: "panel:vc-portfolio", calls: spend > 0 ? (g.usd < spend ? 2 : 1) : 0, usd: spend });
+  await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "grok", op: "panel:vc-portfolio", calls: spend > 0 ? (g.usd < spend ? 2 : 1) : 0, usd: spend });
   const result = { available: true, name, count: investments.length, investments };
   if (investments.length) await cacheSetJson(cacheKey, result);
   res.status(200).json(result);

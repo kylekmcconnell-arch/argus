@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 // Find + break down a project's official X account (/api/x-find). Searches X for
 // the project by name, resolves the profile, and cross-checks the match (does the
@@ -26,24 +26,52 @@ type Found = {
 const fmt = (n?: number | null) => (n == null ? "—" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(n));
 const joined = (s?: string | null) => { if (!s) return ""; const d = new Date(s); return isNaN(+d) ? "" : d.toLocaleDateString(undefined, { month: "short", year: "numeric" }); };
 const CONF: Record<string, string> = { high: "var(--color-pass)", medium: "var(--color-caution)", low: "var(--color-ink-faint)" };
+const HANDLE = /^@?[A-Za-z0-9_]{2,30}$/;
 
-export function ProjectXAccount({ name, domain, seedHandle, onAudit }: { name: string; domain: string; seedHandle?: string; onAudit?: (q: string) => void }) {
-  const [d, setD] = useState<Found | null>(null);
-  const [state, setState] = useState<"loading" | "ok" | "none">("loading");
-  const ran = useRef(false);
+function keylessSeed(seedHandle?: string): Found | null {
+  if (!seedHandle || !HANDLE.test(seedHandle)) return null;
+  return {
+    available: true,
+    found: true,
+    handle: `@${seedHandle.replace(/^@/, "")}`,
+    confidence: "high",
+    matchReason: "the handle was found on the project's own site",
+  };
+}
+
+export function ProjectXAccount({ name, domain, seedHandle, panelCostToken, onAudit }: { name: string; domain: string; seedHandle?: string; panelCostToken?: string; onAudit?: (q: string) => void }) {
+  const fallback = keylessSeed(seedHandle);
+  const [resolved, setResolved] = useState<{ token: string; result: Found | null } | null>(null);
 
   useEffect(() => {
-    if (ran.current) return;
-    ran.current = true;
-    const qs = new URLSearchParams({ name: name ?? "", domain: domain ?? "", handle: seedHandle ?? "" });
-    fetch(`/api/x-find?${qs}`)
-      .then((r) => r.json())
-      .then((j: Found) => { if (j?.available && j.found) { setD(j); setState("ok"); } else setState("none"); })
-      .catch(() => setState("none"));
-  }, [name, domain, seedHandle]);
+    if (!panelCostToken) return;
 
-  if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">searching X for the project's account…</div>;
-  if (state === "none" || !d?.handle) return null;
+    const controller = new AbortController();
+    const qs = new URLSearchParams({ name: name ?? "", domain: domain ?? "", handle: seedHandle ?? "" });
+    fetch(`/api/x-find?${qs}`, {
+      signal: controller.signal,
+      headers: {
+        "x-argus-panel-context": "required",
+        "x-argus-panel-token": panelCostToken,
+      },
+    })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`x-find ${response.status}`);
+        return await response.json() as Found;
+      })
+      .then((result) => {
+        setResolved({ token: panelCostToken, result: result?.available && result.found ? result : null });
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setResolved({ token: panelCostToken, result: null });
+      });
+    return () => controller.abort();
+  }, [domain, name, panelCostToken, seedHandle]);
+
+  const paidResult = resolved && resolved.token === panelCostToken ? resolved.result : null;
+  const d = paidResult ?? fallback;
+  if (panelCostToken && resolved?.token !== panelCostToken && !fallback) return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">searching X for the project's account…</div>;
+  if (!d?.handle) return null;
 
   const conf = d.confidence ?? "low";
   const followRatio = d.followers && d.following ? d.followers / d.following : null;

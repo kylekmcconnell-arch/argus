@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 
-// Loud banner when a paid provider is failing (credits out, key dead). Without
-// this, a dead provider degrades reports SILENTLY — team searches return
-// nothing and the audit just looks thin. One health probe per session (plus a
-// 5-minute refresh), shared across every report via a module-level cache.
+// Loud banner when a critical provider is not configured. The public readiness
+// endpoint is deliberately zero-spend; live credit/key probes belong in an
+// explicit authenticated admin action. Cache one readiness read per session
+// (plus a 5-minute refresh), shared across every report.
 type Svc = { id: string; label: string; ok: boolean; detail?: string; action?: string };
 
 let cache: { at: number; services: Svc[] } | null = null;
@@ -39,7 +39,7 @@ export function ServiceAlert() {
     <div className="mb-4 rounded-xl border px-4 py-3" style={{ borderColor: "var(--color-avoid)", background: "rgba(220,38,38,0.08)" }}>
       <div className="flex items-center gap-2 text-[13.5px] font-semibold" style={{ color: "var(--color-avoid)" }}>
         <span className="text-[15px]">⚠</span>
-        {down.length === 1 ? `${down[0].label} is failing — this report is running degraded` : `${down.length} providers are failing — this report is running degraded`}
+        {down.length === 1 ? `${down[0].label} is unavailable — this report has reduced coverage` : `${down.length} providers are unavailable — this report has reduced coverage`}
       </div>
       <div className="mt-1.5 space-y-1">
         {down.map((s) => (
@@ -51,7 +51,7 @@ export function ServiceAlert() {
         ))}
       </div>
       <p className="mt-1.5 text-[11.5px] text-ink-faint">
-        Deep digs (team search, portfolios, namesake, identity) depend on these — rescan after topping up.
+        Deep digs (team search, portfolios, namesake, identity) depend on these — rescan after configuration is restored.
       </p>
     </div>
   );

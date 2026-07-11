@@ -8,14 +8,21 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const harness = vi.hoisted(() => ({
   landingInput: "",
+  landingPrivate: false,
   shellInput: "",
+  shellPrivate: false,
+  recentRef: "",
   reconProps: [] as Array<Record<string, unknown>>,
   reconMounts: 0,
+  tokenReports: [] as Array<Record<string, unknown>>,
+  personReports: [] as Array<Record<string, unknown>>,
+  projectViews: [] as Array<Record<string, unknown>>,
   caseBriefTargets: [] as Array<Record<string, unknown>>,
   caseBriefDirty: false,
   fetchReport: vi.fn(),
   fetchReportVersion: vi.fn(),
   fetchReportState: vi.fn(),
+  fetchReconWebTeam: vi.fn(),
   getRun: vi.fn(),
   getScanRun: vi.fn(),
   probeBackend: vi.fn(),
@@ -24,13 +31,16 @@ const harness = vi.hoisted(() => ({
   startInvestigationScan: vi.fn(),
   startPersonAudit: vi.fn(),
   startTokenScan: vi.fn(),
+  syncReport: vi.fn(),
+  scanOnComplete: null as ((run: Record<string, unknown>) => void) | null,
 }));
 
 vi.mock("./components/AppShell", () => ({
-  AppShell: ({ children, onAudit, onNav }: { children: ReactNode; onAudit: (input: string) => void | Promise<void>; onNav: (target: "idle") => void }) => (
+  AppShell: ({ children, onAudit, onNav, onOpenRecent }: { children: ReactNode; onAudit: (input: string, priv?: boolean) => void | Promise<void>; onNav: (target: "idle") => void; onOpenRecent?: (ref: string, kind?: "token") => void | Promise<void> }) => (
     <main>
       <button data-testid="nav-home" onClick={() => onNav("idle")}>Home</button>
-      <button data-testid="shell-run" onClick={() => { void onAudit(harness.shellInput); }}>Run quick audit</button>
+      <button data-testid="shell-run" onClick={() => { void onAudit(harness.shellInput, harness.shellPrivate); }}>Run quick audit</button>
+      <button data-testid="reopen-recent" onClick={() => { void onOpenRecent?.(harness.recentRef, "token"); }}>Reopen recent</button>
       {children}
     </main>
   ),
@@ -40,7 +50,7 @@ vi.mock("./components/Landing", () => ({
   Landing: ({ onAudit }: { onAudit: (input: string, priv?: boolean) => void | Promise<void> }) => (
     <button
       data-testid="landing-run"
-      onClick={() => { void onAudit(harness.landingInput, false); }}
+      onClick={() => { void onAudit(harness.landingInput, harness.landingPrivate); }}
     >
       Run investigation
     </button>
@@ -48,35 +58,66 @@ vi.mock("./components/Landing", () => ({
 }));
 
 vi.mock("./components/LiveRun", () => ({
-  LiveRun: () => <div data-testid="live-run">Live run</div>,
-}));
-
-vi.mock("./components/Report", () => ({
-  Report: (props: { onOpenBrief?: () => void }) => (
-    <div data-testid="stored-person-report">
-      Stored person report
-      {props.onOpenBrief && <button data-testid="person-case-brief" onClick={props.onOpenBrief}>Case brief</button>}
-    </div>
+  LiveRun: ({ onDone }: { onDone: (dossier: Record<string, unknown>) => void }) => (
+    <button data-testid="finish-person-run" onClick={() => onDone({ handle: "@private_source", report: { audit_id: "private-person" } })}>Finish person run</button>
   ),
 }));
 
+vi.mock("./components/Report", () => ({
+  Report: (props: { dossier: Record<string, unknown>; onAudit?: (q: string) => void; onOpenProject?: (name: string) => void; onOpenBrief?: () => void }) => {
+    harness.personReports.push(props);
+    return (
+      <div data-testid="stored-person-report">
+        Stored person report
+        {props.onAudit && <button data-testid="person-pivot" onClick={() => props.onAudit?.("@person_pivot")}>Audit person pivot</button>}
+        {props.onOpenProject && <button data-testid="project-pivot" onClick={() => props.onOpenProject?.("Private Project")}>Open project pivot</button>}
+        {props.onOpenBrief && <button data-testid="person-case-brief" onClick={props.onOpenBrief}>Case brief</button>}
+      </div>
+    );
+  },
+}));
+
 vi.mock("./components/InvestigationReport", () => ({
-  InvestigationReport: (props: { onOpenToken: () => void; onOpenProjectAccount: () => void; onOpenBrief?: () => void }) => (
+  InvestigationReport: (props: { onAudit: (q: string) => void; onOpenToken: () => void; onOpenProjectAccount: () => void; onOpenBrief?: () => void }) => (
     <div data-testid="stored-investigation-report">
       Stored investigation report
       <button data-testid="open-derived-token" onClick={props.onOpenToken}>Open token</button>
       <button data-testid="open-derived-account" onClick={props.onOpenProjectAccount}>Open account</button>
+      <button data-testid="investigation-pivot" onClick={() => props.onAudit("@investigation_pivot")}>Audit founder pivot</button>
       {props.onOpenBrief && <button data-testid="investigation-case-brief" onClick={props.onOpenBrief}>Case brief</button>}
     </div>
   ),
 }));
 
 vi.mock("./components/TokenReport", () => ({
-  TokenReport: (props: { onOpenBrief?: () => void }) => (
-    <div data-testid="stored-token-report">
-      Stored token report
-      {props.onOpenBrief && <button data-testid="token-case-brief" onClick={props.onOpenBrief}>Case brief</button>}
-    </div>
+  TokenReport: (props: { dossier: Record<string, unknown>; onAudit?: (q: string) => void; onOpenBrief?: () => void }) => {
+    harness.tokenReports.push(props.dossier);
+    return (
+      <div data-testid="stored-token-report">
+        Stored token report
+        {props.onAudit && <button data-testid="token-pivot" onClick={() => props.onAudit?.("@token_pivot")}>Audit token pivot</button>}
+        {props.onOpenBrief && <button data-testid="token-case-brief" onClick={props.onOpenBrief}>Case brief</button>}
+      </div>
+    );
+  },
+}));
+
+vi.mock("./components/ProjectView", () => ({
+  ProjectView: (props: { record?: boolean; onAudit: (q: string) => void }) => {
+    harness.projectViews.push(props);
+    return <button data-testid="project-person-pivot" onClick={() => props.onAudit("@project_pivot")}>Audit project person</button>;
+  },
+}));
+
+vi.mock("./components/TokenRun", () => ({
+  TokenRun: ({ onDone }: { onDone: (result: Record<string, unknown>, priv: boolean, scanId: string) => void }) => (
+    <button data-testid="finish-token-run" onClick={() => onDone({ address: "0x4444444444444444444444444444444444444444", symbol: "PRIVATE" }, true, "private-token-scan")}>Finish token run</button>
+  ),
+}));
+
+vi.mock("./components/InvestigationRun", () => ({
+  InvestigationRun: ({ onDone }: { onDone: (result: Record<string, unknown>, priv: boolean, scanId: string) => void }) => (
+    <button data-testid="finish-investigation-run" onClick={() => onDone({ token: { address: "0x5555555555555555555555555555555555555555", symbol: "PRIVATE" }, projectAccount: { handle: "@private_project", report: { audit_id: "private-project-account" } } }, true, "private-investigation-scan")}>Finish investigation run</button>
   ),
 }));
 
@@ -133,7 +174,9 @@ vi.mock("./lib/runner", () => ({
 
 vi.mock("./lib/scanrunner", () => ({
   getScanRun: harness.getScanRun,
-  setScanOnComplete: vi.fn(),
+  setScanOnComplete: vi.fn((callback: (run: Record<string, unknown>) => void) => {
+    harness.scanOnComplete = callback;
+  }),
   startInvestigationScan: harness.startInvestigationScan,
   startTokenScan: harness.startTokenScan,
 }));
@@ -153,7 +196,11 @@ vi.mock("./lib/reports", () => ({
   storedTokenDossier: (report: { payload: Record<string, unknown>; versionContext?: unknown }) => report.versionContext
     ? { ...report.payload, versionContext: report.versionContext }
     : report.payload,
-  syncReport: vi.fn(),
+  syncReport: harness.syncReport,
+}));
+
+vi.mock("./lib/reconSupplements", () => ({
+  fetchReconWebTeam: harness.fetchReconWebTeam,
 }));
 
 vi.mock("./token/resolveSubject", () => ({
@@ -205,25 +252,62 @@ function expectNoRunnerStarted(): void {
   expect(harness.startInvestigationScan).not.toHaveBeenCalled();
 }
 
+function tokenResult(address: string, headline: string) {
+  return {
+    address,
+    chain: "ethereum",
+    dexId: "uniswap",
+    symbol: "ORDER",
+    name: "Ordering Test",
+    verdict: "PASS",
+    score: 90,
+    capApplied: null,
+    headline,
+    axes: [],
+    safety: { available: false, simChecked: false },
+    socials: [],
+    projectX: null,
+    deployer: null,
+    topHolders: [],
+    insiderPct: 0,
+    bundleCount: 0,
+    bundleRisk: "low",
+    graph: { nodes: [], edges: [] },
+    findings: [],
+    trace: [],
+    live: true,
+    safetyChecked: false,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   harness.landingInput = "";
+  harness.landingPrivate = false;
   harness.shellInput = "";
+  harness.shellPrivate = false;
+  harness.recentRef = "";
   harness.reconProps.length = 0;
   harness.reconMounts = 0;
+  harness.tokenReports.length = 0;
+  harness.personReports.length = 0;
+  harness.projectViews.length = 0;
   harness.caseBriefTargets.length = 0;
   harness.caseBriefDirty = false;
   harness.fetchReport.mockResolvedValue(null);
   harness.fetchReportVersion.mockResolvedValue(null);
   harness.fetchReportState.mockResolvedValue({ status: "missing", report: null });
+  harness.fetchReconWebTeam.mockResolvedValue([]);
   harness.getRun.mockReturnValue(null);
   harness.getScanRun.mockReturnValue(null);
   harness.probeBackend.mockResolvedValue({ configured: true });
   harness.resolveStoredCases.mockResolvedValue({ status: "ok", subjects: [] });
   harness.resolveTokenSubject.mockResolvedValue({ state: "not_found" });
-  harness.startTokenScan.mockReturnValue({ priv: false });
-  harness.startInvestigationScan.mockReturnValue({ priv: false });
-  harness.startPersonAudit.mockReturnValue({ priv: false });
+  harness.startTokenScan.mockImplementation((_input, priv: boolean) => ({ priv }));
+  harness.startInvestigationScan.mockImplementation((_input, priv: boolean) => ({ priv }));
+  harness.startPersonAudit.mockImplementation((_input, priv: boolean) => ({ priv }));
+  harness.syncReport.mockResolvedValue({ state: "failed" });
+  harness.scanOnComplete = null;
   window.history.replaceState({}, "", "/");
 });
 
@@ -418,6 +502,159 @@ describe("App routing safety", () => {
     await vi.waitFor(() => expect(view.querySelector("[data-testid='token-case-brief']")).not.toBeNull());
   });
 
+  it.each([
+    ["token", "open-derived-token", "stored-token-report"],
+    ["project account", "open-derived-account", "stored-person-report"],
+  ])("keeps the exact evidence route while opening the derived %s facet", async (_label, buttonId, reportId) => {
+    const versionId = "00000000-0000-4000-8000-000000000211";
+    const address = "0x1111111111111111111111111111111111111112";
+    harness.fetchReportVersion.mockResolvedValue({
+      kind: "investigation",
+      ref: address,
+      payload: {
+        token: { address, symbol: "EXACT" },
+        projectAccount: { handle: "@exact_project" },
+      },
+      versionContext: { caseId: "case-investigation", reportVersionId: versionId },
+    });
+
+    const view = await renderApp(`/?version=${versionId}`);
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-investigation-report']")).not.toBeNull());
+    await act(async () => view.querySelector<HTMLButtonElement>(`[data-testid='${buttonId}']`)?.click());
+    await settle();
+
+    expect(view.querySelector(`[data-testid='${reportId}']`)).not.toBeNull();
+    expect(window.location.search).toBe(`?version=${versionId}`);
+    expect(view.textContent).toContain("Immutable evidence review");
+  });
+
+  it("serializes same-token persistence and never lets the older completion replace the newer scan", async () => {
+    const address = "0x2222222222222222222222222222222222222222";
+    let resolveFirst!: (value: { state: "persisted"; reportVersionId: string; panelCostToken: string }) => void;
+    let resolveSecond!: (value: { state: "persisted"; reportVersionId: string; panelCostToken: string }) => void;
+    const firstPersistence = new Promise<{ state: "persisted"; reportVersionId: string; panelCostToken: string }>((resolve) => { resolveFirst = resolve; });
+    const secondPersistence = new Promise<{ state: "persisted"; reportVersionId: string; panelCostToken: string }>((resolve) => { resolveSecond = resolve; });
+    harness.syncReport.mockReset()
+      .mockReturnValueOnce(firstPersistence)
+      .mockReturnValueOnce(secondPersistence);
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "token",
+        ref: address,
+        payload: { address, symbol: "OLD", headline: "older durable report" },
+        versionContext: { caseId: "case-token", reportVersionId: "version-old" },
+      },
+    });
+    harness.recentRef = address;
+    const view = await renderApp();
+    expect(harness.scanOnComplete).not.toBeNull();
+    await act(async () => {
+      harness.scanOnComplete?.({ id: "scan-1", kind: "token", priv: false, result: tokenResult(address, "first scan") });
+      harness.scanOnComplete?.({ id: "scan-2", kind: "token", priv: false, result: tokenResult(address, "second scan") });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledTimes(1));
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='reopen-recent']")?.click());
+    await settle();
+    expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({
+      headline: "second scan",
+      persistence: expect.objectContaining({ state: "pending", scanId: "scan-2" }),
+    }));
+
+    await act(async () => {
+      resolveFirst({ state: "persisted", reportVersionId: "version-1", panelCostToken: "panel-1" });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(harness.syncReport).toHaveBeenCalledTimes(2));
+    harness.fetchReportState.mockResolvedValue({ status: "open", report: null });
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='reopen-recent']")?.click());
+    await settle();
+    expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({
+      headline: "second scan",
+      persistence: expect.objectContaining({ state: "pending", scanId: "scan-2" }),
+    }));
+
+    await act(async () => {
+      resolveSecond({ state: "persisted", reportVersionId: "version-2", panelCostToken: "panel-2" });
+      await Promise.resolve();
+    });
+    await vi.waitFor(() => expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({
+      headline: "second scan",
+      persistence: expect.objectContaining({ state: "persisted", scanId: "scan-2", reportVersionId: "version-2" }),
+    })));
+  });
+
+  it("prefers a scan that completes while durable report lookup is in flight", async () => {
+    const address = "0x3333333333333333333333333333333333333333";
+    let resolveLookup!: (value: Record<string, unknown>) => void;
+    harness.fetchReportState.mockReturnValue(new Promise<Record<string, unknown>>((resolve) => { resolveLookup = resolve; }));
+    harness.recentRef = address;
+    const view = await renderApp();
+
+    act(() => view.querySelector<HTMLButtonElement>("[data-testid='reopen-recent']")?.click());
+    await vi.waitFor(() => expect(harness.fetchReportState).toHaveBeenCalledWith(address, "token"));
+    await act(async () => {
+      harness.scanOnComplete?.({ id: "scan-during-lookup", kind: "token", priv: false, result: tokenResult(address, "completed during lookup") });
+      await Promise.resolve();
+    });
+    resolveLookup({
+      status: "open",
+      report: {
+        kind: "token",
+        ref: address,
+        payload: { address, symbol: "OLD", headline: "older durable report" },
+        versionContext: { caseId: "case-token", reportVersionId: "version-old" },
+      },
+    });
+    await settle();
+
+    expect(harness.tokenReports.at(-1)).toEqual(expect.objectContaining({
+      headline: "completed during lookup",
+      persistence: expect.objectContaining({ state: "failed", scanId: "scan-during-lookup" }),
+    }));
+  });
+
+  it("runs deep investigation team discovery only after persistence with the exact capability", async () => {
+    const address = "0x6666666666666666666666666666666666666666";
+    harness.syncReport.mockResolvedValue({
+      state: "persisted",
+      reportVersionId: "00000000-0000-4000-8000-000000000266",
+      panelCostToken: "signed-investigation-capability",
+    });
+    harness.fetchReconWebTeam.mockResolvedValue([{ name: "Bound Founder", role: "founder" }]);
+    await renderApp();
+
+    await act(async () => {
+      harness.scanOnComplete?.({
+        id: "investigation-supplement-scan",
+        kind: "investigation",
+        priv: false,
+        result: {
+          rootRef: address,
+          token: tokenResult(address, "investigation core"),
+          projectX: null,
+          siteUrl: "https://project.example",
+          recon: { team: { names: [] }, socials: [] },
+          projectAccount: null,
+          founders: [],
+          founderNote: "Core report",
+          deployerTrail: null,
+          webTeam: [],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await vi.waitFor(() => expect(harness.fetchReconWebTeam).toHaveBeenCalledWith(
+      "https://project.example",
+      "Ordering Test",
+      expect.objectContaining({ team: { names: [] } }),
+      "signed-investigation-capability",
+    ));
+  });
+
   it("retries a failed quick lookup as a quick token audit, not a full investigation", async () => {
     harness.shellInput = "$QUICK";
     harness.resolveStoredCases.mockResolvedValueOnce({ status: "unavailable", subjects: [] });
@@ -467,9 +704,10 @@ describe("App routing safety", () => {
         status: "open",
       }],
     });
+    const siteVersionContext = { caseId: "case-site", reportVersionId: "version-site", version: 3, createdAt: "2026-07-10T12:00:00.000Z" };
     harness.fetchReportState.mockResolvedValue({
       status: "open",
-      report: { kind: "site", payload: { recon: storedRecon }, versionContext: { caseId: "case-site", reportVersionId: "version-site" } },
+      report: { kind: "site", payload: { recon: storedRecon }, versionContext: siteVersionContext },
     });
 
     const view = await renderApp("/?site=HTTPS%3A%2F%2FExample.COM%2F");
@@ -479,6 +717,7 @@ describe("App routing safety", () => {
     const latestProps = harness.reconProps.at(-1);
     expect(latestProps?.initialRecon).toBe(storedRecon);
     expect(latestProps?.initialUrl).toBeUndefined();
+    expect(latestProps?.initialVersionContext).toBe(siteVersionContext);
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='site-case-brief']")?.click());
     await settle();
     expect(harness.caseBriefTargets.at(-1)).toEqual({
@@ -520,6 +759,9 @@ describe("App routing safety", () => {
     await vi.waitFor(() => expect(harness.reconMounts).toBe(2));
 
     expect(harness.reconProps.at(-1)?.initialRecon).toBe(secondRecon);
+    expect(harness.reconProps.at(-1)?.initialVersionContext).toEqual(expect.objectContaining({
+      reportVersionId: "version-site-2",
+    }));
     await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='site-case-brief']")?.click());
     await settle();
     expect(harness.caseBriefTargets.at(-1)).toEqual({
@@ -599,6 +841,109 @@ describe("App routing safety", () => {
 
     expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull();
     expect(view.querySelector("[data-testid='person-case-brief']")).toBeNull();
+  });
+
+  it("keeps person and project pivots private and prevents project graph recording", async () => {
+    harness.landingInput = "@private_source";
+    harness.landingPrivate = true;
+    const view = await renderApp();
+    await submitLanding();
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='finish-person-run']")).not.toBeNull());
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='finish-person-run']")?.click());
+    await settle();
+    expect(harness.personReports.at(-1)?.dossier).toEqual(expect.objectContaining({
+      persistence: { state: "private" },
+    }));
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='person-pivot']")?.click());
+    await settle();
+    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("person_pivot", true);
+
+    // Return to the source report, then follow its project exploration path.
+    await act(async () => {
+      const source = harness.personReports[0];
+      (source?.onOpenProject as ((name: string) => void) | undefined)?.("Private Project");
+    });
+    await settle();
+    expect(harness.projectViews.at(-1)?.record).toBe(false);
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='project-person-pivot']")?.click());
+    await settle();
+    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("project_pivot", true);
+  });
+
+  it("keeps token and investigation founder pivots private", async () => {
+    const tokenAddress = "0x4444444444444444444444444444444444444444";
+    harness.shellInput = tokenAddress;
+    harness.shellPrivate = true;
+    harness.resolveTokenSubject.mockResolvedValue({
+      state: "resolved",
+      candidate: {
+        input: { kind: "token", ref: tokenAddress, via: "evm" },
+        canonicalRef: tokenAddress,
+        chain: "ethereum",
+        symbol: "PRIVATE",
+        name: "Private Token",
+        pairAddress: "pair",
+        liquidityUsd: 10,
+      },
+    });
+    const view = await renderApp();
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='shell-run']")?.click());
+    await settle();
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='finish-token-run']")?.click());
+    await settle();
+
+    expect(harness.tokenReports.at(-1)?.persistence).toEqual({ state: "private", scanId: "private-token-scan" });
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='token-pivot']")?.click());
+    await settle();
+    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("token_pivot", true);
+
+    // Start a separate private investigation and verify its founder callback.
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='nav-home']")?.click());
+    harness.landingInput = "0x5555555555555555555555555555555555555555";
+    harness.landingPrivate = true;
+    await submitLanding();
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='finish-investigation-run']")?.click());
+    await settle();
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='investigation-pivot']")?.click());
+    await settle();
+    expect(harness.startPersonAudit).toHaveBeenLastCalledWith("investigation_pivot", true);
+  });
+
+  it("canonicalizes a private ticker without reopening its existing public case", async () => {
+    const address = "0x7777777777777777777777777777777777777777";
+    const candidate = {
+      input: { kind: "token" as const, ref: address, via: "evm" as const },
+      canonicalRef: address,
+      chain: "ethereum",
+      symbol: "PRIVATE",
+      name: "Private Canonical Token",
+      pairAddress: "pair-private",
+      liquidityUsd: 100,
+    };
+    harness.landingInput = "$PRIVATE";
+    harness.landingPrivate = true;
+    harness.resolveTokenSubject.mockResolvedValue({ state: "resolved", candidate });
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "public-case",
+        kind: "investigation",
+        ref: address,
+        query: "$PRIVATE",
+        status: "open",
+      }],
+    });
+
+    await renderApp();
+    await submitLanding();
+
+    expect(harness.resolveTokenSubject).toHaveBeenCalled();
+    expect(harness.resolveStoredCases).not.toHaveBeenCalled();
+    expect(harness.fetchReportState).not.toHaveBeenCalled();
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, true);
   });
 
   it("does not navigate away when an unsaved case brief close is declined", async () => {

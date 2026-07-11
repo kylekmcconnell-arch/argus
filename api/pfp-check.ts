@@ -6,7 +6,7 @@
 // profile photo so a supposedly-real founder fronted by a GAN face gets flagged.
 // Gated on ANTHROPIC_API_KEY (reuses the OCR pattern). Read-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { attachPanelCost, claudeUsd } from "./_cache.js";
+import { attachPanelCost, claudeUsd, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 45 };
@@ -67,7 +67,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth) return;
   const key = process.env.ANTHROPIC_API_KEY;
   const handle = typeof req.query.handle === "string" ? req.query.handle.replace(/^@/, "").trim() : "";
-  const reportVersionId = typeof req.query.reportVersionId === "string" ? req.query.reportVersionId : undefined;
+  const panelToken = req.headers["x-argus-panel-token"];
+  const panelTokenValue = Array.isArray(panelToken) ? panelToken[0] : panelToken;
+  const panelCostVersionId = resolvePanelCostVersion(
+    auth.organizationId,
+    panelTokenValue,
+  );
+  if (!panelCostVersionId) { res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." }); return; }
   const urlParam = typeof req.query.url === "string" ? req.query.url : "";
   const imageUrl = urlParam || (HANDLE.test(handle) ? `https://unavatar.io/x/${encodeURIComponent(handle)}?fallback=false` : "");
   if (!imageUrl) { res.status(400).json({ error: "handle or url required" }); return; }
@@ -96,7 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (!r.ok) { res.status(200).json({ available: true, imageUrl: usedUrl, note: `vision ${r.status}` }); return; }
     const d = (await r.json()) as any;
-    await attachPanelCost(auth.organizationId, reportVersionId, { provider: "claude", op: "panel:pfp-check", calls: 1, usd: claudeUsd(d.usage), meta: "vision" });
+    await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "claude", op: "panel:pfp-check", calls: 1, usd: claudeUsd(d.usage), meta: "vision" });
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
     const m = text.match(/\{[\s\S]*\}/);
     let parsed: any = {};

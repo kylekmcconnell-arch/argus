@@ -7,7 +7,7 @@ import { recordForensicEntities } from "../graph/store";
 // per-hit detail (repos, followers, account age) is there so a human can judge.
 type Hit = { platform: string; username: string; url: string; detail: string };
 
-export function IdentitySweep({ handle, auto }: { handle: string; auto?: boolean }) {
+export function IdentitySweep({ handle, auto, record = true }: { handle: string; auto?: boolean; record?: boolean }) {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const ran = useRef(false);
@@ -26,7 +26,7 @@ export function IdentitySweep({ handle, auto }: { handle: string; auto?: boolean
         ...prior.map((p) => ({ key: `@${p.replace(/^@/, "").toLowerCase()}`, type: "Person", edgeType: "REBRAND_FROM", label: `@${p}` })),
         ...footprint.map((h) => ({ key: `${h.platform.toLowerCase()}:${h.username.toLowerCase()}`, type: "Identity", subtype: "Account", edgeType: "SAME_USERNAME", label: `${h.platform} @${h.username}` })),
       ];
-      if (ents.length) recordForensicEntities(handle, ents);
+      if (record && ents.length) recordForensicEntities(handle, ents);
     } catch {
       setData({ note: "Identity sweep failed." });
     } finally {

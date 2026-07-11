@@ -25,6 +25,7 @@ import { RingAlert } from "./RingAlert";
 import { TrustGraph } from "./TrustGraph";
 import { investigationContribution, getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
+import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -76,6 +77,29 @@ export function InvestigationReport({
 }) {
   const [spent, setSpent] = useState(0);
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
+  const versionContext = inv.versionContext;
+  const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
+  const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
+  const currentIntelligenceEnabled = Boolean(
+    versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
+  );
+  const persistencePending = !versionContext && inv.persistence?.state === "pending";
+  const persistenceFailed = !versionContext && inv.persistence?.state === "failed";
+  const panelCostToken = !versionContext && inv.persistence?.state === "persisted"
+    ? inv.persistence.panelCostToken ?? undefined
+    : undefined;
+  const persistenceMissingCapability = !versionContext
+    && inv.persistence?.state === "persisted"
+    && !panelCostToken;
+  const showCurrentIntelligence = versionContext
+    ? currentIntelligenceEnabled
+    : !persistencePending && !persistenceFailed && !persistenceMissingCapability;
+  const canRecordCurrentIntelligence = !versionContext && inv.persistence?.state !== "private";
+  const canMutateWorkspace = !versionContext && inv.persistence?.state !== "private";
+  const canShare = Boolean(
+    versionContext?.reportVersionId
+    || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
+  );
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
   const tokenSubjectGraphKey = String(token.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
   const diligenceChecks = inv.versionContext
@@ -106,7 +130,7 @@ export function InvestigationReport({
     ? "INCOMPLETE"
     : projectAccount?.report.composite_verdict;
   // Arkham entity labels for the deployer + funder wallets.
-  const arkham = useArkhamLabels([token.deployer, deployerTrail?.funder?.address]);
+  const arkham = useArkhamLabels(showCurrentIntelligence && panelCostToken ? [token.deployer, deployerTrail?.funder?.address] : []);
   const tm = verdictMeta(presentedTokenVerdict);
   // The project's GitHub org (from its site links), for commit forensics.
   // The project's own website (first non-social link) → domain intelligence.
@@ -160,6 +184,34 @@ export function InvestigationReport({
     setSpent(spentRef.current);
     onAudit(handle);
   };
+  const share = async () => {
+    if (shareState === "creating") return;
+    setShareState("creating");
+    try {
+      const response = await fetch("/api/share", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "investigation",
+          ref: token.address,
+          reportVersionId: versionContext?.reportVersionId
+            ?? (inv.persistence?.state === "persisted" ? inv.persistence.reportVersionId : undefined),
+        }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { url?: unknown; message?: unknown };
+      if (!response.ok || typeof body.url !== "string") {
+        throw new Error(typeof body.message === "string" ? body.message : "Secure share link creation failed.");
+      }
+      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable.");
+      await navigator.clipboard.writeText(new URL(body.url, location.origin).toString());
+      setShareState("copied");
+      setTimeout(() => setShareState("idle"), 1800);
+    } catch (error) {
+      console.error("[share] investigation report failed", error);
+      setShareState("error");
+      setTimeout(() => setShareState("idle"), 3000);
+    }
+  };
 
   // The connection web: this token's own subgraph (deployer → funder trail, project
   // account, site) plus every cross-audit tie to other subjects you've scanned.
@@ -192,13 +244,57 @@ export function InvestigationReport({
               Case brief
             </button>
           )}
-          <span className={`mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider ${onReAudit || onOpenBrief ? "" : "ml-auto"}`} style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
+          {canShare && (
+            <button
+              type="button"
+              onClick={() => void share()}
+              disabled={shareState === "creating"}
+              aria-live="polite"
+              title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable investigation link"}
+              className={`rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:cursor-wait disabled:opacity-60 ${onReAudit || onOpenBrief ? "" : "ml-auto"}`}
+            >
+              {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share"}
+            </button>
+          )}
+          <span
+            className={`mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider ${onReAudit || onOpenBrief || canShare ? "" : "ml-auto"}`}
+            style={versionContext
+              ? { borderColor: "var(--color-line-2)", color: "var(--color-ink-faint)" }
+              : { borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
+          >
+            {versionContext ? `SNAPSHOT v${versionContext.version}` : "● LIVE SCAN"}
+          </span>
         </div>
       </header>
 
       <div className="mx-auto max-w-4xl px-5">
-        <div className="mt-4"><ServiceAlert /></div>
-        <RingAlert handle={"$" + token.symbol} onAudit={onAudit} />
+        {!versionContext && <div className="mt-4"><ServiceAlert /></div>}
+        {versionContext && (
+          <div className="mt-4">
+            <SnapshotEvidenceControl
+              snapshotVersion={versionContext.version}
+              capturedAt={versionContext.createdAt}
+              currentIntelligenceEnabled={currentIntelligenceEnabled}
+              onLoadCurrentIntelligence={() => setCurrentIntelligenceVersionId(versionContext.reportVersionId)}
+            />
+          </div>
+        )}
+        {!versionContext && showCurrentIntelligence && (
+          <div className="mt-4">
+            <LiveSupplementalNotice private={inv.persistence?.state === "private"} persisted={inv.persistence?.state === "persisted"} />
+          </div>
+        )}
+        {persistencePending && (
+          <div className="mt-4 rounded-xl border border-line bg-panel px-4 py-3 text-[11.5px] text-ink-dim" role="status">
+            Saving the immutable investigation before post-scan intelligence runs…
+          </div>
+        )}
+        {(persistenceFailed || persistenceMissingCapability) && (
+          <div className="mt-4 rounded-xl border border-caution/40 bg-caution/5 px-4 py-3 text-[11.5px] text-caution" role="alert">
+            Post-scan intelligence is paused because this investigation could not be saved. Rescan before spending on supplemental providers.
+          </div>
+        )}
+        {showCurrentIntelligence && <RingAlert handle={"$" + token.symbol} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
         {/* headline */}
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-3">
@@ -281,9 +377,11 @@ export function InvestigationReport({
               <span>chain <span className="mono text-ink-dim capitalize">{token.chain}</span></span>
             </div>
             {/* price history — the shape of the chart IS forensic context (pump, dump, drawdown) */}
-            <div className="mt-3 border-t border-line/60 pt-2.5">
-              <TokenSparkline address={token.address} chain={token.chain} pairAddress={token.pairAddress} />
-            </div>
+            {showCurrentIntelligence && (
+              <div className="mt-3 border-t border-line/60 pt-2.5">
+                <TokenSparkline address={token.address} chain={token.chain} pairAddress={token.pairAddress} />
+              </div>
+            )}
             {/* CEX listings — real centralized-exchange listings are a strong legitimacy signal */}
             {token.cg?.cexNames && token.cg.cexNames.length > 0 ? (
               <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-line/60 pt-2">
@@ -451,31 +549,37 @@ export function InvestigationReport({
         {/* on-chain forensic suite — the same cluster the token report uses:
             market intel, holders, clustering, operator trace, EVM deployer +
             bytecode, and the OFAC sanctions screen, in one canonical order. */}
-        <div className="mt-3">
-          <OnChainForensics token={token} onAudit={onAudit} />
-          <ArkhamGraphBridge subject={`$${token.symbol}`} labels={arkham} />
-          {token.deployer && <Counterparties address={token.deployer} subject={`$${token.symbol}`} chain={token.chain} />}
-          {token.deployer && <RiskPaths address={token.deployer} />}
-          {token.deployer && <div className="mt-3"><Holdings address={token.deployer} symbol={token.symbol} /></div>}
-        </div>
+        {showCurrentIntelligence && panelCostToken && (
+          <div className="mt-3">
+            <OnChainForensics token={token} onAudit={onAudit} record={canRecordCurrentIntelligence} />
+            {canRecordCurrentIntelligence && <ArkhamGraphBridge subject={`$${token.symbol}`} labels={arkham} />}
+            {token.deployer && <Counterparties address={token.deployer} subject={`$${token.symbol}`} chain={token.chain} record={canRecordCurrentIntelligence} />}
+            {token.deployer && <RiskPaths address={token.deployer} />}
+            {token.deployer && <div className="mt-3"><Holdings address={token.deployer} symbol={token.symbol} /></div>}
+          </div>
+        )}
 
         {/* token provenance: who it's named after, and whether they're behind it */}
-        <div className="mt-3">
-          <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} reportVersionId={inv.versionContext?.reportVersionId} onAudit={onAudit} />
-        </div>
+        {showCurrentIntelligence && panelCostToken && (
+          <div className="mt-3">
+            <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} panelCostToken={panelCostToken} onAudit={onAudit} />
+          </div>
+        )}
 
         {/* unified project research: news & press, documents & resources, domain
             intelligence, and GitHub forensics — the same cluster every report uses */}
-        <div className="mt-3">
-          <ProjectResearch name={token.name} symbol={token.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${token.symbol}`} newsHandle={projectX} />
-        </div>
+        {showCurrentIntelligence && (
+          <div className="mt-3">
+            <ProjectResearch name={token.name} symbol={token.symbol} domain={projectDomain} githubOrg={ghOrg} subjectKey={`$${token.symbol}`} newsHandle={projectX} record={canRecordCurrentIntelligence} {...(panelCostToken ? { panelCostToken } : {})} />
+          </div>
+        )}
 
         {/* Connection web: the subject's graph + its ties to everything else you've
             audited — the deeper map, below the team. */}
         {invGraph && invGraph.nodes.length > 1 && (
           <div className="mt-3">
             <Card title="Connection web · click any node to open it">
-              <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={connections} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
+              <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={showCurrentIntelligence ? connections : []} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
             </Card>
           </div>
         )}
@@ -534,20 +638,24 @@ export function InvestigationReport({
             projectX ? `project X account ${projectX}` : "",
             token.deployer ? `deployer wallet ${token.deployer}` : "",
             deployerTrail?.funder ? `funder ${deployerTrail.funder.label ?? deployerTrail.funder.address}` : "",
-            connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
+            !versionContext && connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
             invGraph ? `graph entities: ${[...new Set(invGraph.nodes.map((n) => String(n.key)))].slice(0, 30).join(", ")}` : "",
           ].filter(Boolean).join(" | ")} />
         </div>
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
-        <div className="mt-3">
-          <AddInfo subject={`$${token.symbol}`} subjectKind="investigation" canonicalRef={token.address} subjectGraphKey={tokenSubjectGraphKey} />
-        </div>
+        {showCurrentIntelligence && canMutateWorkspace && (
+          <div className="mt-3">
+            <AddInfo subject={`$${token.symbol}`} subjectKind="investigation" canonicalRef={token.address} subjectGraphKey={tokenSubjectGraphKey} />
+          </div>
+        )}
 
         {/* hard link — manually bridge this subject to another entity in the graph */}
-        <div className="mt-3">
-          <LinkEntity subject={`$${token.symbol}`} subjectKind="investigation" canonicalRef={token.address} graphSubjectKey={tokenSubjectGraphKey} />
-        </div>
+        {showCurrentIntelligence && canMutateWorkspace && (
+          <div className="mt-3">
+            <LinkEntity subject={`$${token.symbol}`} subjectKind="investigation" canonicalRef={token.address} graphSubjectKey={tokenSubjectGraphKey} />
+          </div>
+        )}
 
         <div className="mt-4 rounded-xl border border-line bg-panel/40 p-4 text-[12px] leading-relaxed text-ink-faint">
           <span className="text-ink-dim">How to read this:</span> the token and site recon run keyless and free; the project account is backgrounded automatically (one live people-audit). Per-founder deep-dives are one-click and capped at {MAX_FOUNDER_AUDITS} per investigation to bound cost. ARGUS never invents a founder: names without a verified handle are shown but not audited, and a project account is never treated as a person behind the project.

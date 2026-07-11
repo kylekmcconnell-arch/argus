@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useReducer } from "react";
 import { getContributions, subscribeGraph } from "../graph/store";
 import { subjectConnections, reconcileVerdict, type SubjectConnection, type Reconciliation } from "../graph/network";
 
@@ -15,25 +15,53 @@ function compute(handle: string): { conns: SubjectConnection[]; recon: Reconcili
   return { conns, recon: reconcileVerdict(handle, contribs) };
 }
 
-export function RingAlert({ handle, onAudit }: { handle: string; onAudit?: (q: string) => void }) {
-  const [{ conns, recon }, setState] = useState(() => compute(handle));
+export interface RingAlertProps {
+  handle: string;
+  onAudit?: (q: string) => void;
+  snapshotVersion?: number;
+}
+
+export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) {
+  const [, markGraphChanged] = useReducer((revision: number) => revision + 1, 0);
   // The community graph hydrates async on app load — recompute when it lands.
-  useEffect(() => {
-    setState(compute(handle));
-    return subscribeGraph(() => setState(compute(handle)));
-  }, [handle]);
+  useEffect(() => subscribeGraph(markGraphChanged), []);
+  const { conns, recon } = compute(handle);
 
   if (!conns.length && !recon) return null;
 
-  // A hard/medium tie to a failed subject — or Arkham exposure to a flagged bad
-  // actor — reframes the report as a REVISED VERDICT over the contract headline.
+  // Live reports can reconcile the headline. Immutable snapshots keep their
+  // stored verdict and present the same graph evidence as a current overlay.
   const override = recon;
-  const color = override?.severity === "caution" ? "var(--color-caution)" : "var(--color-avoid)";
-  const bg = override?.severity === "caution" ? "rgba(232,177,42,0.08)" : "rgba(220,38,38,0.08)";
+  const snapshotMode = snapshotVersion !== undefined;
+  const snapshotSuggestion = override?.severity === "avoid" ? "AVOID" : "CAUTION";
+  const cautionTone = snapshotMode ? snapshotSuggestion === "CAUTION" : override?.severity === "caution";
+  const color = cautionTone ? "var(--color-caution)" : "var(--color-avoid)";
+  const bg = cautionTone ? "rgba(232,177,42,0.08)" : "rgba(220,38,38,0.08)";
 
   return (
     <div className="mb-4 rounded-xl border px-4 py-3" style={{ borderColor: color, background: bg }}>
-      {override ? (
+      {snapshotMode ? (
+        <div>
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mono rounded border border-line-2 bg-panel px-2 py-0.5 text-[10px] uppercase tracking-wider text-ink-dim">
+              Current workspace network overlay
+            </span>
+            <span className="mono rounded px-2 py-0.5 text-[11px] font-semibold" style={{ background: `${color}1a`, color }}>
+              suggests {snapshotSuggestion}
+            </span>
+          </div>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed" style={{ color }}>
+            Current overlay suggests {snapshotSuggestion} while stored v{snapshotVersion} verdict remains unchanged.
+          </p>
+          {override?.riskEntities && override.riskEntities.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {override.riskEntities.slice(0, 6).map((entity) => (
+                <span key={entity.key} className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${color}1a`, color }}>{entity.label}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : override ? (
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="mono rounded px-2 py-0.5 text-[12px] font-bold" style={{ background: color, color: "#fff" }}>REVISED: {override.severity === "caution" ? "CAUTION" : "AVOID"}</span>
@@ -80,7 +108,9 @@ export function RingAlert({ handle, onAudit }: { handle: string; onAudit?: (q: s
       </div>
       )}
       <p className="mt-1.5 text-[11.5px] text-ink-faint">
-        {conns.length > 0
+        {snapshotMode
+          ? `This overlay comes from the current shared graph and was not captured in snapshot v${snapshotVersion}. Review it as new intelligence; it does not revise the stored verdict.`
+          : conns.length > 0
           ? "From the accumulated audit graph (yours + co-analysts'). A shared deployer, funder, or team member with a failed subject is a serial-operator signal no single audit can see."
           : "Arkham risk + counterparty data on this subject's own wallets. Exposure to a hacker, mixer, or sanctioned entity is a serial-operator / laundering signal the contract score can't see."}
       </p>

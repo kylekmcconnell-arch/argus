@@ -6,9 +6,10 @@
 //      linked to the immutable version. Evidence payloads are never rewritten.
 // api/ functions cannot import server/ modules at runtime (bundling), hence the
 // small duplication with server/cache.ts.
-import { createHash } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
 
 const TTL_MS = 24 * 3600 * 1000;
+const PANEL_COST_TOKEN_TTL_MS = 30 * 60 * 1000;
 
 function creds() {
   const url = process.env.SUPABASE_URL;
@@ -25,6 +26,58 @@ const headers = (key) => ({
 // silent miss when two callers happen to use the same logical key.
 const hash = (s) => "gj:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function panelCostTokenSecret() {
+  return process.env.PANEL_COST_TOKEN_SECRET
+    || process.env.SUPABASE_SECRET_KEY
+    || process.env.SUPABASE_SERVICE_ROLE_KEY
+    || process.env.SUPABASE_SERVICE_KEY
+    || null;
+}
+
+// Browser-triggered supplemental panels must never be allowed to nominate an
+// arbitrary historical version for cost attribution. The report route issues
+// this short-lived capability only after it has authenticated the tenant and
+// persisted the exact version; panel routes bind it back to the authenticated
+// tenant before writing a cost line.
+export function issuePanelCostToken(organizationId, reportVersionId) {
+  const secret = panelCostTokenSecret();
+  if (!secret || !UUID.test(organizationId || "") || !UUID.test(reportVersionId || "")) return undefined;
+
+  const payload = Buffer.from(JSON.stringify({
+    v: 1,
+    org: organizationId.toLowerCase(),
+    report: reportVersionId.toLowerCase(),
+    exp: Math.floor((Date.now() + PANEL_COST_TOKEN_TTL_MS) / 1000),
+  })).toString("base64url");
+  const signature = createHmac("sha256", secret).update(payload).digest("base64url");
+  return `${payload}.${signature}`;
+}
+
+export function resolvePanelCostVersion(organizationId, token) {
+  const secret = panelCostTokenSecret();
+  if (!secret || !UUID.test(organizationId || "") || typeof token !== "string" || token.length > 2048) return undefined;
+
+  const parts = token.split(".");
+  if (parts.length !== 2 || !parts[0] || !/^[A-Za-z0-9_-]{43}$/.test(parts[1])) return undefined;
+
+  try {
+    const expected = createHmac("sha256", secret).update(parts[0]).digest();
+    const provided = Buffer.from(parts[1], "base64url");
+    if (provided.length !== expected.length || !timingSafeEqual(provided, expected)) return undefined;
+
+    const payload = JSON.parse(Buffer.from(parts[0], "base64url").toString("utf8"));
+    if (payload?.v !== 1
+      || !UUID.test(payload.org || "")
+      || !UUID.test(payload.report || "")
+      || payload.org.toLowerCase() !== organizationId.toLowerCase()
+      || !Number.isSafeInteger(payload.exp)
+      || payload.exp <= Math.floor(Date.now() / 1000)) return undefined;
+    return payload.report.toLowerCase();
+  } catch {
+    return undefined;
+  }
+}
 
 export async function cacheGetJson(key) {
   const c = creds();

@@ -23,7 +23,7 @@ import { streamAudit, probeBackend } from "./live";
 import type { RetrievalStage } from "../collect/retrieve";
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
-import type { ReportVersionContext } from "./reportVersion";
+import type { ReportPersistenceContext, ReportVersionContext } from "./reportVersion";
 
 export interface FounderCandidate {
   name: string;          // display name or @handle
@@ -64,6 +64,8 @@ export interface Investigation {
   webTeam: WebPerson[];           // team found by the web/LinkedIn deep search
   /** Frozen server-side evidence/check context for a persisted report version. */
   versionContext?: ReportVersionContext;
+  /** Transient persistence/cost capability for a scan completed in this tab. */
+  persistence?: ReportPersistenceContext;
 }
 
 async function fetchDeployerTrail(wallet: string): Promise<DeployerTrail | null> {
@@ -75,31 +77,6 @@ async function fetchDeployerTrail(wallet: string): Promise<DeployerTrail | null>
     return d as DeployerTrail;
   } catch {
     return null;
-  }
-}
-
-export async function fetchWebTeam(siteUrl: string, projectName: string, recon: Recon | null): Promise<WebPerson[]> {
-  try {
-    const host = new URL(siteUrl).hostname.replace(/^www\./, "");
-    const qs = new URLSearchParams({ domain: host, name: projectName || "", names: (recon?.team.names ?? []).slice(0, 8).join(",") });
-    // The project's own X handle (from the site's social links) unlocks the
-    // X-content angle of the team search — the team named in its own posts.
-    const NOISE = /^(home|share|intent|i|status|explore|search|hashtag|messages)$/i;
-    const xh = (recon?.socials ?? [])
-      .map((s) => s.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1])
-      .find((h) => h && !NOISE.test(h));
-    if (xh) qs.set("x", xh);
-    // GitHub org from the site's links unlocks the org-members/contributors angle.
-    const ghOrg = (recon?.socials ?? [])
-      .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
-      .find((g) => g && !/^(orgs|sponsors|topics|features|about)$/i.test(g));
-    if (ghOrg) qs.set("gh", ghOrg);
-    const res = await fetch(`/api/recon-team?${qs}`);
-    if (!res.ok) return [];
-    const d = await res.json() as { people?: WebPerson[] };
-    return Array.isArray(d.people) ? d.people : [];
-  } catch {
-    return [];
   }
 }
 
@@ -265,22 +242,14 @@ export function streamInvestigation(
       }
       if (aborted) return;
 
-      // ── Hop 2b: dig the web + LinkedIn for the team (the render-based recon is
-      //    shallow; this searches Google/LinkedIn/Crunchbase/X and connects names
-      //    to real identities + profiles). ──
-      let webTeam: WebPerson[] = [];
+      // Paid deep-team discovery runs only after this investigation has been
+      // persisted and can present an exact report-bound capability. Keeping it
+      // out of the core collector prevents private or failed saves from creating
+      // unbound provider spend; App attaches the result as live supplemental data.
+      const webTeam: WebPerson[] = [];
       if (siteUrl) {
-        h.onHop("digging the web + LinkedIn for the team");
-        h.onStep(milestone("Step 2b · Deep team search", `Searching Google, LinkedIn, Crunchbase and X for the people behind ${shorten(siteUrl)}…`, "neutral"));
-        webTeam = await fetchWebTeam(siteUrl, token.name, recon);
-        if (!aborted && webTeam.length) {
-          const withLi = webTeam.filter((p) => p.linkedin).length;
-          h.onStep(milestone("Team dug up", `${webTeam.length} ${webTeam.length === 1 ? "person" : "people"} via web/LinkedIn: ${webTeam.map((p) => p.handle ? `${p.name} (${p.handle})` : p.name).join(", ")}.${withLi ? ` ${withLi} with a LinkedIn.` : ""}`, "good"));
-        } else if (!aborted) {
-          h.onStep(milestone("Team search", "No team members could be dug up via web/LinkedIn/X search.", "neutral"));
-        }
+        h.onStep(milestone("Step 2b · Deep team search", "Scheduled after the immutable investigation version is saved.", "neutral"));
       }
-      if (aborted) return;
 
       // ── Hop 3: background the project's X account (ONE paid people-audit, auto) ──
       let projectAccount: Dossier | null = null;

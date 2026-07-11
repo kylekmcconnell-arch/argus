@@ -13,7 +13,7 @@ const LABEL: Record<string, string> = {
   unclear: "Unclear",
 };
 
-export function PfpCheck({ handle, brand, reportVersionId }: { handle: string; brand?: boolean; reportVersionId?: string }) {
+export function PfpCheck({ handle, brand, panelCostToken }: { handle: string; brand?: boolean; panelCostToken?: string }) {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const ran = useRef(false);
@@ -24,8 +24,9 @@ export function PfpCheck({ handle, brand, reportVersionId }: { handle: string; b
     (async () => {
       try {
         const params = new URLSearchParams({ handle: handle.replace(/^@/, "") });
-        if (reportVersionId) params.set("reportVersionId", reportVersionId);
-        const r = await fetch(`/api/pfp-check?${params}`);
+        const r = await fetch(`/api/pfp-check?${params}`, panelCostToken
+          ? { headers: { "x-argus-panel-token": panelCostToken } }
+          : undefined);
         setData(await r.json());
       } catch {
         setData({ note: "Photo check failed." });
@@ -33,7 +34,7 @@ export function PfpCheck({ handle, brand, reportVersionId }: { handle: string; b
         setLoading(false);
       }
     })();
-  }, [handle, reportVersionId]);
+  }, [handle, panelCostToken]);
 
   if (data && data.available === false) return null; // no analyst key configured
 

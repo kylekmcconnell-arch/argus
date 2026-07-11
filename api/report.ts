@@ -8,6 +8,7 @@ import {
   type ServiceCredentials,
 } from "./_auth.js";
 import { activateReportVersion, persistProvenance } from "./_provenance.js";
+import { issuePanelCostToken } from "./_cache.js";
 import {
   mapStoredCheckRuns,
   type ReportAttestationState,
@@ -832,9 +833,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (CASE_KINDS.has(kind)) {
         row.report_version_id = await createImmutableVersion(credentials, auth, row, body);
+        const reportVersionId = String(row.report_version_id);
+        const panelCostToken = issuePanelCostToken(auth.organizationId, reportVersionId);
         // The RPC atomically wrote both the immutable version and its active
         // projection. A second HTTP write would reintroduce partial persistence.
-        res.status(200).json({ ok: true, reportVersionId: row.report_version_id });
+        res.status(200).json({
+          ok: true,
+          reportVersionId,
+          ...(panelCostToken ? { panelCostToken } : {}),
+        });
         return;
       }
 

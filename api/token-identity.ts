@@ -7,7 +7,7 @@
 // the official website, the official X account, and the founder (with handle),
 // pinned to THIS contract. 24h-cached; cost folded into the token's report.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache.js";
+import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 40 };
@@ -23,7 +23,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const name = q(req.query.name);
   const contract = q(req.query.contract);
   const chain = q(req.query.chain);
-  const reportVersionId = q(req.query.reportVersionId) || undefined;
+  const panelToken = req.headers["x-argus-panel-token"];
+  const panelTokenValue = Array.isArray(panelToken) ? panelToken[0] : panelToken;
+  const panelCostVersionId = resolvePanelCostVersion(
+    auth.organizationId,
+    panelTokenValue,
+  );
+  if (panelTokenValue && !panelCostVersionId) { res.status(409).json({ error: "invalid_panel_context", message: "This post-scan context expired. Rescan before running paid supplemental intelligence." }); return; }
   if (!symbol && !name) { res.status(400).json({ error: "symbol or name required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Grok (XAI_API_KEY) not configured." }); return; }
 
@@ -70,7 +76,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       confidence: ["high", "medium", "low"].includes(p.confidence) ? p.confidence : "low",
       note: typeof p.note === "string" ? p.note.slice(0, 200) : "",
     };
-    await attachPanelCost(auth.organizationId, reportVersionId, { provider: "grok", op: "panel:token-identity", calls: 1, usd });
+    await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "grok", op: "panel:token-identity", calls: 1, usd });
     if (website || x_handle || founder) await cacheSetJson(cacheKey, out); // don't cache an all-null miss
     res.status(200).json(out);
   } catch (e) {

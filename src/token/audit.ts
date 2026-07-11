@@ -5,7 +5,7 @@
 // unified Panoptes graph. The engine owns the bands and caps.
 
 import type { RunnableTokenInput } from "../lib/resolveInput";
-import type { ReportVersionContext } from "../lib/reportVersion";
+import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
 import type { TraceStep } from "../data/evidence";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import { tokenEntityKey, walletEntityKey } from "../graph/network";
@@ -79,6 +79,12 @@ export interface TokenDossier {
   safetyChecked: boolean;
   /** Frozen server-side evidence/check context for a persisted report version. */
   versionContext?: ReportVersionContext;
+  /** Snapshot framing inherited from a parent investigation facet. */
+  viewVersionContext?: ReportVersionContext;
+  /** Fresh persistence/cost capability inherited from a parent investigation. */
+  viewPersistence?: ReportPersistenceContext;
+  /** Transient persistence/cost capability for a scan completed in this tab. */
+  persistence?: ReportPersistenceContext;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));

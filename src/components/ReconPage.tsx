@@ -9,7 +9,7 @@ import { beginScan, endScan } from "../lib/activescans";
 import { syncReport } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 import { recordContribution } from "../graph/store";
-import { fetchWebTeam, type WebPerson } from "../lib/investigation";
+import type { WebPerson } from "../lib/investigation";
 import { ProjectResearch } from "./ProjectResearch";
 import { resolveProjectToken, type ResolvedProjectToken } from "../lib/resolveProjectToken";
 import { AddInfo } from "./AddInfo";
@@ -17,24 +17,11 @@ import { LinkEntity } from "./LinkEntity";
 import { SiteHistory } from "./SiteHistory";
 import { SiteInfra } from "./SiteInfra";
 import { ProjectXAccount } from "./ProjectXAccount";
-
-// A clean plain-text DD summary for pasting into a chat / channel.
-function reconReportText(r: Recon): string {
-  let host = r.retrieval.url;
-  try { host = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { /* keep */ }
-  const v = r.verdict;
-  const lines = [
-    `${r.title || host} — ${v ? `${v.verdict} ${v.score ?? "—"}/100` : r.retrieval.status} · site${v?.capApplied ? ` (cap: ${v.capApplied.replace(/_/g, " ")})` : ""}`,
-    r.identityLine,
-    "",
-    ...(v?.reasons ?? []).slice(0, 6).map((re) => `${GLYPH[re.tone] ?? "·"} ${re.text}`),
-    "",
-    host,
-    `${location.origin}/?site=${encodeURIComponent(host)}`,
-    "— audited live by ARGUS",
-  ];
-  return lines.join("\n");
-}
+import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
+import { reconResultPolicy } from "../lib/reconResultPolicy";
+import { reconReportText } from "../lib/reconReportText";
+import { fetchReconWebTeam } from "../lib/reconSupplements";
+import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
 
 // Turn a finished recon into a graph contribution: the project, its X account,
 // and (if found) its on-chain token + that token's own subgraph.
@@ -104,7 +91,7 @@ const hostFromUrl = (u: string) => { try { return new URL(/^https?:\/\//.test(u)
 // Verdict/finding text asserting an absent team — suppressed when a team IS known.
 const TEAM_ABSENCE = /\bno team\b|team not (?:established|found)|no (?:leadership|team) section|anonymous team/i;
 
-export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, onInvestigate, onOpenRecent, onOpenBrief }: { initialUrl?: string; initialRecon?: Recon; initialPrivate?: boolean; onAudit?: (q: string) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void; onOpenBrief?: (ref: string) => void }) {
+export function ReconPage({ initialUrl, initialRecon, initialVersionContext, initialPrivate, onAudit, onInvestigate, onOpenRecent, onOpenBrief, onStartFresh }: { initialUrl?: string; initialRecon?: Recon; initialVersionContext?: ReportVersionContext; initialPrivate?: boolean; onAudit?: (q: string, priv?: boolean) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void; onOpenBrief?: (ref: string) => void; onStartFresh?: () => void }) {
   const [url, setUrl] = useState(initialUrl ?? initialRecon?.retrieval.url ?? "");
   const [priv, setPriv] = useState(!!initialPrivate);
   const privRef = useRef(!!initialPrivate);
@@ -112,6 +99,18 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
   const [stages, setStages] = useState<RetrievalStage[]>([]);
   const [pivotNotes, setPivotNotes] = useState<string[]>([]);
   const [recon, setRecon] = useState<Recon | null>(initialRecon ?? null);
+  const [resultPrivate, setResultPrivate] = useState<boolean | null>(initialRecon ? !!initialPrivate : null);
+  const [resultPersistence, setResultPersistence] = useState<ReportPersistenceContext | null>(null);
+  const [snapshotContext, setSnapshotContext] = useState<ReportVersionContext | null>(initialVersionContext ?? null);
+  const [currentIntelligenceEnabled, setCurrentIntelligenceEnabled] = useState(false);
+  const showCurrentIntelligence = !snapshotContext || currentIntelligenceEnabled;
+  const resultPolicy = reconResultPolicy({
+    hasRecon: Boolean(recon),
+    resultPrivate,
+    nextRunPrivate: priv,
+    snapshot: Boolean(snapshotContext),
+    persistence: resultPersistence,
+  });
   // A Case Brief is valid only for the exact stored snapshot supplied at mount.
   // Any new run clears that binding until the result is reopened from storage.
   const [briefBound, setBriefBound] = useState(Boolean(initialRecon && onOpenBrief));
@@ -136,14 +135,20 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
 
   const run = useCallback(async (raw: string) => {
     if (runningRef.current) return;
+    const target = raw.trim();
+    if (!target) return;
+    const runPrivate = privRef.current;
+    onStartFresh?.();
+    setSnapshotContext(null);
+    setCurrentIntelligenceEnabled(false);
     runningRef.current = true;
     const runId = ++runSequence.current;
     const isCurrent = () => mounted.current && runId === runSequence.current;
-    const target = raw.trim();
-    if (!target) { runningRef.current = false; return; }
     setUrl(target);
     setRunning(true);
     setRecon(null);
+    setResultPrivate(null);
+    setResultPersistence({ state: runPrivate ? "private" : "pending" });
     setBriefBound(false);
     setStages([]);
     setPivotNotes([]);
@@ -170,7 +175,7 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
     }
     if (isCurrent()) {
       setRecon(r);
-      setRunning(false);
+      setResultPrivate(runPrivate);
     }
     endScan(scanId);
 
@@ -187,57 +192,78 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
         if (onInvestigate && officialHost && apexOf(officialHost) === apexOf(scanHost)) {
           // Provable match — run the full report instead of the thin site recon.
           setRedirecting(t);
+          if (isCurrent()) setRunning(false);
           runningRef.current = false;
-          onInvestigate(t.contract, privRef.current);
+          onInvestigate(t.contract, runPrivate);
           return;
         }
         setProjToken(t);
       }
     }
 
-    // Dig the web + LinkedIn for the team (the render-based recon is shallow).
-    if (isCurrent() && r.retrieval.status !== "gap") {
-      setTeamSearching(true);
-      fetchWebTeam(r.retrieval.url, r.title ?? "", r)
-        .then((people) => { if (isCurrent()) setWebTeam(people); })
-        .finally(() => { if (isCurrent()) { setTeamSearching(false); setTeamSearched(true); } });
+    // Private recon: show the keyless result but leave no trace and do not launch
+    // paid supplements. The decision is captured at run start, so changing the
+    // next-run toggle while collection is in flight cannot make this run public.
+    if (runPrivate) {
+      if (isCurrent()) setRunning(false);
+      runningRef.current = false;
+      return;
     }
-    // Private recon: show the result but leave no trace — skip log, graph, persist.
-    if (privRef.current) { runningRef.current = false; return; }
 
-    // Log/persist under the bare host (enigma-fund.com), NOT the full URL —
-    // the report library and the Dossiers delete both key on host, so logging
-    // the raw URL orphaned the sidebar row (purge never matched it to remove it).
+    // Persist under the bare host (enigma-fund.com), NOT the full URL — the
+    // report library and Dossiers lifecycle actions both key on this host.
     let logHost = r.retrieval.url;
     try { logHost = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { /* keep */ }
-    logAudit({
-      kind: "site",
-      query: logHost,
-      ref: logHost,
-      verdict: r.verdict?.verdict ?? r.retrieval.status,
-      score: r.verdict?.score ?? null,
-      coverage: r.retrieval.status,
-      summary: r.identityLine,
-      flags: [
-        r.retrieval.status === "gap" ? "coverage-gap" : "",
-        r.team.state === "unnamed-section" ? "team-unnamed" : "",
-        r.team.state === "named" ? "team-named" : "",
-        r.tokenSignals.length >= 2 ? "token-project" : "",
-        r.pivot?.reconcile.tone === "bad" ? "token-claim-unverified" : "",
-        r.pivot?.found ? "token-found-onchain" : "",
-      ].filter(Boolean),
-    });
-    const contrib = reconContribution(r);
-    if (contrib) recordContribution(contrib);
 
-    // Persist so the recon shows in the Report library (not just the sidebar).
+    // Persist before launching paid supplements. /api/report returns a signed,
+    // short-lived capability for this exact immutable site version; without it,
+    // deep team and X discovery fail closed instead of creating unbound spend.
+    let persistence: ReportPersistenceContext = { state: "failed" };
     if (r.retrieval.status !== "gap") {
       let host = r.retrieval.url;
       try { host = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { /* keep */ }
-      void syncReport("site", host, host, { recon: r }, r.verdict?.verdict, r.verdict?.score);
+      persistence = await syncReport("site", host, host, { recon: r }, r.verdict?.verdict, r.verdict?.score);
     }
+    if (isCurrent()) setResultPersistence(persistence);
+
+    // Coverage gaps remain useful activity-log evidence. Successful recon
+    // results compound the shared graph only after their immutable save exists.
+    if (r.retrieval.status === "gap" || persistence.state === "persisted") {
+      logAudit({
+        kind: "site",
+        query: logHost,
+        ref: logHost,
+        verdict: r.verdict?.verdict ?? r.retrieval.status,
+        score: r.verdict?.score ?? null,
+        coverage: r.retrieval.status,
+        summary: r.identityLine,
+        flags: [
+          r.retrieval.status === "gap" ? "coverage-gap" : "",
+          r.team.state === "unnamed-section" ? "team-unnamed" : "",
+          r.team.state === "named" ? "team-named" : "",
+          r.tokenSignals.length >= 2 ? "token-project" : "",
+          r.pivot?.reconcile.tone === "bad" ? "token-claim-unverified" : "",
+          r.pivot?.found ? "token-found-onchain" : "",
+        ].filter(Boolean),
+      });
+    }
+    if (persistence.state === "persisted") {
+      const contribution = reconContribution(r);
+      if (contribution) recordContribution(contribution);
+    }
+
+    const panelCostToken = persistence.state === "persisted"
+      ? persistence.panelCostToken ?? undefined
+      : undefined;
+    if (isCurrent() && r.retrieval.status !== "gap" && panelCostToken) {
+      setTeamSearching(true);
+      void fetchReconWebTeam(r.retrieval.url, r.title ?? "", r, panelCostToken)
+        .then((people) => { if (isCurrent()) setWebTeam(people); })
+        .finally(() => { if (isCurrent()) { setTeamSearching(false); setTeamSearched(true); } });
+    }
+    if (isCurrent()) setRunning(false);
     runningRef.current = false;
-  }, [onInvestigate]);
+  }, [onInvestigate, onStartFresh]);
 
   // Auto-run when opened with a URL from the main search bar.
   useEffect(() => {
@@ -272,6 +298,22 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
         shell, it escalates to a rendering crawler instead of guessing. Crucially, when it cannot see something it
         says so: a failed fetch becomes a coverage gap, never a confident "anonymous team."
       </p>
+
+      {snapshotContext && (
+        <div className="mt-4">
+          <SnapshotEvidenceControl
+            snapshotVersion={snapshotContext.version}
+            capturedAt={snapshotContext.createdAt}
+            currentIntelligenceEnabled={currentIntelligenceEnabled}
+            onLoadCurrentIntelligence={() => setCurrentIntelligenceEnabled(true)}
+          />
+        </div>
+      )}
+      {!snapshotContext && recon && (
+        <div className="mt-4">
+          <LiveSupplementalNotice private={resultPolicy.displayedPrivate} persisted={resultPersistence?.state === "persisted"} />
+        </div>
+      )}
 
       {/* input */}
       <div className="mt-5 flex items-center gap-2">
@@ -345,7 +387,7 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
                         {COVERAGE[recon.retrieval.status].label}
                       </span>
                       {v.capApplied && <span className="mono rounded px-1.5 py-0.5 text-[10px] text-ink-faint" style={{ background: "var(--color-avoid)14", color: "var(--color-avoid)" }}>cap · {v.capApplied.replace(/_/g, " ")}</span>}
-                      {briefBound && !priv && onOpenBrief && reconHost && (
+                      {briefBound && resultPolicy.canMutate && onOpenBrief && reconHost && (
                         <button
                           type="button"
                           onClick={() => onOpenBrief(reconHost)}
@@ -356,8 +398,17 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
                         </button>
                       )}
                       <button
-                        onClick={() => { navigator.clipboard?.writeText(reconReportText(recon)); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-                        className={`mono rounded-md border border-line px-2 py-0.5 text-[10.5px] text-ink-faint transition hover:text-ink ${briefBound && !priv && onOpenBrief && reconHost ? "" : "ml-auto"}`}
+                        onClick={() => {
+                          navigator.clipboard?.writeText(reconReportText(recon, {
+                            reportVersionId: snapshotContext?.reportVersionId
+                              ?? (resultPersistence?.state === "persisted" ? resultPersistence.reportVersionId ?? undefined : undefined),
+                            version: snapshotContext?.version,
+                            privateSession: resultPolicy.displayedPrivate,
+                          }, window.location.origin));
+                          setCopied(true);
+                          setTimeout(() => setCopied(false), 1500);
+                        }}
+                        className={`mono rounded-md border border-line px-2 py-0.5 text-[10.5px] text-ink-faint transition hover:text-ink ${briefBound && resultPolicy.canMutate && onOpenBrief && reconHost ? "" : "ml-auto"}`}
                       >
                         {copied ? "copied ✓" : "copy report"}
                       </button>
@@ -382,7 +433,7 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
               a real token, one click opens the full on-chain report where the depth is */}
           {projToken && (
             <button
-              onClick={() => onAudit?.(projToken.contract)}
+              onClick={() => onAudit?.(projToken.contract, resultPolicy.displayedPrivate)}
               className="mt-3 w-full rounded-xl border p-4 text-left transition hover:brightness-110"
               style={{ borderColor: "var(--color-signal)66", background: "var(--color-signal)0d" }}
             >
@@ -398,7 +449,7 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
           )}
 
           {/* the project's official X account — searched, resolved, broken down */}
-          {reconHost && (recon.title || reconHost) && (
+          {showCurrentIntelligence && reconHost && (recon.title || reconHost) && (
             <div className="mt-3">
               <ProjectXAccount
                 name={recon.title || reconHost.replace(/\.[a-z]+$/, "")}
@@ -408,7 +459,8 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
                   const seg = x?.url.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{2,30})/i)?.[1] ?? (x?.label.startsWith("@") ? x.label.slice(1) : undefined);
                   return seg && !/status|home|intent|share|i$/i.test(seg) ? seg : undefined;
                 })()}
-                onAudit={onAudit}
+                panelCostToken={resultPolicy.panelCostToken}
+                onAudit={onAudit ? (handle) => onAudit(handle, resultPolicy.displayedPrivate) : undefined}
               />
             </div>
           )}
@@ -458,7 +510,7 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
                   not asserted to be this project's. */}
               {recon.pivot.found && onAudit && (
                 <button
-                  onClick={() => onAudit(recon.pivot!.found!.address)}
+                  onClick={() => onAudit(recon.pivot!.found!.address, resultPolicy.displayedPrivate)}
                   className="mono mt-3 rounded-lg border border-line bg-panel-2/50 px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
                 >
                   {recon.pivot.method === "name-search" ? `audit ${recon.pivot.found.symbol} independently →` : `open full token audit for ${recon.pivot.found.symbol} →`}
@@ -471,7 +523,7 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
                   <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Closest by name (not a confirmed match)</div>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {recon.pivot.candidates.map((c) => (
-                      <button key={c.address} onClick={() => onAudit?.(c.address)} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim transition hover:text-ink">
+                      <button key={c.address} onClick={() => onAudit?.(c.address, resultPolicy.displayedPrivate)} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim transition hover:text-ink">
                         {c.symbol} · {c.chain} · ${Math.round(c.liqUsd).toLocaleString()}
                       </button>
                     ))}
@@ -543,7 +595,7 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
                           <span className="text-[9.5px] text-ink-faint">({p.source})</span>
                         </span>
                         {p.handle && onAudit ? (
-                          <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
+                          <button onClick={() => onAudit(p.handle!, resultPolicy.displayedPrivate)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
                         ) : (
                           <span className="mono shrink-0 text-[10.5px] text-ink-faint">named only</span>
                         )}
@@ -559,19 +611,19 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
 
           {/* unified project research: news & press, documents & resources, domain
               intelligence, and GitHub forensics — the same cluster every report uses */}
-          {reconHost && <ProjectResearch name={(recon.title || reconHost).split(/[:|–—·]/)[0].trim() || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} />}
+          {showCurrentIntelligence && reconHost && <ProjectResearch name={(recon.title || reconHost).split(/[:|–—·]/)[0].trim() || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} record={resultPolicy.canRecord} panelCostToken={resultPolicy.panelCostToken} />}
 
           {/* off-chain operator linking: shared analytics IDs / co-registered domains / hosting */}
-          {reconHost && <SiteInfra domain={reconHost} record={!priv} onAudit={onAudit} />}
+          {showCurrentIntelligence && reconHost && <SiteInfra key={`${reconHost}:${resultPolicy.canRecord ? "record" : "read-only"}`} domain={reconHost} record={resultPolicy.canRecord} onAudit={onAudit ? (ref) => onAudit(ref, resultPolicy.displayedPrivate) : undefined} />}
 
           {/* deleted-content archaeology: what the site removed over time */}
-          {reconHost && <SiteHistory domain={reconHost} />}
+          {showCurrentIntelligence && reconHost && <SiteHistory domain={reconHost} />}
 
           {/* analyst augmentation — add a piece the recon missed (verified before publish) */}
-          {reconHost && <AddInfo subject={reconHost} subjectKind="site" canonicalRef={reconHost} subjectGraphKey={reconHost} />}
+          {showCurrentIntelligence && resultPolicy.canMutate && reconHost && <AddInfo subject={reconHost} subjectKind="site" canonicalRef={reconHost} subjectGraphKey={reconHost} />}
 
           {/* hard link — manually bridge this site to another entity in the graph */}
-          {reconHost && <LinkEntity subject={reconHost} subjectKind="site" canonicalRef={reconHost} graphSubjectKey={reconHost} />}
+          {showCurrentIntelligence && resultPolicy.canMutate && reconHost && <LinkEntity subject={reconHost} subjectKind="site" canonicalRef={reconHost} graphSubjectKey={reconHost} />}
         </>
       )}
     </div>

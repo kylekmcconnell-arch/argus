@@ -15,6 +15,7 @@ const SHARE_TTL_MS = 30 * 24 * 60 * 60 * 1_000;
 const SHAREABLE_KINDS = new Set(["person", "token", "investigation", "site"]);
 const EVM_ADDRESS = /^0x[0-9a-f]{40}$/i;
 const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const UUID = /^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i;
 
 function normalizeRef(value: string): string {
   const clean = value.trim().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
@@ -35,24 +36,28 @@ async function jsonRows<T>(response: Response, operation: string): Promise<T[]> 
   return Array.isArray(body) ? (body as T[]) : [];
 }
 
-async function resolveCurrentVersion(
+async function resolveShareableVersion(
   credentials: ServiceCredentials,
   organizationId: string,
   kind: string,
   ref: string,
+  requestedReportVersionId?: string,
 ): Promise<string | null> {
-  const reportsResponse = await fetch(
-    `${credentials.url}/rest/v1/reports?select=report_version_id&organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.${encodeURIComponent(kind)}&ref=eq.${encodeURIComponent(ref)}&report_version_id=not.is.null&order=ts.desc&limit=1`,
-    { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
-  );
-  const reports = await jsonRows<{ report_version_id?: unknown }>(reportsResponse, "current report lookup");
-  const reportVersionId = typeof reports[0]?.report_version_id === "string"
-    ? reports[0].report_version_id
-    : "";
+  let reportVersionId = requestedReportVersionId ?? "";
+  if (!reportVersionId) {
+    const reportsResponse = await fetch(
+      `${credentials.url}/rest/v1/reports?select=report_version_id&organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.${encodeURIComponent(kind)}&ref=eq.${encodeURIComponent(ref)}&report_version_id=not.is.null&order=ts.desc&limit=1`,
+      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
+    );
+    const reports = await jsonRows<{ report_version_id?: unknown }>(reportsResponse, "current report lookup");
+    reportVersionId = typeof reports[0]?.report_version_id === "string"
+      ? reports[0].report_version_id
+      : "";
+  }
   if (!reportVersionId) return null;
 
-  // Treat the projection as a pointer, not authority: verify that the target
-  // immutable version and case belong to the same workspace and subject.
+  // Whether selected explicitly or through the mutable projection, verify the
+  // immutable version and case against the exact workspace and subject.
   const versionsResponse = await fetch(
     `${credentials.url}/rest/v1/report_versions?select=id,case_id&id=eq.${encodeURIComponent(reportVersionId)}&organization_id=eq.${encodeURIComponent(organizationId)}&limit=1`,
     { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
@@ -117,18 +122,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: "invalid_share_subject", message: "A valid report kind and reference are required." });
     return;
   }
+  const hasRequestedVersion = Object.prototype.hasOwnProperty.call(body, "reportVersionId");
+  const requestedReportVersionId = hasRequestedVersion && typeof body.reportVersionId === "string"
+    ? body.reportVersionId.trim().toLowerCase()
+    : "";
+  if (hasRequestedVersion && !UUID.test(requestedReportVersionId)) {
+    res.status(400).json({ error: "invalid_report_version", message: "A valid immutable report version is required." });
+    return;
+  }
 
   try {
-    const reportVersionId = await resolveCurrentVersion(
+    const reportVersionId = await resolveShareableVersion(
       credentials,
       auth.organizationId,
       kind,
       ref,
+      hasRequestedVersion ? requestedReportVersionId : undefined,
     );
     if (!reportVersionId) {
       res.status(404).json({
         error: "shareable_report_not_found",
-        message: "This report has not finished saving as an immutable version yet.",
+        message: hasRequestedVersion
+          ? "That immutable report version is not available for this workspace and subject."
+          : "This report has not finished saving as an immutable version yet.",
       });
       return;
     }
