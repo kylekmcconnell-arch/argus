@@ -17,6 +17,7 @@ import { buildAliasResolver } from "../graph/network";
 import { getContributions } from "../graph/store";
 import { useArgusAuth } from "../auth-context";
 import { normalizeSubjectRef } from "../lib/subjectRef";
+import type { CaseBriefTarget } from "../lib/caseBrief";
 
 const normRef = normalizeSubjectRef;
 
@@ -66,7 +67,13 @@ function reportReadout(report: ReportListing) {
   };
 }
 
-export function DossiersPage({ onOpen }: { onOpen: (ref: string, kind?: ReportKind) => void }) {
+export function DossiersPage({
+  onOpen,
+  onOpenBrief,
+}: {
+  onOpen: (ref: string, kind?: ReportKind) => void;
+  onOpenBrief: (target: CaseBriefTarget) => void;
+}) {
   const { role } = useArgusAuth();
   const [reports, setReports] = useState<ReportListing[] | null>(null);
   const [archivedReports, setArchivedReports] = useState<ReportListing[] | null>(null);
@@ -264,6 +271,18 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string, kind?: ReportKi
                   <span className="block text-[18px] font-semibold tabular">{r.score ?? "—"}</span>
                   <span className="block text-[8px] tracking-wider">{readout.label}</span>
                 </span>
+                <button
+                  type="button"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    onOpenBrief(briefTargetForReport(r));
+                  }}
+                  aria-label={`Open case brief for the ${r.kind} report ${r.query ?? r.ref}`}
+                  title="Open the analyst decision brief for this exact case facet"
+                  className="mono relative z-10 shrink-0 rounded-md border border-line px-2 py-1 text-[10px] text-ink-dim transition hover:border-signal hover:text-signal"
+                >
+                  Brief
+                </button>
                 {role === "owner" && (
                   <button
                     type="button"
@@ -380,25 +399,40 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string, kind?: ReportKi
             </button>
           )}
         </div>
-        {/* facet chips — each opens its own stored report */}
+        {/* Each facet owns a distinct report AND brief. Never attach a brief to
+            the visual entity group: token and investigation cases can share a
+            contract while retaining separate immutable histories. */}
         <div className="mt-2 flex flex-wrap gap-1.5 border-t border-line/60 pt-2">
           {sorted.map((r) => {
             const role = r.kind === "person" ? roleByRef.get(normalizeSubjectRef(r.ref)) : undefined;
             const km = (role && ROLE_LABEL[role]) || KIND_META[r.kind] || KIND_META.person;
             const fm = r.verdict ? verdictMeta(r.verdict) : null;
             return (
-              <button
-                key={`${r.kind}:${r.ref}`}
-                type="button"
-                disabled={isArchived}
-                onClick={(ev) => { openBtn(ev); if (!isArchived) onOpen(r.ref, r.kind); }}
-                title={isArchived ? "Restore this case before opening it" : `Open the ${km.label} report — ${r.query ?? r.ref}`}
-                className="mono inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[10px] text-ink-dim transition hover:border-signal hover:text-signal disabled:cursor-default disabled:hover:border-line disabled:hover:text-ink-dim"
-              >
-                <span className="uppercase" style={{ color: km.color }}>{km.label}</span>
-                <span className="truncate text-ink-faint">{r.query ?? r.ref}</span>
-                {fm && r.score != null && <span style={{ color: fm.color }}>{r.score}</span>}
-              </button>
+              <span key={`${r.kind}:${r.ref}`} className="inline-flex overflow-hidden rounded-md border border-line">
+                <button
+                  type="button"
+                  disabled={isArchived}
+                  onClick={(ev) => { openBtn(ev); if (!isArchived) onOpen(r.ref, r.kind); }}
+                  title={isArchived ? "Restore this case before opening its report" : `Open the ${km.label} report — ${r.query ?? r.ref}`}
+                  className="mono inline-flex min-h-8 min-w-0 items-center gap-1 px-2 py-1 text-[10px] text-ink-dim transition hover:bg-signal/5 hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-ink-dim"
+                >
+                  <span className="uppercase" style={{ color: km.color }}>{km.label}</span>
+                  <span className="max-w-40 truncate text-ink-faint">{r.query ?? r.ref}</span>
+                  {fm && r.score != null && <span style={{ color: fm.color }}>{r.score}</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={(ev) => {
+                    ev.stopPropagation();
+                    onOpenBrief(briefTargetForReport(r));
+                  }}
+                  aria-label={`Open case brief for the ${r.kind} facet ${r.query ?? r.ref}`}
+                  title={`Open the analyst brief for this exact ${r.kind} case`}
+                  className="mono min-h-8 border-l border-line px-2 py-1 text-[10px] text-ink-faint transition hover:bg-signal/5 hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal"
+                >
+                  Brief
+                </button>
+              </span>
             );
           })}
         </div>
@@ -469,4 +503,10 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string, kind?: ReportKi
       </div>
     </div>
   );
+}
+function briefTargetForReport(report: ReportListing): CaseBriefTarget {
+  const expectedReportVersionId = report.reportVersionId;
+  return report.caseId
+    ? { caseId: report.caseId, expectedReportVersionId }
+    : { kind: report.kind, ref: report.ref, expectedReportVersionId };
 }

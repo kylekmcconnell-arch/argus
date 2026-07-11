@@ -5,7 +5,9 @@ export type ReportAttestationState = "server_collected" | "analyst_submitted" | 
 
 /** Immutable metadata shared by full report reads and lightweight listings. */
 export interface ReportVersionMetadata {
+  caseId: string;
   reportVersionId: string;
+  version: number;
   completenessState: ReportCompletenessState;
   attestationState: ReportAttestationState;
   methodologyVersion: string | null;

@@ -5,6 +5,7 @@ import { logAudit, hydrateSharedLog } from "./lib/auditlog";
 import {
   syncReport,
   fetchReport,
+  fetchReportVersion,
   fetchReportState,
   storedInvestigation,
   storedPersonDossier,
@@ -12,6 +13,7 @@ import {
   storedTokenDossier,
   resolveStoredCases,
   type ReportKind,
+  type StoredReport,
   type StoredCaseSubject,
 } from "./lib/reports";
 import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph } from "./graph/store";
@@ -29,6 +31,7 @@ import { personChecks, tokenChecks } from "./lib/scanChecklist";
 import { deriveDecisionReadiness } from "./lib/decisionReadiness";
 import { normalizeSubjectRef } from "./lib/subjectRef";
 import { useArgusAuth } from "./auth-context";
+import type { CaseBriefTarget } from "./lib/caseBrief";
 
 // Product areas load on demand. The home/search shell stays immediate while
 // heavyweight reports, graph views, recon, and admin tooling become cached
@@ -38,6 +41,7 @@ const AdminPage = lazy(() => import("./components/AdminPage").then((module) => (
 const AlertsPage = lazy(() => import("./components/AlertsPage").then((module) => ({ default: module.AlertsPage })));
 const ApiPage = lazy(() => import("./components/ApiPage").then((module) => ({ default: module.ApiPage })));
 const ChangelogPage = lazy(() => import("./components/ChangelogPage").then((module) => ({ default: module.ChangelogPage })));
+const CaseBriefPanel = lazy(() => import("./components/CaseBriefPanel").then((module) => ({ default: module.CaseBriefPanel })));
 const DossiersPage = lazy(() => import("./components/DossiersPage").then((module) => ({ default: module.DossiersPage })));
 const FindWallet = lazy(() => import("./components/FindWallet").then((module) => ({ default: module.FindWallet })));
 const FoundersPage = lazy(() => import("./components/FoundersPage").then((module) => ({ default: module.FoundersPage })));
@@ -69,6 +73,36 @@ function RouteLoading() {
   );
 }
 
+function CaseBriefLoadingDialog() {
+  const ref = useRef<HTMLDialogElement>(null);
+  useEffect(() => {
+    const dialog = ref.current;
+    if (!dialog) return;
+    if (typeof dialog.showModal === "function") dialog.showModal();
+    else dialog.setAttribute("open", "");
+    dialog.focus();
+    return () => {
+      if (dialog.open && typeof dialog.close === "function") dialog.close();
+      else dialog.removeAttribute("open");
+    };
+  }, []);
+  return (
+    <dialog
+      ref={ref}
+      tabIndex={-1}
+      aria-label="Opening case brief"
+      className="fixed inset-0 z-[100] m-0 ml-auto h-[100dvh] max-h-none w-full max-w-[760px] border-0 border-l border-line bg-void p-0 text-ink shadow-2xl backdrop:bg-black/75"
+    >
+      <div className="flex h-full items-center justify-center" role="status" aria-live="polite">
+        <span className="flex items-center gap-2 text-[12px] text-ink-dim">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal" />
+          Opening case brief…
+        </span>
+      </div>
+    </dialog>
+  );
+}
+
 type Phase =
   | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
   | "running" | "live" | "report"
@@ -85,7 +119,7 @@ type Cached =
   | { kind: "person"; dossier: Dossier }
   | { kind: "token"; dossier: TokenDossier }
   | { kind: "investigation"; inv: Investigation }
-  | { kind: "site"; recon: Recon };
+  | { kind: "site"; recon: Recon; briefTarget?: CaseBriefTarget };
 
 type CachedKind = Cached["kind"];
 
@@ -99,6 +133,12 @@ const clearCachedRef = (cache: Map<string, Cached>, ref: string) => {
   for (const key of cache.keys()) if (key.endsWith(suffix)) cache.delete(key);
 };
 
+function clearUrlQuery(): void {
+  if (typeof window !== "undefined" && window.location.search) {
+    window.history.replaceState({}, "", window.location.pathname);
+  }
+}
+
 const siteCaseRef = (value: string): string => {
   try {
     return new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`)
@@ -109,6 +149,44 @@ const siteCaseRef = (value: string): string => {
     return normalizeSubjectRef(value).replace(/\/.*$/, "").replace(/^www\./, "");
   }
 };
+
+function briefTargetForPerson(dossier: Dossier): CaseBriefTarget | null {
+  if (dossier.versionContext?.caseId) {
+    return {
+      caseId: dossier.versionContext.caseId,
+      expectedReportVersionId: dossier.versionContext.reportVersionId,
+    };
+  }
+  if (dossier.persistence?.state === "persisted" && dossier.persistence.reportVersionId) {
+    return {
+      kind: "person",
+      ref: normalizeSubjectRef(dossier.handle),
+      expectedReportVersionId: dossier.persistence.reportVersionId,
+    };
+  }
+  return null;
+}
+
+function cachedFromStoredReport(report: StoredReport): Cached | null {
+  if (report.kind === "site") {
+    const recon = storedSiteRecon(report);
+    if (!recon) return null;
+    return {
+      kind: "site",
+      recon,
+      briefTarget: report.versionContext?.caseId
+        ? {
+            caseId: report.versionContext.caseId,
+            expectedReportVersionId: report.versionContext.reportVersionId,
+          }
+        : undefined,
+    };
+  }
+  if (report.kind === "investigation") return { kind: "investigation", inv: storedInvestigation(report) };
+  if (report.kind === "token") return { kind: "token", dossier: storedTokenDossier(report) };
+  if (report.kind === "person") return { kind: "person", dossier: storedPersonDossier(report) };
+  return null;
+}
 
 function preferredStoredCase(
   subjects: StoredCaseSubject[],
@@ -125,9 +203,11 @@ function preferredStoredCase(
 // Deep links:
 //   ?s=<handle>    -> open the stored report for that subject (share links)
 //   ?live=<handle> -> resolve the person case before re-attaching or launching
-function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: string; openRef?: string; openKind?: ReportKind } {
+function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: string; openRef?: string; openKind?: ReportKind; openVersionId?: string } {
   if (typeof window === "undefined") return { phase: "idle", dossier: null, query: "" };
   const params = new URLSearchParams(window.location.search);
+  const version = params.get("version");
+  if (version) return { phase: "idle", dossier: null, query: "", openVersionId: version };
   const s = params.get("s");
   // Resolved after mount via onOpenRecent (session cache -> stored report -> rescan).
   if (s) return { phase: "idle", dossier: null, query: "", openRef: s };
@@ -146,13 +226,17 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
 export default function App() {
   const { role } = useArgusAuth();
   const [boot] = useState(initialFromUrl);
+  const [evidenceReviewVersionId, setEvidenceReviewVersionId] = useState<string | null>(boot.openVersionId ?? null);
   const [phase, setPhase] = useState<Phase>(boot.phase);
   const [dossier, setDossier] = useState<Dossier | null>(boot.dossier);
+  const [personBriefTarget, setPersonBriefTarget] = useState<CaseBriefTarget | null>(null);
   const [query, setQuery] = useState(boot.query);
   const [tokenInput, setTokenInput] = useState<RunnableTokenInput | null>(null);
   const [tokenDossier, setTokenDossier] = useState<TokenDossier | null>(null);
+  const [tokenBriefTarget, setTokenBriefTarget] = useState<CaseBriefTarget | null>(null);
   const [reconUrl, setReconUrl] = useState<string | null>(boot.phase === "recon" ? boot.query : null);
   const [storedRecon, setStoredRecon] = useState<Recon | null>(null);
+  const [storedReconBriefTarget, setStoredReconBriefTarget] = useState<CaseBriefTarget | null>(null);
   const [investigationInput, setInvestigationInput] = useState<RunnableTokenInput | null>(null);
   const [investigation, setInvestigation] = useState<Investigation | null>(null);
   const [viewedProject, setViewedProject] = useState<{ name: string; domain?: string } | null>(null);
@@ -169,6 +253,26 @@ export default function App() {
   const [tokenChoices, setTokenChoices] = useState<TokenCandidate[]>([]);
   const [tokenChoicePrivate, setTokenChoicePrivate] = useState(false);
   const [tokenChoiceMode, setTokenChoiceMode] = useState<TokenLaunchMode>("investigation");
+  const [caseBriefTarget, setCaseBriefTarget] = useState<CaseBriefTarget | null>(null);
+  const caseBriefDirtyRef = useRef(false);
+  const caseBriefBusyRef = useRef(false);
+  const closeCaseBriefForNavigation = useCallback((): boolean => {
+    if (caseBriefBusyRef.current) return false;
+    if (caseBriefDirtyRef.current && !window.confirm("Discard your unsaved case brief changes and note draft?")) return false;
+    caseBriefDirtyRef.current = false;
+    caseBriefBusyRef.current = false;
+    setCaseBriefTarget(null);
+    return true;
+  }, []);
+  const dismissCaseBrief = useCallback(() => {
+    caseBriefDirtyRef.current = false;
+    caseBriefBusyRef.current = false;
+    setCaseBriefTarget(null);
+  }, []);
+  const trackCaseBriefDirty = useCallback((dirty: boolean, busy = false) => {
+    caseBriefDirtyRef.current = dirty;
+    caseBriefBusyRef.current = busy;
+  }, []);
 
   // Session cache of completed audits, so clicking a recent audit SHOWS the
   // result it already produced (with a Rescan button) instead of re-running it.
@@ -180,6 +284,12 @@ export default function App() {
   // graphed, or shown in the sidebar/tickers.
   const privRef = useRef(false);
   const [privateMode, setPrivateMode] = useState(false);
+
+  const leaveEvidenceReview = useCallback(() => {
+    if (!evidenceReviewVersionId) return;
+    setEvidenceReviewVersionId(null);
+    clearUrlQuery();
+  }, [evidenceReviewVersionId]);
 
   // Pull the shared community graph + audit log once on load, so this session
   // sees everyone's work (no-op when no backend is configured).
@@ -195,7 +305,11 @@ export default function App() {
   }, []);
 
   const onAudit = useCallback(async (raw: string, priv = false, force = false) => {
+    if (!closeCaseBriefForNavigation()) return;
+    leaveEvidenceReview();
     const requestId = ++safeAuditRequestRef.current;
+    setPersonBriefTarget(null);
+    setTokenBriefTarget(null);
     setCaseNotice(null);
     privRef.current = priv;
     setPrivateMode(priv);
@@ -219,6 +333,7 @@ export default function App() {
       setQuery(raw);
       setReconUrl(resolved.ref);
       setStoredRecon(null);
+      setStoredReconBriefTarget(null);
       setPhase("recon");
       return;
     }
@@ -237,14 +352,18 @@ export default function App() {
     } else {
       setPhase("notfound");
     }
-  }, [setLiveError, setPhase, setPrivateMode, setQuery, setReconUrl, setTokenInput, showPrivacyConflict]);
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, setLiveError, setPhase, setPrivateMode, setQuery, setReconUrl, setTokenInput, showPrivacyConflict]);
 
   // The main search bar runs the full autonomous investigation for a contract;
   // handles and sites fall through to the normal routing. Internal clicks
   // (Radar, recon, watchlist, founder buttons) keep using onAudit for a quick
   // single-surface audit and don't auto-spend.
   const onInvestigate = useCallback((raw: string, priv = false, force = false) => {
+    if (!closeCaseBriefForNavigation()) return;
+    leaveEvidenceReview();
     safeAuditRequestRef.current += 1;
+    setPersonBriefTarget(null);
+    setTokenBriefTarget(null);
     setCaseNotice(null);
     privRef.current = priv;
     setPrivateMode(priv);
@@ -258,15 +377,17 @@ export default function App() {
       return;
     }
     onAudit(raw, priv, force);
-  }, [onAudit, setInvestigationInput, setPhase, setPrivateMode, setQuery, showPrivacyConflict]);
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, setInvestigationInput, setPhase, setPrivateMode, setQuery, showPrivacyConflict]);
 
   const onInvestigationError = useCallback(() => setPhase("notfound"), [setPhase]);
 
   // Open a project-centric view: dig who worked on it, all auditable.
   const onOpenProject = useCallback((name: string, domain?: string) => {
+    if (!closeCaseBriefForNavigation()) return;
+    leaveEvidenceReview();
     setViewedProject({ name, domain });
     setPhase("project");
-  }, [setPhase, setViewedProject]);
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, setPhase, setViewedProject]);
 
   // DATA-side completion (runs for every finished scan, backgrounded or not, so it
   // lands in the library even if navigated away). Never touches the view.
@@ -306,7 +427,13 @@ export default function App() {
   // VIEW-side completion (only when this view is mounted on the finished run) —
   // the runner already logged/persisted, so these just move the current view.
   const onInvestigationDone = useCallback((inv: Investigation) => { setInvestigation(inv); setPhase("investigation-report"); }, [setInvestigation, setPhase]);
-  const onTokenDone = useCallback((d: TokenDossier) => { setTokenDossier(d); setPhase("token-report"); }, [setPhase, setTokenDossier]);
+  const onTokenDone = useCallback((d: TokenDossier) => {
+    setTokenDossier(d);
+    // Token scans render before their asynchronous persistence finishes. Expose
+    // a brief only after reopening the exact immutable stored version.
+    setTokenBriefTarget(null);
+    setPhase("token-report");
+  }, [setPhase, setTokenDossier]);
 
   // Data-side completion for a person audit: cache + persist + log + graph. This
   // is view-independent — it's what makes a BACKGROUNDED audit still land in
@@ -346,14 +473,28 @@ export default function App() {
   // so this just moves the CURRENT view to the finished report (no re-logging).
   const showCached = useCallback((ref: string, c: Cached) => {
     setQuery(ref);
-    if (c.kind === "person") { setDossier(c.dossier); setPhase("report"); }
-    else if (c.kind === "token") { setTokenDossier(c.dossier); setPhase("token-report"); }
+    if (c.kind === "person") {
+      setDossier(c.dossier);
+      setPersonBriefTarget(briefTargetForPerson(c.dossier));
+      setPhase("report");
+    }
+    else if (c.kind === "token") {
+      setTokenDossier(c.dossier);
+      setTokenBriefTarget(c.dossier.versionContext?.caseId
+        ? {
+            caseId: c.dossier.versionContext.caseId,
+            expectedReportVersionId: c.dossier.versionContext.reportVersionId,
+          }
+        : null);
+      setPhase("token-report");
+    }
     else if (c.kind === "investigation") { setInvestigation(c.inv); setPhase("investigation-report"); }
-    else { setReconUrl(null); setStoredRecon(c.recon); setPhase("recon"); }
+    else { setReconUrl(null); setStoredRecon(c.recon); setStoredReconBriefTarget(c.briefTarget ?? null); setPhase("recon"); }
   }, [setDossier, setInvestigation, setPhase, setQuery, setStoredRecon, setTokenDossier]);
 
   const onLiveDone = useCallback((d: Dossier) => {
     setDossier(d);
+    setPersonBriefTarget(briefTargetForPerson(d));
     setPhase("report");
   }, [setDossier, setPhase]);
 
@@ -401,7 +542,11 @@ export default function App() {
     requestedKind?: ReportKind,
     allowLaunch = true,
   ) => {
+    if (!closeCaseBriefForNavigation()) return;
+    leaveEvidenceReview();
     const requestId = ++safeAuditRequestRef.current;
+    privRef.current = false;
+    setPrivateMode(false);
     setCaseNotice(null);
     const cachedKind = requestedKind === "person" || requestedKind === "token" || requestedKind === "investigation" || requestedKind === "site"
       ? requestedKind
@@ -450,17 +595,9 @@ export default function App() {
     const tokInput = tokRun ? resolveInput(tokRun.input) : null;
     if (tokRun && !tokRun.priv && tokRun.status === "running" && tokInput && isRunnableTokenInput(tokInput) && (!requestedKind || requestedKind === "token")) { setTokenInput(tokInput); setQuery(tokRun.input); setPhase("token-run"); return; }
 
-    if (run?.status === "done" && !run.priv && run.dossier && (!requestedKind || requestedKind === "person")) {
-      setDossier(run.dossier);
-      setPhase("report");
-      return;
-    }
-    const c = cachedKind
-      ? resultCache.current.get(cacheKey(ref, cachedKind))
-      : requestedKind
-        ? undefined
-        : resultCache.current.get(cacheKey(ref));
-    if (c) { showCached(ref, c); return; }
+    // Once no collector is actively running, durable storage is authoritative.
+    // Prefer its exact immutable version over a same-session cache that another
+    // analyst or a newer completed scan may already have superseded.
     const rep = lookup.report;
     if (rep?.payload && (rep.kind === "person" || rep.kind === "token" || rep.kind === "investigation" || rep.kind === "site")) {
       if (rep.kind === "site") {
@@ -471,7 +608,16 @@ export default function App() {
           setPhase("notfound");
           return;
         }
-        const cached = { kind: "site" as const, recon };
+        const cached = {
+          kind: "site" as const,
+          recon,
+          briefTarget: rep.versionContext?.caseId
+            ? {
+                caseId: rep.versionContext.caseId,
+                expectedReportVersionId: rep.versionContext.reportVersionId,
+              }
+            : undefined,
+        };
         cacheResult(resultCache.current, ref, cached, !requestedKind);
         showCached(ref, cached);
         return;
@@ -485,6 +631,19 @@ export default function App() {
       showCached(ref, cached);
       return;
     }
+
+    if (run?.status === "done" && !run.priv && run.dossier && (!requestedKind || requestedKind === "person")) {
+      setDossier(run.dossier);
+      setPersonBriefTarget(briefTargetForPerson(run.dossier));
+      setPhase("report");
+      return;
+    }
+    const c = cachedKind
+      ? resultCache.current.get(cacheKey(ref, cachedKind))
+      : requestedKind
+        ? undefined
+        : resultCache.current.get(cacheKey(ref));
+    if (c) { showCached(ref, c); return; }
     if (!allowLaunch) {
       setQuery(ref);
       setCaseNotice({ reason: "missing", ref, kind: requestedKind });
@@ -494,7 +653,7 @@ export default function App() {
     }
     if (requestedKind === "investigation") onInvestigate(ref);
     else onAudit(ref);
-  }, [onAudit, onInvestigate, showCached]);
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, onInvestigate, showCached]);
 
   const openOrLaunchTokenCandidate = useCallback(async (
     candidate: TokenCandidate,
@@ -565,6 +724,8 @@ export default function App() {
     mode: TokenLaunchMode,
     allowLaunch = true,
   ) => {
+    if (!closeCaseBriefForNavigation()) return;
+    leaveEvidenceReview();
     const requestId = ++safeAuditRequestRef.current;
     setCaseNotice(null);
     setTokenChoices([]);
@@ -658,7 +819,7 @@ export default function App() {
       return;
     }
     await openOrLaunchTokenCandidate(resolution.candidate, priv, mode, requestId, allowLaunch);
-  }, [onAudit, onOpenRecent, openOrLaunchTokenCandidate]);
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, onOpenRecent, openOrLaunchTokenCandidate]);
 
   const onLandingAudit = useCallback(
     (raw: string, priv = false) => onSafeAuditMode(raw, priv, "investigation"),
@@ -673,8 +834,34 @@ export default function App() {
   // open a library/graph card: same path as a recent click (stored report first)
   const onOpen = onOpenRecent;
 
-  // Share links (?s=<handle>) resolve through the same stored-report path.
+  // Share links resolve through the stored-report path. `?version=` is an
+  // immutable evidence-review route used by Case Briefs and never launches a scan.
   useEffect(() => {
+    if (evidenceReviewVersionId) {
+      let cancelled = false;
+      const timer = window.setTimeout(() => {
+        void (async () => {
+          const report = await fetchReportVersion(evidenceReviewVersionId);
+          if (cancelled) return;
+          const cached = report ? cachedFromStoredReport(report) : null;
+          const ref = report?.ref ?? "";
+          if (!cached || !ref) {
+            setQuery(evidenceReviewVersionId);
+            setLiveError("That immutable evidence version is unavailable or you no longer have access to it.");
+            setPhase("notfound");
+            return;
+          }
+          privRef.current = false;
+          setPrivateMode(false);
+          cacheResult(resultCache.current, ref, cached, false);
+          showCached(ref, cached);
+        })();
+      }, 0);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(timer);
+      };
+    }
     if (!boot.openRef) return;
     const timer = window.setTimeout(() => {
       const ref = boot.openRef as string;
@@ -684,24 +871,22 @@ export default function App() {
       else void onOpenRecent(ref, boot.openKind, false);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [boot.openKind, boot.openRef, onOpenRecent, onSafeAuditMode]);
-
-  const clearUrl = () => {
-    if (typeof window !== "undefined" && window.location.search) {
-      window.history.replaceState({}, "", window.location.pathname);
-    }
-  };
+  }, [boot.openKind, boot.openRef, evidenceReviewVersionId, onOpenRecent, onSafeAuditMode, showCached]);
 
   const reset = useCallback(() => {
+    if (!closeCaseBriefForNavigation()) return;
     safeAuditRequestRef.current += 1;
-    clearUrl();
+    leaveEvidenceReview();
     setPhase("idle");
     setDossier(null);
+    setPersonBriefTarget(null);
     setTokenInput(null);
     setTokenDossier(null);
+    setTokenBriefTarget(null);
     setInvestigationInput(null);
     setInvestigation(null);
     setStoredRecon(null);
+    setStoredReconBriefTarget(null);
     setQuery("");
     setLiveError(null);
     setCaseNotice(null);
@@ -710,10 +895,16 @@ export default function App() {
     setTokenChoiceMode("investigation");
     privRef.current = false;
     setPrivateMode(false);
-  }, [setDossier, setInvestigation, setInvestigationInput, setLiveError, setPhase, setPrivateMode, setQuery, setTokenDossier, setTokenInput]);
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, setDossier, setInvestigation, setInvestigationInput, setLiveError, setPhase, setPrivateMode, setQuery, setTokenDossier, setTokenInput]);
 
   // from the investigation report: open the full on-chain token report
   const onOpenToken = useCallback(() => {
+    if (!closeCaseBriefForNavigation()) return;
+    leaveEvidenceReview();
+    // The token dossier embedded in an investigation inherits investigation
+    // evidence context. It is not the independently persisted token case, so
+    // fail closed instead of attaching either facet's Case Brief to this view.
+    setTokenBriefTarget(null);
     setInvestigation((inv) => {
       if (inv) {
         setTokenDossier(inv.versionContext
@@ -723,28 +914,36 @@ export default function App() {
       }
       return inv;
     });
-  }, [setInvestigation, setPhase, setTokenDossier]);
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, setInvestigation, setPhase, setTokenDossier]);
 
   // from the investigation report: open the full people report for the project
   // account (already collected — no re-spend), which shows the axis/cap reasoning.
   const onOpenProjectAccount = useCallback(() => {
+    if (!closeCaseBriefForNavigation()) return;
+    leaveEvidenceReview();
+    // Nested project-account audits are collected privately inside the owning
+    // investigation and are not durable person cases.
+    setPersonBriefTarget(null);
     setInvestigation((inv) => {
       if (inv?.projectAccount) { setDossier(inv.projectAccount); setQuery(inv.projectAccount.handle); setPhase("report"); }
       return inv;
     });
-  }, [setDossier, setInvestigation, setPhase, setQuery]);
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, setDossier, setInvestigation, setPhase, setQuery]);
 
   const onNav = useCallback((t: NavTarget) => {
+    if (!closeCaseBriefForNavigation()) return;
     safeAuditRequestRef.current += 1;
-    clearUrl();
+    setPersonBriefTarget(null);
+    setTokenBriefTarget(null);
+    leaveEvidenceReview();
     if (t === "idle") {
       setDossier(null);
       setQuery("");
     }
     // opening Site recon from the rail is a fresh, manual page (private off by default)
-    if (t === "recon") { setReconUrl(null); setStoredRecon(null); privRef.current = false; setPrivateMode(false); }
+    if (t === "recon") { setReconUrl(null); setStoredRecon(null); setStoredReconBriefTarget(null); privRef.current = false; setPrivateMode(false); }
     setPhase(t);
-  }, [setDossier, setPhase, setPrivateMode, setQuery, setReconUrl]);
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, setDossier, setPhase, setPrivateMode, setQuery, setReconUrl]);
 
   const personAudit = phase === "running" || phase === "live" || phase === "report";
   const inAudit = personAudit || phase === "token-run" || phase === "token-report" || phase === "investigation" || phase === "investigation-report" || phase === "resolving" || phase === "token-choice";
@@ -758,6 +957,13 @@ export default function App() {
   return (
     <AppShell onNav={onNav} onAudit={onSafeAudit} onOpenRecent={onOpenRecent} activeHandle={activeHandle} view={view}>
       <Suspense fallback={<RouteLoading />}>
+      {evidenceReviewVersionId && phase !== "idle" && phase !== "notfound" && (
+        <div className="mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border border-signal/35 bg-signal/5 px-4 py-3 text-[11.5px] text-ink-dim">
+          <span className="font-medium text-signal">Immutable evidence review</span>
+          <span className="mono break-all">version {evidenceReviewVersionId}</span>
+          <span>Opened in a separate tab so the Case Brief draft remains intact.</span>
+        </div>
+      )}
       {phase === "idle" && <Landing onAudit={onLandingAudit} onAbout={() => setPhase("about")} onOpenRecent={onOpenRecent} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
@@ -768,7 +974,7 @@ export default function App() {
 
       {phase === "changelog" && <ChangelogPage />}
 
-      {phase === "dossiers" && <DossiersPage onOpen={onOpen} />}
+      {phase === "dossiers" && <DossiersPage onOpen={onOpen} onOpenBrief={setCaseBriefTarget} />}
 
       {phase === "graph" && <GraphPage onOpen={onOpen} />}
 
@@ -788,7 +994,7 @@ export default function App() {
 
       {phase === "alerts" && <AlertsPage onOpen={onOpenRecent} />}
 
-      {phase === "recon" && <ReconPage key={storedRecon ? `stored:${storedRecon.retrieval.url}` : reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialRecon={storedRecon ?? undefined} initialPrivate={privateMode} onAudit={onSafeAudit} onInvestigate={onLandingAudit} onOpenRecent={onOpenRecent} />}
+      {phase === "recon" && <ReconPage key={storedRecon ? `stored:${storedRecon.retrieval.url}:${JSON.stringify(storedReconBriefTarget)}` : reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialRecon={storedRecon ?? undefined} initialPrivate={privateMode} onAudit={onSafeAudit} onInvestigate={onLandingAudit} onOpenRecent={onOpenRecent} onOpenBrief={!evidenceReviewVersionId && !privateMode && storedReconBriefTarget ? () => setCaseBriefTarget(storedReconBriefTarget) : undefined} />}
 
       {phase === "find" && <FindWallet onAudit={onSafeAudit} onReset={reset} onOpenRecent={onOpenRecent} />}
 
@@ -796,14 +1002,14 @@ export default function App() {
 
       {phase === "live" && <LiveRun handle={query} onDone={onLiveDone} onError={onLiveError} />}
 
-      {phase === "report" && dossier && <Report dossier={dossier} onReset={reset} onAudit={onSafeAudit} onRescan={() => onAudit(dossier.handle, privRef.current)} onOpenProject={onOpenProject} />}
+      {phase === "report" && dossier && <Report dossier={dossier} onReset={reset} onAudit={onSafeAudit} onRescan={() => onAudit(dossier.handle, privRef.current)} onOpenProject={onOpenProject} onOpenBrief={!evidenceReviewVersionId && !privateMode && personBriefTarget ? () => setCaseBriefTarget(personBriefTarget) : undefined} />}
       {phase === "project" && viewedProject && <ProjectView project={viewedProject} onAudit={onSafeAudit} onReset={reset} />}
 
       {phase === "token-run" && tokenInput && (
         <TokenRun input={tokenInput} onDone={onTokenDone} onError={() => setPhase("notfound")} />
       )}
 
-      {phase === "token-report" && tokenDossier && <TokenReport dossier={tokenDossier} onReset={reset} onAudit={onSafeAudit} onRescan={() => onAudit(tokenDossier.address, privRef.current, true)} />}
+      {phase === "token-report" && tokenDossier && <TokenReport dossier={tokenDossier} onReset={reset} onAudit={onSafeAudit} onRescan={() => onAudit(tokenDossier.address, privRef.current, true)} onOpenBrief={!evidenceReviewVersionId && !privateMode && tokenBriefTarget ? () => setCaseBriefTarget(tokenBriefTarget) : undefined} />}
 
       {phase === "investigation" && investigationInput && (
         <InvestigationRun input={investigationInput} onDone={onInvestigationDone} onError={onInvestigationError} />
@@ -816,9 +1022,16 @@ export default function App() {
           onReset={reset}
           onOpenToken={onOpenToken}
           onOpenProjectAccount={onOpenProjectAccount}
+          onOpenBrief={!evidenceReviewVersionId && !privateMode && investigation.versionContext?.caseId
+            ? () => setCaseBriefTarget({
+                caseId: investigation.versionContext!.caseId,
+                expectedReportVersionId: investigation.versionContext!.reportVersionId,
+              })
+            : undefined}
           onReAudit={() => {
             const input = resolveInput(investigation.token.address);
             if (!isRunnableTokenInput(input)) return;
+            leaveEvidenceReview();
             setInvestigationInput(input);
             setInvestigation(null);
             const run = startInvestigationScan(input, privRef.current, { force: true });
@@ -1002,6 +1215,16 @@ export default function App() {
         </div>
       )}
       </Suspense>
+      {caseBriefTarget && (
+        <Suspense fallback={<CaseBriefLoadingDialog />}>
+          <CaseBriefPanel
+            key={JSON.stringify(caseBriefTarget)}
+            target={caseBriefTarget}
+            onClose={dismissCaseBrief}
+            onDirtyChange={trackCaseBriefDirty}
+          />
+        </Suspense>
+      )}
     </AppShell>
   );
 }

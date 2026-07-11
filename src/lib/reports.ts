@@ -113,6 +113,7 @@ export async function syncReport(
 
 export interface StoredReport {
   kind: ReportKind;
+  ref?: string;
   query?: string;
   contributor?: string;
   payload: unknown;
@@ -177,6 +178,7 @@ export function storedSiteRecon(report: StoredReport): Recon | null {
 
 // One row per persisted report (no payload — heavy; fetched per-ref on open).
 export interface ReportListing {
+  caseId?: string;
   ref: string;
   kind: ReportKind;
   query?: string;
@@ -185,6 +187,7 @@ export interface ReportListing {
   score?: number | null;
   ts?: string;
   reportVersionId?: string;
+  version?: number;
   completenessState?: ReportCompletenessState;
   attestationState?: ReportAttestationState;
   methodologyVersion?: string | null;
@@ -335,4 +338,19 @@ export async function fetchReportState(ref: string, kind?: ReportKind): Promise<
 
 export async function fetchReport(ref: string, kind?: ReportKind): Promise<StoredReport | null> {
   return (await fetchReportState(ref, kind)).report;
+}
+
+/** Load one immutable evidence snapshot by version id, even after archiving. */
+export async function fetchReportVersion(reportVersionId: string): Promise<StoredReport | null> {
+  try {
+    const response = await fetch(`/api/report?${new URLSearchParams({ versionId: reportVersionId }).toString()}`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(15_000),
+    });
+    if (!response.ok) return null;
+    const body = await response.json() as { report?: StoredReport | null };
+    return body.report ?? null;
+  } catch {
+    return null;
+  }
 }

@@ -13,7 +13,7 @@
   --color-line-2: #2a3c57; /* stronger border */
   --color-ink: #eaf0f8; /* primary text (near-white) */
   --color-ink-dim: #9aabc2; /* secondary text */
-  --color-ink-faint: #57687f; /* tertiary text */
+  --color-ink-faint: #7689a2; /* tertiary text · AA on dark panels */
 
   --color-signal: #3b82f6; /* royal-blue accent (the iris) */
   --color-signal-dim: #2563eb;
@@ -44,15 +44,15 @@
   --color-line-2: #cfd8e6;
   --color-ink: #0a1322;
   --color-ink-dim: #44566f;
-  --color-ink-faint: #8493a8;
+  --color-ink-faint: #66758a; /* tertiary text · AA on white */
 
   --color-signal: #2563eb;
   --color-signal-dim: #1d4ed8;
   --color-accent-tint: #eef4fe;
 
-  --color-pass: #16a34a;
-  --color-caution: #d97706;
-  --color-fail: #ea580c;
+  --color-pass: #15803d;
+  --color-caution: #b45309;
+  --color-fail: #c2410c;
   --color-avoid: #dc2626;
   --color-unverifiable: #7c3aed;
 

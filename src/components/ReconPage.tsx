@@ -104,7 +104,7 @@ const hostFromUrl = (u: string) => { try { return new URL(/^https?:\/\//.test(u)
 // Verdict/finding text asserting an absent team — suppressed when a team IS known.
 const TEAM_ABSENCE = /\bno team\b|team not (?:established|found)|no (?:leadership|team) section|anonymous team/i;
 
-export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, onInvestigate, onOpenRecent }: { initialUrl?: string; initialRecon?: Recon; initialPrivate?: boolean; onAudit?: (q: string) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
+export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, onInvestigate, onOpenRecent, onOpenBrief }: { initialUrl?: string; initialRecon?: Recon; initialPrivate?: boolean; onAudit?: (q: string) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void; onOpenBrief?: (ref: string) => void }) {
   const [url, setUrl] = useState(initialUrl ?? initialRecon?.retrieval.url ?? "");
   const [priv, setPriv] = useState(!!initialPrivate);
   const privRef = useRef(!!initialPrivate);
@@ -112,6 +112,9 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
   const [stages, setStages] = useState<RetrievalStage[]>([]);
   const [pivotNotes, setPivotNotes] = useState<string[]>([]);
   const [recon, setRecon] = useState<Recon | null>(initialRecon ?? null);
+  // A Case Brief is valid only for the exact stored snapshot supplied at mount.
+  // Any new run clears that binding until the result is reopened from storage.
+  const [briefBound, setBriefBound] = useState(Boolean(initialRecon && onOpenBrief));
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
   const [webTeam, setWebTeam] = useState<WebPerson[]>([]);
@@ -141,6 +144,7 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
     setUrl(target);
     setRunning(true);
     setRecon(null);
+    setBriefBound(false);
     setStages([]);
     setPivotNotes([]);
     setWebTeam([]);
@@ -341,9 +345,19 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
                         {COVERAGE[recon.retrieval.status].label}
                       </span>
                       {v.capApplied && <span className="mono rounded px-1.5 py-0.5 text-[10px] text-ink-faint" style={{ background: "var(--color-avoid)14", color: "var(--color-avoid)" }}>cap · {v.capApplied.replace(/_/g, " ")}</span>}
+                      {briefBound && !priv && onOpenBrief && reconHost && (
+                        <button
+                          type="button"
+                          onClick={() => onOpenBrief(reconHost)}
+                          title="Open the analyst decision brief anchored to this exact site case"
+                          className="mono ml-auto rounded-md border border-line px-2 py-0.5 text-[10.5px] font-medium text-ink transition hover:border-signal hover:text-signal"
+                        >
+                          case brief
+                        </button>
+                      )}
                       <button
                         onClick={() => { navigator.clipboard?.writeText(reconReportText(recon)); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
-                        className="mono ml-auto rounded-md border border-line px-2 py-0.5 text-[10.5px] text-ink-faint transition hover:text-ink"
+                        className={`mono rounded-md border border-line px-2 py-0.5 text-[10.5px] text-ink-faint transition hover:text-ink ${briefBound && !priv && onOpenBrief && reconHost ? "" : "ml-auto"}`}
                       >
                         {copied ? "copied ✓" : "copy report"}
                       </button>

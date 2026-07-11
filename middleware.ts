@@ -9,6 +9,7 @@ const PUBLIC_API_PATHS = new Set([
 const VIEWER_GET_PATHS = new Set([
   "/api/session",
   "/api/report",
+  "/api/case-brief",
   "/api/graph",
   "/api/auditlog",
   "/api/providers",
@@ -16,6 +17,7 @@ const VIEWER_GET_PATHS = new Set([
   "/api/keys-status",
 ]);
 const OWNER_PATHS = new Set(["/api/reclassify", "/api/members"]);
+const UNMETERED_COLLABORATION_PATHS = new Set(["/api/case-brief"]);
 const ROLE_RANK: Record<string, number> = { viewer: 0, analyst: 1, owner: 2 };
 const ROUTE_UNITS: Record<string, number> = {
   "/api/audit": 15,
@@ -50,12 +52,16 @@ export default async function middleware(request: Request): Promise<Response> {
     const origin = request.headers.get("origin") || "";
     const allowed = new Set((process.env.ARGUS_CORS_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean));
     const headers: Record<string, string> = {
-      "access-control-allow-methods": "GET, POST, PUT, DELETE, OPTIONS",
+      "access-control-allow-methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
       "access-control-allow-headers": "Authorization, Content-Type",
       "access-control-max-age": "600",
       vary: "Origin",
     };
-    if (origin && pathname.startsWith("/api/v1/") && allowed.has(origin)) {
+    if (
+      origin
+      && (pathname.startsWith("/api/v1/") || pathname === "/api/case-brief")
+      && allowed.has(origin)
+    ) {
       headers["access-control-allow-origin"] = origin;
     }
     // Never forward an unauthenticated preflight into handlers that may ignore
@@ -148,7 +154,10 @@ export default async function middleware(request: Request): Promise<Response> {
   }
 
   let apiBudgetRemaining: number | null = null;
-  if (ROLE_RANK[requiredRole] >= ROLE_RANK.analyst) {
+  if (
+    ROLE_RANK[requiredRole] >= ROLE_RANK.analyst
+    && !UNMETERED_COLLABORATION_PATHS.has(pathname)
+  ) {
     const configuredLimit = Number.parseInt(
       role === "owner"
         ? process.env.ARGUS_OWNER_DAILY_API_UNITS || "1500"
