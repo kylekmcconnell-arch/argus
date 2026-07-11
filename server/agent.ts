@@ -5,9 +5,10 @@
 //
 // Gated on ANTHROPIC_API_KEY. With no key, callers fall back to heuristics.
 
+import { createHash } from "node:crypto";
 import { ANALYST_MODEL, env } from "./config";
 import { addClaudeUsage } from "./cost";
-import type { Contradiction } from "../src/data/evidence";
+import type { AxisEvidenceRecord, Contradiction } from "../src/data/evidence";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 
@@ -227,7 +228,14 @@ export async function scanContradictions(handle: string, evidenceJson: string): 
 // held role with a one-line rationale, classify identity, and write the headline.
 // The engine still owns caps/banding/composite — the agent only fills the axes.
 export interface AnalystVerdict {
-  axes: { axis: string; score: number; rationale: string }[];
+  axes: {
+    axis: string;
+    score: number;
+    rationale: string;
+    evidenceRefs: string[];
+    counterEvidenceRefs: string[];
+    gaps: string[];
+  }[];
   headline: string;
   identity_note: string;
 }
@@ -238,6 +246,11 @@ export interface AnalystAxis {
   role: string;
 }
 
+const ARTIFACT_ID = /^art_v1_[a-f0-9]{64}$/;
+const COVERAGE_ONLY_VERIFICATIONS = new Set<AxisEvidenceRecord["verification"]>(["checked_empty", "unavailable"]);
+const isSubstantiveArtifact = (artifact: AxisEvidenceRecord | undefined): artifact is AxisEvidenceRecord =>
+  !!artifact && !COVERAGE_ONLY_VERIFICATIONS.has(artifact.verification);
+
 // Tool schemas constrain the shape Claude is asked to return, but provider
 // responses are still untrusted input. An analyst result is usable only when it
 // contains one (and only one) finite, in-range score for every requested axis.
@@ -246,11 +259,17 @@ export interface AnalystAxis {
 export function validateAnalystVerdict(
   value: unknown,
   axisCatalog: AnalystAxis[],
+  evidenceCatalog: AxisEvidenceRecord[] = [],
 ): AnalystVerdict | null {
-  if (!value || typeof value !== "object" || !axisCatalog.length) return null;
+  if (!value || typeof value !== "object" || !axisCatalog.length || !evidenceCatalog.length) return null;
   const raw = value as Partial<AnalystVerdict>;
   if (!Array.isArray(raw.axes) || raw.axes.length !== axisCatalog.length) return null;
-  if (typeof raw.headline !== "string" || typeof raw.identity_note !== "string") return null;
+  if (
+    typeof raw.headline !== "string"
+    || !raw.headline.trim()
+    || typeof raw.identity_note !== "string"
+    || !raw.identity_note.trim()
+  ) return null;
 
   const expected = new Map<string, AnalystAxis>();
   for (const spec of axisCatalog) {
@@ -258,14 +277,72 @@ export function validateAnalystVerdict(
     expected.set(spec.axis, spec);
   }
 
-  const seen = new Map<string, { axis: string; score: number; rationale: string }>();
+  const artifacts = new Map<string, AxisEvidenceRecord>();
+  for (const artifact of evidenceCatalog) {
+    if (
+      !ARTIFACT_ID.test(artifact.artifactId)
+      || artifacts.has(artifact.artifactId)
+      || artifact.contentHash !== artifact.artifactId.slice("art_v1_".length)
+      || !Array.isArray(artifact.eligibleAxes)
+    ) return null;
+    artifacts.set(artifact.artifactId, artifact);
+  }
+
+  const validRefs = (value: unknown, min: number, max: number): string[] | null => {
+    if (!Array.isArray(value) || value.length < min || value.length > max) return null;
+    if (!value.every((item) => typeof item === "string" && ARTIFACT_ID.test(item))) return null;
+    const refs = value as string[];
+    return new Set(refs).size === refs.length ? [...refs] : null;
+  };
+  const validGaps = (value: unknown): string[] | null => {
+    if (!Array.isArray(value) || value.length > 6) return null;
+    const gaps = value.map((item) => typeof item === "string" ? item.trim() : "");
+    if (gaps.some((gap) => !gap || gap.length > 400) || new Set(gaps).size !== gaps.length) return null;
+    return gaps;
+  };
+
+  const seen = new Map<string, AnalystVerdict["axes"][number]>();
   for (const candidate of raw.axes as unknown[]) {
     if (!candidate || typeof candidate !== "object") return null;
-    const row = candidate as { axis?: unknown; score?: unknown; rationale?: unknown };
-    if (typeof row.axis !== "string" || typeof row.score !== "number" || typeof row.rationale !== "string") return null;
+    const row = candidate as {
+      axis?: unknown;
+      score?: unknown;
+      rationale?: unknown;
+      evidenceRefs?: unknown;
+      counterEvidenceRefs?: unknown;
+      gaps?: unknown;
+    };
+    if (
+      typeof row.axis !== "string"
+      || typeof row.score !== "number"
+      || typeof row.rationale !== "string"
+      || !row.rationale.trim()
+    ) return null;
     const spec = expected.get(row.axis);
     if (!spec || seen.has(row.axis) || !Number.isFinite(row.score) || row.score < 0 || row.score > spec.weight) return null;
-    seen.set(row.axis, { axis: row.axis, score: row.score, rationale: row.rationale.trim() });
+    const evidenceRefs = validRefs(row.evidenceRefs, 1, 12);
+    const counterEvidenceRefs = validRefs(row.counterEvidenceRefs, 0, 12);
+    const gaps = validGaps(row.gaps);
+    if (!evidenceRefs || !counterEvidenceRefs || !gaps) return null;
+    if (counterEvidenceRefs.some((ref) => evidenceRefs.includes(ref))) return null;
+    const everyRefEligible = [...evidenceRefs, ...counterEvidenceRefs].every((ref) => {
+      const artifact = artifacts.get(ref);
+      return artifact?.eligibleAxes.includes(row.axis as string);
+    });
+    if (!everyRefEligible) return null;
+    // Coverage records preserve exact gap lineage but cannot satisfy support by
+    // themselves. Every scored axis must also cite substantive evidence.
+    if (!evidenceRefs.some((ref) => isSubstantiveArtifact(artifacts.get(ref)))) return null;
+    if (evidenceRefs.some((ref) => !isSubstantiveArtifact(artifacts.get(ref))) && gaps.length === 0) return null;
+    if (!counterEvidenceRefs.every((ref) => isSubstantiveArtifact(artifacts.get(ref)))) return null;
+    seen.set(row.axis, {
+      axis: row.axis,
+      score: row.score,
+      rationale: row.rationale.trim(),
+      evidenceRefs,
+      counterEvidenceRefs,
+      gaps,
+    });
   }
   if (seen.size !== expected.size) return null;
 
@@ -285,6 +362,7 @@ interface AnalystEvidencePacketOptions {
    * enter the context used to score or contradict the audited subject.
    */
   includeInvestigativeLeads: boolean;
+  axisCatalog?: AnalystAxis[];
 }
 
 const clip = (value: unknown, max: number): string | undefined => {
@@ -425,6 +503,483 @@ const compactFinding = (value: unknown): Record<string, unknown> | null => {
   };
 };
 
+// Scoring eligibility is deliberately methodology-owned rather than inferred
+// by the model. Sections may support only the axes listed here; the validator
+// rejects a citation to a real artifact when that artifact is ineligible for
+// the particular axis being scored.
+const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
+  profile: [
+    "F1_identity_verifiability", "F5_reputation_integrity",
+    "P1_team_and_identity", "P5_traction_and_liveness", "P6_transparency_integrity",
+    "K1_identity_roster", "K3_disclosure_deletion",
+    "I1_identity_legitimacy", "AG1_identity_legitimacy",
+    "AD1_identity_verifiability", "ME1_identity", "ME2_role_authenticity", "ME3_conduct_reputation",
+  ],
+  // Visual profile-photo triage is a review lead, never identity proof and
+  // therefore never eligible to move a score.
+  profileAuthenticity: [],
+  trustGraphScreen: [
+    "F5_reputation_integrity", "F6_network_quality", "P1_team_and_identity", "P4_backing_and_partners", "P6_transparency_integrity",
+    "K1_identity_roster", "K4_onchain_conduct", "K5_cabal_fud", "I1_identity_legitimacy", "I4_testimonial_corroboration", "I5_reputation_fud",
+    "AG1_identity_legitimacy", "AG3_service_integrity", "AG4_reputation_fud", "AD1_identity_verifiability", "AD3_relationship_corroboration",
+    "AD4_advisory_conduct", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation",
+  ],
+  // Findings are routed by exact finding_type below. A section-wide allowlist
+  // made unrelated facts (for example, token collapse) eligible for identity.
+  findings: [],
+  ventures: [
+    "F2_track_record", "F3_repeat_backing", "F4_build_substance", "F5_reputation_integrity", "F6_network_quality",
+    "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "I2_portfolio_quality", "I3_fund_scale_tier",
+    "AG2_client_outcomes", "AD2_advised_outcomes",
+  ],
+  testimonials: ["F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "I4_testimonial_corroboration", "AD3_relationship_corroboration"],
+  advised: ["F2_track_record", "F5_reputation_integrity", "AD2_advised_outcomes", "AD3_relationship_corroboration", "AD4_advisory_conduct", "AD5_reputation_fud"],
+  promotions: ["F5_reputation_integrity", "P3_token_conduct", "P6_transparency_integrity", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud", "AG3_service_integrity", "AD4_advisory_conduct"],
+  wallets: ["F5_reputation_integrity", "P3_token_conduct", "P6_transparency_integrity", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "AD4_advisory_conduct"],
+  team: [
+    "F1_identity_verifiability", "F2_track_record", "F4_build_substance", "F6_network_quality",
+    "P1_team_and_identity", "P2_product_substance", "P4_backing_and_partners", "I1_identity_legitimacy",
+    "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity", "ME2_role_authenticity",
+  ],
+  notableFollowers: ["F6_network_quality", "P4_backing_and_partners", "P5_traction_and_liveness", "K5_cabal_fud", "I2_portfolio_quality", "I4_testimonial_corroboration", "I5_reputation_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
+  recentActivity: [
+    "F2_track_record", "F4_build_substance", "F5_reputation_integrity", "P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity",
+    "K2_call_performance", "K3_disclosure_deletion", "K5_cabal_fud", "I2_portfolio_quality", "I4_testimonial_corroboration", "I5_reputation_fud",
+    "AG2_client_outcomes", "AG3_service_integrity", "AG4_reputation_fud", "AD2_advised_outcomes", "AD3_relationship_corroboration", "AD4_advisory_conduct", "AD5_reputation_fud",
+    "ME2_role_authenticity", "ME3_conduct_reputation",
+  ],
+  // Source artifacts are routed by kind/provider below. An unknown artifact is
+  // intentionally ineligible; a gap is safer than a citation with no semantic
+  // relationship to the axis.
+  sourceArtifacts: [],
+  clientEngagements: ["F5_reputation_integrity", "AG2_client_outcomes", "AG3_service_integrity", "AG4_reputation_fud"],
+  associates: ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I5_reputation_fud", "AG4_reputation_fud", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  ventureTeams: ["F1_identity_verifiability", "F2_track_record", "F4_build_substance", "F6_network_quality", "P1_team_and_identity", "P2_product_substance", "P4_backing_and_partners", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability"],
+};
+
+const REPUTATION_FINDING_AXES = [
+  "F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud",
+  "I5_reputation_fud", "AG4_reputation_fud", "AD5_reputation_fud", "ME3_conduct_reputation",
+] as const;
+
+const IDENTITY_LEAD_FINDING_AXES = [
+  "F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity",
+  "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud",
+  "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud",
+  "ME1_identity", "ME3_conduct_reputation",
+] as const;
+
+/** Methodology-owned semantic routing for direct-subject finding artifacts. */
+const FINDING_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
+  CommunityFUD: REPUTATION_FINDING_AXES,
+  LegalCaseNameLead: IDENTITY_LEAD_FINDING_AXES,
+  SanctionsNameLead: IDENTITY_LEAD_FINDING_AXES,
+  SiteNotLive: ["F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
+  TokenCollapse: ["F5_reputation_integrity", "P3_token_conduct", "K2_call_performance", "K4_onchain_conduct"],
+  CadenceDecay: ["F4_build_substance", "P5_traction_and_liveness", "ME3_conduct_reputation"],
+  TrustGraphConnection: SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
+  AdvisoryRug: ["F5_reputation_integrity", "AD2_advised_outcomes", "AD4_advisory_conduct", "AD5_reputation_fud"],
+  DeceptionFinding: [
+    "F5_reputation_integrity", "P6_transparency_integrity", "K3_disclosure_deletion", "K5_cabal_fud",
+    "I4_testimonial_corroboration", "I5_reputation_fud", "AG3_service_integrity", "AG4_reputation_fud",
+    "AD3_relationship_corroboration", "AD4_advisory_conduct", "AD5_reputation_fud", "ME3_conduct_reputation",
+  ],
+  Exit: ["F2_track_record", "F3_repeat_backing", "F4_build_substance", "I2_portfolio_quality"],
+  IPO: ["F2_track_record", "F3_repeat_backing", "F4_build_substance", "I2_portfolio_quality"],
+  MeridianExit: ["F2_track_record", "F3_repeat_backing", "F4_build_substance", "I2_portfolio_quality"],
+  InvestigatorCallout: [
+    ...REPUTATION_FINDING_AXES,
+    "P3_token_conduct", "K3_disclosure_deletion", "K4_onchain_conduct", "AG3_service_integrity", "AD4_advisory_conduct",
+  ],
+};
+
+const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
+  "identity-resolution": ["F1_identity_verifiability", "P1_team_and_identity", "K1_identity_roster", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
+  "profile-photo-authenticity": [],
+  "code-footprint-github": ["F2_track_record", "F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
+  "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
+  "affiliations-associates": ["F2_track_record", "F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I2_portfolio_quality", "I4_testimonial_corroboration", "AD3_relationship_corroboration", "ME2_role_authenticity"],
+  "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
+  "vc-portfolio-track-record": ["F2_track_record", "F3_repeat_backing", "I2_portfolio_quality", "I3_fund_scale_tier"],
+  "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "I2_portfolio_quality", "I3_fund_scale_tier", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  "ofac-sanctions-name": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation"],
+  "trust-graph-connections": SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
+};
+
+const SOURCE_ARTIFACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
+  profile_photo: SECTION_AXIS_ELIGIBILITY.profileAuthenticity,
+  trust_graph: SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
+  legal_case: [
+    "F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity",
+    "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud",
+    "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud",
+    "ME1_identity", "ME3_conduct_reputation",
+  ],
+  sanctions_screen: [
+    "F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity",
+    "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud",
+    "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud",
+    "ME1_identity", "ME3_conduct_reputation",
+  ],
+  press: [
+    "F2_track_record", "F3_repeat_backing", "F4_build_substance", "F5_reputation_integrity", "F6_network_quality",
+    "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "P6_transparency_integrity",
+    "K5_cabal_fud", "I2_portfolio_quality", "I3_fund_scale_tier", "I5_reputation_fud",
+    "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation",
+  ],
+};
+
+const sourceArtifactKind = (value: Record<string, unknown>): string => {
+  const kind = typeof value.kind === "string" ? value.kind : "";
+  if (SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind]) return kind;
+  const provider = typeof value.provider === "string" ? value.provider : "";
+  if (provider === "claude-vision" || provider === "twitterapi") return "profile_photo";
+  if (provider === "argus-graph") return "trust_graph";
+  if (provider === "courtlistener") return "legal_case";
+  if (provider === "opensanctions") return "sanctions_screen";
+  if (provider === "google-news") return "press";
+  return "";
+};
+
+const stableJson = (value: unknown): string => {
+  const normalize = (candidate: unknown): unknown => {
+    if (candidate == null || typeof candidate === "string" || typeof candidate === "boolean") return candidate;
+    if (typeof candidate === "number") return Number.isFinite(candidate) ? candidate : null;
+    if (Array.isArray(candidate)) return candidate.map(normalize);
+    if (typeof candidate !== "object") return null;
+    return Object.fromEntries(
+      Object.keys(candidate as Record<string, unknown>)
+        .sort()
+        .filter((key) => (candidate as Record<string, unknown>)[key] !== undefined)
+        .map((key) => [key, normalize((candidate as Record<string, unknown>)[key])]),
+    );
+  };
+  return JSON.stringify(normalize(value));
+};
+
+const evidencePayload = (value: unknown): Record<string, unknown> => {
+  const base: Record<string, unknown> = value && typeof value === "object" && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : { value };
+  delete base.artifactId;
+  return base;
+};
+
+const eligibleAxesFor = (section: string, value: Record<string, unknown>, axisCatalog: AnalystAxis[]): string[] => {
+  const checkId = typeof value.checkId === "string" ? value.checkId : typeof value.check_id === "string" ? value.check_id : "";
+  const findingType = typeof value.finding_type === "string" ? value.finding_type : "";
+  const eligible = section === "profile" && value.profile_collection_state !== "resolved"
+    ? []
+    : section === "findings"
+      ? FINDING_AXIS_ELIGIBILITY[findingType] ?? []
+      : section === "checkOutcomes" && checkId
+    ? CHECK_AXIS_ELIGIBILITY[checkId] ?? []
+    : section === "sourceArtifacts"
+      ? SOURCE_ARTIFACT_AXIS_ELIGIBILITY[sourceArtifactKind(value)] ?? []
+      : SECTION_AXIS_ELIGIBILITY[section] ?? [];
+  const allowed = new Set(eligible);
+  return [...new Set(axisCatalog.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
+};
+
+const recordText = (record: Record<string, unknown>, keys: string[], max: number): string | undefined => {
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === "string" && value.trim()) return clip(value.trim(), max);
+  }
+  return undefined;
+};
+
+const safeArtifactSourceUrl = (value?: string): string | undefined => {
+  if (!value) return undefined;
+  try {
+    const url = new URL(value);
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password || !url.hostname) {
+      return undefined;
+    }
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(?:access[_-]?token|api[_-]?key|key|token|signature|sig|auth)$/i.test(key)) {
+        url.searchParams.delete(key);
+      }
+    }
+    return url.toString();
+  } catch {
+    return undefined;
+  }
+};
+
+const ARTIFACT_URL_FIELDS = new Set([
+  "sourceUrl", "source_url", "evidence_url", "url", "linkedin", "link", "href",
+  "citation", "link_evidence_url",
+]);
+
+const sanitizeArtifactUrls = (value: unknown, depth = 0): unknown => {
+  if (value == null || typeof value !== "object" || depth > 4) return value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeArtifactUrls(item, depth + 1));
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+    if (ARTIFACT_URL_FIELDS.has(key) && typeof item === "string") {
+      const safe = safeArtifactSourceUrl(item);
+      if (safe) sanitized[key] = safe;
+      continue;
+    }
+    sanitized[key] = sanitizeArtifactUrls(item, depth + 1);
+  }
+  return sanitized;
+};
+
+const verificationFor = (section: string, record: Record<string, unknown>): AxisEvidenceRecord["verification"] => {
+  if (section === "axisGaps") return "unavailable";
+  if (section === "checkOutcomes") {
+    const status = recordText(record, ["status"], 40)?.toLowerCase();
+    if (status === "confirmed" || status === "finding") return "verified";
+    if (status === "checked-empty") return "checked_empty";
+    if (status === "unavailable" || status === "unknown" || status === "stale" || status === "not-applicable") return "unavailable";
+  }
+  if (section === "findings") {
+    const status = recordText(record, ["verification_status"], 40)?.toLowerCase();
+    if (status === "verified" && record.artifact_verified === true) return "verified";
+    if (status === "reported") return "reported";
+  }
+  if (section === "sourceArtifacts") {
+    const match = recordText(record, ["match"], 40);
+    const kind = recordText(record, ["kind"], 80);
+    if (kind === "trust_graph") {
+      if (record.coverageState === "unavailable" || match === "observed") return "unavailable";
+      if (match === "screened_clear" || match === "no_match") return "checked_empty";
+      const contentHash = recordText(record, ["contentHash"], 64);
+      const sourceContentHash = recordText(record, ["sourceContentHash"], 64);
+      if (match === "risk_signal" && /^[a-f0-9]{64}$/i.test(contentHash ?? "") && /^[a-f0-9]{64}$/i.test(sourceContentHash ?? "")) {
+        return "verified";
+      }
+      return "unavailable";
+    }
+    if (match === "no_match" || match === "screened_clear") return "checked_empty";
+    if (match === "candidate") return "reported";
+  }
+  if (section === "trustGraphScreen") {
+    if (record.status === "incomplete") return "unavailable";
+    const connections = Array.isArray(record.connections) ? record.connections : [];
+    const qualifiedConnections = connections.filter((candidate) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+      const connection = candidate as Record<string, unknown>;
+      return connection.qualified === true && Array.isArray(connection.ties) && connection.ties.length > 0;
+    });
+    if (record.status === "clear" && qualifiedConnections.length === 0) return "checked_empty";
+    if (qualifiedConnections.length > 0) return "verified";
+    return "unavailable";
+  }
+  return "observed";
+};
+
+const DIRECT_SECTIONS = new Set(["profile", "profileAuthenticity", "findings", "wallets", "promotions", "recentActivity"]);
+
+const providerFor = (section: string, payload: Record<string, unknown>): string => {
+  const declared = recordText(payload, ["provider"], 100);
+  if (declared) return declared;
+  if (section === "profile") {
+    const profileProvider = recordText(payload, ["profile_provider"], 100);
+    if (profileProvider) return profileProvider;
+  }
+  const attributed = recordText(payload, ["source_author", "source"], 100);
+  if (attributed) return attributed;
+  const sourceUrl = safeArtifactSourceUrl(
+    recordText(payload, ["sourceUrl", "source_url", "evidence_url", "link_evidence_url", "url"], 420),
+  );
+  if (sourceUrl) {
+    try {
+      return new URL(sourceUrl).hostname.replace(/^www\./i, "");
+    } catch {
+      // safeArtifactSourceUrl already parsed it; retain the honest fallback below.
+    }
+  }
+  return section === "axisGaps" ? "argus" : "source-unspecified";
+};
+
+const makeAxisArtifact = (
+  section: string,
+  value: unknown,
+  axisCatalog: AnalystAxis[],
+  eligibleOverride?: string[],
+): { decorated: Record<string, unknown>; catalog: AxisEvidenceRecord } => {
+  const payload = sanitizeArtifactUrls(evidencePayload(value)) as Record<string, unknown>;
+  const contentHash = createHash("sha256").update(stableJson({ section, payload })).digest("hex");
+  const artifactId = `art_v1_${contentHash}`;
+  const eligibleAxes = eligibleOverride ?? eligibleAxesFor(section, payload, axisCatalog);
+  const provider = providerFor(section, payload);
+  const operationKey = recordText(payload, ["checkId", "check_id", "finding_type", "kind", "type"], 100);
+  const title = recordText(payload, ["title", "label", "claim", "name", "project_name", "handle", "axis"], 180)
+    ?? `${section} evidence`;
+  const excerpt = recordText(payload, ["excerpt", "note", "rationale", "evidence", "bio", "detail", "text", "value"], 320);
+  const sourceUrl = safeArtifactSourceUrl(
+    recordText(payload, ["sourceUrl", "source_url", "evidence_url", "url", "linkedin"], 420),
+  );
+  const capturedAt = recordText(payload, ["capturedAt", "captured_at", "profile_captured_at", "completedAt", "source_date"], 40);
+  return {
+    decorated: { ...payload, artifactId },
+    catalog: {
+      artifactId,
+      kind: "axis_evidence",
+      provider,
+      operation: section === "axisGaps" ? `coverage_gap:${eligibleAxes[0] ?? "unknown"}` : `${section}:${operationKey ?? "collect"}`,
+      section,
+      title,
+      ...(excerpt ? { excerpt } : {}),
+      ...(sourceUrl ? { sourceUrl } : {}),
+      ...(capturedAt ? { capturedAt } : {}),
+      contentHash,
+      eligibleAxes,
+      verification: verificationFor(section, payload),
+      scope: DIRECT_SECTIONS.has(section) ? "direct_subject" : "subject_context",
+    },
+  };
+};
+
+const SCORING_SINGLE_SECTIONS = ["profile", "profileAuthenticity", "trustGraphScreen"] as const;
+const SCORING_ARRAY_SECTIONS = [
+  "findings", "ventures", "testimonials", "advised", "promotions", "wallets", "team",
+  "notableFollowers", "recentActivity", "sourceArtifacts", "checkOutcomes",
+  "clientEngagements", "associates", "ventureTeams",
+] as const;
+
+function renderScoringPacket(packet: Record<string, unknown>, axisCatalog: AnalystAxis[]): Record<string, unknown> {
+  const rendered: Record<string, unknown> = { ...packet, schema_version: 4 };
+  const packetCoverage = packet.coverage && typeof packet.coverage === "object" && !Array.isArray(packet.coverage)
+    ? packet.coverage as Record<string, { available: number; included: number }>
+    : {};
+  const renderedCoverage = Object.fromEntries(
+    Object.entries(packetCoverage).map(([section, value]) => [section, { ...value }]),
+  );
+  // Decision calls may cite only content-addressed artifacts. Raw collection
+  // telemetry (including provider-run counts and omitted-row counts) stays in the
+  // investigator packet and cannot influence scoring as uncitable context.
+  delete rendered.coverage;
+  delete rendered.providerRuns;
+  const artifacts: AxisEvidenceRecord[] = [];
+  for (const section of SCORING_SINGLE_SECTIONS) {
+    if (packet[section] == null) continue;
+    const artifact = makeAxisArtifact(section, packet[section], axisCatalog);
+    if (artifact.catalog.eligibleAxes.length === 0) {
+      delete rendered[section];
+      continue;
+    }
+    rendered[section] = artifact.decorated;
+    artifacts.push(artifact.catalog);
+  }
+  for (const section of SCORING_ARRAY_SECTIONS) {
+    const values = Array.isArray(packet[section]) ? packet[section] as unknown[] : [];
+    const eligibleValues = values.flatMap((value) => {
+      const artifact = makeAxisArtifact(section, value, axisCatalog);
+      if (artifact.catalog.eligibleAxes.length === 0) return [];
+      artifacts.push(artifact.catalog);
+      return [artifact.decorated];
+    });
+    rendered[section] = eligibleValues;
+    if (renderedCoverage[section]) renderedCoverage[section].included = eligibleValues.length;
+  }
+
+  const axisGaps = axisCatalog.flatMap((axis) => {
+    // An existing unavailable check is already the explicit gap artifact for
+    // that axis. Synthesize a new one only when no retained record is eligible.
+    const hasEligibleEvidence = artifacts.some((artifact) => artifact.eligibleAxes.includes(axis.axis));
+    if (hasEligibleEvidence) return [];
+    const artifact = makeAxisArtifact("axisGaps", {
+      axis: axis.axis,
+      status: "unavailable",
+      note: `No retained scoring artifact is eligible for ${axis.axis}.`,
+    }, axisCatalog, [axis.axis]);
+    artifacts.push(artifact.catalog);
+    return [artifact.decorated];
+  });
+  rendered.axisGaps = axisGaps;
+  rendered.evidenceCatalog = [...new Map(artifacts.map((artifact) => [artifact.artifactId, artifact])).values()];
+  return rendered;
+}
+
+const isAxisEvidenceRecord = (value: unknown): value is AxisEvidenceRecord => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value as Partial<AxisEvidenceRecord>;
+  return typeof row.artifactId === "string"
+    && ARTIFACT_ID.test(row.artifactId)
+    && row.kind === "axis_evidence"
+    && typeof row.provider === "string" && !!row.provider
+    && typeof row.operation === "string" && !!row.operation
+    && typeof row.section === "string" && !!row.section
+    && typeof row.title === "string" && !!row.title
+    && (row.excerpt === undefined || typeof row.excerpt === "string")
+    && (row.sourceUrl === undefined || typeof row.sourceUrl === "string")
+    && (row.capturedAt === undefined || typeof row.capturedAt === "string")
+    && typeof row.contentHash === "string"
+    && row.contentHash === row.artifactId.slice("art_v1_".length)
+    && Array.isArray(row.eligibleAxes)
+    && row.eligibleAxes.length > 0
+    && row.eligibleAxes.every((axis) => typeof axis === "string" && !!axis)
+    && new Set(row.eligibleAxes).size === row.eligibleAxes.length
+    && ["verified", "reported", "observed", "checked_empty", "unavailable"].includes(String(row.verification))
+    && (row.scope === "direct_subject" || row.scope === "subject_context");
+};
+
+/** Parse and integrity-check the concise catalog frozen into a scorer packet. */
+export function extractScoringEvidenceCatalog(json: string): AxisEvidenceRecord[] {
+  let packet: Record<string, unknown>;
+  try {
+    const value = JSON.parse(json) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    packet = value as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(packet.evidenceCatalog) || !packet.evidenceCatalog.every(isAxisEvidenceRecord)) return [];
+  const catalog = packet.evidenceCatalog as AxisEvidenceRecord[];
+  const byId = new Map(catalog.map((record) => [record.artifactId, record]));
+  if (byId.size !== catalog.length) return [];
+
+  const represented = new Set<string>();
+  const inspect = (section: string, value: unknown) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const decorated = value as Record<string, unknown>;
+    if (typeof decorated.artifactId !== "string") return;
+    const artifactId = decorated.artifactId;
+    const payload = evidencePayload(decorated);
+    const contentHash = createHash("sha256").update(stableJson({ section, payload })).digest("hex");
+    const catalogRecord = byId.get(artifactId);
+    if (artifactId !== `art_v1_${contentHash}` || catalogRecord?.section !== section || catalogRecord.contentHash !== contentHash) return;
+    represented.add(artifactId);
+  };
+  for (const section of SCORING_SINGLE_SECTIONS) inspect(section, packet[section]);
+  for (const section of [...SCORING_ARRAY_SECTIONS, "axisGaps"] as const) {
+    if (Array.isArray(packet[section])) (packet[section] as unknown[]).forEach((value) => inspect(section, value));
+  }
+  return represented.size === catalog.length ? catalog.map((record) => ({ ...record, eligibleAxes: [...record.eligibleAxes] })) : [];
+}
+
+const pruneTrustGraphPacket = (packet: Record<string, unknown>): boolean => {
+  const screen = packet.trustGraphScreen;
+  if (!screen || typeof screen !== "object" || Array.isArray(screen)) return false;
+  const graph = screen as Record<string, unknown>;
+  const connections = Array.isArray(graph.connections) ? graph.connections as unknown[] : [];
+  for (let index = connections.length - 1; index >= 0; index--) {
+    const connection = connections[index];
+    if (!connection || typeof connection !== "object" || Array.isArray(connection)) continue;
+    const ties = (connection as Record<string, unknown>).ties;
+    if (Array.isArray(ties) && ties.length > 1) {
+      ties.pop();
+      return true;
+    }
+  }
+  if (connections.length > 1) {
+    connections.pop();
+    return true;
+  }
+  if (connections.length === 1) {
+    connections.pop();
+    return true;
+  }
+  delete packet.trustGraphScreen;
+  return true;
+};
+
 /**
  * Serialize evidence without ever truncating JSON text. Each section is capped
  * structurally and the packet records coverage, with findings receiving first
@@ -447,6 +1002,9 @@ function serializeAnalystEvidencePacket(
     sourceArtifacts: 24,
     checkOutcomes: 20,
     providerRuns: 24,
+    clientEngagements: 16,
+    associates: 16,
+    ventureTeams: 12,
   };
   const findingsRaw = Array.isArray(input.findings) ? input.findings : [];
   const profile = input.profile && typeof input.profile === "object" && !Array.isArray(input.profile)
@@ -464,11 +1022,17 @@ function serializeAnalystEvidencePacket(
     const scope = row.finding_scope && typeof row.finding_scope === "object" && !Array.isArray(row.finding_scope)
       ? row.finding_scope as Record<string, unknown>
       : undefined;
-    if (row.evidence_origin === "model_lead") return true;
+    if (row.evidence_origin === "model_lead" || row.artifact_verified === false) return true;
     if (!scope) return false; // backwards-compatible curated direct finding
     if (scope.scope !== "direct_subject" || scope.relationship_to_subject !== "self") return true;
     const targetEntityKey = normalizeEntityKey(scope.target_entity_key);
     return !!subjectEntityKey && targetEntityKey !== subjectEntityKey;
+  };
+  const hasTrustedFindingProvenance = (value: unknown): boolean => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const row = value as Record<string, unknown>;
+    return (row.evidence_origin === "deterministic" || row.evidence_origin === "human_verified")
+      && row.artifact_verified === true;
   };
   const findingPriority = (value: unknown): number => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return 4;
@@ -478,7 +1042,9 @@ function serializeAnalystEvidencePacket(
     if (typeof row.polarity === "number" && row.polarity < 0) return 2;
     return 3;
   };
-  const scoringFindingsRaw = findingsRaw.filter((value) => !isInvestigativeLead(value));
+  const scoringFindingsRaw = findingsRaw.filter((value) =>
+    !isInvestigativeLead(value)
+    && (!options.axisCatalog || hasTrustedFindingProvenance(value)));
   const investigativeLeadsRaw = findingsRaw.filter(isInvestigativeLead);
   const findings = scoringFindingsRaw
     .map((value, index) => ({ value, index }))
@@ -521,6 +1087,13 @@ function serializeAnalystEvidencePacket(
 
   for (const [section, limit] of Object.entries(sectionLimits)) {
     const rawSource = Array.isArray(input[section]) ? input[section] as unknown[] : [];
+    if (options.axisCatalog && section === "providerRuns") {
+      // Operational telemetry is useful for the investigator trace but is not
+      // evidence about the subject. Remove it structurally from decision calls
+      // so an uncitable provider state cannot influence a score.
+      coverage.providerRuns = { available: rawSource.length, included: 0 };
+      continue;
+    }
     const source = options.includeInvestigativeLeads
       ? rawSource
       : rawSource.filter((item) => {
@@ -548,23 +1121,62 @@ function serializeAnalystEvidencePacket(
     "ventures",
     "team",
     "providerRuns",
+    "associates",
+    "clientEngagements",
+    "ventureTeams",
     "checkOutcomes",
     "sourceArtifacts",
   ];
-  let json = JSON.stringify(packet);
+  const render = () => options.axisCatalog
+    ? renderScoringPacket(packet, options.axisCatalog)
+    : packet;
+  let json = JSON.stringify(render());
+  const protectedEvidenceSections = new Set(["checkOutcomes", "sourceArtifacts"]);
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
-    const section = pruneOrder.find((key) => Array.isArray(packet[key]) && (packet[key] as unknown[]).length > 0);
+    const section = pruneOrder.find((key) =>
+      !protectedEvidenceSections.has(key)
+      && Array.isArray(packet[key])
+      && (packet[key] as unknown[]).length > 0);
     if (!section) break;
     (packet[section] as unknown[]).pop();
     coverage[section].included = (packet[section] as unknown[]).length;
-    json = JSON.stringify(packet);
+    json = JSON.stringify(render());
   }
   // Pathological inputs can fill the entire budget with findings alone. Remove
   // complete lowest-priority rows, never bytes, and disclose the omitted count.
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS && findings.length > 1) {
     findings.pop();
     coverage.findings.included = findings.length;
-    json = JSON.stringify(packet);
+    json = JSON.stringify(render());
+  }
+  // A graph is a high-priority predicate, but its nested connection/tie arrays
+  // must still obey the same hard request budget as every other section.
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS && pruneTrustGraphPacket(packet)) {
+    json = JSON.stringify(render());
+  }
+  // Only after low-priority context and oversized graph detail are bounded do we
+  // trim primary source/check artifacts.
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
+    const section = pruneOrder.find((key) =>
+      protectedEvidenceSections.has(key)
+      && Array.isArray(packet[key])
+      && (packet[key] as unknown[]).length > 0);
+    if (!section) break;
+    (packet[section] as unknown[]).pop();
+    coverage[section].included = (packet[section] as unknown[]).length;
+    json = JSON.stringify(render());
+  }
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS && findings.length > 0) {
+    findings.pop();
+    coverage.findings.included = findings.length;
+    json = JSON.stringify(render());
+  }
+  if (json.length > ANALYST_EVIDENCE_MAX_CHARS && packet.profile != null) {
+    delete packet.profile;
+    json = JSON.stringify(render());
+  }
+  if (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
+    throw new Error(`analyst evidence packet exceeds ${ANALYST_EVIDENCE_MAX_CHARS} characters after structural pruning`);
   }
   return json;
 }
@@ -582,8 +1194,8 @@ export function buildAnalystEvidencePacket(input: Record<string, unknown>): stri
  * leads are removed as data, not merely accompanied by a prompt instruction,
  * so related-entity allegations cannot influence either decision call.
  */
-export function buildScoringEvidencePacket(input: Record<string, unknown>): string {
-  return serializeAnalystEvidencePacket(input, { includeInvestigativeLeads: false });
+export function buildScoringEvidencePacket(input: Record<string, unknown>, axisCatalog: AnalystAxis[]): string {
+  return serializeAnalystEvidencePacket(input, { includeInvestigativeLeads: false, axisCatalog });
 }
 
 export async function analyzeSubject(
@@ -593,6 +1205,21 @@ export async function analyzeSubject(
   evidenceJson: string,
 ): Promise<AnalystVerdict | null> {
   if (!axisCatalog.length) return null;
+  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
+  if (
+    !evidenceCatalog.length
+    || axisCatalog.some((axis) => !evidenceCatalog.some((artifact) =>
+      isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis)))
+  ) return null;
+  const requestedAxisNames = new Set(axisCatalog.map((axis) => axis.axis));
+  const allowedRefs = evidenceCatalog
+    .filter((artifact) => artifact.eligibleAxes.some((axis) => requestedAxisNames.has(axis)))
+    .map((artifact) => artifact.artifactId);
+  const substantiveRefs = evidenceCatalog
+    .filter((artifact) =>
+      isSubstantiveArtifact(artifact)
+      && artifact.eligibleAxes.some((axis) => requestedAxisNames.has(axis)))
+    .map((artifact) => artifact.artifactId);
   const system =
     "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject " +
     "on a fixed set of axes from collected evidence only. Be skeptical: a strong " +
@@ -633,6 +1260,17 @@ export async function analyzeSubject(
     `responsibility. This restriction applies to finding collections, not to ` +
     `legitimate non-finding evidence: profile, team, wallet, check-outcome, source, ` +
     `and provider evidence may affect scoring when relevant and reliable.\n\n` +
+    `CITATION RULE: every axis must return evidenceRefs, counterEvidenceRefs, and ` +
+    `gaps. evidenceRefs must contain 1 to 12 exact artifactId values from ` +
+    `evidenceCatalog whose eligibleAxes includes that axis. counterEvidenceRefs ` +
+    `must contain 0 to 12 eligible artifact IDs that credibly pull against the ` +
+    `score. Never put the same artifact in both arrays. gaps must contain 0 to 6 ` +
+    `short descriptions of material unresolved evidence. Artifacts whose ` +
+    `verification is "unavailable" or "checked_empty" are coverage gaps only. ` +
+    `They may appear in evidenceRefs only alongside at least one substantive ` +
+    `support artifact and a matching description in gaps; they may never appear ` +
+    `in counterEvidenceRefs. providerRuns operational telemetry is excluded ` +
+    `from the scoring packet and must never be inferred or cited.\n\n` +
     `TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection ` +
     `findings bound to an exact complete server-collected report may influence scoring. ` +
     `Weak or unqualified ties are context only. ARGUS applies any graph cap ` +
@@ -652,19 +1290,42 @@ export async function analyzeSubject(
             properties: {
               axis: { type: "string", enum: axisCatalog.map((a) => a.axis) },
               score: { type: "number", minimum: 0, maximum: Math.max(...axisCatalog.map((a) => a.weight)) },
-              rationale: { type: "string" },
+              rationale: { type: "string", minLength: 1 },
+              evidenceRefs: {
+                type: "array",
+                minItems: 1,
+                maxItems: 12,
+                uniqueItems: true,
+                items: { type: "string", enum: allowedRefs },
+              },
+              counterEvidenceRefs: {
+                type: "array",
+                minItems: 0,
+                maxItems: 12,
+                uniqueItems: true,
+                items: { type: "string", enum: substantiveRefs },
+              },
+              gaps: {
+                type: "array",
+                minItems: 0,
+                maxItems: 6,
+                uniqueItems: true,
+                items: { type: "string", minLength: 1, maxLength: 400 },
+              },
             },
-            required: ["axis", "score", "rationale"],
+            required: ["axis", "score", "rationale", "evidenceRefs", "counterEvidenceRefs", "gaps"],
+            additionalProperties: false,
           },
         },
-        headline: { type: "string" },
-        identity_note: { type: "string", description: "Identity resolution. Distinguish the ACCOUNT OPERATOR from the project's TEAM: if named team members are present in the evidence (especially with a LinkedIn), acknowledge them by name and do NOT claim 'no linked real-world identity' or 'zero credentials' — instead say the account/operator is pseudonymous while N named people are publicly tied to the project (list a few). Only say no one is identified if the evidence truly has no named people." },
+        headline: { type: "string", minLength: 1 },
+        identity_note: { type: "string", minLength: 1, description: "Identity resolution. Distinguish the ACCOUNT OPERATOR from the project's TEAM: if named team members are present in the evidence (especially with a LinkedIn), acknowledge them by name and do NOT claim 'no linked real-world identity' or 'zero credentials' — instead say the account/operator is pseudonymous while N named people are publicly tied to the project (list a few). Only say no one is identified if the evidence truly has no named people." },
       },
       required: ["axes", "headline", "identity_note"],
+      additionalProperties: false,
     },
   };
-  const raw = await structured<unknown>(system, user, tool, 3000);
-  const validated = validateAnalystVerdict(raw, axisCatalog);
+  const raw = await structured<unknown>(system, user, tool, 6000);
+  const validated = validateAnalystVerdict(raw, axisCatalog, evidenceCatalog);
   if (raw && !validated) console.warn("[agent] rejected incomplete or invalid analyst axis set");
   return validated;
 }

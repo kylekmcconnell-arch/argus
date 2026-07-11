@@ -31,6 +31,7 @@ import { SanctionsNameScreen } from "./SanctionsNameScreen";
 import { RingAlert } from "./RingAlert";
 import { useArgusAuth } from "../auth-context";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
+import { DecisionBasis } from "./DecisionBasis";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -121,12 +122,18 @@ function AxisBar({
   weight,
   rationale,
   color,
+  evidenceRefs,
+  counterEvidenceRefs,
+  gaps,
 }: {
   axis: string;
   score: number;
   weight: number;
   rationale: string;
   color: string;
+  evidenceRefs?: string[];
+  counterEvidenceRefs?: string[];
+  gaps?: string[];
 }) {
   const ratio = weight ? score / weight : 0;
   const weak = ratio < 0.45;
@@ -146,6 +153,17 @@ function AxisBar({
         />
       </div>
       {rationale && <p className="mt-1.5 text-[12px] leading-snug text-ink-faint">{rationale}</p>}
+      {evidenceRefs && (
+        <a
+          href={`#decision-basis-${axis}`}
+          className="mt-1.5 inline-flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 rounded-md text-[11.5px] text-signal underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+        >
+          <span>{evidenceRefs.length} evidence {evidenceRefs.length === 1 ? "artifact" : "artifacts"}</span>
+          {(counterEvidenceRefs?.length ?? 0) > 0 && <span className="text-caution">{counterEvidenceRefs!.length} counter</span>}
+          {(gaps?.length ?? 0) > 0 && <span className="text-caution">{gaps!.length} {gaps!.length === 1 ? "gap" : "gaps"}</span>}
+          <span aria-hidden="true">↑</span>
+        </a>
+      )}
     </div>
   );
 }
@@ -198,7 +216,17 @@ function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing:
         <div className="overflow-hidden border-t border-line px-4 pb-3">
           <div className="divide-y divide-line/60">
             {axes.map(([k, a]) => (
-              <AxisBar key={k} axis={k} score={a.score} weight={a.weight} rationale={a.rationale} color={m.color} />
+              <AxisBar
+                key={k}
+                axis={k}
+                score={a.score}
+                weight={a.weight}
+                rationale={a.rationale}
+                color={m.color}
+                evidenceRefs={governing ? a.evidenceRefs : undefined}
+                counterEvidenceRefs={governing ? a.counterEvidenceRefs : undefined}
+                gaps={governing ? a.gaps : undefined}
+              />
             ))}
           </div>
           {rr.dox_bonus > 0 && (
@@ -521,75 +549,6 @@ function validHash(value?: string): string | null {
   return value && /^[a-f0-9]{64}$/i.test(value) ? value.toLowerCase() : null;
 }
 
-type FrozenOutcomeCheck = NonNullable<Dossier["checkRuns"]>[number];
-
-const SUPPORT_CHECK_PRIORITY = [
-  { checkId: "identity-resolution", label: "Identity resolution" },
-  { checkId: "code-footprint-github", label: "GitHub footprint" },
-  { checkId: "affiliations-associates", label: "Affiliation corroboration" },
-  { checkId: "vc-portfolio-track-record", label: "Venture-record corroboration" },
-] as const;
-
-const NON_SUPPORTING_NOTE = /\b(?:no|none|not|without|unknown|unavailable|failed|failure|missing|unresolved|unconfirmed|cannot|could not|did not|does not)\b/i;
-
-function supportingNoteClause(note?: string): string | null {
-  if (!note) return null;
-  return note
-    .split(/\s+·\s+/)
-    .map((clause) => clause.trim())
-    .find((clause) => clause.length > 0 && !NON_SUPPORTING_NOTE.test(clause)) ?? null;
-}
-
-function asSentence(value: string): string {
-  return /[.!?]$/.test(value) ? value : `${value}.`;
-}
-
-/**
- * Select report support only from immutable collector outcomes. A model score,
- * axis rationale, or positive narrative finding cannot populate this summary.
- * Checked-empty/no-match evidence is useful coverage, but never positive
- * support. Press is included only when a confirmed check has an inspectable,
- * hashed exact-match artifact, and remains explicitly sentiment-neutral.
- */
-function strongestRecordedSupport(
-  checks: readonly FrozenOutcomeCheck[],
-  artifacts: readonly FrozenSourceArtifact[],
-): string {
-  for (const candidate of SUPPORT_CHECK_PRIORITY) {
-    const check = checks.find((item) =>
-      item.checkId === candidate.checkId
-      && item.status === "confirmed"
-      && (item.sourceCount ?? 0) > 0,
-    );
-    const note = supportingNoteClause(check?.note);
-    if (note) return `${candidate.label} · ${asSentence(note)}`;
-  }
-
-  const pressCheck = checks.find((check) =>
-    check.checkId === "news-press"
-    && check.status === "confirmed"
-    && (check.sourceCount ?? 0) > 0
-    && supportingNoteClause(check.note),
-  );
-  const pressArtifact = pressCheck
-    ? artifacts
-      .filter((artifact) =>
-        artifact.kind === "press"
-        && (artifact.match === "exact_handle" || artifact.match === "exact_name")
-        && Boolean(validHash(artifact.contentHash))
-        && Boolean(safeSourceLink(artifact.sourceUrl))
-        && artifact.title.trim().length > 0,
-      )
-      .sort((left, right) => Number(right.match === "exact_handle") - Number(left.match === "exact_handle"))[0]
-    : undefined;
-  if (pressArtifact) {
-    const match = pressArtifact.match === "exact_handle" ? "exact handle" : "exact name";
-    return `Public-footprint evidence · A frozen press source matched the ${match}: ${asSentence(pressArtifact.title.trim())} This records a source match, not favorable coverage.`;
-  }
-
-  return "No confirmed supporting outcome is frozen in this snapshot. Checked-empty and no-match records count toward coverage, not positive support.";
-}
-
 function safeFrozenImageData(value?: string): string | null {
   return value && /^data:image\/(?:jpeg|png|gif|webp);base64,[a-z0-9+/=]+$/i.test(value)
     ? value
@@ -804,11 +763,12 @@ function FrozenTrustGraphPanel({
 function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }) {
   if (!artifacts.length) return null;
   return (
-    <Section
-      title="Frozen source ledger"
-      kicker="off-chain sources captured before scoring · tamper-evident artifact records"
-    >
-      <Card className="divide-y divide-line/60 overflow-hidden">
+    <div id="frozen-source-ledger" className="scroll-mt-24">
+      <Section
+        title="Frozen source ledger"
+        kicker="off-chain sources captured before scoring · tamper-evident artifact records"
+      >
+        <Card className="divide-y divide-line/60 overflow-hidden">
         {artifacts.map((artifact, index) => {
           const source = safeSourceLink(artifact.sourceUrl);
           const capturedAt = frozenSourceDate(artifact.capturedAt);
@@ -830,7 +790,7 @@ function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }
                 ? "var(--color-ink-dim)"
                 : "var(--color-signal)";
           return (
-            <article key={`${artifact.provider}:${artifact.contentHash}:${index}`} className="px-4 py-3.5">
+            <article id={`source-${artifact.contentHash}`} key={`${artifact.provider}:${artifact.contentHash}:${index}`} className="scroll-mt-24 px-4 py-3.5">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide text-ink-dim">
                   {SOURCE_KIND_LABEL[artifact.kind]}
@@ -865,17 +825,59 @@ function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }
             </article>
           );
         })}
-      </Card>
-    </Section>
+        </Card>
+      </Section>
+    </div>
   );
 }
 
 /* ── main report ──────────────────────────────────────────────────── */
 
+type ReportTeamMember = Dossier["webTeam"][number];
+
+function groundedTeamMember(member: ReportTeamMember): boolean {
+  return member.evidence_origin !== "model_lead" && member.artifact_verified === true;
+}
+
+function sanitizedGroundedTeamMember(member: ReportTeamMember): ReportTeamMember {
+  return {
+    ...member,
+    ...(member.identity_link_evidence_origin === "model_lead"
+      ? { handle: undefined, linkedin: undefined }
+      : {}),
+    ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
+  };
+}
+
+function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
+  const inferred = (dossier.webTeam ?? []).flatMap((member) => {
+    if (!groundedTeamMember(member)) return [member];
+    if (member.identity_link_evidence_origin !== "model_lead" && member.projects_evidence_origin !== "model_lead") return [];
+    return [{
+      ...member,
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
+      provider: "grok",
+    }];
+  });
+  const seen = new Set<string>();
+  return [...(dossier.webTeamLeads ?? []), ...inferred].filter((member) => {
+    const key = [member.name, member.handle ?? "", member.linkedin ?? "", member.role, member.source].join("|").toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void }) {
   const { role } = useArgusAuth();
   const f = dossier;
-  const { report, graph, founderSummary, evidence, webTeam } = dossier;
+  const { report, graph, founderSummary, evidence } = dossier;
+  const webTeam = (dossier.webTeam ?? []).filter(groundedTeamMember).map(sanitizedGroundedTeamMember);
+  const webTeamLeads = reportTeamLeads(dossier);
+  const groundedVentureNames = (evidence.ventures ?? [])
+    .filter((venture) => venture.evidence_origin !== "model_lead" && venture.artifact_verified === true)
+    .map((venture) => venture.project_name);
   const roles = report.roles as SubjectClass[];
   const derivedDiligenceChecks = personChecks({
     identityConfidence: report.identity_confidence ?? undefined,
@@ -982,7 +984,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const capturedLabel = versionContext?.createdAt
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : null;
-  const strongestSupport = strongestRecordedSupport(frozenOutcomeChecks, f.sourceArtifacts ?? []);
+  const governingRoleReport = report.role_reports.find((rr) => rr.role === report.governing_role)
+    ?? report.role_reports[0];
   const publishableSubjectFindings = report.publishable_findings.filter((finding) =>
     isPublishableSubjectFinding(finding, report.handle),
   );
@@ -1002,17 +1005,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     const text = `${contradiction.claim}\n${contradiction.conflict}`.toLowerCase();
     return ![...quarantinedRelatedHandles].some((target) => text.includes(`@${target}`));
   });
-  const recordedConcern = publishableSubjectFindings.find((finding) => finding.polarity < 0)?.claim;
-  const highestConcern = recordedConcern
-    ?? (readiness.status === "ready"
-      ? "No adverse finding is recorded; review the evidence before deciding."
-      : "No adverse finding is recorded, but incomplete coverage prevents a clean inference.");
-  const openCheckLabels = diligenceChecks
-    .filter((check) => check.status === "unknown" || check.status === "unavailable" || check.status === "stale")
-    .map((check) => check.label);
-  const unresolvedSummary = openCheckLabels.length
-    ? `${openCheckLabels.slice(0, 2).join(" · ")}${openCheckLabels.length > 2 ? ` · +${openCheckLabels.length - 2} more` : ""}`
-    : "No unresolved applicable checks.";
   const [watched, setWatched] = useState(() => isWatched(report.handle));
   // The compounding web: who else (from your past audits) this subject is tied to.
   const connections = subjectConnections(report.handle, getContributions());
@@ -1327,21 +1319,30 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               </div>
             )}
             {legacyCoverageNotCaptured ? (
-              <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-caution/35 bg-caution/5 px-4 py-3">
-                <div className="min-w-0 flex-1">
-                  <div className="text-[12px] font-medium text-ink">Frozen coverage unavailable</div>
-                  <p className="mt-1 max-w-2xl text-[11.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
+              <>
+                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-caution/35 bg-caution/5 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12px] font-medium text-ink">Frozen coverage unavailable</div>
+                    <p className="mt-1 max-w-2xl text-[11.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
+                  </div>
+                  {onRescan && (
+                    <button
+                      type="button"
+                      onClick={onRescan}
+                      className="mono min-h-11 shrink-0 rounded-lg border border-signal px-3 py-2 text-[11px] font-medium text-signal transition hover:bg-signal/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+                    >
+                      Rescan to capture coverage
+                    </button>
+                  )}
                 </div>
-                {onRescan && (
-                  <button
-                    type="button"
-                    onClick={onRescan}
-                    className="mono shrink-0 rounded-lg border border-signal px-3 py-2 text-[11px] font-medium text-signal transition hover:bg-signal/10"
-                  >
-                    Rescan to capture coverage
-                  </button>
-                )}
-              </div>
+                <div className="mt-3">
+                  <DecisionBasis
+                    roleReport={governingRoleReport}
+                    catalog={f.axisEvidenceCatalog}
+                    lineageVersion={f.axisCitationVersion}
+                  />
+                </div>
+              </>
             ) : (
               <>
                 <dl className="mt-3 grid gap-2 sm:grid-cols-3">
@@ -1358,20 +1359,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     <dd className="mono mt-0.5 text-[16px] font-semibold" style={{ color: readiness.unresolved ? readinessColor : "var(--color-ink)" }}>{readiness.unresolved}</dd>
                   </div>
                 </dl>
-                <dl className="mt-3 grid gap-2 lg:grid-cols-3">
-                  <div className="rounded-lg border border-line/70 px-3 py-2.5">
-                    <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Strongest recorded support</dt>
-                    <dd className="mt-1 text-[11px] leading-relaxed text-ink-dim">{strongestSupport}</dd>
-                  </div>
-                  <div className="rounded-lg border border-line/70 px-3 py-2.5">
-                    <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Highest recorded concern</dt>
-                    <dd className="mt-1 text-[11px] leading-relaxed text-ink-dim">{highestConcern}</dd>
-                  </div>
-                  <div className="rounded-lg border border-line/70 px-3 py-2.5">
-                    <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Open questions</dt>
-                    <dd className="mt-1 text-[11px] leading-relaxed text-ink-dim">{unresolvedSummary}</dd>
-                  </div>
-                </dl>
+                <div className="mt-3">
+                  <DecisionBasis
+                    roleReport={governingRoleReport}
+                    catalog={f.axisEvidenceCatalog}
+                    lineageVersion={f.axisCitationVersion}
+                    onRescan={onRescan}
+                  />
+                </div>
                 {presentation.final && (
                   <p className="mt-3 text-[11.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
                 )}
@@ -1460,6 +1455,36 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 </p>
               )}
             </div>
+          </div>
+        )}
+
+        {webTeamLeads.length > 0 && (
+          <div className="mt-3">
+            <div className="mb-1.5 flex flex-wrap items-center gap-2">
+              <span className="mono rounded border border-caution/45 px-1.5 py-0.5 text-[10.5px] text-caution">Investigative team candidates</span>
+              <span className="text-[11px] text-ink-faint">unverified leads · not identity proof · not scored or sent to report chat</span>
+            </div>
+            <Card className="divide-y divide-line/60 border-caution/25">
+              {webTeamLeads.map((member, index) => (
+                <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-[12px]">
+                  <span className="font-medium text-ink-dim">{member.name}</span>
+                  <span className="mono rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-faint">{member.role}</span>
+                  {member.handle && <span className="mono text-[10.5px] text-caution">candidate {member.handle}</span>}
+                  {member.linkedin && <span className="text-[10.5px] text-ink-faint">LinkedIn candidate recorded</span>}
+                  <span className="text-[10px] text-ink-faint">{member.provider ?? member.source}</span>
+                  {member.evidence && <span className="min-w-full text-[10.5px] leading-relaxed text-ink-faint">{member.evidence}</span>}
+                  {member.handle && onAudit && (
+                    <button
+                      type="button"
+                      onClick={() => onAudit(member.handle!)}
+                      className="mono ml-auto min-h-11 rounded-md border border-caution/45 px-2.5 py-1 text-[10.5px] text-caution transition hover:bg-caution/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-caution"
+                    >
+                      verify →
+                    </button>
+                  )}
+                </div>
+              ))}
+            </Card>
           </div>
         )}
 
@@ -1788,6 +1813,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
+          {/* transparent scan methodology — what ARGUS checked on this person */}
+          {diligenceChecks.length > 0 && (
+            <div className="min-w-0 lg:col-span-2">
+              <MethodologyChecklist id="scan-methodology" checks={diligenceChecks} />
+            </div>
+          )}
+
           <div className="min-w-0 lg:col-span-2">
             <Section title="Connection web" kicker="click any node to open it · subject → projects → the people behind them">
               <Card className="p-2">
@@ -1796,20 +1828,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </Section>
           </div>
 
-          {/* transparent scan methodology — what ARGUS checked on this person */}
-          {diligenceChecks.length > 0 && (
-            <div className="min-w-0 lg:col-span-2">
-              <MethodologyChecklist id="scan-methodology" checks={diligenceChecks} />
-            </div>
-          )}
-
           {/* ask-the-report chat — grounded in this person's own evidence */}
           <div className="min-w-0 lg:col-span-2">
             <AskReport subject={report.handle} context={[
               f.headline,
               `roles: ${roles.join(", ")}`,
               showTrustGraphSupplemental && !versionContext && connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
-              (evidence.ventures ?? []).length ? `ventures: ${evidence.ventures.map((v) => v.project_name).join(", ")}` : "",
+              groundedVentureNames.length ? `ventures: ${groundedVentureNames.join(", ")}` : "",
               (webTeam ?? []).length ? `team/associates: ${webTeam.map((p) => p.name).join(", ")}` : "",
             ].filter(Boolean).join(" | ")} />
           </div>

@@ -137,9 +137,20 @@ export const redditAdapter: Adapter = {
         claim: h.title,
         source_url: h.url,
         source_date: new Date().toISOString().slice(0, 10),
+        source_author: "reddit",
         verification_status: "Reported",
         independent_source_count: 1,
         polarity: -1,
+        provider: "reddit",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        finding_scope: {
+          scope: "direct_subject",
+          target_entity_key: ctx.evidence.profile.handle,
+          target_entity_type: "person",
+          relationship_to_subject: "self",
+          relationship_label: "Reddit search result naming the audited handle",
+        },
       });
     }
     ctx.emit({ phase: "Reputation", label: `${hits.length} threads`, detail: `Top: "${hits[0].title.slice(0, 70)}" (${hits[0].sub})`, source: "reddit", tone: hits.length > 3 ? "warn" : "neutral" });

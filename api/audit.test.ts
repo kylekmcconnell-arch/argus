@@ -127,6 +127,7 @@ describe("person audit input guard", () => {
     vi.mocked(runAudit).mockResolvedValue({
       live: true,
       handle: "@argus",
+      axisCitationVersion: 1,
       completeness_state: "complete",
       report: {
         audit_id: "audit-run-1",
@@ -302,6 +303,7 @@ describe("person audit input guard", () => {
     vi.mocked(runAudit).mockResolvedValue({
       live: true,
       handle: "@argus",
+      axisCitationVersion: 1,
       completeness_state: "complete",
       report: { audit_id: "audit-run-graph", composite_verdict: "PASS", governing_score: 82 },
       checkRuns: [{ checkId: "identity-resolution", label: "Identity resolution", status: "confirmed" }],
@@ -318,6 +320,11 @@ describe("person audit input guard", () => {
     const { res } = response();
 
     await handler(request("argus"), res);
+
+    const versionWrite = vi.mocked(fetch).mock.calls[0]?.[1];
+    expect(JSON.parse(String(versionWrite?.body))).toMatchObject({
+      p_methodology_version: "argus-person-v3-lineage",
+    });
 
     expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledWith(
       expect.anything(),

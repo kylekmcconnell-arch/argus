@@ -196,4 +196,40 @@ describe("Reddit provider attempt accounting", () => {
       }),
     ]));
   });
+
+  it("freezes Reddit complaints as reported reputation evidence with exact provider lineage", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ access_token: "token", expires_in: 3600 }))
+      .mockResolvedValueOnce(json({
+        data: {
+          children: [{ data: { title: "A warning about subject", subreddit_name_prefixed: "r/web3", score: 8, permalink: "/warning" } }],
+        },
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { redditAdapter } = await loadModules();
+    const { emptyEvidence } = await import("../../src/data/evidence");
+    const { buildScoringEvidencePacket, extractScoringEvidenceCatalog } = await import("../agent");
+    const evidence = emptyEvidence("@subject");
+
+    await redditAdapter.run({ handle: evidence.profile.handle, evidence, emit: vi.fn(), recordCheck: vi.fn() });
+
+    expect(evidence.findings[0]).toMatchObject({
+      provider: "reddit",
+      source_author: "reddit",
+      verification_status: "Reported",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      finding_scope: { scope: "direct_subject", target_entity_key: "@subject", relationship_to_subject: "self" },
+    });
+    const catalog = extractScoringEvidenceCatalog(buildScoringEvidencePacket({ findings: evidence.findings }, [
+      { axis: "F1_identity_verifiability", weight: 12, role: "FOUNDER" },
+      { axis: "F5_reputation_integrity", weight: 18, role: "FOUNDER" },
+    ]));
+    const artifact = catalog.find((candidate) => candidate.section === "findings");
+    expect(artifact).toMatchObject({
+      provider: "reddit",
+      verification: "reported",
+      eligibleAxes: ["F5_reputation_integrity"],
+    });
+  });
 });

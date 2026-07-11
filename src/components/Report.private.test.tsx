@@ -7,7 +7,7 @@ import { buildReport, SUBJECTS } from "../data/subjects";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const harness = vi.hoisted(() => ({ livePanel: vi.fn() }));
+const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn() }));
 
 vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
@@ -26,7 +26,7 @@ vi.mock("./AddInfo", () => ({ AddInfo: () => { harness.livePanel("add-info"); re
 vi.mock("./LinkEntity", () => ({ LinkEntity: () => { harness.livePanel("link-entity"); return null; } }));
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => <div>service-ready</div> }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: () => null }));
-vi.mock("./AskReport", () => ({ AskReport: () => null }));
+vi.mock("./AskReport", () => ({ AskReport: (props: Record<string, unknown>) => { harness.askReport(props); return null; } }));
 vi.mock("./Avatar", () => ({ Avatar: () => null }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => null }));
 
@@ -37,6 +37,7 @@ let container: HTMLDivElement;
 
 beforeEach(() => {
   harness.livePanel.mockReset();
+  harness.askReport.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -47,19 +48,48 @@ afterEach(() => {
   container.remove();
 });
 
-function readinessSupportText(): string {
-  const label = [...container.querySelectorAll("dt")]
-    .find((node) => node.textContent?.trim() === "Strongest recorded support");
-  return label?.parentElement?.textContent ?? "";
-}
-
-function readinessConcernText(): string {
-  const label = [...container.querySelectorAll("dt")]
-    .find((node) => node.textContent?.trim() === "Highest recorded concern");
-  return label?.parentElement?.textContent ?? "";
+function decisionBasisText(): string {
+  return container.querySelector('section[aria-label="Decision basis"]')?.textContent ?? "";
 }
 
 describe("private person report evidence boundary", () => {
+  it("renders model-only team identities as leads and excludes them from grounded report chat", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const modelVenture = {
+      ...base.evidence.ventures[0],
+      project_name: "Model Venture",
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
+    };
+    const dossier = {
+      ...base,
+      webTeam: [{
+        name: "Model Team Lead",
+        handle: "@model_team_lead",
+        linkedin: "linkedin.com/in/model-team-lead",
+        role: "CTO",
+        source: "Grok web search",
+        provider: "grok",
+        evidence_origin: "model_lead" as const,
+        artifact_verified: false,
+      }],
+      evidence: { ...base.evidence, ventures: [modelVenture] },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Investigative team candidates");
+    expect(container.textContent).toContain("Model Team Lead");
+    expect(container.textContent).toContain("not identity proof");
+    expect(container.textContent).not.toContain("identity resolved through the named team");
+    expect(container.querySelector('a[href*="model-team-lead"]')).toBeNull();
+    const context = String(harness.askReport.mock.calls.at(-1)?.[0]?.context ?? "");
+    expect(context).not.toContain("Model Team Lead");
+    expect(context).not.toContain("Model Venture");
+  });
+
   it("does not mount subject-specific supplemental panels", () => {
     const dossier = {
       ...buildReport(SUBJECTS[1]),
@@ -354,7 +384,7 @@ describe("decision-safe person report presentation", () => {
     expect(mountedPanels).not.toContain("ring-alert");
   });
 
-  it("summarizes confirmed collector support instead of model findings", () => {
+  it("does not infer legacy axis lineage from collector prose or model findings", () => {
     const base = buildReport(SUBJECTS[1]);
     const modelFinding = {
       ...base.report.publishable_findings[0],
@@ -424,14 +454,15 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    const support = readinessSupportText();
-    expect(support).toContain("Identity resolution");
-    expect(support).toContain("GitHub account kylemcconnell links back to @kyle");
-    expect(support).not.toContain("MODEL-GENERATED POSITIVE NARRATIVE");
-    expect(support).not.toContain("No verified positive finding");
+    const basis = decisionBasisText();
+    expect(basis).toContain("Lineage unavailable");
+    expect(basis).toContain("will not infer");
+    expect(basis).not.toContain("Identity resolution");
+    expect(basis).not.toContain("GitHub account kylemcconnell links back to @kyle");
+    expect(basis).not.toContain("MODEL-GENERATED POSITIVE NARRATIVE");
   });
 
-  it("uses an exact frozen press artifact only with a confirmed press outcome", () => {
+  it("keeps a frozen press artifact in its ledger without inventing a legacy axis link", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
       ...base,
@@ -460,10 +491,10 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    const support = readinessSupportText();
-    expect(support).toContain("Public-footprint evidence");
-    expect(support).toContain("Independent profile of the founder");
-    expect(support).toContain("source match, not favorable coverage");
+    expect(container.textContent).toContain("Independent profile of the founder");
+    const basis = decisionBasisText();
+    expect(basis).toContain("Lineage unavailable");
+    expect(basis).not.toContain("Independent profile of the founder");
   });
 
   it("does not promote checked-empty, no-match, or unsupported artifacts into positive support", () => {
@@ -524,11 +555,10 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    const support = readinessSupportText();
-    expect(support).toContain("No confirmed supporting outcome is frozen");
-    expect(support).toContain("Checked-empty and no-match records count toward coverage, not positive support");
-    expect(support).not.toContain("MODEL POSITIVE");
-    expect(support).not.toContain("Artifact without a confirmed press outcome");
+    const basis = decisionBasisText();
+    expect(basis).toContain("Lineage unavailable");
+    expect(basis).not.toContain("MODEL POSITIVE");
+    expect(basis).not.toContain("Artifact without a confirmed press outcome");
   });
 
   it("renders associate accusations as unverified leads outside the subject score", () => {
@@ -608,8 +638,8 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Investigative leads");
     expect(container.textContent).toContain("Related-entity lead");
     expect(container.textContent).toContain("@legacy_associate");
-    expect(readinessConcernText()).not.toContain("legacy_associate");
-    expect(readinessConcernText()).toContain("No adverse finding is recorded");
+    expect(decisionBasisText()).not.toContain("legacy_associate");
+    expect(decisionBasisText()).toContain("Lineage unavailable");
     expect(container.textContent).not.toContain("A model-discovered complaint names @legacy_associate");
   });
 

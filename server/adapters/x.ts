@@ -992,6 +992,9 @@ export const xAdapter: Adapter = {
     const haveOfficialAvatar = ctx.evidence.profile.avatar_source_state != null;
     const prof = haveProfile && haveOfficialAvatar ? null : await getProfile(ctx.handle);
     if (prof) {
+      ctx.evidence.profile.profile_collection_state = "resolved";
+      ctx.evidence.profile.profile_provider = "twitterapi";
+      ctx.evidence.profile.profile_captured_at = new Date().toISOString();
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
       ctx.evidence.profile.followers = fmtFollowers(prof.followers);

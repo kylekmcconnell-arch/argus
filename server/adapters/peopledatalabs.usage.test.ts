@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
+import { VentureOutcome } from "../../src/engine";
 import { getCost, withCostLedger } from "../cost";
 import { enrichPerson, peopledatalabsAdapter } from "./peopledatalabs";
 
@@ -158,5 +159,40 @@ describe("People Data Labs provider attempt accounting", () => {
     expect(evidence.profile.display_name).toBe("Analytical Engine");
     expect(evidence.profile.resolved_name).toBe("Ada Lovelace");
     expect(evidence.profile.identity_confidence).toBe("Probable");
+  });
+
+  it("stamps new and corroborated ventures with exact PDL provenance", async () => {
+    vi.stubEnv("PDL_API_KEY", "pdl-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      data: {
+        full_name: "Ada Lovelace",
+        experience: [
+          { company: { name: "Existing Co", website: "existing.example" }, title: { name: "Founder" } },
+          { company: { name: "New Co", website: "new.example" }, title: { name: "Engineer" } },
+        ],
+      },
+    })));
+    const evidence = emptyEvidence("@ada");
+    evidence.profile.display_name = "Ada Lovelace";
+    evidence.ventures.push({
+      project_name: "Existing Co",
+      role: "claimed founder",
+      period: "",
+      outcome: VentureOutcome.UNKNOWN,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    });
+
+    await withCostLedger(() => peopledatalabsAdapter.run({
+      handle: evidence.profile.handle,
+      evidence,
+      emit: vi.fn(),
+      recordCheck: vi.fn(),
+    }));
+
+    expect(evidence.ventures).toEqual(expect.arrayContaining([
+      expect.objectContaining({ project_name: "Existing Co", provider: "peopledatalabs", evidence_origin: "deterministic", artifact_verified: true }),
+      expect.objectContaining({ project_name: "New Co", provider: "peopledatalabs", evidence_origin: "deterministic", artifact_verified: true }),
+    ]));
   });
 });

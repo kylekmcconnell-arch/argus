@@ -13,6 +13,7 @@ import type {
   AssociateInput,
   Finding,
   IdentityConfidence,
+  EvidenceOrigin,
 } from "../engine";
 
 export interface SubjectProfile {
@@ -32,12 +33,53 @@ export interface SubjectProfile {
   last_post_at?: string;    // ISO time of the most recent tweet (dormancy signal)
   days_since_post?: number; // days since that post, computed at collect time
   identity_emails?: string[]; // PDL-resolved emails — bridge to leaked GitHub commit emails
+  /** A placeholder handle is not provider evidence until this is `resolved`. */
+  profile_collection_state?: "resolved" | "unavailable";
+  /** Provider that returned the frozen profile, when collection succeeded. */
+  profile_provider?: string;
+  /** Capture time for the provider-returned profile. */
+  profile_captured_at?: string;
 }
 
 export interface AxisInput {
   axis: string;
   score: number;
   rationale: string;
+  /** Exact frozen artifacts the analyst used to justify this score. */
+  evidenceRefs?: string[];
+  /** Credible artifacts that pull against the selected score. */
+  counterEvidenceRefs?: string[];
+  /** Material evidence gaps the analyst could not resolve. */
+  gaps?: string[];
+}
+
+export type AxisEvidenceVerification =
+  | "verified"
+  | "reported"
+  | "observed"
+  | "checked_empty"
+  | "unavailable";
+
+/**
+ * A content-addressed record from the exact, post-pruning packet shown to the
+ * scoring analyst. `artifactId` is the durable join key used by the immutable
+ * report, normalized provenance tables, and the report UI; `contentHash`
+ * remains the integrity fingerprint of the bounded record itself.
+ */
+export interface AxisEvidenceRecord {
+  artifactId: string;
+  kind: "axis_evidence";
+  provider: string;
+  operation: string;
+  section: string;
+  title: string;
+  excerpt?: string;
+  sourceUrl?: string;
+  capturedAt?: string;
+  contentHash: string;
+  eligibleAxes: string[];
+  verification: AxisEvidenceVerification;
+  scope: "direct_subject" | "subject_context";
 }
 
 // A high-signal account (respected caller, founder, VC, or infra) that follows
@@ -84,6 +126,8 @@ export interface SourceArtifact {
   publishedAt?: string;
   excerpt?: string;
   match: "exact_name" | "exact_handle" | "candidate" | "no_match" | "observed" | "risk_signal" | "screened_clear";
+  /** Explicit failed/partial collection state when `match` alone is ambiguous. */
+  coverageState?: "unavailable";
 }
 
 export type ProfilePhotoClassification =
@@ -157,6 +201,22 @@ export interface WebTeamMember {
   evidence?: string;
   source: string; // where it came from: web/LinkedIn search, post role-scan, X content
   projects?: { name: string; role?: string }[]; // their OTHER projects (serial-founder web)
+  /** Discovery-only model rows stay visible but are excluded from governing scoring. */
+  evidence_origin?: EvidenceOrigin;
+  artifact_verified?: boolean;
+  provider?: string;
+  /** Tracks separately when a verified roster row received model-found identity links. */
+  identity_link_evidence_origin?: EvidenceOrigin;
+  projects_evidence_origin?: EvidenceOrigin;
+}
+
+export interface VentureTeamInput {
+  key: string;
+  name: string;
+  people: { name: string; handle?: string; role?: string }[];
+  evidence_origin?: EvidenceOrigin;
+  artifact_verified?: boolean;
+  provider?: string;
 }
 
 export interface CollectedEvidence {
@@ -171,6 +231,10 @@ export interface CollectedEvidence {
   associates: AssociateInput[];
   findings: Finding[];
   axes: AxisInput[];
+  /** Present on new live reports whose model scores carry strict artifact refs. */
+  axisCitationVersion?: 1;
+  /** Frozen registry from the exact scorer packet; never reconstructed later. */
+  axisEvidenceCatalog?: AxisEvidenceRecord[];
   headline: string;
   recentActivity: string[]; // recent post text, fuel for claim extraction
   notableFollowers: NotableFollower[]; // respected accounts that follow the subject
@@ -182,7 +246,7 @@ export interface CollectedEvidence {
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to
   // the same node the venture already occupies.
-  ventureTeams?: { key: string; name: string; people: { name: string; handle?: string; role?: string }[] }[];
+  ventureTeams?: VentureTeamInput[];
 }
 
 export function emptyEvidence(handle: string): CollectedEvidence {
@@ -197,6 +261,7 @@ export function emptyEvidence(handle: string): CollectedEvidence {
       joined: "—",
       identity_confidence: "Unverified",
       identity_note: "No identity resolution available.",
+      profile_collection_state: "unavailable",
     },
     roles: [],
     ventures: [],

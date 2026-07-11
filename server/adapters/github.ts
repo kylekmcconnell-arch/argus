@@ -187,8 +187,18 @@ export const githubAdapter: Adapter = {
         outcome: VentureOutcome.ACTIVE,
         evidence_url: `https://github.com/${a.org}`,
         notes: `GitHub: ${a.via}`,
+        provider: "github",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
       });
-      ctx.evidence.associates.push({ associate_handle: a.org, relation: "github org", evidence_url: `https://github.com/${a.org}` });
+      ctx.evidence.associates.push({
+        associate_handle: a.org,
+        relation: "github org",
+        evidence_url: `https://github.com/${a.org}`,
+        provider: "github",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      });
       added.push(a.org);
     }
     ctx.recordCheck?.({

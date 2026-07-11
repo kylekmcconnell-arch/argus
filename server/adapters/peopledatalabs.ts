@@ -194,6 +194,9 @@ export const peopledatalabsAdapter: Adapter = {
         }
         if (!ex.period && period) ex.period = period;
         if (!ex.evidence_url && x.url) ex.evidence_url = httpify(x.url);
+        ex.provider = "peopledatalabs";
+        ex.evidence_origin = "deterministic";
+        ex.artifact_verified = true;
         confirmed.push(company);
       } else {
         const rec = {
@@ -203,6 +206,9 @@ export const peopledatalabsAdapter: Adapter = {
           outcome: VentureOutcome.UNKNOWN,
           evidence_url: httpify(x.url),
           notes: "People Data Labs employment record",
+          provider: "peopledatalabs",
+          evidence_origin: "deterministic" as const,
+          artifact_verified: true,
         };
         ctx.evidence.ventures.push(rec);
         byName.set(key, rec);

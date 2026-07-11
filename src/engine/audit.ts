@@ -38,6 +38,18 @@ export interface AxisScore {
   weight: number;
   rationale: string;
   role: string;
+  /** Artifact IDs from the exact scorer packet that support this score. */
+  evidenceRefs?: string[];
+  /** Eligible artifacts that materially pull the score in the other direction. */
+  counterEvidenceRefs?: string[];
+  /** Explicit unresolved evidence gaps, preserved verbatim from the analyst. */
+  gaps?: string[];
+}
+
+export interface AxisLineage {
+  evidenceRefs?: string[];
+  counterEvidenceRefs?: string[];
+  gaps?: string[];
 }
 
 export interface RoleReport {
@@ -57,6 +69,8 @@ interface EvidenceProvenance {
   // it can never establish the predicate for a hard cap by itself.
   evidence_origin?: EvidenceOrigin;
   artifact_verified?: boolean;
+  /** Provider that established the frozen artifact, when known. */
+  provider?: string;
 }
 
 export interface TrustGraphPredicate {
@@ -177,7 +191,7 @@ export interface Promotion extends EvidenceProvenance {
   notes?: string;
 }
 
-export interface AssociateInput {
+export interface AssociateInput extends EvidenceProvenance {
   associate_handle: string;
   relation: string;
   in_cabal_kb?: boolean;
@@ -185,7 +199,7 @@ export interface AssociateInput {
   notes?: string;
 }
 
-export interface Associate {
+export interface Associate extends EvidenceProvenance {
   associate_key: string;
   relation: string;
   in_cabal_kb?: boolean;
@@ -348,7 +362,7 @@ export class Audit {
     };
   }
 
-  setAxis(axis: string, score: number, rationale = "") {
+  setAxis(axis: string, score: number, rationale = "", lineage: AxisLineage = {}) {
     const role = classForAxis(axis);
     if (!this.roles.includes(role)) {
       throw new Error(`axis ${axis} belongs to ${role}, not a held role`);
@@ -360,6 +374,9 @@ export class Audit {
       weight: w,
       rationale,
       role,
+      ...(lineage.evidenceRefs ? { evidenceRefs: [...lineage.evidenceRefs] } : {}),
+      ...(lineage.counterEvidenceRefs ? { counterEvidenceRefs: [...lineage.counterEvidenceRefs] } : {}),
+      ...(lineage.gaps ? { gaps: [...lineage.gaps] } : {}),
     };
   }
 

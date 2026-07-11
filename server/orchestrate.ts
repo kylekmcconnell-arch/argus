@@ -16,7 +16,14 @@ import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence } from "../src/data/evidence";
 import type { AdapterRunResult, CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
-import { analystAvailable, analyzeSubject, buildScoringEvidencePacket, extractClaims, scanContradictions } from "./agent";
+import {
+  analystAvailable,
+  analyzeSubject,
+  buildScoringEvidencePacket,
+  extractClaims,
+  extractScoringEvidenceCatalog,
+  scanContradictions,
+} from "./agent";
 import { getCost, withCostLedger } from "./cost";
 import { PersonCheckTracker, type ProviderRunState } from "./checks";
 
@@ -129,6 +136,9 @@ async function coldIntake(ctx: CollectContext) {
   let siteUrl: string | undefined;
   const prof = await xProfile(ctx.handle);
   if (prof) {
+    ctx.evidence.profile.profile_collection_state = "resolved";
+    ctx.evidence.profile.profile_provider = "twitterapi";
+    ctx.evidence.profile.profile_captured_at = new Date().toISOString();
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
     if (prof.image) {
       ctx.evidence.profile.avatar_url = prof.image; // official X image source for the frozen integrity screen
@@ -145,6 +155,9 @@ async function coldIntake(ctx: CollectContext) {
     }
     ctx.emit({ phase: "P0 · Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} · ${ctx.evidence.profile.followers} followers · joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
   } else {
+    ctx.evidence.profile.profile_collection_state = "unavailable";
+    ctx.evidence.profile.profile_provider = "twitterapi";
+    ctx.evidence.profile.profile_captured_at = undefined;
     // Be honest about a missing profile instead of silently rendering "—
     // followers" — discovery below can still proceed.
     ctx.emit({ phase: "P0 · Intake", label: "Profile unavailable", detail: "twitterapi.io has no record of this handle (not in their index). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
@@ -197,7 +210,28 @@ async function coldIntake(ctx: CollectContext) {
   ctx.emit({ phase: "P0 · Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify…", tone: "neutral" });
   const claims = await extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
   if (claims) {
-    ctx.evidence.roles = asRoles(claims.roles);
+    const candidateRoles = [...new Set(asRoles(claims.roles))];
+    for (const role of candidateRoles) {
+      ctx.evidence.findings.push({
+        finding_type: "RoleCandidate",
+        claim: `Model-extracted self-claim suggests ${role}; provider corroboration is required before routing.`,
+        source_url: "",
+        source_date: "",
+        source_author: "claude-intake",
+        verification_status: "Rumor",
+        independent_source_count: 0,
+        polarity: 0,
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        finding_scope: {
+          scope: "direct_subject",
+          target_entity_key: ctx.evidence.profile.handle,
+          target_entity_type: "person",
+          relationship_to_subject: "self",
+          relationship_label: "audited subject role claim",
+        },
+      });
+    }
     ctx.evidence.ventures = claims.ventures.map((v) => ({
       project_name: v.project_name,
       role: v.role ?? "founder",
@@ -229,7 +263,7 @@ async function coldIntake(ctx: CollectContext) {
       artifact_verified: false,
     }));
     const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
-    ctx.emit({ phase: "P0 · Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} — now verifying each.`, source: "claude", tone: "neutral" });
+    ctx.emit({ phase: "P0 · Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"} — role candidates remain non-governing until independently verified.`, source: "claude", tone: "neutral" });
   }
 
   // ── Affiliation discovery: every venture the subject is publicly tied to in
@@ -278,18 +312,82 @@ async function coldIntake(ctx: CollectContext) {
   const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
   const byHandle = new Map<string, (typeof webTeam)[number]>();
   const byName = new Map<string, (typeof webTeam)[number]>();
-  for (const t of [...pageTeam, ...siteTeam, ...people, ...postRoleTeam]) {
+  const teamCandidates = [
+    ...pageTeam.map((member) => ({
+      ...member,
+      evidence_origin: domain ? "deterministic" as const : "model_lead" as const,
+      artifact_verified: !!domain,
+      provider: domain ? "team-page" : "team-page-candidate",
+      identity_link_evidence_origin: domain ? "deterministic" as const : "model_lead" as const,
+      projects_evidence_origin: domain ? "deterministic" as const : "model_lead" as const,
+    })),
+    ...siteTeam.map((member) => ({
+      ...member,
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
+      provider: "grok",
+      identity_link_evidence_origin: "model_lead" as const,
+      projects_evidence_origin: "model_lead" as const,
+    })),
+    ...people.map((member) => ({
+      ...member,
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
+      provider: "grok",
+      identity_link_evidence_origin: "model_lead" as const,
+      projects_evidence_origin: "model_lead" as const,
+    })),
+    ...postRoleTeam.map((member) => ({
+      ...member,
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic" as const,
+      projects_evidence_origin: "deterministic" as const,
+    })),
+  ];
+  for (const t of teamCandidates) {
     const h = t.handle ? norm(t.handle) : "";
     const n = norm(t.name);
     if (!h && !n) continue;
     const existing = (h && byHandle.get(h)) || (n && byName.get(n)) || null;
     if (existing) {
-      if (!existing.handle && t.handle) { existing.handle = t.handle; byHandle.set(norm(t.handle), existing); }
-      if (!existing.linkedin && t.linkedin) existing.linkedin = t.linkedin;
-      if ((!existing.projects || !existing.projects.length) && t.projects?.length) existing.projects = t.projects;
+      if (!existing.handle && t.handle) {
+        existing.handle = t.handle;
+        existing.identity_link_evidence_origin = t.identity_link_evidence_origin;
+        byHandle.set(norm(t.handle), existing);
+      }
+      if (!existing.linkedin && t.linkedin) {
+        existing.linkedin = t.linkedin;
+        existing.identity_link_evidence_origin = t.identity_link_evidence_origin;
+      }
+      if ((!existing.projects || !existing.projects.length) && t.projects?.length) {
+        existing.projects = t.projects;
+        existing.projects_evidence_origin = t.projects_evidence_origin;
+      }
+      if (t.artifact_verified === true && existing.artifact_verified !== true) {
+        existing.evidence_origin = "deterministic";
+        existing.artifact_verified = true;
+        existing.provider = t.provider;
+        existing.source = t.source ?? existing.source;
+        existing.evidence = t.evidence ?? existing.evidence;
+      }
       continue;
     }
-    const rec = { name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects };
+    const rec = {
+      name: t.name,
+      handle: t.handle,
+      role: t.role,
+      linkedin: t.linkedin,
+      evidence: t.evidence,
+      source: t.source ?? "X content",
+      projects: t.projects,
+      evidence_origin: t.evidence_origin,
+      artifact_verified: t.artifact_verified,
+      provider: t.provider,
+      identity_link_evidence_origin: t.identity_link_evidence_origin,
+      projects_evidence_origin: t.projects_evidence_origin,
+    };
     webTeam.push(rec);
     if (h) byHandle.set(h, rec);
     if (n) byName.set(n, rec);
@@ -305,10 +403,17 @@ async function coldIntake(ctx: CollectContext) {
   // name collision the contradictions section catches). Drop it at the source
   // rather than present a stranger's team as this account's identity.
   const subj = norm(ctx.handle);
-  const accountVouchesTeam = !!domain || people.length > 0 || postRoleTeam.length > 0 || webTeam.some((t) => norm(t.handle) === subj);
+  const accountVouchesTeam = !!domain
+    || postRoleTeam.length > 0
+    || webTeam.some((t) => t.artifact_verified === true && norm(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
-    ctx.emit({ phase: "P1 · Team", label: "Same-name project (not this account)", detail: `Found a team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it — its handle isn't among them, it links no site, and its own posts name no team. Treated as a name collision, not the account's identity.`, source: "team-search", tone: "warn" });
-    webTeam.length = 0; // clear in place (shared ref with ctx.evidence.webTeam)
+    ctx.emit({ phase: "P1 · Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it — its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
+    for (const member of webTeam) {
+      member.evidence_origin = "model_lead";
+      member.artifact_verified = false;
+      member.identity_link_evidence_origin = "model_lead";
+      member.projects_evidence_origin = "model_lead";
+    }
   }
 
   // Actively resolve identities for members still name-only (the team page names
@@ -321,8 +426,16 @@ async function coldIntake(ctx: CollectContext) {
     for (const f of found) {
       const m = byName.get(norm(f.name));
       if (!m) continue;
-      if (!m.handle && f.handle) { m.handle = f.handle; linked++; }
-      if (!m.linkedin && f.linkedin) { m.linkedin = f.linkedin; if (!f.handle) linked++; }
+      if (!m.handle && f.handle) {
+        m.handle = f.handle;
+        m.identity_link_evidence_origin = "model_lead";
+        linked++;
+      }
+      if (!m.linkedin && f.linkedin) {
+        m.linkedin = f.linkedin;
+        m.identity_link_evidence_origin = "model_lead";
+        if (!f.handle) linked++;
+      }
     }
     if (linked) ctx.emit({ phase: "P1 · Team", label: "Identities linked", detail: `Resolved X/LinkedIn for ${linked} of ${nameOnly.length} name-only team members.`, source: "grok", tone: "good" });
   }
@@ -339,7 +452,7 @@ async function coldIntake(ctx: CollectContext) {
     // Only directly fetched first-party team pages and deterministic role scans
     // can raise identity confidence. Grok web/X results remain useful leads in
     // the roster, but cannot confirm the very identity it was asked to discover.
-    const backedTeam = [...pageTeam, ...postRoleTeam].filter((candidate) =>
+    const backedTeam = [...(domain ? pageTeam : []), ...postRoleTeam].filter((candidate) =>
       webTeam.some((member) =>
         (!!candidate.handle && norm(candidate.handle) === norm(member.handle)) ||
         (!!candidate.name && norm(candidate.name) === norm(member.name)),
@@ -396,6 +509,8 @@ async function coldIntake(ctx: CollectContext) {
           verification_status: "Verified",
           independent_source_count: 1,
           polarity: -1,
+          evidence_origin: "deterministic",
+          artifact_verified: true,
         });
         ctx.emit({ phase: "P2 · Substance", label: "Website not live", detail: `${domain} ${notLive} — ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
       } else if (site.status === "client_rendered") {
@@ -423,7 +538,14 @@ async function coldIntake(ctx: CollectContext) {
       const key = t.handle.replace(/^@/, "").toLowerCase();
       if (haveAssoc.has(key)) continue;
       haveAssoc.add(key);
-      ctx.evidence.associates.push({ associate_handle: t.handle, relation: `team: ${t.role}`, notes: t.evidence });
+      ctx.evidence.associates.push({
+        associate_handle: t.handle,
+        relation: `team: ${t.role}`,
+        notes: t.evidence,
+        provider: "grok",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+      });
       addedTeam.push(`${t.name} (${t.handle})`);
     }
     const addedAdv: string[] = [];
@@ -480,10 +602,6 @@ async function coldIntake(ctx: CollectContext) {
         ctx.evidence.ventures.push(rec);
         return { v, rec };
       });
-    const founderish = discovered.some((v) => /founder|cofounder/i.test(v.role));
-    if (founderish && (!ctx.evidence.roles.length || ctx.evidence.roles.every((r) => r === SubjectClass.MEMBER))) {
-      ctx.evidence.roles = [SubjectClass.FOUNDER];
-    }
     ctx.emit({ phase: "P0 · Intake", label: "Affiliations discovered", detail: `${discovered.length} public affiliation${discovered.length === 1 ? "" : "s"} tied to the subject: ${discovered.slice(0, 5).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
 
     // 2. Corroborate the top leads against a second, independent source, all in
@@ -538,6 +656,25 @@ function axisCatalog(roles: SubjectClass[]) {
     }
   }
   return out;
+}
+
+function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[] {
+  const roles = new Set<SubjectClass>();
+  if (evidence.profile.profile_collection_state === "resolved" && evidence.profile.bio.trim()) {
+    classifySubject(evidence.profile.bio).applicable_classes.forEach((role) => roles.add(role));
+  }
+  for (const venture of evidence.ventures) {
+    if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;
+    const role = (venture.role ?? "").toLowerCase();
+    if (/founder|co-?founder|\bceo\b|\bcto\b|creator|owner/.test(role)) roles.add(SubjectClass.FOUNDER);
+    else if (/advisor|adviser|board/.test(role)) roles.add(SubjectClass.ADVISOR);
+    else if (/investor|partner|principal|venture|capital|\bgp\b/.test(role)) roles.add(SubjectClass.INVESTOR);
+    else if (/contributor|engineer|developer|employee|manager|director|lead|role on record/.test(role)) roles.add(SubjectClass.MEMBER);
+  }
+  if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
+    roles.add(SubjectClass.AGENCY);
+  }
+  return [...roles];
 }
 
 // ── Phase 3.5: adverse-signal sweep, manipulation-tooling flag, cross-project
@@ -698,6 +835,9 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
         .filter((m) => (m.handle || m.name) && m.handle?.replace(/^@/, "").toLowerCase() !== self)
         .slice(0, 8)
         .map((m) => ({ name: m.name, handle: m.handle, role: m.role })),
+      provider: "grok",
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
     })).filter((vt) => vt.people.length > 0);
     if (ctx.evidence.ventureTeams.length) {
       const total = ctx.evidence.ventureTeams.reduce((n, vt) => n + vt.people.length, 0);
@@ -721,9 +861,27 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
         const projList = [...r.projects].join(", ");
         if (haveAssoc.has(key)) {
           const existing = evidence.associates.find((a) => a.associate_handle.replace(/^@/, "").toLowerCase() === key);
-          if (existing) existing.notes = [existing.notes, `also on: ${projList}`].filter(Boolean).join(" · ");
+          if (existing?.evidence_origin === "model_lead") {
+            existing.notes = [existing.notes, `also on: ${projList}`].filter(Boolean).join(" · ");
+          } else {
+            evidence.associates.push({
+              associate_handle: "@" + key,
+              relation: "cross-project overlap",
+              notes: `appears across ${projList}`,
+              provider: "grok",
+              evidence_origin: "model_lead",
+              artifact_verified: false,
+            });
+          }
         } else {
-          evidence.associates.push({ associate_handle: "@" + key, relation: "cross-project overlap", notes: `appears across ${projList}` });
+          evidence.associates.push({
+            associate_handle: "@" + key,
+            relation: "cross-project overlap",
+            notes: `appears across ${projList}`,
+            provider: "grok",
+            evidence_origin: "model_lead",
+            artifact_verified: false,
+          });
         }
       }
       ctx.emit({ phase: "Adverse", label: `${overlaps.length} cross-project overlap${overlaps.length === 1 ? "" : "s"}`, detail: overlaps.slice(0, 5).map(([k, r]) => `@${k} (${[...r.projects].join(", ")})`).join(" · "), source: "grok", tone: "warn" });
@@ -769,6 +927,8 @@ async function tokenLifecycle(ctx: CollectContext) {
         verification_status: "Verified",
         independent_source_count: 1,
         polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
       });
       ctx.emit({ phase: "Token", label: `$${sig.ticker} collapse`, detail: `${sig.dive.detail}. The dive-after-launch pattern.`, source: "dexscreener", tone: "bad" });
     }),
@@ -793,6 +953,8 @@ async function postCadence(ctx: CollectContext) {
       verification_status: "Verified",
       independent_source_count: 1,
       polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
     });
     ctx.emit({ phase: "Cadence", label: report.silent ? "Went quiet" : "Cadence thinning", detail: report.summary, source: "twitterapi.io", tone: report.silent ? "bad" : "warn" });
   } else {
@@ -817,6 +979,7 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
   const handleLabel = seed.profile.handle.replace(/^@/, "") || "unknown";
   return {
     ...seed,
+    roles: [],
     profile: {
       // A fixture profile is also a claim seed. Mutable public metadata and
       // resolved identity fields must be recollected; otherwise an unrelated
@@ -829,6 +992,8 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
       joined: "—",
       identity_confidence: "Unverified",
       identity_note: "Fixture discovery seed only; identity requires a fresh provider re-check.",
+      profile_collection_state: "unavailable",
+      profile_provider: "twitterapi",
     },
     axes: [],
     headline: "",
@@ -927,15 +1092,36 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
         engagement.manipulation_service_flag ? "claimed manipulation service" : "",
       ].filter(Boolean)),
     })),
-    findings: seed.findings.map((finding) => ({
-      ...finding,
-      verification_status: "Rumor",
-      independent_source_count: 0,
-      evidence_origin: "model_lead",
-      artifact_verified: false,
-      content_hash: undefined,
-      trust_graph: undefined,
-    })),
+    findings: [
+      ...seed.findings.map((finding) => ({
+        ...finding,
+        verification_status: "Rumor",
+        independent_source_count: 0,
+        evidence_origin: "model_lead" as const,
+        artifact_verified: false,
+        content_hash: undefined,
+        trust_graph: undefined,
+      })),
+      ...seed.roles.map((role) => ({
+        finding_type: "RoleCandidate",
+        claim: `Fixture discovery suggests ${role}; provider corroboration is required before routing.`,
+        source_url: "",
+        source_date: "",
+        source_author: "fixture-discovery",
+        verification_status: "Rumor",
+        independent_source_count: 0,
+        polarity: 0,
+        evidence_origin: "model_lead" as const,
+        artifact_verified: false,
+        finding_scope: {
+          scope: "direct_subject" as const,
+          target_entity_key: seed.profile.handle,
+          target_entity_type: "person" as const,
+          relationship_to_subject: "self" as const,
+          relationship_label: "fixture role candidate",
+        },
+      })),
+    ],
     // Fixture relationship and frozen-artifact collections are not wired to a
     // live re-verifier. Drop them instead of materializing stale graph edges or
     // letting old source snapshots enter a new analyst context.
@@ -1090,11 +1276,14 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
   }
   await Promise.all(signalPasses);
 
-  // route roles if we don't have them yet (unknown subject)
-  if (!evidence.roles.length) {
-    const route = classifySubject(evidence.profile.bio);
-    evidence.roles = route.applicable_classes.length ? route.applicable_classes : [SubjectClass.MEMBER];
-    emit({ phase: "P0 · Routing", label: "Classify roles", detail: `Routed to ${evidence.roles.join(", ")} (${route.confidence} confidence).`, tone: "neutral" });
+  // Route only from provider-backed profile/career evidence. Model-extracted
+  // role candidates remain investigator-visible leads and can never select the
+  // governing methodology on their own.
+  evidence.roles = providerBackedRoles(evidence);
+  if (evidence.roles.length) {
+    emit({ phase: "P0 · Routing", label: "Classify roles", detail: `Provider-backed evidence routed to ${evidence.roles.join(", ")}.`, tone: "neutral" });
+  } else {
+    emit({ phase: "P0 · Routing", label: "Role unresolved", detail: "No deterministic or provider-corroborated role evidence was collected. Model role candidates remain leads; the report will publish INCOMPLETE.", tone: "warn" });
   }
 
   // Final deterministic pre-analyst pass: join the freshly collected graph to
@@ -1139,25 +1328,28 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
     ventures: evidence.ventures,
     testimonials: evidence.testimonials,
     advised: evidence.advised,
-    promotions: evidence.promotions,
-    wallets: evidence.wallets,
+    promotions: evidence.promotions.map((promotion) => ({ ...promotion, provider: "twitterapi" })),
+    wallets: evidence.wallets.map((wallet) => ({ ...wallet, provider: "find-wallet/onchain" })),
     clientEngagements: evidence.clientEngagements,
     associates: evidence.associates,
     // The named people behind the project (from the site + LinkedIn + X content),
     // so identity/founder scoring reflects the team we actually found.
     team: (evidence.webTeam ?? []).map((p) => ({
       name: p.name,
-      handle: p.handle,
+      handle: p.identity_link_evidence_origin === "model_lead" ? undefined : p.handle,
       role: p.role,
-      linkedin: p.linkedin,
+      linkedin: p.identity_link_evidence_origin === "model_lead" ? undefined : p.linkedin,
       source: p.source,
       evidence: p.evidence,
-      otherProjects: p.projects,
+      otherProjects: p.projects_evidence_origin === "model_lead" ? undefined : p.projects,
+      provider: p.provider,
+      evidence_origin: p.evidence_origin,
+      artifact_verified: p.artifact_verified,
     })),
     ventureTeams: evidence.ventureTeams,
     findings: evidence.findings,
-    notableFollowers: evidence.notableFollowers,
-    recentActivity: evidence.recentActivity.slice(0, 12),
+    notableFollowers: evidence.notableFollowers.map((follower) => ({ ...follower, provider: "twitterapi" })),
+    recentActivity: evidence.recentActivity.slice(0, 12).map((text) => ({ text, provider: "twitterapi" })),
     sourceArtifacts: evidence.sourceArtifacts,
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
@@ -1173,14 +1365,20 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
     // Decision models receive a structurally isolated packet. Related-entity and
     // model-discovered leads remain visible to investigators, but are absent from
     // both the subject scorer and contradiction analyzer context.
-    const evidenceJson = buildScoringEvidencePacket(baseEvidence);
+    const requestedAxes = axisCatalog(evidence.roles);
+    const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
+    const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson);
+    if (frozenAxisEvidence.length > 0) {
+      evidence.axisCitationVersion = 1;
+      evidence.axisEvidenceCatalog = frozenAxisEvidence;
+    }
     // The validator accepts all requested axes or none, and the collector ledger
     // must independently confirm that a fresh analyst attempt occurred.
     evidence.axes = [];
     const analystBefore = attemptTotals(["claude"]);
     const [found, verdict] = await Promise.all([
       scanContradictions(evidence.profile.handle, evidenceJson),
-      analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson),
+      analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson),
     ]);
     const analystAttempts = attemptDelta(analystBefore, attemptTotals(["claude"]));
     const analystObserved = analystAttempts.total > 0;
