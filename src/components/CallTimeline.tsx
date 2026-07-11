@@ -25,7 +25,7 @@ function Chip({ label, pct, elapsed, strong }: { label: string; pct: number | nu
   );
 }
 
-export function CallTimeline({ handle, ticker, address, chain }: { handle: string; ticker: string; address: string; chain: string }) {
+export function CallTimeline({ handle, ticker, address, chain, reportVersionId }: { handle: string; ticker: string; address: string; chain: string; reportVersionId?: string }) {
   const [d, setD] = useState<CallPerf | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "none">("loading");
   const ran = useRef(false);
@@ -33,11 +33,11 @@ export function CallTimeline({ handle, ticker, address, chain }: { handle: strin
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
-    fetch(`/api/call-performance?handle=${enc(handle.replace(/^@/, ""))}&ticker=${enc(ticker)}&address=${enc(address)}&chain=${enc(chain)}`)
+    fetch(`/api/call-performance?handle=${enc(handle.replace(/^@/, ""))}&ticker=${enc(ticker)}&address=${enc(address)}&chain=${enc(chain)}${reportVersionId ? `&reportVersionId=${enc(reportVersionId)}` : ""}`)
       .then((r) => r.json())
       .then((j: CallPerf) => { if (j?.available && j.periods?.length) { setD(j); setState("ok"); } else setState("none"); })
       .catch(() => setState("none"));
-  }, [handle, ticker, address, chain]);
+  }, [handle, ticker, address, chain, reportVersionId]);
 
   if (state === "loading") return <div className="mt-1 text-[10px] text-ink-faint">timing the call…</div>;
   if (state === "none" || !d) return null;

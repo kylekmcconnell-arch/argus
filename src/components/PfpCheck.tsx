@@ -13,7 +13,7 @@ const LABEL: Record<string, string> = {
   unclear: "Unclear",
 };
 
-export function PfpCheck({ handle, brand }: { handle: string; brand?: boolean }) {
+export function PfpCheck({ handle, brand, reportVersionId }: { handle: string; brand?: boolean; reportVersionId?: string }) {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const ran = useRef(false);
@@ -23,7 +23,9 @@ export function PfpCheck({ handle, brand }: { handle: string; brand?: boolean })
     ran.current = true;
     (async () => {
       try {
-        const r = await fetch(`/api/pfp-check?handle=${encodeURIComponent(handle.replace(/^@/, ""))}`);
+        const params = new URLSearchParams({ handle: handle.replace(/^@/, "") });
+        if (reportVersionId) params.set("reportVersionId", reportVersionId);
+        const r = await fetch(`/api/pfp-check?${params}`);
         setData(await r.json());
       } catch {
         setData({ note: "Photo check failed." });
@@ -31,7 +33,7 @@ export function PfpCheck({ handle, brand }: { handle: string; brand?: boolean })
         setLoading(false);
       }
     })();
-  }, [handle]);
+  }, [handle, reportVersionId]);
 
   if (data && data.available === false) return null; // no analyst key configured
 

@@ -46,7 +46,13 @@ export function SecondOpinion({ dossier }: { dossier: TokenDossier }) {
       try {
         const r = await fetch("/api/challenge-verdict", {
           method: "POST", headers: { "content-type": "application/json" },
-          body: JSON.stringify({ subject: dossier.symbol ? `$${dossier.symbol}` : "token", verdict: dossier.verdict, score: dossier.score, evidence: buildEvidence(dossier) }),
+          body: JSON.stringify({
+            subject: dossier.symbol ? `$${dossier.symbol}` : "token",
+            verdict: dossier.verdict,
+            score: dossier.score,
+            evidence: buildEvidence(dossier),
+            reportVersionId: dossier.versionContext?.reportVersionId,
+          }),
         });
         setData(await r.json());
       } catch { /* non-fatal */ }

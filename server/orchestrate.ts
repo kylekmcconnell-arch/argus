@@ -17,7 +17,7 @@ import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import { analystAvailable, analyzeSubject, buildAnalystEvidencePacket, extractClaims, scanContradictions } from "./agent";
-import { resetCost, getCost } from "./cost";
+import { getCost, withCostLedger } from "./cost";
 import { PersonCheckTracker } from "./checks";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
@@ -717,8 +717,7 @@ async function postCadence(ctx: CollectContext) {
   }
 }
 
-export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier | null> {
-  resetCost(); // fresh per-audit provider-spend ledger
+async function runAuditWithLedger(rawHandle: string, emit: Emit): Promise<Dossier | null> {
   const fixture = findSubject(rawHandle);
   const liveProviders = ADAPTERS.filter((a) => KEYED.has(a.id) && a.available());
   const anyLive = liveProviders.length > 0 || analystAvailable();
@@ -923,4 +922,8 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
   dossier.cost = cost;
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches ≈${cost.sources} sources · Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
   return dossier;
+}
+
+export function runAudit(rawHandle: string, emit: Emit): Promise<Dossier | null> {
+  return withCostLedger(() => runAuditWithLedger(rawHandle, emit));
 }

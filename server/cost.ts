@@ -11,8 +11,11 @@
 // Free/keyless calls (dexscreener, goplus, github, wayback, memory.lol, site
 // fetches) are recorded at $0 so the breakdown shows the whole pipeline.
 //
-// One module-level ledger is safe: a serverless instance handles one audit at a
-// time and runAudit resets it at the top of every run.
+// Each audit owns an async-local ledger. Serverless instances can overlap
+// requests, so module-global mutable totals would mix provider spend between
+// investigations and, eventually, organizations.
+
+import { AsyncLocalStorage } from "node:async_hooks";
 
 const PRICE = {
   grokIn: 0.2 / 1e6,
@@ -34,19 +37,43 @@ export interface LedgerLine {
   meta?: string;
 }
 
-let ledger = new Map<string, LedgerLine>();
-let grok = { in: 0, out: 0, calls: 0, sources: 0 };
-let claude = { in: 0, out: 0, calls: 0 };
+interface CostState {
+  ledger: Map<string, LedgerLine>;
+  grok: { in: number; out: number; calls: number; sources: number };
+  claude: { in: number; out: number; calls: number };
+}
+
+const createState = (): CostState => ({
+  ledger: new Map(),
+  grok: { in: 0, out: 0, calls: 0, sources: 0 },
+  claude: { in: 0, out: 0, calls: 0 },
+});
+
+const auditCostState = new AsyncLocalStorage<CostState>();
+let fallbackState = createState();
+
+const currentState = (): CostState => auditCostState.getStore() ?? fallbackState;
+
+/** Run one complete investigation with an isolated provider-spend ledger. */
+export function withCostLedger<T>(work: () => T): T {
+  return auditCostState.run(createState(), work);
+}
 
 export function resetCost(): void {
-  ledger = new Map();
-  grok = { in: 0, out: 0, calls: 0, sources: 0 };
-  claude = { in: 0, out: 0, calls: 0 };
+  const state = auditCostState.getStore();
+  if (state) {
+    state.ledger.clear();
+    state.grok = { in: 0, out: 0, calls: 0, sources: 0 };
+    state.claude = { in: 0, out: 0, calls: 0 };
+  } else {
+    fallbackState = createState();
+  }
 }
 
 // Generic: count a provider call (usd may be 0 for free providers — still
 // recorded, the point is the full picture).
 export function recordCall(provider: string, op: string, usd = 0, meta?: string): void {
+  const { ledger } = currentState();
   const key = `${provider}|${op}`;
   const cur = ledger.get(key);
   if (cur) {
@@ -63,6 +90,7 @@ export function recordTwitterapi(op: string): void {
 }
 
 export function addGrokUsage(u: { input_tokens?: number; output_tokens?: number; num_sources_used?: number } | undefined, toolCalls?: number, op = "live-search"): void {
+  const { grok } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
   const sources = typeof u?.num_sources_used === "number" ? u.num_sources_used : (toolCalls ?? 0) * EST_SOURCES_PER_SEARCH;
@@ -74,6 +102,7 @@ export function addGrokUsage(u: { input_tokens?: number; output_tokens?: number;
 }
 
 export function addClaudeUsage(u: { input_tokens?: number; output_tokens?: number } | undefined, op = "analysis"): void {
+  const { claude } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
   claude.calls += 1;
@@ -105,6 +134,7 @@ export interface AuditCost {
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
 export function getCost(): AuditCost {
+  const { ledger, grok, claude } = currentState();
   const lines = [...ledger.values()]
     .map((l) => ({ ...l, usd: round4(l.usd) }))
     .sort((a, b) => b.usd - a.usd || b.calls - a.calls);

@@ -67,6 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth) return;
   const key = process.env.ANTHROPIC_API_KEY;
   const handle = typeof req.query.handle === "string" ? req.query.handle.replace(/^@/, "").trim() : "";
+  const reportVersionId = typeof req.query.reportVersionId === "string" ? req.query.reportVersionId : undefined;
   const urlParam = typeof req.query.url === "string" ? req.query.url : "";
   const imageUrl = urlParam || (HANDLE.test(handle) ? `https://unavatar.io/x/${encodeURIComponent(handle)}?fallback=false` : "");
   if (!imageUrl) { res.status(400).json({ error: "handle or url required" }); return; }
@@ -95,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (!r.ok) { res.status(200).json({ available: true, imageUrl: usedUrl, note: `vision ${r.status}` }); return; }
     const d = (await r.json()) as any;
-    await attachPanelCost(auth.organizationId, handle, { provider: "claude", op: "panel:pfp-check", calls: 1, usd: claudeUsd(d.usage), meta: "vision" }, "person");
+    await attachPanelCost(auth.organizationId, reportVersionId, { provider: "claude", op: "panel:pfp-check", calls: 1, usd: claudeUsd(d.usage), meta: "vision" });
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
     const m = text.match(/\{[\s\S]*\}/);
     let parsed: any = {};

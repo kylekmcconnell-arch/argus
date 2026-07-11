@@ -1,15 +1,13 @@
 // Shared helpers for the api/ functions (NOT an exposed route — underscore files
 // are importable siblings only). Two jobs:
-//   1. 24h JSON cache in the existing `reports` table (kind='grokcache') so the
-//      expensive browser panels (namesake, VC portfolio) don't re-buy the same
-//      Grok search on every report open.
+//   1. 24h JSON cache in a service-only provider_cache table so cached provider
+//      responses are never mixed with tenant report projections.
 //   2. attachPanelCost: write post-report panel spend to the mutable cost ledger
 //      linked to the immutable version. Evidence payloads are never rewritten.
 // api/ functions cannot import server/ modules at runtime (bundling), hence the
 // small duplication with server/cache.ts.
 import { createHash } from "node:crypto";
 
-const KIND = "grokcache";
 const TTL_MS = 24 * 3600 * 1000;
 
 function creds() {
@@ -22,27 +20,24 @@ const headers = (key) => ({
   ...(!key.startsWith("sb_secret_") ? { authorization: `Bearer ${key}` } : {}),
   "content-type": "application/json",
 });
-const hash = (s) => "g:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
-const EVM_ADDRESS = /^0x[0-9a-f]{40}$/i;
-const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-const normRef = (s) => {
-  const clean = s.trim().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
-  if (SOLANA_ADDRESS.test(clean)) return clean;
-  if (EVM_ADDRESS.test(clean)) return clean.toLowerCase();
-  return clean.toLowerCase();
-};
+// API cache values use a distinct namespace from the server text cache. The
+// payload envelopes differ, so sharing a raw hash could turn a valid hit into a
+// silent miss when two callers happen to use the same logical key.
+const hash = (s) => "gj:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export async function cacheGetJson(key) {
   const c = creds();
   if (!c) return null;
   try {
-    const r = await fetch(`${c.url}/rest/v1/reports?select=payload&ref=eq.${encodeURIComponent(hash(key))}&kind=eq.${KIND}&limit=1`, {
+    const r = await fetch(`${c.url}/rest/v1/provider_cache?select=payload,expires_at&cache_key=eq.${encodeURIComponent(hash(key))}&limit=1`, {
       headers: headers(c.key), signal: AbortSignal.timeout(4000),
     });
     if (!r.ok) return null;
     const rows = await r.json();
     const p = rows?.[0]?.payload;
-    if (p?.value == null || typeof p.at !== "number" || Date.now() - p.at > TTL_MS) return null;
+    const expiresAt = rows?.[0]?.expires_at ? Date.parse(rows[0].expires_at) : Number.NaN;
+    if (p?.value == null || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
     return p.value;
   } catch {
     return null;
@@ -53,10 +48,16 @@ export async function cacheSetJson(key, value) {
   const c = creds();
   if (!c || value == null) return;
   try {
-    await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
+    const now = Date.now();
+    await fetch(`${c.url}/rest/v1/provider_cache?on_conflict=cache_key`, {
       method: "POST",
       headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify({ ref: hash(key), kind: KIND, query: key.slice(0, 180), payload: { value, at: Date.now() }, ts: new Date().toISOString() }),
+      body: JSON.stringify({
+        cache_key: hash(key),
+        payload: { value },
+        expires_at: new Date(now + TTL_MS).toISOString(),
+        updated_at: new Date(now).toISOString(),
+      }),
       signal: AbortSignal.timeout(4000),
     });
   } catch { /* best-effort */ }
@@ -64,26 +65,16 @@ export async function cacheSetJson(key, value) {
 
 
 
-// Record a panel's spend against the subject's current immutable version.
-// REPLACE semantics per provider+op prevent a re-opened panel from inflating
-// totals, while organization scoping prevents cross-workspace attribution.
-export async function attachPanelCost(organizationId, rawRef, line, requestedKind) {
+// Record a panel's spend against one exact immutable version. A display ref is
+// not sufficient: token + investigation cases intentionally share a contract
+// ref, and a newer version may publish while a panel request is in flight.
+export async function attachPanelCost(organizationId, reportVersionId, line) {
   const c = creds();
-  if (!c || !organizationId || !rawRef || !line?.provider || !line?.op) return;
+  if (!c || !organizationId || !UUID.test(reportVersionId || "") || !line?.provider || !line?.op) return;
   try {
-    const ref = normRef(rawRef);
-    const kindFilter = requestedKind ? `&kind=eq.${encodeURIComponent(requestedKind)}` : "";
-    const r = await fetch(
-      `${c.url}/rest/v1/reports?select=report_version_id&organization_id=eq.${encodeURIComponent(organizationId)}&ref=eq.${encodeURIComponent(ref)}&kind=in.%28person%2Ctoken%2Cinvestigation%2Csite%29${kindFilter}&report_version_id=not.is.null&order=ts.desc&limit=1`,
-      { headers: headers(c.key), signal: AbortSignal.timeout(6000) },
-    );
-    if (!r.ok) return;
-    const rows = await r.json();
-    const reportVersionId = rows?.[0]?.report_version_id;
-    if (typeof reportVersionId !== "string") return;
     const calls = Number.isFinite(line.calls) ? Math.max(0, Math.floor(line.calls)) : 0;
     const usd = Number.isFinite(line.usd) ? Math.max(0, Math.round(line.usd * 10000) / 10000) : 0;
-    await fetch(`${c.url}/rest/v1/rpc/upsert_report_cost_line`, {
+    const response = await fetch(`${c.url}/rest/v1/rpc/upsert_report_cost_line`, {
       method: "POST",
       headers: headers(c.key),
       body: JSON.stringify({
@@ -97,6 +88,9 @@ export async function attachPanelCost(organizationId, rawRef, line, requestedKin
       }),
       signal: AbortSignal.timeout(8000),
     });
+    if (!response.ok) {
+      console.error("[cost] exact panel attribution failed", response.status);
+    }
   } catch { /* accounting is best-effort */ }
 }
 

@@ -460,7 +460,7 @@ export function InvestigationReport({
 
         {/* token provenance: who it's named after, and whether they're behind it */}
         <div className="mt-3">
-          <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} onAudit={onAudit} />
+          <NamesakeCheck symbol={token.symbol} name={token.name} contract={token.address} chain={token.chain} reportVersionId={inv.versionContext?.reportVersionId} onAudit={onAudit} />
         </div>
 
         {/* unified project research: news & press, documents & resources, domain

@@ -26,6 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const verdict = s(body.verdict).slice(0, 20);
   const score = body.score == null ? "n/a" : String(body.score);
   const evidence = s(body.evidence).slice(0, 6000);
+  const reportVersionId = s(body.reportVersionId) || undefined;
   if (!verdict || !evidence) { res.status(400).json({ error: "verdict and evidence required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Claude not configured; adversarial review unavailable." }); return; }
 
@@ -47,7 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (!r.ok) { res.status(200).json({ available: true, note: `claude ${r.status}` }); return; }
     const d = (await r.json()) as any;
-    if (subject) await attachPanelCost(auth.organizationId, subject.replace(/^[@$]/, ""), { provider: "claude", op: "panel:challenge-verdict", calls: 1, usd: claudeUsd(d.usage) });
+    await attachPanelCost(auth.organizationId, reportVersionId, { provider: "claude", op: "panel:challenge-verdict", calls: 1, usd: claudeUsd(d.usage) });
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
     const m = text.match(/\{[\s\S]*\}/);
     let parsed: any = {};

@@ -13,27 +13,25 @@
 //      a human approves/denies in AdminOps. Correct-but-unprovable never auto-
 //      publishes, and it's never silently dropped.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import {
+  requireArgusAuth,
+  serviceCredentials,
+  serviceHeaders,
+} from "./_auth.js";
 
 export const config = { maxDuration: 20 };
 
 const norm = (s: string) => s.trim().toLowerCase().replace(/^[@$]/, "").replace(/\/$/, "");
 const genId = (disc: string, value: string) => `${disc}_${norm(value).replace(/[^a-z0-9]+/g, "")}`.slice(0, 48);
 
-function creds() {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-  return url && key ? { url: url.replace(/\/$/, ""), key } : null;
-}
-const headers = (key: string) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
-
 type Status = "live" | "pending";
 type Augmentation = { id?: string; status?: Status; why?: string; type: string; value: string; label: string; url?: string; detail?: string; graphKey?: string; rel?: string; kind?: string; by: string; at: number };
 
-async function listAug(ref: string): Promise<Augmentation[]> {
-  const c = creds();
+async function listAug(organizationId: string, ref: string): Promise<Augmentation[]> {
+  const c = serviceCredentials();
   if (!c) return [];
   try {
-    const r = await fetch(`${c.url}/rest/v1/reports?select=payload&ref=eq.${encodeURIComponent(ref)}&kind=eq.augmentation&limit=1`, { headers: headers(c.key), signal: AbortSignal.timeout(5000) });
+    const r = await fetch(`${c.url}/rest/v1/reports?select=payload&organization_id=eq.${encodeURIComponent(organizationId)}&ref=eq.${encodeURIComponent(ref)}&kind=eq.augmentation&limit=1`, { headers: serviceHeaders(c.key), signal: AbortSignal.timeout(5000) });
     if (!r.ok) return [];
     const rows = await r.json();
     const items = rows?.[0]?.payload?.items;
@@ -41,11 +39,11 @@ async function listAug(ref: string): Promise<Augmentation[]> {
   } catch { return []; }
 }
 
-async function loadRow(ref: string): Promise<{ subject: string; items: Augmentation[] } | null> {
-  const c = creds();
+async function loadRow(organizationId: string, ref: string): Promise<{ subject: string; items: Augmentation[] } | null> {
+  const c = serviceCredentials();
   if (!c) return null;
   try {
-    const r = await fetch(`${c.url}/rest/v1/reports?select=query,payload&ref=eq.${encodeURIComponent(ref)}&kind=eq.augmentation&limit=1`, { headers: headers(c.key), signal: AbortSignal.timeout(5000) });
+    const r = await fetch(`${c.url}/rest/v1/reports?select=query,payload&organization_id=eq.${encodeURIComponent(organizationId)}&ref=eq.${encodeURIComponent(ref)}&kind=eq.augmentation&limit=1`, { headers: serviceHeaders(c.key), signal: AbortSignal.timeout(5000) });
     if (!r.ok) return null;
     const rows = await r.json();
     if (!rows?.[0]) return null;
@@ -54,11 +52,11 @@ async function loadRow(ref: string): Promise<{ subject: string; items: Augmentat
   } catch { return null; }
 }
 
-async function listAllPending(): Promise<(Augmentation & { ref: string; subject: string })[]> {
-  const c = creds();
+async function listAllPending(organizationId: string): Promise<(Augmentation & { ref: string; subject: string })[]> {
+  const c = serviceCredentials();
   if (!c) return [];
   try {
-    const r = await fetch(`${c.url}/rest/v1/reports?select=ref,query,payload&kind=eq.augmentation&order=ts.desc&limit=300`, { headers: headers(c.key), signal: AbortSignal.timeout(7000) });
+    const r = await fetch(`${c.url}/rest/v1/reports?select=ref,query,payload&organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.augmentation&order=ts.desc&limit=300`, { headers: serviceHeaders(c.key), signal: AbortSignal.timeout(7000) });
     if (!r.ok) return [];
     const rows = (await r.json()) as { ref: string; query: string; payload?: { items?: Augmentation[] } }[];
     const out: (Augmentation & { ref: string; subject: string })[] = [];
@@ -67,17 +65,18 @@ async function listAllPending(): Promise<(Augmentation & { ref: string; subject:
   } catch { return []; }
 }
 
-async function saveAug(ref: string, subject: string, items: Augmentation[]): Promise<void> {
-  const c = creds();
-  if (!c) return;
+async function saveAug(organizationId: string, ref: string, subject: string, items: Augmentation[]): Promise<boolean> {
+  const c = serviceCredentials();
+  if (!c) return false;
   try {
-    await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
+    const response = await fetch(`${c.url}/rest/v1/reports?on_conflict=organization_id,ref,kind`, {
       method: "POST",
-      headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify({ ref, kind: "augmentation", query: subject.slice(0, 180), payload: { items }, ts: new Date().toISOString() }),
+      headers: serviceHeaders(c.key, { prefer: "resolution=merge-duplicates,return=minimal" }),
+      body: JSON.stringify({ organization_id: organizationId, ref, kind: "augmentation", query: subject.slice(0, 180), payload: { items }, ts: new Date().toISOString() }),
       signal: AbortSignal.timeout(6000),
     });
-  } catch { /* best-effort */ }
+    return response.ok;
+  } catch { return false; }
 }
 
 // ── independent verification per type ──────────────────────────────────────
@@ -196,56 +195,78 @@ async function diagnose(subject: string, item: Augmentation): Promise<{ reason: 
 
 type Learning = { subject: string; label: string; kind: string; reason: string; fix: string; at: number };
 const LEARN_REF = "learnings:v1";
-async function listLearnings(): Promise<Learning[]> {
-  const c = creds();
+async function listLearnings(organizationId: string): Promise<Learning[]> {
+  const c = serviceCredentials();
   if (!c) return [];
   try {
-    const r = await fetch(`${c.url}/rest/v1/reports?select=payload&ref=eq.${encodeURIComponent(LEARN_REF)}&kind=eq.learning&limit=1`, { headers: headers(c.key), signal: AbortSignal.timeout(5000) });
+    const r = await fetch(`${c.url}/rest/v1/reports?select=payload&organization_id=eq.${encodeURIComponent(organizationId)}&ref=eq.${encodeURIComponent(LEARN_REF)}&kind=eq.learning&limit=1`, { headers: serviceHeaders(c.key), signal: AbortSignal.timeout(5000) });
     if (!r.ok) return [];
     const rows = await r.json();
     const items = rows?.[0]?.payload?.items;
     return Array.isArray(items) ? items : [];
   } catch { return []; }
 }
-async function saveLearning(entry: Learning): Promise<void> {
-  const c = creds();
-  if (!c) return;
-  const items = [entry, ...(await listLearnings())].slice(0, 60);
+async function saveLearning(organizationId: string, entry: Learning): Promise<boolean> {
+  const c = serviceCredentials();
+  if (!c) return false;
+  const items = [entry, ...(await listLearnings(organizationId))].slice(0, 60);
   try {
-    await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, { method: "POST", headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" }, body: JSON.stringify({ ref: LEARN_REF, kind: "learning", query: "self-learning", payload: { items }, ts: new Date().toISOString() }), signal: AbortSignal.timeout(6000) });
-  } catch { /* */ }
+    const response = await fetch(`${c.url}/rest/v1/reports?on_conflict=organization_id,ref,kind`, { method: "POST", headers: serviceHeaders(c.key, { prefer: "resolution=merge-duplicates,return=minimal" }), body: JSON.stringify({ organization_id: organizationId, ref: LEARN_REF, kind: "learning", query: "self-learning", payload: { items }, ts: new Date().toISOString() }), signal: AbortSignal.timeout(6000) });
+    return response.ok;
+  } catch { return false; }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET") {
+    res.status(405).setHeader("Allow", "GET").json({ error: "method_not_allowed" });
+    return;
+  }
+
   const action = typeof req.query.action === "string" ? req.query.action : "";
+  const subject = typeof req.query.subject === "string" ? req.query.subject.trim() : "";
+  const type = (typeof req.query.type === "string" ? req.query.type : "").toLowerCase();
+  const value = typeof req.query.value === "string" ? req.query.value.slice(0, 200) : "";
+  const auth = await requireArgusAuth(
+    req,
+    res,
+    action ? "owner" : type && value ? "analyst" : "viewer",
+  );
+  if (!auth) return;
+  res.setHeader("Cache-Control", "private, no-store");
 
   // ── Admin actions ──
   if (action) {
     const secret = process.env.ARGUS_ADMIN_SECRET;
     if (!secret || req.query.secret !== secret) { res.status(403).json({ error: "forbidden" }); return; }
-    if (action === "pending-all") { res.status(200).json({ ok: true, pending: await listAllPending() }); return; }
-    if (action === "learnings") { res.status(200).json({ ok: true, learnings: await listLearnings() }); return; }
+    if (action === "pending-all") { res.status(200).json({ ok: true, pending: await listAllPending(auth.organizationId) }); return; }
+    if (action === "learnings") { res.status(200).json({ ok: true, learnings: await listLearnings(auth.organizationId) }); return; }
     if (action === "diagnose") {
       const ref2 = typeof req.query.ref === "string" ? req.query.ref : "";
       const id = typeof req.query.id === "string" ? req.query.id : "";
-      const row = ref2 ? await loadRow(ref2) : null;
+      const row = ref2 ? await loadRow(auth.organizationId, ref2) : null;
       const it = row?.items.find((i) => i.id === id) ?? null;
       if (!row || !it) { res.status(200).json({ ok: false, reason: "not found" }); return; }
       const dg = await diagnose(row.subject, it);
-      if (dg) await saveLearning({ subject: row.subject, label: it.label, kind: it.rel ? `link:${it.rel}` : it.type, reason: dg.reason, fix: dg.fix, at: Date.now() });
+      if (dg) {
+        const saved = await saveLearning(auth.organizationId, { subject: row.subject, label: it.label, kind: it.rel ? `link:${it.rel}` : it.type, reason: dg.reason, fix: dg.fix, at: Date.now() });
+        if (!saved) { res.status(503).json({ ok: false, error: "learning_store_failed" }); return; }
+      }
       res.status(200).json({ ok: true, diagnosis: dg });
       return;
     }
     if (action === "approve" || action === "deny") {
       const ref2 = typeof req.query.ref === "string" ? req.query.ref : "";
       const id = typeof req.query.id === "string" ? req.query.id : "";
-      const row = ref2 ? await loadRow(ref2) : null;
+      const row = ref2 ? await loadRow(auth.organizationId, ref2) : null;
       if (!row) { res.status(200).json({ ok: false, reason: "not found" }); return; }
       const target = row.items.find((i) => i.id === id) ?? null;
       const items2 = action === "approve"
         ? row.items.map((i) => (i.id === id ? { ...i, status: "live" as Status } : i))
         : row.items.filter((i) => i.id !== id);
-      await saveAug(ref2, row.subject, items2);
+      if (!await saveAug(auth.organizationId, ref2, row.subject, items2)) {
+        res.status(503).json({ ok: false, error: "augmentation_store_failed" });
+        return;
+      }
       res.status(200).json({ ok: true, action, item: target ? { ...target, status: action === "approve" ? "live" : "denied" } : null });
       return;
     }
@@ -253,14 +274,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const subject = typeof req.query.subject === "string" ? req.query.subject.trim() : "";
   if (!subject) { res.status(400).json({ error: "subject required" }); return; }
   const ref = "aug:" + norm(subject).slice(0, 120);
-  const type = (typeof req.query.type === "string" ? req.query.type : "").toLowerCase();
-  const value = typeof req.query.value === "string" ? req.query.value.slice(0, 200) : "";
 
   // List mode — return everything; the client shows live and counts pending.
-  if (!type || !value) { res.status(200).json({ subject, items: await listAug(ref) }); return; }
+  if (!type || !value) { res.status(200).json({ subject, items: await listAug(auth.organizationId, ref) }); return; }
 
   const TYPES = ["github", "website", "x", "contract", "wallet"];
   if (!TYPES.includes(type)) { res.status(200).json({ verified: false, reason: "unsupported type" }); return; }
@@ -268,7 +286,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const v = await verify(type, value);
   if (!v || !v.ok) { res.status(200).json({ verified: false, reason: v?.reason ?? "could not verify" }); return; }
 
-  const by = (typeof req.query.by === "string" ? req.query.by : "").trim().slice(0, 40) || "analyst";
+  const by = auth.displayName.trim().slice(0, 40) || "analyst";
   const rel = (typeof req.query.rel === "string" ? req.query.rel : "").trim().slice(0, 40);
   const effectiveType = rel ? "link" : type;
 
@@ -279,10 +297,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const base = { id, status, why: corr.why, value: value.trim(), label: v.label, url: v.url, detail: v.detail, graphKey: v.graphKey, by, at: Date.now() };
   const item: Augmentation = rel ? { ...base, type: "link", kind: type, rel } : { ...base, type };
 
-  const items = await listAug(ref);
+  const items = await listAug(auth.organizationId, ref);
   // Replace any prior addition of the same type+value; keep newest first, cap 24.
   const deduped = [item, ...items.filter((i) => !((i.type === item.type || (i.type === "link" && item.type === "link" && i.rel === item.rel)) && norm(i.value) === norm(item.value)))].slice(0, 24);
-  await saveAug(ref, subject, deduped);
+  if (!await saveAug(auth.organizationId, ref, subject, deduped)) {
+    res.status(503).json({ verified: true, status, error: "augmentation_store_failed" });
+    return;
+  }
   if (status === "pending") await notifyPending(subject, item);
 
   res.status(200).json({ verified: true, status, why: corr.why, item, items: deduped });
