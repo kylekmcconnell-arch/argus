@@ -10,6 +10,7 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 // @ts-ignore — bundled JS sibling
 import { attachPanelCost, claudeUsd } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 30 };
 
@@ -18,6 +19,8 @@ const s = (v: unknown) => (typeof v === "string" ? v : "");
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const key = process.env.ANTHROPIC_API_KEY;
   if (req.method !== "POST") { res.status(405).json({ error: "POST required" }); return; }
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
   const body = (typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body) ?? {};
   const subject = s(body.subject).slice(0, 80);
   const verdict = s(body.verdict).slice(0, 20);
@@ -44,7 +47,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (!r.ok) { res.status(200).json({ available: true, note: `claude ${r.status}` }); return; }
     const d = (await r.json()) as any;
-    if (subject) await attachPanelCost(subject.replace(/^[@$]/, ""), { provider: "claude", op: "panel:challenge-verdict", calls: 1, usd: claudeUsd(d.usage) });
+    if (subject) await attachPanelCost(auth.organizationId, subject.replace(/^[@$]/, ""), { provider: "claude", op: "panel:challenge-verdict", calls: 1, usd: claudeUsd(d.usage) });
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
     const m = text.match(/\{[\s\S]*\}/);
     let parsed: any = {};

@@ -13,6 +13,13 @@ import type {
 } from "./reportVersion";
 
 export type ReportKind = "person" | "token" | "investigation" | "site";
+export type ReportStatus = "open" | "archived";
+export type ReportLifecycleAction = "archive" | "restore";
+
+export interface ReportSubject {
+  kind: ReportKind;
+  ref: string;
+}
 
 export function reportChecks(
   kind: ReportKind,
@@ -100,6 +107,11 @@ export interface StoredReport {
   versionContext?: ReportVersionContext;
 }
 
+export interface ReportLookup {
+  status: ReportStatus | "missing" | "unavailable";
+  report: StoredReport | null;
+}
+
 /** Attach read-only version context without modifying the immutable payload. */
 export function storedPersonDossier(report: StoredReport): Dossier {
   const payload = report.payload as Dossier;
@@ -138,6 +150,8 @@ export interface ReportListing {
   attestationState?: ReportAttestationState;
   methodologyVersion?: string | null;
   createdAt?: string;
+  status?: ReportStatus;
+  archivedAt?: string;
   // Provider spend of the audit run (person audits; token audits are keyless-free).
   cost?: {
     usd?: number;
@@ -177,36 +191,60 @@ export function groupReportsByEntity(reports: ReportListing[], resolve: (k: stri
 }
 
 // The report library: every persisted report from every analyst, newest first.
-export async function listReports(): Promise<ReportListing[]> {
-  try {
-    const r = await fetch("/api/report?list=1", { signal: AbortSignal.timeout(9000) });
-    if (!r.ok) return [];
-    const d = await r.json() as { reports?: ReportListing[] };
-    return Array.isArray(d?.reports) ? d.reports : [];
-  } catch {
-    return [];
+export async function listReports(status: ReportStatus = "open"): Promise<ReportListing[]> {
+  const url = status === "archived"
+    ? "/api/report?list=1&status=archived"
+    : "/api/report?list=1";
+  const response = await fetch(url, { signal: AbortSignal.timeout(9000) });
+  const body = await response.json().catch(() => ({})) as { reports?: ReportListing[]; message?: unknown };
+  if (!response.ok) {
+    throw new Error(typeof body.message === "string" ? body.message : `Report library unavailable (${response.status}).`);
+  }
+  return Array.isArray(body.reports) ? body.reports : [];
+}
+
+export async function changeReportLifecycle(
+  action: ReportLifecycleAction,
+  subjects: readonly ReportSubject[],
+): Promise<void> {
+  const response = await fetch("/api/report", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ action, subjects }),
+    signal: AbortSignal.timeout(12_000),
+  });
+  const body = await response.json().catch(() => ({})) as { message?: unknown };
+  if (!response.ok) {
+    throw new Error(typeof body.message === "string" ? body.message : `Case ${action} failed (${response.status}).`);
   }
 }
 
 // Retry once with real headroom: a cold serverless start (functions scale to zero
 // after idle) can blow past a single short timeout, and a null here wrongly sends
 // a click on a STORED audit into a fresh live re-run (or "No live dossier yet").
-export async function fetchReport(ref: string, kind?: ReportKind): Promise<StoredReport | null> {
+export async function fetchReportState(ref: string, kind?: ReportKind): Promise<ReportLookup> {
   const params = new URLSearchParams({ ref: ref.replace(/^[@$]/, "") });
   if (kind) params.set("kind", kind);
   const url = `/api/report?${params.toString()}`;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
-      if (!r.ok) { if (attempt === 0) continue; return null; }
-      const d = await r.json() as { report?: StoredReport | null };
+      if (!r.ok) { if (attempt === 0) continue; return { status: "unavailable", report: null }; }
+      const d = await r.json() as { report?: StoredReport | null; caseStatus?: ReportStatus | "missing" };
       const report = d?.report ?? null;
-      if (kind && report && report.kind !== kind) return null;
-      return report;
+      if (kind && report && report.kind !== kind) return { status: "missing", report: null };
+      return {
+        status: report ? "open" : d.caseStatus === "archived" || d.caseStatus === "open" ? d.caseStatus : "missing",
+        report,
+      };
     } catch {
       if (attempt === 0) continue;
-      return null;
+      return { status: "unavailable", report: null };
     }
   }
-  return null;
+  return { status: "unavailable", report: null };
+}
+
+export async function fetchReport(ref: string, kind?: ReportKind): Promise<StoredReport | null> {
+  return (await fetchReportState(ref, kind)).report;
 }

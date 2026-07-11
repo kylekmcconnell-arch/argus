@@ -51,18 +51,6 @@ export function clearContributions(): void {
   emitGraphChange();
 }
 
-// Remove ONE subject's contribution (local cache + the shared graph) — the
-// per-subject counterpart to clearContributions, used by the report purge.
-export function removeContribution(handle: string): void {
-  try {
-    const all = getContributions();
-    const key = buildAliasResolver(all)(handle);
-    localStorage.setItem(KEY, JSON.stringify(all.filter((x) => canonicalKey(x) !== key)));
-  } catch { /* noop */ }
-  void fetch(`/api/graph?handle=${encodeURIComponent(handle)}`, { method: "DELETE" }).catch(() => { /* offline */ });
-  emitGraphChange();
-}
-
 // Merge extra nodes/edges INTO the subject's existing contribution (not a replace),
 // so a forensic panel that runs after the audit can attach its findings to the
 // same subject — keeping them "mine" for subjectConnections. Creates the

@@ -8,6 +8,7 @@
 // pinned to THIS contract. 24h-cached; cost folded into the token's report.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 40 };
 
@@ -15,6 +16,8 @@ const q = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const HANDLE = /^@?[A-Za-z0-9_]{2,30}$/;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
   const key = process.env.XAI_API_KEY;
   const symbol = q(req.query.symbol).replace(/^\$/, "");
   const name = q(req.query.name);
@@ -66,7 +69,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       confidence: ["high", "medium", "low"].includes(p.confidence) ? p.confidence : "low",
       note: typeof p.note === "string" ? p.note.slice(0, 200) : "",
     };
-    await attachPanelCost(contract || symbol || name, { provider: "grok", op: "panel:token-identity", calls: 1, usd });
+    await attachPanelCost(auth.organizationId, contract || symbol || name, { provider: "grok", op: "panel:token-identity", calls: 1, usd });
     if (website || x_handle || founder) await cacheSetJson(cacheKey, out); // don't cache an all-null miss
     res.status(200).json(out);
   } catch (e) {

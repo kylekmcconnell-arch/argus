@@ -7,6 +7,7 @@
 // endorsed token is a different risk class entirely. Grok (web + X search).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 60 };
 
@@ -14,6 +15,8 @@ const q = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const RELS = new Set(["created", "endorsed", "acknowledged", "denied", "unaffiliated", "not_a_person", "unclear"]);
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
   const key = process.env.XAI_API_KEY;
   const symbol = q(req.query.symbol).replace(/^\$/, "");
   const name = q(req.query.name);
@@ -56,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Fold this panel's spend into the subject's stored report (investigations
     // are stored under the contract address), then cache the answer.
     const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : 0;
-    await attachPanelCost(contract || symbol, { provider: "grok", op: "panel:namesake", calls: 1, usd: grokUsd(d.usage, toolCalls), meta: `${(d.usage?.input_tokens ?? 0) + (d.usage?.output_tokens ?? 0)} tok` });
+    await attachPanelCost(auth.organizationId, contract || symbol, { provider: "grok", op: "panel:namesake", calls: 1, usd: grokUsd(d.usage, toolCalls), meta: `${(d.usage?.input_tokens ?? 0) + (d.usage?.output_tokens ?? 0)} tok` });
     const out = {
       available: true,
       named_after: typeof p.named_after === "string" ? p.named_after.slice(0, 80) : null,

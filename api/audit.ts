@@ -10,7 +10,7 @@ import {
   serviceHeaders,
   type AuthContext,
 } from "./_auth.js";
-import { persistProvenance } from "./_provenance.js";
+import { activateReportVersion, persistProvenance } from "./_provenance.js";
 
 export const config = { maxDuration: 180 };
 
@@ -80,33 +80,7 @@ export async function persistServerDossier(
     dossier,
     dossier.checkRuns,
   );
-
-  const row = {
-    organization_id: auth.organizationId,
-    ref,
-    kind: "person",
-    query,
-    contributor: auth.displayName.slice(0, 80),
-    created_by: auth.userId,
-    report_version_id: reportVersionId,
-    attestation_state: attestationState,
-    payload: dossier,
-    verdict,
-    score,
-    ts: new Date().toISOString(),
-  };
-  const projectionResponse = await fetch(
-    `${credentials.url}/rest/v1/reports?on_conflict=organization_id,ref,kind`,
-    {
-      method: "POST",
-      headers: serviceHeaders(credentials.key, { prefer: "resolution=merge-duplicates,return=minimal" }),
-      body: JSON.stringify(row),
-      signal: AbortSignal.timeout(10_000),
-    },
-  );
-  if (!projectionResponse.ok) {
-    throw new Error(`report projection write failed (${projectionResponse.status}): ${(await projectionResponse.text()).slice(0, 240)}`);
-  }
+  await activateReportVersion(credentials, auth.organizationId, reportVersionId);
   return reportVersionId;
 }
 

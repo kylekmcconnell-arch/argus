@@ -127,27 +127,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === "DELETE") {
-      const ref = str(typeof req.query.ref === "string" ? req.query.ref : "", 500);
-      if (!ref) {
-        res.status(400).json({ error: "ref_required" });
-        return;
-      }
-      const bare = ref.replace(/^[@$]/, "");
-      const variants = [...new Set([ref, bare, `@${bare}`, `$${bare}`])];
-      for (const column of ["ref", "query"] as const) {
-        for (const value of variants) {
-          const response = await fetch(
-            `${credentials.url}/rest/v1/${TABLE}?${orgFilter}&${column}=eq.${encodeURIComponent(value)}`,
-            {
-              method: "DELETE",
-              headers: serviceHeaders(credentials.key, { prefer: "return=minimal" }),
-              signal: AbortSignal.timeout(10_000),
-            },
-          );
-          if (!response.ok) throw new Error(`audit log delete failed (${response.status})`);
-        }
-      }
-      res.status(200).json({ ok: true });
+      res.status(410).json({
+        error: "audit_history_deletion_disabled",
+        message: "Audit history is append-only. Archive the exact case from the report library instead.",
+      });
       return;
     }
 

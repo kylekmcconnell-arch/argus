@@ -8,6 +8,7 @@
 // and says so. twitterapi.io (call tweet) + GeckoTerminal (price, no key).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { attachPanelCost } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 30 };
 
@@ -89,6 +90,8 @@ async function findCall(handle: string, ticker: string | undefined, address: str
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
   const q = req.query;
   const handle = typeof q.handle === "string" ? q.handle.replace(/^@/, "").trim() : "";
   const ticker = typeof q.ticker === "string" ? q.ticker.trim() : undefined;
@@ -148,7 +151,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const curPrice = daily[daily.length - 1][4];
     const peak = Math.max(...daily.filter((c) => c[0] >= anchorSec).map((c) => c[4]), anchorPrice);
 
-    if (twCalls) await attachPanelCost(handle, { provider: "twitterapi", op: "panel:call-performance", calls: twCalls, usd: twCalls * 0.0002 });
+    if (twCalls) await attachPanelCost(auth.organizationId, handle, { provider: "twitterapi", op: "panel:call-performance", calls: twCalls, usd: twCalls * 0.0002 }, "person");
     res.status(200).json({
       available: true,
       anchor,

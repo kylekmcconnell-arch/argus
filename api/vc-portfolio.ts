@@ -6,6 +6,7 @@
 // hit-rate. XAI_API_KEY.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 120 };
 
@@ -37,6 +38,8 @@ async function grok(key: string, system: string, user: string): Promise<{ parsed
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
   const key = process.env.XAI_API_KEY;
   const handle = q(req.query.handle).replace(/^@/, "");
   const name = q(req.query.name) || handle;
@@ -94,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }));
 
   // Fold the panel spend into the KOL/VC's stored person report + cache the answer.
-  await attachPanelCost(handle || name, { provider: "grok", op: "panel:vc-portfolio", calls: spend > 0 ? (g.usd < spend ? 2 : 1) : 0, usd: spend });
+  await attachPanelCost(auth.organizationId, handle || name, { provider: "grok", op: "panel:vc-portfolio", calls: spend > 0 ? (g.usd < spend ? 2 : 1) : 0, usd: spend }, "person");
   const result = { available: true, name, count: investments.length, investments };
   if (investments.length) await cacheSetJson(cacheKey, result);
   res.status(200).json(result);

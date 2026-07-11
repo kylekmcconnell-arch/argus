@@ -7,6 +7,7 @@
 // Gated on ANTHROPIC_API_KEY (reuses the OCR pattern). Read-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { attachPanelCost, claudeUsd } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 45 };
 
@@ -62,6 +63,8 @@ async function resolveAvatar(handle: string, urlParam: string): Promise<{ img: {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
   const key = process.env.ANTHROPIC_API_KEY;
   const handle = typeof req.query.handle === "string" ? req.query.handle.replace(/^@/, "").trim() : "";
   const urlParam = typeof req.query.url === "string" ? req.query.url : "";
@@ -92,7 +95,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (!r.ok) { res.status(200).json({ available: true, imageUrl: usedUrl, note: `vision ${r.status}` }); return; }
     const d = (await r.json()) as any;
-    await attachPanelCost(handle, { provider: "claude", op: "panel:pfp-check", calls: 1, usd: claudeUsd(d.usage), meta: "vision" });
+    await attachPanelCost(auth.organizationId, handle, { provider: "claude", op: "panel:pfp-check", calls: 1, usd: claudeUsd(d.usage), meta: "vision" }, "person");
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
     const m = text.match(/\{[\s\S]*\}/);
     let parsed: any = {};
