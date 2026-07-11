@@ -47,8 +47,14 @@ export interface CollectContext {
 }
 
 export interface AdapterRunResult {
-  state: "executed" | "partial" | "failed";
+  /**
+   * `executed` is reserved for a run that made at least one observed provider
+   * attempt. An adapter that is configured but has no applicable input must
+   * return `skipped`; configuration alone is never evidence collection.
+   */
+  state: "executed" | "partial" | "failed" | "skipped";
   detail?: string;
+  attempts?: number;
 }
 
 // An adapter declares which provider key(s) it needs and a run() that mutates
@@ -57,5 +63,7 @@ export interface Adapter {
   id: string;
   label: string;
   available: () => boolean;
+  /** Optional preflight for seeded evidence before choosing the live path. */
+  applicable?: (evidence: CollectedEvidence) => boolean;
   run: (ctx: CollectContext) => Promise<void | AdapterRunResult>;
 }

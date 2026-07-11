@@ -188,7 +188,9 @@ export async function scanContradictions(handle: string, evidenceJson: string): 
     "You are ARGUS contradiction analysis. From everything collected about a subject, find INTERNAL CONTRADICTIONS: where the subject's own stated claims conflict with each other or with the collected evidence. " +
     "Examples: claims a team of N but only one builder is found; claims an audit but no auditor or verification exists; claims a named backer who never acknowledges them; a stated launch/founding date that conflicts with the account age, domain age, or on-chain history; claims 'doxxed' but no real identity resolves; claims locked liquidity that on-chain shows unlocked; a partnership the partner never confirmed; a venture in the bio that discovery found no evidence for. " +
     "Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes. " +
-    "SCOPE RULES — these are NOT contradictions: (1) ARGUS's OWN analysis metadata (fields like identity_confidence, identity_note, verdicts, evidence notes such as 'single-source lead, unverified') disagreeing with other ARGUS fields — only the SUBJECT's outward claims vs external facts count; a low-confidence evidence note is a gap, not a conflict. (2) Normal vertical integration: a project's token running on its own chain, its dApp on its own platform, or its products naming each other is how ecosystems work, not circularity. (3) Marketing self-description ('#1', 'leading') vs modest traction is puffery to note in scoring, not a contradiction, unless it conflicts with a specific verifiable fact.";
+    "SCOPE RULES — these are NOT contradictions: (1) ARGUS's OWN analysis metadata (fields like identity_confidence, identity_note, verdicts, evidence notes such as 'single-source lead, unverified') disagreeing with other ARGUS fields — only the SUBJECT's outward claims vs external facts count; a low-confidence evidence note is a gap, not a conflict. (2) Normal vertical integration: a project's token running on its own chain, its dApp on its own platform, or its products naming each other is how ecosystems work, not circularity. (3) Marketing self-description ('#1', 'leading') vs modest traction is puffery to note in scoring, not a contradiction, unless it conflicts with a specific verifiable fact. " +
+    "INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this evidence packet. Do not infer anything about the subject from their absence. " +
+    "FINDING ATTRIBUTION RULE: when comparing or interpreting finding collections, attribute only direct-subject findings to the audited subject. A claim targeting an associate or venture cannot contradict the subject's claims unless separate direct-subject evidence explicitly connects the conduct to the subject. Never rewrite an associate's allegation as the subject's allegation. This attribution rule is specific to finding collections; profile, team, wallet, check-outcome, and other non-finding evidence in the packet remain legitimate evidence for testing the subject's claims.";
   const user = `Subject: ${handle}\n\nCollected evidence (JSON):\n${evidenceJson}`;
   const tool: ToolSchema = {
     name: "record_contradictions",
@@ -277,6 +279,14 @@ export function validateAnalystVerdict(
 
 export const ANALYST_EVIDENCE_MAX_CHARS = 24_000;
 
+interface AnalystEvidencePacketOptions {
+  /**
+   * Discovery-only rows are useful in the investigator UI, but they must never
+   * enter the context used to score or contradict the audited subject.
+   */
+  includeInvestigativeLeads: boolean;
+}
+
 const clip = (value: unknown, max: number): string | undefined => {
   if (typeof value !== "string") return undefined;
   return value.length <= max ? value : value.slice(0, max) + "…";
@@ -334,6 +344,18 @@ const compactTrustGraphPredicate = (value: unknown): Record<string, unknown> | u
     other_attestation: clip(row.other_attestation, 40),
     other_completeness: clip(row.other_completeness, 20),
     other_verdict: clip(row.other_verdict, 40),
+  };
+};
+
+const compactFindingScope = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  return {
+    scope: clip(row.scope, 32),
+    target_entity_key: clip(row.target_entity_key, 180),
+    target_entity_type: clip(row.target_entity_type, 32),
+    relationship_to_subject: clip(row.relationship_to_subject, 32),
+    relationship_label: clip(row.relationship_label, 180),
   };
 };
 
@@ -399,6 +421,7 @@ const compactFinding = (value: unknown): Record<string, unknown> | null => {
     artifact_verified: typeof f.artifact_verified === "boolean" ? f.artifact_verified : undefined,
     content_hash: clip(f.content_hash, 64),
     trust_graph: compactTrustGraphPredicate(f.trust_graph),
+    finding_scope: compactFindingScope(f.finding_scope),
   };
 };
 
@@ -408,7 +431,10 @@ const compactFinding = (value: unknown): Record<string, unknown> | null => {
  * priority. If the packet is still large, low-priority items are removed whole;
  * the returned string therefore always parses and never cuts a finding in half.
  */
-export function buildAnalystEvidencePacket(input: Record<string, unknown>): string {
+function serializeAnalystEvidencePacket(
+  input: Record<string, unknown>,
+  options: AnalystEvidencePacketOptions,
+): string {
   const sectionLimits: Record<string, number> = {
     ventures: 12,
     testimonials: 12,
@@ -423,6 +449,27 @@ export function buildAnalystEvidencePacket(input: Record<string, unknown>): stri
     providerRuns: 24,
   };
   const findingsRaw = Array.isArray(input.findings) ? input.findings : [];
+  const profile = input.profile && typeof input.profile === "object" && !Array.isArray(input.profile)
+    ? input.profile as Record<string, unknown>
+    : undefined;
+  const normalizeEntityKey = (value: unknown): string | undefined => {
+    if (typeof value !== "string") return undefined;
+    const handle = value.trim().replace(/^https?:\/\/(?:www\.)?(?:x|twitter)\.com\//i, "").replace(/^@/, "");
+    return /^[A-Za-z0-9_]{1,30}$/.test(handle) ? `@${handle.toLowerCase()}` : undefined;
+  };
+  const subjectEntityKey = normalizeEntityKey(profile?.handle);
+  const isInvestigativeLead = (value: unknown): boolean => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const row = value as Record<string, unknown>;
+    const scope = row.finding_scope && typeof row.finding_scope === "object" && !Array.isArray(row.finding_scope)
+      ? row.finding_scope as Record<string, unknown>
+      : undefined;
+    if (row.evidence_origin === "model_lead") return true;
+    if (!scope) return false; // backwards-compatible curated direct finding
+    if (scope.scope !== "direct_subject" || scope.relationship_to_subject !== "self") return true;
+    const targetEntityKey = normalizeEntityKey(scope.target_entity_key);
+    return !!subjectEntityKey && targetEntityKey !== subjectEntityKey;
+  };
   const findingPriority = (value: unknown): number => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return 4;
     const row = value as Record<string, unknown>;
@@ -431,18 +478,23 @@ export function buildAnalystEvidencePacket(input: Record<string, unknown>): stri
     if (typeof row.polarity === "number" && row.polarity < 0) return 2;
     return 3;
   };
-  const findings = findingsRaw
+  const scoringFindingsRaw = findingsRaw.filter((value) => !isInvestigativeLead(value));
+  const investigativeLeadsRaw = findingsRaw.filter(isInvestigativeLead);
+  const findings = scoringFindingsRaw
     .map((value, index) => ({ value, index }))
     .sort((a, b) => findingPriority(a.value) - findingPriority(b.value) || a.index - b.index)
     .slice(0, 24)
     .map(({ value }) => compactFinding(value))
     .filter((f): f is Record<string, unknown> => !!f);
   const coverage: Record<string, { available: number; included: number }> = {
-    findings: { available: findingsRaw.length, included: findings.length },
+    findings: { available: scoringFindingsRaw.length, included: findings.length },
   };
   const packet: Record<string, unknown> = {
-    schema_version: 2,
+    schema_version: 3,
     coverage,
+    finding_scope_policy: {
+      findings: "Direct subject evidence eligible for scoring, subject to provenance and verification.",
+    },
     profile: compactObject(input.profile),
     profileAuthenticity: compactProfileAuthenticity(input.profileAuthenticity),
     trustGraphScreen: compactTrustGraphScreen(input.trustGraphScreen),
@@ -451,14 +503,54 @@ export function buildAnalystEvidencePacket(input: Record<string, unknown>): stri
     findings,
   };
 
+  if (options.includeInvestigativeLeads) {
+    const investigativeLeads = investigativeLeadsRaw
+      .slice(0, 16)
+      .map((value) => compactFinding(value))
+      .filter((f): f is Record<string, unknown> => !!f);
+    coverage.investigative_leads = {
+      available: investigativeLeadsRaw.length,
+      included: investigativeLeads.length,
+    };
+    (packet.finding_scope_policy as Record<string, unknown>).investigative_leads =
+      "Discovery/context only. Never attribute these claims to the audited subject or use them to lower subject scores, set the headline, establish a cap, or claim decision readiness.";
+    // The general analyst packet can retain leads for investigator-facing tasks.
+    // Decision calls use buildScoringEvidencePacket, which omits them entirely.
+    packet.investigative_leads = investigativeLeads;
+  }
+
   for (const [section, limit] of Object.entries(sectionLimits)) {
-    const source = Array.isArray(input[section]) ? input[section] as unknown[] : [];
+    const rawSource = Array.isArray(input[section]) ? input[section] as unknown[] : [];
+    const source = options.includeInvestigativeLeads
+      ? rawSource
+      : rawSource.filter((item) => {
+          if (!item || typeof item !== "object" || Array.isArray(item)) return true;
+          const record = item as Record<string, unknown>;
+          // The decision packet accepts provider-collected records and legacy
+          // deterministic rows, never discovery-only/model-lead objects. This
+          // closes the same attribution boundary for ventures, testimonials,
+          // wallets, promotions, and advisory rows as for findings.
+          return record.evidence_origin !== "model_lead" && record.artifact_verified !== false;
+        });
     const included = source.slice(0, limit).map((item) => compactObject(item)).filter((item) => item !== undefined);
     packet[section] = included;
     coverage[section] = { available: source.length, included: included.length };
   }
 
-  const pruneOrder = ["recentActivity", "notableFollowers", "wallets", "promotions", "advised", "testimonials", "ventures", "team", "providerRuns", "checkOutcomes", "sourceArtifacts"];
+  const pruneOrder = [
+    "recentActivity",
+    "notableFollowers",
+    ...(options.includeInvestigativeLeads ? ["investigative_leads"] : []),
+    "wallets",
+    "promotions",
+    "advised",
+    "testimonials",
+    "ventures",
+    "team",
+    "providerRuns",
+    "checkOutcomes",
+    "sourceArtifacts",
+  ];
   let json = JSON.stringify(packet);
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
     const section = pruneOrder.find((key) => Array.isArray(packet[key]) && (packet[key] as unknown[]).length > 0);
@@ -475,6 +567,23 @@ export function buildAnalystEvidencePacket(input: Record<string, unknown>): stri
     json = JSON.stringify(packet);
   }
   return json;
+}
+
+/**
+ * General-purpose compact packet used by non-decision analyst workflows. It
+ * keeps investigative leads structurally separate from direct findings.
+ */
+export function buildAnalystEvidencePacket(input: Record<string, unknown>): string {
+  return serializeAnalystEvidencePacket(input, { includeInvestigativeLeads: true });
+}
+
+/**
+ * Evidence context for subject scoring and contradiction analysis. Discovery
+ * leads are removed as data, not merely accompanied by a prompt instruction,
+ * so related-entity allegations cannot influence either decision call.
+ */
+export function buildScoringEvidencePacket(input: Record<string, unknown>): string {
+  return serializeAnalystEvidencePacket(input, { includeInvestigativeLeads: false });
 }
 
 export async function analyzeSubject(
@@ -514,6 +623,16 @@ export async function analyzeSubject(
     `not identity proof. A real-looking photo never establishes who operates the ` +
     `account, and an AI, stock, celebrity, logo, cartoon, unclear, or missing photo ` +
     `never establishes impersonation by itself. Use it only as a review lead.\n\n` +
+    `INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this ` +
+    `scoring packet. Do not infer anything about the subject from their absence. ` +
+    `Use all remaining collected evidence according to its provenance and ` +
+    `verification state.\n\n` +
+    `FINDING ATTRIBUTION RULE: when comparing or interpreting finding collections, ` +
+    `only direct-subject findings may be attributed to the audited ` +
+    `subject. A relationship alone is not evidence of participation or ` +
+    `responsibility. This restriction applies to finding collections, not to ` +
+    `legitimate non-finding evidence: profile, team, wallet, check-outcome, source, ` +
+    `and provider evidence may affect scoring when relevant and reliable.\n\n` +
     `TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection ` +
     `findings bound to an exact complete server-collected report may influence scoring. ` +
     `Weak or unqualified ties are context only. ARGUS applies any graph cap ` +

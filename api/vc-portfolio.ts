@@ -1,9 +1,10 @@
-// A VC / investor's portfolio + track record. GET /api/vc-portfolio?handle=&name=
+// Model-discovered VC / investor portfolio candidates. GET /api/vc-portfolio?handle=&name=
 //
-// A fund's whole pitch is its judgement, so the audit is its scoreboard: what did
-// they back, and how did it end? Grok (web + X + Crunchbase) assembles the
-// portfolio; the client then prices each token investment on-chain for a real
-// hit-rate. XAI_API_KEY.
+// Grok (web + X) discovers candidate investor-project relationships. These are
+// supplemental investigative leads, not verified holdings: a model-returned URL
+// is only a candidate source until a deterministic collector freezes and verifies
+// the relationship. The client may price a named token, but that market lookup
+// does not verify the investment claim. XAI_API_KEY.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
@@ -12,7 +13,39 @@ export const config = { maxDuration: 120 };
 
 const q = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
-type GrokAttempt = { parsed: any | null; usd: number; status: "succeeded" | "partial" | "failed"; meta?: string };
+interface GrokInvestmentCandidate {
+  project?: unknown;
+  ticker?: unknown;
+  contract?: unknown;
+  chain?: unknown;
+  x_handle?: unknown;
+  stage?: unknown;
+  year?: unknown;
+  outcome?: unknown;
+  source_url?: unknown;
+  source_title?: unknown;
+}
+
+interface GrokPayload {
+  investments?: unknown;
+}
+
+type GrokAttempt = { parsed: GrokPayload | null; usd: number; status: "succeeded" | "partial" | "failed"; meta?: string };
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
+
+const textValue = (value: unknown): string => typeof value === "string" ? value : "";
+
+function candidateSourceUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > 2_000) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
 
 async function grok(key: string, system: string, user: string): Promise<GrokAttempt> {
   let r: Response;
@@ -31,20 +64,31 @@ async function grok(key: string, system: string, user: string): Promise<GrokAtte
   } catch { return { parsed: null, usd: 0, status: "failed", meta: "transport_error" }; }
   if (!r.ok) return { parsed: null, usd: 0, status: "failed", meta: `http_${r.status}` };
 
-  let d: any;
+  let d: unknown;
   try { d = await r.json(); }
   catch { return { parsed: null, usd: 0, status: "failed", meta: "response_json_error" }; }
-  const toolCalls = Array.isArray(d?.output) ? d.output.filter((o: any) => /search|tool/.test(String(o?.type ?? ""))).length : 0;
-  const usd = grokUsd(d?.usage, toolCalls);
-  const text = d?.output_text ?? (Array.isArray(d?.output) ? d.output.flatMap((o: any) => o?.content ?? []).map((c: any) => c?.text ?? "").join(" ") : "") ?? "";
+  const payload = isRecord(d) ? d : {};
+  const output = Array.isArray(payload.output) ? payload.output : [];
+  const toolCalls = output.filter((item) => isRecord(item) && /search|tool/.test(String(item.type ?? ""))).length;
+  const usage = isRecord(payload.usage) ? {
+    input_tokens: typeof payload.usage.input_tokens === "number" ? payload.usage.input_tokens : undefined,
+    output_tokens: typeof payload.usage.output_tokens === "number" ? payload.usage.output_tokens : undefined,
+  } : undefined;
+  const usd = grokUsd(usage, toolCalls);
+  const outputText = typeof payload.output_text === "string"
+    ? payload.output_text
+    : output.flatMap((item) => isRecord(item) && Array.isArray(item.content) ? item.content : [])
+      .map((content) => isRecord(content) ? textValue(content.text) : "")
+      .join(" ");
+  const text = outputText || "";
   const m = typeof text === "string" ? text.match(/\{[\s\S]*\}/) : null;
   if (!m) return { parsed: null, usd, status: "partial", meta: "output_contract_error" };
-  let parsed: any;
+  let parsed: unknown;
   try { parsed = JSON.parse(m[0]); }
   catch { return { parsed: null, usd, status: "partial", meta: "output_contract_error" }; }
-  return Array.isArray(parsed?.investments)
-    ? { parsed, usd, status: "succeeded" }
-    : { parsed, usd, status: "partial", meta: "output_contract_error" };
+  return isRecord(parsed) && Array.isArray(parsed.investments)
+    ? { parsed: parsed as GrokPayload, usd, status: "succeeded" }
+    : { parsed: null, usd, status: "partial", meta: "output_contract_error" };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -67,58 +111,82 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // ?fresh=1 bypasses it (used to re-deepen a fund cached under an older, thinner
   // search) and overwrites the cache with the new result.
   const fresh = q(req.query.fresh) === "1";
-  const cacheKey = `vcport:${(name || handle).toLowerCase()}`;
+  const cacheKey = `vcport:leads-v2:${(name || handle).toLowerCase()}`;
   if (!fresh) {
     const cached = await cacheGetJson<Record<string, unknown>>(cacheKey);
     if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
   }
 
   const system =
-    "You are a research analyst assembling the public investment portfolio of a crypto/tech VC, fund, or angel. " +
-    "USE both your own knowledge AND live web/X search (Crunchbase, the fund's own portfolio page, round announcements, CryptoRank, Messari, RootData, press). A major fund has DOZENS of public investments — be EXHAUSTIVE: aim to list at least 20-40 for a well-known fund, including smaller, earlier-stage, and non-token deals, not just the famous handful. Never return an empty (or tiny) list for a fund with a known portfolio. " +
-    "For EACH portfolio company or token, capture what you can (fields you don't know can be empty strings): project name (required), token ticker (with a leading $ if it has one), token contract address + chain if known, the project's X handle, the round/stage, the year, and the current OUTCOME/STATUS (active/healthy, acquired, shut down, or rugged/dead). " +
-    "Only include REAL investments (from your knowledge or search); do not fabricate deals that never happened, but DO include well-documented public ones even if you cannot find every field. " +
-    "Reply with ONLY compact JSON: {\"investments\":[{\"project\":\"\",\"ticker\":\"$...\",\"contract\":\"\",\"chain\":\"\",\"x_handle\":\"@...\",\"stage\":\"\",\"year\":\"\",\"outcome\":\"\"}]}. Return an empty list ONLY if this is genuinely not an investor or has no findable investments. Never use em dashes.";
-  const user = `Investor/fund: ${name}${handle && handle.toLowerCase() !== name.toLowerCase() ? ` (X @${handle})` : ""}. List their crypto and startup investment portfolio — as many real, publicly known holdings as you can, with each deal's project name, token ticker, X handle, stage, year, and current outcome. Include famous ones you already know even without a citation.`;
+    "You are a research analyst discovering candidate public investments of a crypto/tech VC, fund, or angel. " +
+    "Use live web/X search only (the fund's own portfolio page, round announcements, Crunchbase, CryptoRank, Messari, RootData, or reputable press). Do not include an investment from model memory alone. " +
+    "For EACH candidate, include one specific public source URL that names or clearly supports the investor-project relationship. A URL is still only a candidate for later deterministic verification. Skip uncited relationships. " +
+    "Capture: project name (required), token ticker, contract + chain if directly supported, project X handle, stage, year, reported current outcome, source_url, and source_title. " +
+    "Reply with ONLY compact JSON: {\"investments\":[{\"project\":\"\",\"ticker\":\"$...\",\"contract\":\"\",\"chain\":\"\",\"x_handle\":\"@...\",\"stage\":\"\",\"year\":\"\",\"outcome\":\"\",\"source_url\":\"https://...\",\"source_title\":\"\"}]}. Return an empty list when no source-linked candidates are found. Never use em dashes.";
+  const user = `Investor/fund: ${name}${handle && handle.toLowerCase() !== name.toLowerCase() ? ` (X @${handle})` : ""}. Find source-linked public portfolio candidates. Every row must include the exact candidate source URL; do not use uncited memory.`;
 
   // Grok is nondeterministic and often returns a THIN list for a fund with a big
   // public portfolio. When the first pass comes back short, run a second pass and
   // MERGE (dedupe by project) to deepen coverage — a fund's page can list 40+.
   const g = await grok(key, system, user);
   const attempts: GrokAttempt[] = [g];
-  const list: any[] = Array.isArray(g.parsed?.investments) ? g.parsed.investments : [];
-  if (list.length < 15) {
-    const g2 = await grok(key, system, user + " Be exhaustive: list at least 25-40 holdings, including earlier-stage and less-famous portfolio companies — do NOT stop at the well-known ones.");
+  const list: GrokInvestmentCandidate[] = Array.isArray(g.parsed?.investments)
+    ? g.parsed.investments.filter(isRecord)
+    : [];
+  const sourceLinkedCount = () => list.filter((item) =>
+    textValue(item.project).trim() && candidateSourceUrl(item.source_url),
+  ).length;
+  if (sourceLinkedCount() < 15) {
+    const g2 = await grok(key, system, user + " Search for additional source-linked candidates, including earlier-stage and less-famous companies. Keep only rows with a specific public source URL.");
     attempts.push(g2);
-    const more: any[] = Array.isArray(g2.parsed?.investments) ? g2.parsed.investments : [];
-    const seen = new Set(list.map((i) => String(i?.project ?? "").trim().toLowerCase()).filter(Boolean));
+    const more: GrokInvestmentCandidate[] = Array.isArray(g2.parsed?.investments)
+      ? g2.parsed.investments.filter(isRecord)
+      : [];
+    const indexes = new Map(list
+      .map((item, index) => [textValue(item.project).trim().toLowerCase(), index] as const)
+      .filter(([project]) => Boolean(project)));
     for (const i of more) {
-      const k = String(i?.project ?? "").trim().toLowerCase();
-      if (k && !seen.has(k)) { seen.add(k); list.push(i); }
+      const k = textValue(i.project).trim().toLowerCase();
+      if (!k) continue;
+      const existing = indexes.get(k);
+      if (existing === undefined) {
+        indexes.set(k, list.length);
+        list.push(i);
+      } else if (!candidateSourceUrl(list[existing].source_url) && candidateSourceUrl(i.source_url)) {
+        // A second pass with an actual candidate source supersedes an uncited
+        // remembered row for the same project.
+        list[existing] = i;
+      }
     }
   }
-  const raw: any[] = list;
-  const investments = raw
-    .filter((i) => i && typeof i.project === "string" && i.project.trim())
+  const uncitedCount = list.filter((item) =>
+    textValue(item.project).trim() && !candidateSourceUrl(item.source_url),
+  ).length;
+  const candidates = list
+    .filter((item) => textValue(item.project).trim() && candidateSourceUrl(item.source_url))
     .slice(0, 40)
-    .map((i) => ({
-      project: String(i.project).trim().slice(0, 80),
-      ticker: typeof i.ticker === "string" && i.ticker.trim() ? (i.ticker.startsWith("$") ? i.ticker.trim() : "$" + i.ticker.trim()).slice(0, 16) : null,
-      contract: typeof i.contract === "string" && /^(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(i.contract.trim()) ? i.contract.trim() : null,
-      chain: typeof i.chain === "string" ? i.chain.trim().toLowerCase().slice(0, 16) : null,
-      x_handle: typeof i.x_handle === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(i.x_handle.replace(/^@/, "")) ? "@" + i.x_handle.replace(/^@/, "") : null,
-      stage: typeof i.stage === "string" ? i.stage.trim().slice(0, 30) : null,
-      year: typeof i.year === "string" || typeof i.year === "number" ? String(i.year).slice(0, 10) : null,
-      outcome: typeof i.outcome === "string" ? i.outcome.trim().slice(0, 60) : null,
+    .map((item) => ({
+      project: textValue(item.project).trim().slice(0, 80),
+      ticker: textValue(item.ticker).trim() ? (textValue(item.ticker).startsWith("$") ? textValue(item.ticker).trim() : "$" + textValue(item.ticker).trim()).slice(0, 16) : null,
+      contract: typeof item.contract === "string" && /^(0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(item.contract.trim()) ? item.contract.trim() : null,
+      chain: textValue(item.chain).trim() ? textValue(item.chain).trim().toLowerCase().slice(0, 16) : null,
+      x_handle: typeof item.x_handle === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(item.x_handle.replace(/^@/, "")) ? "@" + item.x_handle.replace(/^@/, "") : null,
+      stage: textValue(item.stage).trim() ? textValue(item.stage).trim().slice(0, 30) : null,
+      year: typeof item.year === "string" || typeof item.year === "number" ? String(item.year).slice(0, 10) : null,
+      outcome: textValue(item.outcome).trim() ? textValue(item.outcome).trim().slice(0, 60) : null,
+      source_url: candidateSourceUrl(item.source_url),
+      source_title: textValue(item.source_title).trim() ? textValue(item.source_title).trim().slice(0, 160) : null,
+      evidence_state: "model_lead" as const,
     }));
 
   // Fold the panel spend into the KOL/VC's stored person report + cache the answer.
   const spend = attempts.reduce((sum, attempt) => sum + attempt.usd, 0);
-  const status = attempts.every((attempt) => attempt.status === "succeeded")
+  const providerStatus = attempts.every((attempt) => attempt.status === "succeeded")
     ? "succeeded"
     : attempts.every((attempt) => attempt.status === "failed")
       ? "failed"
       : "partial";
+  const status = providerStatus === "succeeded" && uncitedCount > 0 ? "partial" : providerStatus;
   await attachPanelCost(auth.organizationId, panelCostVersionId, {
     provider: "grok",
     op: "panel:vc-portfolio",
@@ -126,9 +194,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     usd: spend,
     initiatedBy: auth.userId,
     status,
-    ...(status === "succeeded" ? {} : { meta: `succeeded_${attempts.filter((attempt) => attempt.status === "succeeded").length}_of_${attempts.length}` }),
+    ...(status === "succeeded" ? {} : {
+      meta: [
+        `succeeded_${attempts.filter((attempt) => attempt.status === "succeeded").length}_of_${attempts.length}`,
+        uncitedCount ? `discarded_${uncitedCount}_uncited` : "",
+      ].filter(Boolean).join(" · "),
+    }),
   });
-  const result = { available: true, name, count: investments.length, investments };
-  if (investments.length) await cacheSetJson(cacheKey, result);
+  if (status === "failed") {
+    res.status(502).json({
+      error: "portfolio_search_failed",
+      message: "The paid portfolio search failed. No portfolio conclusion or graph relationship was recorded.",
+      retryable: true,
+    });
+    return;
+  }
+  if (status === "partial" && candidates.length === 0) {
+    res.status(502).json({
+      error: "portfolio_search_incomplete",
+      message: "The paid portfolio search returned an incomplete response. No portfolio conclusion or graph relationship was recorded.",
+      retryable: true,
+    });
+    return;
+  }
+  const result = {
+    available: true,
+    evidence_state: "model_lead" as const,
+    notice: "Unverified source candidates only; excluded from the trust graph and frozen verdict.",
+    name,
+    candidate_count: candidates.length,
+    search_status: status,
+    omitted_uncited_count: uncitedCount,
+    ...(uncitedCount > 0 ? {
+      coverage_note: `${uncitedCount} model-returned relationship${uncitedCount === 1 ? " was" : "s were"} omitted because no candidate source URL was supplied.`,
+    } : {}),
+    candidates,
+  };
+  if (candidates.length) await cacheSetJson(cacheKey, result);
   res.status(200).json(result);
 }

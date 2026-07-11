@@ -71,6 +71,21 @@ export interface TrustGraphPredicate {
   other_verdict: string;
 }
 
+/**
+ * Entity attribution for a finding. Related-entity evidence is deliberately a
+ * separate class from evidence about the audited subject: an allegation about
+ * an associate or venture must never be silently rewritten as an allegation
+ * about the subject.
+ */
+export interface FindingScope {
+  scope: "direct_subject" | "related_entity";
+  target_entity_key: string;
+  target_entity_type: "person" | "project";
+  relationship_to_subject: "self" | "associate" | "venture";
+  /** Human-readable relationship captured at discovery time. */
+  relationship_label?: string;
+}
+
 export interface Finding extends EvidenceProvenance {
   finding_type: string;
   claim: string;
@@ -84,6 +99,8 @@ export interface Finding extends EvidenceProvenance {
   content_hash?: string;
   /** Structured, engine-validated predicate for a frozen cross-report graph cap. */
   trust_graph?: TrustGraphPredicate;
+  /** Exact entity the claim is about and how that entity relates to the subject. */
+  finding_scope?: FindingScope;
   // Model output may surface a lead, but only a deterministically fetched (or
   // human-verified) artifact is eligible to govern a hard cap.
 }
@@ -138,7 +155,7 @@ export interface ClientEngagement extends EvidenceProvenance {
   notes?: string;
 }
 
-export interface Wallet {
+export interface Wallet extends EvidenceProvenance {
   address: string;
   chain: string;
   link_tier: string;
@@ -189,6 +206,8 @@ export interface AuditReport {
   score_total: number | null;
   cap_applied: string | null;
   publishable_findings: Finding[];
+  /** Discovery/context rows retained for analyst follow-up, never published as subject findings. */
+  investigative_leads: Finding[];
   finalized_at: string;
   founder_summary?: { pattern: string; repeat_backing: RepeatBackingResult };
   advised_summary?: { advised: number; rugs: number; rugs_with_allocation: number; successes: number };
@@ -364,7 +383,7 @@ export class Audit {
     const keys: string[] = [];
     const has = (ftype: string, status: string, n = 1) =>
       this.findings.some(
-        (f) => f.finding_type === ftype && f.verification_status === status && f.independent_source_count >= n && this.findingHasVerifiedArtifact(f),
+        (f) => this.findingTargetsSubject(f) && f.finding_type === ftype && f.verification_status === status && f.independent_source_count >= n && this.findingHasVerifiedArtifact(f),
       );
     if (has("DeceptionFinding", "Verified")) keys.push("deception_confirmed");
     if (has("InvestigatorCallout", "Verified", 2)) keys.push("investigator_verified_fraud");
@@ -402,7 +421,8 @@ export class Audit {
           Array.isArray(value)
           && value.length > 0
           && value.every((edgeType) => typeof edgeType === "string" && edgeType.trim().length > 0);
-        return finding.finding_type === "TrustGraphConnection"
+        return this.findingTargetsSubject(finding)
+        && finding.finding_type === "TrustGraphConnection"
         && finding.verification_status === "Verified"
         && finding.independent_source_count >= 1
         && finding.evidence_origin === "deterministic"
@@ -439,6 +459,20 @@ export class Audit {
     return this.artifactIsEligible(f.source_url, f.evidence_origin, f.artifact_verified);
   }
 
+  private findingTargetsSubject(f: Finding): boolean {
+    const scope = f.finding_scope;
+    // Curated and deterministic records created before entity scoping were
+    // direct subject findings. Preserve those fixtures while requiring every
+    // newly scoped row to prove both its relationship and exact target.
+    if (!scope) return true;
+    if (scope.scope !== "direct_subject" || scope.relationship_to_subject !== "self") return false;
+    try {
+      return normalizeHandle(scope.target_entity_key) === this.handle;
+    } catch {
+      return false;
+    }
+  }
+
   private roleCapsTriggered(role: SubjectClass): string[] {
     const keys: string[] = [];
     if (role === SubjectClass.FOUNDER) {
@@ -454,14 +488,16 @@ export class Audit {
       // A founder who builds the means to rug/wash-trade undetectably (bundlers,
       // mixers, volume fakers): the tooling flag, verified from their own product
       // surfaces, is disqualifying on its own.
-      if (this.findings.some((f) => f.finding_type === "ManipulationTooling" && f.verification_status === "Verified" && this.findingHasVerifiedArtifact(f)))
+      if (this.findings.some((f) => this.findingTargetsSubject(f) && f.finding_type === "ManipulationTooling" && f.verification_status === "Verified" && this.findingHasVerifiedArtifact(f)))
         keys.push("operates_manipulation_tooling");
     } else if (role === SubjectClass.KOL) {
       if (
         this.wallets.some(
           (w) =>
             w.sold_into_own_promo &&
-            (w.link_tier === "SelfDoxxed" || w.link_tier === "InvestigatorAttributed"),
+            (w.link_tier === "SelfDoxxed" || w.link_tier === "InvestigatorAttributed") &&
+            w.evidence_origin !== "model_lead" &&
+            w.artifact_verified !== false,
         )
       )
         keys.push("wallet_sold_into_promo");
@@ -478,7 +514,7 @@ export class Audit {
         t.artifact_verified !== false,
       ))
         keys.push("contradicted_testimonial");
-      if (this.findings.some((f) => f.finding_type === "PredatoryTerms" && f.verification_status === "Verified" && this.findingHasVerifiedArtifact(f)))
+      if (this.findings.some((f) => this.findingTargetsSubject(f) && f.finding_type === "PredatoryTerms" && f.verification_status === "Verified" && this.findingHasVerifiedArtifact(f)))
         keys.push("predatory_terms_verified");
     } else if (role === SubjectClass.ADVISOR) {
       if (this.advisedProjects.some((p) =>
@@ -596,6 +632,7 @@ export class Audit {
       score_total: govScore,
       cap_applied: govCap,
       publishable_findings: this.publishable(),
+      investigative_leads: this.investigativeLeads(),
       finalized_at: new Date(0).toISOString(),
     };
     if (this.roles.includes(SubjectClass.FOUNDER)) report.founder_summary = this.founderSummary();
@@ -605,7 +642,17 @@ export class Audit {
 
   private publishable(): Finding[] {
     return this.findings.filter(
-      (f) => f.independent_source_count >= 1 && (f.verification_status === "Verified" || f.verification_status === "Reported"),
+      (f) => this.findingTargetsSubject(f)
+        && f.evidence_origin !== "model_lead"
+        && f.artifact_verified !== false
+        && f.independent_source_count >= 1
+        && (f.verification_status === "Verified" || f.verification_status === "Reported"),
+    );
+  }
+
+  private investigativeLeads(): Finding[] {
+    return this.findings.filter(
+      (f) => f.evidence_origin === "model_lead" || !this.findingTargetsSubject(f),
     );
   }
 
@@ -654,7 +701,7 @@ export class Audit {
       nodes.push({ type: "Identity", subtype: "Wallet", key, link_tier: w.link_tier });
       edges.push({ src: this.handle, dst: key, type: "CONTROLS_WALLET", tier: w.link_tier });
     }
-    for (const f of this.findings.filter((x) => x.finding_type === "DeceptionFinding")) {
+    for (const f of this.findings.filter((x) => this.findingTargetsSubject(x) && x.finding_type === "DeceptionFinding")) {
       const key = "DF-" + f.claim.slice(0, 10);
       nodes.push({ type: "DeceptionFinding", key, claim: f.claim });
       edges.push({ src: key, dst: this.handle, type: "FLAGS", permanent: true });

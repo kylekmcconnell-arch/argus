@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ANALYST_EVIDENCE_MAX_CHARS,
+  analyzeSubject,
   buildAnalystEvidencePacket,
+  buildScoringEvidencePacket,
+  scanContradictions,
   structured,
   validateAnalystVerdict,
   type AnalystAxis,
@@ -14,6 +17,12 @@ const catalog: AnalystAxis[] = [
 ];
 
 describe("analyst verdict integrity", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
   it("accepts exactly one finite, in-range score per requested axis", () => {
     const result = validateAnalystVerdict({
       axes: [
@@ -188,6 +197,189 @@ describe("analyst verdict integrity", () => {
       content_hash: "d".repeat(64),
       trust_graph: expect.objectContaining({ tie_type: "Identity", other_verdict: "FAIL" }),
     });
+  });
+
+  it("separates associate and model leads from subject-scoring findings with explicit scope", () => {
+    const direct = {
+      finding_type: "DeterministicFinding",
+      claim: "Evidence about the audited subject.",
+      source_url: "https://example.com/subject",
+      verification_status: "Verified",
+      independent_source_count: 2,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      finding_scope: {
+        scope: "direct_subject",
+        target_entity_key: "@subject",
+        target_entity_type: "person",
+        relationship_to_subject: "self",
+        relationship_label: "audited subject",
+      },
+    };
+    const associateLead = {
+      finding_type: "AdverseLead",
+      claim: "A complaint page was surfaced about @associate.",
+      source_url: "https://example.com/associate-candidate",
+      verification_status: "Reported",
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      finding_scope: {
+        scope: "related_entity",
+        target_entity_key: "@associate",
+        target_entity_type: "person",
+        relationship_to_subject: "associate",
+        relationship_label: "recorded collaborator",
+      },
+    };
+    const mismatchedDirectTarget = {
+      ...direct,
+      claim: "A forged direct scope actually names another account.",
+      finding_scope: {
+        ...direct.finding_scope,
+        target_entity_key: "@somebody_else",
+      },
+    };
+
+    const parsed = JSON.parse(buildAnalystEvidencePacket({
+      profile: { handle: "@subject" },
+      findings: [associateLead, mismatchedDirectTarget, direct],
+    }));
+
+    expect(parsed.schema_version).toBe(3);
+    expect(parsed.coverage.findings).toEqual({ available: 1, included: 1 });
+    expect(parsed.coverage.investigative_leads).toEqual({ available: 2, included: 2 });
+    expect(parsed.findings).toEqual([expect.objectContaining({ claim: direct.claim })]);
+    expect(parsed.investigative_leads).toEqual([
+      expect.objectContaining({
+        claim: associateLead.claim,
+        finding_scope: expect.objectContaining({
+          scope: "related_entity",
+          target_entity_key: "@associate",
+          relationship_to_subject: "associate",
+        }),
+      }),
+      expect.objectContaining({
+        claim: mismatchedDirectTarget.claim,
+        finding_scope: expect.objectContaining({ target_entity_key: "@somebody_else" }),
+      }),
+    ]);
+    expect(parsed.finding_scope_policy.investigative_leads).toContain("Never attribute");
+  });
+
+  it("completely removes investigative leads from the scorer packet while retaining legitimate evidence", () => {
+    const direct = {
+      finding_type: "DeterministicFinding",
+      claim: "DIRECT_SUBJECT_FINDING_RETAINED",
+      source_url: "https://example.com/direct",
+      verification_status: "Verified",
+      independent_source_count: 2,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      finding_scope: {
+        scope: "direct_subject",
+        target_entity_key: "@subject",
+        target_entity_type: "person",
+        relationship_to_subject: "self",
+      },
+    };
+    const modelLead = {
+      ...direct,
+      claim: "MODEL_LEAD_MUST_NOT_REACH_SCORER",
+      source_url: "https://example.com/model-lead",
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    };
+    const relatedLead = {
+      ...direct,
+      claim: "RELATED_ENTITY_MUST_NOT_REACH_SCORER",
+      source_url: "https://example.com/related",
+      finding_scope: {
+        scope: "related_entity",
+        target_entity_key: "@associate",
+        target_entity_type: "person",
+        relationship_to_subject: "associate",
+      },
+    };
+
+    const packet = buildScoringEvidencePacket({
+      profile: { handle: "@subject", name: "Subject Person", bio: "Public builder" },
+      team: [{ name: "Named Teammate", role: "CTO", linkedin: "https://linkedin.com/in/teammate" }],
+      wallets: [{ chain: "ethereum", address: "0x123", attribution: "self-disclosed" }],
+      ventures: [{ project_name: "FIXTURE_VENTURE_MUST_NOT_REACH_SCORER", evidence_origin: "model_lead", artifact_verified: false }],
+      testimonials: [{ claimed_endorser_handle: "@fixture_endorser", evidence_origin: "model_lead", artifact_verified: false }],
+      promotions: [{ ticker: "FIXTURE_PROMO", evidence_origin: "model_lead", artifact_verified: false }],
+      checkOutcomes: [{ checkId: "identity-resolution", status: "confirmed", provider: "github" }],
+      findings: [modelLead, relatedLead, direct],
+      investigative_leads: [{ claim: "SEPARATE_LEAD_ARRAY_MUST_NOT_REACH_SCORER" }],
+    });
+    const parsed = JSON.parse(packet);
+
+    expect(parsed).not.toHaveProperty("investigative_leads");
+    expect(parsed.coverage).not.toHaveProperty("investigative_leads");
+    expect(parsed.finding_scope_policy).not.toHaveProperty("investigative_leads");
+    expect(parsed.findings).toEqual([
+      expect.objectContaining({ claim: "DIRECT_SUBJECT_FINDING_RETAINED" }),
+    ]);
+    expect(parsed.profile).toMatchObject({ handle: "@subject", name: "Subject Person" });
+    expect(parsed.team[0]).toMatchObject({ name: "Named Teammate", role: "CTO" });
+    expect(parsed.wallets[0]).toMatchObject({ chain: "ethereum", address: "0x123" });
+    expect(parsed.checkOutcomes[0]).toMatchObject({
+      checkId: "identity-resolution",
+      status: "confirmed",
+    });
+    expect(packet).not.toContain("MODEL_LEAD_MUST_NOT_REACH_SCORER");
+    expect(packet).not.toContain("RELATED_ENTITY_MUST_NOT_REACH_SCORER");
+    expect(packet).not.toContain("SEPARATE_LEAD_ARRAY_MUST_NOT_REACH_SCORER");
+    expect(packet).not.toContain("FIXTURE_VENTURE_MUST_NOT_REACH_SCORER");
+    expect(packet).not.toContain("fixture_endorser");
+    expect(packet).not.toContain("FIXTURE_PROMO");
+    expect(packet).not.toContain("model_lead");
+    expect(packet).not.toContain("@associate");
+  });
+
+  it("tells decision prompts that leads are excluded without discarding non-finding evidence", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { tool_choice: { name: string } };
+      const input = request.tool_choice.name === "record_contradictions"
+        ? { contradictions: [] }
+        : {
+            axes: [
+              { axis: "F1_identity_verifiability", score: 10, rationale: "Named team" },
+              { axis: "F2_track_record", score: 20, rationale: "Verified work" },
+            ],
+            headline: "Evidence-backed result",
+            identity_note: "Identity resolved",
+          };
+      return new Response(JSON.stringify({
+        content: [{ type: "tool_use", name: request.tool_choice.name, input }],
+        usage: { input_tokens: 100, output_tokens: 20 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await scanContradictions("@subject", "{\"profile\":{\"handle\":\"@subject\"}}");
+    await analyzeSubject("@subject", ["FOUNDER"], catalog, "{\"profile\":{\"handle\":\"@subject\"}}");
+
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as {
+      system: string;
+      messages: { content: string }[];
+      tool_choice: { name: string };
+    });
+    const contradictionPrompt = requests.find((request) => request.tool_choice.name === "record_contradictions")?.system ?? "";
+    const scoringPrompt = requests.find((request) => request.tool_choice.name === "record_verdict")?.messages[0]?.content ?? "";
+
+    expect(contradictionPrompt).toContain("investigative leads are excluded from this evidence packet");
+    expect(contradictionPrompt).toContain("when comparing or interpreting finding collections");
+    expect(contradictionPrompt).toContain("profile, team, wallet, check-outcome");
+    expect(scoringPrompt).toContain("investigative leads are excluded from this scoring packet");
+    expect(scoringPrompt).toContain("when comparing or interpreting finding collections");
+    expect(scoringPrompt).toContain("profile, team, wallet, check-outcome");
+    expect(scoringPrompt).not.toContain("only rows in the findings array may influence");
   });
 });
 

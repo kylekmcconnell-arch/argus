@@ -44,7 +44,7 @@ export interface Dossier {
     runs: Array<{
       id: string;
       label: string;
-      state: "executed" | "partial" | "failed" | "unavailable";
+      state: "executed" | "partial" | "failed" | "unavailable" | "skipped";
       observedAt: string;
       detail?: string;
     }>;

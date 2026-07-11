@@ -47,6 +47,12 @@ afterEach(() => {
   container.remove();
 });
 
+function readinessSupportText(): string {
+  const label = [...container.querySelectorAll("dt")]
+    .find((node) => node.textContent?.trim() === "Strongest recorded support");
+  return label?.parentElement?.textContent ?? "";
+}
+
 describe("private person report evidence boundary", () => {
   it("does not mount subject-specific supplemental panels", () => {
     const dossier = {
@@ -340,6 +346,261 @@ describe("decision-safe person report presentation", () => {
     const mountedPanels = harness.livePanel.mock.calls.map(([panel]) => panel);
     expect(mountedPanels).not.toContain("pfp");
     expect(mountedPanels).not.toContain("ring-alert");
+  });
+
+  it("summarizes confirmed collector support instead of model findings", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const modelFinding = {
+      ...base.report.publishable_findings[0],
+      claim: "MODEL-GENERATED POSITIVE NARRATIVE MUST NOT DRIVE READINESS",
+    };
+    const dossier = {
+      ...base,
+      report: {
+        ...base.report,
+        publishable_findings: [modelFinding],
+      },
+      checkRuns: [
+        {
+          checkId: "identity-resolution",
+          label: "Identity resolution",
+          status: "confirmed" as const,
+          note: "GitHub account kylemcconnell links back to @kyle · licensed identity record resolved to Kyle McConnell",
+          provider: "github,peopledatalabs",
+          sourceCount: 2,
+        },
+        {
+          checkId: "code-footprint-github",
+          label: "Code footprint (GitHub)",
+          status: "confirmed" as const,
+          note: "github.com/kylemcconnell resolved through its X handle field",
+          provider: "github",
+          sourceCount: 1,
+        },
+        {
+          checkId: "news-press",
+          label: "News & press",
+          status: "confirmed" as const,
+          note: "1 exact-handle crypto press result frozen",
+          provider: "google-news",
+          sourceCount: 1,
+        },
+        {
+          checkId: "profile-photo-authenticity",
+          label: "Profile-photo integrity",
+          status: "checked-empty" as const,
+          note: "real candid observed; visual-only screen cannot prove image ownership or identity",
+          provider: "claude-vision",
+          sourceCount: 1,
+        },
+      ],
+      sourceArtifacts: [{
+        kind: "press" as const,
+        provider: "google-news" as const,
+        title: "Kyle McConnell launches an on-chain research product",
+        sourceUrl: "https://example.com/kyle-launch",
+        capturedAt: "2026-07-11T15:00:00.000Z",
+        contentHash: "a".repeat(64),
+        match: "exact_handle" as const,
+      }, {
+        kind: "profile_photo" as const,
+        provider: "claude-vision" as const,
+        title: "Profile-photo integrity screen",
+        sourceUrl: "https://pbs.twimg.com/profile_images/kyle.jpg",
+        capturedAt: "2026-07-11T15:01:00.000Z",
+        contentHash: "b".repeat(64),
+        match: "observed" as const,
+      }],
+      completeness_state: "complete" as const,
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const support = readinessSupportText();
+    expect(support).toContain("Identity resolution");
+    expect(support).toContain("GitHub account kylemcconnell links back to @kyle");
+    expect(support).not.toContain("MODEL-GENERATED POSITIVE NARRATIVE");
+    expect(support).not.toContain("No verified positive finding");
+  });
+
+  it("uses an exact frozen press artifact only with a confirmed press outcome", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: { ...base.report, publishable_findings: [] },
+      checkRuns: [{
+        checkId: "news-press",
+        label: "News & press",
+        status: "confirmed" as const,
+        note: "1 exact-handle crypto press result frozen",
+        provider: "google-news",
+        sourceCount: 1,
+      }],
+      sourceArtifacts: [{
+        kind: "press" as const,
+        provider: "google-news" as const,
+        title: "Independent profile of the founder",
+        sourceUrl: "https://example.com/founder-profile",
+        capturedAt: "2026-07-11T15:00:00.000Z",
+        contentHash: "c".repeat(64),
+        match: "exact_handle" as const,
+      }],
+      completeness_state: "complete" as const,
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const support = readinessSupportText();
+    expect(support).toContain("Public-footprint evidence");
+    expect(support).toContain("Independent profile of the founder");
+    expect(support).toContain("source match, not favorable coverage");
+  });
+
+  it("does not promote checked-empty, no-match, or unsupported artifacts into positive support", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const modelFinding = {
+      ...base.report.publishable_findings[0],
+      claim: "MODEL POSITIVE THAT MUST REMAIN OUTSIDE THE READINESS SUMMARY",
+    };
+    const dossier = {
+      ...base,
+      report: { ...base.report, publishable_findings: [modelFinding] },
+      checkRuns: [{
+        checkId: "identity-resolution",
+        label: "Identity resolution",
+        status: "checked-empty" as const,
+        note: "licensed identity provider completed without a matching real-world record",
+        provider: "peopledatalabs",
+      }, {
+        checkId: "code-footprint-github",
+        label: "Code footprint (GitHub)",
+        status: "confirmed" as const,
+        note: "GitHub footprint marked confirmed without a frozen source count",
+        provider: "github",
+      }, {
+        checkId: "news-press",
+        label: "News & press",
+        status: "checked-empty" as const,
+        note: "exact-name and exact-handle crypto press searches returned no matching article",
+        provider: "google-news",
+      }, {
+        checkId: "profile-photo-authenticity",
+        label: "Profile-photo integrity",
+        status: "checked-empty" as const,
+        note: "real candid observed; visual-only screen cannot prove image ownership or identity",
+        provider: "claude-vision",
+      }],
+      sourceArtifacts: [{
+        kind: "press" as const,
+        provider: "google-news" as const,
+        title: "Artifact without a confirmed press outcome",
+        sourceUrl: "https://example.com/unqualified-press",
+        capturedAt: "2026-07-11T15:00:00.000Z",
+        contentHash: "d".repeat(64),
+        match: "exact_handle" as const,
+      }, {
+        kind: "sanctions_screen" as const,
+        provider: "opensanctions" as const,
+        title: "US Treasury OFAC SDN exact-name screen",
+        sourceUrl: "https://example.com/ofac",
+        capturedAt: "2026-07-11T15:01:00.000Z",
+        contentHash: "e".repeat(64),
+        match: "no_match" as const,
+      }],
+      completeness_state: "complete" as const,
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const support = readinessSupportText();
+    expect(support).toContain("No confirmed supporting outcome is frozen");
+    expect(support).toContain("Checked-empty and no-match records count toward coverage, not positive support");
+    expect(support).not.toContain("MODEL POSITIVE");
+    expect(support).not.toContain("Artifact without a confirmed press outcome");
+  });
+
+  it("renders associate accusations as unverified leads outside the subject score", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: {
+        ...base.report,
+        publishable_findings: [],
+        investigative_leads: [{
+          finding_type: "AdverseLead",
+          claim: "@associate (scam accusation lead): a complaint page names the associate.",
+          source_url: "https://example.com/associate-complaint",
+          source_date: "",
+          source_author: "candidate complaint index",
+          verification_status: "Reported",
+          independent_source_count: 1,
+          polarity: -1,
+          evidence_origin: "model_lead" as const,
+          artifact_verified: false,
+          finding_scope: {
+            scope: "related_entity" as const,
+            target_entity_key: "@associate",
+            target_entity_type: "person" as const,
+            relationship_to_subject: "associate" as const,
+            relationship_label: "recorded collaborator",
+          },
+        }],
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Investigative leads");
+    expect(container.textContent).toContain("Associate lead");
+    expect(container.textContent).toContain("unverified lead · outside subject score");
+    expect(container.textContent).toContain(`not verified evidence of conduct by ${base.report.handle}`);
+    expect(container.textContent).not.toContain("Publishable findings");
+  });
+
+  it("distinguishes a verified related-entity artifact from subject attribution", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      report: {
+        ...base.report,
+        publishable_findings: [],
+        investigative_leads: [{
+          finding_type: "LegalFinding",
+          claim: "A frozen court artifact names the associated venture.",
+          source_url: "https://example.com/venture-case",
+          source_date: "2026-01-02",
+          source_author: "court record",
+          verification_status: "Verified" as const,
+          independent_source_count: 1,
+          polarity: -1,
+          evidence_origin: "deterministic" as const,
+          artifact_verified: true,
+          finding_scope: {
+            scope: "related_entity" as const,
+            target_entity_key: "@related_venture",
+            target_entity_type: "project" as const,
+            relationship_to_subject: "venture" as const,
+            relationship_label: "former employer",
+          },
+        }],
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("verified about target · outside subject score");
+    expect(container.textContent).toContain(`verified about @related_venture, but it is not evidence of conduct by ${base.report.handle}`);
+    expect(container.textContent).toContain("Verified target source");
   });
 });
 

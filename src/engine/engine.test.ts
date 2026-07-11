@@ -149,6 +149,94 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(r.verdict).not.toBe("AVOID");
   });
 
+  it("keeps a model lead with a candidate URL out of publishable subject findings", () => {
+    const audit = highScoringFounder("@scoped_subject");
+    audit.addFinding({
+      finding_type: "AdverseLead",
+      claim: "A search model surfaced a candidate complaint page.",
+      source_url: "https://example.com/candidate-only",
+      source_date: "",
+      verification_status: "Reported",
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      finding_scope: {
+        scope: "direct_subject",
+        target_entity_key: "@scoped_subject",
+        target_entity_type: "person",
+        relationship_to_subject: "self",
+      },
+    });
+
+    const result = audit.finalize();
+
+    expect(result.publishable_findings).toEqual([]);
+    expect(result.investigative_leads).toHaveLength(1);
+    expect(result.investigative_leads[0]).toMatchObject({
+      finding_type: "AdverseLead",
+      evidence_origin: "model_lead",
+      finding_scope: { scope: "direct_subject", target_entity_key: "@scoped_subject" },
+    });
+  });
+
+  it("cannot cap or publish a verified adverse finding scoped to an associate", () => {
+    const audit = highScoringFounder("@primary_subject");
+    audit.addFinding({
+      finding_type: "InvestigatorCallout",
+      claim: "Investigators documented conduct by @associate_only.",
+      source_url: "https://example.com/associate-evidence",
+      source_date: "2026-07-11",
+      verification_status: "Verified",
+      independent_source_count: 3,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      finding_scope: {
+        scope: "related_entity",
+        target_entity_key: "@associate_only",
+        target_entity_type: "person",
+        relationship_to_subject: "associate",
+        relationship_label: "recorded collaborator",
+      },
+    });
+
+    const result = audit.finalize();
+
+    expect(result.cap_applied).toBeNull();
+    expect(result.score_total).toBe(100);
+    expect(result.publishable_findings).toEqual([]);
+    expect(result.investigative_leads).toHaveLength(1);
+  });
+
+  it("fails closed when a row claims direct scope but targets another handle", () => {
+    const audit = highScoringFounder("@primary_subject_2");
+    audit.addFinding({
+      finding_type: "DeceptionFinding",
+      claim: "This claim is actually about somebody else.",
+      source_url: "https://example.com/other-person",
+      source_date: "2026-07-11",
+      verification_status: "Verified",
+      independent_source_count: 2,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      finding_scope: {
+        scope: "direct_subject",
+        target_entity_key: "@different_person",
+        target_entity_type: "person",
+        relationship_to_subject: "self",
+      },
+    });
+
+    const result = audit.finalize();
+
+    expect(result.cap_applied).toBeNull();
+    expect(result.publishable_findings).toEqual([]);
+    expect(result.investigative_leads).toHaveLength(1);
+    expect(audit.toPanoptes().nodes.some((node) => node.type === "DeceptionFinding")).toBe(false);
+  });
+
   it("model-discovered manipulation tooling cannot fire founder or agency caps", () => {
     const founder = new Audit("@model_tool_lead", { subject_class: SubjectClass.FOUNDER });
     founder.setIdentity("Confirmed");
