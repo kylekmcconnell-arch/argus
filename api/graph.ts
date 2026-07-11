@@ -124,21 +124,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.method === "DELETE") {
-      const handle = typeof req.query.handle === "string" ? req.query.handle.trim().slice(0, 500) : "";
-      if (!handle) {
-        res.status(400).json({ error: "handle_required" });
-        return;
-      }
-      const response = await fetch(
-        `${credentials.url}/rest/v1/${TABLE}?${orgFilter}&canonical_key=eq.${encodeURIComponent(canonical(handle))}`,
-        {
-          method: "DELETE",
-          headers: serviceHeaders(credentials.key, { prefer: "return=minimal" }),
-          signal: AbortSignal.timeout(10_000),
-        },
-      );
-      if (!response.ok) throw new Error(`graph delete failed (${response.status})`);
-      res.status(200).json({ ok: true });
+      res.status(410).json({
+        error: "graph_history_deletion_disabled",
+        message: "Trust-graph intelligence is retained when a case is archived.",
+      });
       return;
     }
 

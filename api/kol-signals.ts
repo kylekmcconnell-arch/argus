@@ -6,6 +6,7 @@
 // twitterapi.io (TWITTERAPI_KEY). Read-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { attachPanelCost } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 30 };
 
@@ -41,6 +42,8 @@ function botFlags(f: any): number {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
   const key = process.env.TWITTERAPI_KEY;
   const handle = typeof req.query.handle === "string" ? req.query.handle.replace(/^@/, "").trim() : "";
   if (!handle || !HANDLE.test(handle)) { res.status(400).json({ error: "handle required" }); return; }
@@ -93,7 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? `No strong bot/bought-engagement signal in the sample (${botPct}% of ${sampled} sampled followers flagged, ~${avgLikes} likes & ~${avgReplies} replies/post on ${totalFollowers.toLocaleString()} followers).`
         : "Could not sample followers.";
 
-    await attachPanelCost(handle, { provider: "twitterapi", op: "panel:kol-signals", calls: twCalls, usd: twCalls * 0.0002 });
+    await attachPanelCost(auth.organizationId, handle, { provider: "twitterapi", op: "panel:kol-signals", calls: twCalls, usd: twCalls * 0.0002 }, "person");
     res.status(200).json({
       available: true,
       handle,

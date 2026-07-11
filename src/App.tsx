@@ -5,6 +5,7 @@ import { logAudit, hydrateSharedLog } from "./lib/auditlog";
 import {
   syncReport,
   fetchReport,
+  fetchReportState,
   storedInvestigation,
   storedPersonDossier,
   storedTokenDossier,
@@ -21,6 +22,7 @@ import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
 import { personChecks, tokenChecks } from "./lib/scanChecklist";
 import { deriveDecisionReadiness } from "./lib/decisionReadiness";
+import { useArgusAuth } from "./auth-context";
 
 // Product areas load on demand. The home/search shell stays immediate while
 // heavyweight reports, graph views, recon, and admin tooling become cached
@@ -83,6 +85,10 @@ const cacheResult = (cache: Map<string, Cached>, ref: string, result: Cached, up
   cache.set(cacheKey(ref, result.kind), result);
   if (updateLatest) cache.set(cacheKey(ref), result);
 };
+const clearCachedRef = (cache: Map<string, Cached>, ref: string) => {
+  const suffix = `:${normalizedCacheRef(ref)}`;
+  for (const key of cache.keys()) if (key.endsWith(suffix)) cache.delete(key);
+};
 
 // Deep links:
 //   ?s=<handle>    -> open the stored report for that subject (share links)
@@ -106,6 +112,7 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
 }
 
 export default function App() {
+  const { role } = useArgusAuth();
   const [boot] = useState(initialFromUrl);
   const [phase, setPhase] = useState<Phase>(boot.phase);
   const [dossier, setDossier] = useState<Dossier | null>(boot.dossier);
@@ -122,6 +129,11 @@ export default function App() {
   // carry the real reason so the failure page tells the truth and offers a retry,
   // instead of the "no live dossier / demo" copy that implies nothing ever ran.
   const [liveError, setLiveError] = useState<string | null>(null);
+  const [caseNotice, setCaseNotice] = useState<{
+    reason: "archived" | "unavailable";
+    ref: string;
+    kind?: ReportKind;
+  } | null>(null);
 
   // Session cache of completed audits, so clicking a recent audit SHOWS the
   // result it already produced (with a Rescan button) instead of re-running it.
@@ -140,6 +152,7 @@ export default function App() {
   useEffect(() => { void hydrateCommunityGraph(); void hydrateSharedLog(); void probeBackend(); }, []);
 
   const onAudit = useCallback(async (raw: string, priv = false) => {
+    setCaseNotice(null);
     privRef.current = priv;
     setPrivateMode(priv);
     const resolved = resolveInput(raw);
@@ -176,6 +189,7 @@ export default function App() {
   // (Radar, recon, watchlist, founder buttons) keep using onAudit for a quick
   // single-surface audit and don't auto-spend.
   const onInvestigate = useCallback((raw: string, priv = false) => {
+    setCaseNotice(null);
     privRef.current = priv;
     setPrivateMode(priv);
     if (resolveInput(raw).kind === "token") {
@@ -315,6 +329,7 @@ export default function App() {
   // (survives reload, and pulls up another analyst's actual report) → and only
   // re-runs if we have neither.
   const onOpenRecent = useCallback(async (ref: string, requestedKind?: ReportKind) => {
+    setCaseNotice(null);
     const cachedKind = requestedKind === "person" || requestedKind === "token" || requestedKind === "investigation"
       ? requestedKind
       : undefined;
@@ -323,20 +338,53 @@ export default function App() {
     if (run && (!requestedKind || requestedKind === "person")) {
       setQuery(run.handle);
       if (run.status === "running") { setPhase("live"); return; }
-      if (run.status === "done" && run.dossier) { setDossier(run.dossier); setPhase("report"); return; }
     }
     // A background token / investigation scan still running — reopen its console.
     const invRun = getScanRun("investigation", ref);
     if (invRun && invRun.status === "running" && (!requestedKind || requestedKind === "investigation")) { setInvestigationInput(invRun.input); setQuery(invRun.input); setPhase("investigation"); return; }
     const tokRun = getScanRun("token", ref);
     if (tokRun && tokRun.status === "running" && (!requestedKind || requestedKind === "token")) { setTokenInput(resolveInput(tokRun.input)); setQuery(tokRun.input); setPhase("token-run"); return; }
+
+    // Case status is authoritative over in-memory caches. Archived audit-log and
+    // graph rows remain valuable history, but clicking them must never trigger a
+    // paid rerun or reopen a cached report implicitly.
+    const lookup = await fetchReportState(ref, requestedKind);
+    if (lookup.status === "archived") {
+      clearCachedRef(resultCache.current, ref);
+      setQuery(ref);
+      setCaseNotice({ reason: "archived", ref, kind: requestedKind });
+      setLiveError(null);
+      setPhase("notfound");
+      return;
+    }
+    if (lookup.status === "unavailable") {
+      setQuery(ref);
+      setCaseNotice({ reason: "unavailable", ref, kind: requestedKind });
+      setLiveError(null);
+      setPhase("notfound");
+      return;
+    }
+    if (lookup.status === "open" && !lookup.report) {
+      clearCachedRef(resultCache.current, ref);
+      setQuery(ref);
+      setCaseNotice(null);
+      setLiveError("The case is open, but its immutable projection is temporarily unavailable. No new scan was started.");
+      setPhase("notfound");
+      return;
+    }
+
+    if (run?.status === "done" && run.dossier && (!requestedKind || requestedKind === "person")) {
+      setDossier(run.dossier);
+      setPhase("report");
+      return;
+    }
     const c = cachedKind
       ? resultCache.current.get(cacheKey(ref, cachedKind))
       : requestedKind
         ? undefined
         : resultCache.current.get(cacheKey(ref));
     if (c) { showCached(ref, c); return; }
-    const rep = await fetchReport(ref, requestedKind);
+    const rep = lookup.report;
     if (rep?.payload && (rep.kind === "person" || rep.kind === "token" || rep.kind === "investigation")) {
       const cached = rep.kind === "investigation"
         ? { kind: "investigation" as const, inv: storedInvestigation(rep) }
@@ -377,6 +425,7 @@ export default function App() {
     setInvestigation(null);
     setQuery("");
     setLiveError(null);
+    setCaseNotice(null);
     privRef.current = false;
     setPrivateMode(false);
   }, [setDossier, setInvestigation, setInvestigationInput, setLiveError, setPhase, setPrivateMode, setQuery, setTokenDossier, setTokenInput]);
@@ -491,7 +540,42 @@ export default function App() {
       {phase === "notfound" && (
         <div className="relative flex min-h-full flex-col items-center justify-center px-6 py-24 text-center">
           <div className="grid-bg absolute inset-0 -z-10" />
-          {resolveInput(query).kind === "token" ? (
+          {caseNotice ? (
+            <>
+              <div className="mono max-w-md break-all text-[13px] text-signal">{caseNotice.ref}</div>
+              <h2 className="mt-3 text-2xl font-medium tracking-tight text-ink">
+                {caseNotice.reason === "archived" ? "This case is archived" : "Stored case status is unavailable"}
+              </h2>
+              <p className="mt-2 max-w-md text-[14px] leading-relaxed text-ink-dim">
+                {caseNotice.reason === "archived"
+                  ? "Its immutable reports, evidence, audit history, and trust-graph intelligence are preserved. ARGUS did not start a new scan."
+                  : "ARGUS could not safely verify whether this case is active or archived. No cached report was opened and no paid scan was started."}
+              </p>
+              <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
+                <button
+                  onClick={() => caseNotice.reason === "archived"
+                    ? setPhase("dossiers")
+                    : void onOpenRecent(caseNotice.ref, caseNotice.kind)}
+                  className="btn-primary px-5 py-2.5 text-[13px] font-medium"
+                >
+                  {caseNotice.reason === "archived" ? "Go to report library" : "Retry opening"}
+                </button>
+                {caseNotice.reason === "archived" && role !== "viewer" && (
+                  <button
+                    onClick={() => {
+                      const archived = caseNotice;
+                      setCaseNotice(null);
+                      if (archived.kind === "investigation") onInvestigate(archived.ref);
+                      else onAudit(archived.ref);
+                    }}
+                    className="rounded-lg border border-line px-5 py-2.5 text-[13px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                  >
+                    Start fresh scan and reopen
+                  </button>
+                )}
+              </div>
+            </>
+          ) : resolveInput(query).kind === "token" ? (
             <>
               <div className="mono max-w-md break-all text-[13px] text-signal">{query}</div>
               <h2 className="mt-3 text-2xl font-medium tracking-tight text-ink">Couldn't resolve that token</h2>
@@ -534,7 +618,7 @@ export default function App() {
               </button>
             </>
           )}
-          {resolveInput(query).kind === "token" && (
+          {!caseNotice && resolveInput(query).kind === "token" && (
             <button onClick={reset} className="btn-primary mt-6 px-5 py-2.5 text-[13px] font-medium">
               Back to home
             </button>

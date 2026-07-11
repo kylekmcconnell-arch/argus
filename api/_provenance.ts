@@ -188,3 +188,23 @@ export async function persistProvenance(
     upsertRows(credentials, "check_runs", "report_version_id,check_id", checkRows),
   ]);
 }
+
+/** Publish the projection only after every provenance write above succeeded. */
+export async function activateReportVersion(
+  credentials: ServiceCredentials,
+  organizationId: string,
+  reportVersionId: string,
+): Promise<void> {
+  const response = await fetch(`${credentials.url}/rest/v1/rpc/activate_report_version`, {
+    method: "POST",
+    headers: serviceHeaders(credentials.key),
+    body: JSON.stringify({
+      p_organization_id: organizationId,
+      p_report_version_id: reportVersionId,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    throw new Error(`report activation failed (${response.status}): ${(await response.text()).slice(0, 240)}`);
+  }
+}

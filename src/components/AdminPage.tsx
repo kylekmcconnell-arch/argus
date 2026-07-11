@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { auditReadinessLabel, getLog, clearLog, hasCoverageGap, logStats, mergedLog, presentedAuditVerdict, applyRoles, type LogEntry } from "../lib/auditlog";
-import { purgeSubject } from "../lib/purge";
 import { verdictMeta } from "../lib/verdict";
 import { PendingEdits } from "./PendingEdits";
 import { TeamAccess } from "./TeamAccess";
@@ -191,23 +190,6 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
                 </span>
                 {hasCoverageGap(e) && <span className="mono text-[9px] uppercase tracking-wide text-caution">coverage gap</span>}
                 <span className="mono text-[10px] text-ink-faint">{ago(e.ts)}</span>
-              </span>
-              {/* span, not <button> — this whole row is already a button */}
-              <span
-                role="button"
-                tabIndex={0}
-                title="Remove this subject everywhere: audit log (yours + shared), stored report, trust graph — a fresh audit starts from scratch"
-                onClick={(ev) => {
-                  ev.stopPropagation();
-                  ev.preventDefault();
-                  const ref = e.ref ?? e.query;
-                  if (!window.confirm(`Delete ${e.query} everywhere (audit log, stored report, trust graph)? This cannot be undone. You can always audit it again later.`)) return;
-                  purgeSubject(ref);
-                  setLog(getLog());
-                }}
-                className="mono mt-0.5 shrink-0 cursor-pointer rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-faint transition hover:border-avoid hover:text-avoid"
-              >
-                ×
               </span>
             </div>
             );

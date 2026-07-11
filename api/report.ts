@@ -7,7 +7,7 @@ import {
   type AuthContext,
   type ServiceCredentials,
 } from "./_auth.js";
-import { persistProvenance } from "./_provenance.js";
+import { activateReportVersion, persistProvenance } from "./_provenance.js";
 import {
   mapStoredCheckRuns,
   type ReportAttestationState,
@@ -21,9 +21,15 @@ export const config = { maxDuration: 15 };
 
 const TABLE = "reports";
 const MAX_BODY = 1_800_000;
+const MAX_LIFECYCLE_BODY = 25_000;
 const CASE_KINDS = new Set(["person", "token", "investigation", "site"]);
 const STORED_KINDS = new Set([...CASE_KINDS, "watch"]);
 type JsonRecord = Record<string, unknown>;
+
+interface CaseSubject {
+  kind: string;
+  ref: string;
+}
 
 const asRecord = (value: unknown): JsonRecord =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
@@ -39,6 +45,81 @@ const normRef = (value: string) => {
 
 function safeParse(value: string): unknown {
   try { return JSON.parse(value); } catch { return {}; }
+}
+
+function lifecycleSubjects(value: unknown): CaseSubject[] | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 50) return null;
+  const unique = new Map<string, CaseSubject>();
+  for (const candidate of value) {
+    const row = asRecord(candidate);
+    const kind = typeof row.kind === "string" ? row.kind : "";
+    const ref = normRef(typeof row.ref === "string" ? row.ref : "");
+    if (!CASE_KINDS.has(kind) || !ref || ref.length > 500) return null;
+    unique.set(`${kind}\u0000${ref}`, { kind, ref });
+  }
+  return [...unique.values()];
+}
+
+async function manageLifecycle(
+  credentials: ServiceCredentials,
+  auth: AuthContext,
+  action: "archive" | "restore",
+  subjects: readonly CaseSubject[],
+): Promise<unknown[]> {
+  const response = await fetch(`${credentials.url}/rest/v1/rpc/manage_case_lifecycle`, {
+    method: "POST",
+    headers: serviceHeaders(credentials.key),
+    body: JSON.stringify({
+      p_organization_id: auth.organizationId,
+      p_actor_user_id: auth.userId,
+      p_action: action,
+      p_subjects: subjects,
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) {
+    throw new Error(`case lifecycle failed (${response.status}): ${(await response.text()).slice(0, 240)}`);
+  }
+  const rows = await response.json() as unknown;
+  return Array.isArray(rows) ? rows : [];
+}
+
+async function subjectsForRef(
+  credentials: ServiceCredentials,
+  organizationId: string,
+  ref: string,
+): Promise<CaseSubject[]> {
+  const response = await fetch(
+    `${credentials.url}/rest/v1/cases?select=kind,canonical_ref&organization_id=eq.${encodeURIComponent(organizationId)}&canonical_ref=eq.${encodeURIComponent(ref)}&kind=in.%28person%2Ctoken%2Cinvestigation%2Csite%29`,
+    { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
+  );
+  if (!response.ok) throw new Error(`case lookup failed (${response.status})`);
+  const rows = await response.json() as unknown;
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((value) => {
+    const row = asRecord(value);
+    return typeof row.kind === "string" && typeof row.canonical_ref === "string"
+      ? [{ kind: row.kind, ref: row.canonical_ref }]
+      : [];
+  });
+}
+
+async function caseStatusForRef(
+  credentials: ServiceCredentials,
+  organizationId: string,
+  ref: string,
+  kind: string,
+): Promise<"open" | "archived" | "missing"> {
+  if (kind && !CASE_KINDS.has(kind)) return "missing";
+  const kindFilter = kind ? `&kind=eq.${encodeURIComponent(kind)}` : "";
+  const response = await fetch(
+    `${credentials.url}/rest/v1/cases?select=status&organization_id=eq.${encodeURIComponent(organizationId)}&canonical_ref=eq.${encodeURIComponent(ref)}${kindFilter}&order=updated_at.desc&limit=1`,
+    { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
+  );
+  if (!response.ok) throw new Error(`case status lookup failed (${response.status})`);
+  const rows = await response.json() as unknown;
+  const status = Array.isArray(rows) ? asRecord(rows[0]).status : null;
+  return status === "open" || status === "archived" ? status : "missing";
 }
 
 function completeness(payload: unknown, requested: unknown): "complete" | "partial" | "failed" {
@@ -77,6 +158,78 @@ function versionMetadata(value: unknown): ReportVersionMetadata | null {
   };
 }
 
+function mergedCost(baseValue: unknown, panelValues: readonly JsonRecord[] = []): JsonRecord {
+  const base = asRecord(baseValue);
+  if (!panelValues.length) return base;
+  const baseCalls = Array.isArray(base.calls)
+    ? base.calls.map(asRecord).filter((line) => typeof line.provider === "string" && typeof line.op === "string")
+    : [];
+  const panelKeys = new Set(panelValues.map((line) => `${String(line.provider)}\u0000${String(line.operation)}`));
+  const replacedBaseUsd = baseCalls.reduce((sum, line) => {
+    const key = `${String(line.provider)}\u0000${String(line.op)}`;
+    return panelKeys.has(key) && typeof line.usd === "number" ? sum + line.usd : sum;
+  }, 0);
+  const callsByKey = new Map<string, JsonRecord>();
+  for (const line of baseCalls) callsByKey.set(`${String(line.provider)}\u0000${String(line.op)}`, line);
+  for (const line of panelValues) {
+    const provider = typeof line.provider === "string" ? line.provider : "panel";
+    const operation = typeof line.operation === "string" ? line.operation : "panel";
+    callsByKey.set(`${provider}\u0000${operation}`, {
+      provider,
+      op: operation,
+      calls: typeof line.calls === "number" ? line.calls : 0,
+      usd: typeof line.usd === "number" ? line.usd : 0,
+      ...(typeof line.meta === "string" && line.meta ? { meta: line.meta } : {}),
+    });
+  }
+  const calls = [...callsByKey.values()].sort((a, b) =>
+    (typeof b.usd === "number" ? b.usd : 0) - (typeof a.usd === "number" ? a.usd : 0)
+    || (typeof b.calls === "number" ? b.calls : 0) - (typeof a.calls === "number" ? a.calls : 0));
+  const baseUsd = typeof base.usd === "number"
+    ? base.usd
+    : baseCalls.reduce((sum, line) => typeof line.usd === "number" ? sum + line.usd : sum, 0);
+  const panelUsd = panelValues.reduce((sum, line) => typeof line.usd === "number" ? sum + line.usd : sum, 0);
+  return {
+    ...base,
+    usd: Math.round(Math.max(0, baseUsd - replacedBaseUsd + panelUsd) * 100) / 100,
+    calls,
+  };
+}
+
+async function loadCostLines(
+  credentials: ServiceCredentials,
+  organizationId: string,
+  reportVersionIds: readonly string[],
+): Promise<Map<string, JsonRecord[]>> {
+  const ids = [...new Set(reportVersionIds.filter(Boolean))];
+  const result = new Map<string, JsonRecord[]>();
+  try {
+    const chunks: string[][] = [];
+    for (let index = 0; index < ids.length; index += 60) chunks.push(ids.slice(index, index + 60));
+    const responses = await Promise.all(chunks.map(async (chunk) => {
+      const filter = encodeURIComponent(`in.(${chunk.join(",")})`);
+      const response = await fetch(
+        `${credentials.url}/rest/v1/report_cost_lines?select=report_version_id,provider,operation,calls,usd,meta&organization_id=eq.${encodeURIComponent(organizationId)}&report_version_id=${filter}`,
+        { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+      );
+      if (!response.ok) throw new Error(`report cost ledger read failed (${response.status})`);
+      const rows = await response.json() as unknown;
+      return Array.isArray(rows) ? rows : [];
+    }));
+    for (const value of responses.flat()) {
+      const row = asRecord(value);
+      const versionId = typeof row.report_version_id === "string" ? row.report_version_id : "";
+      if (!versionId) continue;
+      const current = result.get(versionId) ?? [];
+      current.push(row);
+      result.set(versionId, current);
+    }
+  } catch (error) {
+    console.warn("[report] panel cost ledger unavailable", error);
+  }
+  return result;
+}
+
 async function loadVersionMetadata(
   credentials: ServiceCredentials,
   organizationId: string,
@@ -110,6 +263,70 @@ async function loadVersionMetadata(
     }
   }
   return result;
+}
+
+async function loadArchivedReports(
+  credentials: ServiceCredentials,
+  organizationId: string,
+): Promise<JsonRecord[]> {
+  const caseResponse = await fetch(
+    `${credentials.url}/rest/v1/cases?select=id,kind,canonical_ref,display_query,updated_at&organization_id=eq.${encodeURIComponent(organizationId)}&status=eq.archived&order=updated_at.desc&limit=200`,
+    { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+  );
+  if (!caseResponse.ok) throw new Error(`archived case list failed (${caseResponse.status})`);
+  const rawCases = await caseResponse.json() as unknown;
+  const cases = Array.isArray(rawCases) ? rawCases.map(asRecord) : [];
+  const caseIds = cases
+    .map((row) => typeof row.id === "string" ? row.id : "")
+    .filter(Boolean);
+  if (!caseIds.length) return [];
+
+  const versionChunks: string[][] = [];
+  for (let index = 0; index < caseIds.length; index += 60) {
+    versionChunks.push(caseIds.slice(index, index + 60));
+  }
+  const rawVersions = (await Promise.all(versionChunks.map(async (ids) => {
+    const caseFilter = encodeURIComponent(`in.(${ids.join(",")})`);
+    const response = await fetch(
+      `${credentials.url}/rest/v1/report_versions?select=id,case_id,version,verdict,score,completeness_state,attestation_state,methodology_version,created_at,cost,contributor_label&organization_id=eq.${encodeURIComponent(organizationId)}&case_id=${caseFilter}&order=version.desc`,
+      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+    );
+    if (!response.ok) throw new Error(`archived report versions failed (${response.status})`);
+    const rows = await response.json() as unknown;
+    return Array.isArray(rows) ? rows : [];
+  }))).flat();
+  const latestByCase = new Map<string, JsonRecord>();
+  for (const value of rawVersions) {
+    const row = asRecord(value);
+    const caseId = typeof row.case_id === "string" ? row.case_id : "";
+    if (caseId && !latestByCase.has(caseId)) latestByCase.set(caseId, row);
+  }
+  const latestVersionIds = [...latestByCase.values()]
+    .map((row) => typeof row.id === "string" ? row.id : "")
+    .filter(Boolean);
+  const costLines = await loadCostLines(credentials, organizationId, latestVersionIds);
+
+  return cases.flatMap((reportCase) => {
+    const caseId = typeof reportCase.id === "string" ? reportCase.id : "";
+    const kind = typeof reportCase.kind === "string" ? reportCase.kind : "";
+    const ref = typeof reportCase.canonical_ref === "string" ? reportCase.canonical_ref : "";
+    const version = latestByCase.get(caseId);
+    const metadata = version ? versionMetadata(version) : null;
+    if (!caseId || !CASE_KINDS.has(kind) || !ref || !version || !metadata) return [];
+    return [{
+      ref,
+      kind,
+      query: typeof reportCase.display_query === "string" ? reportCase.display_query : ref,
+      contributor: typeof version.contributor_label === "string" ? version.contributor_label : "anonymous",
+      verdict: typeof version.verdict === "string" ? version.verdict : null,
+      score: typeof version.score === "number" ? version.score : null,
+      ts: metadata.createdAt,
+      cost: mergedCost(version.cost, costLines.get(metadata.reportVersionId)),
+      status: "archived",
+      archivedAt: typeof reportCase.updated_at === "string" ? reportCase.updated_at : metadata.createdAt,
+      ...metadata,
+    }];
+  });
 }
 
 async function loadVersionContext(
@@ -179,6 +396,7 @@ async function createImmutableVersion(
     payload,
     raw.checkRuns,
   );
+  await activateReportVersion(credentials, auth.organizationId, versionId);
   return versionId;
 }
 
@@ -237,6 +455,7 @@ async function attachServerVersion(
     storedPayload,
     storedPayload.checkRuns,
   );
+  await activateReportVersion(credentials, auth.organizationId, versionId);
   return versionId;
 }
 
@@ -278,7 +497,14 @@ function payloadRef(kind: string, payload: unknown): string | null {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const minimumRole = req.method === "DELETE" ? "owner" : req.method === "POST" ? "analyst" : "viewer";
+  const requestedDeleteKind = typeof req.query.kind === "string" ? req.query.kind : "";
+  const minimumRole = req.method === "PATCH"
+    ? "owner"
+    : req.method === "DELETE"
+      ? requestedDeleteKind === "watch" ? "analyst" : "owner"
+      : req.method === "POST"
+        ? "analyst"
+        : "viewer";
   const auth = await requireArgusAuth(req, res, minimumRole);
   if (!auth) return;
   const credentials = serviceCredentials();
@@ -291,6 +517,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method === "GET") {
       if (req.query.list != null) {
+        const requestedStatus = typeof req.query.status === "string" ? req.query.status : "open";
+        if (requestedStatus !== "open" && requestedStatus !== "archived") {
+          res.status(400).json({ error: "invalid_report_status" });
+          return;
+        }
+        if (requestedStatus === "archived") {
+          const reports = await loadArchivedReports(credentials, auth.organizationId);
+          res.status(200).json({ available: true, reports });
+          return;
+        }
         const response = await fetch(
           `${credentials.url}/rest/v1/${TABLE}?select=ref,kind,query,contributor,verdict,score,ts,report_version_id,attestation_state,cost:payload->cost&${orgFilter}&kind=in.%28person%2Ctoken%2Cinvestigation%2Csite%29&order=ts.desc&limit=200`,
           { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
@@ -301,11 +537,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const versionIds = rows
           .map((row) => typeof row.report_version_id === "string" ? row.report_version_id : "")
           .filter(Boolean);
-        const versions = await loadVersionMetadata(credentials, auth.organizationId, versionIds);
+        const [versions, costLines] = await Promise.all([
+          loadVersionMetadata(credentials, auth.organizationId, versionIds),
+          loadCostLines(credentials, auth.organizationId, versionIds),
+        ]);
         const reports = rows.map((row) => {
           const versionId = typeof row.report_version_id === "string" ? row.report_version_id : "";
           const metadata = versionId ? versions.get(versionId) : null;
-          return metadata ? { ...row, ...metadata } : row;
+          const cost = mergedCost(row.cost, versionId ? costLines.get(versionId) : undefined);
+          return metadata
+            ? { ...row, cost, status: "open", ...metadata }
+            : { ...row, cost, status: "open" };
         });
         res.status(200).json({ available: true, reports });
         return;
@@ -346,11 +588,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const reportVersionId = typeof report?.report_version_id === "string"
         ? report.report_version_id
         : "";
+      if (!report) {
+        const caseStatus = await caseStatusForRef(
+          credentials,
+          auth.organizationId,
+          ref,
+          requestedKind,
+        );
+        res.status(200).json({ available: true, report: null, caseStatus });
+        return;
+      }
       const versionContext = reportVersionId
         ? await loadVersionContext(credentials, auth.organizationId, reportVersionId)
         : null;
       res.status(200).json({
         available: true,
+        caseStatus: "open",
         report: report && versionContext ? { ...report, versionContext } : report,
       });
       return;
@@ -408,8 +661,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (CASE_KINDS.has(kind)) {
         row.report_version_id = await createImmutableVersion(credentials, auth, row, body);
+        // The RPC atomically wrote both the immutable version and its active
+        // projection. A second HTTP write would reintroduce partial persistence.
+        res.status(200).json({ ok: true, reportVersionId: row.report_version_id });
+        return;
       }
 
+      // Watch rows are mutable shared state, not case reports.
       const response = await fetch(
         `${credentials.url}/rest/v1/${TABLE}?on_conflict=organization_id,ref,kind`,
         {
@@ -428,6 +686,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
 
+    if (req.method === "PATCH") {
+      const raw = typeof req.body === "string" ? safeParse(req.body) : req.body;
+      const body: JsonRecord = raw && typeof raw === "object" ? raw as JsonRecord : {};
+      if (JSON.stringify(body).length > MAX_LIFECYCLE_BODY) {
+        res.status(413).json({ error: "lifecycle_request_too_large" });
+        return;
+      }
+      const action = body.action === "archive" || body.action === "restore" ? body.action : null;
+      const subjects = lifecycleSubjects(body.subjects);
+      if (!action || !subjects) {
+        res.status(400).json({ error: "valid_action_and_subjects_required" });
+        return;
+      }
+      const results = await manageLifecycle(credentials, auth, action, subjects);
+      res.status(200).json({ ok: true, action, results });
+      return;
+    }
+
     if (req.method === "DELETE") {
       const ref = normRef(typeof req.query.ref === "string" ? req.query.ref : "");
       if (!ref) {
@@ -439,22 +715,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(400).json({ error: "invalid_kind" });
         return;
       }
-      const kindFilter = requestedKind ? `&kind=eq.${requestedKind}` : "";
-      const response = await fetch(
-        `${credentials.url}/rest/v1/${TABLE}?${orgFilter}&ref=eq.${encodeURIComponent(ref)}${kindFilter}`,
-        {
-          method: "DELETE",
-          headers: serviceHeaders(credentials.key, { prefer: "return=minimal" }),
-          signal: AbortSignal.timeout(10_000),
-        },
-      );
-      if (!response.ok) throw new Error(`report projection delete failed (${response.status})`);
-      // Immutable report_versions remain as the auditable history of what ran.
-      res.status(200).json({ ok: true });
+      if (requestedKind === "watch") {
+        const response = await fetch(
+          `${credentials.url}/rest/v1/${TABLE}?${orgFilter}&ref=eq.${encodeURIComponent(ref)}&kind=eq.watch`,
+          {
+            method: "DELETE",
+            headers: serviceHeaders(credentials.key, { prefer: "return=minimal" }),
+            signal: AbortSignal.timeout(10_000),
+          },
+        );
+        if (!response.ok) throw new Error(`watch projection delete failed (${response.status})`);
+        res.status(200).json({ ok: true, deleted: "watch" });
+        return;
+      }
+
+      const subjects = requestedKind
+        ? [{ kind: requestedKind, ref }]
+        : await subjectsForRef(credentials, auth.organizationId, ref);
+      const results = subjects.length
+        ? await manageLifecycle(credentials, auth, "archive", subjects)
+        : [];
+      res.status(200).json({ ok: true, action: "archive", results });
       return;
     }
 
-    res.status(405).setHeader("Allow", "GET, POST, DELETE").json({ error: "method_not_allowed" });
+    res.status(405).setHeader("Allow", "GET, POST, PATCH, DELETE").json({ error: "method_not_allowed" });
   } catch (error) {
     console.error("[report] failed", error);
     res.status(502).json({ error: "report_store_failed", message: String(error) });

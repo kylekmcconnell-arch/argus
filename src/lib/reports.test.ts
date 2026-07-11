@@ -1,7 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Dossier } from "../data/dossier";
 import type { Investigation } from "./investigation";
-import { fetchReport, reportChecks, reportCompleteness } from "./reports";
+import {
+  changeReportLifecycle,
+  fetchReport,
+  fetchReportState,
+  listReports,
+  reportChecks,
+  reportCompleteness,
+} from "./reports";
 import type { TokenDossier } from "../token/audit";
 import type { ReportVersionContext } from "./reportVersion";
 
@@ -106,5 +113,83 @@ describe("fetchReport", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(fetchReport("0xabc", "investigation")).resolves.toBeNull();
+  });
+
+  it("preserves an archived state so callers do not auto-rerun it", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ report: null, caseStatus: "archived" }),
+    }));
+
+    await expect(fetchReportState("@alice", "person")).resolves.toEqual({
+      status: "archived",
+      report: null,
+    });
+  });
+
+  it("fails closed when stored case status cannot be verified", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReportState("@alice", "person")).resolves.toEqual({
+      status: "unavailable",
+      report: null,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("report library lifecycle", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("loads active and archived libraries through distinct status filters", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ reports: [] }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await listReports();
+    await listReports("archived");
+
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/report?list=1");
+    expect(fetchMock.mock.calls[1][0]).toBe("/api/report?list=1&status=archived");
+  });
+
+  it("submits exact-kind subjects in one awaited lifecycle request", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await changeReportLifecycle("archive", [
+      { kind: "token", ref: "0xabc" },
+      { kind: "investigation", ref: "0xabc" },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/report");
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ method: "PATCH" });
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
+      action: "archive",
+      subjects: [
+        { kind: "token", ref: "0xabc" },
+        { kind: "investigation", ref: "0xabc" },
+      ],
+    });
+  });
+
+  it("surfaces lifecycle failures instead of removing a local row optimistically", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      json: async () => ({ message: "Case changed while archiving." }),
+    }));
+
+    await expect(changeReportLifecycle("archive", [{ kind: "person", ref: "alice" }]))
+      .rejects.toThrow("Case changed while archiving.");
   });
 });

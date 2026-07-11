@@ -129,32 +129,6 @@ async function syncEntryUpdate(entry: LogEntry, sharedRow: boolean): Promise<voi
   }
 }
 
-// Remove EVERY log row for one subject — local rows, the shared cache, and the
-// shared backend (all contributors). Part of the start-from-scratch purge.
-export function removeSubjectRows(ref: string): void {
-  const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^[@$]/, "");
-  // Also reduce a full URL to its bare host, so purging "enigma-fund.com" removes
-  // legacy site rows logged under "https://www.enigma-fund.com/" (they key on
-  // host now, but older rows stored the raw URL and would otherwise be orphaned).
-  const host = (s?: string) => {
-    const v = norm(s);
-    try { return new URL(v.includes("://") ? v : `https://${v}`).hostname.replace(/^www\./, ""); } catch { return v; }
-  };
-  const target = norm(ref);
-  const targetHost = host(ref);
-  if (!target) return;
-  const keep = (e: LogEntry) => {
-    const k = norm(e.ref ?? e.query);
-    return k !== target && host(e.ref ?? e.query) !== targetHost;
-  };
-  try {
-    localStorage.setItem(KEY, JSON.stringify(getLog().filter(keep)));
-  } catch { /* storage unavailable */ }
-  sharedCache = sharedCache.filter(keep);
-  void fetch(`${SYNC_URL}?ref=${encodeURIComponent(ref)}`, { method: "DELETE" }).catch(() => { /* offline */ });
-  emitLogChange();
-}
-
 // Rewrite the role: flags on every stored row for one subject — local rows and
 // shared (other analysts') rows — and push the updates up. This is how
 // re-categorization re-files old audits WITHOUT rerunning them: scores and

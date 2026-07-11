@@ -23,11 +23,12 @@ import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
 import { ProjectIntel } from "./ProjectIntel";
-import { purgeSubject } from "../lib/purge";
+import { changeReportLifecycle } from "../lib/reports";
 import { ServiceAlert } from "./ServiceAlert";
 import { LegalScreen } from "./LegalScreen";
 import { SanctionsNameScreen } from "./SanctionsNameScreen";
 import { RingAlert } from "./RingAlert";
+import { useArgusAuth } from "../auth-context";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -358,6 +359,7 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
 /* ── main report ──────────────────────────────────────────────────── */
 
 export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onOpenProject?: (name: string, domain?: string) => void }) {
+  const { role } = useArgusAuth();
   const f = dossier;
   const { report, graph, founderSummary, evidence, webTeam } = dossier;
   const roles = report.roles as SubjectClass[];
@@ -379,6 +381,13 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
   const scoredVerdictMeta = verdictMeta(report.composite_verdict);
   const readinessColor = readiness.status === "ready" ? "var(--color-pass)" : "var(--color-caution)";
   const versionContext = f.versionContext;
+  const livePersistence = (f as Dossier & {
+    persistence?: { state?: string; reportVersionId?: string | null };
+  }).persistence;
+  const canArchive = role === "owner" && Boolean(
+    versionContext?.reportVersionId
+    || (livePersistence?.state === "persisted" && livePersistence.reportVersionId),
+  );
   const attestationLabel = versionContext?.attestationState === "server_collected"
     ? "server-collected snapshot"
     : versionContext?.attestationState === "analyst_submitted"
@@ -407,6 +416,22 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
   // The compounding web: who else (from your past audits) this subject is tied to.
   const connections = subjectConnections(report.handle, getContributions());
   const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
+  const [archiveState, setArchiveState] = useState<"idle" | "archiving" | "error">("idle");
+
+  const archive = async () => {
+    if (archiveState === "archiving") return;
+    if (!window.confirm(
+      `Archive ${report.handle}? Its immutable report, evidence, audit history, and trust-graph intelligence will be preserved. Active public share links will be revoked.`,
+    )) return;
+    setArchiveState("archiving");
+    try {
+      await changeReportLifecycle("archive", [{ kind: "person", ref: report.handle }]);
+      onReset();
+    } catch (archiveError) {
+      console.error("[case] archive failed", archiveError);
+      setArchiveState("error");
+    }
+  };
   const share = async () => {
     if (shareState === "creating") return;
     setShareState("creating");
@@ -499,24 +524,24 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             >
               New audit
             </button>
-            <details className="relative">
-              <summary className="list-none cursor-pointer rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-faint transition hover:border-line-2 hover:text-ink [&::-webkit-details-marker]:hidden">
-                More
-              </summary>
-              <div className="absolute right-0 top-full z-30 mt-1.5 w-48 rounded-xl border border-line bg-panel p-1.5 shadow-xl">
-                <button
-                  onClick={() => {
-                    if (!window.confirm(`Delete ${report.handle} everywhere (audit log, stored report, trust graph)? This cannot be undone. You can always audit it again later.`)) return;
-                    purgeSubject(report.handle);
-                    onReset();
-                  }}
-                  title="Remove this report everywhere and start from scratch"
-                  className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-ink-dim transition hover:bg-avoid/10 hover:text-avoid"
-                >
-                  Delete report
-                </button>
-              </div>
-            </details>
+            {canArchive && (
+              <details className="relative">
+                <summary className="list-none cursor-pointer rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-faint transition hover:border-line-2 hover:text-ink [&::-webkit-details-marker]:hidden">
+                  More
+                </summary>
+                <div className="absolute right-0 top-full z-30 mt-1.5 w-56 rounded-xl border border-line bg-panel p-1.5 shadow-xl">
+                  <button
+                    type="button"
+                    onClick={() => void archive()}
+                    disabled={archiveState === "archiving"}
+                    title="Remove this case from active work while preserving its immutable evidence and history"
+                    className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-ink-dim transition hover:bg-signal/10 hover:text-signal disabled:cursor-wait disabled:opacity-60"
+                  >
+                    {archiveState === "archiving" ? "Archiving case…" : archiveState === "error" ? "Archive failed · retry" : "Archive case"}
+                  </button>
+                </div>
+              </details>
+            )}
           </div>
         </div>
       </header>
