@@ -276,6 +276,40 @@ function CorroborationTable({
 
 /* ── findings ledger ──────────────────────────────────────────────── */
 
+type ReportFinding = Dossier["report"]["publishable_findings"][number];
+
+const normalizedEntityHandle = (value?: string | null): string | null => {
+  if (!value) return null;
+  const match = value.trim().match(/^@?([A-Za-z0-9_]{1,30})$/);
+  return match ? match[1].toLowerCase() : null;
+};
+
+const findingTarget = (finding: ReportFinding): string | null =>
+  finding.finding_scope?.target_entity_key
+  ?? finding.claim.match(/@([A-Za-z0-9_]{1,30})/)?.[0]
+  ?? null;
+
+/**
+ * Stored snapshots are immutable, including early versions produced before the
+ * engine enforced entity scope. Apply the current publication boundary as a
+ * read-time projection so a historical model lead can never keep appearing as
+ * verified subject evidence merely because the underlying payload is frozen.
+ */
+function isPublishableSubjectFinding(finding: ReportFinding, subject: string): boolean {
+  if (finding.evidence_origin === "model_lead" || finding.artifact_verified === false) return false;
+  if (finding.independent_source_count < 1) return false;
+  if (finding.verification_status !== "Verified" && finding.verification_status !== "Reported") return false;
+  const scope = finding.finding_scope;
+  if (!scope) {
+    // Pre-scope deterministic findings remain readable, but legacy discovery
+    // types fail closed because their actual target was not stored separately.
+    return !/Lead$/i.test(finding.finding_type);
+  }
+  return scope.scope === "direct_subject"
+    && scope.relationship_to_subject === "self"
+    && normalizedEntityHandle(scope.target_entity_key) === normalizedEntityHandle(subject);
+}
+
 function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable_findings"] }) {
   if (!findings.length) return null;
   return (
@@ -367,12 +401,17 @@ function InvestigativeLeadsLedger({ leads, subject }: {
     <div className="space-y-2">
       {leads.map((lead, index) => {
         const scope = lead.finding_scope;
-        const target = scope?.target_entity_key || "unresolved target";
+        const target = findingTarget(lead) || "unresolved target";
+        const inferredRelated = !scope
+          && normalizedEntityHandle(target) !== null
+          && normalizedEntityHandle(target) !== normalizedEntityHandle(subject);
         const relationship = scope?.relationship_to_subject === "associate"
           ? "Associate lead"
           : scope?.relationship_to_subject === "venture"
             ? "Venture lead"
-            : "Subject lead";
+            : inferredRelated
+              ? "Related-entity lead"
+              : "Subject lead";
         const verifiedAboutTarget = lead.verification_status === "Verified"
           && lead.artifact_verified === true
           && lead.evidence_origin !== "model_lead";
@@ -944,8 +983,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : null;
   const strongestSupport = strongestRecordedSupport(frozenOutcomeChecks, f.sourceArtifacts ?? []);
-  const recordedConcern = report.publishable_findings.find((finding) => finding.polarity < 0)?.claim
-    ?? [...f.contradictions].sort((left, right) => ({ high: 3, medium: 2, low: 1 }[right.severity] - { high: 3, medium: 2, low: 1 }[left.severity]))[0]?.conflict;
+  const publishableSubjectFindings = report.publishable_findings.filter((finding) =>
+    isPublishableSubjectFinding(finding, report.handle),
+  );
+  const quarantinedLegacyFindings = report.publishable_findings.filter((finding) =>
+    !isPublishableSubjectFinding(finding, report.handle),
+  );
+  const investigativeLeads = [...(report.investigative_leads ?? []), ...quarantinedLegacyFindings]
+    .filter((finding, index, all) => all.findIndex((candidate) =>
+      candidate.finding_type === finding.finding_type
+      && candidate.claim === finding.claim
+      && candidate.source_url === finding.source_url,
+    ) === index);
+  const quarantinedRelatedHandles = new Set(quarantinedLegacyFindings
+    .map((finding) => normalizedEntityHandle(findingTarget(finding)))
+    .filter((target): target is string => Boolean(target && target !== normalizedEntityHandle(report.handle))));
+  const visibleContradictions = f.contradictions.filter((contradiction) => {
+    const text = `${contradiction.claim}\n${contradiction.conflict}`.toLowerCase();
+    return ![...quarantinedRelatedHandles].some((target) => text.includes(`@${target}`));
+  });
+  const recordedConcern = publishableSubjectFindings.find((finding) => finding.polarity < 0)?.claim;
   const highestConcern = recordedConcern
     ?? (readiness.status === "ready"
       ? "No adverse finding is recorded; review the evidence before deciding."
@@ -1407,10 +1464,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         )}
 
         {/* contradictions — claims that do not match the evidence */}
-        {f.contradictions.length > 0 && (
+        {visibleContradictions.length > 0 && (
           <Section title="Contradictions" kicker="claims that do not match the collected evidence">
             <Card className="divide-y divide-line/60">
-              {f.contradictions.map((c, i) => {
+              {visibleContradictions.map((c, i) => {
                 const sc = c.severity === "high" ? "var(--color-avoid)" : c.severity === "medium" ? "var(--color-caution)" : "var(--color-ink-faint)";
                 return (
                   <div key={i} className="flex items-start gap-2.5 px-4 py-3">
@@ -1773,15 +1830,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         </div>
 
         {/* findings ledger */}
-        {report.publishable_findings.length > 0 && (
+        {publishableSubjectFindings.length > 0 && (
           <Section title="Publishable findings" kicker="sourced · dated · independently corroborated">
-            <FindingsLedger findings={report.publishable_findings} />
+            <FindingsLedger findings={publishableSubjectFindings} />
           </Section>
         )}
 
-        {(report.investigative_leads ?? []).length > 0 && (
+        {investigativeLeads.length > 0 && (
           <Section title="Investigative leads" kicker="entity-scoped follow-up · target verification shown separately · never scored as subject evidence">
-            <InvestigativeLeadsLedger leads={report.investigative_leads ?? []} subject={report.handle} />
+            <InvestigativeLeadsLedger leads={investigativeLeads} subject={report.handle} />
           </Section>
         )}
 
