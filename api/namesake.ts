@@ -22,6 +22,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const name = q(req.query.name);
   const contract = q(req.query.contract);
   const chain = q(req.query.chain);
+  const reportVersionId = q(req.query.reportVersionId) || undefined;
   if (!symbol && !name) { res.status(400).json({ error: "symbol or name required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Grok not configured." }); return; }
 
@@ -59,7 +60,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Fold this panel's spend into the subject's stored report (investigations
     // are stored under the contract address), then cache the answer.
     const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : 0;
-    await attachPanelCost(auth.organizationId, contract || symbol, { provider: "grok", op: "panel:namesake", calls: 1, usd: grokUsd(d.usage, toolCalls), meta: `${(d.usage?.input_tokens ?? 0) + (d.usage?.output_tokens ?? 0)} tok` });
+    await attachPanelCost(auth.organizationId, reportVersionId, { provider: "grok", op: "panel:namesake", calls: 1, usd: grokUsd(d.usage, toolCalls), meta: `${(d.usage?.input_tokens ?? 0) + (d.usage?.output_tokens ?? 0)} tok` });
     const out = {
       available: true,
       named_after: typeof p.named_after === "string" ? p.named_after.slice(0, 80) : null,

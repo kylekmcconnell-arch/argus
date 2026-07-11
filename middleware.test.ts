@@ -64,6 +64,52 @@ describe("Case Brief middleware policy", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
+  it("allows a viewer to read tenant-scoped alerts without consuming analyst quota", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        id: "00000000-0000-4000-8000-000000000010",
+        email_confirmed_at: "2026-07-11T00:00:00.000Z",
+      }))
+      .mockResolvedValueOnce(jsonResponse([{
+        organization_id: "00000000-0000-4000-8000-000000000001",
+        role: "viewer",
+        active: true,
+      }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(new Request(
+      "https://argus.example/api/alerts",
+      { headers: { authorization: "Bearer viewer-token" } },
+    ));
+
+    expect(response.status).toBe(204);
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("requires analyst access to dismiss an alert", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        id: "00000000-0000-4000-8000-000000000010",
+        email_confirmed_at: "2026-07-11T00:00:00.000Z",
+      }))
+      .mockResolvedValueOnce(jsonResponse([{
+        organization_id: "00000000-0000-4000-8000-000000000001",
+        role: "viewer",
+        active: true,
+      }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(new Request(
+      "https://argus.example/api/alerts?ref=al%3Aone",
+      { method: "DELETE", headers: { authorization: "Bearer viewer-token" } },
+    ));
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ error: "insufficient_role", requiredRole: "analyst" });
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it("does not allow a viewer to mutate Case Brief", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({

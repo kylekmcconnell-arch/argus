@@ -15,6 +15,8 @@ const VIEWER_GET_PATHS = new Set([
   "/api/providers",
   "/api/changelog",
   "/api/keys-status",
+  "/api/alerts",
+  "/api/augment",
 ]);
 const OWNER_PATHS = new Set(["/api/reclassify", "/api/members"]);
 const UNMETERED_COLLABORATION_PATHS = new Set(["/api/case-brief"]);

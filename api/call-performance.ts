@@ -48,9 +48,9 @@ async function gt(path: string): Promise<any | null> {
   }
   return gtOnce(GT_FREE, { accept: "application/json" }, path);
 }
-let twCalls = 0;
-async function tw(url: string, key: string): Promise<any | null> {
-  twCalls += 1;
+interface CallCounter { calls: number }
+async function tw(url: string, key: string, counter: CallCounter): Promise<any | null> {
+  counter.calls += 1;
   try { const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
 }
 
@@ -73,10 +73,10 @@ async function poolFor(network: string, address: string): Promise<string | null>
 
 // The earliest tweet from this handle that mentions the token (contract first,
 // then ticker). Returns { sec, url, text } or null.
-async function findCall(handle: string, ticker: string | undefined, address: string | undefined, key: string) {
+async function findCall(handle: string, ticker: string | undefined, address: string | undefined, key: string, counter: CallCounter) {
   const queries = [address ? `from:${handle} ${address}` : "", ticker ? `from:${handle} ${ticker.startsWith("$") ? ticker : "$" + ticker}` : ""].filter(Boolean);
   for (const q of queries) {
-    const d = await tw(`${TW}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=Latest`, key);
+    const d = await tw(`${TW}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=Latest`, key, counter);
     const tweets: any[] = d?.tweets ?? d?.data?.tweets ?? [];
     if (!tweets.length) continue;
     const dated = tweets
@@ -97,18 +97,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const ticker = typeof q.ticker === "string" ? q.ticker.trim() : undefined;
   const address = typeof q.address === "string" ? q.address.trim() : undefined;
   const chain = typeof q.chain === "string" ? q.chain.trim().toLowerCase() : "";
+  const reportVersionId = typeof q.reportVersionId === "string" ? q.reportVersionId : undefined;
   if (!handle || !HANDLE.test(handle) || !address) { res.status(400).json({ error: "handle + address required" }); return; }
   const network = NETWORK[chain] ?? chain;
   if (!network) { res.status(200).json({ available: true, note: "unsupported chain" }); return; }
 
-  twCalls = 0;
+  const twitterUsage: CallCounter = { calls: 0 };
   try {
     const pool = await poolFor(network, address);
     if (!pool) { res.status(200).json({ available: true, note: "no pool indexed for this token" }); return; }
 
     // Find the call time (or fall back to the token's launch = oldest candle).
     const twKey = process.env.TWITTERAPI_KEY;
-    const call = twKey ? await findCall(handle, ticker, address, twKey) : null;
+    const call = twKey ? await findCall(handle, ticker, address, twKey, twitterUsage) : null;
 
     // Daily candles across the token's life (for launch anchor + long offsets).
     const dailyD = await gt(`/networks/${network}/pools/${pool}/ohlcv/day?aggregate=1&limit=1000&currency=usd`);
@@ -151,7 +152,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const curPrice = daily[daily.length - 1][4];
     const peak = Math.max(...daily.filter((c) => c[0] >= anchorSec).map((c) => c[4]), anchorPrice);
 
-    if (twCalls) await attachPanelCost(auth.organizationId, handle, { provider: "twitterapi", op: "panel:call-performance", calls: twCalls, usd: twCalls * 0.0002 }, "person");
+    if (twitterUsage.calls) {
+      const target = `${network}:${address}`.slice(0, 128);
+      await attachPanelCost(auth.organizationId, reportVersionId, {
+        provider: "twitterapi",
+        op: `panel:call-performance:${target}`,
+        calls: twitterUsage.calls,
+        usd: twitterUsage.calls * 0.0002,
+      });
+    }
     res.status(200).json({
       available: true,
       anchor,

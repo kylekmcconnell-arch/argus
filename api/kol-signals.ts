@@ -13,9 +13,9 @@ export const config = { maxDuration: 30 };
 const TW = "https://api.twitterapi.io";
 const HANDLE = /^[A-Za-z0-9_]{1,30}$/;
 
-let twCalls = 0; // per-invocation counter (one request handled per lambda at a time)
-async function tw(url: string, key: string): Promise<any> {
-  twCalls += 1;
+interface CallCounter { calls: number }
+async function tw(url: string, key: string, counter: CallCounter): Promise<any> {
+  counter.calls += 1;
   try {
     const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) });
     return r.ok ? await r.json() : null;
@@ -46,12 +46,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth) return;
   const key = process.env.TWITTERAPI_KEY;
   const handle = typeof req.query.handle === "string" ? req.query.handle.replace(/^@/, "").trim() : "";
+  const reportVersionId = typeof req.query.reportVersionId === "string" ? req.query.reportVersionId : undefined;
   if (!handle || !HANDLE.test(handle)) { res.status(400).json({ error: "handle required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "twitterapi not configured." }); return; }
-  twCalls = 0;
+  const twitterUsage: CallCounter = { calls: 0 };
 
   try {
-    const prof = await tw(`${TW}/twitter/user/info?userName=${encodeURIComponent(handle)}`, key);
+    const prof = await tw(`${TW}/twitter/user/info?userName=${encodeURIComponent(handle)}`, key, twitterUsage);
     const p = prof?.data ?? prof ?? {};
     const totalFollowers = num(p.followers, p.followers_count) ?? 0;
 
@@ -60,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let sampled = 0;
     let likelyBots = 0;
     for (let page = 0; page < 3; page++) {
-      const d = await tw(`${TW}/twitter/user/followers?userName=${encodeURIComponent(handle)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, key);
+      const d = await tw(`${TW}/twitter/user/followers?userName=${encodeURIComponent(handle)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, key, twitterUsage);
       const list: any[] = d?.followers ?? d?.data?.followers ?? (Array.isArray(d?.data) ? d.data : []);
       if (!list?.length) break;
       for (const f of list) { sampled++; if (botFlags(f) >= 2) likelyBots++; }
@@ -70,7 +71,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const botPct = sampled ? Math.round((likelyBots / sampled) * 100) : null;
 
     // Engagement authenticity from recent posts.
-    const postsD = await tw(`${TW}/twitter/user/last_tweets?userName=${encodeURIComponent(handle)}`, key);
+    const postsD = await tw(`${TW}/twitter/user/last_tweets?userName=${encodeURIComponent(handle)}`, key, twitterUsage);
     const tweets: any[] = postsD?.data?.tweets ?? postsD?.tweets ?? [];
     const eng = tweets.slice(0, 20).map((t) => ({
       likes: num(t.likeCount, t.favorite_count, t.favoriteCount, t.likes) ?? 0,
@@ -96,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? `No strong bot/bought-engagement signal in the sample (${botPct}% of ${sampled} sampled followers flagged, ~${avgLikes} likes & ~${avgReplies} replies/post on ${totalFollowers.toLocaleString()} followers).`
         : "Could not sample followers.";
 
-    await attachPanelCost(auth.organizationId, handle, { provider: "twitterapi", op: "panel:kol-signals", calls: twCalls, usd: twCalls * 0.0002 }, "person");
+    await attachPanelCost(auth.organizationId, reportVersionId, { provider: "twitterapi", op: "panel:kol-signals", calls: twitterUsage.calls, usd: twitterUsage.calls * 0.0002 });
     res.status(200).json({
       available: true,
       handle,

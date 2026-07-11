@@ -45,7 +45,7 @@ async function auditInvestment(inv: Investment): Promise<Scored> {
   return { ...inv, address: d.address, chainResolved: d.chain, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap, dead, resolved: true };
 }
 
-export function VcReport({ handle, name, onAudit }: { handle: string; name: string; onAudit?: (q: string) => void }) {
+export function VcReport({ handle, name, reportVersionId, onAudit }: { handle: string; name: string; reportVersionId?: string; onAudit?: (q: string) => void }) {
   const [rows, setRows] = useState<Scored[] | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "none">("loading");
   const [attempt, setAttempt] = useState(0);
@@ -57,7 +57,9 @@ export function VcReport({ handle, name, onAudit }: { handle: string; name: stri
     setState("loading");
     (async () => {
       try {
-        const r = await fetch(`/api/vc-portfolio?handle=${encodeURIComponent(handle.replace(/^@/, ""))}&name=${encodeURIComponent(name)}`);
+        const params = new URLSearchParams({ handle: handle.replace(/^@/, ""), name });
+        if (reportVersionId) params.set("reportVersionId", reportVersionId);
+        const r = await fetch(`/api/vc-portfolio?${params}`);
         const d = await r.json();
         const inv: Investment[] = d?.investments ?? [];
         if (!inv.length) { setState("none"); return; }
@@ -86,7 +88,7 @@ export function VcReport({ handle, name, onAudit }: { handle: string; name: stri
         setState("none");
       }
     })();
-  }, [handle, name, attempt]);
+  }, [handle, name, reportVersionId, attempt]);
 
   if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">assembling the portfolio + pricing each bet…</div>;
   if (state === "none" || !rows) {

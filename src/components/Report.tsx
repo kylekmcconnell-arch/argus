@@ -384,6 +384,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const livePersistence = (f as Dossier & {
     persistence?: { state?: string; reportVersionId?: string | null };
   }).persistence;
+  const panelReportVersionId = versionContext?.reportVersionId
+    ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId ?? undefined : undefined);
   const canArchive = role === "owner" && Boolean(
     versionContext?.reportVersionId
     || (livePersistence?.state === "persisted" && livePersistence.reportVersionId),
@@ -1033,7 +1035,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           <div className="min-w-0 lg:col-span-2">
             <Section title="Profile photo" kicker="is the face real, or AI-generated / stock / a logo standing in for a person?">
-              <PfpCheck handle={report.handle} brand={(webTeam?.length ?? 0) > 0} />
+              <PfpCheck handle={report.handle} brand={(webTeam?.length ?? 0) > 0} reportVersionId={panelReportVersionId} />
             </Section>
           </div>
 
@@ -1050,7 +1052,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           {roles.some((r) => r === "INVESTOR") && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="VC track record" kicker="their portfolio → each token bet priced on-chain: a fund graded on how its bets ended">
-                <VcReport handle={report.handle} name={f.display_name || report.handle} onAudit={onAudit} />
+                <VcReport handle={report.handle} name={f.display_name || report.handle} reportVersionId={panelReportVersionId} onAudit={onAudit} />
               </Section>
             </div>
           )}
@@ -1058,7 +1060,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           {roles.some((r) => r === "KOL") && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="KOL report" kicker="a promoter's threat model: did their shilled tokens rug, and is their reach real?">
-                <KolReport handle={report.handle} promotions={evidence.promotions ?? []} associates={evidence.associates ?? []} onAudit={onAudit} />
+                <KolReport handle={report.handle} promotions={evidence.promotions ?? []} associates={evidence.associates ?? []} reportVersionId={panelReportVersionId} onAudit={onAudit} />
               </Section>
             </div>
           )}

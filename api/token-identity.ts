@@ -23,6 +23,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const name = q(req.query.name);
   const contract = q(req.query.contract);
   const chain = q(req.query.chain);
+  const reportVersionId = q(req.query.reportVersionId) || undefined;
   if (!symbol && !name) { res.status(400).json({ error: "symbol or name required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Grok (XAI_API_KEY) not configured." }); return; }
 
@@ -69,7 +70,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       confidence: ["high", "medium", "low"].includes(p.confidence) ? p.confidence : "low",
       note: typeof p.note === "string" ? p.note.slice(0, 200) : "",
     };
-    await attachPanelCost(auth.organizationId, contract || symbol || name, { provider: "grok", op: "panel:token-identity", calls: 1, usd });
+    await attachPanelCost(auth.organizationId, reportVersionId, { provider: "grok", op: "panel:token-identity", calls: 1, usd });
     if (website || x_handle || founder) await cacheSetJson(cacheKey, out); // don't cache an all-null miss
     res.status(200).json(out);
   } catch (e) {

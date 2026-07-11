@@ -1246,6 +1246,7 @@ function emptyEvidence(handle) {
 }
 
 // server/cost.ts
+import { AsyncLocalStorage } from "node:async_hooks";
 var PRICE = {
   grokIn: 0.2 / 1e6,
   grokOut: 0.5 / 1e6,
@@ -1257,15 +1258,19 @@ var PRICE = {
   heliusCall: 1e-4
 };
 var EST_SOURCES_PER_SEARCH = 5;
-var ledger = /* @__PURE__ */ new Map();
-var grok = { in: 0, out: 0, calls: 0, sources: 0 };
-var claude = { in: 0, out: 0, calls: 0 };
-function resetCost() {
-  ledger = /* @__PURE__ */ new Map();
-  grok = { in: 0, out: 0, calls: 0, sources: 0 };
-  claude = { in: 0, out: 0, calls: 0 };
+var createState = () => ({
+  ledger: /* @__PURE__ */ new Map(),
+  grok: { in: 0, out: 0, calls: 0, sources: 0 },
+  claude: { in: 0, out: 0, calls: 0 }
+});
+var auditCostState = new AsyncLocalStorage();
+var fallbackState = createState();
+var currentState = () => auditCostState.getStore() ?? fallbackState;
+function withCostLedger(work) {
+  return auditCostState.run(createState(), work);
 }
 function recordCall(provider, op, usd = 0, meta) {
+  const { ledger } = currentState();
   const key = `${provider}|${op}`;
   const cur = ledger.get(key);
   if (cur) {
@@ -1280,6 +1285,7 @@ function recordTwitterapi(op) {
   recordCall("twitterapi", op, PRICE.twitterapiCall);
 }
 function addGrokUsage(u, toolCalls, op = "live-search") {
+  const { grok } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
   const sources = typeof u?.num_sources_used === "number" ? u.num_sources_used : (toolCalls ?? 0) * EST_SOURCES_PER_SEARCH;
@@ -1290,6 +1296,7 @@ function addGrokUsage(u, toolCalls, op = "live-search") {
   recordCall("grok", op, tin * PRICE.grokIn + tout * PRICE.grokOut + sources * PRICE.grokSource, `${tin + tout} tok \xB7 ~${sources} sources`);
 }
 function addClaudeUsage(u, op = "analysis") {
+  const { claude } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
   claude.calls += 1;
@@ -1305,6 +1312,7 @@ function recordHelius(op) {
 }
 var round4 = (n) => Math.round(n * 1e4) / 1e4;
 function getCost() {
+  const { ledger, grok, claude } = currentState();
   const lines = [...ledger.values()].map((l) => ({ ...l, usd: round4(l.usd) })).sort((a, b) => b.usd - a.usd || b.calls - a.calls);
   const grokUsd = lines.filter((l) => l.provider === "grok").reduce((a, l) => a + l.usd, 0);
   const claudeUsd = lines.filter((l) => l.provider === "claude").reduce((a, l) => a + l.usd, 0);
@@ -1760,26 +1768,30 @@ var PersonCheckTracker = class {
 // server/cache.ts
 import { createHash } from "node:crypto";
 var TTL_MS = 24 * 3600 * 1e3;
-var KIND = "grokcache";
 function creds() {
   const url = env("SUPABASE_URL");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
   return url && key ? { url: url.replace(/\/$/, ""), key } : null;
 }
-var headers = (key) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
-var hash = (s) => "g:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
+var headers = (key) => ({
+  apikey: key,
+  ...!key.startsWith("sb_secret_") ? { authorization: `Bearer ${key}` } : {},
+  "content-type": "application/json"
+});
+var hash = (s) => "gt:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
 async function cacheGet(key) {
   const c = creds();
   if (!c) return null;
   try {
     const r = await fetch(
-      `${c.url}/rest/v1/reports?select=payload&ref=eq.${encodeURIComponent(hash(key))}&kind=eq.${KIND}&limit=1`,
+      `${c.url}/rest/v1/provider_cache?select=payload,expires_at&cache_key=eq.${encodeURIComponent(hash(key))}&limit=1`,
       { headers: headers(c.key), signal: AbortSignal.timeout(4e3) }
     );
     if (!r.ok) return null;
     const rows = await r.json();
     const p = rows?.[0]?.payload;
-    if (!p?.text || typeof p.at !== "number" || Date.now() - p.at > TTL_MS) return null;
+    const expiresAt = rows?.[0]?.expires_at ? Date.parse(rows[0].expires_at) : Number.NaN;
+    if (!p?.text || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
     recordCall("cache", "grok-hit", 0, "24h search cache");
     return p.text;
   } catch {
@@ -1790,10 +1802,16 @@ async function cacheSet(key, text) {
   const c = creds();
   if (!c || !text) return;
   try {
-    await fetch(`${c.url}/rest/v1/reports?on_conflict=ref,kind`, {
+    const now = Date.now();
+    await fetch(`${c.url}/rest/v1/provider_cache?on_conflict=cache_key`, {
       method: "POST",
       headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify({ ref: hash(key), kind: KIND, query: key.slice(0, 180), payload: { text, at: Date.now() }, ts: (/* @__PURE__ */ new Date()).toISOString() }),
+      body: JSON.stringify({
+        cache_key: hash(key),
+        payload: { text },
+        expires_at: new Date(now + TTL_MS).toISOString(),
+        updated_at: new Date(now).toISOString()
+      }),
       signal: AbortSignal.timeout(4e3)
     });
   } catch {
@@ -4289,8 +4307,7 @@ async function postCadence(ctx) {
     ctx.emit({ phase: "Cadence", label: "Posting steady", detail: report.summary, source: "twitterapi.io", tone: "neutral" });
   }
 }
-async function runAudit(rawHandle, emit) {
-  resetCost();
+async function runAuditWithLedger(rawHandle, emit) {
   const fixture = findSubject(rawHandle);
   const liveProviders = ADAPTERS.filter((a) => KEYED.has(a.id) && a.available());
   const anyLive = liveProviders.length > 0 || analystAvailable();
@@ -4458,6 +4475,9 @@ async function runAudit(rawHandle, emit) {
   dossier.cost = cost;
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches \u2248${cost.sources} sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
   return dossier;
+}
+function runAudit(rawHandle, emit) {
+  return withCostLedger(() => runAuditWithLedger(rawHandle, emit));
 }
 
 // src/graph/network.ts
