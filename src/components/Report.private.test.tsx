@@ -53,6 +53,12 @@ function readinessSupportText(): string {
   return label?.parentElement?.textContent ?? "";
 }
 
+function readinessConcernText(): string {
+  const label = [...container.querySelectorAll("dt")]
+    .find((node) => node.textContent?.trim() === "Highest recorded concern");
+  return label?.parentElement?.textContent ?? "";
+}
+
 describe("private person report evidence boundary", () => {
   it("does not mount subject-specific supplemental panels", () => {
     const dossier = {
@@ -563,6 +569,48 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("unverified lead · outside subject score");
     expect(container.textContent).toContain(`not verified evidence of conduct by ${base.report.handle}`);
     expect(container.textContent).not.toContain("Publishable findings");
+  });
+
+  it("quarantines unsafe findings and derived contradictions in immutable legacy reports", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const legacyLead = {
+      finding_type: "AdverseLead",
+      claim: "@legacy_associate (scam accusation lead): a candidate complaint names the associate.",
+      source_url: "https://example.com/legacy-associate-complaint",
+      source_date: "",
+      source_author: "candidate complaint index",
+      verification_status: "Reported" as const,
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
+    };
+    const dossier = {
+      ...base,
+      contradictions: [{
+        claim: "The subject works with @legacy_associate.",
+        conflict: "A model-discovered complaint names @legacy_associate.",
+        severity: "medium" as const,
+        confidence: "low" as const,
+      }],
+      report: {
+        ...base.report,
+        publishable_findings: [legacyLead],
+        investigative_leads: [],
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(container.textContent).not.toContain("Publishable findings");
+    expect(container.textContent).toContain("Investigative leads");
+    expect(container.textContent).toContain("Related-entity lead");
+    expect(container.textContent).toContain("@legacy_associate");
+    expect(readinessConcernText()).not.toContain("legacy_associate");
+    expect(readinessConcernText()).toContain("No adverse finding is recorded");
+    expect(container.textContent).not.toContain("A model-discovered complaint names @legacy_associate");
   });
 
   it("distinguishes a verified related-entity artifact from subject attribution", () => {
