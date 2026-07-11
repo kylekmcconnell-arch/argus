@@ -5,6 +5,7 @@
 // unified Panoptes graph. The engine owns the bands and caps.
 
 import type { ResolvedInput } from "../lib/resolveInput";
+import type { ReportVersionContext } from "../lib/reportVersion";
 import type { TraceStep } from "../data/evidence";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import { tokenEntityKey, walletEntityKey } from "../graph/network";
@@ -76,6 +77,8 @@ export interface TokenDossier {
   trace: TraceStep[];
   live: boolean;
   safetyChecked: boolean;
+  /** Frozen server-side evidence/check context for a persisted report version. */
+  versionContext?: ReportVersionContext;
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));

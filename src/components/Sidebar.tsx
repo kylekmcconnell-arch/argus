@@ -9,6 +9,7 @@ import { activeScans, subscribeScans } from "../lib/activescans";
 import { activeScanRuns, subscribeScanRuns } from "../lib/scanrunner";
 import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
+import type { ReportKind } from "../lib/reports";
 
 // Subject thumbnail: the real logo/photo, falling back to a letter if it is
 // missing or fails to load (unavatar/favicon/dexscreener can 404).
@@ -162,7 +163,7 @@ export function Sidebar({
 }: {
   onNav: (t: NavTarget) => void;
   onAudit: (handle: string) => void;
-  onOpenRecent?: (ref: string) => void;
+  onOpenRecent?: (ref: string, kind?: ReportKind) => void;
   activeHandle?: string | null;
   view: NavTarget | "audit";
   open?: boolean;
@@ -171,7 +172,11 @@ export function Sidebar({
   const auth = useArgusAuth();
   const nav = (t: NavTarget) => { onNav(t); onClose?.(); };
   // Recent-audit clicks SHOW the cached result (with Rescan) rather than re-run.
-  const openRecent = (h: string) => { (onOpenRecent ?? onAudit)(h); onClose?.(); };
+  const openRecent = (ref: string, kind?: ReportKind) => {
+    if (onOpenRecent) onOpenRecent(ref, kind);
+    else onAudit(ref);
+    onClose?.();
+  };
   const [, setTick] = useState(0);
   // Re-render when the shared audit log hydrates/updates OR a background run
   // makes progress (so "generating…" ticks up and flips to the finished audit).
@@ -242,7 +247,7 @@ export function Sidebar({
           return (
             <button
               key={`run:${r.key}`}
-              onClick={() => openRecent(r.handle)}
+              onClick={() => openRecent(r.handle, "person")}
               title="Generating — click to watch. Keeps running if you navigate away."
               className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${active ? "bg-panel soft-shadow" : "hover:bg-panel/70"}`}
             >
@@ -267,7 +272,7 @@ export function Sidebar({
           return (
             <button
               key={`scan:${s.id}`}
-              onClick={() => openRecent(s.ref)}
+              onClick={() => openRecent(s.ref, s.kind)}
               title={`Scanning ${s.label} (${s.kind})…`}
               className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-panel/70"
             >
@@ -299,7 +304,10 @@ export function Sidebar({
             return (
               <button
                 key={e.id}
-                onClick={() => openRecent(ref)}
+                onClick={() => openRecent(
+                  ref,
+                  e.flags?.some((flag) => flag.toLowerCase() === "investigation") ? "investigation" : e.kind,
+                )}
                 className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
                   active ? "bg-panel soft-shadow" : "hover:bg-panel/70"
                 }`}

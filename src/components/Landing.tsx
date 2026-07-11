@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { HeroBackdrop } from "./ArgusMark";
 import { ScoreTicker } from "./ScoreTicker";
+import type { ReportKind } from "../lib/reports";
 import { recentScored } from "../lib/recentScored";
 import { PrivateToggle } from "./PrivateToggle";
 
 // Origami-style hero: centered heading + chat-style input + quick-start dossiers,
 // over a faint line-art backdrop. Calm and static, matching origami.chat.
-export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: string, priv?: boolean) => void; onAbout: () => void; onOpenRecent?: (ref: string) => void }) {
+export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: string, priv?: boolean) => void; onAbout: () => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
   const [value, setValue] = useState("");
   const [priv, setPriv] = useState(false);
   const hasScores = onOpenRecent && recentScored(1).length > 0;

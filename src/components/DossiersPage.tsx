@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { listReports, groupReportsByEntity, type ReportListing } from "../lib/reports";
+import { listReports, groupReportsByEntity, type ReportKind, type ReportListing } from "../lib/reports";
 import { purgeSubject } from "../lib/purge";
 import { verdictMeta } from "../lib/verdict";
 import { mergedLog } from "../lib/auditlog";
@@ -57,7 +57,7 @@ function reportReadout(report: ReportListing) {
   };
 }
 
-export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
+export function DossiersPage({ onOpen }: { onOpen: (ref: string, kind?: ReportKind) => void }) {
   const [reports, setReports] = useState<ReportListing[] | null>(null);
   const [q, setQ] = useState("");
   const [costOpen, setCostOpen] = useState<string | null>(null); // "<kind>:<ref>" with expanded cost ledger
@@ -138,7 +138,7 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
                   <span className="flex items-center gap-1.5">
                     <button
                       type="button"
-                      onClick={() => onOpen(r.ref)}
+                      onClick={() => onOpen(r.ref, r.kind)}
                       aria-label={`Open stored report for ${r.query ?? r.ref}`}
                       title="Open the stored report"
                       className="mono min-w-0 cursor-pointer truncate text-left text-[13px] text-ink after:absolute after:inset-0 after:cursor-pointer after:content-[''] focus-visible:outline-none"
@@ -314,7 +314,7 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
             return (
               <button
                 key={`${r.kind}:${r.ref}`}
-                onClick={(ev) => { openBtn(ev); onOpen(r.ref); }}
+                onClick={(ev) => { openBtn(ev); onOpen(r.ref, r.kind); }}
                 title={`Open the ${km.label} report — ${r.query ?? r.ref}`}
                 className="mono inline-flex items-center gap-1 rounded-md border border-line px-1.5 py-0.5 text-[10px] text-ink-dim transition hover:border-signal hover:text-signal"
               >
