@@ -4491,11 +4491,21 @@ var GOPLUS_CHAIN = {
   linea: "59144",
   scroll: "534352"
 };
+async function dexByTokenResult(address) {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (!res.ok) return { ok: false, pairs: [] };
+    const d = await res.json();
+    return { ok: true, pairs: d.pairs ?? [] };
+  } catch {
+    return { ok: false, pairs: [] };
+  }
+}
 async function dexByToken(address) {
-  const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
-  if (!res.ok) return [];
-  const d = await res.json();
-  return d.pairs ?? [];
+  const result = await dexByTokenResult(address);
+  return result.pairs;
 }
 var CG_PLATFORM = {
   ethereum: "ethereum",
@@ -4531,7 +4541,8 @@ async function coingeckoToken(chain, address) {
     const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
     const cex = new Set(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean));
     const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
-    const homepage = (d.links?.homepage ?? []).find((u) => typeof u === "string" && /^https?:\/\//i.test(u)) ?? null;
+    const homepageValue = (d.links?.homepage ?? []).find((value) => typeof value === "string" && /^https?:\/\//i.test(value));
+    const homepage = typeof homepageValue === "string" ? homepageValue : null;
     const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
     const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
     const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
@@ -4540,17 +4551,29 @@ async function coingeckoToken(chain, address) {
     return null;
   }
 }
+async function dexByPairResult(chain, pair) {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (!res.ok) return { ok: false, pair: null };
+    const d = await res.json();
+    return { ok: true, pair: d.pair ?? d.pairs?.[0] ?? null };
+  } catch {
+    return { ok: false, pair: null };
+  }
+}
 async function dexByPair(chain, pair) {
-  const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`);
-  if (!res.ok) return null;
-  const d = await res.json();
-  return d.pair ?? d.pairs?.[0] ?? null;
+  const result = await dexByPairResult(chain, pair);
+  return result.pair;
 }
 function pickPair(pairs, wantAddress) {
   if (!pairs.length) return null;
   const byLiq = [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
   if (wantAddress) {
-    const match = byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase());
+    const exact = byLiq.find((p) => p.baseToken?.address === wantAddress);
+    if (exact) return exact;
+    const match = /^0x[0-9a-f]{40}$/i.test(wantAddress) ? byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase()) : void 0;
     if (match) return match;
   }
   return byLiq[0];
@@ -4565,7 +4588,7 @@ async function honeypotIs(chainId, address) {
       simSuccess: !!d.simulationSuccess,
       buyTax: d.simulationResult?.buyTax ?? 0,
       sellTax: d.simulationResult?.sellTax ?? 0,
-      flags: (d.flags ?? []).map((f) => f.description ?? f.flag ?? String(f))
+      flags: (d.flags ?? []).map((flag) => typeof flag === "string" ? flag : flag.description ?? flag.flag ?? String(flag))
     };
   } catch {
     return null;
@@ -4760,8 +4783,9 @@ var _cache = /* @__PURE__ */ new Map();
 var CACHE_TTL = 6e4;
 async function auditToken(input, emit, opts) {
   if (input.kind !== "token") return null;
-  const key = `${input.via}:${input.ref.toLowerCase()}:${opts?.skipSim ? 1 : 0}`;
-  const hit = _cache.get(key);
+  const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
+  const key = `${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}`;
+  const hit = opts?.force ? void 0 : _cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
   const d = await runTokenAudit(input, emit, opts);
   _cache.set(key, { at: Date.now(), d });
@@ -5114,21 +5138,43 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
 // src/lib/resolveInput.ts
 var EVM = /^0x[a-fA-F0-9]{40}$/;
 var SOLANA = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
-var DEX_URL = /dexscreener\.com\/([a-z0-9]+)\/([a-zA-Z0-9]+)/i;
+var TOKEN_CANDIDATE = /^[A-Za-z0-9]{32,44}$/;
+var TICKER = /^\$[A-Za-z0-9][A-Za-z0-9._-]{0,19}$/;
 var HTTP_URL = /^https?:\/\//i;
 var DOMAIN = /^([a-z0-9-]+\.)+[a-z]{2,24}(\/\S*)?$/i;
 var NAME_SERVICE = /\.(eth|sol|crypto|nft|bnb|x|lens)$/i;
+var approvedHost = (hostname, root) => hostname === root || hostname.endsWith(`.${root}`);
+function inputUrl(value) {
+  const candidate = HTTP_URL.test(value) ? value : /^(?:[a-z0-9-]+\.)*(?:x\.com|twitter\.com|dexscreener\.com)\//i.test(value) ? `https://${value}` : null;
+  if (!candidate) return null;
+  try {
+    return new URL(candidate);
+  } catch {
+    return null;
+  }
+}
 function resolveInput(raw) {
   const s = raw.trim();
-  const dex = s.match(DEX_URL);
-  if (dex) return { kind: "token", ref: s, via: "dexscreener" };
+  const parsedUrl = inputUrl(s);
+  const hostname = parsedUrl?.hostname.toLowerCase() ?? "";
+  const isDexUrl = !!parsedUrl && approvedHost(hostname, "dexscreener.com");
+  const isXUrl = !!parsedUrl && (approvedHost(hostname, "x.com") || approvedHost(hostname, "twitter.com"));
+  const dexPath = isDexUrl ? parsedUrl.pathname.match(/^\/([a-z0-9]+)\/([a-zA-Z0-9]+)(?:\/|$)/i) : null;
+  if (dexPath && parsedUrl) return { kind: "token", ref: parsedUrl.href, via: "dexscreener" };
+  if (TICKER.test(s)) return { kind: "token", ref: s, via: "ticker" };
+  if (s.startsWith("$")) return { kind: "token", ref: s, via: "address-candidate" };
   if (EVM.test(s)) return { kind: "token", ref: s, via: "evm" };
-  if (!s.startsWith("@") && !/twitter\.com|x\.com/i.test(s) && SOLANA.test(s) && s.length >= 32) {
+  if (!s.startsWith("@") && !isXUrl && SOLANA.test(s) && s.length >= 32) {
     return { kind: "token", ref: s, via: "solana" };
   }
+  if (!s.startsWith("@") && !isXUrl && TOKEN_CANDIDATE.test(s)) {
+    return { kind: "token", ref: s, via: "address-candidate" };
+  }
   const NOISE = /^(home|explore|notifications|messages|i|intent|search|hashtag|settings|share|status|about|tos|privacy)$/i;
-  const xUrl = s.match(/(?:x|twitter)\.com\/([A-Za-z0-9_]{1,30})/i);
-  if (xUrl && !NOISE.test(xUrl[1])) return { kind: "handle", ref: xUrl[1] };
+  const xHandle = isXUrl && parsedUrl ? parsedUrl.pathname.split("/").filter(Boolean)[0] ?? "" : "";
+  if (/^[A-Za-z0-9_]{1,30}$/.test(xHandle) && !NOISE.test(xHandle)) {
+    return { kind: "handle", ref: xHandle };
+  }
   if (HTTP_URL.test(s)) return { kind: "site", ref: s };
   if (!s.startsWith("@") && DOMAIN.test(s) && !NAME_SERVICE.test(s)) return { kind: "site", ref: s };
   return { kind: "handle", ref: s.replace(/^@/, "") };

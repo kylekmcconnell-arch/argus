@@ -7,7 +7,7 @@
 // of what the user is looking at.
 import { auditToken, type TokenDossier } from "../token/audit";
 import { streamInvestigation, type Investigation } from "./investigation";
-import { resolveInput, type ResolvedInput } from "./resolveInput";
+import type { RunnableTokenInput } from "./resolveInput";
 import type { TraceStep } from "../data/evidence";
 
 export type ScanKind = "token" | "investigation";
@@ -33,7 +33,11 @@ const aborts = new Map<string, () => void>();
 const listeners = new Set<Listener>();
 let onComplete: ((run: ScanRun) => void) | null = null;
 
-const norm = (s: string) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
+const EVM_ADDRESS = /^0x[0-9a-f]{40}$/i;
+const norm = (s: string) => {
+  const clean = s.trim().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
+  return EVM_ADDRESS.test(clean) ? clean.toLowerCase() : clean;
+};
 const trunc = (s: string) => (s.length > 20 ? s.slice(0, 8) + "…" + s.slice(-4) : s);
 function emit() { for (const l of listeners) l(); }
 
@@ -55,7 +59,7 @@ export function cancelScanRun(kind: ScanKind, ref: string) {
 }
 
 // Start (or re-attach to) a background token audit.
-export function startTokenScan(input: ResolvedInput, priv = false): ScanRun {
+export function startTokenScan(input: RunnableTokenInput, priv = false, opts?: { force?: boolean }): ScanRun {
   const ref = norm(input.ref);
   const key = `token:${ref}`;
   const existing = runs.get(key);
@@ -70,7 +74,11 @@ export function startTokenScan(input: ResolvedInput, priv = false): ScanRun {
   (async () => {
     try {
       let count = 0;
-      const d = await auditToken(input, (s) => { if (cancelled) return; count += 1; run.steps = [...run.steps, s]; run.pct = Math.min(92, count * 18); emit(); });
+      const d = await auditToken(
+        input,
+        (s) => { if (cancelled) return; count += 1; run.steps = [...run.steps, s]; run.pct = Math.min(92, count * 18); emit(); },
+        { force: opts?.force },
+      );
       if (cancelled) return;
       if (!d) { run.status = "error"; run.error = "not_found"; emit(); }
       else { run.status = "done"; run.result = d; run.pct = 100; emit(); onComplete?.(run); }
@@ -82,8 +90,9 @@ export function startTokenScan(input: ResolvedInput, priv = false): ScanRun {
 }
 
 // Start (or re-attach to) a background token investigation.
-export function startInvestigationScan(rawInput: string, priv = false): ScanRun {
-  const ref = norm(resolveInput(rawInput).ref);
+export function startInvestigationScan(input: RunnableTokenInput, priv = false, opts?: { force?: boolean }): ScanRun {
+  const rawInput = input.ref;
+  const ref = norm(input.ref);
   const key = `investigation:${ref}`;
   const existing = runs.get(key);
   if (existing && existing.status === "running") return existing;
@@ -93,12 +102,12 @@ export function startInvestigationScan(rawInput: string, priv = false): ScanRun 
   emit();
 
   let count = 0;
-  const abort = streamInvestigation(rawInput, {
+  const abort = streamInvestigation(input, {
     onStep: (s) => { count += 1; run.steps = [...run.steps, s]; run.pct = Math.min(94, count * 7); emit(); },
     onHop: (sub) => { run.hop = sub; emit(); },
     onDone: (inv) => { run.status = "done"; run.result = inv; run.pct = 100; aborts.delete(key); emit(); onComplete?.(run); },
     onError: () => { run.status = "error"; run.error = "error"; aborts.delete(key); emit(); },
-  });
+  }, { forceTokenAudit: opts?.force });
   aborts.set(key, abort);
   return run;
 }

@@ -1,9 +1,14 @@
 // Authenticated API: GET /api/v1/token?address=<contract> (or ?url=...).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import type { ResolvedInput, RunnableTokenInput } from "../../src/lib/resolveInput.js";
 import { auditToken, resolveInput } from "../_collector.js";
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
 
 export const config = { maxDuration: 30 };
+
+const isRunnableTokenInput = (input: ResolvedInput): input is RunnableTokenInput =>
+  input.kind === "token"
+  && (input.via === "evm" || input.via === "solana" || input.via === "dexscreener");
 
 function cors(req: VercelRequest, res: VercelResponse): void {
   const origin = typeof req.headers.origin === "string" ? req.headers.origin : "";
@@ -27,8 +32,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
   const input = resolveInput(ref);
-  if (input.kind !== "token") {
-    res.status(400).json({ error: "input is not a token contract or DexScreener url" });
+  if (!isRunnableTokenInput(input)) {
+    res.status(400).json({ error: "input must be an exact token contract or DexScreener url" });
     return;
   }
   const quota = await consumeInvestigationQuota(auth, "/api/v1/token", { kind: "token_api" });

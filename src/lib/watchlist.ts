@@ -3,6 +3,8 @@
 // pulls, score drops. Keyless "alerts" without a backend; true push alerts would
 // be a Vercel cron over the collector later.
 
+import { normalizeSubjectRef } from "./subjectRef";
+
 export interface WatchSnapshot {
   verdict: string;
   score: number | null;
@@ -35,11 +37,12 @@ function save(items: WatchItem[]) {
 }
 
 export function isWatched(id: string): boolean {
-  return getWatchlist().some((w) => w.id.toLowerCase() === id.toLowerCase());
+  return getWatchlist().some((w) => normalizeSubjectRef(w.id) === normalizeSubjectRef(id));
 }
 
 export function addWatch(item: WatchItem) {
-  const items = getWatchlist().filter((w) => w.id.toLowerCase() !== item.id.toLowerCase());
+  const itemRef = normalizeSubjectRef(item.id);
+  const items = getWatchlist().filter((w) => normalizeSubjectRef(w.id) !== itemRef);
   items.unshift(item);
   save(items);
   // Sync up (kind='watch' row) so the watchlist is SHARED between analysts and
@@ -52,7 +55,8 @@ export function addWatch(item: WatchItem) {
 }
 
 export function removeWatch(id: string) {
-  save(getWatchlist().filter((w) => w.id.toLowerCase() !== id.toLowerCase()));
+  const target = normalizeSubjectRef(id);
+  save(getWatchlist().filter((w) => normalizeSubjectRef(w.id) !== target));
   void fetch(`/api/report?ref=${encodeURIComponent(id)}&kind=watch`, { method: "DELETE" }).catch(() => { /* offline */ });
 }
 
@@ -67,8 +71,8 @@ export async function hydrateSharedWatchlist(): Promise<void> {
     const shared: WatchItem[] = Array.isArray(d?.watches) ? d.watches : [];
     if (!shared.length) return;
     const local = getWatchlist();
-    const have = new Set(local.map((w) => w.id.toLowerCase()));
-    const merged = [...local, ...shared.filter((w) => w && w.id && !have.has(w.id.toLowerCase()))];
+    const have = new Set(local.map((w) => normalizeSubjectRef(w.id)));
+    const merged = [...local, ...shared.filter((w) => w && w.id && !have.has(normalizeSubjectRef(w.id)))];
     if (merged.length !== local.length) save(merged);
   } catch { /* stay local-only */ }
 }
@@ -84,6 +88,7 @@ export function toggleWatch(item: WatchItem): boolean {
 
 // re-baseline an item to the current snapshot (mark as seen)
 export function rebaseline(id: string, snapshot: WatchSnapshot) {
-  const items = getWatchlist().map((w) => (w.id.toLowerCase() === id.toLowerCase() ? { ...w, snapshot } : w));
+  const target = normalizeSubjectRef(id);
+  const items = getWatchlist().map((w) => (normalizeSubjectRef(w.id) === target ? { ...w, snapshot } : w));
   save(items);
 }

@@ -1,6 +1,6 @@
 import type { Dossier } from "../src/data/dossier";
 import type { TraceStep } from "../src/data/evidence";
-import type { ResolvedInput } from "../src/lib/resolveInput";
+import type { ResolvedInput, RunnableTokenInput } from "../src/lib/resolveInput";
 import type { TokenDossier } from "../src/token/audit";
 
 /** Typed boundary for the generated server collector bundle. */
@@ -10,9 +10,9 @@ export function runAudit(
 ): Promise<Dossier | null>;
 
 export function auditToken(
-  input: ResolvedInput,
+  input: RunnableTokenInput,
   emit?: (step: TraceStep) => void,
-  options?: { skipSim?: boolean },
+  options?: { skipSim?: boolean; force?: boolean },
 ): Promise<TokenDossier | null>;
 
 export function resolveInput(raw: string): ResolvedInput;

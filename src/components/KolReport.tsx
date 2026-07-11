@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { auditToken } from "../token/audit";
-import { resolveInput } from "../lib/resolveInput";
+import { isRunnableTokenInput, resolveInput } from "../lib/resolveInput";
 import { verdictMeta } from "../lib/verdict";
 import { TokenSparkline } from "./TokenSparkline";
 import { CallTimeline } from "./CallTimeline";
@@ -58,7 +58,7 @@ async function auditOnePromo(p: Promo): Promise<TokRes | null> {
   const label = p.ticker ? (p.ticker.startsWith("$") ? p.ticker : "$" + p.ticker) : "token";
   if (!contract) return { label, dead: false, unresolved: true };
   const input = resolveInput(contract);
-  const d = input.kind === "token" ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
+  const d = isRunnableTokenInput(input) ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
   if (!d) return { label, dead: false, unresolved: true };
   if (BLUECHIP.has((d.symbol ?? "").toUpperCase())) return null; // resolved to a major asset
   const liq = d.liquidityUsd ?? 0;

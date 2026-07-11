@@ -232,6 +232,13 @@ describe("report case lifecycle API", () => {
 
   it("returns an archived case state instead of treating a missing projection as a new subject", async () => {
     const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{
+        case_id: "00000000-0000-4000-8000-000000000101",
+        subject_kind: "person",
+        subject_ref: "alice",
+        display_query: "@Alice",
+        case_status: "archived",
+      }]))
       .mockResolvedValueOnce(jsonResponse([]))
       .mockResolvedValueOnce(jsonResponse([{ status: "archived" }]));
     vi.stubGlobal("fetch", fetchMock);
@@ -241,5 +248,62 @@ describe("report case lifecycle API", () => {
 
     expect(captured.statusCode).toBe(200);
     expect(captured.body).toEqual({ available: true, report: null, caseStatus: "archived" });
+  });
+
+  it("resolves labels and legacy case-folded refs from durable cases", async () => {
+    const canonical = "52hneKeDvX3QMpysYXERquicq3QXxfVChqsEtYaLpump";
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse([{
+      case_id: "00000000-0000-4000-8000-000000000101",
+      subject_kind: "token",
+      subject_ref: canonical,
+      display_query: "$PEPEBULL",
+      case_status: "archived",
+      updated_at: "2026-07-11T01:00:00.000Z",
+    }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("GET", { query: { resolve: "$pepebull" } }), res);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://database.example/rest/v1/rpc/resolve_case_subject");
+    expect(captured.body).toEqual({
+      available: true,
+      subjects: [{
+        caseId: "00000000-0000-4000-8000-000000000101",
+        kind: "token",
+        ref: canonical,
+        query: "$PEPEBULL",
+        status: "archived",
+        updatedAt: "2026-07-11T01:00:00.000Z",
+      }],
+    });
+  });
+
+  it("rejects a direct read when one label resolves to multiple contracts", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse([
+      {
+        case_id: "00000000-0000-4000-8000-000000000201",
+        subject_kind: "token",
+        subject_ref: "0x1111111111111111111111111111111111111111",
+        display_query: "$SAME",
+        case_status: "open",
+      },
+      {
+        case_id: "00000000-0000-4000-8000-000000000202",
+        subject_kind: "token",
+        subject_ref: "0x2222222222222222222222222222222222222222",
+        display_query: "$SAME",
+        case_status: "open",
+      },
+    ]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("GET", { query: { ref: "$SAME", kind: "token" } }), res);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(captured.statusCode).toBe(409);
+    expect(captured.body).toMatchObject({ error: "case_subject_ambiguous" });
   });
 });

@@ -4,6 +4,7 @@
 // trend (accelerating vs cooling), and — with a time range + category filter —
 // a "most scanned VCs in the last 24h" style leaderboard. No new storage.
 import { mergedLog, type LogEntry } from "./auditlog";
+import { normalizeSubjectRef } from "./subjectRef";
 
 export type ScanCategory = "founder" | "vc" | "kol" | "project" | "site" | "other";
 
@@ -29,7 +30,7 @@ export interface ScanOpts {
   category?: ScanCategory | null;
 }
 
-const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
+const norm = normalizeSubjectRef;
 const DEFAULT_HALF = 3 * 86400000; // all-time trend compares last 3d vs the 3d before
 
 function categoryOf(e: LogEntry): ScanCategory {

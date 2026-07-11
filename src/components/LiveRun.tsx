@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
 import { AuditConsole } from "./AuditConsole";
-import { startPersonAudit, subscribeRuns, getRun } from "../lib/runner";
+import { subscribeRuns, getRun } from "../lib/runner";
 import type { Dossier } from "../data/dossier";
 
 // Live run: a VIEW onto the background runner, not the owner of the stream. It
-// starts (or re-attaches to) the run for this handle and renders its steps as
+// re-attaches to the run for this handle and renders its steps as
 // they arrive. Navigating away unmounts this component but does NOT stop the
 // audit — the runner keeps streaming and the result still lands in the library.
 export function LiveRun({
@@ -19,7 +19,6 @@ export function LiveRun({
   const [, setTick] = useState(0);
 
   useEffect(() => {
-    startPersonAudit(handle); // idempotent: re-attaches if already running
     const unsub = subscribeRuns(() => setTick((t) => t + 1));
     return unsub; // detach the view only — the run keeps going in the background
   }, [handle]);

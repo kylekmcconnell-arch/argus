@@ -3,7 +3,7 @@
 // the page calls runBench() on view and the numbers are whatever the live
 // on-chain data produces right now.
 import { auditToken, type TokenDossier } from "../token/audit";
-import { resolveInput } from "../lib/resolveInput";
+import { isRunnableTokenInput, resolveInput } from "../lib/resolveInput";
 import { CORPUS, type CorpusToken } from "./corpus";
 
 export interface BenchResult {
@@ -80,7 +80,8 @@ export async function runBench(
   return pool(CORPUS, concurrency, async (token) => {
     let r: BenchResult;
     try {
-      const d = await auditToken(resolveInput(token.address));
+      const input = resolveInput(token.address);
+      const d = isRunnableTokenInput(input) ? await auditToken(input) : null;
       if (!d) {
         r = { token, status: "error", verdict: "—", score: null, capApplied: null, mintable: false, freezable: false, headline: "", correct: false, driver: "No DEX pair resolved.", error: "unresolved" };
       } else {

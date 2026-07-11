@@ -21,6 +21,10 @@ export interface DexPair {
   info?: { imageUrl?: string; websites?: { url: string }[]; socials?: { type: string; url: string }[] };
 }
 
+export type DexPairsResult =
+  | { ok: true; pairs: DexPair[] }
+  | { ok: false; pairs: [] };
+
 // DexScreener chainId -> GoPlus numeric chain id (EVM only)
 export const GOPLUS_CHAIN: Record<string, string> = {
   ethereum: "1",
@@ -62,25 +66,43 @@ export async function radarTokens(): Promise<RadarRef[]> {
   return out;
 }
 
+export async function dexByTokenResult(address: string): Promise<DexPairsResult> {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return { ok: false, pairs: [] };
+    const d = (await res.json()) as { pairs?: DexPair[] };
+    return { ok: true, pairs: d.pairs ?? [] };
+  } catch {
+    return { ok: false, pairs: [] };
+  }
+}
+
 export async function dexByToken(address: string): Promise<DexPair[]> {
-  const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
-  if (!res.ok) return [];
-  const d = (await res.json()) as { pairs?: DexPair[] };
-  return d.pairs ?? [];
+  const result = await dexByTokenResult(address);
+  return result.pairs;
 }
 
 // Keyless, CORS-open free-text search across DexScreener — lets a site recon
 // look for a project's token on-chain by name/ticker when the page hides the
 // contract address.
-export async function searchTokens(query: string): Promise<DexPair[]> {
+export async function searchTokensResult(query: string): Promise<DexPairsResult> {
   try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query)}`);
-    if (!res.ok) return [];
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/search?q=${encodeURIComponent(query)}`, {
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return { ok: false, pairs: [] };
     const d = (await res.json()) as { pairs?: DexPair[] };
-    return d.pairs ?? [];
+    return { ok: true, pairs: d.pairs ?? [] };
   } catch {
-    return [];
+    return { ok: false, pairs: [] };
   }
+}
+
+export async function searchTokens(query: string): Promise<DexPair[]> {
+  const result = await searchTokensResult(query);
+  return result.pairs;
 }
 
 // Investigation Logic Map, Phase 1 Step 2: corroborate token data against an
@@ -92,6 +114,19 @@ const CG_PLATFORM: Record<string, string> = {
 };
 const CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
 export interface CgInfo { listed: boolean; rank: number | null; mcapUsd: number | null; marketCount: number; cexCount: number; cexNames: string[]; homepage: string | null; twitter: string | null; image: string | null; description: string | null; }
+
+interface CoinGeckoTicker {
+  market?: { name?: string; identifier?: string };
+}
+
+interface CoinGeckoResponse {
+  tickers?: CoinGeckoTicker[];
+  links?: { homepage?: unknown[]; twitter_screen_name?: unknown };
+  image?: { large?: string; small?: string; thumb?: string };
+  market_cap_rank?: number;
+  market_data?: { market_cap?: { usd?: number } };
+  description?: { en?: unknown };
+}
 
 // CoinGecko's description.en is the project's own blurb — the "what it actually
 // does" a report should lead with. Strip HTML + markdown links to plain text and
@@ -121,8 +156,8 @@ export async function coingeckoToken(chain: string, address: string): Promise<Cg
     const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
     if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
     if (!res.ok) return null;
-    const d = (await res.json()) as any;
-    const tickers: any[] = d.tickers ?? [];
+    const d = (await res.json()) as CoinGeckoResponse;
+    const tickers = d.tickers ?? [];
     const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
     const cex = new Set<string>(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean) as string[]);
     // Tier-1 exchanges first, then the rest, for an honest "listed on" line.
@@ -130,7 +165,8 @@ export async function coingeckoToken(chain: string, address: string): Promise<Cg
     // OFFICIAL project links — CoinGecko carries these even for blue-chips whose
     // DexScreener pair info is bare (e.g. $UNI). Feeds the investigation's site
     // recon + project-account audit instead of dead-ending on "no website / no X".
-    const homepage = (d.links?.homepage ?? []).find((u: any) => typeof u === "string" && /^https?:\/\//i.test(u)) ?? null;
+    const homepageValue = (d.links?.homepage ?? []).find((value) => typeof value === "string" && /^https?:\/\//i.test(value));
+    const homepage = typeof homepageValue === "string" ? homepageValue : null;
     const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
     const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
     const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
@@ -140,18 +176,36 @@ export async function coingeckoToken(chain: string, address: string): Promise<Cg
   }
 }
 
+export async function dexByPairResult(chain: string, pair: string): Promise<{
+  ok: boolean;
+  pair: DexPair | null;
+}> {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
+      signal: AbortSignal.timeout(8_000),
+    });
+    if (!res.ok) return { ok: false, pair: null };
+    const d = (await res.json()) as { pairs?: DexPair[]; pair?: DexPair };
+    return { ok: true, pair: d.pair ?? d.pairs?.[0] ?? null };
+  } catch {
+    return { ok: false, pair: null };
+  }
+}
+
 export async function dexByPair(chain: string, pair: string): Promise<DexPair | null> {
-  const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`);
-  if (!res.ok) return null;
-  const d = (await res.json()) as { pairs?: DexPair[]; pair?: DexPair };
-  return d.pair ?? d.pairs?.[0] ?? null;
+  const result = await dexByPairResult(chain, pair);
+  return result.pair;
 }
 
 export function pickPair(pairs: DexPair[], wantAddress?: string): DexPair | null {
   if (!pairs.length) return null;
   const byLiq = [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
   if (wantAddress) {
-    const match = byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase());
+    const exact = byLiq.find((p) => p.baseToken?.address === wantAddress);
+    if (exact) return exact;
+    const match = /^0x[0-9a-f]{40}$/i.test(wantAddress)
+      ? byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase())
+      : undefined;
     if (match) return match;
   }
   return byLiq[0];
@@ -197,17 +251,26 @@ export interface HoneypotSim {
   sellTax: number;
   flags: string[];
 }
+
+interface HoneypotResponse {
+  honeypotResult?: { isHoneypot?: boolean };
+  simulationSuccess?: boolean;
+  simulationResult?: { buyTax?: number; sellTax?: number };
+  flags?: Array<{ description?: string; flag?: string } | string>;
+}
 export async function honeypotIs(chainId: string, address: string): Promise<HoneypotSim | null> {
   try {
     const res = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
     if (!res.ok) return null;
-    const d = (await res.json()) as any;
+    const d = (await res.json()) as HoneypotResponse;
     return {
       isHoneypot: !!d.honeypotResult?.isHoneypot,
       simSuccess: !!d.simulationSuccess,
       buyTax: d.simulationResult?.buyTax ?? 0,
       sellTax: d.simulationResult?.sellTax ?? 0,
-      flags: (d.flags ?? []).map((f: any) => f.description ?? f.flag ?? String(f)),
+      flags: (d.flags ?? []).map((flag) => typeof flag === "string"
+        ? flag
+        : flag.description ?? flag.flag ?? String(flag)),
     };
   } catch {
     return null;

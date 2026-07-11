@@ -358,7 +358,7 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
 
 /* ── main report ──────────────────────────────────────────────────── */
 
-export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onOpenProject?: (name: string, domain?: string) => void }) {
+export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string) => void }) {
   const { role } = useArgusAuth();
   const f = dossier;
   const { report, graph, founderSummary, evidence, webTeam } = dossier;
@@ -500,8 +500,8 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
             {f.live ? "● LIVE" : "CURATED"}
           </span>
           <div className="ml-auto flex items-center gap-2">
-            {onAudit && (
-              <button onClick={() => onAudit(report.handle)} title="Run this audit again, fresh" className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
+            {onRescan && (
+              <button onClick={onRescan} title="Run this audit again, fresh" className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
                 Rescan
               </button>

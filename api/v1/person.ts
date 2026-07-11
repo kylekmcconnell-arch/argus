@@ -1,6 +1,6 @@
 // Authenticated API: GET /api/v1/person?handle=<@handle>
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { runAudit } from "../_collector.js";
+import { resolveInput, runAudit } from "../_collector.js";
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
 import { persistServerDossier } from "../audit.js";
 
@@ -22,8 +22,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("cache-control", "private, no-store");
   const auth = await requireArgusAuth(req, res, "analyst");
   if (!auth) return;
-  const handle = req.query.handle as string | undefined;
-  if (!handle) {
+  const rawHandle = typeof req.query.handle === "string" ? req.query.handle.trim() : "";
+  const resolved = rawHandle ? resolveInput(rawHandle) : null;
+  const handle = resolved?.kind === "handle" ? resolved.ref : "";
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
     res.status(400).json({ error: "pass ?handle=<@handle>" });
     return;
   }

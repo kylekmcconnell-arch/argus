@@ -17,7 +17,7 @@
 //   - recon.team.state drives the founder section verbatim; a coverage gap is a
 //     gap, not an absence claim.
 import { auditToken, type TokenDossier } from "../token/audit";
-import { resolveInput } from "./resolveInput";
+import type { RunnableTokenInput } from "./resolveInput";
 import { runRecon, type Recon } from "../collect/recon";
 import { streamAudit, probeBackend } from "./live";
 import type { RetrievalStage } from "../collect/retrieve";
@@ -190,7 +190,11 @@ async function fetchTokenIdentity(symbol: string, name: string, contract: string
   } catch { return null; }
 }
 
-export function streamInvestigation(rootRef: string, h: InvestigationHandlers): () => void {
+export function streamInvestigation(
+  input: RunnableTokenInput,
+  h: InvestigationHandlers,
+  opts?: { forceTokenAudit?: boolean },
+): () => void {
   let aborted = false;
   let abortLive: (() => void) | null = null;
   const abort = () => { aborted = true; abortLive?.(); };
@@ -200,7 +204,11 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
       // ── Hop 1: on-chain token audit (free) ──
       h.onHop("auditing the token on-chain");
       h.onStep(milestone("Step 1 · On-chain token audit", "DexScreener + GoPlus, keyless.", "neutral"));
-      const token = await auditToken(resolveInput(rootRef), (s) => { if (!aborted) h.onStep(s); });
+      const token = await auditToken(
+        input,
+        (s) => { if (!aborted) h.onStep(s); },
+        { force: opts?.forceTokenAudit },
+      );
       if (aborted) return;
       if (!token) { h.onError("Could not resolve that contract on any DEX."); return; }
 
@@ -311,7 +319,7 @@ export function streamInvestigation(rootRef: string, h: InvestigationHandlers): 
       }
       const note = founderNote(siteUrl, recon, founders);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
-      h.onDone({ rootRef, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note, deployerTrail, webTeam });
+      h.onDone({ rootRef: input.ref, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note, deployerTrail, webTeam });
     } catch (e) {
       if (!aborted) h.onError(String(e));
     }

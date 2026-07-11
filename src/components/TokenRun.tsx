@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { AuditConsole } from "./AuditConsole";
-import { startTokenScan, subscribeScanRuns, getScanRun } from "../lib/scanrunner";
-import type { ResolvedInput } from "../lib/resolveInput";
+import { subscribeScanRuns, getScanRun } from "../lib/scanrunner";
+import type { RunnableTokenInput } from "../lib/resolveInput";
 import type { TokenDossier } from "../token/audit";
 
 // A VIEW onto the background token scan — not the owner of the run. Navigating
@@ -12,14 +12,13 @@ export function TokenRun({
   onDone,
   onError,
 }: {
-  input: ResolvedInput;
+  input: RunnableTokenInput;
   onDone: (d: TokenDossier) => void;
   onError: () => void;
 }) {
   const [, setTick] = useState(0);
 
   useEffect(() => {
-    startTokenScan(input); // idempotent: re-attaches if already running
     const unsub = subscribeScanRuns(() => setTick((t) => t + 1));
     return unsub; // detach the view only — the run continues in the background
   }, [input]);

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { auditToken } from "../token/audit";
-import { resolveInput } from "../lib/resolveInput";
+import { isRunnableTokenInput, resolveInput } from "../lib/resolveInput";
 import { shortAddr } from "../lib/wallets";
 import { verdictMeta } from "../lib/verdict";
 import { FunderSweep } from "./FunderSweep";
@@ -66,7 +66,7 @@ export function OnchainReality({ promotions, wallets, symbolHints, onAudit }: { 
       setState("loading");
       if (contract) {
         const input = resolveInput(contract);
-        const d = input.kind === "token" ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
+        const d = isRunnableTokenInput(input) ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
         setTok(d);
         const isSol = (input.kind === "token" && input.via === "solana") || d?.chain === "solana";
         let dep = d?.deployer ?? null;

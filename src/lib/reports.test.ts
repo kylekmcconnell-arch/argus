@@ -5,9 +5,12 @@ import {
   changeReportLifecycle,
   fetchReport,
   fetchReportState,
+  groupReportsByEntity,
   listReports,
   reportChecks,
   reportCompleteness,
+  resolveStoredCases,
+  storedSiteRecon,
 } from "./reports";
 import type { TokenDossier } from "../token/audit";
 import type { ReportVersionContext } from "./reportVersion";
@@ -18,6 +21,27 @@ const legacyDossier = {
   handle: "@example",
   evidence: { associates: [] },
 } as unknown as Dossier;
+
+describe("report entity grouping", () => {
+  it("never merges different contracts only because they share a ticker", () => {
+    const reports = [
+      { kind: "token" as const, ref: "0x1111111111111111111111111111111111111111", query: "$SAME" },
+      { kind: "investigation" as const, ref: "0x1111111111111111111111111111111111111111", query: "$SAME" },
+      { kind: "token" as const, ref: "0x2222222222222222222222222222222222222222", query: "$SAME" },
+    ];
+
+    const groups = groupReportsByEntity(reports, (key) => key);
+
+    expect(groups).toHaveLength(2);
+    expect(groups.map((group) => new Set(group.map((report) => report.ref)).size)).toEqual([1, 1]);
+  });
+});
+
+describe("stored site recovery", () => {
+  it("rejects malformed legacy recon payloads before the UI dereferences them", () => {
+    expect(storedSiteRecon({ kind: "site", payload: { recon: {} } })).toBeNull();
+  });
+});
 
 describe("person report synchronization", () => {
   it("prefers server-frozen check runs over evidence-derived guesses", () => {
@@ -191,5 +215,58 @@ describe("report library lifecycle", () => {
 
     await expect(changeReportLifecycle("archive", [{ kind: "person", ref: "alice" }]))
       .rejects.toThrow("Case changed while archiving.");
+  });
+});
+
+describe("stored case resolution", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("resolves an archived display label to its exact canonical case", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        available: true,
+        subjects: [{
+          caseId: "00000000-0000-4000-8000-000000000123",
+          kind: "token",
+          ref: "52hneKeDvX3QMpysYXERquicq3QXxfVChqsEtYaLpump",
+          query: "$PEPEBULL",
+          status: "archived",
+          updatedAt: "2026-07-11T00:00:00.000Z",
+        }],
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveStoredCases("$PEPEBULL")).resolves.toMatchObject({
+      status: "ok",
+      subjects: [{
+        kind: "token",
+        ref: "52hneKeDvX3QMpysYXERquicq3QXxfVChqsEtYaLpump",
+        status: "archived",
+      }],
+    });
+    expect(fetchMock.mock.calls[0][0]).toBe("/api/report?resolve=%24PEPEBULL");
+  });
+
+  it("fails closed when alias status cannot be checked", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: false, status: 503 });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(resolveStoredCases("52hnekedvx3qmpysyxerquicq3qxxfvchqsetyalpump"))
+      .resolves.toEqual({ status: "unavailable", subjects: [] });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("fails closed on a malformed successful resolver response", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ available: true, subjects: [{ kind: "token" }] }),
+    }));
+
+    await expect(resolveStoredCases("$BROKEN"))
+      .resolves.toEqual({ status: "unavailable", subjects: [] });
   });
 });

@@ -31,6 +31,13 @@ interface CaseSubject {
   ref: string;
 }
 
+interface ResolvedCaseSubject extends CaseSubject {
+  caseId: string;
+  query: string;
+  status: "open" | "archived";
+  updatedAt?: string;
+}
+
 const asRecord = (value: unknown): JsonRecord =>
   value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
 
@@ -82,6 +89,48 @@ async function manageLifecycle(
   }
   const rows = await response.json() as unknown;
   return Array.isArray(rows) ? rows : [];
+}
+
+async function resolveCaseSubjects(
+  credentials: ServiceCredentials,
+  organizationId: string,
+  input: string,
+): Promise<ResolvedCaseSubject[]> {
+  const response = await fetch(`${credentials.url}/rest/v1/rpc/resolve_case_subject`, {
+    method: "POST",
+    headers: serviceHeaders(credentials.key),
+    body: JSON.stringify({
+      p_organization_id: organizationId,
+      p_input: input,
+    }),
+    signal: AbortSignal.timeout(8_000),
+  });
+  if (!response.ok) throw new Error(`case subject resolution failed (${response.status})`);
+  const rows = await response.json() as unknown;
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((candidate): ResolvedCaseSubject[] => {
+    const row = asRecord(candidate);
+    const kind = typeof row.subject_kind === "string" ? row.subject_kind : "";
+    const ref = typeof row.subject_ref === "string" ? row.subject_ref : "";
+    const status = row.case_status === "open" || row.case_status === "archived"
+      ? row.case_status
+      : null;
+    if (
+      typeof row.case_id !== "string"
+      || !CASE_KINDS.has(kind)
+      || !ref
+      || typeof row.display_query !== "string"
+      || !status
+    ) return [];
+    return [{
+      caseId: row.case_id,
+      kind,
+      ref,
+      query: row.display_query,
+      status,
+      updatedAt: typeof row.updated_at === "string" ? row.updated_at : undefined,
+    }];
+  });
 }
 
 async function subjectsForRef(
@@ -516,6 +565,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (req.method === "GET") {
+      if (req.query.resolve != null) {
+        const input = typeof req.query.resolve === "string" ? req.query.resolve.trim() : "";
+        if (!input || input.length > 500) {
+          res.status(400).json({ error: "valid_case_input_required" });
+          return;
+        }
+        const subjects = await resolveCaseSubjects(credentials, auth.organizationId, input);
+        res.status(200).json({ available: true, subjects });
+        return;
+      }
+
       if (req.query.list != null) {
         const requestedStatus = typeof req.query.status === "string" ? req.query.status : "open";
         if (requestedStatus !== "open" && requestedStatus !== "archived") {
@@ -567,14 +627,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return;
       }
 
-      const ref = normRef(typeof req.query.ref === "string" ? req.query.ref : "");
-      if (!ref) {
+      const rawRef = typeof req.query.ref === "string" ? req.query.ref.trim() : "";
+      if (!rawRef) {
         res.status(400).json({ error: "ref_required" });
         return;
       }
       const requestedKind = typeof req.query.kind === "string" ? req.query.kind : "";
       if (requestedKind && !STORED_KINDS.has(requestedKind)) {
         res.status(400).json({ error: "invalid_kind" });
+        return;
+      }
+      const resolvedSubjects = await resolveCaseSubjects(credentials, auth.organizationId, rawRef);
+      const eligibleSubjects = requestedKind
+        ? resolvedSubjects.filter((subject) => subject.kind === requestedKind)
+        : resolvedSubjects;
+      const distinctRefs = new Set(eligibleSubjects.map((subject) => subject.ref));
+      if (distinctRefs.size > 1) {
+        res.status(409).json({
+          error: "case_subject_ambiguous",
+          subjects: eligibleSubjects,
+        });
+        return;
+      }
+      const resolvedSubject = eligibleSubjects[0];
+      const ref = resolvedSubject?.ref ?? normRef(rawRef);
+      if (!ref) {
+        res.status(400).json({ error: "ref_required" });
         return;
       }
       const kindFilter = requestedKind ? `&kind=eq.${requestedKind}` : "";
