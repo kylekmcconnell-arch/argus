@@ -1,4 +1,5 @@
 -- Append-only, exact-version provider usage accounting.
+-- Filename matches the production migration-history version assigned at apply.
 --
 -- report_cost_lines remains the backwards-compatible aggregate read model.
 -- Every new event is first written once under a tenant idempotency key, then
