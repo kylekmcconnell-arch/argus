@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { createAuthenticatedFetch, type FetchLike } from "./authenticatedFetch";
+import {
+  createAuthenticatedFetch,
+  shouldRevalidateSession,
+  type FetchLike,
+} from "./authenticatedFetch";
 
 function recorder() {
   const calls: Array<{ input: string | URL | Request; init?: RequestInit }> = [];
@@ -87,5 +91,21 @@ describe("createAuthenticatedFetch", () => {
 
     expect(native.calls.map(({ init }) => new Headers(init?.headers).get("authorization")))
       .toEqual(["Bearer first-token", "Bearer refreshed-token"]);
+  });
+});
+
+describe("shouldRevalidateSession", () => {
+  it("ignores repeated focus events for the validated token", () => {
+    expect(shouldRevalidateSession("token-a", "token-a", null)).toBe(false);
+  });
+
+  it("coalesces repeated events while the same token is being verified", () => {
+    expect(shouldRevalidateSession("token-a", null, "token-a")).toBe(false);
+  });
+
+  it("validates initial, refreshed, and signed-out session states", () => {
+    expect(shouldRevalidateSession("token-a", null, null)).toBe(true);
+    expect(shouldRevalidateSession("token-b", "token-a", null)).toBe(true);
+    expect(shouldRevalidateSession(null, "token-a", null)).toBe(true);
   });
 });

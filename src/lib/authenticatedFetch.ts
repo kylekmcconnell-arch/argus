@@ -3,6 +3,16 @@ export type FetchLike = (
   init?: RequestInit,
 ) => Promise<Response>;
 
+/** Supabase may emit SIGNED_IN again when a tab regains focus. */
+export function shouldRevalidateSession(
+  nextAccessToken: string | null,
+  validatedAccessToken: string | null,
+  pendingAccessToken: string | null,
+): boolean {
+  if (!nextAccessToken) return true;
+  return nextAccessToken !== validatedAccessToken && nextAccessToken !== pendingAccessToken;
+}
+
 /**
  * Attach the current ARGUS session token without calling back into the auth
  * client. Supabase auth events can hold an internal client lock, so a fetch
