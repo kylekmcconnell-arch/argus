@@ -297,6 +297,91 @@ const compactObject = (value: unknown, depth = 0): unknown => {
   );
 };
 
+const compactProfileAuthenticity = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  // imageData is intentionally excluded. The immutable report retains the
+  // exact inspected bytes for replay, while Claude receives only the bounded
+  // classification metadata and byte hash.
+  return {
+    provider: clip(row.provider, 80),
+    capturedAt: clip(row.capturedAt, 40),
+    imageUrl: clip(row.imageUrl, 420),
+    imageContentHash: clip(row.imageContentHash, 64),
+    mediaType: clip(row.mediaType, 40),
+    classification: clip(row.classification, 80),
+    confidence: typeof row.confidence === "number" && Number.isFinite(row.confidence) ? row.confidence : undefined,
+    isRealPerson: typeof row.isRealPerson === "boolean" ? row.isRealPerson : undefined,
+    flag: typeof row.flag === "boolean" ? row.flag : undefined,
+    tells: Array.isArray(row.tells) ? row.tells.slice(0, 8).map((tell) => clip(tell, 180)).filter(Boolean) : [],
+    note: clip(row.note, 420),
+  };
+};
+
+const compactTrustGraphPredicate = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const edgeTypes = (candidate: unknown) => Array.isArray(candidate)
+    ? candidate.slice(0, 12).map((item) => clip(item, 80)).filter(Boolean)
+    : [];
+  return {
+    tie_key: clip(row.tie_key, 240),
+    tie_type: clip(row.tie_type, 80),
+    tie_strength: clip(row.tie_strength, 20),
+    subject_edge_types: edgeTypes(row.subject_edge_types),
+    other_edge_types: edgeTypes(row.other_edge_types),
+    other_report_version_id: clip(row.other_report_version_id, 64),
+    other_attestation: clip(row.other_attestation, 40),
+    other_completeness: clip(row.other_completeness, 20),
+    other_verdict: clip(row.other_verdict, 40),
+  };
+};
+
+const compactTrustGraphScreen = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const connections = Array.isArray(row.connections) ? row.connections.slice(0, 8).map((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return undefined;
+    const connection = candidate as Record<string, unknown>;
+    const ties = Array.isArray(connection.ties) ? connection.ties.slice(0, 4).map((candidateTie) => {
+      if (!candidateTie || typeof candidateTie !== "object" || Array.isArray(candidateTie)) return undefined;
+      const tie = candidateTie as Record<string, unknown>;
+      const edges = (candidateEdges: unknown) => Array.isArray(candidateEdges)
+        ? candidateEdges.slice(0, 8).map((item) => clip(item, 60)).filter(Boolean)
+        : [];
+      return {
+        key: clip(tie.key, 180),
+        label: clip(tie.label, 180),
+        type: clip(tie.type, 80),
+        strength: clip(tie.strength, 20),
+        subjectEdgeTypes: edges(tie.subjectEdgeTypes),
+        otherEdgeTypes: edges(tie.otherEdgeTypes),
+      };
+    }).filter(Boolean) : [];
+    return {
+      other: clip(connection.other, 180),
+      otherReportVersionId: clip(connection.otherReportVersionId, 64),
+      otherAttestation: clip(connection.otherAttestation, 40),
+      otherCompleteness: clip(connection.otherCompleteness, 20),
+      otherVerdict: clip(connection.otherVerdict, 40),
+      qualified: typeof connection.qualified === "boolean" ? connection.qualified : undefined,
+      direct: typeof connection.direct === "boolean" ? connection.direct : undefined,
+      ties,
+    };
+  }).filter(Boolean) : [];
+  return {
+    provider: clip(row.provider, 80),
+    capturedAt: clip(row.capturedAt, 40),
+    status: clip(row.status, 20),
+    contributionCount: typeof row.contributionCount === "number" && Number.isFinite(row.contributionCount) ? row.contributionCount : undefined,
+    qualifiedContributionCount: typeof row.qualifiedContributionCount === "number" && Number.isFinite(row.qualifiedContributionCount) ? row.qualifiedContributionCount : undefined,
+    sourceContentHash: clip(row.sourceContentHash, 64),
+    severity: clip(row.severity, 20),
+    line: clip(row.line, 500),
+    connections,
+  };
+};
+
 const compactFinding = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== "object") return null;
   const f = value as Record<string, unknown>;
@@ -312,6 +397,8 @@ const compactFinding = (value: unknown): Record<string, unknown> | null => {
     polarity: typeof f.polarity === "number" && Number.isFinite(f.polarity) ? f.polarity : undefined,
     evidence_origin: clip(f.evidence_origin, 32),
     artifact_verified: typeof f.artifact_verified === "boolean" ? f.artifact_verified : undefined,
+    content_hash: clip(f.content_hash, 64),
+    trust_graph: compactTrustGraphPredicate(f.trust_graph),
   };
 };
 
@@ -336,14 +423,29 @@ export function buildAnalystEvidencePacket(input: Record<string, unknown>): stri
     providerRuns: 24,
   };
   const findingsRaw = Array.isArray(input.findings) ? input.findings : [];
-  const findings = findingsRaw.slice(0, 24).map(compactFinding).filter((f): f is Record<string, unknown> => !!f);
+  const findingPriority = (value: unknown): number => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return 4;
+    const row = value as Record<string, unknown>;
+    if (row.finding_type === "TrustGraphConnection" && row.trust_graph) return 0;
+    if (row.verification_status === "Verified" && row.artifact_verified === true) return 1;
+    if (typeof row.polarity === "number" && row.polarity < 0) return 2;
+    return 3;
+  };
+  const findings = findingsRaw
+    .map((value, index) => ({ value, index }))
+    .sort((a, b) => findingPriority(a.value) - findingPriority(b.value) || a.index - b.index)
+    .slice(0, 24)
+    .map(({ value }) => compactFinding(value))
+    .filter((f): f is Record<string, unknown> => !!f);
   const coverage: Record<string, { available: number; included: number }> = {
     findings: { available: findingsRaw.length, included: findings.length },
   };
   const packet: Record<string, unknown> = {
-    schema_version: 1,
+    schema_version: 2,
     coverage,
     profile: compactObject(input.profile),
+    profileAuthenticity: compactProfileAuthenticity(input.profileAuthenticity),
+    trustGraphScreen: compactTrustGraphScreen(input.trustGraphScreen),
     // Findings stay ahead of descriptive context in the budget. This prevents a
     // long social corpus from hiding the material facts that govern a verdict.
     findings,
@@ -407,7 +509,15 @@ export async function analyzeSubject(
     `flag: do not score identity/backing axes as if the operators were anonymous, ` +
     `and do NOT write a headline that calls the founder identity "unresolved", ` +
     `"unnamed", or "anonymous" when named leaders are present. Only treat identity ` +
-    `as unresolved when the evidence genuinely names no one behind the project.`;
+    `as unresolved when the evidence genuinely names no one behind the project.\n\n` +
+    `PROFILE PHOTO RULE: profileAuthenticity is a visual-integrity triage screen, ` +
+    `not identity proof. A real-looking photo never establishes who operates the ` +
+    `account, and an AI, stock, celebrity, logo, cartoon, unclear, or missing photo ` +
+    `never establishes impersonation by itself. Use it only as a review lead.\n\n` +
+    `TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection ` +
+    `findings bound to an exact complete server-collected report may influence scoring. ` +
+    `Weak or unqualified ties are context only. ARGUS applies any graph cap ` +
+    `deterministically after your axis scoring; do not invent or strengthen one.`;
   const tool: ToolSchema = {
     name: "record_verdict",
     description: "Record the per-axis scores, headline, and identity note.",

@@ -13,6 +13,54 @@ import {
   TestimonialVerdict as TV,
 } from "./index";
 
+const FOUNDER_AXES = [
+  "F1_identity_verifiability",
+  "F2_track_record",
+  "F3_repeat_backing",
+  "F4_build_substance",
+  "F5_reputation_integrity",
+  "F6_network_quality",
+];
+
+function highScoringFounder(handle = "@graph_subject"): Audit {
+  const audit = new Audit(handle, { subject_class: SubjectClass.FOUNDER });
+  audit.setIdentity("Confirmed");
+  for (const axis of FOUNDER_AXES) audit.setAxis(axis, 100, "strong baseline");
+  return audit;
+}
+
+function trustGraphFinding(
+  graphOverrides: Record<string, unknown> = {},
+  findingOverrides: Record<string, unknown> = {},
+) {
+  return {
+    finding_type: "TrustGraphConnection",
+    claim: "The subject shares a frozen identity bridge with a failed report.",
+    source_url: "",
+    source_date: "2026-07-11",
+    source_author: "ARGUS trust graph",
+    verification_status: "Verified",
+    independent_source_count: 1,
+    polarity: -1,
+    evidence_origin: "deterministic",
+    artifact_verified: true,
+    content_hash: "a".repeat(64),
+    trust_graph: {
+      tie_key: "email:dev@example.com",
+      tie_type: "Identity",
+      tie_strength: "hard",
+      subject_edge_types: ["IDENTITY_EMAIL"],
+      other_edge_types: ["COMMIT_EMAIL"],
+      other_report_version_id: "00000000-0000-4000-8000-000000000201",
+      other_attestation: "server_collected",
+      other_completeness: "complete",
+      other_verdict: "FAIL",
+      ...graphOverrides,
+    },
+    ...findingOverrides,
+  };
+}
+
 describe("ARGUS-P v2 engine (port fidelity)", () => {
   it("mints a distinct immutable audit id for repeated subjects", () => {
     const first = new Audit("@same_subject", { subject_class: SubjectClass.FOUNDER });
@@ -130,6 +178,61 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     });
     for (const ax of ["AG1_identity_legitimacy", "AG2_client_outcomes", "AG3_service_integrity", "AG4_reputation_fud"]) agency.setAxis(ax, 18);
     expect(agency.finalize().cap_applied).not.toBe("market_manipulation_services");
+  });
+
+  it("caps an exact hard trust-graph predicate only when its source report is qualified", () => {
+    const audit = highScoringFounder();
+    audit.addFinding(trustGraphFinding() as never);
+
+    const result = audit.finalize();
+
+    expect(result.cap_applied).toBe("trust_graph_hard_link");
+    expect(result.score_total).toBe(10);
+    expect(result.verdict).toBe("AVOID");
+  });
+
+  it("downgrades an exact medium trust-graph predicate without treating it as hard identity proof", () => {
+    const audit = highScoringFounder();
+    audit.addFinding(trustGraphFinding({
+      tie_key: "@shared-founder",
+      tie_type: "Person",
+      tie_strength: "medium",
+      subject_edge_types: ["ASSOCIATES_WITH"],
+      other_edge_types: ["TEAM"],
+    }) as never);
+
+    const result = audit.finalize();
+
+    expect(result.cap_applied).toBe("trust_graph_medium_link");
+    expect(result.score_total).toBe(69);
+    expect(result.verdict).toBe("CAUTION");
+  });
+
+  it.each([
+    ["weak tie", { tie_key: "holder:0x1234", tie_strength: "weak" }, {}],
+    ["weak key mislabeled medium", { tie_key: "holder:0x1234", tie_strength: "medium" }, {}],
+    ["medium key mislabeled hard", { tie_key: "@shared-founder", tie_strength: "hard" }, {}],
+    ["generic company collision", { tie_key: "examplelabs", tie_type: "Company", tie_strength: "medium", subject_edge_types: ["FOUNDED"], other_edge_types: ["TEAM"] }, {}],
+    ["person lead without a qualified relationship", { tie_key: "@shared-founder", tie_type: "Person", tie_strength: "medium", subject_edge_types: ["MENTIONED"], other_edge_types: ["TEAM"] }, {}],
+    ["partial source report", { other_completeness: "partial" }, {}],
+    ["failed source collection", { other_completeness: "failed" }, {}],
+    ["analyst-submitted source", { other_attestation: "analyst_submitted" }, {}],
+    ["legacy source", { other_attestation: "legacy_unattested" }, {}],
+    ["non-adverse source verdict", { other_verdict: "CAUTION" }, {}],
+    ["missing source-side edge", { other_edge_types: [] }, {}],
+    ["blank subject-side edge", { subject_edge_types: [""] }, {}],
+    ["unverified artifact", {}, { artifact_verified: false }],
+    ["model-generated predicate", {}, { evidence_origin: "model_lead" }],
+    ["malformed artifact hash", {}, { content_hash: "not-a-sha" }],
+  ])("does not cap from an unqualified trust-graph predicate: %s", (_label, graphOverrides, findingOverrides) => {
+    const audit = highScoringFounder(`@unqualified_${String(_label).replace(/\W+/g, "_")}`);
+    audit.addFinding(trustGraphFinding(graphOverrides, findingOverrides) as never);
+
+    const result = audit.finalize();
+
+    expect(result.cap_applied).toBeNull();
+    expect(result.score_total).toBe(100);
+    expect(result.verdict).toBe("PASS");
   });
 
   it("a partial axis set finalizes INCOMPLETE with no score", () => {

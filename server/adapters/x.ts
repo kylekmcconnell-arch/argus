@@ -968,11 +968,18 @@ export const xAdapter: Adapter = {
     // 1. profile via twitterapi.io — fallback retry only if coldIntake didn't
     //    already resolve the follower count (so a busy/empty bio still gets it).
     const haveProfile = ctx.evidence.profile.followers && ctx.evidence.profile.followers !== "—";
-    const prof = haveProfile ? null : await getProfile(ctx.handle);
+    const haveOfficialAvatar = ctx.evidence.profile.avatar_source_state != null;
+    const prof = haveProfile && haveOfficialAvatar ? null : await getProfile(ctx.handle);
     if (prof) {
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
       ctx.evidence.profile.followers = fmtFollowers(prof.followers);
+      if (prof.image) {
+        ctx.evidence.profile.avatar_url = prof.image;
+        ctx.evidence.profile.avatar_source_state = "resolved";
+      } else {
+        ctx.evidence.profile.avatar_source_state = "none";
+      }
       if (prof.createdAt) {
         const d = new Date(prof.createdAt);
         if (!isNaN(d.getTime())) {

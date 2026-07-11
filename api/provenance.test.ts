@@ -52,4 +52,48 @@ describe("frozen source artifact provenance", () => {
       },
     });
   });
+
+  it("persists a deterministic hash-only artifact without inventing a public URL", async () => {
+    const contentHash = "c".repeat(64);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await persistProvenance(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        reportVersionId: "00000000-0000-4000-8000-000000000022",
+        attestationState: "server_collected",
+      },
+      {
+        sourceArtifacts: [{
+          kind: "trust_graph",
+          provider: "argus-graph",
+          title: "Organization trust-graph reconciliation",
+          capturedAt: "2026-07-11T12:00:00.000Z",
+          match: "risk_signal",
+          excerpt: "Exact report-version graph tie.",
+          contentHash,
+          sourceContentHash: contentHash,
+        }],
+      },
+      [],
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const request = fetchMock.mock.calls[0];
+    const rows = JSON.parse(String((request[1] as RequestInit).body)) as Array<Record<string, unknown>>;
+    expect(rows[0]).toMatchObject({
+      evidence_key: contentHash,
+      provider: "argus-graph",
+      source_type: "trust_graph",
+      source_url: null,
+      content_hash: contentHash,
+      metadata: {
+        hashOnly: true,
+        match: "risk_signal",
+        sourceContentHash: contentHash,
+      },
+    });
+  });
 });

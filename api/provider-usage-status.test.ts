@@ -134,9 +134,11 @@ describe("provider usage status attribution", () => {
   });
 
   it("records a failed Claude photo attempt after the image was fetched", async () => {
-    vi.stubEnv("TWITTERAPI_KEY", "");
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(new Uint8Array(300), {
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        data: { profilePicture: "https://pbs.twimg.com/profile_images/123/profile.jpg" },
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(Uint8Array.from({ length: 300 }, (_, index) => index < 3 ? [0xff, 0xd8, 0xff][index] : 0), {
         status: 200,
         headers: { "content-type": "image/jpeg" },
       }))
@@ -147,7 +149,7 @@ describe("provider usage status attribution", () => {
     await pfpCheckHandler({
       method: "GET",
       headers: panelHeaders,
-      query: { url: "https://image.test/profile.jpg" },
+      query: { handle: "alice" },
     } as never, res as never);
 
     expect(captured.status).toBe(200);
@@ -159,6 +161,44 @@ describe("provider usage status attribution", () => {
       status: "failed",
       meta: "vision",
     }));
+  });
+
+  it("rejects arbitrary direct image URLs before any provider or cost work", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await pfpCheckHandler({
+      method: "GET",
+      headers: panelHeaders,
+      query: { handle: "alice", url: "http://127.0.0.1/admin" },
+    } as never, res as never);
+
+    expect(captured.status).toBe(400);
+    expect(captured.body).toMatchObject({ error: "direct_image_urls_not_supported" });
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(attachPanelCost).not.toHaveBeenCalled();
+  });
+
+  it("does not turn an untrusted avatar URL from X into a clean no-photo result", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: { profilePicture: "http://127.0.0.1/private-image" },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await pfpCheckHandler({
+      method: "GET",
+      headers: panelHeaders,
+      query: { handle: "alice" },
+    } as never, res as never);
+
+    expect(captured.status).toBe(200);
+    expect(captured.body).toMatchObject({
+      available: false,
+      note: expect.stringContaining("untrusted avatar URL"),
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("records a thrown Grok X-discovery request as failed", async () => {

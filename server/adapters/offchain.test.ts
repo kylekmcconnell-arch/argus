@@ -1,7 +1,10 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
 import type { CheckObservation, CollectContext } from "./types";
 import { offchainAdapter } from "./offchain";
+
+const { collectProfilePhoto } = vi.hoisted(() => ({ collectProfilePhoto: vi.fn() }));
+vi.mock("./profilePhoto", () => ({ collectProfilePhoto }));
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -39,6 +42,10 @@ function context(): { ctx: CollectContext; checks: CheckObservation[] } {
 }
 
 describe("frozen off-chain diligence adapter", () => {
+  beforeEach(() => {
+    collectProfilePhoto.mockReset().mockResolvedValue({ status: "succeeded", detail: "profile screen complete" });
+  });
+
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -97,7 +104,7 @@ describe("frozen off-chain diligence adapter", () => {
 
     const result = await offchainAdapter.run(ctx);
 
-    expect(result).toMatchObject({ state: "failed" });
+    expect(result).toMatchObject({ state: "partial" });
     expect(checks.filter((check) => check.status === "unavailable").map((check) => check.id).sort()).toEqual([
       "news-press",
       "ofac-sanctions-name",

@@ -59,6 +59,18 @@ interface EvidenceProvenance {
   artifact_verified?: boolean;
 }
 
+export interface TrustGraphPredicate {
+  tie_key: string;
+  tie_type: string;
+  tie_strength: "hard" | "medium" | "weak";
+  subject_edge_types: string[];
+  other_edge_types: string[];
+  other_report_version_id: string;
+  other_attestation: "server_collected" | "analyst_submitted" | "legacy_unattested";
+  other_completeness: "complete" | "partial" | "failed";
+  other_verdict: string;
+}
+
 export interface Finding extends EvidenceProvenance {
   finding_type: string;
   claim: string;
@@ -68,6 +80,10 @@ export interface Finding extends EvidenceProvenance {
   verification_status: string; // Verified | Reported | Rumor
   independent_source_count: number;
   polarity: number;
+  /** Hash of a frozen internal artifact when there is no external source URL. */
+  content_hash?: string;
+  /** Structured, engine-validated predicate for a frozen cross-report graph cap. */
+  trust_graph?: TrustGraphPredicate;
   // Model output may surface a lead, but only a deterministically fetched (or
   // human-verified) artifact is eligible to govern a hard cap.
 }
@@ -352,6 +368,58 @@ export class Audit {
       );
     if (has("DeceptionFinding", "Verified")) keys.push("deception_confirmed");
     if (has("InvestigatorCallout", "Verified", 2)) keys.push("investigator_verified_fraud");
+    const frozenGraphFinding = (strength: "hard" | "medium") =>
+      this.findings.some((finding) => {
+        const graph = finding.trust_graph;
+        const tieKey = typeof graph?.tie_key === "string" ? graph.tie_key.trim() : "";
+        const hardKey = /^(?:code:|email:|wallet:|funder:|mint:|token:|ga:|gtm:|adsense:|fbpixel:).+/i.test(tieKey);
+        const weakKey = /^(?:holder|amm|dex|pool|lp|market)(?::|$)|^(?:ip|favicon):/i.test(tieKey);
+        const tieType = typeof graph?.tie_type === "string" ? graph.tie_type.trim() : "";
+        const relationshipEdges = new Set([
+          "TEAM",
+          "WORKED_ON",
+          "ASSOCIATES_WITH",
+          "FOUNDED",
+          "ADVISED",
+          "SERVICED",
+          "CLAIMED_ENDORSEMENT",
+        ]);
+        const hasRelationshipEdge = (value: unknown) =>
+          Array.isArray(value) && value.some((edgeType) => typeof edgeType === "string" && relationshipEdges.has(edgeType));
+        const personTie = tieType === "Person"
+          && hasRelationshipEdge(graph?.subject_edge_types)
+          && hasRelationshipEdge(graph?.other_edge_types);
+        const domainTie = /^(?:Domain|Website)$/i.test(tieType)
+          && /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(tieKey)
+          && Array.isArray(graph?.subject_edge_types)
+          && graph.subject_edge_types.includes("LINKS")
+          && Array.isArray(graph?.other_edge_types)
+          && graph.other_edge_types.includes("LINKS");
+        const exactStrength = strength === "hard"
+          ? hardKey && tieType.length > 0
+          : tieKey.length > 0 && !hardKey && !weakKey && (personTie || domainTie);
+        const validEdgeTypes = (value: unknown): value is string[] =>
+          Array.isArray(value)
+          && value.length > 0
+          && value.every((edgeType) => typeof edgeType === "string" && edgeType.trim().length > 0);
+        return finding.finding_type === "TrustGraphConnection"
+        && finding.verification_status === "Verified"
+        && finding.independent_source_count >= 1
+        && finding.evidence_origin === "deterministic"
+        && finding.artifact_verified === true
+        && typeof finding.content_hash === "string"
+        && /^[a-f0-9]{64}$/i.test(finding.content_hash)
+        && graph?.tie_strength === strength
+        && exactStrength
+        && validEdgeTypes(graph?.subject_edge_types)
+        && validEdgeTypes(graph?.other_edge_types)
+        && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(graph.other_report_version_id)
+        && graph.other_attestation === "server_collected"
+        && graph.other_completeness === "complete"
+        && (graph.other_verdict === "FAIL" || graph.other_verdict === "AVOID");
+      });
+    if (frozenGraphFinding("hard")) keys.push("trust_graph_hard_link");
+    if (frozenGraphFinding("medium")) keys.push("trust_graph_medium_link");
     return keys;
   }
 

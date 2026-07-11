@@ -30,7 +30,7 @@ export interface PersonCheckScope {
 
 const CHECKS: readonly CheckDefinition[] = [
   { id: "identity-resolution", label: "Identity resolution", defaultNote: "no completed server-side identity resolution was recorded" },
-  { id: "profile-photo-authenticity", label: "Profile-photo authenticity", defaultNote: "server collector did not run a photo-authenticity provider" },
+  { id: "profile-photo-authenticity", label: "Profile-photo integrity", defaultNote: "server collector did not run a profile-photo integrity screen" },
   { id: "code-footprint-github", label: "Code footprint (GitHub)", defaultNote: "no completed GitHub resolution was recorded" },
   { id: "identity-continuity", label: "Identity continuity", defaultNote: "no completed handle-history result was recorded" },
   { id: "affiliations-associates", label: "Affiliations & associates", defaultNote: "no corroborated affiliation collection outcome was recorded" },
@@ -41,6 +41,9 @@ const CHECKS: readonly CheckDefinition[] = [
   { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check", requiresResolvedRealName: true },
   { id: "trust-graph-connections", label: "Trust-graph connections", defaultNote: "server collector did not run flagged-subject graph reconciliation" },
 ] as const;
+
+/** Stable persisted checklist contract used to qualify immutable reports. */
+export const PERSON_CHECK_IDS: readonly PersonCheckId[] = Object.freeze(CHECKS.map((check) => check.id));
 
 const STATUS_PRIORITY: Record<CheckStatus, number> = {
   "not-applicable": 0,

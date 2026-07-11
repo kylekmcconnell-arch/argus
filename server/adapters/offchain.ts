@@ -17,6 +17,7 @@ import {
 import { cacheGet, cacheSet } from "../cache";
 import { recordCall } from "../cost";
 import type { Adapter, AdapterRunResult, CollectContext } from "./types";
+import { collectProfilePhoto } from "./profilePhoto";
 
 const asIso = (value: unknown): string | undefined => {
   if (typeof value === "number" || typeof value === "string") {
@@ -96,21 +97,22 @@ const failedCheckNote = (label: string, status: OffchainAttemptStatus, attempts:
 
 export const offchainAdapter: Adapter = {
   id: "offchain-diligence",
-  label: "News, legal, and sanctions",
+  label: "Photo, news, legal, and sanctions",
   available: () => true,
   async run(ctx: CollectContext): Promise<AdapterRunResult> {
     const capturedAt = new Date().toISOString();
     const name = resolvedRealName(ctx);
     ctx.emit({
       phase: "Off-chain",
-      label: "News / legal / sanctions",
+      label: "Photo / news / legal / sanctions",
       detail: name
-        ? `Freezing exact-name news, US court, and OFAC outcomes for ${name} before scoring…`
-        : "Freezing the subject's exact-name/handle news outcome before scoring; legal and OFAC require a resolved real person.",
+        ? `Freezing the official profile-photo, exact-name news, US court, and OFAC outcomes for ${name} before scoring…`
+        : "Freezing the official profile-photo and exact-name/handle news outcomes before scoring; legal and OFAC require a resolved real person.",
       tone: "neutral",
     });
 
     const newsPromise = collectNews(name ?? ctx.evidence.profile.display_name, ctx.handle);
+    const profilePhotoPromise = collectProfilePhoto(ctx);
     const legalPromise = name ? collectLegalCases(name) : null;
     const ofacPromise = name
       ? collectOfacName(name, {
@@ -124,8 +126,9 @@ export const offchainAdapter: Adapter = {
         })
       : null;
 
-    const [news, legal, ofac] = await Promise.all([
+    const [news, profilePhoto, legal, ofac] = await Promise.all([
       newsPromise,
+      profilePhotoPromise,
       legalPromise ?? Promise.resolve(null),
       ofacPromise ?? Promise.resolve(null),
     ]);
@@ -269,7 +272,7 @@ export const offchainAdapter: Adapter = {
       }
     }
 
-    const statuses = [news.status, legal?.status, ofac?.status].filter(
+    const statuses = [news.status, profilePhoto.status, legal?.status, ofac?.status].filter(
       (status): status is OffchainAttemptStatus => Boolean(status),
     );
     const failed = statuses.filter((status) => status === "failed").length;
@@ -284,7 +287,7 @@ export const offchainAdapter: Adapter = {
       phase: "Off-chain",
       label: state === "failed" ? "Off-chain screens unavailable" : "Off-chain evidence frozen",
       detail: `${artifactCount} source artifact${artifactCount === 1 ? "" : "s"} available before scoring${state === "partial" ? "; at least one provider path was incomplete" : ""}.`,
-      source: "google-news · courtlistener · opensanctions",
+      source: "claude-vision · google-news · courtlistener · opensanctions",
       tone: state === "failed" ? "warn" : state === "partial" ? "warn" : "neutral",
     });
     return { state, detail: `${artifactCount} artifacts · ${failed} failed · ${partial} partial` };

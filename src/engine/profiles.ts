@@ -18,6 +18,8 @@ export interface Profile {
 export const SHARED_CAPS: Record<string, number> = {
   deception_confirmed: 10,
   investigator_verified_fraud: 10,
+  trust_graph_hard_link: 10,
+  trust_graph_medium_link: 69,
 };
 
 export const PROFILES: Record<SubjectClass, Profile> = {

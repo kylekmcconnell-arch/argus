@@ -36,6 +36,7 @@ import { onchainAdapter } from "./adapters/onchain";
 import { hasResolvedRealName, offchainAdapter } from "./adapters/offchain";
 import { archivedAffiliation } from "./adapters/wayback";
 import { resolveForHandle } from "./adapters/wallet";
+import { collectTrustGraph } from "./adapters/trustgraph";
 
 const ADAPTERS: Adapter[] = [
   xAdapter,
@@ -82,7 +83,12 @@ async function coldIntake(ctx: CollectContext) {
   const prof = await xProfile(ctx.handle);
   if (prof) {
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
-    if (prof.image) ctx.evidence.profile.avatar_url = prof.image; // real X photo → reliable avatar
+    if (prof.image) {
+      ctx.evidence.profile.avatar_url = prof.image; // official X image source for the frozen integrity screen
+      ctx.evidence.profile.avatar_source_state = "resolved";
+    } else {
+      ctx.evidence.profile.avatar_source_state = "none";
+    }
     ctx.evidence.profile.bio = prof.bio ?? "";
     siteUrl = prof.website;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
@@ -837,6 +843,37 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
     emit({ phase: "P0 · Routing", label: "Classify roles", detail: `Routed to ${evidence.roles.join(", ")} (${route.confidence} confidence).`, tone: "neutral" });
   }
 
+  // Final deterministic pre-analyst pass: join the freshly collected graph to
+  // prior organization evidence, but allow only exact immutable, complete,
+  // server-collected report versions to carry verdict text or govern a cap.
+  // The provisional dossier is used only to materialize today's graph; its
+  // score/verdict is deliberately omitted from the contribution.
+  try {
+    const provisional = assembleDossier(evidence, true);
+    const graphResult = await collectTrustGraph(ctx, {
+      handle: provisional.handle,
+      nodes: provisional.graph.nodes,
+      edges: provisional.graph.edges,
+      aliases: [provisional.handle],
+    });
+    checkTracker.provider(
+      "trust-graph",
+      "Frozen trust-graph reconciliation",
+      graphResult.state,
+      graphResult.detail,
+    );
+  } catch (error) {
+    const detail = `Trust-graph materialization failed: ${String(error)}`;
+    checkTracker.provider("trust-graph", "Frozen trust-graph reconciliation", "failed", detail);
+    checkTracker.record({
+      id: "trust-graph-connections",
+      status: "unavailable",
+      note: detail,
+      provider: "argus-graph",
+    });
+    emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
+  }
+
   // Strip ARGUS's OWN analysis fields (identity_confidence/identity_note) from
   // what the LLMs see: the analyst writes identity_note fresh, and the
   // contradiction scanner must never "contradict" our metadata against itself.
@@ -868,6 +905,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
     notableFollowers: evidence.notableFollowers,
     recentActivity: evidence.recentActivity.slice(0, 12),
     sourceArtifacts: evidence.sourceArtifacts,
+    profileAuthenticity: evidence.profileAuthenticity,
+    trustGraphScreen: evidence.trustGraphScreen,
     checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
     providerRuns: checkTracker.providers().runs,
   };

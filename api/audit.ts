@@ -13,6 +13,7 @@ import {
 import { activateReportVersion, persistProvenance } from "./_provenance.js";
 import { issuePanelCostToken, recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
 import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
+import { activateReportVersionWithAuthoritativeGraph } from "./_graph.js";
 
 export const config = { maxDuration: 180 };
 
@@ -103,7 +104,19 @@ export async function persistServerDossier(
     dossier,
     dossier.checkRuns,
   );
-  await activateReportVersion(credentials, auth.organizationId, reportVersionId);
+  const activatedWithGraph = await activateReportVersionWithAuthoritativeGraph(
+    credentials,
+    {
+      organizationId: auth.organizationId,
+      reportVersionId,
+      userId: auth.userId,
+      attestationState,
+      completeness: qualifiedCompleteness,
+    },
+  );
+  if (!activatedWithGraph) {
+    await activateReportVersion(credentials, auth.organizationId, reportVersionId);
+  }
   return reportVersionId;
 }
 

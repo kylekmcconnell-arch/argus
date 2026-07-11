@@ -21,6 +21,7 @@ export interface SubjectProfile {
   resolved_name?: string; // licensed/deterministic real name; display name remains untouched for UX
   avatar: string;
   avatar_url?: string; // real X profile photo URL, when resolved (else derive from handle)
+  avatar_source_state?: "resolved" | "none"; // explicit twitterapi outcome; absence means collection was unavailable
   website?: string;    // independently resolved first-party site, when available
   bio: string;
   followers: string;
@@ -71,17 +72,78 @@ export interface TraceStep {
 // court-caption or sanctions-name match is a lead tied to a source, not proof
 // that the named person is the audited subject.
 export interface SourceArtifact {
-  kind: "press" | "legal_case" | "sanctions_screen";
-  provider: "google-news" | "courtlistener" | "opensanctions";
+  kind: "press" | "legal_case" | "sanctions_screen" | "profile_photo" | "trust_graph";
+  provider: "google-news" | "courtlistener" | "opensanctions" | "claude-vision" | "twitterapi" | "argus-graph";
   title: string;
-  sourceUrl: string;
+  /** External source when one exists. Internal frozen evidence may be hash-only. */
+  sourceUrl?: string;
   capturedAt: string;
   contentHash: string;
   /** Fingerprint of a provider dataset/index when the source URL is mutable. */
   sourceContentHash?: string;
   publishedAt?: string;
   excerpt?: string;
-  match: "exact_name" | "exact_handle" | "candidate" | "no_match";
+  match: "exact_name" | "exact_handle" | "candidate" | "no_match" | "observed" | "risk_signal" | "screened_clear";
+}
+
+export type ProfilePhotoClassification =
+  | "real_candid"
+  | "studio_or_stock"
+  | "ai_generated"
+  | "celebrity_or_public_figure"
+  | "logo_or_cartoon"
+  | "no_photo"
+  | "unclear";
+
+/** Frozen result from the exact profile-image bytes inspected before scoring. */
+export interface ProfileAuthenticityResult {
+  provider: "claude-vision" | "twitterapi";
+  capturedAt: string;
+  imageUrl?: string;
+  /** Exact bytes inspected, retained with the immutable report for replay. */
+  imageData?: string;
+  mediaType?: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+  imageContentHash?: string;
+  classification: ProfilePhotoClassification;
+  confidence?: number;
+  isRealPerson?: boolean;
+  flag: boolean;
+  tells: string[];
+  note: string;
+}
+
+export interface FrozenTrustGraphTie {
+  key: string;
+  label: string;
+  type: string;
+  strength: "hard" | "medium" | "weak";
+  subjectEdgeTypes: string[];
+  otherEdgeTypes: string[];
+}
+
+export interface FrozenTrustGraphConnection {
+  other: string;
+  otherReportVersionId?: string;
+  otherAttestation?: "server_collected" | "analyst_submitted" | "legacy_unattested";
+  otherCompleteness?: "complete" | "partial" | "failed";
+  otherVerdict?: string;
+  qualified: boolean;
+  direct: boolean;
+  ties: FrozenTrustGraphTie[];
+}
+
+/** Organization-scoped graph reconciliation frozen before analyst scoring. */
+export interface TrustGraphScreen {
+  provider: "argus-graph";
+  capturedAt: string;
+  status: "clear" | "risk" | "incomplete";
+  contributionCount: number;
+  qualifiedContributionCount: number;
+  sourceContentHash: string;
+  severity?: "avoid" | "caution";
+  line: string;
+  connections: FrozenTrustGraphConnection[];
+  riskEntities?: { key: string; label: string }[];
 }
 
 // A person behind the project, dug from the website (web/LinkedIn), the account's
@@ -114,6 +176,8 @@ export interface CollectedEvidence {
   notableFollowers: NotableFollower[]; // respected accounts that follow the subject
   contradictions: Contradiction[]; // internal contradictions across materials
   sourceArtifacts: SourceArtifact[]; // immutable off-chain sources collected before scoring
+  profileAuthenticity?: ProfileAuthenticityResult;
+  trustGraphScreen?: TrustGraphScreen;
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to
