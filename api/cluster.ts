@@ -15,12 +15,15 @@
 //
 // Solana only (Helius RPC + RugCheck). Gated on HELIUS_API_KEY. Bounded + graceful.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { requireArgusAuth } from "./_auth.js";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
 export const config = { maxDuration: 60 };
 
 const SOLADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const MAX_WALLETS = 20;   // top holders we bother to cluster (cost bound)
 const CHUNK = 5;          // per-wallet concurrency
+interface ProviderUsage { helius: number; heliusSucceeded: number; rugcheck: number; rugcheckSucceeded: number }
 
 // CEX hot wallets + programs: a shared *exchange* funder is NOT a same-operator
 // signal (thousands of unrelated users withdraw from Binance), so these can never
@@ -41,7 +44,8 @@ const SYSTEM = new Set<string>([
 // liquidity or custody, not a person — exclude it from the operator analysis.
 const MARKET = /amm|dex|pool|cex|exchange|program|vault|locker|market|raydium|meteora|orca|pump/i;
 
-async function rpc(url: string, method: string, params: unknown): Promise<any> {
+async function rpc(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<any> {
+  usage.helius += 1;
   const res = await fetch(url, {
     method: "POST", headers: { "content-type": "application/json" },
     body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }), signal: AbortSignal.timeout(12000),
@@ -49,15 +53,16 @@ async function rpc(url: string, method: string, params: unknown): Promise<any> {
   if (!res.ok) throw new Error(`rpc ${method} ${res.status}`);
   const d = (await res.json()) as any;
   if (d.error) throw new Error(`rpc ${method}: ${d.error.message}`);
+  usage.heliusSucceeded += 1;
   return d.result;
 }
 
 // The oldest few signatures for a wallet — the funding sits in one of its first txs.
-async function oldestSigs(url: string, wallet: string): Promise<string[]> {
+async function oldestSigs(url: string, wallet: string, usage: ProviderUsage): Promise<string[]> {
   let before: string | undefined;
   let last: any[] = [];
   for (let page = 0; page < 4; page++) {
-    const batch: any[] = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }]).catch(() => []);
+    const batch: any[] = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage).catch(() => []);
     if (!batch?.length) break;
     last = batch;
     if (batch.length < 1000) break;
@@ -69,7 +74,7 @@ async function oldestSigs(url: string, wallet: string): Promise<string[]> {
 // The account that first sent SOL into the wallet (the funder). Same shapes the
 // deployer trail recognises: plain transfer, account-create funding, or the
 // balance-delta fallback (the account that lost the most SOL in a funding tx).
-async function fundingSource(url: string, wallet: string, sigs: string[]): Promise<string | null> {
+async function fundingSource(url: string, wallet: string, sigs: string[], usage: ProviderUsage): Promise<string | null> {
   const scan = (instrs: any[]): string | null => {
     for (const ix of instrs ?? []) {
       const p = ix.parsed;
@@ -80,7 +85,7 @@ async function fundingSource(url: string, wallet: string, sigs: string[]): Promi
     return null;
   };
   for (const sig of sigs) {
-    const tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }]).catch(() => null);
+    const tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage).catch(() => null);
     if (!tx) continue;
     const direct = scan(tx.transaction?.message?.instructions);
     if (direct) return direct;
@@ -99,12 +104,14 @@ async function fundingSource(url: string, wallet: string, sigs: string[]): Promi
 
 // Native-SOL counterparties of a wallet (recent), to catch a DIRECT transfer
 // between two members of the holder set — a wallet paying another is a hard link.
-async function counterparties(key: string, wallet: string): Promise<Set<string>> {
+async function counterparties(key: string, wallet: string, usage: ProviderUsage): Promise<Set<string>> {
   const out = new Set<string>();
+  usage.helius += 1;
   try {
     const r = await fetch(`https://api.helius.xyz/v0/addresses/${wallet}/transactions?api-key=${key}&limit=100`, { signal: AbortSignal.timeout(12000) });
     if (!r.ok) return out;
     const txs = await r.json();
+    usage.heliusSucceeded += 1;
     for (const t of Array.isArray(txs) ? txs : []) {
       for (const nt of t.nativeTransfers ?? []) {
         if (nt.fromUserAccount === wallet && nt.toUserAccount) out.add(nt.toUserAccount);
@@ -129,6 +136,16 @@ async function inChunks<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
   const key = process.env.HELIUS_API_KEY;
   const mint = typeof req.query.mint === "string" ? req.query.mint.trim() : "";
   const chain = (typeof req.query.chain === "string" ? req.query.chain : "solana").toLowerCase();
@@ -136,11 +153,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (chain !== "solana") { res.status(200).json({ available: false, note: "Wallet clustering is Solana-only for now." }); return; }
   if (!key) { res.status(200).json({ mint, available: false, note: "Helius not configured; clustering unavailable." }); return; }
 
+  const usage: ProviderUsage = { helius: 0, heliusSucceeded: 0, rugcheck: 0, rugcheckSucceeded: 0 };
   try {
     // 1. Pull the holder set + labels + creator from RugCheck (full addresses).
+    usage.rugcheck += 1;
     const rr = await fetch(`https://api.rugcheck.xyz/v1/tokens/${encodeURIComponent(mint)}/report`, { signal: AbortSignal.timeout(15000), headers: { accept: "application/json" } });
     if (!rr.ok) { res.status(200).json({ mint, available: false, error: `rugcheck ${rr.status}` }); return; }
     const rc = (await rr.json()) as any;
+    usage.rugcheckSucceeded += 1;
     const ka: Record<string, { name?: string; type?: string }> = rc.knownAccounts ?? {};
     const isMarket = (h: any) => { const lab = ka[h.address] || ka[h.owner]; return !!(lab?.type && MARKET.test(lab.type)); };
     const holders = (rc.topHolders ?? [])
@@ -160,8 +180,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const deadline = Date.now() + 50000;
     const profiles = await inChunks(set, CHUNK, async (w) => {
       if (Date.now() > deadline) return { wallet: w, funder: null as string | null, cps: new Set<string>() };
-      const [sigs, cps] = await Promise.all([oldestSigs(url, w), counterparties(key, w)]);
-      const funder = sigs.length ? await fundingSource(url, w, sigs) : null;
+      const [sigs, cps] = await Promise.all([oldestSigs(url, w, usage), counterparties(key, w, usage)]);
+      const funder = sigs.length ? await fundingSource(url, w, sigs, usage) : null;
       return { wallet: w, funder, cps };
     });
 
@@ -226,5 +246,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({ mint, available: true, walletsAnalyzed: set.length, clusters, allWallets, edges, note });
   } catch (e) {
     res.status(200).json({ mint, available: true, clusters: [], error: String(e), note: "Wallet clustering failed." });
+  } finally {
+    if (usage.rugcheck > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "rugcheck",
+        op: "panel:solana-cluster",
+        calls: usage.rugcheck,
+        usd: 0,
+        meta: "keyless",
+        initiatedBy: auth.userId,
+        status: usage.rugcheckSucceeded === usage.rugcheck ? "succeeded" : usage.rugcheckSucceeded > 0 ? "partial" : "failed",
+      });
+    }
+    if (usage.helius > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "helius",
+        op: "panel:solana-cluster",
+        calls: usage.helius,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usage.heliusSucceeded === usage.helius ? "succeeded" : usage.heliusSucceeded > 0 ? "partial" : "failed",
+      });
+    }
   }
 }

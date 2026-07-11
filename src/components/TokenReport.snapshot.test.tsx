@@ -199,6 +199,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(harness.secondOpinion).not.toHaveBeenCalled();
 
     render(dossier({
+      deployer: "0x4444444444444444444444444444444444444444",
       persistence: {
         state: "persisted",
         reportVersionId: versionContext.reportVersionId,
@@ -213,7 +214,15 @@ describe("token report supplemental evidence boundary", () => {
     expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Share")).toBe(true);
     const onChainProps = harness.livePanel.mock.calls
       .find(([name]) => name === "on-chain")?.[1] as Record<string, unknown> | undefined;
-    expect(onChainProps).toEqual(expect.objectContaining({ record: true }));
+    expect(onChainProps).toEqual(expect.objectContaining({
+      panelCostToken: "signed-panel-capability",
+      record: true,
+    }));
+    for (const panel of ["counterparties", "risk-paths", "holdings"]) {
+      expect(harness.livePanel.mock.calls.find(([name]) => name === panel)?.[1]).toEqual(
+        expect.objectContaining({ panelCostToken: "signed-panel-capability" }),
+      );
+    }
     expect(harness.livePanel.mock.calls.find(([name]) => name === "project-research")?.[1]).toEqual(
       expect.objectContaining({ panelCostToken: "signed-panel-capability" }),
     );

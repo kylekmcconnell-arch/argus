@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { labelAddress } from "../lib/addressLabels";
 import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { ArkhamName } from "./ArkhamName";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // Holder / distribution forensics — is the ownership a healthy base or a rug
 // wearing a costume? Solana pulls the rich RugCheck view (total holders, top-10
@@ -32,22 +33,25 @@ function Metric({ label, value, tone }: { label: string; value: string; tone?: s
   );
 }
 
-export function HolderForensics({ address, chain, holderCount, evmTop, insiderPct }: {
+export function HolderForensics({ address, chain, holderCount, evmTop, insiderPct, panelCostToken }: {
   address: string;
   chain: string;
   holderCount: number;
   evmTop: { pct: number; tag?: string; address?: string; isContract?: boolean }[];
   insiderPct: number;
+  panelCostToken?: string;
 }) {
   const [d, setD] = useState<Holders | null>(null);
   const [state, setState] = useState<"loading" | "sol" | "evm">(chain === "solana" ? "loading" : "evm");
   // Arkham entity labels for every holder wallet shown — names the anonymous ones.
-  const arkham = useArkhamLabels([...evmTop.map((h) => h.address), ...(d?.top ?? []).map((h) => h.owner)]);
+  const { labels: arkham, state: arkhamState } = useArkhamLabels(
+    [...evmTop.map((h) => h.address), ...(d?.top ?? []).map((h) => h.owner)],
+    panelCostToken,
+  );
 
   useEffect(() => {
-    if (chain !== "solana") { setState("evm"); return; }
+    if (chain !== "solana") return;
     let live = true;
-    setState("loading");
     fetch(`/api/holders?mint=${encodeURIComponent(address)}&chain=${chain}`)
       .then((r) => r.json())
       .then((j) => { if (!live) return; if (j?.available) { setD(j); setState("sol"); } else setState("evm"); })
@@ -73,6 +77,10 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
         </div>
 
         <p className="mt-2 text-[13px] font-medium leading-relaxed" style={{ color: TONE[d.verdict.tone] }}>{d.verdict.line}</p>
+
+        {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
+          <PanelRequestNotice failure={arkhamState} label="Holder identity labels" className="mt-3" />
+        )}
 
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <Metric label="holders" value={d.totalHolders ? money(d.totalHolders) : "—"} />
@@ -126,6 +134,9 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
         <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Holder forensics</span>
         <span className="mono text-[10px] text-ink-faint">on-chain</span>
       </div>
+      {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
+        <PanelRequestNotice failure={arkhamState} label="Holder identity labels" className="mt-3" />
+      )}
       <div className="mt-3 grid grid-cols-3 gap-3">
         <Metric label="holders" value={holderCount ? holderCount.toLocaleString() : "—"} />
         <Metric label={`top ${top.length} hold`} value={top.length ? `${topSum.toFixed(0)}%` : "—"} tone={concentrated ? TONE.bad : undefined} />

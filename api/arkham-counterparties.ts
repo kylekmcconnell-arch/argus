@@ -7,8 +7,9 @@
 // non-exchange counterparties become verified relationship edges in the trust
 // graph — ground truth, not inference. Deduped by entity, cached 24h.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore — bundled JS sibling
-import { cacheGetJson, cacheSetJson } from "./_cache.js";
+import { attachPanelCost, cacheGetJson, cacheSetJson, resolvePanelCostVersion } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
+import { providerAddressKey } from "../src/lib/providerAddress.js";
 
 export const config = { maxDuration: 20 };
 
@@ -27,19 +28,33 @@ export type Counterparty = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
   const key = process.env.ARKHAM_API_KEY;
   if (!key) { res.status(200).json({ available: false, note: "Arkham not configured." }); return; }
   const addr = (typeof req.query.address === "string" ? req.query.address : "").trim();
   if (!addr || addr.length < 8) { res.status(400).json({ error: "address required" }); return; }
 
-  const ck = `arkham-cp:${addr.toLowerCase()}:v1`;
+  const ck = `arkham-cp:${providerAddressKey(addr)}:v1`;
   const cached = await cacheGetJson<any>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
+  let providerCalls = 0;
+  let providerSucceeded = 0;
   try {
+    providerCalls += 1;
     const r = await fetch(`${CP}${encodeURIComponent(addr)}`, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(12000) });
     if (!r.ok) { res.status(200).json({ available: false, note: `Arkham ${r.status}` }); return; }
     const d = (await r.json()) as Record<string, unknown>;
+    providerSucceeded += 1;
     // Response is keyed by chain → array of counterparties. Flatten every chain.
     const rows: any[] = [];
     for (const v of Object.values(d)) if (Array.isArray(v)) rows.push(...v);
@@ -79,5 +94,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json(out);
   } catch (e) {
     res.status(200).json({ available: false, error: String(e), note: "Counterparties lookup failed." });
+  } finally {
+    if (providerCalls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "arkham",
+        op: "panel:arkham-counterparties",
+        calls: providerCalls,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: providerSucceeded === providerCalls ? "succeeded" : providerSucceeded > 0 ? "partial" : "failed",
+      });
+    }
   }
 }

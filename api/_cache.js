@@ -2,11 +2,11 @@
 // are importable siblings only). Two jobs:
 //   1. 24h JSON cache in a service-only provider_cache table so cached provider
 //      responses are never mixed with tenant report projections.
-//   2. attachPanelCost: write post-report panel spend to the mutable cost ledger
-//      linked to the immutable version. Evidence payloads are never rewritten.
+//   2. append exact-version provider usage events; the database maintains the
+//      backwards-compatible mutable cost projection. Evidence is never rewritten.
 // api/ functions cannot import server/ modules at runtime (bundling), hence the
 // small duplication with server/cache.ts.
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomUUID, timingSafeEqual } from "node:crypto";
 
 const TTL_MS = 24 * 3600 * 1000;
 const PANEL_COST_TOKEN_TTL_MS = 30 * 60 * 1000;
@@ -118,33 +118,72 @@ export async function cacheSetJson(key, value) {
 
 
 
-// Record a panel's spend against one exact immutable version. A display ref is
-// not sufficient: token + investigation cases intentionally share a contract
-// ref, and a newer version may publish while a panel request is in flight.
-export async function attachPanelCost(organizationId, reportVersionId, line) {
+// Append one idempotent provider call to the exact immutable version and let
+// the database update the legacy report_cost_lines aggregate in the same
+// transaction. A display ref is never sufficient: a newer version may publish
+// while a panel request is in flight.
+export async function recordProviderUsageEvent(organizationId, reportVersionId, line) {
   const c = creds();
-  if (!c || !organizationId || !UUID.test(reportVersionId || "") || !line?.provider || !line?.op) return;
-  try {
-    const calls = Number.isFinite(line.calls) ? Math.max(0, Math.floor(line.calls)) : 0;
-    const usd = Number.isFinite(line.usd) ? Math.max(0, Math.round(line.usd * 10000) / 10000) : 0;
-    const response = await fetch(`${c.url}/rest/v1/rpc/upsert_report_cost_line`, {
-      method: "POST",
-      headers: headers(c.key),
-      body: JSON.stringify({
-        p_organization_id: organizationId,
-        p_report_version_id: reportVersionId,
-        p_provider: String(line.provider).slice(0, 100),
-        p_operation: String(line.op).slice(0, 160),
-        p_calls: calls,
-        p_usd: usd,
-        p_meta: typeof line.meta === "string" ? line.meta.slice(0, 500) : null,
-      }),
-      signal: AbortSignal.timeout(8000),
-    });
-    if (!response.ok) {
-      console.error("[cost] exact panel attribution failed", response.status);
+  if (!c || !UUID.test(organizationId || "") || !UUID.test(reportVersionId || "") || !line?.provider || !line?.op) return;
+
+  const initiatedBy = line.initiatedBy == null ? null : String(line.initiatedBy).toLowerCase();
+  if (initiatedBy != null && !UUID.test(initiatedBy)) return;
+
+  const allowedStatuses = new Set(["succeeded", "failed", "partial", "cached"]);
+  const status = line.status == null ? "succeeded" : String(line.status);
+  if (!allowedStatuses.has(status)) return;
+
+  const suppliedKey = line.idempotencyKey == null ? null : String(line.idempotencyKey).trim();
+  if (suppliedKey != null && (suppliedKey.length < 1 || suppliedKey.length > 200)) return;
+
+  const calls = Number.isFinite(line.calls) ? Math.max(0, Math.floor(line.calls)) : 0;
+  // Keep micro-cost estimates visible. Several keyed APIs cost far less than a
+  // cent per call, so four-decimal rounding incorrectly turned real spend into
+  // a zero-price event.
+  const usd = Number.isFinite(line.usd) ? Math.max(0, Math.round(line.usd * 100000000) / 100000000) : 0;
+  const body = JSON.stringify({
+    p_organization_id: organizationId.toLowerCase(),
+    p_report_version_id: reportVersionId.toLowerCase(),
+    p_idempotency_key: suppliedKey || `api:${randomUUID()}`,
+    p_provider: String(line.provider).slice(0, 100),
+    p_operation: String(line.op).slice(0, 160),
+    p_calls: calls,
+    p_usd: usd,
+    p_initiated_by: initiatedBy,
+    p_status: status,
+    p_meta: typeof line.meta === "string" ? line.meta.slice(0, 500) : null,
+  });
+
+  // A response can be lost after the database commits. Reusing the same body
+  // for one transport retry lets the RPC's idempotency constraint return the
+  // original event instead of double counting it.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(`${c.url}/rest/v1/rpc/record_provider_usage_event`, {
+        method: "POST",
+        headers: headers(c.key),
+        body,
+        signal: AbortSignal.timeout(8000),
+      });
+      if (response.ok) return;
+      const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === 1) {
+        console.error("[cost] provider usage event attribution failed", response.status);
+        return;
+      }
+    } catch {
+      if (attempt === 1) {
+        console.error("[cost] provider usage event attribution failed", "transport");
+      }
     }
-  } catch { /* accounting is best-effort */ }
+  }
+}
+
+// Compatibility name used throughout the provider routes. Each invocation is
+// now one append-only event; callers may supply idempotencyKey for a replayable
+// request, otherwise recordProviderUsageEvent generates a fresh request key.
+export async function attachPanelCost(organizationId, reportVersionId, line) {
+  return recordProviderUsageEvent(organizationId, reportVersionId, line);
 }
 
 // Grok pricing (list rates) for panel endpoints computing their own spend.

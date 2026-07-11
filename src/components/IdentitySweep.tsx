@@ -1,22 +1,36 @@
 import { useEffect, useRef, useState } from "react";
 import { recordForensicEntities } from "../graph/store";
+import { fetchPanelJson, panelRequestFailure, requiredPanelHeaders, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // Past-identity sweep (/api/identity-sweep): prior X handles (rebrands) + the same
 // username found on GitHub / Farcaster / Reddit / Telegram, tying a pseudonym to a
 // dated footprint elsewhere. On-click. Same-username is a LEAD, not proof — the
 // per-hit detail (repos, followers, account age) is there so a human can judge.
 type Hit = { platform: string; username: string; url: string; detail: string };
+type IdentityData = {
+  priorHandles?: string[];
+  footprint?: Hit[];
+  archivedBios?: { handle: string; year: string; bio: string }[];
+  firstSeen?: string;
+  note?: string;
+};
 
-export function IdentitySweep({ handle, auto, record = true }: { handle: string; auto?: boolean; record?: boolean }) {
-  const [data, setData] = useState<any | null>(null);
+export function IdentitySweep({ handle, auto, panelCostToken, record = true }: { handle: string; auto?: boolean; panelCostToken?: string; record?: boolean }) {
+  const [data, setData] = useState<IdentityData | null>(null);
   const [loading, setLoading] = useState(false);
-  const ran = useRef(false);
+  const [failure, setFailure] = useState<{ key: string; failure: PanelRequestFailure } | null>(null);
+  const requestKey = [handle, panelCostToken ?? ""].join("\u0000");
+  const currentFailure = failure?.key === requestKey ? failure.failure : null;
+  const ran = useRef("");
   const run = async () => {
-    if (loading || data) return;
+    if (loading || data || currentFailure || !panelCostToken) return;
     setLoading(true);
     try {
-      const r = await fetch(`/api/identity-sweep?handle=${encodeURIComponent(handle.replace(/^@/, ""))}`);
-      const d = await r.json();
+      const d = await fetchPanelJson<IdentityData>(
+        `/api/identity-sweep?handle=${encodeURIComponent(handle.replace(/^@/, ""))}`,
+        { headers: requiredPanelHeaders(panelCostToken) },
+      );
       setData(d);
       // Record prior handles (rebrands) + cross-platform footprint into the graph
       // so the same identity bridges across audits.
@@ -27,25 +41,26 @@ export function IdentitySweep({ handle, auto, record = true }: { handle: string;
         ...footprint.map((h) => ({ key: `${h.platform.toLowerCase()}:${h.username.toLowerCase()}`, type: "Identity", subtype: "Account", edgeType: "SAME_USERNAME", label: `${h.platform} @${h.username}` })),
       ];
       if (record && ents.length) recordForensicEntities(handle, ents);
-    } catch {
-      setData({ note: "Identity sweep failed." });
+    } catch (error) {
+      setFailure({ key: requestKey, failure: panelRequestFailure(error) });
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    if (auto && !ran.current) { ran.current = true; void run(); }
+    if (auto && panelCostToken && ran.current !== requestKey) { ran.current = requestKey; void run(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [auto, handle]);
+  }, [auto, handle, panelCostToken, requestKey]);
 
+  if (currentFailure) return <PanelRequestNotice failure={currentFailure} label="Past-identity sweep" />;
   if (!data) {
     return (
       <div className="rounded-xl border border-line bg-panel p-4">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Past-identity sweep</span>
-          <button onClick={run} disabled={loading} className="mono rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-dim transition hover:text-ink disabled:opacity-50">
-            {loading ? "tracing identities…" : "trace past identities →"}
+          <button onClick={run} disabled={loading || !panelCostToken} className="mono rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-dim transition hover:text-ink disabled:opacity-50">
+            {loading ? "tracing identities…" : panelCostToken ? "trace past identities →" : "saved report required"}
           </button>
         </div>
         <p className="mt-1.5 text-[12px] leading-relaxed text-ink-faint">

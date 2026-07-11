@@ -36,8 +36,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!verdict || !evidence) { res.status(400).json({ error: "verdict and evidence required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Claude not configured; adversarial review unavailable." }); return; }
 
+  let attempted = false;
+  let recorded = false;
+  const recordAttempt = async (status: "succeeded" | "partial" | "failed", usd = 0, meta?: string) => {
+    if (!attempted || recorded) return;
+    recorded = true;
+    try {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "claude",
+        op: "panel:challenge-verdict",
+        calls: 1,
+        usd,
+        initiatedBy: auth.userId,
+        status,
+        ...(meta ? { meta } : {}),
+      });
+    } catch { /* usage attribution must not replace the provider response */ }
+  };
+
+  attempted = true;
+  let r: Response;
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
+    r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
       body: JSON.stringify({
@@ -52,21 +72,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
       signal: AbortSignal.timeout(26000),
     });
-    if (!r.ok) { res.status(200).json({ available: true, note: `claude ${r.status}` }); return; }
-    const d = (await r.json()) as any;
-    await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "claude", op: "panel:challenge-verdict", calls: 1, usd: claudeUsd(d.usage) });
-    const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
-    const m = text.match(/\{[\s\S]*\}/);
-    let parsed: any = {};
-    if (m) { try { parsed = JSON.parse(m[0]); } catch { /* */ } }
-    const rec = ["uphold", "soften", "harden"].includes(parsed.recommendation) ? parsed.recommendation : "uphold";
-    const conf = ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium";
-    const challenges = (Array.isArray(parsed.challenges) ? parsed.challenges : [])
-      .filter((c: any) => c && typeof c.point === "string" && c.point.trim())
-      .map((c: any) => ({ direction: c.direction === "too_lenient" ? "too_lenient" : "too_harsh", point: c.point.trim().slice(0, 280) }))
-      .slice(0, 6);
-    res.status(200).json({ available: true, recommendation: rec, confidence: conf, summary: s(parsed.summary).slice(0, 200), challenges });
   } catch (e) {
+    await recordAttempt("failed", 0, "transport_error");
     res.status(200).json({ available: true, error: String(e), note: "Adversarial review failed." });
+    return;
   }
+  if (!r.ok) {
+    await recordAttempt("failed", 0, `http_${r.status}`);
+    res.status(200).json({ available: true, note: `claude ${r.status}` });
+    return;
+  }
+
+  let d: any;
+  try {
+    d = await r.json();
+  } catch (e) {
+    await recordAttempt("failed", 0, "response_json_error");
+    res.status(200).json({ available: true, error: String(e), note: "Adversarial review returned an unreadable response." });
+    return;
+  }
+
+  const usd = claudeUsd(d?.usage);
+  const text = (Array.isArray(d?.content) ? d.content : []).map((b: any) => b?.text ?? "").join(" ");
+  const m = text.match(/\{[\s\S]*\}/);
+  let parsed: any = {};
+  let validContract = false;
+  if (m) {
+    try {
+      parsed = JSON.parse(m[0]);
+      validContract = !!parsed
+        && typeof parsed === "object"
+        && !Array.isArray(parsed)
+        && ["uphold", "soften", "harden"].includes(parsed.recommendation)
+        && ["low", "medium", "high"].includes(parsed.confidence)
+        && Array.isArray(parsed.challenges);
+    } catch { /* malformed model output is a partial provider result */ }
+  }
+  await recordAttempt(validContract ? "succeeded" : "partial", usd, validContract ? undefined : "output_contract_error");
+  const rec = ["uphold", "soften", "harden"].includes(parsed.recommendation) ? parsed.recommendation : "uphold";
+  const conf = ["low", "medium", "high"].includes(parsed.confidence) ? parsed.confidence : "medium";
+  const challenges = (Array.isArray(parsed.challenges) ? parsed.challenges : [])
+    .filter((c: any) => c && typeof c.point === "string" && c.point.trim())
+    .map((c: any) => ({ direction: c.direction === "too_lenient" ? "too_lenient" : "too_harsh", point: c.point.trim().slice(0, 280) }))
+    .slice(0, 6);
+  res.status(200).json({ available: true, recommendation: rec, confidence: conf, summary: s(parsed.summary).slice(0, 200), challenges });
 }

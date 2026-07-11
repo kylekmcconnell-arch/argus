@@ -15,7 +15,7 @@ vi.mock("../graph/store", () => ({ getContributions: () => [], investigationCont
 vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
 
 vi.mock("./Avatar", () => ({ Avatar: () => null }));
-vi.mock("./OnChainForensics", () => ({ OnChainForensics: () => { harness.livePanel("on-chain"); return null; } }));
+vi.mock("./OnChainForensics", () => ({ OnChainForensics: (props: Record<string, unknown>) => { harness.livePanel("on-chain", props); return null; } }));
 vi.mock("./ProjectResearch", () => ({ ProjectResearch: () => { harness.livePanel("project-research"); return null; } }));
 vi.mock("./ProjectLinks", () => ({ ProjectLinks: () => null }));
 vi.mock("./MethodologyChecklist", () => ({ MethodologyChecklist: () => null }));
@@ -24,9 +24,9 @@ vi.mock("./AddInfo", () => ({ AddInfo: () => { harness.livePanel("add-info"); re
 vi.mock("./LinkEntity", () => ({ LinkEntity: () => { harness.livePanel("link-entity"); return null; } }));
 vi.mock("./AskReport", () => ({ AskReport: () => null }));
 vi.mock("./ArkhamGraphBridge", () => ({ ArkhamGraphBridge: () => null }));
-vi.mock("./Counterparties", () => ({ Counterparties: () => { harness.livePanel("counterparties"); return null; } }));
-vi.mock("./RiskPaths", () => ({ RiskPaths: () => { harness.livePanel("risk-paths"); return null; } }));
-vi.mock("./Holdings", () => ({ Holdings: () => { harness.livePanel("holdings"); return null; } }));
+vi.mock("./Counterparties", () => ({ Counterparties: (props: Record<string, unknown>) => { harness.livePanel("counterparties", props); return null; } }));
+vi.mock("./RiskPaths", () => ({ RiskPaths: (props: Record<string, unknown>) => { harness.livePanel("risk-paths", props); return null; } }));
+vi.mock("./Holdings", () => ({ Holdings: (props: Record<string, unknown>) => { harness.livePanel("holdings", props); return null; } }));
 vi.mock("./TokenSparkline", () => ({ TokenSparkline: () => { harness.livePanel("sparkline"); return null; } }));
 vi.mock("./NamesakeCheck", () => ({ NamesakeCheck: () => { harness.livePanel("namesake"); return null; } }));
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => null }));
@@ -163,6 +163,27 @@ describe("investigation exact sharing", () => {
 
     expect([...container.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Share")).toBe(false);
     expect(harness.livePanel).not.toHaveBeenCalled();
-    expect(harness.arkham).toHaveBeenCalledWith([]);
+    expect(harness.arkham).toHaveBeenCalledWith([], undefined);
+  });
+
+  it("threads the saved report capability through every keyed current-data panel", () => {
+    render(investigation({
+      token: { ...token(), deployer: address },
+      persistence: {
+        state: "persisted",
+        reportVersionId,
+        panelCostToken: "signed-panel-capability",
+      },
+    }));
+
+    for (const panel of ["on-chain", "counterparties", "risk-paths", "holdings"]) {
+      expect(harness.livePanel.mock.calls.find(([name]) => name === panel)?.[1]).toEqual(
+        expect.objectContaining({ panelCostToken: "signed-panel-capability" }),
+      );
+    }
+    expect(harness.arkham).toHaveBeenCalledWith(
+      [address, undefined],
+      "signed-panel-capability",
+    );
   });
 });

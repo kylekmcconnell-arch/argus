@@ -44,8 +44,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     "Reply with ONLY compact JSON: {\"website\":\"https://...\",\"x_handle\":\"@...\",\"founder\":\"Full Name\",\"founder_handle\":\"@...\",\"confidence\":\"high|medium|low\",\"note\":\"one line\"}. Use null for any field you cannot confidently determine. NEVER invent a handle or a name. Never use em dashes.";
   const user = `Token: $${symbol}${name && name.toLowerCase() !== symbol.toLowerCase() ? ` (${name})` : ""}${contract ? `, contract ${contract}` : ""}${chain ? ` on ${chain}` : ""}. What is its official website, official X account, and founder (with X handle)?`;
 
+  let attempted = false;
+  let recorded = false;
+  const recordAttempt = async (status: "succeeded" | "partial" | "failed", usd = 0, meta?: string) => {
+    if (!attempted || recorded) return;
+    recorded = true;
+    try {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "grok",
+        op: "panel:token-identity",
+        calls: 1,
+        usd,
+        initiatedBy: auth.userId,
+        status,
+        ...(meta ? { meta } : {}),
+      });
+    } catch { /* usage attribution must not replace the provider response */ }
+  };
+
+  attempted = true;
+  let r: Response;
   try {
-    const r = await fetch("https://api.x.ai/v1/responses", {
+    r = await fetch("https://api.x.ai/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
@@ -56,30 +76,54 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }),
       signal: AbortSignal.timeout(35000),
     });
-    if (!r.ok) { res.status(200).json({ available: true, error: `grok ${r.status}` }); return; }
-    const d = (await r.json()) as any;
-    const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : 0;
-    const usd = grokUsd(d.usage, toolCalls);
-    const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
-    const m = text.match(/\{[\s\S]*\}/);
-    const p = m ? JSON.parse(m[0]) : {};
-    const website = typeof p.website === "string" && /^https?:\/\//i.test(p.website) ? p.website.trim() : null;
-    const x_handle = typeof p.x_handle === "string" && HANDLE.test(p.x_handle) ? "@" + p.x_handle.replace(/^@/, "") : null;
-    const founder = typeof p.founder === "string" && p.founder.trim().length >= 2 && p.founder.trim().length < 60 ? p.founder.trim() : null;
-    const founder_handle = typeof p.founder_handle === "string" && HANDLE.test(p.founder_handle) ? "@" + p.founder_handle.replace(/^@/, "") : null;
-    const out = {
-      available: true,
-      website,
-      x_handle,
-      founder,
-      founder_handle,
-      confidence: ["high", "medium", "low"].includes(p.confidence) ? p.confidence : "low",
-      note: typeof p.note === "string" ? p.note.slice(0, 200) : "",
-    };
-    await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "grok", op: "panel:token-identity", calls: 1, usd });
-    if (website || x_handle || founder) await cacheSetJson(cacheKey, out); // don't cache an all-null miss
-    res.status(200).json(out);
   } catch (e) {
+    await recordAttempt("failed", 0, "transport_error");
     res.status(200).json({ available: true, error: String(e) });
+    return;
   }
+  if (!r.ok) {
+    await recordAttempt("failed", 0, `http_${r.status}`);
+    res.status(200).json({ available: true, error: `grok ${r.status}` });
+    return;
+  }
+
+  let d: any;
+  try { d = await r.json(); }
+  catch (e) {
+    await recordAttempt("failed", 0, "response_json_error");
+    res.status(200).json({ available: true, error: String(e) });
+    return;
+  }
+  const toolCalls = Array.isArray(d?.output) ? d.output.filter((o: any) => /search|tool/.test(String(o?.type ?? ""))).length : 0;
+  const usd = grokUsd(d?.usage, toolCalls);
+  const text = d?.output_text ?? (Array.isArray(d?.output) ? d.output.flatMap((o: any) => o?.content ?? []).map((c: any) => c?.text ?? "").join(" ") : "") ?? "";
+  const m = typeof text === "string" ? text.match(/\{[\s\S]*\}/) : null;
+  let p: any = {};
+  let validContract = false;
+  if (m) {
+    try {
+      p = JSON.parse(m[0]);
+      validContract = !!p
+        && typeof p === "object"
+        && !Array.isArray(p)
+        && ["high", "medium", "low"].includes(p.confidence)
+        && ["website", "x_handle", "founder", "founder_handle"].every((field) => Object.hasOwn(p, field));
+    } catch { /* malformed model output is a partial provider result */ }
+  }
+  await recordAttempt(validContract ? "succeeded" : "partial", usd, validContract ? undefined : "output_contract_error");
+  const website = typeof p.website === "string" && /^https?:\/\//i.test(p.website) ? p.website.trim() : null;
+  const x_handle = typeof p.x_handle === "string" && HANDLE.test(p.x_handle) ? "@" + p.x_handle.replace(/^@/, "") : null;
+  const founder = typeof p.founder === "string" && p.founder.trim().length >= 2 && p.founder.trim().length < 60 ? p.founder.trim() : null;
+  const founder_handle = typeof p.founder_handle === "string" && HANDLE.test(p.founder_handle) ? "@" + p.founder_handle.replace(/^@/, "") : null;
+  const out = {
+    available: true,
+    website,
+    x_handle,
+    founder,
+    founder_handle,
+    confidence: ["high", "medium", "low"].includes(p.confidence) ? p.confidence : "low",
+    note: typeof p.note === "string" ? p.note.slice(0, 200) : "",
+  };
+  if (validContract && (website || x_handle || founder)) await cacheSetJson(cacheKey, out); // don't pin a malformed or all-null result
+  res.status(200).json(out);
 }

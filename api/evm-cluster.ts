@@ -10,6 +10,8 @@
 //
 // EVM only. Gated on ETHERSCAN_API_KEY (GoPlus is keyless). Bounded + graceful.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { requireArgusAuth } from "./_auth.js";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
 export const config = { maxDuration: 60 };
 
@@ -19,6 +21,7 @@ const CHAINID: Record<string, number> = {
 };
 const MAX_WALLETS = 20;
 const CHUNK = 4;
+interface ProviderUsage { etherscan: number; etherscanSucceeded: number; goplus: number; goplusSucceeded: number }
 const isAddr = (s: string) => /^0x[a-fA-F0-9]{40}$/.test(s);
 const lc = (s: string) => s.toLowerCase();
 
@@ -41,29 +44,33 @@ const SKIP = new Set<string>([
 ]);
 
 const ES = "https://api.etherscan.io/v2/api";
-async function txlist(chainid: number, address: string, key: string, offset: number): Promise<any[]> {
+async function txlist(chainid: number, address: string, key: string, offset: number, usage: ProviderUsage): Promise<any[]> {
+  usage.etherscan += 1;
   const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "txlist", address, startblock: "0", endblock: "99999999", page: "1", offset: String(offset), sort: "asc", apikey: key });
   const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
   if (!r || !r.ok) return [];
   const d = (await r.json().catch(() => null)) as any;
+  if (d != null) usage.etherscanSucceeded += 1;
   return Array.isArray(d?.result) ? d.result : [];
 }
 
 // ERC-20 transfers of a SPECIFIC token for a wallet — holders passing the token
 // among themselves is a stronger coordination signal than sharing ETH.
-async function tokentx(chainid: number, wallet: string, token: string, key: string): Promise<any[]> {
+async function tokentx(chainid: number, wallet: string, token: string, key: string, usage: ProviderUsage): Promise<any[]> {
+  usage.etherscan += 1;
   const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "tokentx", contractaddress: token, address: wallet, page: "1", offset: "200", sort: "desc", apikey: key });
   const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
   if (!r || !r.ok) return [];
   const d = (await r.json().catch(() => null)) as any;
+  if (d != null) usage.etherscanSucceeded += 1;
   return Array.isArray(d?.result) ? d.result : [];
 }
 
 // A holder's first funder + the set-members it directly transacted with. Reads both
 // ETH (txlist, oldest-first — captures the funding tx) AND transfers of the token
 // itself (tokentx) so wallets that pass the token to each other are linked.
-async function profile(chainid: number, wallet: string, token: string, key: string, inSet: Set<string>): Promise<{ wallet: string; funder: string | null; cps: string[] }> {
-  const [txs, ttx] = await Promise.all([txlist(chainid, wallet, key, 2000), tokentx(chainid, wallet, token, key)]);
+async function profile(chainid: number, wallet: string, token: string, key: string, inSet: Set<string>, usage: ProviderUsage): Promise<{ wallet: string; funder: string | null; cps: string[] }> {
+  const [txs, ttx] = await Promise.all([txlist(chainid, wallet, key, 2000, usage), tokentx(chainid, wallet, token, key, usage)]);
   let funder: string | null = null;
   const cps = new Set<string>();
   for (const t of txs) {
@@ -90,6 +97,16 @@ async function inChunks<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
   const key = process.env.ETHERSCAN_API_KEY;
   const address = typeof req.query.address === "string" ? req.query.address.trim() : "";
   const chain = (typeof req.query.chain === "string" ? req.query.chain : "").toLowerCase();
@@ -98,10 +115,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!chainid) { res.status(200).json({ address, chain, available: false, note: `No chain id for '${chain}'.` }); return; }
   if (!key) { res.status(200).json({ address, chain, available: false, note: "Etherscan not configured; EVM clustering unavailable." }); return; }
 
+  const usage: ProviderUsage = { etherscan: 0, etherscanSucceeded: 0, goplus: 0, goplusSucceeded: 0 };
   try {
     // 1. Holder set from GoPlus (keyless). percent is a 0..1 fraction.
+    usage.goplus += 1;
     const gr = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainid}?contract_addresses=${address}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
     const gd = gr && gr.ok ? ((await gr.json().catch(() => null)) as any) : null;
+    if (gd != null) usage.goplusSucceeded += 1;
     const tok = gd?.result?.[lc(address)] ?? gd?.result?.[address] ?? null;
     if (!tok) { res.status(200).json({ address, chain, available: true, clusters: [], walletsAnalyzed: 0, note: "No holder data available for this token." }); return; }
     const creator = typeof tok.creator_address === "string" && isAddr(tok.creator_address) ? lc(tok.creator_address) : null;
@@ -118,7 +138,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // 2. Each holder's funder + in-set counterparties.
     const inSet = new Set(set);
     const deadline = Date.now() + 50000;
-    const profiles = await inChunks(set, CHUNK, async (w) => (Date.now() > deadline ? { wallet: w, funder: null, cps: [] } : profile(chainid, w, lc(address), key, inSet)));
+    const profiles = await inChunks(set, CHUNK, async (w) => (Date.now() > deadline ? { wallet: w, funder: null, cps: [] } : profile(chainid, w, lc(address), key, inSet, usage)));
 
     // 3. Union: shared non-exchange funder, or a direct transfer between members.
     const dsu = new DSU();
@@ -165,5 +185,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json({ address, chain, available: true, walletsAnalyzed: set.length, clusters, allWallets, edges, note });
   } catch (e) {
     res.status(200).json({ address, chain, available: true, clusters: [], error: String(e), note: "EVM wallet clustering failed." });
+  } finally {
+    if (usage.goplus > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "goplus",
+        op: "panel:evm-cluster",
+        calls: usage.goplus,
+        usd: 0,
+        meta: "keyless",
+        initiatedBy: auth.userId,
+        status: usage.goplusSucceeded === usage.goplus ? "succeeded" : usage.goplusSucceeded > 0 ? "partial" : "failed",
+      });
+    }
+    if (usage.etherscan > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "etherscan",
+        op: "panel:evm-cluster",
+        calls: usage.etherscan,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usage.etherscanSucceeded === usage.etherscan ? "succeeded" : usage.etherscanSucceeded > 0 ? "partial" : "failed",
+      });
+    }
   }
 }

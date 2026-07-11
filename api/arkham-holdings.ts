@@ -8,8 +8,9 @@
 // IS the token they launched has every incentive to defend the price — and nothing
 // realized. Deduped to the top holdings by USD, self-token + stable share flagged.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore — bundled JS sibling
-import { cacheGetJson, cacheSetJson } from "./_cache.js";
+import { attachPanelCost, cacheGetJson, cacheSetJson, resolvePanelCostVersion } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
+import { providerAddressKey } from "../src/lib/providerAddress.js";
 
 export const config = { maxDuration: 20 };
 
@@ -32,20 +33,34 @@ type Out = {
 const num = (v: unknown) => (Number.isFinite(Number(v)) ? Number(v) : 0);
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
   const key = process.env.ARKHAM_API_KEY;
   if (!key) { res.status(200).json({ available: false, note: "Arkham not configured." }); return; }
   const addr = (typeof req.query.address === "string" ? req.query.address : "").trim();
   const symbol = (typeof req.query.symbol === "string" ? req.query.symbol : "").trim().toUpperCase();
   if (!addr || addr.length < 8) { res.status(400).json({ error: "address required" }); return; }
 
-  const ck = `arkham-hold:${addr.toLowerCase()}:${symbol || "-"}:v1`;
+  const ck = `arkham-hold:${providerAddressKey(addr)}:${symbol || "-"}:v1`;
   const cached = await cacheGetJson<Out>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
+  let providerCalls = 0;
+  let providerSucceeded = 0;
   try {
+    providerCalls += 1;
     const r = await fetch(`${BAL}${encodeURIComponent(addr)}`, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(12000) });
     if (!r.ok) { res.status(200).json({ available: false, note: `Arkham ${r.status}` }); return; }
     const d = (await r.json()) as { totalBalance?: Record<string, number>; totalBalance24hAgo?: Record<string, number>; balances?: Record<string, any[]> };
+    providerSucceeded += 1;
 
     const totalUsd = Object.values(d.totalBalance ?? {}).reduce((s, v) => s + num(v), 0);
     const totalUsd24hAgo = Object.values(d.totalBalance24hAgo ?? {}).reduce((s, v) => s + num(v), 0);
@@ -89,5 +104,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json(out);
   } catch (e) {
     res.status(200).json({ available: false, error: String(e), note: "Holdings lookup failed." });
+  } finally {
+    if (providerCalls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "arkham",
+        op: "panel:arkham-holdings",
+        calls: providerCalls,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: providerSucceeded === providerCalls ? "succeeded" : providerSucceeded > 0 ? "partial" : "failed",
+      });
+    }
   }
 }

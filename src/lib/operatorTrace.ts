@@ -14,6 +14,7 @@
 // forward sweep alone is a 60s call), so the frontier, budget, dedup, and the
 // graph write live here and each server call stays individually bounded.
 import { recordForensicEntities } from "../graph/store";
+import { fetchPanelJson, PanelRequestError, requiredPanelHeaders } from "./panelCostHeaders";
 
 const SOLADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -53,6 +54,7 @@ export interface TraceOpts {
   rootLabel?: string;   // e.g. "$SYMBOL" — for display only
   chain?: string;       // "solana" (default) or an EVM chain id (ethereum/base/…)
   record?: boolean;     // false for historical overlays that must not mutate the graph
+  panelCostToken?: string; // signed capability binding provider calls to the saved report
 }
 export type TraceStep = (s: { label: string; detail?: string; tone?: "neutral" | "good" | "warn" | "bad" }) => void;
 
@@ -88,6 +90,9 @@ const short = (a: string) => a.slice(0, 4) + "…" + a.slice(-4);
 
 // ── the trace ───────────────────────────────────────────────────────────────
 export async function traceOperator(rootDeployer: string, opts: TraceOpts, onStep: TraceStep): Promise<OperatorCluster | null> {
+  const panelCostToken = opts.panelCostToken;
+  if (!panelCostToken) return null;
+  const providerHeaders = requiredPanelHeaders(panelCostToken);
   // Chain-branch: the trace chains the same two primitives on either chain, just
   // pointed at the chain's endpoints (Solana/Helius vs EVM/Etherscan). The server
   // shapes are aligned (same field names) so the loop below is chain-agnostic.
@@ -140,12 +145,13 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
     if (tracedFunder.has(addr) || traces >= maxTraces || overBudget()) return;
     tracedFunder.add(addr);
     traces++;
-    let d: DeployerTraceResponse;
-    try {
-      const r = await fetch(`${deployerEP}?wallet=${encodeURIComponent(addr)}${cp}`);
-      d = await r.json() as DeployerTraceResponse;
-    } catch { return; }
-    if (!d || d.available === false) return;
+    const d = await fetchPanelJson<DeployerTraceResponse>(
+      `${deployerEP}?wallet=${encodeURIComponent(addr)}${cp}`,
+      { headers: providerHeaders },
+    );
+    if (!d || d.available === false) {
+      throw new PanelRequestError("unavailable", 200, "Deployer trace provider is unavailable.");
+    }
     const w = wallets.get(addr);
     if (w) {
       // Solana returns tokensCreated; EVM returns deployments — either is the count.
@@ -180,12 +186,13 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
     sweptForward.add(addr);
     sweeps++;
     onStep({ label: `Sweeping forward from ${short(addr)}`, detail: "every wallet this hub seeded, and which of them minted tokens…", tone: "neutral" });
-    let d: FunderSweepResponse;
-    try {
-      const r = await fetch(`${funderEP}?wallet=${encodeURIComponent(addr)}${cp}`);
-      d = await r.json() as FunderSweepResponse;
-    } catch { return; }
-    if (!d || d.available === false) return;
+    const d = await fetchPanelJson<FunderSweepResponse>(
+      `${funderEP}?wallet=${encodeURIComponent(addr)}${cp}`,
+      { headers: providerHeaders },
+    );
+    if (!d || d.available === false) {
+      throw new PanelRequestError("unavailable", 200, "Funder sweep provider is unavailable.");
+    }
     const hub = addWallet(addr, "funder", depth, { seededCount: d.seededCount ?? 0 });
     for (const t of (d.ownTokens ?? []) as { mint: string; name?: string }[]) {
       addToken(t.mint, t.name, addr);

@@ -40,7 +40,7 @@ export function ProjectResearch({
       )}
       <ProjectDocs name={name} symbol={symbol} domain={domain} panelCostToken={panelCostToken} />
       {domain && <ProjectIntel domain={domain} />}
-      {githubOrg && <GithubForensics org={githubOrg} subjectKey={subjectKey} record={record} />}
+      {githubOrg && <GithubForensics org={githubOrg} subjectKey={subjectKey} panelCostToken={panelCostToken} record={record} />}
     </div>
   );
 }

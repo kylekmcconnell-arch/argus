@@ -133,6 +133,8 @@ describe("project document paid-search capability", () => {
       op: "panel:project-docs",
       calls: 1,
       usd: 0.1254,
+      initiatedBy: "00000000-0000-4000-8000-000000000010",
+      status: "succeeded",
     });
     expect(cacheSetJson).toHaveBeenCalledWith(expect.stringContaining(":grok"), expect.any(Object));
   });

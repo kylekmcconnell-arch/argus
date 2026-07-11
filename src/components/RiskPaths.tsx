@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { fetchPanelJson, panelRequestFailure, requiredPanelHeaders, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // Why a wallet is flagged: the seed→target trace behind its Arkham risk score.
 // Each path names the hacker / mixer / sanctioned entity it's exposed to, the
@@ -10,23 +12,32 @@ const usd = (n: number) => (n >= 1e9 ? `$${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? 
 const short = (a: string) => (a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 const AVOID = new Set(["hacker", "sanctioned"]);
 
-export function RiskPaths({ address }: { address?: string | null }) {
-  const [paths, setPaths] = useState<Path[] | null>(null);
-  const ran = useRef(false);
+export function RiskPaths({ address, panelCostToken }: { address?: string | null; panelCostToken?: string }) {
+  const requestKey = [address ?? "", panelCostToken ?? ""].join("\u0000");
+  const [result, setResult] = useState<{ key: string; paths: Path[]; failure?: PanelRequestFailure } | null>(null);
+  const ran = useRef("");
 
   useEffect(() => {
-    if (ran.current || !address) return;
-    ran.current = true;
+    if (ran.current === requestKey || !address || !panelCostToken) return;
+    ran.current = requestKey;
+    let live = true;
     (async () => {
       try {
-        const r = await fetch(`/api/arkham-risk-paths?address=${encodeURIComponent(address)}`);
-        const d = await r.json();
-        setPaths(d?.available ? d.paths ?? [] : []);
-      } catch { /* non-fatal */ }
+        const d = await fetchPanelJson<{ available?: boolean; paths?: Path[] }>(
+          `/api/arkham-risk-paths?address=${encodeURIComponent(address)}`,
+          { headers: requiredPanelHeaders(panelCostToken) },
+        );
+        if (live) setResult({ key: requestKey, paths: d?.available ? d.paths ?? [] : [] });
+      } catch (error) {
+        if (live) setResult({ key: requestKey, paths: [], failure: panelRequestFailure(error) });
+      }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address]);
+    return () => { live = false; };
+  }, [address, panelCostToken, requestKey]);
 
+  const current = result?.key === requestKey ? result : null;
+  if (current?.failure) return <PanelRequestNotice failure={current.failure} label="Risk-path intelligence" />;
+  const paths = current?.paths;
   if (!paths || paths.length === 0) return null;
   const worst = paths.some((p) => AVOID.has((p.category ?? "").toLowerCase()));
   const c = worst ? "var(--color-avoid)" : "var(--color-caution)";

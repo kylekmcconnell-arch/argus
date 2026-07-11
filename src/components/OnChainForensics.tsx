@@ -13,12 +13,12 @@ import { SanctionsScreen } from "./SanctionsScreen";
 // from a single TokenDossier: market intel → holder distribution → wallet
 // clustering → operator trace → (EVM) deployer trail → (EVM) bytecode → OFAC
 // sanctions. One source of truth for every token/investigation report.
-export function OnChainForensics({ token, onAudit, record = true }: { token: TokenDossier; onAudit: (h: string) => void; record?: boolean }) {
+export function OnChainForensics({ token, onAudit, panelCostToken, record = true }: { token: TokenDossier; onAudit: (h: string) => void; panelCostToken: string; record?: boolean }) {
   const isEvm = token.chain !== "solana";
   return (
     <div className="space-y-3">
       {/* rank, ATH drawdown, dilution, unlock flags */}
-      <MarketIntel symbol={token.symbol} contract={token.address} chain={token.chain} />
+      <MarketIntel symbol={token.symbol} contract={token.address} chain={token.chain} panelCostToken={panelCostToken} />
       {/* healthy base or a rug in a costume? */}
       <HolderForensics
         address={token.address}
@@ -26,13 +26,14 @@ export function OnChainForensics({ token, onAudit, record = true }: { token: Tok
         holderCount={token.safety.holderCount}
         evmTop={token.topHolders.map((h) => ({ pct: h.percent, tag: h.tag, address: h.address, isContract: h.isContract }))}
         insiderPct={token.insiderPct}
+        panelCostToken={panelCostToken}
       />
       {/* how many "top holders" are one hand? */}
-      <WalletClusters mint={token.address} chain={token.chain} symbol={token.symbol} record={record} />
+      <WalletClusters mint={token.address} chain={token.chain} symbol={token.symbol} panelCostToken={panelCostToken} record={record} />
       {/* recursive operator trace — isolated project or one node in a serial factory? */}
-      {token.deployer && <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} record={record} />}
+      {token.deployer && <OperatorNetwork deployer={token.deployer} chain={token.chain} label={`$${token.symbol}`} onAudit={onAudit} panelCostToken={panelCostToken} record={record} />}
       {/* EVM deployer trail — who deployed it, who funded the gas, serial launcher? */}
-      {isEvm && <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} knownDeployer={token.deployer} record={record} />}
+      {isEvm && <EvmDeployer address={token.address} chain={token.chain} symbol={token.symbol} knownDeployer={token.deployer} panelCostToken={panelCostToken} record={record} />}
       {/* EVM bytecode fingerprint — rug-enabling code + byte-identical known-rug clone check */}
       {isEvm && <BytecodeForensics address={token.address} chain={token.chain} symbol={token.symbol} record={record} />}
       {/* OFAC sanctions — deployer + top holders (a hard legal signal) */}

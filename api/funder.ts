@@ -14,6 +14,8 @@
 //
 // Solana only (Helius). Gated on HELIUS_API_KEY. Bounded + graceful when unset.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { requireArgusAuth } from "./_auth.js";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
 export const config = { maxDuration: 60 };
 
@@ -24,6 +26,7 @@ const TX_PAGES = 6; // enhanced-tx pages of the funder (100 tx/page)
 const MAX_CANDIDATES = 40; // distinct recipients we bother to check
 const CHECK_CHUNK = 6; // concurrency for the per-recipient mint scans
 const SOLADDR = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+interface ProviderUsage { calls: number; succeeded: number }
 
 // CEX hot wallets + program/system accounts to exclude as recipients — they
 // receive SOL constantly and are never a seeded deployer.
@@ -48,24 +51,26 @@ const DENY_MINT = new Set<string>([
   "So11111111111111111111111111111111111111112", // wSOL
 ]);
 
-async function enhancedTx(key: string, addr: string, before: string): Promise<any[]> {
+async function enhancedTx(key: string, addr: string, before: string, usage: ProviderUsage): Promise<any[]> {
+  usage.calls += 1;
   const u = `https://api.helius.xyz/v0/addresses/${addr}/transactions?api-key=${key}&limit=100${before ? `&before=${before}` : ""}`;
   const r = await fetch(u, { signal: AbortSignal.timeout(12000) });
   if (!r.ok) return [];
   const d = await r.json();
+  usage.succeeded += 1;
   return Array.isArray(d) ? d : [];
 }
 
 // Distinct wallets the funder sent SOL to (in the launch-seeding size band),
 // newest first, bounded by TX_PAGES.
-async function seedRecipients(key: string, funder: string, deadline: number): Promise<{ recipients: string[]; scanned: number; truncated: boolean }> {
+async function seedRecipients(key: string, funder: string, deadline: number, usage: ProviderUsage): Promise<{ recipients: string[]; scanned: number; truncated: boolean }> {
   const recipients = new Set<string>();
   let before = "";
   let scanned = 0;
   let truncated = false;
   for (let page = 0; page < TX_PAGES; page++) {
     if (Date.now() > deadline) { truncated = true; break; }
-    const txs = await enhancedTx(key, funder, before);
+    const txs = await enhancedTx(key, funder, before, usage);
     if (!txs.length) break;
     scanned += txs.length;
     for (const tx of txs) {
@@ -88,8 +93,8 @@ async function seedRecipients(key: string, funder: string, deadline: number): Pr
 // Tokens a wallet has MINTED (created), from its recent TOKEN_MINT events. The
 // launched mint is the non-stablecoin token in the transfer; the name comes free
 // from the enhanced-tx description when the mint touches exactly one real token.
-async function mintedTokens(key: string, wallet: string): Promise<{ total: number; sample: { mint: string; name?: string }[] }> {
-  const txs = await enhancedTx(key, wallet, "").catch(() => []);
+async function mintedTokens(key: string, wallet: string, usage: ProviderUsage): Promise<{ total: number; sample: { mint: string; name?: string }[] }> {
+  const txs = await enhancedTx(key, wallet, "", usage).catch(() => []);
   const mints = new Set<string>();
   const nameByMint = new Map<string, string>();
   for (const t of txs) {
@@ -112,24 +117,35 @@ async function inChunks<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
   const key = process.env.HELIUS_API_KEY;
   const wallet = typeof req.query.wallet === "string" ? req.query.wallet.trim() : "";
   if (!wallet || !SOLADDR.test(wallet)) { res.status(400).json({ error: "valid Solana wallet required" }); return; }
   if (!key) { res.status(200).json({ wallet, available: false, note: "Helius not configured; funder sweep unavailable." }); return; }
 
   const deadline = Date.now() + 50000;
+  const usage: ProviderUsage = { calls: 0, succeeded: 0 };
   try {
     // Two operator shapes, one call: (1) this wallet's OWN launches — a single
     // wallet that serial-mints is a rug farm on its own; (2) the forward sweep —
     // a funder that spreads launches across fresh dev wallets to look independent.
     const [own, seed] = await Promise.all([
-      mintedTokens(key, wallet),
-      seedRecipients(key, wallet, deadline),
+      mintedTokens(key, wallet, usage),
+      seedRecipients(key, wallet, deadline, usage),
     ]);
     const { recipients, scanned, truncated } = seed;
     const checked = await inChunks(recipients, CHECK_CHUNK, async (w) => {
       if (Date.now() > deadline) return null;
-      const t = await mintedTokens(key, w);
+      const t = await mintedTokens(key, w, usage);
       return t.total > 0 ? { wallet: w, tokensCreated: t.total, sampleTokens: t.sample } : null;
     });
     const seededDeployers = (checked.filter(Boolean) as {
@@ -157,5 +173,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (e) {
     res.status(200).json({ wallet, available: true, seededDeployers: [], error: String(e), note: "Funder sweep failed." });
+  } finally {
+    if (usage.calls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "helius",
+        op: "panel:solana-funder",
+        calls: usage.calls,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usage.succeeded === usage.calls ? "succeeded" : usage.succeeded > 0 ? "partial" : "failed",
+      });
+    }
   }
 }

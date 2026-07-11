@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { shortAddr } from "../lib/wallets";
 import { recordForensicEntities } from "../graph/store";
+import { fetchPanelJson, panelRequestFailure, requiredPanelHeaders, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // EVM deployer forensics (/api/evm-deployer). The EVM counterpart to the Solana
 // deployer trail: who deployed this contract, whether their gas traces to a KYC'd
@@ -19,15 +21,15 @@ type Data = {
   walletAgeDays?: number | null; note?: string;
 };
 
-export function EvmDeployer({ address, chain, symbol, knownDeployer, record = true }: { address: string; chain: string; symbol?: string; knownDeployer?: string | null; record?: boolean }) {
-  const [data, setData] = useState<Data | null>(null);
-  const [state, setState] = useState<"loading" | "done">("loading");
-  const ran = useRef(false);
+export function EvmDeployer({ address, chain, symbol, knownDeployer, panelCostToken, record = true }: { address: string; chain: string; symbol?: string; knownDeployer?: string | null; panelCostToken?: string; record?: boolean }) {
+  const requestKey = [address, chain, knownDeployer ?? "", panelCostToken ?? ""].join("\u0000");
+  const [result, setResult] = useState<{ key: string; data: Data | null; failure?: PanelRequestFailure } | null>(null);
+  const ran = useRef("");
 
   useEffect(() => {
-    if (ran.current) return;
-    ran.current = true;
-    if (chain === "solana") { setState("done"); return; }
+    if (ran.current === requestKey || !panelCostToken || chain === "solana") return;
+    ran.current = requestKey;
+    let live = true;
     (async () => {
       try {
         // If the audit already resolved the deployer (e.g. via GoPlus), trace THAT
@@ -36,9 +38,12 @@ export function EvmDeployer({ address, chain, symbol, knownDeployer, record = tr
         const q = knownDeployer && /^0x[a-fA-F0-9]{40}$/.test(knownDeployer)
           ? `wallet=${encodeURIComponent(knownDeployer)}`
           : `address=${encodeURIComponent(address)}`;
-        const r = await fetch(`/api/evm-deployer?${q}&chain=${encodeURIComponent(chain)}`);
-        const d: Data = await r.json();
-        setData(d);
+        const d = await fetchPanelJson<Data>(
+          `/api/evm-deployer?${q}&chain=${encodeURIComponent(chain)}`,
+          { headers: requiredPanelHeaders(panelCostToken) },
+        );
+        if (!live) return;
+        setResult({ key: requestKey, data: d });
         // Feed the graph: deployer + (anon) funder keyed like the Solana forensics
         // so a wallet that recurs across audits collapses to one node and bridges.
         if (record && d?.available && d.deployer) {
@@ -49,14 +54,18 @@ export function EvmDeployer({ address, chain, symbol, knownDeployer, record = tr
           if (d.funder && d.funder.kind === "wallet") ents.push({ key: `funder:${d.funder.address.slice(0, 8)}`, type: "Identity", subtype: "FunderWallet", edgeType: "FUNDED_BY", label: shortAddr(d.funder.address) });
           recordForensicEntities(symbol ? `$${symbol}` : `token:${address}`, ents);
         }
-      } catch { /* non-fatal */ }
-      setState("done");
+      } catch (error) {
+        if (live) setResult({ key: requestKey, data: null, failure: panelRequestFailure(error) });
+      }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => { live = false; };
+  }, [address, chain, knownDeployer, panelCostToken, record, requestKey, symbol]);
 
-  if (chain === "solana") return null;
-  if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[11.5px] text-ink-faint">tracing the deployer on-chain…</div>;
+  if (chain === "solana" || !panelCostToken) return null;
+  const current = result?.key === requestKey ? result : null;
+  if (!current) return <div className="rounded-xl border border-line bg-panel p-4 text-[11.5px] text-ink-faint">tracing the deployer on-chain…</div>;
+  if (current.failure) return <PanelRequestNotice failure={current.failure} label="Deployer intelligence" />;
+  const data = current.data;
   if (!data || data.available === false || !data.deployer) {
     if (data && data.note && data.available !== false) {
       return (

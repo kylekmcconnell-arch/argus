@@ -9,6 +9,8 @@
 //
 // EVM only. Gated on ETHERSCAN_API_KEY. Bounded + graceful when unset.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { requireArgusAuth } from "./_auth.js";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
 export const config = { maxDuration: 20 };
 
@@ -35,11 +37,15 @@ const CEX: Record<string, string> = {
 };
 
 const ES = "https://api.etherscan.io/v2/api";
-async function es(chainid: number, params: Record<string, string>, key: string): Promise<any> {
+interface CallCounter { calls: number; succeeded: number }
+async function es(chainid: number, params: Record<string, string>, key: string, usage: CallCounter): Promise<any> {
+  usage.calls += 1;
   const q = new URLSearchParams({ chainid: String(chainid), apikey: key, ...params });
   const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) });
   if (!r.ok) throw new Error(`etherscan ${r.status}`);
-  return r.json();
+  const data = await r.json();
+  usage.succeeded += 1;
+  return data;
 }
 
 const isAddr = (s: string) => /^0x[a-fA-F0-9]{40}$/.test(s);
@@ -47,13 +53,13 @@ const lc = (s: string) => s.toLowerCase();
 
 // The account that first sent ETH/gas into a wallet (its funder), from the oldest
 // txs. The first INCOMING value-bearing tx from a different account is the funder.
-async function fundingSource(chainid: number, wallet: string, key: string): Promise<{ funder: string | null; firstTs: number | null }> {
+async function fundingSource(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<{ funder: string | null; firstTs: number | null }> {
   // Read BOTH external txs and INTERNAL txs (contract-routed ETH — a disperse
   // contract, a multisig, a CEX withdrawal via proxy — invisible to txlist), then
   // take the earliest inflow across both as the true first funder.
   const [d, di] = await Promise.all([
-    es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key).catch(() => null),
-    es(chainid, { module: "account", action: "txlistinternal", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key).catch(() => null),
+    es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key, usage).catch(() => null),
+    es(chainid, { module: "account", action: "txlistinternal", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "50", sort: "asc" }, key, usage).catch(() => null),
   ]);
   const txs: any[] = Array.isArray(d?.result) ? d.result : [];
   const itxs: any[] = Array.isArray(di?.result) ? di.result : [];
@@ -69,8 +75,8 @@ async function fundingSource(chainid: number, wallet: string, key: string): Prom
 // How many contracts this wallet has DEPLOYED, from its tx history (creation txs
 // have an empty `to` and a populated contractAddress). A wallet that has minted
 // many contracts is a serial launcher on its own.
-async function deploymentsBy(chainid: number, wallet: string, key: string): Promise<number> {
-  const d = await es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "10000", sort: "asc" }, key).catch(() => null);
+async function deploymentsBy(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<number> {
+  const d = await es(chainid, { module: "account", action: "txlist", address: wallet, startblock: "0", endblock: "99999999", page: "1", offset: "10000", sort: "asc" }, key, usage).catch(() => null);
   const txs: any[] = Array.isArray(d?.result) ? d.result : [];
   const created = new Set<string>();
   for (const t of txs) {
@@ -80,6 +86,16 @@ async function deploymentsBy(chainid: number, wallet: string, key: string): Prom
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
   const key = process.env.ETHERSCAN_API_KEY;
   // Two entry points: ?address=<contract> resolves the contract's deployer first;
   // ?wallet=<addr> traces that wallet DIRECTLY (this is how the operator trace
@@ -93,12 +109,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!chainid) { res.status(200).json({ address: subject, chain, available: false, note: `No Etherscan chain id for '${chain}'.` }); return; }
   if (!key) { res.status(200).json({ address: subject, chain, available: false, note: "Etherscan not configured; EVM deployer trail unavailable." }); return; }
 
+  const usage: CallCounter = { calls: 0, succeeded: 0 };
   try {
     // 1. Resolve the wallet to trace. Given a wallet, it IS the subject; given a
     //    contract, look up who deployed it.
     let deployer: string | null = walletQ && isAddr(walletQ) ? walletQ : null;
     if (!deployer) {
-      const cc = await es(chainid, { module: "contract", action: "getcontractcreation", contractaddresses: address }, key);
+      const cc = await es(chainid, { module: "contract", action: "getcontractcreation", contractaddresses: address }, key, usage);
       const rec = Array.isArray(cc?.result) ? cc.result[0] : null;
       deployer = rec?.contractCreator && isAddr(rec.contractCreator) ? rec.contractCreator : null;
     }
@@ -106,8 +123,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // 2. The deployer's funder + age, and how many contracts it has deployed.
     const [fund, deployments] = await Promise.all([
-      fundingSource(chainid, deployer, key),
-      deploymentsBy(chainid, deployer, key),
+      fundingSource(chainid, deployer, key, usage),
+      deploymentsBy(chainid, deployer, key, usage),
     ]);
     const funderAddr = fund.funder;
     const cexLabel = funderAddr ? CEX[lc(funderAddr)] ?? null : null;
@@ -133,5 +150,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (e) {
     res.status(200).json({ address, chain, available: true, error: String(e), note: "EVM deployer lookup failed." });
+  } finally {
+    if (usage.calls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "etherscan",
+        op: "panel:evm-deployer",
+        calls: usage.calls,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usage.succeeded === usage.calls ? "succeeded" : usage.succeeded > 0 ? "partial" : "failed",
+      });
+    }
   }
 }

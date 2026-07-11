@@ -28,13 +28,18 @@ interface TeamAngle {
   provider: "grok" | "twitterapi" | "github";
   calls: number;
   usd: number;
+  status: "succeeded" | "partial" | "failed";
 }
-interface CallCounter { calls: number }
+interface CallCounter { calls: number; succeeded: number }
+const counterStatus = (counter: CallCounter): TeamAngle["status"] => (
+  counter.succeeded === counter.calls ? "succeeded" : counter.succeeded > 0 ? "partial" : "failed"
+);
 
 // ── Grok angles ──────────────────────────────────────────────────────────
 async function grokPeople(key: string, system: string, user: string): Promise<TeamAngle> {
+  let r: Response;
   try {
-    const r = await fetch("https://api.x.ai/v1/responses", {
+    r = await fetch("https://api.x.ai/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
@@ -45,33 +50,44 @@ async function grokPeople(key: string, system: string, user: string): Promise<Te
       }),
       signal: AbortSignal.timeout(50000),
     });
-    if (!r.ok) return { people: [], provider: "grok", calls: 1, usd: 0 };
-    const d = (await r.json()) as any;
-    const toolCalls = Array.isArray(d.output) ? d.output.filter((item: any) => /search|tool/.test(String(item.type ?? ""))).length : 0;
-    const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
-    const m = text.match(/\{[\s\S]*\}/);
-    let people: any[] = [];
-    if (m) {
-      try {
-        const parsed = JSON.parse(m[0]).people;
-        if (Array.isArray(parsed)) people = parsed;
-      } catch { /* invalid provider payload */ }
-    }
-    return { people, provider: "grok", calls: 1, usd: grokUsd(d.usage, toolCalls) };
-  } catch { return { people: [], provider: "grok", calls: 1, usd: 0 }; }
+  } catch { return { people: [], provider: "grok", calls: 1, usd: 0, status: "failed" }; }
+  if (!r.ok) return { people: [], provider: "grok", calls: 1, usd: 0, status: "failed" };
+
+  let d: any;
+  try { d = await r.json(); }
+  catch { return { people: [], provider: "grok", calls: 1, usd: 0, status: "failed" }; }
+  const toolCalls = Array.isArray(d?.output) ? d.output.filter((item: any) => /search|tool/.test(String(item?.type ?? ""))).length : 0;
+  const text = d?.output_text ?? (Array.isArray(d?.output) ? d.output.flatMap((o: any) => o?.content ?? []).map((c: any) => c?.text ?? "").join(" ") : "") ?? "";
+  const m = typeof text === "string" ? text.match(/\{[\s\S]*\}/) : null;
+  let people: any[] = [];
+  let validContract = false;
+  if (m) {
+    try {
+      const parsed = JSON.parse(m[0]).people;
+      if (Array.isArray(parsed)) { people = parsed; validContract = true; }
+    } catch { /* invalid provider payload */ }
+  }
+  return { people, provider: "grok", calls: 1, usd: grokUsd(d?.usage, toolCalls), status: validContract ? "succeeded" : "partial" };
 }
 
 // ── X following ∩ mentions (deterministic) ─────────────────────────────────
 async function twJson(url: string, key: string, counter?: CallCounter): Promise<any> {
   if (counter) counter.calls += 1;
-  try { const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
+  try {
+    const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (counter) counter.succeeded += 1;
+    return data;
+  } catch { return null; }
 }
 // Chains/infra/tools every project follows + tags — not team, so filter them out.
 const TW_DENY = new Set(["solana", "ethereum", "bitcoin", "base", "arbitrum", "optimism", "polygon", "bnbchain", "avax", "avalancheavax", "pumpdotfun", "dexscreener", "dextools", "coingecko", "coinmarketcap", "jupiterexchange", "raydiumprotocol", "binance", "coinbase", "uniswap", "tether_to", "circle"]);
 async function followsAndTags(handle: string, key: string, counter?: CallCounter): Promise<any[]> {
   const u = handle.replace(/^@/, "");
   const postsD = await twJson(`${TW}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key, counter);
-  const tweets: any[] = postsD?.data?.tweets ?? postsD?.tweets ?? [];
+  const rawTweets = postsD?.data?.tweets ?? postsD?.tweets;
+  const tweets: any[] = Array.isArray(rawTweets) ? rawTweets : [];
   const mentions = new Set<string>();
   for (const t of tweets) for (const mm of String(t.text ?? "").matchAll(/@([A-Za-z0-9_]{2,30})/g)) mentions.add(mm[1].toLowerCase());
   mentions.delete(u.toLowerCase());
@@ -102,16 +118,24 @@ async function followsAndTags(handle: string, key: string, counter?: CallCounter
 // ── GitHub org (deterministic) ─────────────────────────────────────────────
 async function ghJson(path: string, key: string, counter?: CallCounter): Promise<any> {
   if (counter) counter.calls += 1;
-  try { const r = await fetch(GH + path, { headers: { authorization: `Bearer ${key}`, accept: "application/vnd.github+json", "user-agent": "argus" }, signal: AbortSignal.timeout(10000) }); return r.ok ? await r.json() : null; } catch { return null; }
+  try {
+    const r = await fetch(GH + path, { headers: { authorization: `Bearer ${key}`, accept: "application/vnd.github+json", "user-agent": "argus" }, signal: AbortSignal.timeout(10000) });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (counter) counter.succeeded += 1;
+    return data;
+  } catch { return null; }
 }
 async function githubOrgTeam(org: string, key: string, counter?: CallCounter): Promise<any[]> {
   const o = org.replace(/^https?:\/\/(www\.)?github\.com\//i, "").replace(/\/.*$/, "");
   if (!o) return [];
   const logins = new Set<string>();
-  for (const m of (await ghJson(`/orgs/${encodeURIComponent(o)}/public_members?per_page=20`, key, counter)) ?? []) if (m.login) logins.add(m.login);
-  const repos = (await ghJson(`/orgs/${encodeURIComponent(o)}/repos?sort=pushed&per_page=4`, key, counter)) ?? [];
+  const members = await ghJson(`/orgs/${encodeURIComponent(o)}/public_members?per_page=20`, key, counter);
+  for (const m of Array.isArray(members) ? members : []) if (m.login) logins.add(m.login);
+  const repos = await ghJson(`/orgs/${encodeURIComponent(o)}/repos?sort=pushed&per_page=4`, key, counter);
   for (const repo of (Array.isArray(repos) ? repos : []).slice(0, 3)) {
-    for (const c of (await ghJson(`/repos/${o}/${repo.name}/contributors?per_page=10`, key, counter)) ?? []) if (c.login && c.type === "User") logins.add(c.login);
+    const contributors = await ghJson(`/repos/${o}/${repo.name}/contributors?per_page=10`, key, counter);
+    for (const c of Array.isArray(contributors) ? contributors : []) if (c.login && c.type === "User") logins.add(c.login);
   }
   const out: any[] = [];
   for (const login of [...logins].slice(0, 12)) {
@@ -165,17 +189,46 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (x && HANDLE.test(x)) angles.push(grokPeople(xaiKey, xSystem, xUser));
   }
   if (twKey && x && HANDLE.test(x)) {
-    const counter = { calls: 0 };
-    angles.push(followsAndTags(x, twKey, counter).then((people) => ({ people, provider: "twitterapi", calls: counter.calls, usd: counter.calls * 0.0002 })));
+    const counter = { calls: 0, succeeded: 0 };
+    angles.push(followsAndTags(x, twKey, counter)
+      .then((people): TeamAngle => ({ people, provider: "twitterapi", calls: counter.calls, usd: counter.calls * 0.0002, status: counterStatus(counter) }))
+      .catch((): TeamAngle => ({ people: [], provider: "twitterapi", calls: counter.calls, usd: counter.calls * 0.0002, status: counter.succeeded > 0 ? "partial" : "failed" })));
   }
   if (ghKey && gh) {
-    const counter = { calls: 0 };
-    angles.push(githubOrgTeam(gh, ghKey, counter).then((people) => ({ people, provider: "github", calls: counter.calls, usd: 0 })));
+    const counter = { calls: 0, succeeded: 0 };
+    angles.push(githubOrgTeam(gh, ghKey, counter)
+      .then((people): TeamAngle => ({ people, provider: "github", calls: counter.calls, usd: 0, status: counterStatus(counter) }))
+      .catch((): TeamAngle => ({ people: [], provider: "github", calls: counter.calls, usd: 0, status: counter.succeeded > 0 ? "partial" : "failed" })));
   }
   if (!angles.length) { res.status(200).json({ available: false, people: [] }); return; }
 
   try {
     const results = await Promise.all(angles);
+    const providerTotals = new Map<string, { calls: number; usd: number; statuses: TeamAngle["status"][] }>();
+    for (const angle of results) {
+      const current = providerTotals.get(angle.provider) ?? { calls: 0, usd: 0, statuses: [] };
+      current.calls += angle.calls;
+      current.usd += angle.usd;
+      current.statuses.push(angle.status);
+      providerTotals.set(angle.provider, current);
+    }
+    await Promise.all([...providerTotals].filter(([, total]) => total.calls > 0).map(([provider, total]) => attachPanelCost(
+      panelAuth.organizationId,
+      panelCostVersionId,
+      {
+        provider,
+        op: "panel:recon-team",
+        calls: total.calls,
+        usd: total.usd,
+        initiatedBy: panelAuth.userId,
+        status: total.statuses.every((status) => status === "succeeded")
+          ? "succeeded"
+          : total.statuses.every((status) => status === "failed")
+            ? "failed"
+            : "partial",
+      },
+    )));
+
     const self = new Set([domain.toLowerCase(), x.toLowerCase()].filter(Boolean));
     const byKey = new Map<string, any>();
     for (const { people: arr } of results) {
@@ -198,18 +251,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
     }
-    const providerTotals = new Map<string, { calls: number; usd: number }>();
-    for (const angle of results) {
-      const current = providerTotals.get(angle.provider) ?? { calls: 0, usd: 0 };
-      current.calls += angle.calls;
-      current.usd += angle.usd;
-      providerTotals.set(angle.provider, current);
-    }
-    await Promise.all([...providerTotals].map(([provider, total]) => attachPanelCost(
-      panelAuth.organizationId,
-      panelCostVersionId,
-      { provider, op: "panel:recon-team", calls: total.calls, usd: total.usd },
-    )));
     res.status(200).json({ available: true, people: [...byKey.values()].slice(0, 20) });
   } catch (e) {
     res.status(200).json({ available: true, people: [], error: String(e) });

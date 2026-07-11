@@ -19,40 +19,68 @@ const bare = (h: string) => h.replace(/^@/, "");
 const num = (...v: any[]) => { for (const x of v) if (typeof x === "number") return x; return undefined; };
 
 // Grok: the official X handle for a named project.
-async function findHandle(name: string, domain: string, key: string): Promise<{ handle: string | null; usage?: { input_tokens?: number; output_tokens?: number }; toolCalls: number }> {
+type AttemptStatus = "succeeded" | "partial" | "failed";
+type HandleAttempt = {
+  handle: string | null;
+  usage?: { input_tokens?: number; output_tokens?: number };
+  toolCalls: number;
+  status: AttemptStatus;
+  meta?: string;
+};
+
+async function findHandle(name: string, domain: string, key: string): Promise<HandleAttempt> {
   const system =
     "You identify the ONE official X (Twitter) account for a crypto/tech project, using live web + X search. " +
     "Return the account the project itself operates (matches its name + website), NOT a fan, a founder's personal account, or an impersonator. " +
     "Reply with ONLY compact JSON: {\"handle\":\"@...\"} — or {\"handle\":null} if you cannot confidently identify it. Never invent.";
   const user = `Project: "${name}"${domain ? ` (website ${domain})` : ""}. What is its official X account handle?`;
+  let r: Response;
   try {
-    const r = await fetch("https://api.x.ai/v1/responses", {
+    r = await fetch("https://api.x.ai/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({ model: process.env.ARGUS_GROK_MODEL || "grok-4-fast", input: [{ role: "system", content: system }, { role: "user", content: user }], tools: [{ type: "web_search" }, { type: "x_search" }], max_tool_calls: 4 }),
       signal: AbortSignal.timeout(25000),
     });
-    if (!r.ok) return { handle: null, toolCalls: 0 };
-    const d = (await r.json()) as any;
-    const toolCalls = Array.isArray(d.output) ? d.output.filter((item: any) => /search|tool/.test(String(item.type ?? ""))).length : 0;
-    const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
-    const match = text.match(/\{[\s\S]*\}/);
-    const parsed = match ? JSON.parse(match[0]) : {};
-    const handle = typeof parsed.handle === "string" && HANDLE.test(parsed.handle) ? bare(parsed.handle) : null;
-    return { handle, usage: d.usage, toolCalls };
-  } catch { return { handle: null, toolCalls: 0 }; }
+  } catch { return { handle: null, toolCalls: 0, status: "failed", meta: "transport_error" }; }
+  if (!r.ok) return { handle: null, toolCalls: 0, status: "failed", meta: `http_${r.status}` };
+
+  let d: any;
+  try { d = await r.json(); }
+  catch { return { handle: null, toolCalls: 0, status: "failed", meta: "response_json_error" }; }
+  const toolCalls = Array.isArray(d?.output) ? d.output.filter((item: any) => /search|tool/.test(String(item?.type ?? ""))).length : 0;
+  const text = d?.output_text ?? (Array.isArray(d?.output) ? d.output.flatMap((o: any) => o?.content ?? []).map((c: any) => c?.text ?? "").join(" ") : "") ?? "";
+  const match = typeof text === "string" ? text.match(/\{[\s\S]*\}/) : null;
+  if (!match) return { handle: null, usage: d?.usage, toolCalls, status: "partial", meta: "output_contract_error" };
+  let parsed: any;
+  try { parsed = JSON.parse(match[0]); }
+  catch { return { handle: null, usage: d?.usage, toolCalls, status: "partial", meta: "output_contract_error" }; }
+  if (parsed?.handle == null) return { handle: null, usage: d?.usage, toolCalls, status: "succeeded" };
+  if (typeof parsed.handle !== "string" || !HANDLE.test(parsed.handle)) {
+    return { handle: null, usage: d?.usage, toolCalls, status: "partial", meta: "invalid_handle" };
+  }
+  return { handle: bare(parsed.handle), usage: d?.usage, toolCalls, status: "succeeded" };
 }
 
 // twitterapi.io profile.
-async function profile(handle: string, key: string): Promise<any | null> {
+type ProfileAttempt = { profile: any | null; status: AttemptStatus; meta?: string };
+async function profile(handle: string, key: string): Promise<ProfileAttempt> {
+  let r: Response;
   try {
-    const r = await fetch(`https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(handle)}`, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(10000) });
-    if (!r.ok) return null;
-    const d = (await r.json()) as any;
-    const p = d?.data ?? d;
-    if (!p || (p.name == null && p.followers == null && p.followers_count == null && p.description == null)) return null;
-    const website = p?.profile_bio?.entities?.url?.urls?.[0]?.expanded_url ?? p?.entities?.url?.urls?.[0]?.expanded_url ?? p?.url ?? null;
-    return {
+    r = await fetch(`https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(handle)}`, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(10000) });
+  } catch { return { profile: null, status: "failed", meta: "transport_error" }; }
+  if (!r.ok) return { profile: null, status: "failed", meta: `http_${r.status}` };
+  let d: any;
+  try { d = await r.json(); }
+  catch { return { profile: null, status: "failed", meta: "response_json_error" }; }
+  const p = d?.data ?? d;
+  if (!p || (p.name == null && p.followers == null && p.followers_count == null && p.description == null)) {
+    return { profile: null, status: "partial", meta: "profile_shape_error" };
+  }
+  const website = p?.profile_bio?.entities?.url?.urls?.[0]?.expanded_url ?? p?.entities?.url?.urls?.[0]?.expanded_url ?? p?.url ?? null;
+  return {
+    status: "succeeded",
+    profile: {
       handle: "@" + bare(handle),
       name: p.name ?? null,
       bio: p.description ?? p.bio ?? null,
@@ -63,8 +91,8 @@ async function profile(handle: string, key: string): Promise<any | null> {
       verified: !!(p.isBlueVerified ?? p.blue_verified ?? p.verified ?? p.isVerified),
       website: typeof website === "string" ? website : null,
       avatar: p.profilePicture ?? p.profile_image_url_https ?? null,
-    };
-  } catch { return null; }
+    },
+  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -116,13 +144,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       op: "panel:x-find-search",
       calls: 1,
       usd: grokUsd(result.usage, result.toolCalls),
-    });
+      initiatedBy: auth.userId,
+      status: result.status,
+      ...(result.meta ? { meta: result.meta } : {}),
+    }).catch(() => undefined);
   }
   if (!handle) { res.status(200).json({ available: true, found: false, note: "No official X account could be identified." }); return; }
   if (!twKey) { res.status(200).json({ available: true, found: true, handle: "@" + handle, note: "twitterapi not configured for profile detail." }); return; }
 
-  const p = await profile(handle, twKey);
-  await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "twitterapi", op: "panel:x-find-profile", calls: 1, usd: 0.0002 });
+  const profileResult = await profile(handle, twKey);
+  await attachPanelCost(auth.organizationId, panelCostVersionId, {
+    provider: "twitterapi",
+    op: "panel:x-find-profile",
+    calls: 1,
+    usd: 0.0002,
+    initiatedBy: auth.userId,
+    status: profileResult.status,
+    ...(profileResult.meta ? { meta: profileResult.meta } : {}),
+  }).catch(() => undefined);
+  const p = profileResult.profile;
   if (!p) { res.status(200).json({ available: true, found: true, handle: "@" + handle, note: "Account named but profile could not be resolved." }); return; }
 
   // Confidence: the account's own linked website matching the project's domain is

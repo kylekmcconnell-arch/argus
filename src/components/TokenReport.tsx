@@ -439,10 +439,10 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         {/* on-chain forensic suite — the same cluster the investigation report uses */}
         {showCurrentIntelligence && panelCostToken && (
           <div className="mt-4">
-            <OnChainForensics token={d} onAudit={onAudit} record={canRecordCurrentIntelligence} />
-            {d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} record={canRecordCurrentIntelligence} /></div>}
-            {d.deployer && <div className="mt-3"><RiskPaths address={d.deployer} /></div>}
-            {d.deployer && <div className="mt-3"><Holdings address={d.deployer} symbol={d.symbol} /></div>}
+            <OnChainForensics token={d} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
+            {d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} /></div>}
+            {d.deployer && <div className="mt-3"><RiskPaths address={d.deployer} panelCostToken={panelCostToken} /></div>}
+            {d.deployer && <div className="mt-3"><Holdings address={d.deployer} symbol={d.symbol} panelCostToken={panelCostToken} /></div>}
           </div>
         )}
 

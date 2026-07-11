@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { fetchPanelJson, panelRequestFailure, requiredPanelHeaders, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // What a wallet actually holds right now — net worth, 24h move, token breakdown.
 // The forensic bite lives in the shape of the bag, not the total: an operator whose
@@ -16,24 +18,30 @@ type Data = {
 const usd = (n: number) => (n >= 1e9 ? `$${(n / 1e9).toFixed(2)}B` : n >= 1e6 ? `$${(n / 1e6).toFixed(2)}M` : n >= 1e3 ? `$${(n / 1e3).toFixed(1)}K` : `$${Math.round(n)}`);
 const pct = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
 
-export function Holdings({ address, symbol }: { address?: string | null; symbol?: string }) {
-  const [d, setD] = useState<Data | null>(null);
-  const ran = useRef(false);
+export function Holdings({ address, symbol, panelCostToken }: { address?: string | null; symbol?: string; panelCostToken?: string }) {
+  const requestKey = [address ?? "", symbol ?? "", panelCostToken ?? ""].join("\u0000");
+  const [result, setResult] = useState<{ key: string; data: Data | null; failure?: PanelRequestFailure } | null>(null);
+  const ran = useRef("");
 
   useEffect(() => {
-    if (ran.current || !address) return;
-    ran.current = true;
+    if (ran.current === requestKey || !address || !panelCostToken) return;
+    ran.current = requestKey;
+    let live = true;
     (async () => {
       try {
         const q = `/api/arkham-holdings?address=${encodeURIComponent(address)}${symbol ? `&symbol=${encodeURIComponent(symbol)}` : ""}`;
-        const r = await fetch(q);
-        const j = await r.json();
-        setD(j?.available ? j : null);
-      } catch { /* non-fatal */ }
+        const j = await fetchPanelJson<Data>(q, { headers: requiredPanelHeaders(panelCostToken) });
+        if (live) setResult({ key: requestKey, data: j?.available ? j : null });
+      } catch (error) {
+        if (live) setResult({ key: requestKey, data: null, failure: panelRequestFailure(error) });
+      }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [address]);
+    return () => { live = false; };
+  }, [address, panelCostToken, requestKey, symbol]);
 
+  const current = result?.key === requestKey ? result : null;
+  if (current?.failure) return <PanelRequestNotice failure={current.failure} label="Wallet holdings intelligence" />;
+  const d = current?.data;
   if (!d || !d.available || d.totalUsd < 1 || d.holdings.length === 0) return null;
   const up = d.deltaPct >= 0;
 
