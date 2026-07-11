@@ -2486,26 +2486,20 @@ async function checkFollow(source, target) {
     return null;
   }
 }
-async function dynamicNotable() {
+async function dynamicNotable(organizationId) {
+  const org = organizationId?.trim();
+  if (!org) return [];
   const url = env("SUPABASE_URL");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
   if (!url || !key) return [];
-  const cached = await cacheGet("notable:dynamic");
-  if (cached) {
-    try {
-      return JSON.parse(cached);
-    } catch {
-    }
-  }
   try {
-    const r = await fetch(`${url}/rest/v1/reports?select=ref,score&kind=eq.person&verdict=eq.PASS&order=score.desc&limit=600`, {
-      headers: { apikey: key, authorization: `Bearer ${key}` },
+    const r = await fetch(`${url.replace(/\/$/, "")}/rest/v1/reports?select=ref,score&organization_id=eq.${encodeURIComponent(org)}&kind=eq.person&verdict=eq.PASS&order=score.desc&limit=600`, {
+      headers: { apikey: key, ...!key.startsWith("sb_secret_") ? { authorization: `Bearer ${key}` } : {} },
       signal: AbortSignal.timeout(8e3)
     });
     if (!r.ok) return [];
     const rows = await r.json();
     const accts = rows.filter((x) => x && typeof x.ref === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(x.ref)).map((x) => ({ handle: x.ref.replace(/^@/, ""), label: "ARGUS-verified" }));
-    await cacheSet("notable:dynamic", JSON.stringify(accts));
     return accts;
   } catch {
     return [];
@@ -2516,7 +2510,7 @@ async function notableFollowers(subject, opts) {
   if (!key) return { list: [], checked: 0 };
   const subj = subject.replace(/^@/, "").toLowerCase();
   const seen = /* @__PURE__ */ new Set();
-  const candidates = [...NOTABLE_ACCOUNTS, ...await dynamicNotable()].filter((n) => {
+  const candidates = [...NOTABLE_ACCOUNTS, ...await dynamicNotable(opts?.organizationId)].filter((n) => {
     const lk = n.handle.toLowerCase();
     if (lk === subj || seen.has(lk)) return false;
     seen.add(lk);
@@ -2802,7 +2796,7 @@ var xAdapter = {
       ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Checking which top funds, founders, and KOLs follow the subject\u2026", source: "twitterapi.io", tone: "neutral" });
       const fcm = (ctx.evidence.profile.followers ?? "").match(/([\d.]+)\s*([KMB]?)/i);
       const followerCount = fcm ? Number(fcm[1]) * (/m/i.test(fcm[2]) ? 1e6 : /b/i.test(fcm[2]) ? 1e9 : /k/i.test(fcm[2]) ? 1e3 : 1) : void 0;
-      const scan = await notableFollowers(ctx.handle, { followerCount });
+      const scan = await notableFollowers(ctx.handle, { followerCount, organizationId: ctx.organizationId });
       const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
       if (nf.length) {
@@ -4307,7 +4301,7 @@ async function postCadence(ctx) {
     ctx.emit({ phase: "Cadence", label: "Posting steady", detail: report.summary, source: "twitterapi.io", tone: "neutral" });
   }
 }
-async function runAuditWithLedger(rawHandle, emit) {
+async function runAuditWithLedger(rawHandle, emit, options) {
   const fixture = findSubject(rawHandle);
   const liveProviders = ADAPTERS.filter((a) => KEYED.has(a.id) && a.available());
   const anyLive = liveProviders.length > 0 || analystAvailable();
@@ -4333,6 +4327,7 @@ async function runAuditWithLedger(rawHandle, emit) {
   emit({ phase: "P0 \xB7 Intake", label: "Resolve handle", detail: `Normalizing ${rawHandle} and opening the audit ledger.`, tone: "neutral" });
   const ctx = {
     handle: evidence.profile.handle,
+    organizationId: options?.organizationId,
     evidence,
     emit,
     recordCheck: (observation) => checkTracker.record(observation)
@@ -4476,8 +4471,8 @@ async function runAuditWithLedger(rawHandle, emit) {
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches \u2248${cost.sources} sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
   return dossier;
 }
-function runAudit(rawHandle, emit) {
-  return withCostLedger(() => runAuditWithLedger(rawHandle, emit));
+function runAudit(rawHandle, emit, options) {
+  return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
 }
 
 // src/graph/network.ts

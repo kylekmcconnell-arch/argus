@@ -717,7 +717,7 @@ async function postCadence(ctx: CollectContext) {
   }
 }
 
-async function runAuditWithLedger(rawHandle: string, emit: Emit): Promise<Dossier | null> {
+async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { organizationId?: string }): Promise<Dossier | null> {
   const fixture = findSubject(rawHandle);
   const liveProviders = ADAPTERS.filter((a) => KEYED.has(a.id) && a.available());
   const anyLive = liveProviders.length > 0 || analystAvailable();
@@ -748,6 +748,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit): Promise<Dossie
 
   const ctx: CollectContext = {
     handle: evidence.profile.handle,
+    organizationId: options?.organizationId,
     evidence,
     emit,
     recordCheck: (observation) => checkTracker.record(observation),
@@ -924,6 +925,6 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit): Promise<Dossie
   return dossier;
 }
 
-export function runAudit(rawHandle: string, emit: Emit): Promise<Dossier | null> {
-  return withCostLedger(() => runAuditWithLedger(rawHandle, emit));
+export function runAudit(rawHandle: string, emit: Emit, options?: { organizationId?: string }): Promise<Dossier | null> {
+  return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
 }

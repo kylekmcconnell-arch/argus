@@ -7,6 +7,7 @@ import type { TokenDossier } from "../src/token/audit";
 export function runAudit(
   handle: string,
   emit?: (step: TraceStep) => void,
+  options?: { organizationId?: string },
 ): Promise<Dossier | null>;
 
 export function auditToken(

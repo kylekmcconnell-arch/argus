@@ -425,35 +425,36 @@ export interface NotableScan { list: NotableFollower[]; checked: number }
 // AUTO-GROW: every person ARGUS has audited and PASSed is a verified-legit account
 // — a real founder / fund / KOL whose follow is a credibility signal. Fold them
 // into the reference set so it compounds past the hand-curated core (toward 1000+)
-// accurately and stays current, without hand-typing. Cached (the set moves slowly).
-async function dynamicNotable(): Promise<{ handle: string; label: string }[]> {
+// accurately and stays current, without hand-typing. These rows are tenant-owned:
+// never read them without an explicit organization boundary, and do not put the
+// combined result in the shared provider cache.
+export async function dynamicNotable(organizationId?: string): Promise<{ handle: string; label: string }[]> {
+  const org = organizationId?.trim();
+  if (!org) return [];
   const url = env("SUPABASE_URL");
-  const key = env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
   if (!url || !key) return [];
-  const cached = await cacheGet("notable:dynamic");
-  if (cached) { try { return JSON.parse(cached); } catch { /* refetch */ } }
   try {
-    const r = await fetch(`${url}/rest/v1/reports?select=ref,score&kind=eq.person&verdict=eq.PASS&order=score.desc&limit=600`, {
-      headers: { apikey: key, authorization: `Bearer ${key}` }, signal: AbortSignal.timeout(8000),
+    const r = await fetch(`${url.replace(/\/$/, "")}/rest/v1/reports?select=ref,score&organization_id=eq.${encodeURIComponent(org)}&kind=eq.person&verdict=eq.PASS&order=score.desc&limit=600`, {
+      headers: { apikey: key, ...(!key.startsWith("sb_secret_") ? { authorization: `Bearer ${key}` } : {}) }, signal: AbortSignal.timeout(8000),
     });
     if (!r.ok) return [];
     const rows = (await r.json()) as { ref: string; score: number }[];
     const accts = rows
       .filter((x) => x && typeof x.ref === "string" && /^@?[A-Za-z0-9_]{2,30}$/.test(x.ref))
       .map((x) => ({ handle: x.ref.replace(/^@/, ""), label: "ARGUS-verified" }));
-    await cacheSet("notable:dynamic", JSON.stringify(accts));
     return accts;
   } catch { return []; }
 }
 
-export async function notableFollowers(subject: string, opts?: { followerCount?: number; budgetMs?: number }): Promise<NotableScan> {
+export async function notableFollowers(subject: string, opts?: { followerCount?: number; budgetMs?: number; organizationId?: string }): Promise<NotableScan> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return { list: [], checked: 0 };
   const subj = subject.replace(/^@/, "").toLowerCase();
   // Dedup the combined reference set: the hand-curated core FIRST (so its richer
   // labels win), then the auto-grown ARGUS-verified accounts.
   const seen = new Set<string>();
-  const candidates = [...NOTABLE_ACCOUNTS, ...(await dynamicNotable())].filter((n) => {
+  const candidates = [...NOTABLE_ACCOUNTS, ...(await dynamicNotable(opts?.organizationId))].filter((n) => {
     const lk = n.handle.toLowerCase();
     if (lk === subj || seen.has(lk)) return false;
     seen.add(lk); return true;
@@ -936,7 +937,7 @@ export const xAdapter: Adapter = {
       // enumerate-vs-reverse-check; unknown → reverse-check (safe default).
       const fcm = (ctx.evidence.profile.followers ?? "").match(/([\d.]+)\s*([KMB]?)/i);
       const followerCount = fcm ? Number(fcm[1]) * (/m/i.test(fcm[2]) ? 1e6 : /b/i.test(fcm[2]) ? 1e9 : /k/i.test(fcm[2]) ? 1e3 : 1) : undefined;
-      const scan = await notableFollowers(ctx.handle, { followerCount });
+      const scan = await notableFollowers(ctx.handle, { followerCount, organizationId: ctx.organizationId });
       const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
       // Complete coverage: we checked every account on the curated list directly.

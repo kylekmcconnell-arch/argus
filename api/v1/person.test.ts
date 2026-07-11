@@ -29,6 +29,8 @@ import { resolveInput, runAudit } from "../_collector.js";
 import { persistServerDossier } from "../audit.js";
 import handler from "./person";
 
+const AUTH_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
+
 interface CapturedResponse {
   statusCode: number;
   body: unknown;
@@ -46,10 +48,10 @@ function response(): { res: VercelResponse; captured: CapturedResponse } {
   return { res, captured };
 }
 
-function request(handle: string): VercelRequest {
+function request(handle: string, query: Record<string, string> = {}): VercelRequest {
   return {
     method: "GET",
-    query: { handle },
+    query: { handle, ...query },
     headers: {},
   } as unknown as VercelRequest;
 }
@@ -73,6 +75,27 @@ describe("v1 person input guard", () => {
     expect(captured.body).toEqual({ error: "pass ?handle=<@handle>" });
     expect(consumeInvestigationQuota).not.toHaveBeenCalled();
     expect(runAudit).not.toHaveBeenCalled();
+    expect(persistServerDossier).not.toHaveBeenCalled();
+  });
+
+  it("passes only the authenticated organization to the collector", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({
+      allowed: true,
+      remaining: 9,
+      used: 1,
+    });
+    vi.mocked(runAudit).mockResolvedValue(null);
+    const { res, captured } = response();
+
+    await handler(request("argus", { organizationId: "attacker-controlled-org" }), res);
+
+    expect(captured.statusCode).toBe(404);
+    expect(runAudit).toHaveBeenCalledOnce();
+    expect(runAudit).toHaveBeenCalledWith(
+      "argus",
+      expect.any(Function),
+      { organizationId: AUTH_ORGANIZATION_ID },
+    );
     expect(persistServerDossier).not.toHaveBeenCalled();
   });
 });
