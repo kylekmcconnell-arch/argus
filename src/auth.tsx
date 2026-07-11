@@ -6,7 +6,10 @@ import {
   type AuthValue,
 } from "./auth-context";
 import { ArgusMark } from "./components/ArgusMark";
-import { createAuthenticatedFetch } from "./lib/authenticatedFetch";
+import {
+  createAuthenticatedFetch,
+  shouldRevalidateSession,
+} from "./lib/authenticatedFetch";
 import { setAnalyst } from "./lib/analyst";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, "") || "";
@@ -26,6 +29,8 @@ const supabase: SupabaseClient | null = authConfigured
 
 let fetchInstalled = false;
 let currentAccessToken: string | null = null;
+let validatedAccessToken: string | null = null;
+let pendingAccessToken: string | null = null;
 let currentValidationId = 0;
 
 /** Add the current Supabase bearer token to same-origin API requests only. */
@@ -83,6 +88,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setProfile(null);
     setAuthenticatedButDenied(false);
     if (!session) {
+      validatedAccessToken = null;
+      pendingAccessToken = null;
       setLoading(false);
       return;
     }
@@ -90,15 +97,20 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     try {
       const next = await loadProfile(session);
       if (validationId !== currentValidationId) return;
+      validatedAccessToken = session.access_token;
       setProfile(next);
       setAnalyst(next.user.displayName);
       setError("");
     } catch (validationError) {
       if (validationId !== currentValidationId) return;
+      validatedAccessToken = session.access_token;
       setAuthenticatedButDenied(true);
       setError(validationError instanceof Error ? validationError.message : "Access could not be verified.");
     } finally {
-      if (validationId === currentValidationId) setLoading(false);
+      if (validationId === currentValidationId) {
+        pendingAccessToken = null;
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -107,7 +119,14 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     let active = true;
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       // Leave Supabase's auth callback before making another network request.
-      currentAccessToken = session?.access_token ?? null;
+      const nextAccessToken = session?.access_token ?? null;
+      currentAccessToken = nextAccessToken;
+      if (!shouldRevalidateSession(
+        nextAccessToken,
+        validatedAccessToken,
+        pendingAccessToken,
+      )) return;
+      pendingAccessToken = nextAccessToken;
       const validationId = ++currentValidationId;
       setTimeout(() => {
         if (active && validationId === currentValidationId) {
@@ -118,6 +137,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     return () => {
       active = false;
       currentAccessToken = null;
+      validatedAccessToken = null;
+      pendingAccessToken = null;
       currentValidationId += 1;
       data.subscription.unsubscribe();
     };
@@ -127,6 +148,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setError("");
     setMessage("");
     currentAccessToken = null;
+    validatedAccessToken = null;
+    pendingAccessToken = null;
     currentValidationId += 1;
     await supabase?.auth.signOut();
     setProfile(null);
