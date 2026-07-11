@@ -8,29 +8,29 @@ import type { TokenDossier } from "../token/audit";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const harness = vi.hoisted(() => ({ clipboard: vi.fn() }));
+const harness = vi.hoisted(() => ({ clipboard: vi.fn(), livePanel: vi.fn(), arkham: vi.fn(() => ({})) }));
 
-vi.mock("../lib/useArkhamLabels", () => ({ useArkhamLabels: () => [] }));
+vi.mock("../lib/useArkhamLabels", () => ({ useArkhamLabels: harness.arkham }));
 vi.mock("../graph/store", () => ({ getContributions: () => [], investigationContribution: () => null }));
 vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
 
 vi.mock("./Avatar", () => ({ Avatar: () => null }));
-vi.mock("./OnChainForensics", () => ({ OnChainForensics: () => null }));
-vi.mock("./ProjectResearch", () => ({ ProjectResearch: () => null }));
+vi.mock("./OnChainForensics", () => ({ OnChainForensics: () => { harness.livePanel("on-chain"); return null; } }));
+vi.mock("./ProjectResearch", () => ({ ProjectResearch: () => { harness.livePanel("project-research"); return null; } }));
 vi.mock("./ProjectLinks", () => ({ ProjectLinks: () => null }));
 vi.mock("./MethodologyChecklist", () => ({ MethodologyChecklist: () => null }));
 vi.mock("./ArkhamName", () => ({ ArkhamName: () => null }));
-vi.mock("./AddInfo", () => ({ AddInfo: () => null }));
-vi.mock("./LinkEntity", () => ({ LinkEntity: () => null }));
+vi.mock("./AddInfo", () => ({ AddInfo: () => { harness.livePanel("add-info"); return null; } }));
+vi.mock("./LinkEntity", () => ({ LinkEntity: () => { harness.livePanel("link-entity"); return null; } }));
 vi.mock("./AskReport", () => ({ AskReport: () => null }));
 vi.mock("./ArkhamGraphBridge", () => ({ ArkhamGraphBridge: () => null }));
-vi.mock("./Counterparties", () => ({ Counterparties: () => null }));
-vi.mock("./RiskPaths", () => ({ RiskPaths: () => null }));
-vi.mock("./Holdings", () => ({ Holdings: () => null }));
-vi.mock("./TokenSparkline", () => ({ TokenSparkline: () => null }));
-vi.mock("./NamesakeCheck", () => ({ NamesakeCheck: () => null }));
+vi.mock("./Counterparties", () => ({ Counterparties: () => { harness.livePanel("counterparties"); return null; } }));
+vi.mock("./RiskPaths", () => ({ RiskPaths: () => { harness.livePanel("risk-paths"); return null; } }));
+vi.mock("./Holdings", () => ({ Holdings: () => { harness.livePanel("holdings"); return null; } }));
+vi.mock("./TokenSparkline", () => ({ TokenSparkline: () => { harness.livePanel("sparkline"); return null; } }));
+vi.mock("./NamesakeCheck", () => ({ NamesakeCheck: () => { harness.livePanel("namesake"); return null; } }));
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => null }));
-vi.mock("./RingAlert", () => ({ RingAlert: () => null }));
+vi.mock("./RingAlert", () => ({ RingAlert: () => { harness.livePanel("ring-alert"); return null; } }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: () => null }));
 vi.mock("./SnapshotEvidenceControl", () => ({
   LiveSupplementalNotice: () => null,
@@ -109,6 +109,8 @@ beforeEach(() => {
   document.body.appendChild(container);
   root = createRoot(container);
   harness.clipboard.mockReset().mockResolvedValue(undefined);
+  harness.livePanel.mockReset();
+  harness.arkham.mockClear();
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: harness.clipboard },
@@ -160,5 +162,7 @@ describe("investigation exact sharing", () => {
     render(investigation({ persistence: { state: "private", scanId: "private-scan" } }));
 
     expect([...container.querySelectorAll("button")].some((button) => button.textContent?.trim() === "Share")).toBe(false);
+    expect(harness.livePanel).not.toHaveBeenCalled();
+    expect(harness.arkham).toHaveBeenCalledWith([]);
   });
 });

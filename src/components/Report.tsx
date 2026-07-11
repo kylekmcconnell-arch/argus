@@ -396,9 +396,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const persistenceMissingCapability = !versionContext
     && livePersistence?.state === "persisted"
     && !panelCostToken;
+  const privateSession = livePersistence?.state === "private";
   const showCurrentIntelligence = versionContext
     ? currentIntelligenceEnabled
-    : !persistencePending && !persistenceFailed && !persistenceMissingCapability;
+    : !privateSession && !persistencePending && !persistenceFailed && !persistenceMissingCapability;
   const canRecordCurrentIntelligence = !versionContext && livePersistence?.state !== "private";
   const canMutateWorkspace = !versionContext && livePersistence?.state !== "private";
   const canShare = !embeddedFacet && Boolean(
@@ -602,9 +603,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             />
           </div>
         )}
-        {!versionContext && showCurrentIntelligence && (
+        {!versionContext && (showCurrentIntelligence || privateSession) && (
           <div className="mt-4">
-            <LiveSupplementalNotice private={livePersistence?.state === "private"} persisted={livePersistence?.state === "persisted"} />
+            <LiveSupplementalNotice private={privateSession} persisted={livePersistence?.state === "persisted"} />
           </div>
         )}
         {persistencePending && (

@@ -28,7 +28,8 @@ describe("site recon copied evidence links", () => {
   it("labels a private unsaved recon without implying persistence", () => {
     const text = reconReportText(recon(), { privateSession: true }, "https://argus.test");
 
-    expect(text).toContain("?site=argus.example");
+    expect(text).not.toContain("?site=");
+    expect(text).not.toContain("https://argus.test/");
     expect(text).toContain("private live ARGUS session");
   });
 });

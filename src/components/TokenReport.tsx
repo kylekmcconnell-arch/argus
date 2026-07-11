@@ -102,7 +102,7 @@ function tokenReportText(
     .map((f) => `${TONE_GLYPH[f.tone] ?? "·"} ${f.claim}`);
   const exactLink = evidence?.reportVersionId
     ? `${location.origin}/?version=${encodeURIComponent(evidence.reportVersionId)}`
-    : `${location.origin}/?t=${encodeURIComponent(d.address)}`;
+    : null;
   const provenance = evidence?.version
     ? `— ARGUS immutable snapshot v${evidence.version}`
     : evidence?.reportVersionId
@@ -120,7 +120,7 @@ function tokenReportText(
     "",
     `liq ${moneyShort(d.liquidityUsd)} · mc ${moneyShort(d.mcap)} · age ${age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} CEX` : ""}`,
     d.address,
-    exactLink,
+    ...(exactLink ? [exactLink] : []),
     provenance,
   ].join("\n");
 }
@@ -150,9 +150,10 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const persistenceMissingCapability = !versionContext
     && livePersistence?.state === "persisted"
     && !panelCostToken;
+  const privateSession = livePersistence?.state === "private";
   const showCurrentIntelligence = versionContext
     ? currentIntelligenceEnabled
-    : !persistencePending && !persistenceFailed && !persistenceMissingCapability;
+    : !privateSession && !persistencePending && !persistenceFailed && !persistenceMissingCapability;
   const canRecordCurrentIntelligence = !versionContext && livePersistence?.state !== "private";
   const canMutateWorkspace = !versionContext && livePersistence?.state !== "private";
   const canShare = !embeddedFacet && Boolean(
@@ -308,9 +309,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             />
           </div>
         )}
-        {!versionContext && showCurrentIntelligence && (
+        {!versionContext && (showCurrentIntelligence || privateSession) && (
           <div className="mt-4">
-            <LiveSupplementalNotice private={livePersistence?.state === "private"} persisted={livePersistence?.state === "persisted"} />
+            <LiveSupplementalNotice private={privateSession} persisted={livePersistence?.state === "persisted"} />
           </div>
         )}
         {persistencePending && (

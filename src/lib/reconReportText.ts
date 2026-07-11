@@ -14,7 +14,7 @@ export function reconReportText(
   const base = origin.replace(/\/$/, "");
   const exactLink = evidence?.reportVersionId
     ? `${base}/?version=${encodeURIComponent(evidence.reportVersionId)}`
-    : `${base}/?site=${encodeURIComponent(host)}`;
+    : null;
   const provenance = evidence?.version
     ? `— ARGUS immutable snapshot v${evidence.version}`
     : evidence?.reportVersionId
@@ -30,7 +30,7 @@ export function reconReportText(
     ...(verdict?.reasons ?? []).slice(0, 6).map((reason) => `${GLYPH[reason.tone] ?? "·"} ${reason.text}`),
     "",
     host,
-    exactLink,
+    ...(exactLink ? [exactLink] : []),
     provenance,
   ].join("\n");
 }

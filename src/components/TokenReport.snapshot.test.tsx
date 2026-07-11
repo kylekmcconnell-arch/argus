@@ -232,15 +232,23 @@ describe("token report supplemental evidence boundary", () => {
     expect(harness.secondOpinion).not.toHaveBeenCalled();
   });
 
-  it("keeps private live intelligence session-only and blocks shared graph mutations", () => {
+  it("keeps private supplemental panels paused and copies no mutable subject link", () => {
     render(dossier({ persistence: { state: "private" } }));
 
-    expect(container.textContent).toContain("fetched during this private session");
+    expect(container.textContent).toContain("supplemental panels are paused");
+    expect(container.textContent).toContain("avoid shared cache traces");
     expect(container.textContent).toContain("not saved to a case");
-    expect(harness.livePanel.mock.calls.some(([name]) => name === "on-chain" || name === "counterparties")).toBe(false);
-    expect(harness.livePanel.mock.calls.find(([name]) => name === "project-research")?.[1]).not.toHaveProperty("panelCostToken");
-    expect(harness.livePanel.mock.calls.some(([name]) => name === "add-info" || name === "link-entity")).toBe(false);
+    expect(harness.livePanel).not.toHaveBeenCalled();
+    expect(harness.secondOpinion).not.toHaveBeenCalled();
     expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Share")).toBe(false);
     expect([...container.querySelectorAll("button")].some((button) => button.textContent?.includes("Watch"))).toBe(false);
+
+    const copy = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Copy report");
+    act(() => copy?.click());
+    const copiedReport = String(harness.clipboard.mock.calls.at(-1)?.[0] ?? "");
+    expect(copiedReport).toContain("private live ARGUS session");
+    expect(copiedReport).not.toContain("?t=");
+    expect(copiedReport).not.toContain("?version=");
   });
 });

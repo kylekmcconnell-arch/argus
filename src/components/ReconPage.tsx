@@ -103,7 +103,6 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
   const [resultPersistence, setResultPersistence] = useState<ReportPersistenceContext | null>(null);
   const [snapshotContext, setSnapshotContext] = useState<ReportVersionContext | null>(initialVersionContext ?? null);
   const [currentIntelligenceEnabled, setCurrentIntelligenceEnabled] = useState(false);
-  const showCurrentIntelligence = !snapshotContext || currentIntelligenceEnabled;
   const resultPolicy = reconResultPolicy({
     hasRecon: Boolean(recon),
     resultPrivate,
@@ -111,6 +110,8 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
     snapshot: Boolean(snapshotContext),
     persistence: resultPersistence,
   });
+  const showCurrentIntelligence = (!snapshotContext || currentIntelligenceEnabled)
+    && !resultPolicy.displayedPrivate;
   // A Case Brief is valid only for the exact stored snapshot supplied at mount.
   // Any new run clears that binding until the result is reopened from storage.
   const [briefBound, setBriefBound] = useState(Boolean(initialRecon && onOpenBrief));

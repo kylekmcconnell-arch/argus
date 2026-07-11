@@ -91,9 +91,10 @@ export function InvestigationReport({
   const persistenceMissingCapability = !versionContext
     && inv.persistence?.state === "persisted"
     && !panelCostToken;
+  const privateSession = inv.persistence?.state === "private";
   const showCurrentIntelligence = versionContext
     ? currentIntelligenceEnabled
-    : !persistencePending && !persistenceFailed && !persistenceMissingCapability;
+    : !privateSession && !persistencePending && !persistenceFailed && !persistenceMissingCapability;
   const canRecordCurrentIntelligence = !versionContext && inv.persistence?.state !== "private";
   const canMutateWorkspace = !versionContext && inv.persistence?.state !== "private";
   const canShare = Boolean(
@@ -279,9 +280,9 @@ export function InvestigationReport({
             />
           </div>
         )}
-        {!versionContext && showCurrentIntelligence && (
+        {!versionContext && (showCurrentIntelligence || privateSession) && (
           <div className="mt-4">
-            <LiveSupplementalNotice private={inv.persistence?.state === "private"} persisted={inv.persistence?.state === "persisted"} />
+            <LiveSupplementalNotice private={privateSession} persisted={inv.persistence?.state === "persisted"} />
           </div>
         )}
         {persistencePending && (

@@ -61,10 +61,11 @@ describe("LiveSupplementalNotice", () => {
     expect(container.textContent).toContain("not included in the immutable Share payload or scored verdict");
   });
 
-  it("labels private supplemental evidence as session-only", async () => {
+  it("labels private supplemental panels as paused and unsaved", async () => {
     await act(async () => root.render(<LiveSupplementalNotice private />));
 
-    expect(container.textContent).toContain("fetched during this private session");
+    expect(container.textContent).toContain("supplemental panels are paused");
+    expect(container.textContent).toContain("avoid shared cache traces");
     expect(container.textContent).toContain("not saved to a case");
   });
 

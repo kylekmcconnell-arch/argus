@@ -20,7 +20,7 @@ export function LiveSupplementalNotice({
       className="rounded-lg border border-caution/30 bg-caution/5 px-3 py-2 text-[11.5px] leading-relaxed text-caution"
     >
       {privateSession
-        ? "Live supplemental intelligence · fetched during this private session · not saved to a case or included in the scored verdict"
+        ? "Private result · supplemental panels are paused to avoid shared cache traces · not saved to a case, graph, watchlist, or activity feed"
         : persisted
           ? "Live supplemental intelligence · fetched after the core scan · not included in the immutable Share payload or scored verdict"
           : "Live supplemental intelligence · outside the core scan · not included in a saved Share payload or scored verdict"}
