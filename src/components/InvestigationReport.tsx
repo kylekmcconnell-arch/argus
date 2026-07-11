@@ -75,14 +75,16 @@ export function InvestigationReport({
   const [spent, setSpent] = useState(0);
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
-  const diligenceChecks = tokenChecks(token);
+  const diligenceChecks = inv.versionContext
+    ? inv.versionContext.checks
+    : tokenChecks(token);
   const readiness = deriveDecisionReadiness(diligenceChecks);
   const positiveVerdictNeedsQualification = token.verdict === "PASS" && readiness.status !== "ready";
   const presentedTokenVerdict = positiveVerdictNeedsQualification ? "INCOMPLETE" : token.verdict;
   const preliminaryTokenMeta = verdictMeta(token.verdict);
   const readinessColor = readiness.status === "ready" ? "var(--color-pass)" : "var(--color-caution)";
   const projectChecks = projectAccount
-    ? projectAccount.versionContext?.checks.length
+    ? projectAccount.versionContext
       ? projectAccount.versionContext.checks
       : projectAccount.checkRuns?.length
         ? projectAccount.checkRuns

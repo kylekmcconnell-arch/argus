@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { Sidebar, type NavTarget } from "./Sidebar";
 import { ArgusMark } from "./ArgusMark";
+import type { ReportKind } from "../lib/reports";
 
 // Persistent shell: left rail + a pink-tinted announcement bar + scrolling main,
 // matching the origami.chat dashboard chrome. On mobile the rail becomes a drawer.
@@ -15,7 +16,7 @@ export function AppShell({
   children: ReactNode;
   onNav: (t: NavTarget) => void;
   onAudit: (handle: string) => void;
-  onOpenRecent?: (ref: string) => void;
+  onOpenRecent?: (ref: string, kind?: ReportKind) => void;
   activeHandle?: string | null;
   view: NavTarget | "audit";
 }) {

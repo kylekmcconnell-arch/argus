@@ -12,12 +12,24 @@ import type {
   ReportVersionContext,
 } from "./reportVersion";
 
+export type ReportKind = "person" | "token" | "investigation" | "site";
+
 export function reportChecks(
-  kind: "person" | "token" | "investigation" | "site",
+  kind: ReportKind,
   payload: unknown,
 ): ScanCheck[] {
-  if (kind === "token") return tokenChecks(payload as TokenDossier);
-  if (kind === "investigation") return tokenChecks((payload as Investigation).token);
+  if (kind === "token") {
+    const dossier = payload as TokenDossier;
+    return dossier.versionContext
+      ? dossier.versionContext.checks.map((check) => ({ ...check }))
+      : tokenChecks(dossier);
+  }
+  if (kind === "investigation") {
+    const investigation = payload as Investigation;
+    return investigation.versionContext
+      ? investigation.versionContext.checks.map((check) => ({ ...check }))
+      : tokenChecks(investigation.token);
+  }
   if (kind === "person") {
     const dossier = payload as Dossier;
     // A live collector dossier owns its completed-check record. Re-deriving
@@ -26,7 +38,7 @@ export function reportChecks(
     if (Array.isArray(dossier.checkRuns) && dossier.checkRuns.length) {
       return dossier.checkRuns.map((check) => ({ ...check }));
     }
-    if (Array.isArray(dossier.versionContext?.checks) && dossier.versionContext.checks.length) {
+    if (dossier.versionContext) {
       return dossier.versionContext.checks.map((check) => ({ ...check }));
     }
     return personChecks({
@@ -40,7 +52,7 @@ export function reportChecks(
 }
 
 export function reportCompleteness(
-  kind: "person" | "token" | "investigation" | "site",
+  kind: ReportKind,
   payload: unknown,
   checks = reportChecks(kind, payload),
 ): ReportCompletenessState {
@@ -59,7 +71,7 @@ export function reportCompleteness(
 }
 
 export async function syncReport(
-  kind: "person" | "token" | "investigation" | "site",
+  kind: ReportKind,
   ref: string,
   query: string,
   payload: unknown,
@@ -80,7 +92,7 @@ export async function syncReport(
 }
 
 export interface StoredReport {
-  kind: "person" | "token" | "investigation";
+  kind: ReportKind;
   query?: string;
   contributor?: string;
   payload: unknown;
@@ -96,10 +108,26 @@ export function storedPersonDossier(report: StoredReport): Dossier {
     : { ...payload };
 }
 
+/** Attach frozen token check outcomes without mutating the immutable payload. */
+export function storedTokenDossier(report: StoredReport): TokenDossier {
+  const payload = report.payload as TokenDossier;
+  return report.versionContext
+    ? { ...payload, versionContext: report.versionContext }
+    : { ...payload };
+}
+
+/** Attach frozen investigation check outcomes without mutating the payload. */
+export function storedInvestigation(report: StoredReport): Investigation {
+  const payload = report.payload as Investigation;
+  return report.versionContext
+    ? { ...payload, versionContext: report.versionContext }
+    : { ...payload };
+}
+
 // One row per persisted report (no payload — heavy; fetched per-ref on open).
 export interface ReportListing {
   ref: string;
-  kind: "person" | "token" | "investigation" | "site";
+  kind: ReportKind;
   query?: string;
   contributor?: string;
   verdict?: string | null;
@@ -163,14 +191,18 @@ export async function listReports(): Promise<ReportListing[]> {
 // Retry once with real headroom: a cold serverless start (functions scale to zero
 // after idle) can blow past a single short timeout, and a null here wrongly sends
 // a click on a STORED audit into a fresh live re-run (or "No live dossier yet").
-export async function fetchReport(ref: string): Promise<StoredReport | null> {
-  const url = `/api/report?ref=${encodeURIComponent(ref.replace(/^[@$]/, ""))}`;
+export async function fetchReport(ref: string, kind?: ReportKind): Promise<StoredReport | null> {
+  const params = new URLSearchParams({ ref: ref.replace(/^[@$]/, "") });
+  if (kind) params.set("kind", kind);
+  const url = `/api/report?${params.toString()}`;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
       if (!r.ok) { if (attempt === 0) continue; return null; }
       const d = await r.json() as { report?: StoredReport | null };
-      return d?.report ?? null;
+      const report = d?.report ?? null;
+      if (kind && report && report.kind !== kind) return null;
+      return report;
     } catch {
       if (attempt === 0) continue;
       return null;

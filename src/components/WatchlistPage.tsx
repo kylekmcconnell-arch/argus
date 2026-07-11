@@ -15,7 +15,7 @@ async function check(item: WatchItem): Promise<WatchSnapshot | null> {
   }
   // Person watches read the latest PERSISTED report (a rescan updates it);
   // there is no cheap live re-check for a person, so stored-latest is the truth.
-  const rep = await fetchReport(item.id);
+  const rep = await fetchReport(item.id, "person");
   const r = (rep?.payload as { report?: { composite_verdict?: string; governing_score?: number | null } } | undefined)?.report;
   return r?.composite_verdict ? { verdict: r.composite_verdict, score: r.governing_score ?? null } : null;
 }

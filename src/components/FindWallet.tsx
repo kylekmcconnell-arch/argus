@@ -3,6 +3,7 @@ import { recordContribution, walletContribution, knownAddresses } from "../graph
 import { explorer, shortAddr } from "../lib/wallets";
 import { FunderSweep } from "./FunderSweep";
 import { ScoreTicker } from "./ScoreTicker";
+import type { ReportKind } from "../lib/reports";
 import { PrivateToggle } from "./PrivateToggle";
 
 // ── Find wallet ─────────────────────────────────────────────────────────────
@@ -60,7 +61,7 @@ async function fetchResolved(clue: string): Promise<{ wallets: Wallet[]; note?: 
   }
 }
 
-export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: string) => void; onReset: () => void; onOpenRecent?: (ref: string) => void }) {
+export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: string) => void; onReset: () => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
   const [input, setInput] = useState("");
   const [cards, setCards] = useState<Card[]>([]);
   const [banner, setBanner] = useState<string | null>(null);
@@ -145,7 +146,10 @@ export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: st
         if (img) { const f = img.getAsFile(); if (f) readImage(f); }
       }}
     >
-      <ScoreTicker onOpen={onOpenRecent ?? onAudit} label="Recent audits · click to open the report" />
+      <ScoreTicker
+        onOpen={(ref, kind) => onOpenRecent ? onOpenRecent(ref, kind) : onAudit(ref)}
+        label="Recent audits · click to open the report"
+      />
       <header className="sticky top-0 z-20 border-b border-line bg-void/85 backdrop-blur">
         <div className="mx-auto flex max-w-3xl items-center gap-3 px-5 py-3">
           <button onClick={onReset} className="flex items-center gap-1.5 text-[13px] text-ink-dim transition hover:text-ink">

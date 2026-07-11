@@ -121,7 +121,9 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 
 export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void }) {
   const m = verdictMeta(d.verdict);
-  const checks = tokenChecks(d);
+  const checks = d.versionContext
+    ? d.versionContext.checks
+    : tokenChecks(d);
   const readiness = deriveDecisionReadiness(checks);
   const qualifiesPass = d.verdict === "PASS" && readiness.status !== "ready";
   const presentedVerdict = qualifiesPass

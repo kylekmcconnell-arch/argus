@@ -367,7 +367,7 @@ export function Report({ dossier, onReset, onAudit, onOpenProject }: { dossier: 
     roles,
     hasAssociates: (evidence.associates?.length ?? 0) > 0,
   });
-  const diligenceChecks = f.versionContext?.checks.length
+  const diligenceChecks = f.versionContext
     ? f.versionContext.checks
     : f.checkRuns?.length
       ? f.checkRuns

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { ScoreTicker } from "./ScoreTicker";
+import type { ReportKind } from "../lib/reports";
 import { PrivateToggle } from "./PrivateToggle";
 import { ScanChip } from "./ScanChip";
 import { auditReadinessLabel, mergedLog, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
@@ -57,13 +58,13 @@ function ProjectCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void
   );
 }
 
-export function ProjectsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, priv?: boolean) => void; onOpenRecent?: (ref: string) => void }) {
+export function ProjectsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, priv?: boolean) => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
   const [value, setValue] = useState("");
   const [priv, setPriv] = useState(false);
   const [, setTick] = useState(0);
   useEffect(() => subscribeLog(() => setTick((t) => t + 1)), []);
   const projects = projectAudits();
-  const open = onOpenRecent ?? onAudit;
+  const open = (ref: string, kind?: ReportKind) => onOpenRecent ? onOpenRecent(ref, kind) : onAudit(ref);
 
   return (
     <>

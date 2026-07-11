@@ -1,7 +1,14 @@
 import { describe, expect, it } from "vitest";
 import type { Dossier } from "../data/dossier";
-import { storedPersonDossier, type StoredReport } from "./reports";
+import type { Investigation } from "./investigation";
+import {
+  storedInvestigation,
+  storedPersonDossier,
+  storedTokenDossier,
+  type StoredReport,
+} from "./reports";
 import { mapStoredCheckRuns, type ReportVersionContext } from "./reportVersion";
+import type { TokenDossier } from "../token/audit";
 
 const context: ReportVersionContext = {
   reportVersionId: "00000000-0000-4000-8000-000000000123",
@@ -70,5 +77,24 @@ describe("stored report version context", () => {
     expect(hydrated).not.toBe(payload);
     expect(hydrated.versionContext).toBe(context);
     expect(payload.versionContext).toBeUndefined();
+  });
+
+  it("attaches frozen context to stored token and investigation views", () => {
+    const token = { address: "0xabc" } as TokenDossier;
+    const investigation = { rootRef: "0xabc", token } as Investigation;
+
+    const hydratedToken = storedTokenDossier({ kind: "token", payload: token, versionContext: context });
+    const hydratedInvestigation = storedInvestigation({
+      kind: "investigation",
+      payload: investigation,
+      versionContext: context,
+    });
+
+    expect(hydratedToken).not.toBe(token);
+    expect(hydratedToken.versionContext).toBe(context);
+    expect(token.versionContext).toBeUndefined();
+    expect(hydratedInvestigation).not.toBe(investigation);
+    expect(hydratedInvestigation.versionContext).toBe(context);
+    expect(investigation.versionContext).toBeUndefined();
   });
 });

@@ -2,7 +2,14 @@ import { lazy, Suspense, useState, useCallback, useEffect, useRef } from "react"
 import { AppShell } from "./components/AppShell";
 import { Landing } from "./components/Landing";
 import { logAudit, hydrateSharedLog } from "./lib/auditlog";
-import { syncReport, fetchReport, storedPersonDossier } from "./lib/reports";
+import {
+  syncReport,
+  fetchReport,
+  storedInvestigation,
+  storedPersonDossier,
+  storedTokenDossier,
+  type ReportKind,
+} from "./lib/reports";
 import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph } from "./graph/store";
 import type { Investigation } from "./lib/investigation";
 import { type Dossier } from "./data/dossier";
@@ -62,6 +69,21 @@ type Phase =
   | "project"
   | "notfound";
 
+type Cached =
+  | { kind: "person"; dossier: Dossier }
+  | { kind: "token"; dossier: TokenDossier }
+  | { kind: "investigation"; inv: Investigation };
+
+type CachedKind = Cached["kind"];
+
+const normalizedCacheRef = (value: string) => value
+  .trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
+const cacheKey = (ref: string, kind?: CachedKind) => `${kind ?? "latest"}:${normalizedCacheRef(ref)}`;
+const cacheResult = (cache: Map<string, Cached>, ref: string, result: Cached, updateLatest = true) => {
+  cache.set(cacheKey(ref, result.kind), result);
+  if (updateLatest) cache.set(cacheKey(ref), result);
+};
+
 // Deep links:
 //   ?s=<handle>    -> open the stored report for that subject (share links)
 //   ?live=<handle> -> straight into a live collector run
@@ -103,12 +125,7 @@ export default function App() {
 
   // Session cache of completed audits, so clicking a recent audit SHOWS the
   // result it already produced (with a Rescan button) instead of re-running it.
-  type Cached =
-    | { kind: "person"; dossier: Dossier }
-    | { kind: "token"; dossier: TokenDossier }
-    | { kind: "investigation"; inv: Investigation };
   const resultCache = useRef(new Map<string, Cached>());
-  const cacheKey = (s: string) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
   // Private/incognito toggle for the current NON-person flow (token / investigation
   // / site). Person audits carry their own private flag on the background run.
   // A private audit runs and shows the result but is never persisted, logged,
@@ -182,7 +199,7 @@ export default function App() {
   // DATA-side completion (runs for every finished scan, backgrounded or not, so it
   // lands in the library even if navigated away). Never touches the view.
   const investigationData = useCallback((inv: Investigation, priv: boolean) => {
-    resultCache.current.set(cacheKey(inv.token.address), { kind: "investigation", inv });
+    cacheResult(resultCache.current, inv.token.address, { kind: "investigation", inv });
     if (priv) return;
     void syncReport("investigation", inv.token.address, `$${inv.token.symbol}`, inv, inv.token.verdict, inv.token.score);
     logAudit({
@@ -195,7 +212,7 @@ export default function App() {
     if (c) recordContribution(c);
   }, []);
   const tokenData = useCallback((d: TokenDossier, priv: boolean) => {
-    resultCache.current.set(cacheKey(d.address), { kind: "token", dossier: d });
+    cacheResult(resultCache.current, d.address, { kind: "token", dossier: d });
     if (priv) return;
     void syncReport("token", d.address, `$${d.symbol}`, d, d.verdict, d.score);
     logAudit({
@@ -224,7 +241,7 @@ export default function App() {
   // Recent audits and Dossiers — so the runner calls it for every finished run,
   // whether or not the user is looking at it. It never touches the view.
   const logPerson = useCallback((d: Dossier, priv = false) => {
-    resultCache.current.set(cacheKey(d.handle), { kind: "person", dossier: d });
+    cacheResult(resultCache.current, d.handle, { kind: "person", dossier: d });
     if (priv) return; // private: cached for this session's view only — nothing leaves
     void syncReport("person", d.handle, d.handle, d, d.report.composite_verdict, d.report.governing_score);
     logAudit({
@@ -273,17 +290,13 @@ export default function App() {
   // our stream died. Only show "not found" when nothing was produced.
   const onLiveError = useCallback(async () => {
     const ref = query;
-    const cached = resultCache.current.get(cacheKey(ref));
+    const cached = resultCache.current.get(cacheKey(ref, "person"));
     if (cached) { showCached(ref, cached); return; }
     for (let attempt = 0; attempt < 4; attempt++) {
-      const rep = await fetchReport(ref);
-      if (rep?.payload && (rep.kind === "person" || rep.kind === "token" || rep.kind === "investigation")) {
-        const c = rep.kind === "investigation"
-          ? { kind: "investigation" as const, inv: rep.payload as Investigation }
-          : rep.kind === "token"
-            ? { kind: "token" as const, dossier: rep.payload as TokenDossier }
-            : { kind: "person" as const, dossier: storedPersonDossier(rep) };
-        resultCache.current.set(cacheKey(ref), c);
+      const rep = await fetchReport(ref, "person");
+      if (rep?.payload && rep.kind === "person") {
+        const c = { kind: "person" as const, dossier: storedPersonDossier(rep) };
+        cacheResult(resultCache.current, ref, c);
         showCached(ref, c);
         return;
       }
@@ -301,34 +314,42 @@ export default function App() {
   // button), from: this session's cache → the persisted report on the backend
   // (survives reload, and pulls up another analyst's actual report) → and only
   // re-runs if we have neither.
-  const onOpenRecent = useCallback(async (ref: string) => {
+  const onOpenRecent = useCallback(async (ref: string, requestedKind?: ReportKind) => {
+    const cachedKind = requestedKind === "person" || requestedKind === "token" || requestedKind === "investigation"
+      ? requestedKind
+      : undefined;
     // A background PERSON run — re-attach: reopen the live console or show it done.
     const run = getRun(ref);
-    if (run) {
+    if (run && (!requestedKind || requestedKind === "person")) {
       setQuery(run.handle);
       if (run.status === "running") { setPhase("live"); return; }
       if (run.status === "done" && run.dossier) { setDossier(run.dossier); setPhase("report"); return; }
     }
     // A background token / investigation scan still running — reopen its console.
     const invRun = getScanRun("investigation", ref);
-    if (invRun && invRun.status === "running") { setInvestigationInput(invRun.input); setQuery(invRun.input); setPhase("investigation"); return; }
+    if (invRun && invRun.status === "running" && (!requestedKind || requestedKind === "investigation")) { setInvestigationInput(invRun.input); setQuery(invRun.input); setPhase("investigation"); return; }
     const tokRun = getScanRun("token", ref);
-    if (tokRun && tokRun.status === "running") { setTokenInput(resolveInput(tokRun.input)); setQuery(tokRun.input); setPhase("token-run"); return; }
-    const c = resultCache.current.get(cacheKey(ref));
+    if (tokRun && tokRun.status === "running" && (!requestedKind || requestedKind === "token")) { setTokenInput(resolveInput(tokRun.input)); setQuery(tokRun.input); setPhase("token-run"); return; }
+    const c = cachedKind
+      ? resultCache.current.get(cacheKey(ref, cachedKind))
+      : requestedKind
+        ? undefined
+        : resultCache.current.get(cacheKey(ref));
     if (c) { showCached(ref, c); return; }
-    const rep = await fetchReport(ref);
+    const rep = await fetchReport(ref, requestedKind);
     if (rep?.payload && (rep.kind === "person" || rep.kind === "token" || rep.kind === "investigation")) {
       const cached = rep.kind === "investigation"
-        ? { kind: "investigation" as const, inv: rep.payload as Investigation }
+        ? { kind: "investigation" as const, inv: storedInvestigation(rep) }
         : rep.kind === "token"
-          ? { kind: "token" as const, dossier: rep.payload as TokenDossier }
+          ? { kind: "token" as const, dossier: storedTokenDossier(rep) }
           : { kind: "person" as const, dossier: storedPersonDossier(rep) };
-      resultCache.current.set(cacheKey(ref), cached);
+      cacheResult(resultCache.current, ref, cached, !requestedKind);
       showCached(ref, cached);
       return;
     }
-    onAudit(ref);
-  }, [onAudit, showCached]);
+    if (requestedKind === "investigation") onInvestigate(ref);
+    else onAudit(ref);
+  }, [onAudit, onInvestigate, showCached]);
 
   // open a library/graph card: same path as a recent click (stored report first)
   const onOpen = onOpenRecent;
@@ -363,7 +384,12 @@ export default function App() {
   // from the investigation report: open the full on-chain token report
   const onOpenToken = useCallback(() => {
     setInvestigation((inv) => {
-      if (inv) { setTokenDossier(inv.token); setPhase("token-report"); }
+      if (inv) {
+        setTokenDossier(inv.versionContext
+          ? { ...inv.token, versionContext: inv.versionContext }
+          : inv.token);
+        setPhase("token-report");
+      }
       return inv;
     });
   }, [setInvestigation, setPhase, setTokenDossier]);

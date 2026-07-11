@@ -23,6 +23,7 @@ import { streamAudit, probeBackend } from "./live";
 import type { RetrievalStage } from "../collect/retrieve";
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
+import type { ReportVersionContext } from "./reportVersion";
 
 export interface FounderCandidate {
   name: string;          // display name or @handle
@@ -61,6 +62,8 @@ export interface Investigation {
   founderNote: string;            // honest founder-identity summary
   deployerTrail: DeployerTrail | null; // who funded the deployer (Solana)
   webTeam: WebPerson[];           // team found by the web/LinkedIn deep search
+  /** Frozen server-side evidence/check context for a persisted report version. */
+  versionContext?: ReportVersionContext;
 }
 
 async function fetchDeployerTrail(wallet: string): Promise<DeployerTrail | null> {

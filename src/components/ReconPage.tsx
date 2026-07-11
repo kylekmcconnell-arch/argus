@@ -3,6 +3,7 @@ import { runRecon, type Recon } from "../collect/recon";
 import type { RetrievalStage } from "../collect/retrieve";
 import { logAudit } from "../lib/auditlog";
 import { ScoreTicker } from "./ScoreTicker";
+import type { ReportKind } from "../lib/reports";
 import { PrivateToggle } from "./PrivateToggle";
 import { beginScan, endScan } from "../lib/activescans";
 import { syncReport } from "../lib/reports";
@@ -103,7 +104,7 @@ const hostFromUrl = (u: string) => { try { return new URL(/^https?:\/\//.test(u)
 // Verdict/finding text asserting an absent team — suppressed when a team IS known.
 const TEAM_ABSENCE = /\bno team\b|team not (?:established|found)|no (?:leadership|team) section|anonymous team/i;
 
-export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, onOpenRecent }: { initialUrl?: string; initialPrivate?: boolean; onAudit?: (q: string) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string) => void }) {
+export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, onOpenRecent }: { initialUrl?: string; initialPrivate?: boolean; onAudit?: (q: string) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
   const [url, setUrl] = useState(initialUrl ?? "");
   const [priv, setPriv] = useState(!!initialPrivate);
   const privRef = useRef(!!initialPrivate);
@@ -226,7 +227,11 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, 
   // the rendered page) — the thin render missing a team section isn't its absence.
   const teamKnown = (recon?.team.names.length ?? 0) > 0 || webTeam.length > 0;
 
-  const openRecent = onOpenRecent ?? onAudit;
+  const openRecent = onOpenRecent
+    ? (ref: string, kind?: ReportKind) => onOpenRecent(ref, kind)
+    : onAudit
+      ? (ref: string) => onAudit(ref)
+      : undefined;
   return (
     <>
       {openRecent && <ScoreTicker onOpen={openRecent} label="Recent site recons · click to open the report" filter={(e) => e.kind === "site"} />}
