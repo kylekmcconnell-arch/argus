@@ -121,6 +121,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 
 export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void }) {
   const m = verdictMeta(d.verdict);
+  const tokenSubjectGraphKey = String(d.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
   const checks = d.versionContext
     ? d.versionContext.checks
     : tokenChecks(d);
@@ -553,12 +554,12 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
         <div className="mt-3">
-          <AddInfo subject={`$${d.symbol}`} />
+          <AddInfo subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} subjectGraphKey={tokenSubjectGraphKey} />
         </div>
 
         {/* hard link — manually bridge this subject to another entity in the graph */}
         <div className="mt-3">
-          <LinkEntity subject={`$${d.symbol}`} />
+          <LinkEntity subject={`$${d.symbol}`} subjectKind="token" canonicalRef={d.address} graphSubjectKey={tokenSubjectGraphKey} />
         </div>
 
         <div className="mt-8 rounded-xl border border-line bg-panel/40 p-5">

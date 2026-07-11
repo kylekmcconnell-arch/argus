@@ -1115,12 +1115,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
           <div className="min-w-0 lg:col-span-2">
-            <AddInfo subject={report.handle} />
+            <AddInfo subject={report.handle} subjectKind="person" canonicalRef={report.handle} subjectGraphKey={report.handle} />
           </div>
 
           {/* hard link — manually bridge this person to another entity in the graph */}
           <div className="min-w-0 lg:col-span-2">
-            <LinkEntity subject={report.handle} />
+            <LinkEntity subject={report.handle} subjectKind="person" canonicalRef={report.handle} graphSubjectKey={report.handle} />
           </div>
         </div>
 

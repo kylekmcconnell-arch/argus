@@ -147,12 +147,10 @@ export default async function middleware(request: Request): Promise<Response> {
     return Response.json({ error: "access_not_provisioned" }, { status: 403 });
   }
 
-  const augmentRole = pathname === "/api/augment" && request.method === "GET"
-    ? requestUrl.searchParams.has("action")
-      ? "owner"
-      : requestUrl.searchParams.has("type") && requestUrl.searchParams.has("value")
-        ? "analyst"
-        : "viewer"
+  const augmentRole = pathname === "/api/augment"
+    ? request.method === "GET"
+      ? requestUrl.searchParams.has("view") ? "owner" : "viewer"
+      : request.method === "PATCH" ? "owner" : "analyst"
     : null;
   const requiredRole = augmentRole
     ?? (OWNER_PATHS.has(pathname)
@@ -168,6 +166,7 @@ export default async function middleware(request: Request): Promise<Response> {
   if (
     ROLE_RANK[requiredRole] >= ROLE_RANK.analyst
     && !UNMETERED_COLLABORATION_PATHS.has(pathname)
+    && !(pathname === "/api/augment" && request.method === "GET")
   ) {
     const configuredLimit = Number.parseInt(
       role === "owner"

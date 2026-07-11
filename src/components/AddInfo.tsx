@@ -4,8 +4,9 @@ import { useEffect, useRef, useState } from "react";
 // verification (ARGUS confirms the GitHub/site/handle/contract actually exists on
 // source) is what keeps this from being a way to feed the report false "facts" —
 // only things that check out go live, and they're shared across analysts.
-type Aug = { type: string; status?: "live" | "pending"; why?: string; value: string; label: string; url?: string; detail?: string; by: string; at: number };
+type Aug = { id: string; type: string; status?: "live" | "pending"; why?: string; value: string; label: string; url?: string; detail?: string; by: string; at: number };
 type SubmitState = "idle" | "submitting" | "live" | "pending" | "rejected";
+type SubjectKind = "person" | "token" | "investigation" | "site";
 
 const TYPES: { key: string; label: string; placeholder: string }[] = [
   { key: "github", label: "GitHub", placeholder: "github.com/username  or  username" },
@@ -14,40 +15,68 @@ const TYPES: { key: string; label: string; placeholder: string }[] = [
   { key: "contract", label: "Token / contract", placeholder: "0x…  or  Solana mint" },
 ];
 
-const enc = encodeURIComponent;
 const ago = (ms: number) => { const d = Math.floor((Date.now() - ms) / 86400000); return d <= 0 ? "today" : d === 1 ? "1d ago" : `${d}d ago`; };
 const ICON: Record<string, string> = { github: "GitHub", website: "Site", x: "X", contract: "Token", wallet: "Wallet" };
 
-export function AddInfo({ subject }: { subject: string }) {
+export function AddInfo({ subject, subjectKind, canonicalRef, subjectGraphKey }: { subject: string; subjectKind: SubjectKind; canonicalRef: string; subjectGraphKey?: string }) {
   const [items, setItems] = useState<Aug[]>([]);
   const [open, setOpen] = useState(false);
   const [type, setType] = useState("github");
   const [value, setValue] = useState("");
-  const [by, setBy] = useState("");
   const [state, setState] = useState<SubmitState>("idle");
   const [reason, setReason] = useState("");
-  const ran = useRef(false);
+  const feedbackTimer = useRef<number | null>(null);
+
+  useEffect(() => () => {
+    if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
+  }, []);
 
   useEffect(() => {
-    if (ran.current || !subject) return;
-    ran.current = true;
-    fetch(`/api/augment?subject=${enc(subject)}`).then((r) => r.json()).then((d) => setItems(d?.items ?? [])).catch(() => { /* offline */ });
-  }, [subject]);
+    if (!subject || !canonicalRef) return;
+    const controller = new AbortController();
+    if (feedbackTimer.current !== null) {
+      window.clearTimeout(feedbackTimer.current);
+      feedbackTimer.current = null;
+    }
+    queueMicrotask(() => {
+      if (controller.signal.aborted) return;
+      setItems([]);
+      setState("idle");
+      setReason("");
+    });
+    const params = new URLSearchParams({ subject, subjectKind, canonicalRef });
+    fetch(`/api/augment?${params}`, { signal: controller.signal })
+      .then((r) => r.json())
+      .then((d) => setItems((d?.items ?? []).filter((item: Aug) => item.type !== "link")))
+      .catch(() => { /* offline or superseded */ });
+    return () => controller.abort();
+  }, [subject, subjectKind, canonicalRef]);
 
   const submit = async () => {
     const v = value.trim();
     if (!v || state === "submitting") return;
+    if (feedbackTimer.current !== null) window.clearTimeout(feedbackTimer.current);
     setState("submitting"); setReason("");
     try {
-      const r = await fetch(`/api/augment?subject=${enc(subject)}&type=${enc(type)}&value=${enc(v)}${by.trim() ? `&by=${enc(by.trim())}` : ""}`);
-      const d = await r.json();
-      if (d?.verified) {
-        setItems(d.items ?? []);
+      const r = await fetch("/api/augment", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ subject, subjectKind, canonicalRef, subjectGraphKey, type, value: v }),
+      });
+      const d = await r.json().catch(() => ({}));
+      if (r.ok && d?.verified) {
+        setItems((d.items ?? []).filter((item: Aug) => item.type !== "link"));
         setValue("");
         if (d.status === "pending") { setState("pending"); setReason(d.why ?? "held for review"); }
-        else { setState("live"); setTimeout(() => setState("idle"), 2500); }
+        else {
+          setState("live");
+          feedbackTimer.current = window.setTimeout(() => {
+            setState("idle");
+            feedbackTimer.current = null;
+          }, 2500);
+        }
       } else {
-        setState("rejected"); setReason(d?.reason ?? "could not be verified");
+        setState("rejected"); setReason(d?.reason ?? d?.error ?? "could not be verified");
       }
     } catch { setState("rejected"); setReason("network error"); }
   };
@@ -58,7 +87,7 @@ export function AddInfo({ subject }: { subject: string }) {
 
   return (
     <div className="rounded-xl border border-line bg-panel">
-      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-4 py-3 text-left">
+      <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="flex w-full items-center gap-2 px-4 py-3 text-left">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round"><path d="M12 5v14M5 12h14" /></svg>
         <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Add missing info</span>
         {live.length > 0 && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: "var(--color-pass)14", color: "var(--color-pass)" }}>{live.length} published</span>}
@@ -71,8 +100,8 @@ export function AddInfo({ subject }: { subject: string }) {
           {/* published additions */}
           {live.length > 0 && (
             <div className="mb-3 space-y-1.5">
-              {live.map((it, i) => (
-                <div key={i} className="flex items-center gap-2 text-[12px]">
+              {live.map((it) => (
+                <div key={it.id} className="flex items-center gap-2 text-[12px]">
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--color-pass)" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                   <span className="mono text-[9.5px] uppercase text-ink-faint">{ICON[it.type] ?? it.type}</span>
                   {it.url ? <a href={it.url} target="_blank" rel="noreferrer" className="text-signal hover:underline">{it.label}</a> : <span className="text-ink">{it.label}</span>}
@@ -87,27 +116,29 @@ export function AddInfo({ subject }: { subject: string }) {
           <div className="flex flex-wrap items-center gap-2">
             <div className="flex overflow-hidden rounded-lg border border-line">
               {TYPES.map((t) => (
-                <button key={t.key} onClick={() => setType(t.key)} className="px-2.5 py-1.5 text-[11.5px] transition" style={type === t.key ? { background: "var(--color-signal)", color: "#fff" } : { color: "var(--color-ink-dim)" }}>{t.label}</button>
+                <button type="button" aria-pressed={type === t.key} key={t.key} onClick={() => setType(t.key)} className="px-2.5 py-1.5 text-[11.5px] transition" style={type === t.key ? { background: "var(--color-signal)", color: "#fff" } : { color: "var(--color-ink-dim)" }}>{t.label}</button>
               ))}
             </div>
             <input
               value={value}
+              aria-label={`${TYPES.find((t) => t.key === type)?.label ?? "Information"} to add`}
               onChange={(e) => { setValue(e.target.value); if (state === "rejected") setState("idle"); }}
               onKeyDown={(e) => { if (e.key === "Enter") submit(); }}
               placeholder={TYPES.find((t) => t.key === type)?.placeholder}
               className="mono min-w-0 flex-1 rounded-lg border border-line bg-panel-2/40 px-2.5 py-1.5 text-[12px] text-ink outline-none placeholder:text-ink-faint focus:border-line-2"
             />
-            <input value={by} onChange={(e) => setBy(e.target.value)} placeholder="you (optional)" className="w-24 rounded-lg border border-line bg-panel-2/40 px-2.5 py-1.5 text-[12px] text-ink outline-none placeholder:text-ink-faint" />
-            <button onClick={submit} disabled={state === "submitting" || !value.trim()} className="btn-primary shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-medium disabled:opacity-40">
+            <button type="button" onClick={submit} disabled={state === "submitting" || !value.trim()} className="btn-primary shrink-0 rounded-lg px-3 py-1.5 text-[12px] font-medium disabled:opacity-40">
               {state === "submitting" ? "verifying…" : "Submit"}
             </button>
           </div>
 
           {/* status line */}
-          {state === "submitting" && <p className="mt-2 text-[11.5px] text-ink-faint">Submitted — verifying it exists on source, then checking it can be proven…</p>}
-          {state === "live" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-pass)" }}>✓ Verified and published live.</p>}
-          {state === "pending" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-caution)" }}>⏳ Submitted for review — {reason}. It exists, but ARGUS couldn't auto-prove it's this subject's, so it's held pending your approval (you've been notified).</p>}
-          {state === "rejected" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-caution)" }}>⚠ Rejected — {reason}. The target has to actually exist on source.</p>}
+          <div aria-live="polite">
+            {state === "submitting" && <p className="mt-2 text-[11.5px] text-ink-faint">Submitted — verifying it exists on source, then checking it can be proven…</p>}
+            {state === "live" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-pass)" }}>Verified and published live.</p>}
+            {state === "pending" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-caution)" }}>Queued for owner review — {reason}. It exists, but ARGUS couldn't auto-prove it's this subject's, so it remains unpublished until an owner approves it in AdminOps.</p>}
+            {state === "rejected" && <p className="mt-2 text-[11.5px]" style={{ color: "var(--color-caution)" }}>Rejected — {reason}. The target has to actually exist on source.</p>}
+          </div>
           {state === "idle" && <p className="mt-2 text-[10.5px] leading-snug text-ink-faint">Add something the scan missed. If ARGUS can prove it (e.g. the GitHub links back to this X) it publishes live; if it only verifies the thing exists but can't tie it to this subject, it's held for your approval. A target that doesn't exist is rejected.</p>}
         </div>
       )}

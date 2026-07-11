@@ -77,6 +77,7 @@ export function InvestigationReport({
   const [spent, setSpent] = useState(0);
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
+  const tokenSubjectGraphKey = String(token.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
   const diligenceChecks = inv.versionContext
     ? inv.versionContext.checks
     : tokenChecks(token);
@@ -540,12 +541,12 @@ export function InvestigationReport({
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}
         <div className="mt-3">
-          <AddInfo subject={`$${token.symbol}`} />
+          <AddInfo subject={`$${token.symbol}`} subjectKind="investigation" canonicalRef={token.address} subjectGraphKey={tokenSubjectGraphKey} />
         </div>
 
         {/* hard link — manually bridge this subject to another entity in the graph */}
         <div className="mt-3">
-          <LinkEntity subject={`$${token.symbol}`} />
+          <LinkEntity subject={`$${token.symbol}`} subjectKind="investigation" canonicalRef={token.address} graphSubjectKey={tokenSubjectGraphKey} />
         </div>
 
         <div className="mt-4 rounded-xl border border-line bg-panel/40 p-4 text-[12px] leading-relaxed text-ink-faint">

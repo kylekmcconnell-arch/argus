@@ -10,6 +10,13 @@ logs/
 *.log
 .DS_Store
 
+# Tests are CI inputs, not serverless endpoints or production assets.
+**/*.test.ts
+**/*.test.tsx
+**/*.spec.ts
+**/*.spec.tsx
+supabase/tests/
+
 # Untracked conflict copies are preserved locally but are not valid Vercel
 # function paths because their filenames contain spaces.
 api/audit 2.ts

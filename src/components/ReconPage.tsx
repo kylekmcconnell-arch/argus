@@ -568,10 +568,10 @@ export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, o
           {reconHost && <SiteHistory domain={reconHost} />}
 
           {/* analyst augmentation — add a piece the recon missed (verified before publish) */}
-          {reconHost && <AddInfo subject={reconHost} />}
+          {reconHost && <AddInfo subject={reconHost} subjectKind="site" canonicalRef={reconHost} subjectGraphKey={reconHost} />}
 
           {/* hard link — manually bridge this site to another entity in the graph */}
-          {reconHost && <LinkEntity subject={reconHost} />}
+          {reconHost && <LinkEntity subject={reconHost} subjectKind="site" canonicalRef={reconHost} graphSubjectKey={reconHost} />}
         </>
       )}
     </div>
