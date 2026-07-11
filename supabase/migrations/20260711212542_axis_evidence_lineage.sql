@@ -10,11 +10,14 @@
 -- This tenant-qualified key is the FK target for axis citations. Existing
 -- report_version_id/evidence_key uniqueness guarantees the scan is duplicate
 -- free; organization_id makes cross-tenant references structurally impossible.
--- Build the only potentially heavyweight index online, outside the schema
--- transaction. If later DDL fails, a retry reuses this valid index and attaches
--- the constraint with only a short catalog lock.
-set lock_timeout = '5s';
-set statement_timeout = '120s';
+-- Supabase's migration runner uses the extended-query pipeline protocol, where
+-- PostgreSQL forbids CREATE INDEX CONCURRENTLY. Build the index inside the
+-- migration transaction instead and fail closed if the short lock/statement
+-- limits cannot be met. A retry removes only an invalid same-name index.
+begin;
+
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
 
 do $$
 begin
@@ -34,16 +37,8 @@ begin
 end;
 $$;
 
-create unique index concurrently if not exists evidence_items_org_report_key_uidx
+create unique index if not exists evidence_items_org_report_key_uidx
   on public.evidence_items (organization_id, report_version_id, evidence_key);
-
-reset lock_timeout;
-reset statement_timeout;
-
-begin;
-
-set local lock_timeout = '5s';
-set local statement_timeout = '120s';
 
 alter table public.evidence_items
   add constraint evidence_items_org_report_key_unique

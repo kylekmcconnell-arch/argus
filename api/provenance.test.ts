@@ -745,17 +745,18 @@ describe("axis evidence migration contract (static SQL assertions only)", () => 
     expect(sql).toContain("complete strict person report requires its exact authoritative graph");
   });
 
-  it("builds the tenant-qualified evidence key online before the short attach lock", () => {
-    const concurrentIndex = sql.indexOf("create unique index concurrently");
+  it("builds the tenant-qualified evidence key inside a bounded Supabase-compatible transaction", () => {
     const schemaTransaction = sql.indexOf("\nbegin;\n\nset local");
+    const boundedIndex = sql.indexOf("create unique index if not exists evidence_items_org_report_key_uidx");
     const attachConstraint = sql.indexOf("unique using index evidence_items_org_report_key_uidx");
     expect(sql).toContain("and not index_state.indisvalid");
     expect(sql).toContain("execute 'drop index public.evidence_items_org_report_key_uidx'");
-    expect(sql).toContain("reset lock_timeout");
-    expect(sql).toContain("reset statement_timeout");
-    expect(concurrentIndex).toBeGreaterThan(-1);
-    expect(schemaTransaction).toBeGreaterThan(concurrentIndex);
-    expect(attachConstraint).toBeGreaterThan(schemaTransaction);
+    expect(sql).toContain("set local lock_timeout = '5s'");
+    expect(sql).toContain("set local statement_timeout = '120s'");
+    expect(sql).not.toContain("create unique index concurrently");
+    expect(schemaTransaction).toBeGreaterThan(-1);
+    expect(boundedIndex).toBeGreaterThan(schemaTransaction);
+    expect(attachConstraint).toBeGreaterThan(boundedIndex);
   });
 
   it("marks and independently guards the certified archive lifecycle", () => {
