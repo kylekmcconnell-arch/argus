@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { AuditConsole } from "./AuditConsole";
-import { startInvestigationScan, subscribeScanRuns, getScanRun } from "../lib/scanrunner";
+import { subscribeScanRuns, getScanRun } from "../lib/scanrunner";
 import type { Investigation } from "../lib/investigation";
+import type { RunnableTokenInput } from "../lib/resolveInput";
 
 // A VIEW onto the background investigation — not the owner of the run. Navigating
 // away no longer aborts the cascade: the runner keeps streaming and the finished
@@ -11,19 +12,18 @@ export function InvestigationRun({
   onDone,
   onError,
 }: {
-  input: string;
+  input: RunnableTokenInput;
   onDone: (inv: Investigation) => void;
   onError: () => void;
 }) {
   const [, setTick] = useState(0);
 
   useEffect(() => {
-    startInvestigationScan(input); // idempotent: re-attaches if already running
     const unsub = subscribeScanRuns(() => setTick((t) => t + 1));
     return unsub; // detach the view only — the run continues in the background
   }, [input]);
 
-  const run = getScanRun("investigation", input);
+  const run = getScanRun("investigation", input.ref);
 
   useEffect(() => {
     if (!run) return;
@@ -31,7 +31,7 @@ export function InvestigationRun({
     else if (run.status === "error") onError();
   }, [run?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const label = input.length > 20 ? input.slice(0, 8) + "…" + input.slice(-4) : input;
+  const label = input.ref.length > 20 ? input.ref.slice(0, 8) + "…" + input.ref.slice(-4) : input.ref;
   return (
     <AuditConsole
       handle={label}

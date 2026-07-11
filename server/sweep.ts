@@ -15,7 +15,8 @@ import { createHash } from "node:crypto";
 import { env } from "./config";
 import { auditToken } from "../src/token/audit";
 import { subjectConnections, type GraphContribution } from "../src/graph/network";
-import type { ResolvedInput } from "../src/lib/resolveInput";
+import type { RunnableTokenInput } from "../src/lib/resolveInput";
+import { normalizeSubjectRef } from "../src/lib/subjectRef";
 
 const MAX_TOKEN_CHECKS = 15; // bound one sweep's spend/time
 
@@ -37,7 +38,7 @@ function creds(): { url: string; key: string } | null {
 const headers = (key: string) => ({ apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" });
 const sha = (s: string) => createHash("sha256").update(s).digest("hex").slice(0, 24);
 
-async function pg(c: { url: string; key: string }, path: string, init?: RequestInit): Promise<any | null> {
+async function pg(c: { url: string; key: string }, path: string, init?: RequestInit): Promise<unknown | null> {
   try {
     const r = await fetch(`${c.url}/rest/v1/${path}`, { ...init, headers: { ...headers(c.key), ...(init?.headers as Record<string, string>) }, signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
@@ -62,25 +63,36 @@ async function telegram(text: string): Promise<void> {
   } catch { /* best-effort */ }
 }
 
-export async function runSweep(): Promise<{ checked: number; alerts: SweepAlert[]; note?: string }> {
+export async function runSweep(organizationId: string): Promise<{ checked: number; alerts: SweepAlert[]; note?: string }> {
   const c = creds();
   if (!c) return { checked: 0, alerts: [], note: "no backend configured" };
+  if (!organizationId) return { checked: 0, alerts: [], note: "organization required" };
+  const orgFilter = `organization_id=eq.${encodeURIComponent(organizationId)}`;
 
-  const watchRows = (await pg(c, "reports?select=ref,payload&kind=eq.watch&order=ts.desc&limit=100")) as { ref: string; payload?: { item?: WatchItem } }[] | null;
+  const watchRows = (await pg(c, `reports?select=ref,payload&${orgFilter}&kind=eq.watch&order=ts.desc&limit=100`)) as { ref: string; payload?: { item?: WatchItem } }[] | null;
   const watches = (watchRows ?? []).map((r) => r.payload?.item).filter(Boolean) as WatchItem[];
   if (!watches.length) return { checked: 0, alerts: [], note: "watchlist empty" };
 
-  const graphRows = (await pg(c, "graph_contributions?select=handle,verdict,nodes,edges&order=updated_at.desc&limit=300")) as any[] | null;
+  const graphRows = (await pg(c, `graph_contributions?select=handle,verdict,nodes,edges&${orgFilter}&order=updated_at.desc&limit=300`)) as Array<{
+    handle: string;
+    verdict?: string | null;
+    nodes?: GraphContribution["nodes"];
+    edges?: GraphContribution["edges"];
+  }> | null;
   const contributions: GraphContribution[] = (graphRows ?? []).map((x) => ({ handle: x.handle, verdict: x.verdict ?? undefined, nodes: x.nodes ?? [], edges: x.edges ?? [] }));
+  const openCaseRows = (await pg(c, `cases?select=canonical_ref&${orgFilter}&status=eq.open&kind=in.(person,token,investigation)&limit=500`)) as { canonical_ref?: string }[] | null;
+  const openCases = new Set((openCaseRows ?? [])
+    .map((row) => normalizeSubjectRef(row.canonical_ref))
+    .filter(Boolean));
 
   const found: SweepAlert[] = [];
   let tokenChecks = 0;
 
   for (const w of watches) {
     // ── on-chain drift (tokens only) ──
-    if (w.kind === "token" && tokenChecks < MAX_TOKEN_CHECKS) {
+    if (w.kind === "token" && openCases.has(normalizeSubjectRef(w.id)) && tokenChecks < MAX_TOKEN_CHECKS) {
       tokenChecks++;
-      const input: ResolvedInput = { kind: "token", ref: w.id, via: w.via ?? "evm" };
+      const input: RunnableTokenInput = { kind: "token", ref: w.id, via: w.via ?? "evm" };
       const d = await auditToken(input, undefined, { skipSim: true }).catch(() => null);
       if (d && w.snapshot) {
         const s = w.snapshot;
@@ -94,10 +106,10 @@ export async function runSweep(): Promise<{ checked: number; alerts: SweepAlert[
         }
         // refresh the baseline so the same drift doesn't alert on every sweep
         const item = { ...w, snapshot: { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap } };
-        await pg(c, "reports?on_conflict=ref,kind", {
+        await pg(c, "reports?on_conflict=organization_id,ref,kind", {
           method: "POST",
           headers: { prefer: "resolution=merge-duplicates,return=minimal" },
-          body: JSON.stringify({ ref: w.id.toLowerCase(), kind: "watch", query: w.label, payload: { item }, ts: new Date().toISOString() }),
+          body: JSON.stringify({ organization_id: organizationId, ref: normalizeSubjectRef(w.id), kind: "watch", query: w.label, payload: { item }, ts: new Date().toISOString() }),
         });
       }
     }
@@ -117,10 +129,10 @@ export async function runSweep(): Promise<{ checked: number; alerts: SweepAlert[
   for (const a of found) {
     const detail = a.detail.split("::")[0];
     const ref = "al:" + sha(`${a.subject}|${a.type}|${a.detail}`);
-    const inserted = await pg(c, "reports?on_conflict=ref,kind", {
+    const inserted = await pg(c, "reports?on_conflict=organization_id,ref,kind", {
       method: "POST",
       headers: { prefer: "resolution=ignore-duplicates,return=representation" },
-      body: JSON.stringify({ ref, kind: "alert", query: a.label, payload: { subject: a.subject, label: a.label, type: a.type, detail, at: a.at }, ts: new Date().toISOString() }),
+      body: JSON.stringify({ organization_id: organizationId, ref, kind: "alert", query: a.label, payload: { subject: a.subject, label: a.label, type: a.type, detail, at: a.at }, ts: new Date().toISOString() }),
     });
     if (Array.isArray(inserted) && inserted.length > 0) fresh.push({ ...a, detail });
   }

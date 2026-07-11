@@ -16,8 +16,9 @@ import { getAnalyst } from "../lib/analyst";
 import { buildAliasResolver } from "../graph/network";
 import { getContributions } from "../graph/store";
 import { useArgusAuth } from "../auth-context";
+import { normalizeSubjectRef } from "../lib/subjectRef";
 
-const normRef = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
+const normRef = normalizeSubjectRef;
 
 // The report library: every persisted audit (yours + Enigma's) from the shared
 // backend, searchable, newest first. Click opens the stored report (no re-run).
@@ -130,7 +131,7 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string, kind?: ReportKi
     const imageByRef = new Map<string, string>();
     const roleByRef = new Map<string, string>();
     for (const e of mergedLog()) {
-      const k = (e.ref ?? e.query).trim().toLowerCase().replace(/^[@$]/, "");
+      const k = normalizeSubjectRef(e.ref ?? e.query);
       if (!k) continue;
       const img = auditImage(e);
       if (img && !imageByRef.has(k)) imageByRef.set(k, img);
@@ -156,11 +157,9 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string, kind?: ReportKi
 
   // Entity unification: a project wears three names — the $TOKEN audit, the
   // @handle person audit, and the site recon are three library cards for ONE
-  // thing. Group them by the alias resolver (which unions token↔handle↔domain
-  // from the audits' OWN edges, never name similarity) so the library shows one
-  // card per project with its facets, not three unrelated rows. The token audit
-  // keys the linkage on its $SYMBOL, so a token/investigation groups by its query
-  // ($RECC); person/site group by their ref (the handle / domain).
+  // thing only when the identity is safe. Token + investigation facets group by
+  // exact contract (never ticker); person/site facets may group through graph
+  // aliases established by the audits' own evidence, never name similarity.
   const groups = useMemo(
     () => groupReportsByEntity(shown, buildAliasResolver(getContributions())),
     [shown],
@@ -174,9 +173,9 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string, kind?: ReportKi
           const color = readout.color;
           // Show the ROLE for person audits (Founder/Project/KOL/VC …); fall back
           // to the audit kind (token / project deep-dive) otherwise.
-          const subjectRole = r.kind === "person" ? roleByRef.get(r.ref.toLowerCase().replace(/^[@$]/, "")) : undefined;
+          const subjectRole = r.kind === "person" ? roleByRef.get(normalizeSubjectRef(r.ref)) : undefined;
           const km = (subjectRole && ROLE_LABEL[subjectRole]) || KIND_META[r.kind] || KIND_META.person;
-          const img = imageByRef.get(r.ref.toLowerCase().replace(/^[@$]/, ""));
+          const img = imageByRef.get(normalizeSubjectRef(r.ref));
           const letter = ((r.query ?? r.ref).replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
           const cardKey = `${r.kind}:${r.ref}`;
           const stat = statByKey.get(`${r.kind}:${normRef(r.ref)}`);
@@ -324,7 +323,7 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string, kind?: ReportKi
     const scored = sorted.find((r) => r.verdict) ?? primary;
     const readout = reportReadout(scored);
     const color = readout.color;
-    const img = sorted.map((r) => imageByRef.get(r.ref.toLowerCase().replace(/^[@$]/, ""))).find(Boolean);
+    const img = sorted.map((r) => imageByRef.get(normalizeSubjectRef(r.ref))).find(Boolean);
     const letter = (title.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
     const groupKey = sorted.map((r) => `${r.kind}:${r.ref}`).join("|");
     const lifecycleAction: ReportLifecycleAction = isArchived ? "restore" : "archive";
@@ -384,7 +383,7 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string, kind?: ReportKi
         {/* facet chips — each opens its own stored report */}
         <div className="mt-2 flex flex-wrap gap-1.5 border-t border-line/60 pt-2">
           {sorted.map((r) => {
-            const role = r.kind === "person" ? roleByRef.get(r.ref.toLowerCase().replace(/^[@$]/, "")) : undefined;
+            const role = r.kind === "person" ? roleByRef.get(normalizeSubjectRef(r.ref)) : undefined;
             const km = (role && ROLE_LABEL[role]) || KIND_META[r.kind] || KIND_META.person;
             const fm = r.verdict ? verdictMeta(r.verdict) : null;
             return (

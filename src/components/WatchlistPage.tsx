@@ -1,23 +1,30 @@
 import { useEffect, useState, useCallback } from "react";
 import { getWatchlist, removeWatch, rebaseline, hydrateSharedWatchlist, type WatchItem, type WatchSnapshot } from "../lib/watchlist";
 import { auditToken } from "../token/audit";
-import { fetchReport } from "../lib/reports";
+import { fetchReportState, type ReportLookup } from "../lib/reports";
 import { verdictMeta } from "../lib/verdict";
 
 const RANK: Record<string, number> = { PASS: 0, CAUTION: 1, FAIL: 2, AVOID: 3, UNVERIFIABLE_IDENTITY: 3 };
 
-type Row = { item: WatchItem; current?: WatchSnapshot; loading: boolean; error?: boolean };
+type Row = { item: WatchItem; current?: WatchSnapshot; loading: boolean; error?: boolean; caseStatus?: ReportLookup["status"] };
 
-async function check(item: WatchItem): Promise<WatchSnapshot | null> {
+async function check(item: WatchItem): Promise<{ current: WatchSnapshot | null; caseStatus: ReportLookup["status"] }> {
+  const stored = await fetchReportState(item.id, item.kind);
+  if (stored.status !== "open") return { current: null, caseStatus: stored.status };
   if (item.kind === "token") {
     const d = await auditToken({ kind: "token", ref: item.id, via: item.via ?? "evm" });
-    return d ? { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap } : null;
+    return {
+      current: d ? { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap } : null,
+      caseStatus: stored.status,
+    };
   }
   // Person watches read the latest PERSISTED report (a rescan updates it);
   // there is no cheap live re-check for a person, so stored-latest is the truth.
-  const rep = await fetchReport(item.id, "person");
-  const r = (rep?.payload as { report?: { composite_verdict?: string; governing_score?: number | null } } | undefined)?.report;
-  return r?.composite_verdict ? { verdict: r.composite_verdict, score: r.governing_score ?? null } : null;
+  const report = (stored.report?.payload as { report?: { composite_verdict?: string; governing_score?: number | null } } | undefined)?.report;
+  return {
+    current: report?.composite_verdict ? { verdict: report.composite_verdict, score: report.governing_score ?? null } : null,
+    caseStatus: stored.status,
+  };
 }
 
 function money(n?: number): string {
@@ -37,8 +44,14 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
     const results = await Promise.all(
       items.map(async (item) => {
         try {
-          const current = await check(item);
-          return { item, current: current ?? undefined, loading: false, error: !current } as Row;
+          const result = await check(item);
+          return {
+            item,
+            current: result.current ?? undefined,
+            loading: false,
+            error: result.caseStatus === "open" && !result.current,
+            caseStatus: result.caseStatus,
+          } as Row;
         } catch {
           return { item, loading: false, error: true } as Row;
         }
@@ -133,7 +146,17 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
                     </>
                   )}
                   <span className="mono rounded-full border px-2 py-0.5 font-semibold tracking-wider" style={{ borderColor: curM.color, color: curM.color }}>
-                    {r.loading ? "…" : r.error ? "ERR" : curM.label}
+                    {r.loading
+                      ? "…"
+                      : r.caseStatus === "archived"
+                        ? "ARCHIVED"
+                        : r.caseStatus === "missing"
+                          ? "NO CASE"
+                          : r.caseStatus === "unavailable"
+                            ? "STATUS ERR"
+                            : r.error
+                              ? "ERR"
+                              : curM.label}
                   </span>
                 </div>
 

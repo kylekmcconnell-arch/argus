@@ -4,7 +4,7 @@
 // surfaces the people behind the token (project X, deployer, top holders) and a
 // unified Panoptes graph. The engine owns the bands and caps.
 
-import type { ResolvedInput } from "../lib/resolveInput";
+import type { RunnableTokenInput } from "../lib/resolveInput";
 import type { ReportVersionContext } from "../lib/reportVersion";
 import type { TraceStep } from "../data/evidence";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
@@ -213,13 +213,14 @@ const _cache = new Map<string, { at: number; d: TokenDossier | null }>();
 const CACHE_TTL = 60_000;
 
 export async function auditToken(
-  input: ResolvedInput,
+  input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { skipSim?: boolean },
+  opts?: { skipSim?: boolean; force?: boolean },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
-  const key = `${input.via}:${input.ref.toLowerCase()}:${opts?.skipSim ? 1 : 0}`;
-  const hit = _cache.get(key);
+  const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
+  const key = `${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}`;
+  const hit = opts?.force ? undefined : _cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
   const d = await runTokenAudit(input, emit, opts);
   _cache.set(key, { at: Date.now(), d });
@@ -227,9 +228,9 @@ export async function auditToken(
 }
 
 async function runTokenAudit(
-  input: ResolvedInput,
+  input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { skipSim?: boolean },
+  opts?: { skipSim?: boolean; force?: boolean },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const trace: TraceStep[] = [];

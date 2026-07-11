@@ -10,6 +10,7 @@ import { activeScanRuns, subscribeScanRuns } from "../lib/scanrunner";
 import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
 import type { ReportKind } from "../lib/reports";
+import { normalizeSubjectRef } from "../lib/subjectRef";
 
 // Subject thumbnail: the real logo/photo, falling back to a letter if it is
 // missing or fails to load (unavatar/favicon/dexscreener can 404).
@@ -40,7 +41,7 @@ function recentAudits(max: number): LogEntry[] {
   const seen = new Set<string>();
   const out: LogEntry[] = [];
   for (const e of mergedLog()) {
-    const k = `${e.kind}:${(e.ref ?? e.query).toLowerCase()}`;
+    const k = `${e.kind}:${normalizeSubjectRef(e.ref ?? e.query)}`;
     if (seen.has(k)) continue;
     seen.add(k);
     out.push(e);
@@ -196,10 +197,10 @@ export function Sidebar({
     ...activeScans().map((s) => ({ id: s.id, label: s.label, pct: s.pct, ref: s.ref, kind: s.kind })),
   ];
   // A subject being scanned right now shows only its live chip, not its old row.
-  const scanRefs = new Set(scans.map((s) => s.ref.toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "")));
+  const scanRefs = new Set(scans.map((s) => normalizeSubjectRef(s.ref)));
   const recent = recentAudits(14).filter((e) => {
-    const r = (e.ref ?? e.query).toLowerCase();
-    return !runningKeys.has(r.replace(/^[@$]/, "")) && !scanRefs.has(r.replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, ""));
+    const ref = normalizeSubjectRef(e.ref ?? e.query);
+    return !runningKeys.has(ref) && !scanRefs.has(ref);
   });
   const me = getAnalyst();
   return (

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { auditToken } from "../token/audit";
-import { resolveInput } from "../lib/resolveInput";
+import { isRunnableTokenInput, resolveInput } from "../lib/resolveInput";
 import { verdictMeta } from "../lib/verdict";
 import { TokenSparkline } from "./TokenSparkline";
 import { recordForensicEntities } from "../graph/store";
@@ -33,7 +33,7 @@ async function auditInvestment(inv: Investment): Promise<Scored> {
   if (!contract && inv.ticker) contract = await tickerToContract(inv.ticker);
   if (!contract) return { ...inv, resolved: false };
   const input = resolveInput(contract);
-  const d = input.kind === "token" ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
+  const d = isRunnableTokenInput(input) ? await auditToken(input, undefined, { skipSim: true }).catch(() => null) : null;
   if (!d) return { ...inv, resolved: false };
   const liq = d.liquidityUsd ?? 0;
   const mc = d.mcap ?? 0;

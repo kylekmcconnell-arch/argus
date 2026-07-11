@@ -7,7 +7,7 @@
 // finding, not a footnote.
 import { auditToken, type TokenDossier } from "../token/audit";
 import { searchTokens } from "../token/sources";
-import { resolveInput } from "../lib/resolveInput";
+import { isRunnableTokenInput, resolveInput } from "../lib/resolveInput";
 
 export interface TokenClaim {
   ticker: string | null;
@@ -108,7 +108,8 @@ export async function pivotOnChain(
   const onPage = discoverContracts(content);
   if (onPage.length) {
     emit?.(`contract on page (${onPage[0].addr.slice(0, 8)}…) → auditing on-chain`);
-    const d = await auditToken(resolveInput(onPage[0].addr));
+    const input = resolveInput(onPage[0].addr);
+    const d = isRunnableTokenInput(input) ? await auditToken(input) : null;
     if (d) return { attempted: true, method: "contract-on-page", claim, found: d, candidates: [], reconcile: reconcile(claim, d) };
   }
 
@@ -126,7 +127,8 @@ export async function pivotOnChain(
     // tickers are too generic to auto-confirm by search alone.
     const match = want.length >= 4 ? candidates.find((c) => normTicker(c.symbol) === want) : undefined;
     if (match) {
-      const d = await auditToken(resolveInput(match.address));
+      const input = resolveInput(match.address);
+      const d = isRunnableTokenInput(input) ? await auditToken(input) : null;
       if (d) return { attempted: true, method: "name-search", claim, found: d, candidates: candidates.slice(0, 4), reconcile: reconcile(claim, d, true) };
     }
     // searched, found nothing matching

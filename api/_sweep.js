@@ -165,11 +165,21 @@ var GOPLUS_CHAIN = {
   linea: "59144",
   scroll: "534352"
 };
+async function dexByTokenResult(address) {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (!res.ok) return { ok: false, pairs: [] };
+    const d = await res.json();
+    return { ok: true, pairs: d.pairs ?? [] };
+  } catch {
+    return { ok: false, pairs: [] };
+  }
+}
 async function dexByToken(address) {
-  const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`);
-  if (!res.ok) return [];
-  const d = await res.json();
-  return d.pairs ?? [];
+  const result = await dexByTokenResult(address);
+  return result.pairs;
 }
 var CG_PLATFORM = {
   ethereum: "ethereum",
@@ -205,7 +215,8 @@ async function coingeckoToken(chain, address) {
     const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
     const cex = new Set(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean));
     const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
-    const homepage = (d.links?.homepage ?? []).find((u) => typeof u === "string" && /^https?:\/\//i.test(u)) ?? null;
+    const homepageValue = (d.links?.homepage ?? []).find((value) => typeof value === "string" && /^https?:\/\//i.test(value));
+    const homepage = typeof homepageValue === "string" ? homepageValue : null;
     const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
     const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
     const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
@@ -214,17 +225,29 @@ async function coingeckoToken(chain, address) {
     return null;
   }
 }
+async function dexByPairResult(chain, pair) {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (!res.ok) return { ok: false, pair: null };
+    const d = await res.json();
+    return { ok: true, pair: d.pair ?? d.pairs?.[0] ?? null };
+  } catch {
+    return { ok: false, pair: null };
+  }
+}
 async function dexByPair(chain, pair) {
-  const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`);
-  if (!res.ok) return null;
-  const d = await res.json();
-  return d.pair ?? d.pairs?.[0] ?? null;
+  const result = await dexByPairResult(chain, pair);
+  return result.pair;
 }
 function pickPair(pairs, wantAddress) {
   if (!pairs.length) return null;
   const byLiq = [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
   if (wantAddress) {
-    const match = byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase());
+    const exact = byLiq.find((p) => p.baseToken?.address === wantAddress);
+    if (exact) return exact;
+    const match = /^0x[0-9a-f]{40}$/i.test(wantAddress) ? byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase()) : void 0;
     if (match) return match;
   }
   return byLiq[0];
@@ -239,7 +262,7 @@ async function honeypotIs(chainId, address) {
       simSuccess: !!d.simulationSuccess,
       buyTax: d.simulationResult?.buyTax ?? 0,
       sellTax: d.simulationResult?.sellTax ?? 0,
-      flags: (d.flags ?? []).map((f) => f.description ?? f.flag ?? String(f))
+      flags: (d.flags ?? []).map((flag) => typeof flag === "string" ? flag : flag.description ?? flag.flag ?? String(flag))
     };
   } catch {
     return null;
@@ -434,8 +457,9 @@ var _cache = /* @__PURE__ */ new Map();
 var CACHE_TTL = 6e4;
 async function auditToken(input, emit, opts) {
   if (input.kind !== "token") return null;
-  const key = `${input.via}:${input.ref.toLowerCase()}:${opts?.skipSim ? 1 : 0}`;
-  const hit = _cache.get(key);
+  const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
+  const key = `${input.via}:${cacheRef}:${opts?.skipSim ? 1 : 0}`;
+  const hit = opts?.force ? void 0 : _cache.get(key);
   if (hit && Date.now() - hit.at < CACHE_TTL) return hit.d;
   const d = await runTokenAudit(input, emit, opts);
   _cache.set(key, { at: Date.now(), d });
@@ -785,6 +809,16 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
   return "Falls short on the forensic checks. Treat as high risk.";
 }
 
+// src/lib/subjectRef.ts
+var EVM_ADDRESS2 = /^0x[0-9a-f]{40}$/i;
+var SOLANA_ADDRESS2 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function normalizeSubjectRef(value) {
+  const clean = (value ?? "").trim().replace(/^https?:\/\//i, "").replace(/^[@$]+/, "").replace(/\/$/, "");
+  if (SOLANA_ADDRESS2.test(clean)) return clean;
+  if (EVM_ADDRESS2.test(clean)) return clean.toLowerCase();
+  return clean.toLowerCase();
+}
+
 // server/sweep.ts
 var MAX_TOKEN_CHECKS = 15;
 function creds() {
@@ -818,18 +852,22 @@ async function telegram(text) {
   } catch {
   }
 }
-async function runSweep() {
+async function runSweep(organizationId) {
   const c = creds();
   if (!c) return { checked: 0, alerts: [], note: "no backend configured" };
-  const watchRows = await pg(c, "reports?select=ref,payload&kind=eq.watch&order=ts.desc&limit=100");
+  if (!organizationId) return { checked: 0, alerts: [], note: "organization required" };
+  const orgFilter = `organization_id=eq.${encodeURIComponent(organizationId)}`;
+  const watchRows = await pg(c, `reports?select=ref,payload&${orgFilter}&kind=eq.watch&order=ts.desc&limit=100`);
   const watches = (watchRows ?? []).map((r) => r.payload?.item).filter(Boolean);
   if (!watches.length) return { checked: 0, alerts: [], note: "watchlist empty" };
-  const graphRows = await pg(c, "graph_contributions?select=handle,verdict,nodes,edges&order=updated_at.desc&limit=300");
+  const graphRows = await pg(c, `graph_contributions?select=handle,verdict,nodes,edges&${orgFilter}&order=updated_at.desc&limit=300`);
   const contributions = (graphRows ?? []).map((x) => ({ handle: x.handle, verdict: x.verdict ?? void 0, nodes: x.nodes ?? [], edges: x.edges ?? [] }));
+  const openCaseRows = await pg(c, `cases?select=canonical_ref&${orgFilter}&status=eq.open&kind=in.(person,token,investigation)&limit=500`);
+  const openCases = new Set((openCaseRows ?? []).map((row) => normalizeSubjectRef(row.canonical_ref)).filter(Boolean));
   const found = [];
   let tokenChecks = 0;
   for (const w of watches) {
-    if (w.kind === "token" && tokenChecks < MAX_TOKEN_CHECKS) {
+    if (w.kind === "token" && openCases.has(normalizeSubjectRef(w.id)) && tokenChecks < MAX_TOKEN_CHECKS) {
       tokenChecks++;
       const input = { kind: "token", ref: w.id, via: w.via ?? "evm" };
       const d = await auditToken(input, void 0, { skipSim: true }).catch(() => null);
@@ -844,10 +882,10 @@ async function runSweep() {
           found.push({ subject: w.id, label: w.label, type: "drift", detail: `liquidity halved: $${Math.round(s.liquidityUsd).toLocaleString()} \u2192 $${Math.round(d.liquidityUsd ?? 0).toLocaleString()}`, at: Date.now() });
         }
         const item = { ...w, snapshot: { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap } };
-        await pg(c, "reports?on_conflict=ref,kind", {
+        await pg(c, "reports?on_conflict=organization_id,ref,kind", {
           method: "POST",
           headers: { prefer: "resolution=merge-duplicates,return=minimal" },
-          body: JSON.stringify({ ref: w.id.toLowerCase(), kind: "watch", query: w.label, payload: { item }, ts: (/* @__PURE__ */ new Date()).toISOString() })
+          body: JSON.stringify({ organization_id: organizationId, ref: normalizeSubjectRef(w.id), kind: "watch", query: w.label, payload: { item }, ts: (/* @__PURE__ */ new Date()).toISOString() })
         });
       }
     }
@@ -861,10 +899,10 @@ async function runSweep() {
   for (const a of found) {
     const detail = a.detail.split("::")[0];
     const ref = "al:" + sha(`${a.subject}|${a.type}|${a.detail}`);
-    const inserted = await pg(c, "reports?on_conflict=ref,kind", {
+    const inserted = await pg(c, "reports?on_conflict=organization_id,ref,kind", {
       method: "POST",
       headers: { prefer: "resolution=ignore-duplicates,return=representation" },
-      body: JSON.stringify({ ref, kind: "alert", query: a.label, payload: { subject: a.subject, label: a.label, type: a.type, detail, at: a.at }, ts: (/* @__PURE__ */ new Date()).toISOString() })
+      body: JSON.stringify({ organization_id: organizationId, ref, kind: "alert", query: a.label, payload: { subject: a.subject, label: a.label, type: a.type, detail, at: a.at }, ts: (/* @__PURE__ */ new Date()).toISOString() })
     });
     if (Array.isArray(inserted) && inserted.length > 0) fresh.push({ ...a, detail });
   }

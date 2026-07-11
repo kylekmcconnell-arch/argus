@@ -1,6 +1,6 @@
 // Authenticated person investigation stream.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { runAudit } from "./_collector.js";
+import { resolveInput, runAudit } from "./_collector.js";
 import type { TraceStep } from "../src/data/evidence";
 import type { Dossier } from "../src/data/dossier";
 import {
@@ -93,8 +93,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireArgusAuth(req, res, "analyst");
   if (!auth) return;
 
-  const handle = typeof req.query.handle === "string" ? req.query.handle.trim() : "";
-  if (!handle || handle.length > 200) {
+  const rawHandle = typeof req.query.handle === "string" ? req.query.handle.trim() : "";
+  const resolved = rawHandle ? resolveInput(rawHandle) : null;
+  const handle = resolved?.kind === "handle" ? resolved.ref : "";
+  if (!/^[A-Za-z0-9_]{1,15}$/.test(handle)) {
     res.status(400).json({ error: "valid_handle_required" });
     return;
   }

@@ -104,14 +104,14 @@ const hostFromUrl = (u: string) => { try { return new URL(/^https?:\/\//.test(u)
 // Verdict/finding text asserting an absent team — suppressed when a team IS known.
 const TEAM_ABSENCE = /\bno team\b|team not (?:established|found)|no (?:leadership|team) section|anonymous team/i;
 
-export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, onOpenRecent }: { initialUrl?: string; initialPrivate?: boolean; onAudit?: (q: string) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
-  const [url, setUrl] = useState(initialUrl ?? "");
+export function ReconPage({ initialUrl, initialRecon, initialPrivate, onAudit, onInvestigate, onOpenRecent }: { initialUrl?: string; initialRecon?: Recon; initialPrivate?: boolean; onAudit?: (q: string) => void; onInvestigate?: (q: string, priv?: boolean) => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
+  const [url, setUrl] = useState(initialUrl ?? initialRecon?.retrieval.url ?? "");
   const [priv, setPriv] = useState(!!initialPrivate);
   const privRef = useRef(!!initialPrivate);
   const togglePriv = (v: boolean) => { setPriv(v); privRef.current = v; };
   const [stages, setStages] = useState<RetrievalStage[]>([]);
   const [pivotNotes, setPivotNotes] = useState<string[]>([]);
-  const [recon, setRecon] = useState<Recon | null>(null);
+  const [recon, setRecon] = useState<Recon | null>(initialRecon ?? null);
   const [running, setRunning] = useState(false);
   const [copied, setCopied] = useState(false);
   const [webTeam, setWebTeam] = useState<WebPerson[]>([]);
@@ -119,11 +119,25 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, 
   const [teamSearched, setTeamSearched] = useState(false);
   const [projToken, setProjToken] = useState<ResolvedProjectToken | null>(null);
   const [redirecting, setRedirecting] = useState<ResolvedProjectToken | null>(null);
-  const ran = useRef(false);
+  const ran = useRef(!!initialRecon);
+  const mounted = useRef(true);
+  const runningRef = useRef(false);
+  const runSequence = useRef(0);
+
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
 
   const run = useCallback(async (raw: string) => {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    const runId = ++runSequence.current;
+    const isCurrent = () => mounted.current && runId === runSequence.current;
     const target = raw.trim();
-    if (!target) return;
+    if (!target) { runningRef.current = false; return; }
     setUrl(target);
     setRunning(true);
     setRecon(null);
@@ -137,13 +151,23 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, 
     try { scanHost = new URL(/^https?:\/\//.test(target) ? target : `https://${target}`).hostname.replace(/^www\./, ""); } catch { /* keep */ }
     const scanId = `site:${scanHost}:${Date.now()}`;
     beginScan({ id: scanId, label: scanHost, kind: "site", ref: scanHost, pct: 10 });
-    const r = await runRecon(
-      target,
-      (s) => setStages((prev) => [...prev, s]),
-      (note) => setPivotNotes((prev) => [...prev, note]),
-    );
-    setRecon(r);
-    setRunning(false);
+    let r: Recon;
+    try {
+      r = await runRecon(
+        target,
+        (s) => { if (isCurrent()) setStages((prev) => [...prev, s]); },
+        (note) => { if (isCurrent()) setPivotNotes((prev) => [...prev, note]); },
+      );
+    } catch {
+      endScan(scanId);
+      if (isCurrent()) setRunning(false);
+      runningRef.current = false;
+      return;
+    }
+    if (isCurrent()) {
+      setRecon(r);
+      setRunning(false);
+    }
     endScan(scanId);
 
     // Bridge to the token. A JS-app site (jup.ag) can render too thin to surface
@@ -152,13 +176,14 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, 
     // homepage matches the site we recon'd, this IS that token's project — skip
     // straight to the full investigation. Otherwise (weaker, name-only match) just
     // offer a one-click bridge card.
-    if (r.retrieval.status !== "gap" && !r.isFund && !r.pivot?.found) {
+    if (isCurrent() && r.retrieval.status !== "gap" && !r.isFund && !r.pivot?.found) {
       const t = await resolveProjectToken(r.title || scanHost).catch(() => null);
-      if (t) {
+      if (t && isCurrent()) {
         const officialHost = t.homepage ? hostFromUrl(t.homepage) : null;
         if (onInvestigate && officialHost && apexOf(officialHost) === apexOf(scanHost)) {
           // Provable match — run the full report instead of the thin site recon.
           setRedirecting(t);
+          runningRef.current = false;
           onInvestigate(t.contract, privRef.current);
           return;
         }
@@ -167,14 +192,14 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, 
     }
 
     // Dig the web + LinkedIn for the team (the render-based recon is shallow).
-    if (r.retrieval.status !== "gap") {
+    if (isCurrent() && r.retrieval.status !== "gap") {
       setTeamSearching(true);
       fetchWebTeam(r.retrieval.url, r.title ?? "", r)
-        .then((people) => setWebTeam(people))
-        .finally(() => { setTeamSearching(false); setTeamSearched(true); });
+        .then((people) => { if (isCurrent()) setWebTeam(people); })
+        .finally(() => { if (isCurrent()) { setTeamSearching(false); setTeamSearched(true); } });
     }
     // Private recon: show the result but leave no trace — skip log, graph, persist.
-    if (privRef.current) return;
+    if (privRef.current) { runningRef.current = false; return; }
 
     // Log/persist under the bare host (enigma-fund.com), NOT the full URL —
     // the report library and the Dossiers delete both key on host, so logging
@@ -207,7 +232,8 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, 
       try { host = new URL(r.retrieval.url).hostname.replace(/^www\./, ""); } catch { /* keep */ }
       void syncReport("site", host, host, { recon: r }, r.verdict?.verdict, r.verdict?.score);
     }
-  }, []);
+    runningRef.current = false;
+  }, [onInvestigate]);
 
   // Auto-run when opened with a URL from the main search bar.
   useEffect(() => {
@@ -267,7 +293,7 @@ export function ReconPage({ initialUrl, initialPrivate, onAudit, onInvestigate, 
       <div className="mt-2 flex items-center gap-2 text-[12px] text-ink-faint">
         <span>try</span>
         {EXAMPLES.map((e) => (
-          <button key={e} onClick={() => run(e)} className="mono rounded border border-line bg-panel px-1.5 py-0.5 text-ink-dim transition hover:text-ink">{e}</button>
+          <button key={e} onClick={() => run(e)} disabled={running} className="mono rounded border border-line bg-panel px-1.5 py-0.5 text-ink-dim transition hover:text-ink disabled:opacity-50">{e}</button>
         ))}
       </div>
 
