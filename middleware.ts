@@ -49,7 +49,8 @@ export const config = {
  * JWTs and roles as defense in depth.
  */
 export default async function middleware(request: Request): Promise<Response> {
-  const pathname = new URL(request.url).pathname;
+  const requestUrl = new URL(request.url);
+  const pathname = requestUrl.pathname;
   if (request.method === "OPTIONS") {
     const origin = request.headers.get("origin") || "";
     const allowed = new Set((process.env.ARGUS_CORS_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean));
@@ -146,11 +147,19 @@ export default async function middleware(request: Request): Promise<Response> {
     return Response.json({ error: "access_not_provisioned" }, { status: 403 });
   }
 
-  const requiredRole = OWNER_PATHS.has(pathname)
-    ? "owner"
-    : request.method === "GET" && VIEWER_GET_PATHS.has(pathname)
-      ? "viewer"
-      : "analyst";
+  const augmentRole = pathname === "/api/augment" && request.method === "GET"
+    ? requestUrl.searchParams.has("action")
+      ? "owner"
+      : requestUrl.searchParams.has("type") && requestUrl.searchParams.has("value")
+        ? "analyst"
+        : "viewer"
+    : null;
+  const requiredRole = augmentRole
+    ?? (OWNER_PATHS.has(pathname)
+      ? "owner"
+      : request.method === "GET" && VIEWER_GET_PATHS.has(pathname)
+        ? "viewer"
+        : "analyst");
   if (ROLE_RANK[role] < ROLE_RANK[requiredRole]) {
     return Response.json({ error: "insufficient_role", requiredRole }, { status: 403 });
   }
