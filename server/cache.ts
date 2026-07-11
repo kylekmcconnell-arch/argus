@@ -34,7 +34,7 @@ export async function cacheGet(key: string): Promise<string | null> {
     const p = rows?.[0]?.payload;
     const expiresAt = rows?.[0]?.expires_at ? Date.parse(rows[0].expires_at) : Number.NaN;
     if (!p?.text || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
-    recordCall("cache", "grok-hit", 0, "24h search cache");
+    recordCall("cache", "grok-hit", 0, "24h search cache", "cached");
     return p.text;
   } catch {
     return null;

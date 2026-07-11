@@ -10,15 +10,36 @@ import { env } from "../config";
 export async function heliusWalletActivity(address: string) {
   const key = env("HELIUS_API_KEY");
   if (!key) return null;
+  let res: Response;
   try {
-    recordHelius("address-transactions");
-    const res = await fetch(`https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${key}&limit=50`);
-    if (!res.ok) return null;
-    const txs = (await res.json()) as any[];
-    return { count: txs.length, latest: txs[0]?.timestamp };
+    res = await fetch(`https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${key}&limit=50`);
   } catch {
+    recordHelius("address-transactions", "failed", "subscription/keyed · transport_error");
     return null;
   }
+  if (!res.ok) {
+    recordHelius("address-transactions", "failed", `subscription/keyed · http_${res.status}`);
+    return null;
+  }
+
+  let value: unknown;
+  try { value = await res.json(); }
+  catch {
+    recordHelius("address-transactions", "failed", "subscription/keyed · response_json_error");
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    recordHelius("address-transactions", "partial", "subscription/keyed · result_shape_error");
+    return null;
+  }
+  const malformed = value.some((transaction) => transaction == null || typeof transaction !== "object" || Array.isArray(transaction));
+  recordHelius(
+    "address-transactions",
+    malformed ? "partial" : "succeeded",
+    malformed ? "subscription/keyed · incomplete_transaction_shape" : "subscription/keyed",
+  );
+  const txs = value as Array<{ timestamp?: unknown }>;
+  return { count: txs.length, latest: typeof txs[0]?.timestamp === "number" ? txs[0].timestamp : undefined };
 }
 
 export async function bitqueryReachable(): Promise<boolean> {

@@ -8,6 +8,12 @@ import { env } from "../config";
 import { VentureOutcome } from "../../src/engine";
 
 const BASE = "https://api.peopledatalabs.com/v5";
+type JsonRecord = Record<string, unknown>;
+
+const asRecord = (value: unknown): JsonRecord | null =>
+  value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : null;
+const optionalString = (value: unknown): string | undefined =>
+  typeof value === "string" && value.trim() ? value : undefined;
 
 export async function enrichPerson(params: { profile?: string; name?: string; company?: string }) {
   const key = env("PDL_API_KEY");
@@ -20,38 +26,89 @@ export async function enrichPerson(params: { profile?: string; name?: string; co
   // match is safe; on a bare common name we demand high confidence so we never
   // attach the wrong "Kyle McConnell".
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
+  let res: Response;
   try {
-    const res = await fetch(`${BASE}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
-    if (!res.ok) { recordPdlMatch(false); return null; }
-    const d = (await res.json()) as any;
-    const p = d.data;
-    recordPdlMatch(!!p); // PDL bills per successful match
-    if (!p) return null;
-    return {
-      fullName: p.full_name,
-      jobTitle: p.job_title,
-      jobCompany: p.job_company_name,
-      experience: (p.experience ?? []).map((x: any) => ({
-        company: x.company?.name,
-        title: x.title?.name,
-        start: x.start_date,
-        end: x.end_date,
-        url: x.company?.website || x.company?.linkedin_url || null,
-      })),
-      linkedin: p.linkedin_url,
-      // Emails are the strongest cross-source bridge key: a PDL-resolved email that
-      // MATCHES a leaked GitHub commit email proves the anon dev is this named person.
-      emails: [...new Set([
-        p.work_email,
-        ...(Array.isArray(p.personal_emails) ? p.personal_emails : []),
-        ...(Array.isArray(p.emails) ? p.emails.map((e: any) => (typeof e === "string" ? e : e?.address)) : []),
-      ].filter((e: any) => typeof e === "string" && e.includes("@")).map((e: string) => e.toLowerCase()))],
-      github: typeof p.github_username === "string" ? p.github_username : null,
-      location: typeof p.location_name === "string" ? p.location_name : null,
-    };
+    res = await fetch(`${BASE}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
   } catch {
+    recordPdlMatch(false, "failed", "transport_error");
     return null;
   }
+  if (!res.ok) {
+    recordPdlMatch(false, "failed", `http_${res.status}`);
+    return null;
+  }
+
+  let raw: unknown;
+  try {
+    raw = await res.json();
+  } catch {
+    recordPdlMatch(false, "failed", "response_json_error");
+    return null;
+  }
+
+  const payload = asRecord(raw);
+  if (!payload || !("data" in payload)) {
+    recordPdlMatch(false, "partial", "missing_data");
+    return null;
+  }
+  if (payload.data == null) {
+    recordPdlMatch(false, "succeeded", "no_match");
+    return null;
+  }
+  const p = asRecord(payload.data);
+  if (!p) {
+    recordPdlMatch(false, "partial", "invalid_person_shape");
+    return null;
+  }
+
+  const issues: string[] = [];
+  const fullName = optionalString(p.full_name);
+  if (!fullName) issues.push("missing_full_name");
+  const rawExperience = p.experience;
+  if (rawExperience != null && !Array.isArray(rawExperience)) issues.push("invalid_experience");
+  const experience = (Array.isArray(rawExperience) ? rawExperience : []).flatMap((value) => {
+    const x = asRecord(value);
+    if (!x) {
+      issues.push("invalid_experience_item");
+      return [];
+    }
+    const company = asRecord(x.company);
+    const title = asRecord(x.title);
+    return [{
+      company: optionalString(company?.name),
+      title: optionalString(title?.name),
+      start: optionalString(x.start_date),
+      end: optionalString(x.end_date),
+      url: optionalString(company?.website) || optionalString(company?.linkedin_url) || null,
+    }];
+  });
+  const emailCandidates: unknown[] = [
+    p.work_email,
+    ...(Array.isArray(p.personal_emails) ? p.personal_emails : []),
+    ...(Array.isArray(p.emails)
+      ? p.emails.map((email) => typeof email === "string" ? email : asRecord(email)?.address)
+      : []),
+  ];
+  const person = {
+    fullName,
+    jobTitle: optionalString(p.job_title),
+    jobCompany: optionalString(p.job_company_name),
+    experience,
+    linkedin: optionalString(p.linkedin_url),
+    // Emails are the strongest cross-source bridge key: a PDL-resolved email that
+    // MATCHES a leaked GitHub commit email proves the anon dev is this named person.
+    emails: [...new Set(emailCandidates
+      .filter((email): email is string => typeof email === "string" && email.includes("@"))
+      .map((email) => email.toLowerCase()))],
+    github: optionalString(p.github_username) ?? null,
+    location: optionalString(p.location_name) ?? null,
+  };
+  recordPdlMatch(
+    true,
+    issues.length ? "partial" : "succeeded",
+    issues.length ? `incomplete_result:${[...new Set(issues)].join(",")}` : undefined,
+  );
+  return person;
 }
 
 const httpify = (u?: string | null) => (u ? (/^https?:\/\//.test(u) ? u : "https://" + u) : null);

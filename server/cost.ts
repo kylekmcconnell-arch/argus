@@ -32,10 +32,18 @@ const EST_SOURCES_PER_SEARCH = 5;
 export interface LedgerLine {
   provider: string;
   op: string;
+  /** Total provider attempts, including retries and failed responses. */
   calls: number;
+  succeeded: number;
+  partial: number;
+  failed: number;
+  cached: number;
+  status: ProviderUsageStatus;
   usd: number;
   meta?: string;
 }
+
+export type ProviderUsageStatus = "succeeded" | "partial" | "failed" | "cached";
 
 interface CostState {
   ledger: Map<string, LedgerLine>;
@@ -70,26 +78,65 @@ export function resetCost(): void {
   }
 }
 
-// Generic: count a provider call (usd may be 0 for free providers — still
-// recorded, the point is the full picture).
-export function recordCall(provider: string, op: string, usd = 0, meta?: string): void {
+const statusCounts = (status: ProviderUsageStatus) => ({
+  succeeded: status === "succeeded" ? 1 : 0,
+  partial: status === "partial" ? 1 : 0,
+  failed: status === "failed" ? 1 : 0,
+  cached: status === "cached" ? 1 : 0,
+});
+
+const aggregateStatus = (line: Pick<LedgerLine, "calls" | "succeeded" | "failed" | "cached">): ProviderUsageStatus => {
+  if (line.succeeded === line.calls) return "succeeded";
+  if (line.failed === line.calls) return "failed";
+  if (line.cached === line.calls) return "cached";
+  return "partial";
+};
+
+function mergeMeta(current: string | undefined, next: string | undefined): string | undefined {
+  const clean = next?.trim();
+  if (!clean || current?.includes(clean)) return current;
+  return [current, clean].filter(Boolean).join(" · ").slice(0, 500);
+}
+
+// Generic: count one provider attempt (usd may be 0 for free providers — still
+// recorded, the point is the full picture). Existing adapters default to a
+// succeeded attempt; retrying/paid adapters pass their observed outcome.
+export function recordCall(
+  provider: string,
+  op: string,
+  usd = 0,
+  meta?: string,
+  status: ProviderUsageStatus = "succeeded",
+): void {
   const { ledger } = currentState();
   const key = `${provider}|${op}`;
   const cur = ledger.get(key);
   if (cur) {
     cur.calls += 1;
+    cur.succeeded += status === "succeeded" ? 1 : 0;
+    cur.partial += status === "partial" ? 1 : 0;
+    cur.failed += status === "failed" ? 1 : 0;
+    cur.cached += status === "cached" ? 1 : 0;
+    cur.status = aggregateStatus(cur);
     cur.usd += usd;
-    if (meta) cur.meta = meta;
+    cur.meta = mergeMeta(cur.meta, meta);
   } else {
-    ledger.set(key, { provider, op, calls: 1, usd, meta });
+    const counts = statusCounts(status);
+    ledger.set(key, { provider, op, calls: 1, ...counts, status, usd, ...(meta ? { meta } : {}) });
   }
 }
 
-export function recordTwitterapi(op: string): void {
-  recordCall("twitterapi", op, PRICE.twitterapiCall);
+export function recordTwitterapi(op: string, status: ProviderUsageStatus = "succeeded", meta?: string): void {
+  recordCall("twitterapi", op, PRICE.twitterapiCall, meta, status);
 }
 
-export function addGrokUsage(u: { input_tokens?: number; output_tokens?: number; num_sources_used?: number } | undefined, toolCalls?: number, op = "live-search"): void {
+export function addGrokUsage(
+  u: { input_tokens?: number; output_tokens?: number; num_sources_used?: number } | undefined,
+  toolCalls?: number,
+  op = "live-search",
+  status: ProviderUsageStatus = "succeeded",
+  outcomeMeta?: string,
+): void {
   const { grok } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
@@ -98,28 +145,57 @@ export function addGrokUsage(u: { input_tokens?: number; output_tokens?: number;
   grok.in += tin;
   grok.out += tout;
   grok.sources += sources;
-  recordCall("grok", op, tin * PRICE.grokIn + tout * PRICE.grokOut + sources * PRICE.grokSource, `${tin + tout} tok · ~${sources} sources`);
+  recordCall(
+    "grok",
+    op,
+    tin * PRICE.grokIn + tout * PRICE.grokOut + sources * PRICE.grokSource,
+    [`${tin + tout} tok · ~${sources} sources`, outcomeMeta].filter(Boolean).join(" · "),
+    status,
+  );
 }
 
-export function addClaudeUsage(u: { input_tokens?: number; output_tokens?: number } | undefined, op = "analysis"): void {
+export function addClaudeUsage(
+  u: { input_tokens?: number; output_tokens?: number } | undefined,
+  op = "analysis",
+  status: ProviderUsageStatus = "succeeded",
+  outcomeMeta?: string,
+): void {
   const { claude } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
   claude.calls += 1;
   claude.in += tin;
   claude.out += tout;
-  recordCall("claude", op, tin * PRICE.claudeIn + tout * PRICE.claudeOut, `${tin + tout} tok`);
+  recordCall(
+    "claude",
+    op,
+    tin * PRICE.claudeIn + tout * PRICE.claudeOut,
+    [`${tin + tout} tok`, outcomeMeta].filter(Boolean).join(" · "),
+    status,
+  );
 }
 
-export function recordPdlMatch(matched: boolean): void {
-  recordCall("peopledatalabs", "person/enrich", matched ? PRICE.pdlMatch : 0, matched ? "per-match est" : "no match (free)");
+export function recordPdlMatch(
+  matched: boolean,
+  status: ProviderUsageStatus = "succeeded",
+  meta?: string,
+): void {
+  recordCall(
+    "peopledatalabs",
+    "person/enrich",
+    matched && status !== "failed" ? PRICE.pdlMatch : 0,
+    meta ?? (status === "succeeded" ? (matched ? "per-match est" : "no match (free)") : undefined),
+    status,
+  );
 }
 
-export function recordHelius(op: string): void {
-  recordCall("helius", op, PRICE.heliusCall);
+export function recordHelius(op: string, status: ProviderUsageStatus = "succeeded", meta?: string): void {
+  recordCall("helius", op, PRICE.heliusCall, meta, status);
 }
 
 export interface AuditCost {
+  /** Collector-owned schema marker; distinguishes an observed empty ledger from a missing client field. */
+  schemaVersion: 1;
   usd: number;
   grokUsd: number;
   claudeUsd: number;
@@ -143,6 +219,7 @@ export function getCost(): AuditCost {
   const total = lines.reduce((a, l) => a + l.usd, 0);
   const round2 = (n: number) => Math.round(n * 100) / 100;
   return {
+    schemaVersion: 1,
     usd: round2(total),
     grokUsd: round2(grokUsd),
     claudeUsd: round2(claudeUsd),

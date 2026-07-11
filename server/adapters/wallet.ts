@@ -12,7 +12,33 @@ const ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
 const NAME_IN_TEXT = /\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b/gi;
 
 async function getJson(url: string): Promise<any> {
-  try { recordCall("wallet-resolve", new URL(url).host, 0); const r = await fetch(url, { signal: AbortSignal.timeout(9000) }); return r.ok ? await r.json() : null; } catch { return null; }
+  let operation: string;
+  try { operation = new URL(url).host; }
+  catch { return null; }
+  let response: Response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(9000) });
+  } catch {
+    recordCall("wallet-resolve", operation, 0, "transport_error", "failed");
+    return null;
+  }
+  if (!response.ok) {
+    recordCall("wallet-resolve", operation, 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  let result: unknown;
+  try {
+    result = await response.json();
+  } catch {
+    recordCall("wallet-resolve", operation, 0, "response_json_error", "failed");
+    return null;
+  }
+  if (result === null || typeof result !== "object") {
+    recordCall("wallet-resolve", operation, 0, "invalid_result_shape", "partial");
+    return null;
+  }
+  recordCall("wallet-resolve", operation, 0, undefined, "succeeded");
+  return result;
 }
 async function web3bio(name: string): Promise<string | null> {
   const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);

@@ -45,6 +45,51 @@ begin
 end;
 $$;
 
+create or replace function pg_temp.core_usage_batch_lines()
+returns jsonb
+language sql
+immutable
+as $$
+  select '[
+    {
+      "idempotency_key": "core:40000000-0000-4000-8000-000000000302:177373e87c6f35d979e67733f1e92e499b38d2a0",
+      "provider": "core-anthropic",
+      "operation": "core:analysis",
+      "calls": 2,
+      "usd": 0.02,
+      "status": "succeeded",
+      "meta": "model"
+    },
+    {
+      "idempotency_key": "core:40000000-0000-4000-8000-000000000302:e3bf00c73e85d793a149b6dc4ab20ea85ce4052a",
+      "provider": "core-github",
+      "operation": "core:repository",
+      "calls": 1,
+      "usd": 0,
+      "status": "failed",
+      "meta": "http_503"
+    },
+    {
+      "idempotency_key": "core:40000000-0000-4000-8000-000000000302:69b0803c8ce44b0b6eaee3798d9483ad8c3f653a",
+      "provider": "core-x",
+      "operation": "core:social",
+      "calls": 3,
+      "usd": 0.015,
+      "status": "partial",
+      "meta": null
+    },
+    {
+      "idempotency_key": "core:40000000-0000-4000-8000-000000000302:eaf86a1071dbdf9f6c671c16a6c1da6378aaa9cd",
+      "provider": "core-search",
+      "operation": "core:web",
+      "calls": 0,
+      "usd": 0,
+      "status": "cached",
+      "meta": "cache hit"
+    }
+  ]'::jsonb;
+$$;
+
 insert into public.organizations (id, slug, name) values
   ('40000000-0000-4000-8000-000000000001', 'provider-usage-one', 'Provider Usage One'),
   ('40000000-0000-4000-8000-000000000002', 'provider-usage-two', 'Provider Usage Two');
@@ -273,6 +318,213 @@ select pg_temp.expect_error('cross-tenant actor', $sql$
   )
 $sql$, '42501');
 
+select pg_temp.expect_error('batch rejects a non-array payload', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000102',
+    '{}'::jsonb
+  )
+$sql$, '22023');
+
+select pg_temp.expect_error('batch rejects a missing deterministic key', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000102',
+    '[{
+      "provider":"core-anthropic", "operation":"core:analysis",
+      "calls":1, "usd":0.01, "status":"succeeded", "meta":null
+    }]'::jsonb
+  )
+$sql$, '22023');
+
+select pg_temp.expect_error('batch rejects a forged exact-version key', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000102',
+    '[{
+      "idempotency_key":"core:wrong-version:wrong-digest",
+      "provider":"core-anthropic", "operation":"core:analysis",
+      "calls":1, "usd":0.01, "status":"succeeded", "meta":null
+    }]'::jsonb
+  )
+$sql$, '22023');
+
+select pg_temp.expect_error('batch requires an initiating analyst', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    null,
+    pg_temp.core_usage_batch_lines()
+  )
+$sql$, '22023');
+
+select pg_temp.expect_error('batch rejects duplicate provider operations', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000102',
+    pg_catalog.jsonb_build_array(
+      pg_temp.core_usage_batch_lines() -> 0,
+      pg_temp.core_usage_batch_lines() -> 0
+    )
+  )
+$sql$, '22023');
+
+select pg_temp.expect_error('batch rejects calls outside integer range', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000102',
+    pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_set(
+        pg_temp.core_usage_batch_lines() -> 0,
+        '{calls}',
+        '2147483648'::jsonb
+      )
+    )
+  )
+$sql$, '22023');
+
+select pg_temp.expect_error('batch rejects more than 200 lines', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000102',
+    (select pg_catalog.jsonb_agg('{}'::jsonb) from pg_catalog.generate_series(1, 201))
+  )
+$sql$, '22023');
+
+select pg_temp.expect_error('batch rejects cross-tenant report version', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000001',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000101',
+    pg_temp.core_usage_batch_lines()
+  )
+$sql$, '23503');
+
+select pg_temp.expect_error('batch rejects cross-tenant actor', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000101',
+    pg_temp.core_usage_batch_lines()
+  )
+$sql$, '42501');
+
+do $assert_batch_status_aggregation$
+declare
+  summary record;
+begin
+  select * into strict summary
+  from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000102',
+    pg_temp.core_usage_batch_lines()
+  );
+
+  if summary.event_count <> 4
+     or summary.calls <> 6
+     or summary.usd <> 0.035
+     or summary.succeeded_count <> 1
+     or summary.failed_count <> 1
+     or summary.partial_count <> 1
+     or summary.cached_count <> 1 then
+    raise exception 'batch status aggregation is incorrect: %', row_to_json(summary);
+  end if;
+end;
+$assert_batch_status_aggregation$;
+
+-- Replaying the caller's identical deterministic lines returns the same
+-- summary without appending events or incrementing the compatibility view.
+select * from public.record_provider_usage_batch(
+  '40000000-0000-4000-8000-000000000002',
+  '40000000-0000-4000-8000-000000000302',
+  '40000000-0000-4000-8000-000000000102',
+  pg_temp.core_usage_batch_lines()
+);
+
+do $assert_batch_replay$
+declare
+  projection record;
+begin
+  if (select pg_catalog.count(*)
+      from public.provider_usage_events event
+      where event.organization_id = '40000000-0000-4000-8000-000000000002'
+        and event.report_version_id = '40000000-0000-4000-8000-000000000302') <> 4 then
+    raise exception 'exact batch replay appended duplicate events';
+  end if;
+
+  select
+    pg_catalog.count(*) as line_count,
+    coalesce(pg_catalog.sum(line.calls), 0) as calls,
+    coalesce(pg_catalog.sum(line.usd), 0) as usd
+  into strict projection
+  from public.report_cost_lines line
+  where line.organization_id = '40000000-0000-4000-8000-000000000002'
+    and line.report_version_id = '40000000-0000-4000-8000-000000000302';
+
+  if projection.line_count <> 4
+     or projection.calls <> 6
+     or projection.usd <> 0.035 then
+    raise exception 'exact batch replay double-counted the projection: %', row_to_json(projection);
+  end if;
+end;
+$assert_batch_replay$;
+
+-- The first line sorts before the conflicting replay, proving a later failure
+-- rolls back both its earlier event and its earlier projection mutation.
+select pg_temp.expect_error('conflicting batch replay is atomic', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000102',
+    '[
+      {
+        "idempotency_key":"core:40000000-0000-4000-8000-000000000302:b46919ab6841d8070794770e2b4c1880b4378c03",
+        "provider":"aaa-provider", "operation":"core:atomic-new",
+        "calls":1, "usd":0.001, "status":"succeeded", "meta":null
+      },
+      {
+        "idempotency_key":"core:40000000-0000-4000-8000-000000000302:177373e87c6f35d979e67733f1e92e499b38d2a0",
+        "provider":"core-anthropic", "operation":"core:analysis",
+        "calls":99, "usd":0.02, "status":"succeeded", "meta":"model"
+      }
+    ]'::jsonb
+  )
+$sql$, '40001');
+
+do $assert_batch_rollback$
+begin
+  if exists (
+    select 1
+    from public.provider_usage_events event
+    where event.organization_id = '40000000-0000-4000-8000-000000000002'
+      and event.idempotency_key = 'core:40000000-0000-4000-8000-000000000302:b46919ab6841d8070794770e2b4c1880b4378c03'
+  ) or exists (
+    select 1
+    from public.report_cost_lines line
+    where line.organization_id = '40000000-0000-4000-8000-000000000002'
+      and line.report_version_id = '40000000-0000-4000-8000-000000000302'
+      and line.provider = 'aaa-provider'
+      and line.operation = 'core:atomic-new'
+  ) then
+    raise exception 'failed batch left a partial event or projection write';
+  end if;
+
+  if (select pg_catalog.count(*)
+      from public.provider_usage_events event
+      where event.organization_id = '40000000-0000-4000-8000-000000000002'
+        and event.report_version_id = '40000000-0000-4000-8000-000000000302') <> 4 then
+    raise exception 'failed batch changed the exact-version event set';
+  end if;
+end;
+$assert_batch_rollback$;
+
 select pg_temp.expect_error('service update privilege', $sql$
   update public.provider_usage_events set calls = 999
 $sql$, '42501');
@@ -403,6 +655,14 @@ select pg_temp.expect_error('authenticated RPC execution', $sql$
     'request:browser-rpc', 'grok', 'panel:namesake', 1, 0.1
   )
 $sql$, '42501');
+select pg_temp.expect_error('authenticated batch RPC execution', $sql$
+  select * from public.record_provider_usage_batch(
+    '40000000-0000-4000-8000-000000000002',
+    '40000000-0000-4000-8000-000000000302',
+    '40000000-0000-4000-8000-000000000102',
+    pg_temp.core_usage_batch_lines()
+  )
+$sql$, '42501');
 select pg_temp.expect_error('authenticated summary execution', $sql$
   select public.get_provider_usage_summary(
     '40000000-0000-4000-8000-000000000001',
@@ -416,6 +676,9 @@ declare
   rpc regprocedure := pg_catalog.to_regprocedure(
     'public.record_provider_usage_event(uuid,uuid,text,text,text,integer,numeric,uuid,text,text)'
   );
+  batch_rpc regprocedure := pg_catalog.to_regprocedure(
+    'public.record_provider_usage_batch(uuid,uuid,uuid,jsonb)'
+  );
   summary_rpc regprocedure := pg_catalog.to_regprocedure(
     'public.get_provider_usage_summary(uuid,uuid)'
   );
@@ -423,7 +686,7 @@ declare
     'public.upsert_report_cost_line(uuid,uuid,text,text,integer,numeric,text)'
   );
 begin
-  if rpc is null or summary_rpc is null or legacy_rpc is null then
+  if rpc is null or batch_rpc is null or summary_rpc is null or legacy_rpc is null then
     raise exception 'provider usage RPC signature is missing';
   end if;
 
@@ -464,6 +727,9 @@ begin
   if pg_catalog.has_function_privilege('anon', rpc, 'execute')
      or pg_catalog.has_function_privilege('authenticated', rpc, 'execute')
      or not pg_catalog.has_function_privilege('service_role', rpc, 'execute')
+     or pg_catalog.has_function_privilege('anon', batch_rpc, 'execute')
+     or pg_catalog.has_function_privilege('authenticated', batch_rpc, 'execute')
+     or not pg_catalog.has_function_privilege('service_role', batch_rpc, 'execute')
      or pg_catalog.has_function_privilege('anon', summary_rpc, 'execute')
      or pg_catalog.has_function_privilege('authenticated', summary_rpc, 'execute')
      or not pg_catalog.has_function_privilege('service_role', summary_rpc, 'execute')

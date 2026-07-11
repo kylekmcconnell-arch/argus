@@ -11,7 +11,7 @@ import {
   type AuthContext,
 } from "./_auth.js";
 import { activateReportVersion, persistProvenance } from "./_provenance.js";
-import { issuePanelCostToken } from "./_cache.js";
+import { issuePanelCostToken, recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
 
 export const config = { maxDuration: 180 };
 
@@ -75,6 +75,22 @@ export async function persistServerDossier(
     ? versions[0].report_version_id
     : null;
   if (!reportVersionId) throw new Error("immutable report write returned no id");
+  const cost = dossier.cost && typeof dossier.cost === "object" && !Array.isArray(dossier.cost)
+    ? dossier.cost as { schemaVersion?: unknown; calls?: unknown }
+    : {};
+  const hasObservedLedger = cost.schemaVersion === 1 && Array.isArray(cost.calls);
+  const costLines = hasObservedLedger ? cost.calls as PanelCostLine[] : [];
+  if (dossier.live && !hasObservedLedger) {
+    throw new Error("live provider usage ledger is missing");
+  }
+  if (costLines.length > 0) {
+    await recordProviderUsageBatch(
+      auth.organizationId,
+      reportVersionId,
+      auth.userId,
+      costLines,
+    );
+  }
   await persistProvenance(
     credentials,
     { organizationId: auth.organizationId, reportVersionId, attestationState },

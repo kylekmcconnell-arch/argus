@@ -31,14 +31,35 @@ function stripText(html: string): string {
 }
 
 async function get(url: string, opts?: { requireHtml?: boolean }): Promise<{ url: string; html: string } | null> {
+  let response: Response;
   try {
-    recordCall("site-fetch", "substance", 0);
-    const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,application/javascript" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
-    if (!r.ok) return null;
-    // The homepage must be HTML; a JS bundle (application/javascript) must not be.
-    if ((opts?.requireHtml ?? true) && !/html/i.test(r.headers.get("content-type") ?? "")) return null;
-    return { url: r.url || url, html: await r.text() };
-  } catch { return null; }
+    response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,application/javascript" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
+  } catch {
+    recordCall("site-fetch", "substance", 0, "transport_error", "failed");
+    return null;
+  }
+  if (!response.ok) {
+    recordCall("site-fetch", "substance", 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  // The homepage must be HTML; a JS bundle (application/javascript) must not be.
+  if ((opts?.requireHtml ?? true) && !/html/i.test(response.headers.get("content-type") ?? "")) {
+    recordCall("site-fetch", "substance", 0, "unexpected_content_type", "partial");
+    return null;
+  }
+  let html: string;
+  try {
+    html = await response.text();
+  } catch {
+    recordCall("site-fetch", "substance", 0, "response_text_error", "failed");
+    return null;
+  }
+  if (!html.trim()) {
+    recordCall("site-fetch", "substance", 0, "empty_body", "partial");
+    return null;
+  }
+  recordCall("site-fetch", "substance", 0, undefined, "succeeded");
+  return { url: response.url || url, html };
 }
 
 // Pull the first same-origin module/script bundle URL from the shell so we can read

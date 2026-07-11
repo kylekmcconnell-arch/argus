@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-const { issuePanelCostToken } = vi.hoisted(() => ({
+const { issuePanelCostToken, recordProviderUsageBatch } = vi.hoisted(() => ({
   issuePanelCostToken: vi.fn(),
+  recordProviderUsageBatch: vi.fn(),
 }));
 
-vi.mock("./_cache.js", () => ({ issuePanelCostToken }));
+vi.mock("./_cache.js", () => ({ issuePanelCostToken, recordProviderUsageBatch }));
 
 vi.mock("./_collector.js", async () => {
   const { resolveInput } = await import("../src/lib/resolveInput");
@@ -34,6 +35,7 @@ vi.mock("./_provenance.js", () => ({
 }));
 
 import { consumeInvestigationQuota, requireArgusAuth, serviceCredentials } from "./_auth.js";
+import { activateReportVersion, persistProvenance } from "./_provenance.js";
 import { resolveInput, runAudit } from "./_collector.js";
 import handler from "./audit";
 
@@ -71,6 +73,7 @@ describe("person audit input guard", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     issuePanelCostToken.mockReturnValue("signed-panel-token");
+    recordProviderUsageBatch.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -127,6 +130,13 @@ describe("person audit input guard", () => {
       },
       checkRuns: [],
       providerSnapshot: { capturedAt: "2026-07-11T00:00:00.000Z", runs: [] },
+      cost: {
+        schemaVersion: 1,
+        calls: [
+          { provider: "grok", op: "live-search", calls: 2, usd: 0.2, status: "partial", meta: "one retry" },
+          { provider: "claude", op: "analysis", calls: 1, usd: 0.01, status: "succeeded" },
+        ],
+      },
     } as never);
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
       JSON.stringify([{ report_version_id: reportVersionId }]),
@@ -136,6 +146,21 @@ describe("person audit input guard", () => {
 
     await handler(request("argus"), res);
 
+    expect(recordProviderUsageBatch).toHaveBeenCalledWith(
+      AUTH_ORGANIZATION_ID,
+      reportVersionId,
+      "00000000-0000-4000-8000-000000000010",
+      [
+        { provider: "grok", op: "live-search", calls: 2, usd: 0.2, status: "partial", meta: "one retry" },
+        { provider: "claude", op: "analysis", calls: 1, usd: 0.01, status: "succeeded" },
+      ],
+    );
+    expect(recordProviderUsageBatch.mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(persistProvenance).mock.invocationCallOrder[0],
+    );
+    expect(vi.mocked(persistProvenance).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(activateReportVersion).mock.invocationCallOrder[0],
+    );
     expect(issuePanelCostToken).toHaveBeenCalledWith(AUTH_ORGANIZATION_ID, reportVersionId);
     const stream = captured.chunks.join("");
     expect(stream).toContain("event: done\n");
@@ -158,9 +183,89 @@ describe("person audit input guard", () => {
 
     await handler(request("argus", { private: "1" }), res);
 
+    expect(recordProviderUsageBatch).not.toHaveBeenCalled();
     expect(issuePanelCostToken).not.toHaveBeenCalled();
     const stream = captured.chunks.join("");
     const done = JSON.parse(stream.match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
     expect(done.persistence).toEqual({ state: "private", reportVersionId: null });
+  });
+
+  it("does not activate or publish a report when core usage attribution fails", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@argus",
+      report: { audit_id: "audit-run-accounting-failure", composite_verdict: "PASS", governing_score: 81 },
+      cost: { schemaVersion: 1, calls: [{ provider: "grok", op: "live-search", calls: 1, usd: 0.1 }] },
+    } as never);
+    recordProviderUsageBatch.mockRejectedValueOnce(new Error("provider usage batch attribution failed (503)"));
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify([{ report_version_id: "00000000-0000-4000-8000-000000000302" }]),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+    const { res, captured } = response();
+
+    await handler(request("argus"), res);
+
+    expect(recordProviderUsageBatch).toHaveBeenCalledOnce();
+    expect(persistProvenance).not.toHaveBeenCalled();
+    expect(activateReportVersion).not.toHaveBeenCalled();
+    expect(issuePanelCostToken).not.toHaveBeenCalled();
+    const stream = captured.chunks.join("");
+    expect(stream).toContain("event: persistence\n");
+    const done = JSON.parse(stream.match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null });
+  });
+
+  it("fails closed when a live audit returns no collector-owned usage ledger", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@argus",
+      report: { audit_id: "audit-run-missing-ledger", composite_verdict: "PASS", governing_score: 81 },
+      cost: { calls: [] },
+    } as never);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify([{ report_version_id: "00000000-0000-4000-8000-000000000303" }]),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+    const { res, captured } = response();
+
+    await handler(request("argus"), res);
+
+    expect(recordProviderUsageBatch).not.toHaveBeenCalled();
+    expect(persistProvenance).not.toHaveBeenCalled();
+    expect(activateReportVersion).not.toHaveBeenCalled();
+    expect(issuePanelCostToken).not.toHaveBeenCalled();
+    const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null });
+  });
+
+  it("allows a collector-observed empty ledger when no provider attempt ran", async () => {
+    const reportVersionId = "00000000-0000-4000-8000-000000000304";
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@argus",
+      report: { audit_id: "audit-run-observed-empty", composite_verdict: "INCOMPLETE", governing_score: null },
+      cost: { schemaVersion: 1, calls: [] },
+    } as never);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify([{ report_version_id: reportVersionId }]),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+    const { res, captured } = response();
+
+    await handler(request("argus"), res);
+
+    expect(recordProviderUsageBatch).not.toHaveBeenCalled();
+    expect(persistProvenance).toHaveBeenCalledOnce();
+    expect(activateReportVersion).toHaveBeenCalledWith(expect.anything(), AUTH_ORGANIZATION_ID, reportVersionId);
+    expect(issuePanelCostToken).toHaveBeenCalledWith(AUTH_ORGANIZATION_ID, reportVersionId);
+    const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    expect(done.persistence).toMatchObject({ state: "persisted", reportVersionId });
   });
 });

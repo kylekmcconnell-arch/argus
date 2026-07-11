@@ -179,6 +179,82 @@ export async function recordProviderUsageEvent(organizationId, reportVersionId, 
   }
 }
 
+// Persist the server-owned provider ledger for a completed core audit in one
+// database transaction. Unlike supplemental panel accounting, this is a
+// publication invariant: callers must fail the report activation when the
+// batch cannot be durably attributed to its exact immutable version.
+export async function recordProviderUsageBatch(organizationId, reportVersionId, initiatedBy, lines) {
+  if (!UUID.test(organizationId || "") || !UUID.test(reportVersionId || "") || !UUID.test(initiatedBy || "")) {
+    throw new Error("valid provider usage batch context required");
+  }
+  if (!Array.isArray(lines) || lines.length < 1 || lines.length > 200) {
+    throw new Error("valid provider usage batch required");
+  }
+
+  const allowedStatuses = new Set(["succeeded", "failed", "partial", "cached"]);
+  const seen = new Set();
+  const normalized = lines.map((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      throw new Error("invalid provider usage batch line");
+    }
+    const provider = typeof candidate.provider === "string" ? candidate.provider.trim() : "";
+    const operation = typeof candidate.op === "string" ? candidate.op.trim() : "";
+    const calls = candidate.calls;
+    const usd = candidate.usd;
+    const status = candidate.status == null ? "succeeded" : String(candidate.status);
+    const meta = candidate.meta == null ? null : String(candidate.meta).trim() || null;
+    if (!provider || provider.length > 100
+      || !operation || operation.length > 160
+      || !Number.isSafeInteger(calls) || calls < 0 || calls > 2147483647
+      || !Number.isFinite(usd) || usd < 0
+      || !allowedStatuses.has(status)
+      || (meta != null && meta.length > 500)) {
+      throw new Error("invalid provider usage batch line");
+    }
+    const identity = `${provider}\u0000${operation}`;
+    if (seen.has(identity)) throw new Error("duplicate provider usage batch line");
+    seen.add(identity);
+    const digest = createHash("sha256").update(identity).digest("hex").slice(0, 40);
+    return {
+      idempotency_key: `core:${reportVersionId.toLowerCase()}:${digest}`,
+      provider,
+      operation,
+      calls,
+      usd: Math.round(usd * 100000000) / 100000000,
+      status,
+      meta,
+    };
+  });
+  const c = creds();
+  if (!c) throw new Error("provider usage storage is unavailable");
+  const body = JSON.stringify({
+    p_organization_id: organizationId.toLowerCase(),
+    p_report_version_id: reportVersionId.toLowerCase(),
+    p_initiated_by: initiatedBy.toLowerCase(),
+    p_lines: normalized,
+  });
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      const response = await fetch(`${c.url}/rest/v1/rpc/record_provider_usage_batch`, {
+        method: "POST",
+        headers: headers(c.key),
+        body,
+        signal: AbortSignal.timeout(8000),
+      });
+      if (response.ok) return;
+      const retryable = response.status === 408 || response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === 1) {
+        throw new Error(`provider usage batch attribution failed (${response.status})`);
+      }
+    } catch (error) {
+      if (attempt === 1 || (error instanceof Error && /\([1-4][0-9]{2}\)$/.test(error.message))) {
+        throw error instanceof Error ? error : new Error("provider usage batch attribution failed");
+      }
+    }
+  }
+}
+
 // Compatibility name used throughout the provider routes. Each invocation is
 // now one append-only event; callers may supply idempotencyKey for a replayable
 // request, otherwise recordProviderUsageEvent generates a fresh request key.

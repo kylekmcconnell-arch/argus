@@ -35,21 +35,38 @@ function htmlToText(html: string): string {
 }
 
 async function fetchPage(url: string): Promise<{ url: string; text: string } | null> {
+  let response: Response;
   try {
-    recordCall("site-fetch", "team-page", 0);
-    const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
-    if (!r.ok) return null;
-    const ct = r.headers.get("content-type") ?? "";
-    if (!/html|markdown|text\/plain/i.test(ct)) return null;
-    const raw = await r.text();
-    // Markdown variants are already text; only HTML needs stripping.
-    const text = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
-    // A real team page mentions roles; skip thin/404-ish pages.
-    if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) return null;
-    return { url, text };
+    response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
   } catch {
+    recordCall("site-fetch", "team-page", 0, "transport_error", "failed");
     return null;
   }
+  if (!response.ok) {
+    recordCall("site-fetch", "team-page", 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  const ct = response.headers.get("content-type") ?? "";
+  if (!/html|markdown|text\/plain/i.test(ct)) {
+    recordCall("site-fetch", "team-page", 0, "unexpected_content_type", "partial");
+    return null;
+  }
+  let raw: string;
+  try {
+    raw = await response.text();
+  } catch {
+    recordCall("site-fetch", "team-page", 0, "response_text_error", "failed");
+    return null;
+  }
+  // Markdown variants are already text; only HTML needs stripping.
+  const text = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
+  // A real team page mentions roles; skip thin/404-ish pages.
+  if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) {
+    recordCall("site-fetch", "team-page", 0, "insufficient_team_content", "partial");
+    return null;
+  }
+  recordCall("site-fetch", "team-page", 0, undefined, "succeeded");
+  return { url, text };
 }
 
 export async function fetchTeamPage(domain: string, projectName?: string): Promise<TeamMember[]> {
