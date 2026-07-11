@@ -18,6 +18,10 @@ export type ReportKind = "person" | "token" | "investigation" | "site";
 export type ReportStatus = "open" | "archived";
 export type ReportLifecycleAction = "archive" | "restore";
 
+export type ReportSyncResult =
+  | { state: "persisted"; reportVersionId: string; panelCostToken: string }
+  | { state: "failed" };
+
 export interface ReportSubject {
   kind: ReportKind;
   ref: string;
@@ -97,17 +101,32 @@ export async function syncReport(
   payload: unknown,
   verdict?: string,
   score?: number | null,
-): Promise<void> {
+): Promise<ReportSyncResult> {
   try {
     const checkRuns = reportChecks(kind, payload);
     const completenessState = reportCompleteness(kind, payload, checkRuns);
-    await fetch("/api/report", {
+    const response = await fetch("/api/report", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ kind, ref, query, payload, verdict, score, checkRuns, completenessState }),
+      signal: AbortSignal.timeout(25_000),
     });
+    if (!response.ok) return { state: "failed" };
+    const body = (await response.json().catch(() => ({}))) as {
+      reportVersionId?: unknown;
+      panelCostToken?: unknown;
+    };
+    if (typeof body.reportVersionId !== "string" || typeof body.panelCostToken !== "string") {
+      return { state: "failed" };
+    }
+    return {
+      state: "persisted",
+      reportVersionId: body.reportVersionId,
+      panelCostToken: body.panelCostToken,
+    };
   } catch {
     /* offline or no backend — the session cache still holds it */
+    return { state: "failed" };
   }
 }
 

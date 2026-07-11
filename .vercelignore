@@ -25,3 +25,8 @@ api/og 2.tsx
 api/report 2.ts
 src/components/MethodologyChecklist 2.tsx
 src/lib/scanChecklist 2.ts
+
+# Finder conflict copies and local review artifacts are never deployable input.
+**/* 2.*
+artifacts/
+SPEC-shared-auditlog.md

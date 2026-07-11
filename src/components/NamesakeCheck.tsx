@@ -23,7 +23,7 @@ const REL_META: Record<string, { label: string; color: string; blurb: string }> 
   unclear: { label: "unclear", color: "var(--color-ink-faint)", blurb: "" },
 };
 
-export function NamesakeCheck({ symbol, name, contract, chain, reportVersionId, onAudit }: { symbol: string; name?: string; contract?: string; chain?: string; reportVersionId?: string; onAudit?: (q: string) => void }) {
+export function NamesakeCheck({ symbol, name, contract, chain, panelCostToken, onAudit }: { symbol: string; name?: string; contract?: string; chain?: string; panelCostToken?: string; onAudit?: (q: string) => void }) {
   const [d, setD] = useState<Namesake | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "none">("loading");
   const ran = useRef(false);
@@ -32,8 +32,9 @@ export function NamesakeCheck({ symbol, name, contract, chain, reportVersionId, 
     if (ran.current) return;
     ran.current = true;
     const qs = new URLSearchParams({ symbol, name: name ?? "", contract: contract ?? "", chain: chain ?? "" });
-    if (reportVersionId) qs.set("reportVersionId", reportVersionId);
-    fetch(`/api/namesake?${qs}`)
+    fetch(`/api/namesake?${qs}`, panelCostToken
+      ? { headers: { "x-argus-panel-token": panelCostToken } }
+      : undefined)
       .then((r) => r.json())
       .then((j: Namesake) => {
         if (j?.available === false) { setState("none"); return; }
@@ -41,7 +42,7 @@ export function NamesakeCheck({ symbol, name, contract, chain, reportVersionId, 
         setState("ok");
       })
       .catch(() => setState("none"));
-  }, [symbol, name, contract, chain, reportVersionId]);
+  }, [symbol, name, contract, chain, panelCostToken]);
 
   if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">tracing who the token is named after and whether they're actually behind it…</div>;
   if (state === "none" || !d) return null;

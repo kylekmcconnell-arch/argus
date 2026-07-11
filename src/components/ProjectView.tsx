@@ -9,11 +9,16 @@ const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
 // Dig everyone tied to a project by NAME (and domain if known), via the same
 // web/LinkedIn/X search the recon uses. Name-only is fine for a bare venture.
-async function fetchProjectPeople(name: string, domain?: string): Promise<WebPerson[]> {
+async function fetchProjectPeople(name: string, panelCostToken: string, domain?: string): Promise<WebPerson[]> {
   try {
     const qs = new URLSearchParams({ name });
     if (domain) qs.set("domain", domain.replace(/^https?:\/\//, "").replace(/\/.*$/, ""));
-    const res = await fetch(`/api/recon-team?${qs}`);
+    const res = await fetch(`/api/recon-team?${qs}`, {
+      headers: {
+        "x-argus-panel-context": "required",
+        "x-argus-panel-token": panelCostToken,
+      },
+    });
     if (!res.ok) return [];
     const d = await res.json();
     return Array.isArray(d.people) ? (d.people as WebPerson[]) : [];
@@ -32,32 +37,39 @@ export function ProjectView({
   project,
   onAudit,
   onReset,
+  record = true,
+  panelCostToken,
 }: {
   project: { name: string; domain?: string };
   onAudit: (q: string) => void;
   onReset: () => void;
+  /** Private exploration may fetch people for this view but must not compound the shared graph. */
+  record?: boolean;
+  /** Exact persisted report capability required before paid team discovery. */
+  panelCostToken?: string;
 }) {
   const [people, setPeople] = useState<WebPerson[] | null>(null);
   const [loading, setLoading] = useState(true);
-  const key = `${project.name}|${project.domain ?? ""}`;
+  const key = `${project.name}|${project.domain ?? ""}|${record ? "shared" : "private"}|${panelCostToken ?? "unbound"}`;
   const ran = useRef("");
 
   useEffect(() => {
+    if (!panelCostToken) return;
     if (ran.current === key) return;
     ran.current = key;
     let cancelled = false;
     setLoading(true);
     setPeople(null);
-    fetchProjectPeople(project.name, project.domain)
+    fetchProjectPeople(project.name, panelCostToken, project.domain)
       .then((ppl) => {
         if (cancelled) return;
         setPeople(ppl);
-        if (ppl.length) recordContribution(projectPeopleContribution(project.name, ppl));
+        if (record && ppl.length) recordContribution(projectPeopleContribution(project.name, ppl));
       })
       .catch(() => !cancelled && setPeople([]))
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
-  }, [key, project.domain, project.name]);
+  }, [key, panelCostToken, project.domain, project.name, record]);
 
   // Who else (from past audits) is already tied to this project?
   const connections = subjectConnections(project.name, getContributions());
@@ -88,9 +100,13 @@ export function ProjectView({
         <div className="mt-5 rounded-xl border border-line bg-panel p-4">
           <div className="flex items-center gap-2 text-[10.5px] uppercase tracking-wider text-ink-faint">
             People who worked on this {people && <span className="normal-case tracking-normal text-ink-faint">({people.length})</span>}
-            {loading && <span className="normal-case tracking-normal text-ink-faint">· digging the web…</span>}
+            {panelCostToken && loading && <span className="normal-case tracking-normal text-ink-faint">· digging the web…</span>}
           </div>
-          {people && people.length > 0 ? (
+          {!panelCostToken ? (
+            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-faint">
+              Paid deep-team discovery is paused because this view is not bound to a fresh saved report.
+            </p>
+          ) : people && people.length > 0 ? (
             <div className="mt-2 space-y-1.5">
               {people.map((p) => (
                 <div key={p.handle ?? p.name} className="flex items-start justify-between gap-3">

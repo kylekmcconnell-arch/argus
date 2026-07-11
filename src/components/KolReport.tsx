@@ -91,7 +91,7 @@ async function auditPromotions(promos: Promo[]): Promise<TokRes[]> {
   return results.filter((r): r is TokRes => r != null);
 }
 
-export function KolReport({ handle, promotions, associates, reportVersionId, onAudit }: { handle: string; promotions: Promo[]; associates: Assoc[]; reportVersionId?: string; onAudit?: (q: string) => void }) {
+export function KolReport({ handle, promotions, associates, panelCostToken, record = true, onAudit }: { handle: string; promotions: Promo[]; associates: Assoc[]; panelCostToken?: string; record?: boolean; onAudit?: (q: string) => void }) {
   const [tokens, setTokens] = useState<TokRes[] | null>(null);
   const [signals, setSignals] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -102,7 +102,10 @@ export function KolReport({ handle, promotions, associates, reportVersionId, onA
     ran.current = true;
     (async () => {
       const [sig, toks] = await Promise.all([
-        fetch(`/api/kol-signals?handle=${encodeURIComponent(handle.replace(/^@/, ""))}${reportVersionId ? `&reportVersionId=${encodeURIComponent(reportVersionId)}` : ""}`).then((r) => r.json()).catch(() => null),
+        fetch(
+          `/api/kol-signals?handle=${encodeURIComponent(handle.replace(/^@/, ""))}`,
+          panelCostToken ? { headers: { "x-argus-panel-token": panelCostToken } } : undefined,
+        ).then((r) => r.json()).catch(() => null),
         auditPromotions(promotions),
       ]);
       setSignals(sig && sig.available === false ? null : sig);
@@ -114,7 +117,7 @@ export function KolReport({ handle, promotions, associates, reportVersionId, onA
       const ents = toks
         .filter((t) => !t.unresolved)
         .map((t) => ({ key: t.label, type: "Token", subtype: "Promoted", edgeType: "PROMOTED", label: `${t.label}${t.verdict ? ` · ${t.verdict}` : ""}` }));
-      if (ents.length) recordForensicEntities(handle, ents);
+      if (record && ents.length) recordForensicEntities(handle, ents);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -153,7 +156,7 @@ export function KolReport({ handle, promotions, associates, reportVersionId, onA
                     {t.dead && <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">inactive now</span>}
                     {t.address && t.chain && <span className="ml-auto"><TokenSparkline address={t.address} chain={t.chain} pairAddress={t.pairAddress} compact hidePct /></span>}
                   </div>
-                  {t.address && t.chain && <CallTimeline handle={handle} ticker={t.label} address={t.address} chain={t.chain} reportVersionId={reportVersionId} />}
+                  {t.address && t.chain && <CallTimeline handle={handle} ticker={t.label} address={t.address} chain={t.chain} panelCostToken={panelCostToken} />}
                 </div>
               );
             })}

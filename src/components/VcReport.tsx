@@ -45,7 +45,7 @@ async function auditInvestment(inv: Investment): Promise<Scored> {
   return { ...inv, address: d.address, chainResolved: d.chain, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap, dead, resolved: true };
 }
 
-export function VcReport({ handle, name, reportVersionId, onAudit }: { handle: string; name: string; reportVersionId?: string; onAudit?: (q: string) => void }) {
+export function VcReport({ handle, name, panelCostToken, record = true, onAudit }: { handle: string; name: string; panelCostToken?: string; record?: boolean; onAudit?: (q: string) => void }) {
   const [rows, setRows] = useState<Scored[] | null>(null);
   const [state, setState] = useState<"loading" | "ok" | "none">("loading");
   const [attempt, setAttempt] = useState(0);
@@ -58,8 +58,9 @@ export function VcReport({ handle, name, reportVersionId, onAudit }: { handle: s
     (async () => {
       try {
         const params = new URLSearchParams({ handle: handle.replace(/^@/, ""), name });
-        if (reportVersionId) params.set("reportVersionId", reportVersionId);
-        const r = await fetch(`/api/vc-portfolio?${params}`);
+        const r = await fetch(`/api/vc-portfolio?${params}`, panelCostToken
+          ? { headers: { "x-argus-panel-token": panelCostToken } }
+          : undefined);
         const d = await r.json();
         const inv: Investment[] = d?.investments ?? [];
         if (!inv.length) { setState("none"); return; }
@@ -83,12 +84,12 @@ export function VcReport({ handle, name, reportVersionId, onAudit }: { handle: s
             return { key, type: i.x_handle ? "Company" : "Token", subtype: "Portfolio", edgeType: "INVESTED_IN", label: i.project + (i.stage ? ` · ${i.stage}` : "") };
           })
           .filter(Boolean) as { key: string; type: string; subtype: string; edgeType: string; label: string }[];
-        if (ents.length) recordForensicEntities(handle, ents);
+        if (record && ents.length) recordForensicEntities(handle, ents);
       } catch {
         setState("none");
       }
     })();
-  }, [handle, name, reportVersionId, attempt]);
+  }, [handle, name, panelCostToken, record, attempt]);
 
   if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">assembling the portfolio + pricing each bet…</div>;
   if (state === "none" || !rows) {

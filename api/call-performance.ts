@@ -7,7 +7,7 @@
 // month later." If no call tweet is found, anchors to the token's launch instead
 // and says so. twitterapi.io (call tweet) + GeckoTerminal (price, no key).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { attachPanelCost } from "./_cache.js";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 30 };
@@ -97,7 +97,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const ticker = typeof q.ticker === "string" ? q.ticker.trim() : undefined;
   const address = typeof q.address === "string" ? q.address.trim() : undefined;
   const chain = typeof q.chain === "string" ? q.chain.trim().toLowerCase() : "";
-  const reportVersionId = typeof q.reportVersionId === "string" ? q.reportVersionId : undefined;
+  const panelToken = req.headers["x-argus-panel-token"];
+  const panelTokenValue = Array.isArray(panelToken) ? panelToken[0] : panelToken;
+  const panelCostVersionId = resolvePanelCostVersion(
+    auth.organizationId,
+    panelTokenValue,
+  );
+  if (!panelCostVersionId) { res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." }); return; }
   if (!handle || !HANDLE.test(handle) || !address) { res.status(400).json({ error: "handle + address required" }); return; }
   const network = NETWORK[chain] ?? chain;
   if (!network) { res.status(200).json({ available: true, note: "unsupported chain" }); return; }
@@ -154,7 +160,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (twitterUsage.calls) {
       const target = `${network}:${address}`.slice(0, 128);
-      await attachPanelCost(auth.organizationId, reportVersionId, {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
         provider: "twitterapi",
         op: `panel:call-performance:${target}`,
         calls: twitterUsage.calls,

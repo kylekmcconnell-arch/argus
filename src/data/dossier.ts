@@ -10,7 +10,7 @@ import {
   type PanoptesEdge,
 } from "../engine";
 import type { CollectedEvidence, NotableFollower, Contradiction, WebTeamMember } from "./evidence";
-import type { ReportVersionContext } from "../lib/reportVersion";
+import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
 import type { ScanCheck } from "../lib/scanChecklist";
 
 export interface Dossier {
@@ -44,12 +44,13 @@ export interface Dossier {
   // version. Kept outside the immutable payload itself so loading metadata
   // never mutates (or silently rewrites) the evidence snapshot.
   versionContext?: ReportVersionContext;
+  /** Snapshot framing inherited from a parent investigation facet. */
+  viewVersionContext?: ReportVersionContext;
+  /** Fresh persistence/cost capability inherited from a parent investigation. */
+  viewPersistence?: ReportPersistenceContext;
   // Live SSE completion records whether the immutable version was activated.
   // Consumers must not bind fresh evidence to a durable case when this failed.
-  persistence?: {
-    state: "private" | "persisted" | "failed";
-    reportVersionId?: string | null;
-  };
+  persistence?: ReportPersistenceContext;
   notableFollowers: NotableFollower[];
   contradictions: Contradiction[];
   webTeam: WebTeamMember[];

@@ -1,11 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { attachPanelCost, requireArgusAuth } = vi.hoisted(() => ({
+const { attachPanelCost, requireArgusAuth, resolvePanelCostVersion } = vi.hoisted(() => ({
   attachPanelCost: vi.fn(),
   requireArgusAuth: vi.fn(),
+  resolvePanelCostVersion: vi.fn(),
 }));
 
-vi.mock("./_cache.js", () => ({ attachPanelCost }));
+vi.mock("./_cache.js", () => ({ attachPanelCost, resolvePanelCostVersion }));
 vi.mock("./_auth.js", () => ({ requireArgusAuth }));
 
 import callPerformanceHandler from "./call-performance";
@@ -30,6 +31,11 @@ function json(body: unknown): Response {
 describe("request-local Twitter panel accounting", () => {
   beforeEach(() => {
     attachPanelCost.mockReset().mockResolvedValue(undefined);
+    resolvePanelCostVersion.mockReset().mockImplementation((_organizationId: string, token?: string) => ({
+      "panel-alice": "00000000-0000-4000-8000-000000000301",
+      "panel-bob": "00000000-0000-4000-8000-000000000302",
+      "panel-shared": "00000000-0000-4000-8000-000000000303",
+    })[token ?? ""]);
     requireArgusAuth.mockReset().mockImplementation(async (req: { query?: { handle?: string } }) => ({
       organizationId: `org-${req.query?.handle ?? "test"}`,
       displayName: "Analyst",
@@ -66,14 +72,16 @@ describe("request-local Twitter panel accounting", () => {
     const aliceResponse = response();
     const alice = kolSignalsHandler({
       method: "GET",
-      query: { handle: "alice", reportVersionId: "00000000-0000-4000-8000-000000000301" },
+      query: { handle: "alice", reportVersionId: "00000000-0000-4000-8000-000000000399" },
+      headers: { "x-argus-panel-token": "panel-alice" },
     } as never, aliceResponse.res as never);
     await aliceStarted;
 
     const bobResponse = response();
     await kolSignalsHandler({
       method: "GET",
-      query: { handle: "bob", reportVersionId: "00000000-0000-4000-8000-000000000302" },
+      query: { handle: "bob", reportVersionId: "00000000-0000-4000-8000-000000000398" },
+      headers: { "x-argus-panel-token": "panel-bob" },
     } as never, bobResponse.res as never);
     releaseAlice();
     await alice;
@@ -117,11 +125,11 @@ describe("request-local Twitter panel accounting", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     for (const input of [
-      { handle: "alice", ticker: "$ONE", address: "0xAAAA", chain: "eth", reportVersionId: "00000000-0000-4000-8000-000000000303" },
-      { handle: "alice", ticker: "$TWO", address: "SoLAddress", chain: "solana", reportVersionId: "00000000-0000-4000-8000-000000000303" },
+      { handle: "alice", ticker: "$ONE", address: "0xAAAA", chain: "eth", reportVersionId: "00000000-0000-4000-8000-000000000399" },
+      { handle: "alice", ticker: "$TWO", address: "SoLAddress", chain: "solana", reportVersionId: "00000000-0000-4000-8000-000000000399" },
     ]) {
       const { res, captured } = response();
-      await callPerformanceHandler({ method: "GET", query: input } as never, res as never);
+      await callPerformanceHandler({ method: "GET", query: input, headers: { "x-argus-panel-token": "panel-shared" } } as never, res as never);
       expect(captured.status).toBe(200);
     }
 
@@ -130,7 +138,44 @@ describe("request-local Twitter panel accounting", () => {
     expect(operations).toContain("panel:call-performance:solana:SoLAddress");
     expect(new Set(operations).size).toBe(2);
     for (const call of attachPanelCost.mock.calls) {
+      expect(call[1]).toBe("00000000-0000-4000-8000-000000000303");
       expect(call[2]).toMatchObject({ calls: 1, usd: 0.0002 });
     }
+  });
+
+  it("rejects a raw historical id before provider or cost work", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await kolSignalsHandler({
+      method: "GET",
+      query: { handle: "alice", reportVersionId: "00000000-0000-4000-8000-000000000399" },
+      headers: {},
+    } as never, res as never);
+
+    expect(captured.status).toBe(409);
+    expect(captured.body).toMatchObject({ error: "invalid_panel_context" });
+    expect(resolvePanelCostVersion).toHaveBeenLastCalledWith("org-alice", undefined);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(attachPanelCost).not.toHaveBeenCalled();
+  });
+
+  it("rejects an invalid capability before provider or cost work", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await kolSignalsHandler({
+      method: "GET",
+      query: { handle: "alice", reportVersionId: "00000000-0000-4000-8000-000000000399" },
+      headers: { "x-argus-panel-token": "invalid-panel-token" },
+    } as never, res as never);
+
+    expect(captured.status).toBe(409);
+    expect(captured.body).toMatchObject({ error: "invalid_panel_context" });
+    expect(resolvePanelCostVersion).toHaveBeenLastCalledWith("org-alice", "invalid-panel-token");
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(attachPanelCost).not.toHaveBeenCalled();
   });
 });

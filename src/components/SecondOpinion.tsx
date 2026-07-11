@@ -34,7 +34,7 @@ function buildEvidence(d: TokenDossier): string {
   return lines.join("\n");
 }
 
-export function SecondOpinion({ dossier }: { dossier: TokenDossier }) {
+export function SecondOpinion({ dossier, panelCostToken }: { dossier: TokenDossier; panelCostToken?: string }) {
   const [data, setData] = useState<Data | null>(null);
   const [state, setState] = useState<"loading" | "done">("loading");
   const ran = useRef(false);
@@ -45,13 +45,16 @@ export function SecondOpinion({ dossier }: { dossier: TokenDossier }) {
     (async () => {
       try {
         const r = await fetch("/api/challenge-verdict", {
-          method: "POST", headers: { "content-type": "application/json" },
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            ...(panelCostToken ? { "x-argus-panel-token": panelCostToken } : {}),
+          },
           body: JSON.stringify({
             subject: dossier.symbol ? `$${dossier.symbol}` : "token",
             verdict: dossier.verdict,
             score: dossier.score,
             evidence: buildEvidence(dossier),
-            reportVersionId: dossier.versionContext?.reportVersionId,
           }),
         });
         setData(await r.json());
@@ -59,7 +62,7 @@ export function SecondOpinion({ dossier }: { dossier: TokenDossier }) {
       setState("done");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [dossier.address, panelCostToken]);
 
   if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[11.5px] text-ink-faint">stress-testing the verdict…</div>;
   if (!data || data.available === false || (!data.summary && !(data.challenges ?? []).length)) return null;

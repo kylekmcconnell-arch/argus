@@ -10,7 +10,7 @@ type Resolved = { available: boolean; login?: string; followers?: number; repos?
 
 const enc = encodeURIComponent;
 
-export function PersonGithub({ handle, name, bio, className }: { handle: string; name?: string | null; bio?: string | null; className?: string }) {
+export function PersonGithub({ handle, name, bio, className, record = true }: { handle: string; name?: string | null; bio?: string | null; className?: string; record?: boolean }) {
   const [data, setData] = useState<Resolved | null>(null);
   const ran = useRef(false);
 
@@ -35,7 +35,7 @@ export function PersonGithub({ handle, name, bio, className }: { handle: string;
         {data.confidence && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: data.confidence === "high" ? "var(--color-pass)14" : "var(--color-caution)14", color: data.confidence === "high" ? "var(--color-pass)" : "var(--color-caution)" }}>{data.confidence}-confidence match</span>}
         {data.why && data.why.length > 0 && <span className="text-[10px] text-ink-faint">· {data.why[0]}</span>}
       </div>
-      <GithubForensics login={data.login} subjectKey={handle} />
+      <GithubForensics login={data.login} subjectKey={handle} record={record} />
     </div>
   );
 }

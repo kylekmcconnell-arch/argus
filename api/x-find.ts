@@ -8,7 +8,8 @@
 // not a guess. Grok (search) + twitterapi.io (profile). 24h-cached.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 // @ts-ignore — bundled JS sibling
-import { cacheGetJson, cacheSetJson } from "./_cache.js";
+import { attachPanelCost, cacheGetJson, cacheSetJson, grokUsd, resolvePanelCostVersion } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 30 };
 
@@ -18,7 +19,7 @@ const bare = (h: string) => h.replace(/^@/, "");
 const num = (...v: any[]) => { for (const x of v) if (typeof x === "number") return x; return undefined; };
 
 // Grok: the official X handle for a named project.
-async function findHandle(name: string, domain: string, key: string): Promise<string | null> {
+async function findHandle(name: string, domain: string, key: string): Promise<{ handle: string | null; usage?: { input_tokens?: number; output_tokens?: number }; toolCalls: number }> {
   const system =
     "You identify the ONE official X (Twitter) account for a crypto/tech project, using live web + X search. " +
     "Return the account the project itself operates (matches its name + website), NOT a fan, a founder's personal account, or an impersonator. " +
@@ -31,12 +32,15 @@ async function findHandle(name: string, domain: string, key: string): Promise<st
       body: JSON.stringify({ model: process.env.ARGUS_GROK_MODEL || "grok-4-fast", input: [{ role: "system", content: system }, { role: "user", content: user }], tools: [{ type: "web_search" }, { type: "x_search" }], max_tool_calls: 4 }),
       signal: AbortSignal.timeout(25000),
     });
-    if (!r.ok) return null;
+    if (!r.ok) return { handle: null, toolCalls: 0 };
     const d = (await r.json()) as any;
+    const toolCalls = Array.isArray(d.output) ? d.output.filter((item: any) => /search|tool/.test(String(item.type ?? ""))).length : 0;
     const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
-    const h = text.match(/\{[\s\S]*\}/) ? JSON.parse(text.match(/\{[\s\S]*\}/)[0]).handle : null;
-    return typeof h === "string" && HANDLE.test(h) ? bare(h) : null;
-  } catch { return null; }
+    const match = text.match(/\{[\s\S]*\}/);
+    const parsed = match ? JSON.parse(match[0]) : {};
+    const handle = typeof parsed.handle === "string" && HANDLE.test(parsed.handle) ? bare(parsed.handle) : null;
+    return { handle, usage: d.usage, toolCalls };
+  } catch { return { handle: null, toolCalls: 0 }; }
 }
 
 // twitterapi.io profile.
@@ -64,10 +68,36 @@ async function profile(handle: string, key: string): Promise<any | null> {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
   const name = q(req.query.name);
   const domain = q(req.query.domain).replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase();
   const seed = q(req.query.handle);
   if (!name && !seed) { res.status(400).json({ error: "name or handle required" }); return; }
+
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelContextHeader = req.headers["x-argus-panel-context"];
+  const panelContext = Array.isArray(panelContextHeader) ? panelContextHeader[0] : panelContextHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (panelToken && !panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This site supplement context expired. Run a fresh recon before using paid X discovery." });
+    return;
+  }
+  if (panelContext === "required" && !panelCostVersionId) {
+    res.status(409).json({ error: "panel_context_required", message: "Persist this site recon before using paid X discovery." });
+    return;
+  }
+  // A handle extracted from the site's own HTML is useful without any provider
+  // call. Everything beyond that requires an exact persisted-version capability.
+  if (!panelCostVersionId) {
+    if (seed && HANDLE.test(seed)) {
+      res.status(200).json({ available: true, found: true, handle: `@${bare(seed)}`, confidence: "high", matchReason: "the handle was found on the project's own site" });
+      return;
+    }
+    res.status(409).json({ error: "panel_context_required", message: "Persist this site recon before using paid X discovery." });
+    return;
+  }
 
   const cacheKey = `xfind:${(name || seed).toLowerCase()}:${domain}`;
   const cached = await cacheGetJson<any>(cacheKey);
@@ -78,11 +108,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   // A seed handle (from the page) is resolved directly; otherwise search for it.
   let handle = seed && HANDLE.test(seed) ? bare(seed) : null;
-  if (!handle && name && xaiKey) handle = await findHandle(name, domain, xaiKey);
+  if (!handle && name && xaiKey) {
+    const result = await findHandle(name, domain, xaiKey);
+    handle = result.handle;
+    await attachPanelCost(auth.organizationId, panelCostVersionId, {
+      provider: "grok",
+      op: "panel:x-find-search",
+      calls: 1,
+      usd: grokUsd(result.usage, result.toolCalls),
+    });
+  }
   if (!handle) { res.status(200).json({ available: true, found: false, note: "No official X account could be identified." }); return; }
   if (!twKey) { res.status(200).json({ available: true, found: true, handle: "@" + handle, note: "twitterapi not configured for profile detail." }); return; }
 
   const p = await profile(handle, twKey);
+  await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "twitterapi", op: "panel:x-find-profile", calls: 1, usd: 0.0002 });
   if (!p) { res.status(200).json({ available: true, found: true, handle: "@" + handle, note: "Account named but profile could not be resolved." }); return; }
 
   // Confidence: the account's own linked website matching the project's domain is

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
 // Project documents & resources: the whitepaper, security audits, and the pages a
 // real operation publishes about itself — API / developer docs, About, a named
@@ -27,27 +27,44 @@ const CAT_LABEL: Record<string, string> = {
 };
 const CAT_ORDER = Object.keys(CAT_LABEL);
 
-export function ProjectDocs({ name, symbol, domain }: { name?: string | null; symbol?: string | null; domain?: string | null }) {
-  const [data, setData] = useState<Data | null>(null);
-  const [state, setState] = useState<"loading" | "done">("loading");
-  const ran = useRef(false);
+export function ProjectDocs({
+  name,
+  symbol,
+  domain,
+  panelCostToken,
+}: {
+  name?: string | null;
+  symbol?: string | null;
+  domain?: string | null;
+  panelCostToken?: string;
+}) {
+  const requestKey = [name ?? "", symbol ?? "", domain ?? "", panelCostToken ?? ""].join("\u0000");
+  const [result, setResult] = useState<{ key: string; data: Data | null } | null>(null);
 
   useEffect(() => {
-    if (ran.current) return;
-    ran.current = true;
-    if (!name && !symbol && !domain) { setState("done"); return; }
+    if (!name && !symbol && !domain) return;
+    const controller = new AbortController();
     (async () => {
+      let nextData: Data | null = null;
       try {
         const qs = [name && `name=${enc(name)}`, symbol && `symbol=${enc(symbol)}`, domain && `domain=${enc(domain)}`].filter(Boolean).join("&");
-        const r = await fetch(`/api/project-docs?${qs}`);
-        setData(await r.json());
-      } catch { /* non-fatal */ }
-      setState("done");
+        const r = await fetch(`/api/project-docs?${qs}`, {
+          signal: controller.signal,
+          ...(panelCostToken ? { headers: { "x-argus-panel-token": panelCostToken } } : {}),
+        });
+        if (r.ok) nextData = await r.json();
+      } catch {
+        if (controller.signal.aborted) return;
+      }
+      if (!controller.signal.aborted) setResult({ key: requestKey, data: nextData });
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => controller.abort();
+  }, [domain, name, panelCostToken, requestKey, symbol]);
 
-  if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[11.5px] text-ink-faint">finding documents &amp; resources…</div>;
+  const settled = !name && !symbol && !domain || result?.key === requestKey;
+  const data = result?.key === requestKey ? result.data : null;
+
+  if (!settled) return <div className="rounded-xl border border-line bg-panel p-4 text-[11.5px] text-ink-faint">finding documents &amp; resources…</div>;
   if (!data || data.available === false) return null;
 
   const wp = data.whitepaper;

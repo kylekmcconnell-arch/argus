@@ -11,7 +11,7 @@ type Cap = { selector: string; name: string; risk: "bad" | "warn" | "info" };
 type Data = { available: boolean; isContract?: boolean; isToken?: boolean; proxy?: boolean; implementation?: string | null; fingerprint?: string; codeSize?: number; capabilities?: Cap[]; verdict?: { tone: string; line: string }; note?: string };
 type Twin = { handle: string; verdict?: string };
 
-export function BytecodeForensics({ address, chain, symbol }: { address: string; chain: string; symbol?: string }) {
+export function BytecodeForensics({ address, chain, symbol, record = true }: { address: string; chain: string; symbol?: string; record?: boolean }) {
   const [data, setData] = useState<Data | null>(null);
   const [twins, setTwins] = useState<Twin[]>([]);
   const [state, setState] = useState<"loading" | "done">("loading");
@@ -38,9 +38,11 @@ export function BytecodeForensics({ address, chain, symbol }: { address: string;
           }
           setTwins(found);
           // Record the fingerprint so future audits of a clone bridge to this one.
-          recordForensicEntities(symbol ? `$${symbol}` : `token:${address}`, [
-            { key: fpKey, type: "Identity", subtype: "Bytecode", edgeType: "SAME_BYTECODE", label: `code ${d.fingerprint.slice(0, 8)}` },
-          ]);
+          if (record) {
+            recordForensicEntities(symbol ? `$${symbol}` : `token:${address}`, [
+              { key: fpKey, type: "Identity", subtype: "Bytecode", edgeType: "SAME_BYTECODE", label: `code ${d.fingerprint.slice(0, 8)}` },
+            ]);
+          }
         }
       } catch { /* non-fatal */ }
       setState("done");

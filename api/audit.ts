@@ -11,6 +11,7 @@ import {
   type AuthContext,
 } from "./_auth.js";
 import { activateReportVersion, persistProvenance } from "./_provenance.js";
+import { issuePanelCostToken } from "./_cache.js";
 
 export const config = { maxDuration: 180 };
 
@@ -156,7 +157,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           send("persistence", { state: "failed" });
         }
       }
-      send("done", { ...dossier, persistence: { state: persistence, reportVersionId } });
+      const panelCostToken = persistence === "persisted" && reportVersionId
+        ? issuePanelCostToken(auth.organizationId, reportVersionId)
+        : undefined;
+      send("done", {
+        ...dossier,
+        persistence: {
+          state: persistence,
+          reportVersionId,
+          ...(panelCostToken ? { panelCostToken } : {}),
+        },
+      });
     }
   } catch (error) {
     console.error("[api/audit] failed", error);

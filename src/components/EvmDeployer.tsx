@@ -19,7 +19,7 @@ type Data = {
   walletAgeDays?: number | null; note?: string;
 };
 
-export function EvmDeployer({ address, chain, symbol, knownDeployer }: { address: string; chain: string; symbol?: string; knownDeployer?: string | null }) {
+export function EvmDeployer({ address, chain, symbol, knownDeployer, record = true }: { address: string; chain: string; symbol?: string; knownDeployer?: string | null; record?: boolean }) {
   const [data, setData] = useState<Data | null>(null);
   const [state, setState] = useState<"loading" | "done">("loading");
   const ran = useRef(false);
@@ -41,7 +41,7 @@ export function EvmDeployer({ address, chain, symbol, knownDeployer }: { address
         setData(d);
         // Feed the graph: deployer + (anon) funder keyed like the Solana forensics
         // so a wallet that recurs across audits collapses to one node and bridges.
-        if (d?.available && d.deployer) {
+        if (record && d?.available && d.deployer) {
           // Key wallets by raw addr.slice(0,8) — the SAME convention the token-audit
           // graph + operator trace use — so an EVM deployer/funder that recurs across
           // audits collapses to one node and bridges the operations.

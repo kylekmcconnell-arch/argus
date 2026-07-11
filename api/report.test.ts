@@ -1,6 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
+const { issuePanelCostToken } = vi.hoisted(() => ({
+  issuePanelCostToken: vi.fn(),
+}));
+
+vi.mock("./_cache.js", () => ({ issuePanelCostToken }));
+
 vi.mock("./_auth.js", () => ({
   requireArgusAuth: vi.fn(async () => ({
     userId: "00000000-0000-4000-8000-000000000010",
@@ -63,6 +69,7 @@ describe("report case lifecycle API", () => {
   beforeEach(() => {
     vi.mocked(requireArgusAuth).mockClear();
     vi.mocked(activateReportVersion).mockClear();
+    issuePanelCostToken.mockReset().mockReturnValue("signed-panel-token");
   });
 
   afterEach(() => {
@@ -164,7 +171,49 @@ describe("report case lifecycle API", () => {
       "00000000-0000-4000-8000-000000000001",
       versionId,
     );
-    expect(captured.body).toEqual({ ok: true, reportVersionId: versionId });
+    expect(issuePanelCostToken).toHaveBeenCalledWith(
+      "00000000-0000-4000-8000-000000000001",
+      versionId,
+    );
+    expect(captured.body).toEqual({
+      ok: true,
+      reportVersionId: versionId,
+      panelCostToken: "signed-panel-token",
+    });
+  });
+
+  it("does not mint a fresh panel capability when a person POST only links an existing server version", async () => {
+    const caseId = "00000000-0000-4000-8000-000000000201";
+    const versionId = "00000000-0000-4000-8000-000000000301";
+    const storedPayload = { report: { audit_id: "server-audit-1" }, checkRuns: [] };
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{
+        id: versionId,
+        case_id: caseId,
+        payload: storedPayload,
+        attestation_state: "server_collected",
+      }]))
+      .mockResolvedValueOnce(jsonResponse([{
+        id: caseId,
+        canonical_ref: "alice",
+        kind: "person",
+      }]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("POST", {
+      body: {
+        kind: "person",
+        ref: "alice",
+        payload: {
+          persistence: { state: "persisted", reportVersionId: versionId },
+          report: { audit_id: "server-audit-1" },
+        },
+      },
+    }), res);
+
+    expect(captured.body).toEqual({ ok: true, reportVersionId: versionId, linked: true });
+    expect(issuePanelCostToken).not.toHaveBeenCalled();
   });
 
   it("maps archived cases from their last published immutable version", async () => {
@@ -342,6 +391,7 @@ describe("report case lifecycle API", () => {
         versionContext: { caseId, reportVersionId: versionId, version: 2 },
       },
     });
+    expect(issuePanelCostToken).not.toHaveBeenCalled();
   });
 
   it("returns an archived case state instead of treating a missing projection as a new subject", async () => {

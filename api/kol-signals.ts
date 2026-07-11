@@ -5,7 +5,7 @@
 // markers and reads its recent posts' engagement to flag a paid/hollow audience.
 // twitterapi.io (TWITTERAPI_KEY). Read-only.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-import { attachPanelCost } from "./_cache.js";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 30 };
@@ -46,7 +46,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!auth) return;
   const key = process.env.TWITTERAPI_KEY;
   const handle = typeof req.query.handle === "string" ? req.query.handle.replace(/^@/, "").trim() : "";
-  const reportVersionId = typeof req.query.reportVersionId === "string" ? req.query.reportVersionId : undefined;
+  const panelToken = req.headers["x-argus-panel-token"];
+  const panelTokenValue = Array.isArray(panelToken) ? panelToken[0] : panelToken;
+  const panelCostVersionId = resolvePanelCostVersion(
+    auth.organizationId,
+    panelTokenValue,
+  );
+  if (!panelCostVersionId) { res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." }); return; }
   if (!handle || !HANDLE.test(handle)) { res.status(400).json({ error: "handle required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "twitterapi not configured." }); return; }
   const twitterUsage: CallCounter = { calls: 0 };
@@ -97,7 +103,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? `No strong bot/bought-engagement signal in the sample (${botPct}% of ${sampled} sampled followers flagged, ~${avgLikes} likes & ~${avgReplies} replies/post on ${totalFollowers.toLocaleString()} followers).`
         : "Could not sample followers.";
 
-    await attachPanelCost(auth.organizationId, reportVersionId, { provider: "twitterapi", op: "panel:kol-signals", calls: twitterUsage.calls, usd: twitterUsage.calls * 0.0002 });
+    await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "twitterapi", op: "panel:kol-signals", calls: twitterUsage.calls, usd: twitterUsage.calls * 0.0002 });
     res.status(200).json({
       available: true,
       handle,

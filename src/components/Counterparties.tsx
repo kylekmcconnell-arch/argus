@@ -13,7 +13,7 @@ const usd = (n: number) => (n >= 1e9 ? `$${(n / 1e9).toFixed(1)}B` : n >= 1e6 ? 
 const RISKY = new Set(["privacy", "hacker", "sanctioned", "mixer"]);
 const FLOW: Record<string, { g: string; t: string }> = { in: { g: "M13 5H3m0 0 4-4M3 5l4 4", t: "received from" }, out: { g: "M3 5h10m0 0-4-4m4 4-4 4", t: "sent to" }, both: { g: "M4 8h9m-9 0 3-3m-3 3 3 3M13 3h-9m9 0-3-3m3 3-3 3", t: "two-way" } };
 
-export function Counterparties({ address, subject }: { address?: string | null; subject?: string | null; chain?: string }) {
+export function Counterparties({ address, subject, record = true }: { address?: string | null; subject?: string | null; chain?: string; record?: boolean }) {
   const [rows, setRows] = useState<CP[] | null>(null);
   const ran = useRef(false);
 
@@ -27,7 +27,7 @@ export function Counterparties({ address, subject }: { address?: string | null; 
         const cps: CP[] = d?.available ? d.counterparties ?? [] : [];
         setRows(cps);
         // Feed the meaningful ones into the graph (named, non-exchange, real volume).
-        if (subject) {
+        if (record && subject) {
           const seen = new Set<string>();
           const ents = cps
             .filter((c) => !c.isCex && (RISKY.has((c.type ?? "").toLowerCase()) || c.usd >= 10000))

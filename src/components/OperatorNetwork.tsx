@@ -26,7 +26,7 @@ function NetIcon({ live }: { live?: boolean }) {
   );
 }
 
-export function OperatorNetwork({ deployer, chain, label, onAudit }: { deployer?: string | null; chain?: string; label?: string; onAudit?: (q: string) => void }) {
+export function OperatorNetwork({ deployer, chain, label, onAudit, record = true }: { deployer?: string | null; chain?: string; label?: string; onAudit?: (q: string) => void; record?: boolean }) {
   const [cluster, setCluster] = useState<OperatorCluster | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(false);
@@ -53,6 +53,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit }: { deployer?
       rootLabel: label,
       checkLiveness: true,
       chain,
+      record,
     }, (s) => setSteps((prev) => [...prev, s]));
     if (!running.current) return; // unmounted mid-run
     setCluster(c);

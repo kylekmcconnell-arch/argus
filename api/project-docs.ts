@@ -12,8 +12,8 @@
 //      GitBook / IPFS whitepaper, the audit reports, off-site press coverage.
 // Every link is categorized; nothing is invented. 24h-cached.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore — bundled JS sibling
-import { cacheGetJson, cacheSetJson } from "./_cache.js";
+import { attachPanelCost, cacheGetJson, cacheSetJson, grokUsd, resolvePanelCostVersion } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 30 };
 
@@ -92,7 +92,9 @@ async function crawlNav(domain: string): Promise<Resource[]> {
 }
 
 // Grok: whitepaper, audits, and any resource not linked from the homepage.
-async function findViaGrok(name: string, domain: string, symbol: string, key: string): Promise<any | null> {
+type GrokResult = { parsed: any | null; calls: number; usd: number };
+
+async function findViaGrok(name: string, domain: string, symbol: string, key: string): Promise<GrokResult> {
   const cats = "api, docs, about, team, press, blog, tokenomics, governance, roadmap, faq, legal";
   const system =
     "You find a crypto project's official DOCUMENTS and RESOURCES using live web + X search. " +
@@ -108,32 +110,26 @@ async function findViaGrok(name: string, domain: string, symbol: string, key: st
       body: JSON.stringify({ model: process.env.ARGUS_GROK_MODEL || "grok-4-fast", input: [{ role: "system", content: system }, { role: "user", content: user }], tools: [{ type: "web_search" }, { type: "x_search" }], max_tool_calls: 8 }),
       signal: AbortSignal.timeout(27000),
     });
-    if (!r.ok) return null;
+    if (!r.ok) return { parsed: null, calls: 1, usd: 0 };
     const d = (await r.json()) as any;
     const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
     const m = text.match(/\{[\s\S]*\}/);
-    return m ? JSON.parse(m[0]) : null;
-  } catch { return null; }
+    let parsed: any | null = null;
+    if (m) {
+      try { parsed = JSON.parse(m[0]); } catch { /* malformed model output */ }
+    }
+    const toolCalls = Array.isArray(d.output)
+      ? d.output.filter((item: any) => /search|tool/.test(String(item.type ?? ""))).length
+      : 0;
+    return {
+      parsed,
+      calls: 1,
+      usd: grokUsd(d.usage, toolCalls),
+    };
+  } catch { return { parsed: null, calls: 1, usd: 0 }; }
 }
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const name = q(req.query.name);
-  const symbol = q(req.query.symbol).replace(/^\$/, "");
-  const domain = q(req.query.domain).replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase();
-  if (!name && !symbol && !domain) { res.status(400).json({ error: "name, symbol, or domain required" }); return; }
-  const key = process.env.XAI_API_KEY;
-
-  const cacheKey = `docs:${(name || symbol || domain).toLowerCase()}:${domain}:v3`;
-  const cached = await cacheGetJson<any>(cacheKey);
-  if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
-
-  // Run the deterministic on-site crawl and Grok in parallel; the crawl needs a
-  // domain, Grok needs the key.
-  const [nav, raw] = await Promise.all([
-    domain ? crawlNav(domain) : Promise.resolve([] as Resource[]),
-    key ? findViaGrok(name || symbol, domain, symbol, key) : Promise.resolve(null),
-  ]);
-
+function assembleResult(nav: Resource[], raw: any | null, searchedWithGrok: boolean) {
   const wp = raw?.whitepaper && isUrl(raw.whitepaper.url)
     ? { url: raw.whitepaper.url, kind: ["whitepaper", "litepaper", "docs", "gitbook"].includes(raw.whitepaper.kind) ? raw.whitepaper.kind : "whitepaper" }
     : null;
@@ -166,7 +162,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   resources.sort((a, b) => CAT_ORDER.indexOf(a.category) - CAT_ORDER.indexOf(b.category));
 
-  const out = {
+  return {
     available: true,
     whitepaper: wp,
     resources: resources.slice(0, 18),
@@ -175,9 +171,61 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     hasTeamPage: resources.some((r) => r.category === "team"),
     hasAbout: resources.some((r) => r.category === "about"),
     note: !wp && !resources.length && !audits.length
-      ? (key ? "No whitepaper, documentation, or security audit could be found for this project via its site or web/X search." : "Document finder needs the site's domain (Grok search not configured).")
+      ? (searchedWithGrok
+          ? "No whitepaper, documentation, or security audit could be found for this project via its site or web/X search."
+          : "No on-site documents were found. Live web search is available after the report is persisted.")
       : undefined,
   };
-  await cacheSetJson(cacheKey, out);
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+
+  const panelToken = req.headers["x-argus-panel-token"];
+  const panelTokenValue = Array.isArray(panelToken) ? panelToken[0] : panelToken;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelTokenValue);
+  if (panelTokenValue && !panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
+  const name = q(req.query.name);
+  const symbol = q(req.query.symbol).replace(/^\$/, "");
+  const domain = q(req.query.domain).replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./, "").toLowerCase();
+  if (!name && !symbol && !domain) { res.status(400).json({ error: "name, symbol, or domain required" }); return; }
+
+  const subjectCacheKey = `${(name || symbol || domain).toLowerCase()}:${domain}:v4`;
+  const enhancedCacheKey = `docs:${subjectCacheKey}:grok`;
+  const crawlCacheKey = `docs:${subjectCacheKey}:crawl`;
+
+  // Cached enrichment is safe to read without spending. Only a valid persisted-
+  // report capability may initiate a new Grok request.
+  const enhanced = await cacheGetJson<any>(enhancedCacheKey);
+  if (enhanced) { res.status(200).json({ ...enhanced, _cached: true }); return; }
+
+  const key = process.env.XAI_API_KEY;
+  if (!panelCostVersionId || !key) {
+    const crawlCached = await cacheGetJson<any>(crawlCacheKey);
+    if (crawlCached) { res.status(200).json({ ...crawlCached, _cached: true }); return; }
+    const nav = domain ? await crawlNav(domain) : [];
+    const out = assembleResult(nav, null, false);
+    await cacheSetJson(crawlCacheKey, out);
+    res.status(200).json(out);
+    return;
+  }
+
+  const [nav, grok] = await Promise.all([
+    domain ? crawlNav(domain) : Promise.resolve([] as Resource[]),
+    findViaGrok(name || symbol, domain, symbol, key),
+  ]);
+  await attachPanelCost(auth.organizationId, panelCostVersionId, {
+    provider: "grok",
+    op: "panel:project-docs",
+    calls: grok.calls,
+    usd: grok.usd,
+  });
+  const out = assembleResult(nav, grok.parsed, true);
+  await cacheSetJson(enhancedCacheKey, out);
   res.status(200).json(out);
 }

@@ -19,6 +19,20 @@ export interface ReportVersionContext extends ReportVersionMetadata {
   checks: ScanCheck[];
 }
 
+/**
+ * Transient client context for a report created by the current scan. This is
+ * never restored by an immutable report GET. The signed panel token grants a
+ * short-lived capability to attribute post-scan provider spend to only that
+ * freshly-created version; a bare report version id is never write authority.
+ */
+export interface ReportPersistenceContext {
+  state: "pending" | "private" | "persisted" | "failed";
+  reportVersionId?: string | null;
+  panelCostToken?: string | null;
+  /** Client scan identity used only to ignore stale persistence completions. */
+  scanId?: string;
+}
+
 export interface StoredCheckRun {
   check_id?: unknown;
   provider?: unknown;

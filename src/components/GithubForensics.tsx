@@ -7,7 +7,7 @@ import { recordForensicEntities } from "../graph/store";
 // (a few API calls), like the other deep tools.
 type Ident = { name: string; email: string; login?: string; commits: number; kind: "personal" | "corporate" | "unknown" };
 
-export function GithubForensics({ org, login, subjectKey }: { org?: string; login?: string; subjectKey?: string }) {
+export function GithubForensics({ org, login, subjectKey, record = true }: { org?: string; login?: string; subjectKey?: string; record?: boolean }) {
   const [data, setData] = useState<any | null>(null);
   const [loading, setLoading] = useState(false);
   const label = org ? `github.com/${org}` : `github.com/${login}`;
@@ -23,7 +23,7 @@ export function GithubForensics({ org, login, subjectKey }: { org?: string; logi
       // are the same team. Record them so the graph connects them automatically.
       const leaks = Array.isArray(d?.emailLeaks) ? d.emailLeaks : [];
       const key = subjectKey || org || login;
-      if (key && leaks.length) {
+      if (record && key && leaks.length) {
         recordForensicEntities(key, leaks.map((l: any) => ({ key: `email:${String(l.email).toLowerCase()}`, type: "Identity", subtype: "Email", edgeType: "COMMIT_EMAIL", label: `${l.name} · ${l.email}` })));
       }
     } catch {
