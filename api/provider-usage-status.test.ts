@@ -266,14 +266,65 @@ describe("provider usage status attribution", () => {
     }));
 
     attachPanelCost.mockClear();
-    const portfolioResponse = response();
-    await vcPortfolioHandler({ headers: panelHeaders, query: { name: "Argus Ventures" } } as never, portfolioResponse.res as never);
+    const { res: portfolioRes, captured: portfolioCaptured } = response();
+    await vcPortfolioHandler({ headers: panelHeaders, query: { name: "Argus Ventures" } } as never, portfolioRes as never);
     expect(attachPanelCost).toHaveBeenCalledWith(ORGANIZATION_ID, VERSION_ID, expect.objectContaining({
       provider: "grok",
       op: "panel:vc-portfolio",
       calls: 2,
       status: "failed",
     }));
+    expect(portfolioCaptured.status).toBe(502);
+    expect(portfolioCaptured.body).toMatchObject({
+      error: "portfolio_search_failed",
+      retryable: true,
+    });
+  });
+
+  it("returns only source-linked portfolio candidates as unverified leads", async () => {
+    const first = {
+      output_text: JSON.stringify({
+        investments: [
+          {
+            project: "Source Linked Labs",
+            ticker: "$SLL",
+            source_url: "https://example.com/source-linked-round",
+            source_title: "Seed round announcement",
+          },
+          { project: "Remembered Without Source", ticker: "$MEM" },
+        ],
+      }),
+      output: [{ type: "web_search_call" }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    };
+    const second = {
+      output_text: JSON.stringify({ investments: [] }),
+      output: [{ type: "web_search_call" }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    };
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(first), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(second), { status: 200 })));
+    const { res, captured } = response();
+
+    await vcPortfolioHandler({ headers: panelHeaders, query: { name: "Argus Ventures" } } as never, res as never);
+
+    expect(captured.status).toBe(200);
+    expect(captured.body).toMatchObject({
+      available: true,
+      evidence_state: "model_lead",
+      candidate_count: 1,
+      candidates: [{
+        project: "Source Linked Labs",
+        source_url: "https://example.com/source-linked-round",
+        evidence_state: "model_lead",
+      }],
+    });
+    expect(captured.body).not.toHaveProperty("investments");
+    expect(cacheSetJson).toHaveBeenCalledWith(
+      expect.stringContaining("vcport:leads-v2:"),
+      expect.objectContaining({ evidence_state: "model_lead", candidate_count: 1 }),
+    );
   });
 
   it("records an unreadable token-identity response as failed", async () => {

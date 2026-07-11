@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getCost, withCostLedger } from "../cost";
-import { getRecentPosts, grokSearch, handleHistory } from "./x";
+import { getRecentPosts, grokSearch, handleHistory, searchAdverseSignals } from "./x";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -64,6 +64,36 @@ describe("X provider attempt accounting", () => {
       status: "failed",
       meta: expect.stringContaining("response_json_error"),
     }));
+  });
+
+  it("binds every adverse search result to the exact related entity", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      output_text: JSON.stringify({
+        signals: [{
+          category: "scam_accusation",
+          claim: "A complaint names this account.",
+          source: "rsbot",
+          source_url: "https://example.com/complaint",
+        }],
+      }),
+      output: [{ type: "web_search_call" }],
+      usage: { input_tokens: 100, output_tokens: 50 },
+    })));
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const result = await searchAdverseSignals("@Zhygis", "person", {
+      relationship_to_subject: "associate",
+      relationship_label: "recorded collaborator of @gakonst",
+    });
+
+    expect(result).toEqual([expect.objectContaining({
+      category: "scam_accusation",
+      target_entity_key: "@zhygis",
+      target_entity_type: "person",
+      relationship_to_subject: "associate",
+      relationship_label: "recorded collaborator of @gakonst",
+    })]);
   });
 
   it("counts every Twitter HTTP retry and derives a partial operation status", async () => {

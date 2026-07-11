@@ -358,6 +358,66 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
   );
 }
 
+function InvestigativeLeadsLedger({ leads, subject }: {
+  leads: Dossier["report"]["investigative_leads"];
+  subject: string;
+}) {
+  if (!leads.length) return null;
+  return (
+    <div className="space-y-2">
+      {leads.map((lead, index) => {
+        const scope = lead.finding_scope;
+        const target = scope?.target_entity_key || "unresolved target";
+        const relationship = scope?.relationship_to_subject === "associate"
+          ? "Associate lead"
+          : scope?.relationship_to_subject === "venture"
+            ? "Venture lead"
+            : "Subject lead";
+        const verifiedAboutTarget = lead.verification_status === "Verified"
+          && lead.artifact_verified === true
+          && lead.evidence_origin !== "model_lead";
+        const attributionStatus = verifiedAboutTarget
+          ? "verified about target · outside subject score"
+          : "unverified lead · outside subject score";
+        const source = safeSourceLink(lead.source_url);
+        return (
+          <Card key={`${target}:${lead.claim}:${index}`} className="p-3.5">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="mono rounded border border-caution/50 bg-caution/5 px-1.5 py-0.5 text-[9.5px] uppercase tracking-wider text-caution">
+                {relationship}
+              </span>
+              <span className="mono text-[11px] text-ink">{target}</span>
+              {scope?.relationship_label && <span className="text-[10.5px] text-ink-faint">· {scope.relationship_label}</span>}
+              <span className="mono ml-auto text-[9.5px] uppercase tracking-wide text-ink-faint">{attributionStatus}</span>
+            </div>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{lead.claim}</p>
+            <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+              {verifiedAboutTarget
+                ? `This artifact is verified about ${target}, but it is not evidence of conduct by ${subject}.`
+                : `This is an unverified follow-up lead about ${target}, not verified evidence of conduct by ${subject}.`}
+            </p>
+            {source ? (
+              <a
+                href={source.href}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={`Open candidate source for investigative lead ${index + 1}: ${lead.claim}`}
+                title={source.href}
+                className="mono mt-2 inline-flex max-w-full items-center gap-1.5 text-[11px] text-signal-dim underline-offset-2 hover:text-signal hover:underline"
+              >
+                <span className="shrink-0 text-ink-faint">{verifiedAboutTarget ? "Verified target source" : "Candidate source"}</span>
+                <span className="truncate">{source.label}</span>
+              </a>
+            ) : (
+              <p className="mt-2 text-[11px] text-ink-faint">Candidate source link unavailable</p>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
 type FrozenSourceArtifact = NonNullable<Dossier["sourceArtifacts"]>[number];
 type FrozenProfileAuthenticity = NonNullable<Dossier["profileAuthenticity"]>;
 type FrozenTrustGraphScreen = NonNullable<Dossier["trustGraphScreen"]>;
@@ -420,6 +480,75 @@ const PROFILE_CLASSIFICATION_LABEL: Record<FrozenProfileAuthenticity["classifica
 
 function validHash(value?: string): string | null {
   return value && /^[a-f0-9]{64}$/i.test(value) ? value.toLowerCase() : null;
+}
+
+type FrozenOutcomeCheck = NonNullable<Dossier["checkRuns"]>[number];
+
+const SUPPORT_CHECK_PRIORITY = [
+  { checkId: "identity-resolution", label: "Identity resolution" },
+  { checkId: "code-footprint-github", label: "GitHub footprint" },
+  { checkId: "affiliations-associates", label: "Affiliation corroboration" },
+  { checkId: "vc-portfolio-track-record", label: "Venture-record corroboration" },
+] as const;
+
+const NON_SUPPORTING_NOTE = /\b(?:no|none|not|without|unknown|unavailable|failed|failure|missing|unresolved|unconfirmed|cannot|could not|did not|does not)\b/i;
+
+function supportingNoteClause(note?: string): string | null {
+  if (!note) return null;
+  return note
+    .split(/\s+·\s+/)
+    .map((clause) => clause.trim())
+    .find((clause) => clause.length > 0 && !NON_SUPPORTING_NOTE.test(clause)) ?? null;
+}
+
+function asSentence(value: string): string {
+  return /[.!?]$/.test(value) ? value : `${value}.`;
+}
+
+/**
+ * Select report support only from immutable collector outcomes. A model score,
+ * axis rationale, or positive narrative finding cannot populate this summary.
+ * Checked-empty/no-match evidence is useful coverage, but never positive
+ * support. Press is included only when a confirmed check has an inspectable,
+ * hashed exact-match artifact, and remains explicitly sentiment-neutral.
+ */
+function strongestRecordedSupport(
+  checks: readonly FrozenOutcomeCheck[],
+  artifacts: readonly FrozenSourceArtifact[],
+): string {
+  for (const candidate of SUPPORT_CHECK_PRIORITY) {
+    const check = checks.find((item) =>
+      item.checkId === candidate.checkId
+      && item.status === "confirmed"
+      && (item.sourceCount ?? 0) > 0,
+    );
+    const note = supportingNoteClause(check?.note);
+    if (note) return `${candidate.label} · ${asSentence(note)}`;
+  }
+
+  const pressCheck = checks.find((check) =>
+    check.checkId === "news-press"
+    && check.status === "confirmed"
+    && (check.sourceCount ?? 0) > 0
+    && supportingNoteClause(check.note),
+  );
+  const pressArtifact = pressCheck
+    ? artifacts
+      .filter((artifact) =>
+        artifact.kind === "press"
+        && (artifact.match === "exact_handle" || artifact.match === "exact_name")
+        && Boolean(validHash(artifact.contentHash))
+        && Boolean(safeSourceLink(artifact.sourceUrl))
+        && artifact.title.trim().length > 0,
+      )
+      .sort((left, right) => Number(right.match === "exact_handle") - Number(left.match === "exact_handle"))[0]
+    : undefined;
+  if (pressArtifact) {
+    const match = pressArtifact.match === "exact_handle" ? "exact handle" : "exact name";
+    return `Public-footprint evidence · A frozen press source matched the ${match}: ${asSentence(pressArtifact.title.trim())} This records a source match, not favorable coverage.`;
+  }
+
+  return "No confirmed supporting outcome is frozen in this snapshot. Checked-empty and no-match records count toward coverage, not positive support.";
 }
 
 function safeFrozenImageData(value?: string): string | null {
@@ -814,8 +943,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const capturedLabel = versionContext?.createdAt
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : null;
-  const strongestSupport = report.publishable_findings.find((finding) => finding.polarity > 0)?.claim
-    ?? "No verified positive finding is stored in this snapshot.";
+  const strongestSupport = strongestRecordedSupport(frozenOutcomeChecks, f.sourceArtifacts ?? []);
   const recordedConcern = report.publishable_findings.find((finding) => finding.polarity < 0)?.claim
     ?? [...f.contradictions].sort((left, right) => ({ high: 3, medium: 2, low: 1 }[right.severity] - { high: 3, medium: 2, low: 1 }[left.severity]))[0]?.conflict;
   const highestConcern = recordedConcern
@@ -1561,8 +1689,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           {showCurrentIntelligence && panelCostToken && roles.some((r) => r === "INVESTOR") && (
             <div className="min-w-0 lg:col-span-2">
-              <Section title="VC track record" kicker="their portfolio → each token bet priced on-chain: a fund graded on how its bets ended">
-                <VcReport handle={report.handle} name={f.display_name || report.handle} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} onAudit={onAudit} />
+              <Section title="VC portfolio leads" kicker="paid current supplemental search · unverified candidates · excluded from graph and verdict">
+                <VcReport key={`${report.handle}:${panelCostToken}`} handle={report.handle} name={f.display_name || report.handle} panelCostToken={panelCostToken} onAudit={onAudit} />
               </Section>
             </div>
           )}
@@ -1648,6 +1776,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {report.publishable_findings.length > 0 && (
           <Section title="Publishable findings" kicker="sourced · dated · independently corroborated">
             <FindingsLedger findings={report.publishable_findings} />
+          </Section>
+        )}
+
+        {(report.investigative_leads ?? []).length > 0 && (
+          <Section title="Investigative leads" kicker="entity-scoped follow-up · target verification shown separately · never scored as subject evidence">
+            <InvestigativeLeadsLedger leads={report.investigative_leads ?? []} subject={report.handle} />
           </Section>
         )}
 

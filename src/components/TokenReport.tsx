@@ -488,7 +488,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         {!gp && (
           <div className="mt-3 rounded-xl border border-line bg-panel/40 px-4 py-3 text-[12.5px] text-ink-dim">
-            Contract-internal safety (honeypot, mint authority, ownership, tax) could not be verified keyless on <span className="capitalize">{d.chain}</span>. Those axes are scored conservatively. Add a Helius/Bitquery key to verify on-chain.
+            Contract-internal safety (honeypot, mint authority, ownership, tax) could not be verified by a supported collector on <span className="capitalize">{d.chain}</span>. Those axes are scored conservatively; this report cannot claim that path is complete.
           </div>
         )}
 

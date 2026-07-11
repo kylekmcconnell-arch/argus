@@ -1,7 +1,7 @@
 import { summarizeChecks, type CheckStatus, type ScanCheck } from "../src/lib/scanChecklist";
 import type { CheckObservation, PersonCheckId } from "./adapters/types";
 
-export type ProviderRunState = "executed" | "partial" | "failed" | "unavailable";
+export type ProviderRunState = "executed" | "partial" | "failed" | "unavailable" | "skipped";
 
 export interface ProviderRun {
   id: string;

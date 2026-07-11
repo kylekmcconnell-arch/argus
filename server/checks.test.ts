@@ -94,6 +94,18 @@ describe("PersonCheckTracker", () => {
     }));
   });
 
+  it("keeps a not-applicable provider run explicitly skipped", () => {
+    const tracker = new PersonCheckTracker();
+    tracker.provider("onchain", "On-chain forensics (Helius)", "skipped", "no attributed Solana wallet");
+
+    expect(tracker.providers().runs).toContainEqual(expect.objectContaining({
+      id: "onchain",
+      state: "skipped",
+      detail: "no attributed Solana wallet",
+    }));
+    expect(tracker.completeness(["FOUNDER"])).toBe("partial");
+  });
+
   it("lets the frozen off-chain tranche raise a resolved founder to provisional coverage", () => {
     const tracker = new PersonCheckTracker();
     for (const id of [

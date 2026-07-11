@@ -874,15 +874,32 @@ function parseTeamJSON(text: string | null, selfHandle: string | undefined, sour
 // showed the signal often attaches to the founder's TOOL company, not the token,
 // so this is called per-handle AND per-project, never only per-ticker.
 export type AdverseCategory = "rug" | "slow_rug" | "liquidity_pull" | "drain" | "scam_accusation" | "fud";
+export type AdverseRelationshipToSubject = "self" | "venture" | "associate";
+export interface AdverseSearchContext {
+  relationship_to_subject: AdverseRelationshipToSubject;
+  relationship_label?: string;
+}
 export interface AdverseSignal {
   category: AdverseCategory;
   claim: string;        // model-discovered lead, never a verified fact
   source: string;       // the single source the model says should be checked
   source_url?: string;
+  /** Canonical entity the adverse claim actually names. */
+  target_entity_key: string;
+  target_entity_type: "person" | "project";
+  /** How that target relates to the subject whose report is being assembled. */
+  relationship_to_subject: AdverseRelationshipToSubject;
+  relationship_label?: string;
 }
 
-export async function searchAdverseSignals(handle: string, kind: "person" | "project", ticker?: string): Promise<AdverseSignal[]> {
+export async function searchAdverseSignals(
+  handle: string,
+  kind: "person" | "project",
+  context: AdverseSearchContext,
+  ticker?: string,
+): Promise<AdverseSignal[]> {
   const h = handle.replace(/^@/, "");
+  const targetEntityKey = `@${h.toLowerCase()}`;
   const subject = kind === "project"
     ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}`
     : `the person behind X account @${h}`;
@@ -906,6 +923,10 @@ export async function searchAdverseSignals(handle: string, kind: "person" | "pro
         claim: s.claim.trim(),
         source: (s.source || "unattributed").toString().trim(),
         source_url: typeof s.source_url === "string" && /^https?:\/\//.test(s.source_url) ? s.source_url : undefined,
+        target_entity_key: targetEntityKey,
+        target_entity_type: kind,
+        relationship_to_subject: context.relationship_to_subject,
+        relationship_label: context.relationship_label?.trim() || undefined,
       }))
       .slice(0, 12);
   } catch {

@@ -3,32 +3,62 @@ import { auditToken } from "../token/audit";
 import { isRunnableTokenInput, resolveInput } from "../lib/resolveInput";
 import { verdictMeta } from "../lib/verdict";
 import { TokenSparkline } from "./TokenSparkline";
-import { recordForensicEntities } from "../graph/store";
 
-// VC / investor track record: their portfolio (via /api/vc-portfolio) with each
-// token investment priced on-chain, so "prolific fund" becomes "of N token bets,
-// M are dead." A fund is only as good as how its bets ended. Auto-runs when the
-// subject is an INVESTOR.
-type Investment = { project: string; ticker: string | null; contract: string | null; chain: string | null; x_handle: string | null; stage: string | null; year: string | null; outcome: string | null };
-type Scored = Investment & { address?: string; chainResolved?: string; verdict?: string; score?: number | null; liquidityUsd?: number; mcap?: number; dead?: boolean; resolved?: boolean };
+// VC portfolio discovery is deliberately analyst-triggered: it can be the most
+// expensive supplemental panel on a report, and opening a report must never
+// silently spend that budget. Grok rows remain unverified investigative leads.
+// Pricing a named token enriches the lead but does not verify that the investor
+// backed it, so this component never promotes rows into the trust graph.
+type InvestmentLead = {
+  project: string;
+  ticker: string | null;
+  contract: string | null;
+  chain: string | null;
+  x_handle: string | null;
+  stage: string | null;
+  year: string | null;
+  outcome: string | null;
+  source_url?: string | null;
+  source_title?: string | null;
+  evidence_state?: "model_lead";
+};
+type Scored = InvestmentLead & { address?: string; chainResolved?: string; verdict?: string; score?: number | null; liquidityUsd?: number; mcap?: number; dead?: boolean; resolved?: boolean };
+type DexPair = { baseToken?: { address?: unknown; symbol?: unknown }; liquidity?: { usd?: unknown } };
+type PanelState = "idle" | "loading" | "ok" | "empty" | "unavailable" | "context-error" | "auth-error" | "error";
+
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === "object" && !Array.isArray(value);
 
 async function tickerToContract(ticker: string): Promise<string | null> {
   const sym = ticker.replace(/^\$/, "").toUpperCase();
   if (!sym || sym.length < 2) return null;
   try {
     const r = await fetch(`https://api.dexscreener.com/latest/dex/search/?q=${encodeURIComponent(sym)}`);
-    const d = await r.json();
-    const all: any[] = Array.isArray(d?.pairs) ? d.pairs : [];
+    const d = await r.json() as unknown;
+    const pairsValue = isRecord(d) ? d.pairs : null;
+    const all: DexPair[] = Array.isArray(pairsValue)
+      ? pairsValue.filter((pair): pair is DexPair => isRecord(pair))
+      : [];
     const pairs = all
-      .filter((p: any) => p?.baseToken?.address && String(p?.baseToken?.symbol ?? "").toUpperCase() === sym)
-      .sort((a: any, b: any) => Number(b?.liquidity?.usd ?? 0) - Number(a?.liquidity?.usd ?? 0));
-    return pairs[0]?.baseToken?.address ?? null;
+      .filter((pair) => typeof pair.baseToken?.address === "string" && String(pair.baseToken.symbol ?? "").toUpperCase() === sym)
+      .sort((a, b) => Number(b.liquidity?.usd ?? 0) - Number(a.liquidity?.usd ?? 0));
+    return typeof pairs[0]?.baseToken?.address === "string" ? pairs[0].baseToken.address : null;
   } catch {
     return null;
   }
 }
 
-async function auditInvestment(inv: Investment): Promise<Scored> {
+function safeCandidateSource(value?: string | null): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function auditInvestment(inv: InvestmentLead): Promise<Scored> {
   let contract = inv.contract;
   if (!contract && inv.ticker) contract = await tickerToContract(inv.ticker);
   if (!contract) return { ...inv, resolved: false };
@@ -45,58 +75,147 @@ async function auditInvestment(inv: Investment): Promise<Scored> {
   return { ...inv, address: d.address, chainResolved: d.chain, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap, dead, resolved: true };
 }
 
-export function VcReport({ handle, name, panelCostToken, record = true, onAudit }: { handle: string; name: string; panelCostToken?: string; record?: boolean; onAudit?: (q: string) => void }) {
+export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: string; name: string; panelCostToken?: string; onAudit?: (q: string) => void }) {
   const [rows, setRows] = useState<Scored[] | null>(null);
-  const [state, setState] = useState<"loading" | "ok" | "none">("loading");
+  const [state, setState] = useState<PanelState>("idle");
+  const [message, setMessage] = useState("");
   const [attempt, setAttempt] = useState(0);
   const ran = useRef(-1);
 
   useEffect(() => {
-    if (ran.current === attempt) return;
+    if (attempt < 1 || ran.current === attempt || !panelCostToken) return;
     ran.current = attempt;
     setState("loading");
+    setMessage("");
+    let cancelled = false;
     (async () => {
       try {
         const params = new URLSearchParams({ handle: handle.replace(/^@/, ""), name });
         const r = await fetch(`/api/vc-portfolio?${params}`, panelCostToken
           ? { headers: { "x-argus-panel-token": panelCostToken } }
           : undefined);
-        const d = await r.json();
-        const inv: Investment[] = d?.investments ?? [];
-        if (!inv.length) { setState("none"); return; }
+        const body = await r.json().catch(() => null) as unknown;
+        const d = isRecord(body) ? body : {};
+        if (cancelled) return;
+        if (!r.ok) {
+          const detail = typeof d.message === "string" ? d.message : "The portfolio search did not complete.";
+          setMessage(detail);
+          if (r.status === 409 || d.error === "invalid_panel_context") setState("context-error");
+          else if (r.status === 401 || r.status === 403) setState("auth-error");
+          else setState("error");
+          return;
+        }
+        if (d.available === false) {
+          setMessage(typeof d.note === "string" ? d.note : "The portfolio search provider is not configured.");
+          setState("unavailable");
+          return;
+        }
+        const rawCandidates = Array.isArray(d.candidates) ? d.candidates : [];
+        setMessage(typeof d.coverage_note === "string" ? d.coverage_note : "");
+        const inv = rawCandidates.filter(isRecord).map((row): InvestmentLead => ({
+          project: typeof row.project === "string" ? row.project : "Unresolved project",
+          ticker: typeof row.ticker === "string" ? row.ticker : null,
+          contract: typeof row.contract === "string" ? row.contract : null,
+          chain: typeof row.chain === "string" ? row.chain : null,
+          x_handle: typeof row.x_handle === "string" ? row.x_handle : null,
+          stage: typeof row.stage === "string" ? row.stage : null,
+          year: typeof row.year === "string" ? row.year : null,
+          outcome: typeof row.outcome === "string" ? row.outcome : null,
+          source_url: typeof row.source_url === "string" ? row.source_url : null,
+          source_title: typeof row.source_title === "string" ? row.source_title : null,
+          evidence_state: "model_lead",
+        }));
+        if (!inv.length) {
+          setRows([]);
+          setState("empty");
+          return;
+        }
         // Price the token investments up to a cap (each is an on-chain lookup), but
-        // NEVER drop the rest — token bets beyond the cap and non-token companies
-        // still list (unpriced, with their outcome), so a big portfolio shows in full.
+        // NEVER drop the rest. These are still leads: resolving a token contract
+        // does not verify the investor-project relationship.
         const withToken = inv.filter((i) => i.contract || i.ticker);
         const toPrice = withToken.slice(0, 16);
         const overflow = withToken.slice(16);
         const rest = inv.filter((i) => !(i.contract || i.ticker));
         const scored = await Promise.all(toPrice.map(auditInvestment));
+        if (cancelled) return;
         setRows([...scored, ...overflow.map((i) => ({ ...i, resolved: false })), ...rest.map((i) => ({ ...i, resolved: false }))]);
         setState("ok");
-        // Feed the shared graph: link this fund to each portfolio project/token.
-        // Shared project handles + tickers bridge the fund to the founders who
-        // built those projects and to any KOL who promoted the same token.
-        const ents = inv
-          .map((i) => {
-            const key = i.x_handle || i.ticker;
-            if (!key) return null;
-            return { key, type: i.x_handle ? "Company" : "Token", subtype: "Portfolio", edgeType: "INVESTED_IN", label: i.project + (i.stage ? ` · ${i.stage}` : "") };
-          })
-          .filter(Boolean) as { key: string; type: string; subtype: string; edgeType: string; label: string }[];
-        if (record && ents.length) recordForensicEntities(handle, ents);
       } catch {
-        setState("none");
+        if (!cancelled) {
+          setMessage("The paid portfolio search could not be reached. No portfolio conclusion or graph relationship was recorded.");
+          setState("error");
+        }
       }
     })();
-  }, [handle, name, panelCostToken, record, attempt]);
+    return () => { cancelled = true; };
+  }, [handle, name, panelCostToken, attempt]);
 
-  if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">assembling the portfolio + pricing each bet…</div>;
-  if (state === "none" || !rows) {
+  const run = () => {
+    if (!panelCostToken || state === "loading") return;
+    setState("loading");
+    setAttempt((current) => current + 1);
+  };
+
+  if (state === "idle") {
     return (
-      <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-dim">
-        <span>No verifiable portfolio surfaced on this pass (the portfolio search can be flaky for a well-known fund).</span>
-        <button onClick={() => setAttempt((a) => a + 1)} className="mono rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>retry →</button>
+      <div className="rounded-xl border border-line bg-panel p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="max-w-2xl">
+            <div className="text-[12px] font-medium text-ink">Portfolio outcome analysis</div>
+            <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+              Search for source-linked portfolio candidates, then price up to 16 named tokens. This can run up to two paid Grok searches plus live market lookups. Results stay unverified, outside the trust graph, and do not change the frozen verdict.
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={run}
+            disabled={!panelCostToken}
+            className="mono shrink-0 rounded-md border border-signal/60 px-2.5 py-1 text-[11px] text-signal transition hover:border-signal hover:text-signal-dim disabled:cursor-not-allowed disabled:border-line disabled:text-ink-faint"
+          >
+            {panelCostToken ? "Run portfolio analysis →" : "Saved report required"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">assembling source-linked candidates + pricing named tokens…</div>;
+  if (state === "context-error") {
+    return (
+      <div className="rounded-xl border border-caution/40 bg-caution/5 p-4 text-[12px] leading-relaxed text-ink-dim">
+        <div className="font-medium text-caution">Fresh saved report required</div>
+        <p className="mt-1">{message || "This paid supplemental check needs a fresh persisted report. Rescan before running it."}</p>
+      </div>
+    );
+  }
+  if (state === "auth-error") {
+    return (
+      <div className="rounded-xl border border-caution/40 bg-caution/5 p-4 text-[12px] leading-relaxed text-ink-dim">
+        <div className="font-medium text-caution">Session authorization required</div>
+        <p className="mt-1">{message || "Sign in again before running this paid supplemental search."}</p>
+      </div>
+    );
+  }
+  if (state === "unavailable") {
+    return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-dim">{message}</div>;
+  }
+  if (state === "error") {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-caution/40 bg-caution/5 p-4 text-[12px] text-ink-dim">
+        <span className="max-w-2xl">{message || "The paid search failed. No portfolio conclusion was recorded."}</span>
+        <button onClick={run} className="mono rounded-md border border-signal/60 px-2 py-0.5 text-[11px] text-signal transition hover:border-signal">Retry paid search (may incur cost) →</button>
+      </div>
+    );
+  }
+  if (state === "empty" || !rows) {
+    return (
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-dim">
+        <div className="max-w-2xl">
+          <p>No source-linked portfolio candidates surfaced. This is not evidence that the investor has no portfolio.</p>
+          {message && <p className="mt-1 text-[11px] text-ink-faint">{message}</p>}
+        </div>
+        <button onClick={run} className="mono rounded-md border border-signal/60 px-2 py-0.5 text-[11px] text-signal transition hover:border-signal">Search again (may incur another paid Grok search) →</button>
       </div>
     );
   }
@@ -108,16 +227,21 @@ export function VcReport({ handle, name, panelCostToken, record = true, onAudit 
   return (
     <div className="rounded-xl border border-line bg-panel p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="text-[12px] font-medium text-ink">{rows.length} portfolio {rows.length === 1 ? "investment" : "investments"}</span>
+        <span className="text-[12px] font-medium text-ink">{rows.length} unverified portfolio {rows.length === 1 ? "candidate" : "candidates"}</span>
         {priced.length > 0 && dead.length > 0 && (
-          <span className="mono text-[11px] text-avoid">{dead.length}/{priced.length} token bets dead</span>
+          <span className="mono text-[11px] text-caution">{dead.length}/{priced.length} priced token candidates inactive</span>
         )}
       </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+        Grok surfaced these source candidates. ARGUS has not verified the investor-project relationship; every row is excluded from the trust graph and frozen verdict. Token market data checks the named token only, not the investment claim.
+      </p>
+      {message && <p className="mt-1 text-[11px] leading-relaxed text-caution">{message}</p>}
 
       <div className="mt-2 divide-y divide-line/60 rounded-lg border border-line">
         {rows.map((r, i) => {
           const m = r.verdict ? verdictMeta(r.verdict) : null;
           const openTarget = r.address || r.x_handle;
+          const source = safeCandidateSource(r.source_url);
           return (
             <div key={i} className="px-3 py-2 text-[12px]">
               <div className="flex flex-wrap items-center gap-2">
@@ -130,17 +254,22 @@ export function VcReport({ handle, name, panelCostToken, record = true, onAudit 
                 {(r.stage || r.year) && <span className="text-[10.5px] text-ink-faint">{[r.stage, r.year].filter(Boolean).join(" · ")}</span>}
                 {m && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${m.color}1a`, color: m.color }}>{r.verdict}{r.score != null ? ` ${r.score}` : ""}</span>}
                 {r.resolved && <span className="text-[10.5px] text-ink-faint">{r.mcap ? `mcap ${money(r.mcap)}` : `liq ${money(r.liquidityUsd)}`}</span>}
-                {r.dead && <span className="mono rounded border border-avoid/40 px-1.5 py-0.5 text-[9.5px] text-avoid">dead</span>}
+                {r.dead && <span className="mono rounded border border-caution/40 px-1.5 py-0.5 text-[9.5px] text-caution">inactive market</span>}
                 {r.address && r.chainResolved && <span className="ml-auto"><TokenSparkline address={r.address} chain={r.chainResolved} compact /></span>}
               </div>
-              {r.outcome && !r.resolved && <div className="mt-0.5 text-[10.5px] text-ink-faint">{r.outcome}</div>}
+              {r.outcome && !r.resolved && <div className="mt-0.5 text-[10.5px] text-ink-faint">Model-reported status: {r.outcome}</div>}
+              {source && (
+                <a href={source} target="_blank" rel="noopener noreferrer" className="mono mt-1 inline-block text-[10.5px] text-signal-dim underline-offset-2 hover:text-signal hover:underline">
+                  Candidate source{r.source_title ? ` · ${r.source_title}` : ""} ↗
+                </a>
+              )}
             </div>
           );
         })}
       </div>
       {dead.length > 0 && (
-        <p className="mt-2 text-[12px] leading-relaxed text-avoid">
-          {dead.length} of {priced.length} priceable token bets {dead.length === 1 ? "is" : "are"} effectively dead — no market cap and no tradeable liquidity. Weigh the fund's judgement accordingly.
+        <p className="mt-2 text-[12px] leading-relaxed text-caution">
+          {dead.length} of {priced.length} priceable token candidates {dead.length === 1 ? "appears" : "appear"} inactive based on current market cap and liquidity. This does not verify that the fund invested in them.
         </p>
       )}
     </div>

@@ -56,7 +56,7 @@ server/
     coingecko.ts      token market data by contract
     dexscreener.ts    live DEX liquidity/volume + rug signals (free, keyless)
     reddit.ts         community FUD scan (free tier)
-    onchain.ts        Helius (Solana) / Bitquery wallet forensics
+    onchain.ts        Helius attributed-Solana-wallet activity (Bitquery reserved, not core yet)
 ```
 
 **Graceful degradation is the core design.** With no provider keys, the collector
