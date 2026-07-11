@@ -4,15 +4,17 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="theme-color" content="#0a1322" />
+    <meta name="theme-color" content="#080d18" />
     <script>
       // apply saved theme before paint (no flash); default dark
       try { document.documentElement.dataset.theme = localStorage.getItem("argus-theme") || "dark"; } catch (e) {}
     </script>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Archivo variable (weight + width axes — the width axis is the brand
+         voice, see DESIGN.md .display) + Geist Mono for all data. -->
     <link
-      href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Archivo:ital,wdth,wght@0,62..125,200..900&family=Geist+Mono:wght@400..600&display=swap"
       rel="stylesheet"
     />
     <title>ARGUS — forensic due diligence</title>

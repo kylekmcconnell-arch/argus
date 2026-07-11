@@ -3,8 +3,9 @@ import { Sidebar, type NavTarget } from "./Sidebar";
 import { ArgusMark } from "./ArgusMark";
 import type { ReportKind } from "../lib/reports";
 
-// Persistent shell: left rail + a pink-tinted announcement bar + scrolling main,
-// matching the origami.chat dashboard chrome. On mobile the rail becomes a drawer.
+// Persistent shell: left rail + scrolling main. On mobile the rail becomes a
+// drawer. The old static announcement bar is gone — ServiceAlert (rendered by
+// pages that need it) is the only banner, so real alerts stand out.
 export function AppShell({
   children,
   onNav,
@@ -33,17 +34,10 @@ export function AppShell({
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M4 6h16M4 12h16M4 18h16" /></svg>
           </button>
           <ArgusMark size={22} />
-          <span className="mono text-[13px] font-semibold tracking-[0.2em] text-ink">ARGUS</span>
+          <span className="display text-[13.5px] tracking-[0.02em] text-ink">ARGUS</span>
         </div>
 
-        <div
-          className="flex items-center justify-center gap-2 border-b border-line px-4 py-2 text-center text-[12px] text-ink-dim"
-          style={{ background: "var(--color-accent-tint)" }}
-        >
-          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-signal" />
-          <span className="truncate">Forensic due-diligence. Paste an X handle or a token contract.</span>
-        </div>
-        <main className="thin-scroll flex-1 overflow-y-auto">{children}</main>
+        <main className="thin-scroll atmosphere flex-1 overflow-y-auto">{children}</main>
       </div>
     </div>
   );

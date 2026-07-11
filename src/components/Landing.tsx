@@ -5,8 +5,9 @@ import type { ReportKind } from "../lib/reports";
 import { recentScored } from "../lib/recentScored";
 import { PrivateToggle } from "./PrivateToggle";
 
-// Origami-style hero: centered heading + chat-style input + quick-start dossiers,
-// over a faint line-art backdrop. Calm and static, matching origami.chat.
+// The front door: the investigation question in the display voice, one
+// chat-style input, live samples. The old static announcement-bar copy lives
+// here now ("paste an X handle or a token contract") where it belongs.
 export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: string, priv?: boolean) => void; onAbout: () => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
   const [value, setValue] = useState("");
   const [priv, setPriv] = useState(false);
@@ -19,11 +20,12 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
       {onOpenRecent && <ScoreTicker onOpen={onOpenRecent} />}
 
       <div className={`relative z-10 mx-auto flex w-full max-w-2xl flex-1 flex-col items-center px-6 ${hasScores ? "pt-[7vh]" : "pt-[13vh]"}`}>
-        <h1 className="text-center text-[34px] font-medium leading-[1.1] tracking-[-0.02em] text-ink">
-          Who is actually behind the handle?
+        <div className="eyebrow rise-in">Forensic due-diligence</div>
+        <h1 className="display rise-in mt-3 text-center text-[44px] leading-[1.04] text-ink max-md:text-[32px]">
+          Who is actually behind the&nbsp;handle?
         </h1>
 
-        <p className="mt-3 max-w-lg text-center text-[14px] leading-relaxed text-ink-dim">
+        <p className="rise-in mt-4 max-w-lg text-center text-[13.5px] leading-relaxed text-ink-dim">
           Paste an X handle, a token contract, or a project website. ARGUS audits the people on their
           evidence and the tokens on-chain, then shows the assessment, supporting evidence, and unresolved gaps before capital is at risk.
         </p>
@@ -34,7 +36,7 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
             e.preventDefault();
             if (value.trim()) onAudit(value.trim(), priv);
           }}
-          className="mt-7 w-full rounded-xl border border-line bg-panel p-2.5 soft-shadow transition focus-within:border-line-2"
+          className="mt-7 w-full rounded-xl border border-line bg-panel p-2.5 soft-shadow transition focus-within:border-signal/60"
         >
           <div className="flex items-center gap-2">
             <span className="mono pl-2 text-[15px] text-ink-faint select-none">@</span>
@@ -42,13 +44,13 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
               value={value}
               onChange={(e) => setValue(e.target.value.replace(/^@/, ""))}
               placeholder="@handle, a token contract, or a project site (e.g. neuro-mesh.io)"
-              className="mono min-w-0 flex-1 bg-transparent py-1.5 text-[14px] text-ink placeholder:text-ink-faint focus:outline-none"
+              className="mono min-w-0 flex-1 bg-transparent py-1.5 text-[13.5px] text-ink placeholder:text-ink-faint focus:outline-none"
               autoFocus
             />
           </div>
           <div className="mt-2 flex items-center gap-2 px-1">
             <PrivateToggle on={priv} onToggle={setPriv} />
-            <button type="submit" className="btn-primary ml-auto flex items-center gap-1.5 px-3.5 py-1.5 text-[13px] font-medium">
+            <button type="submit" className="btn-primary ml-auto flex items-center gap-1.5 px-3.5 py-1.5 text-[13.5px] font-medium">
               Run audit
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
             </button>
@@ -57,7 +59,7 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
 
         {/* live token samples */}
         <div className="mt-8 w-full">
-          <div className="mb-2.5 text-center text-[11px] uppercase tracking-[0.18em] text-ink-faint">Or audit a token, live on-chain</div>
+          <div className="eyebrow mb-2.5 text-center">Or audit a token, live on-chain</div>
           <div className="flex flex-wrap justify-center gap-2">
             {[
               { sym: "$PEPE", addr: "0x6982508145454ce325ddbe47a25d4ec3d2311933" },
@@ -67,7 +69,7 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
               <button
                 key={t.sym}
                 onClick={() => onAudit(t.addr, priv)}
-                className="mono rounded-full border border-line bg-panel px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                className="mono rounded-full border border-line bg-panel px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-signal/50 hover:text-ink"
               >
                 {t.sym}
               </button>
