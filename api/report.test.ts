@@ -167,7 +167,7 @@ describe("report case lifecycle API", () => {
     expect(captured.body).toEqual({ ok: true, reportVersionId: versionId });
   });
 
-  it("maps archived cases from their latest immutable version", async () => {
+  it("maps archived cases from their last published immutable version", async () => {
     const caseId = "00000000-0000-4000-8000-000000000101";
     const versionId = "00000000-0000-4000-8000-000000000201";
     const fetchMock = vi.fn()
@@ -177,6 +177,11 @@ describe("report case lifecycle API", () => {
         canonical_ref: "0xabc",
         display_query: "$ABC",
         updated_at: "2026-07-11T01:00:00.000Z",
+      }]))
+      .mockResolvedValueOnce(jsonResponse([{
+        case_id: caseId,
+        report_version_id: versionId,
+        created_at: "2026-07-10T23:01:00.000Z",
       }]))
       .mockResolvedValueOnce(jsonResponse([{
         id: versionId,
@@ -208,6 +213,7 @@ describe("report case lifecycle API", () => {
     expect(captured.body).toEqual({
       available: true,
       reports: [{
+        caseId,
         ref: "0xabc",
         kind: "token",
         query: "$ABC",
@@ -222,11 +228,119 @@ describe("report case lifecycle API", () => {
         status: "archived",
         archivedAt: "2026-07-11T01:00:00.000Z",
         reportVersionId: versionId,
+        version: 2,
         completenessState: "partial",
         attestationState: "analyst_submitted",
         methodologyVersion: "v2",
         createdAt: "2026-07-10T23:00:00.000Z",
       }],
+    });
+    expect(String(fetchMock.mock.calls[1][0])).toContain("/rest/v1/case_events?");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("report.version.activated");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("order=created_at.desc,id.desc");
+    expect(String(fetchMock.mock.calls[2][0])).toContain("/rest/v1/report_versions?");
+    expect(String(fetchMock.mock.calls[2][0])).toContain(versionId);
+  });
+
+  it("exposes exact case and immutable version metadata in the active library", async () => {
+    const caseId = "00000000-0000-4000-8000-000000000101";
+    const versionId = "00000000-0000-4000-8000-000000000201";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([{
+        ref: "0xabc",
+        kind: "token",
+        query: "$ABC",
+        contributor: "Kyle",
+        verdict: "CAUTION",
+        score: 54,
+        ts: "2026-07-11T01:00:00.000Z",
+        report_version_id: versionId,
+        attestation_state: "server_collected",
+        cost: {},
+      }]))
+      .mockResolvedValueOnce(jsonResponse([{
+        id: versionId,
+        case_id: caseId,
+        version: 4,
+        completeness_state: "partial",
+        attestation_state: "server_collected",
+        methodology_version: "v4",
+        created_at: "2026-07-11T01:00:00.000Z",
+      }]))
+      .mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("GET", { query: { list: "1" } }), res);
+
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).toMatchObject({
+      reports: [{
+        caseId,
+        reportVersionId: versionId,
+        version: 4,
+        completenessState: "partial",
+        attestationState: "server_collected",
+      }],
+    });
+    expect(String(fetchMock.mock.calls[1][0])).toContain("select=id,case_id,version,");
+  });
+
+  it("opens an exact immutable report version for evidence review", async () => {
+    const caseId = "00000000-0000-4000-8000-000000000101";
+    const versionId = "00000000-0000-4000-8000-000000000201";
+    const payload = { address: "0xabc", headline: "Frozen evidence" };
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("report_versions?select=id,case_id,payload")) {
+        return jsonResponse([{
+          id: versionId,
+          case_id: caseId,
+          payload,
+          verdict: "CAUTION",
+          score: 54,
+          contributor_label: "Kyle",
+          created_at: "2026-07-10T23:00:00.000Z",
+        }]);
+      }
+      if (url.includes("/rest/v1/cases?select=id,kind,canonical_ref")) {
+        return jsonResponse([{
+          id: caseId,
+          kind: "token",
+          canonical_ref: "0xabc",
+          display_query: "$ABC",
+          status: "archived",
+        }]);
+      }
+      if (url.includes("report_versions?select=id,case_id,version")) {
+        return jsonResponse([{
+          id: versionId,
+          case_id: caseId,
+          version: 2,
+          completeness_state: "partial",
+          attestation_state: "analyst_submitted",
+          methodology_version: "v2",
+          created_at: "2026-07-10T23:00:00.000Z",
+        }]);
+      }
+      if (url.includes("/rest/v1/check_runs?")) return jsonResponse([]);
+      throw new Error(`Unexpected fetch ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("GET", { query: { versionId } }), res);
+
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).toMatchObject({
+      available: true,
+      caseStatus: "archived",
+      report: {
+        kind: "token",
+        ref: "0xabc",
+        payload,
+        versionContext: { caseId, reportVersionId: versionId, version: 2 },
+      },
     });
   });
 

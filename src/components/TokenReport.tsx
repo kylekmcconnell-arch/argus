@@ -119,7 +119,7 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
   );
 }
 
-export function TokenReport({ dossier: d, onReset, onAudit, onRescan }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void }) {
+export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrief }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void; onRescan: () => void; onOpenBrief?: () => void }) {
   const m = verdictMeta(d.verdict);
   const checks = d.versionContext
     ? d.versionContext.checks
@@ -200,11 +200,21 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan }: { dossie
           </button>
           <span className="mono text-[11px] text-ink-faint">/ token</span>
           <span className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             <button onClick={onRescan} title="Run this audit again, fresh" className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
               Rescan
             </button>
+            {onOpenBrief && (
+              <button
+                type="button"
+                onClick={onOpenBrief}
+                title="Open the analyst decision brief anchored to this exact token case"
+                className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink transition hover:border-signal hover:text-signal"
+              >
+                Case brief
+              </button>
+            )}
             <button onClick={copyReport} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copiedTxt ? "Copied ✓" : "Copy report"}</button>
             <button
               onClick={() => void share()}

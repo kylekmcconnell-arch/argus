@@ -11,7 +11,9 @@ import { mapStoredCheckRuns, type ReportVersionContext } from "./reportVersion";
 import type { TokenDossier } from "../token/audit";
 
 const context: ReportVersionContext = {
+  caseId: "00000000-0000-4000-8000-000000000122",
   reportVersionId: "00000000-0000-4000-8000-000000000123",
+  version: 3,
   completenessState: "partial",
   attestationState: "analyst_submitted",
   methodologyVersion: "test-v1",

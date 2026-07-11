@@ -64,6 +64,7 @@ export function InvestigationReport({
   onOpenToken,
   onOpenProjectAccount,
   onReAudit,
+  onOpenBrief,
 }: {
   inv: Investigation;
   onAudit: (q: string) => void;
@@ -71,6 +72,7 @@ export function InvestigationReport({
   onOpenToken: () => void;
   onOpenProjectAccount: () => void;
   onReAudit?: () => void;
+  onOpenBrief?: () => void;
 }) {
   const [spent, setSpent] = useState(0);
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
@@ -179,7 +181,17 @@ export function InvestigationReport({
               Rescan
             </button>
           )}
-          <span className={`mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider ${onReAudit ? "" : "ml-auto"}`} style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
+          {onOpenBrief && (
+            <button
+              type="button"
+              onClick={onOpenBrief}
+              title="Open the analyst decision brief anchored to this exact investigation case"
+              className={`rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink transition hover:border-signal hover:text-signal ${onReAudit ? "" : "ml-auto"}`}
+            >
+              Case brief
+            </button>
+          )}
+          <span className={`mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider ${onReAudit || onOpenBrief ? "" : "ml-auto"}`} style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>● LIVE</span>
         </div>
       </header>
 

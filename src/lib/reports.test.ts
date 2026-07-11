@@ -4,6 +4,7 @@ import type { Investigation } from "./investigation";
 import {
   changeReportLifecycle,
   fetchReport,
+  fetchReportVersion,
   fetchReportState,
   groupReportsByEntity,
   listReports,
@@ -72,7 +73,9 @@ describe("person report synchronization", () => {
 
 describe("stored token and investigation checks", () => {
   const versionContext: ReportVersionContext = {
+    caseId: "00000000-0000-4000-8000-000000000122",
     reportVersionId: "00000000-0000-4000-8000-000000000123",
+    version: 3,
     completenessState: "partial",
     attestationState: "server_collected",
     methodologyVersion: "test-v1",
@@ -160,6 +163,20 @@ describe("fetchReport", () => {
       report: null,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("loads one immutable report version without resolving the active projection", async () => {
+    const reportVersionId = "00000000-0000-4000-8000-000000000201";
+    const report = { kind: "token", ref: "0xabc", payload: { headline: "Frozen" } };
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ report }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchReportVersion(reportVersionId)).resolves.toEqual(report);
+    expect(fetchMock.mock.calls[0][0]).toBe(`/api/report?versionId=${reportVersionId}`);
+    expect(fetchMock.mock.calls[0][1]).toMatchObject({ cache: "no-store" });
   });
 });
 

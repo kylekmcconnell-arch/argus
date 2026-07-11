@@ -17,13 +17,14 @@ import {
   type StoredCheckRun,
 } from "../src/lib/reportVersion.js";
 
-export const config = { maxDuration: 15 };
+export const config = { maxDuration: 20 };
 
 const TABLE = "reports";
 const MAX_BODY = 1_800_000;
 const MAX_LIFECYCLE_BODY = 25_000;
 const CASE_KINDS = new Set(["person", "token", "investigation", "site"]);
 const STORED_KINDS = new Set([...CASE_KINDS, "watch"]);
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 type JsonRecord = Record<string, unknown>;
 
 interface CaseSubject {
@@ -192,14 +193,20 @@ const attestationState = (value: unknown): ReportAttestationState | null =>
 
 function versionMetadata(value: unknown): ReportVersionMetadata | null {
   const row = asRecord(value);
+  const caseId = typeof row.case_id === "string" ? row.case_id : "";
   const reportVersionId = typeof row.id === "string" ? row.id : "";
+  const version = typeof row.version === "number" && Number.isSafeInteger(row.version) && row.version > 0
+    ? row.version
+    : 0;
   const completeness = completenessState(row.completeness_state);
   const attestation = attestationState(row.attestation_state);
   const createdAt = typeof row.created_at === "string" ? row.created_at : "";
   const methodologyVersion = typeof row.methodology_version === "string" ? row.methodology_version : null;
-  if (!reportVersionId || !completeness || !attestation || !createdAt) return null;
+  if (!caseId || !reportVersionId || !version || !completeness || !attestation || !createdAt) return null;
   return {
+    caseId,
     reportVersionId,
+    version,
     completenessState: completeness,
     attestationState: attestation,
     methodologyVersion,
@@ -297,7 +304,7 @@ async function loadVersionMetadata(
   const responses = await Promise.all(chunks.map(async (ids) => {
     const filter = encodeURIComponent(`in.(${ids.join(",")})`);
     const response = await fetch(
-      `${credentials.url}/rest/v1/report_versions?select=id,completeness_state,attestation_state,methodology_version,created_at&organization_id=eq.${encodeURIComponent(organizationId)}&id=${filter}`,
+      `${credentials.url}/rest/v1/report_versions?select=id,case_id,version,completeness_state,attestation_state,methodology_version,created_at&organization_id=eq.${encodeURIComponent(organizationId)}&id=${filter}`,
       { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
     );
     if (!response.ok) throw new Error(`report version metadata read failed (${response.status})`);
@@ -330,36 +337,61 @@ async function loadArchivedReports(
     .filter(Boolean);
   if (!caseIds.length) return [];
 
-  const versionChunks: string[][] = [];
+  const caseChunks: string[][] = [];
   for (let index = 0; index < caseIds.length; index += 60) {
-    versionChunks.push(caseIds.slice(index, index + 60));
+    caseChunks.push(caseIds.slice(index, index + 60));
   }
-  const rawVersions = (await Promise.all(versionChunks.map(async (ids) => {
+  // An archived case has no mutable projection. Resolve the version that was
+  // actually activated/backfilled/restored; a newer immutable row may exist if
+  // activation failed and must never be presented as the published dossier.
+  const rawEvents = (await Promise.all(caseChunks.map(async (ids) => {
     const caseFilter = encodeURIComponent(`in.(${ids.join(",")})`);
     const response = await fetch(
-      `${credentials.url}/rest/v1/report_versions?select=id,case_id,version,verdict,score,completeness_state,attestation_state,methodology_version,created_at,cost,contributor_label&organization_id=eq.${encodeURIComponent(organizationId)}&case_id=${caseFilter}&order=version.desc`,
+      `${credentials.url}/rest/v1/case_events?select=id,case_id,report_version_id,created_at&organization_id=eq.${encodeURIComponent(organizationId)}&case_id=${caseFilter}&event_type=in.%28report.version.activated%2Creport.version.backfilled%2Ccase.restored%29&report_version_id=not.is.null&order=created_at.desc,id.desc`,
+      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+    );
+    if (!response.ok) throw new Error(`archived published-version events failed (${response.status})`);
+    const rows = await response.json() as unknown;
+    return Array.isArray(rows) ? rows : [];
+  }))).flat();
+  const publishedVersionByCase = new Map<string, string>();
+  for (const value of rawEvents) {
+    const row = asRecord(value);
+    const caseId = typeof row.case_id === "string" ? row.case_id : "";
+    const versionId = typeof row.report_version_id === "string" ? row.report_version_id : "";
+    if (caseId && versionId && !publishedVersionByCase.has(caseId)) {
+      publishedVersionByCase.set(caseId, versionId);
+    }
+  }
+  const latestVersionIds = [...new Set(publishedVersionByCase.values())];
+  const versionChunks: string[][] = [];
+  for (let index = 0; index < latestVersionIds.length; index += 60) {
+    versionChunks.push(latestVersionIds.slice(index, index + 60));
+  }
+  const rawVersions = (await Promise.all(versionChunks.map(async (ids) => {
+    const versionFilter = encodeURIComponent(`in.(${ids.join(",")})`);
+    const response = await fetch(
+      `${credentials.url}/rest/v1/report_versions?select=id,case_id,version,verdict,score,completeness_state,attestation_state,methodology_version,created_at,cost,contributor_label&organization_id=eq.${encodeURIComponent(organizationId)}&id=${versionFilter}`,
       { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
     );
     if (!response.ok) throw new Error(`archived report versions failed (${response.status})`);
     const rows = await response.json() as unknown;
     return Array.isArray(rows) ? rows : [];
   }))).flat();
-  const latestByCase = new Map<string, JsonRecord>();
+  const versionsById = new Map<string, JsonRecord>();
   for (const value of rawVersions) {
     const row = asRecord(value);
-    const caseId = typeof row.case_id === "string" ? row.case_id : "";
-    if (caseId && !latestByCase.has(caseId)) latestByCase.set(caseId, row);
+    const versionId = typeof row.id === "string" ? row.id : "";
+    if (versionId) versionsById.set(versionId, row);
   }
-  const latestVersionIds = [...latestByCase.values()]
-    .map((row) => typeof row.id === "string" ? row.id : "")
-    .filter(Boolean);
   const costLines = await loadCostLines(credentials, organizationId, latestVersionIds);
 
   return cases.flatMap((reportCase) => {
     const caseId = typeof reportCase.id === "string" ? reportCase.id : "";
     const kind = typeof reportCase.kind === "string" ? reportCase.kind : "";
     const ref = typeof reportCase.canonical_ref === "string" ? reportCase.canonical_ref : "";
-    const version = latestByCase.get(caseId);
+    const publishedVersionId = publishedVersionByCase.get(caseId) ?? "";
+    const version = versionsById.get(publishedVersionId);
     const metadata = version ? versionMetadata(version) : null;
     if (!caseId || !CASE_KINDS.has(kind) || !ref || !version || !metadata) return [];
     return [{
@@ -398,6 +430,51 @@ async function loadVersionContext(
     ? mapStoredCheckRuns(rawChecks as StoredCheckRun[])
     : [];
   return { ...metadata, checks };
+}
+
+async function loadExactVersionReport(
+  credentials: ServiceCredentials,
+  organizationId: string,
+  reportVersionId: string,
+): Promise<{ report: JsonRecord; caseStatus: "open" | "archived" } | null> {
+  const versionResponse = await fetch(
+    `${credentials.url}/rest/v1/report_versions?select=id,case_id,payload,verdict,score,contributor_label,created_at&organization_id=eq.${encodeURIComponent(organizationId)}&id=eq.${encodeURIComponent(reportVersionId)}&limit=1`,
+    { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+  );
+  if (!versionResponse.ok) throw new Error(`exact report version read failed (${versionResponse.status})`);
+  const rawVersions = await versionResponse.json() as unknown;
+  const version = Array.isArray(rawVersions) ? asRecord(rawVersions[0]) : {};
+  const caseId = typeof version.case_id === "string" ? version.case_id : "";
+  if (!caseId || version.payload == null) return null;
+
+  const [caseResponse, versionContext] = await Promise.all([
+    fetch(
+      `${credentials.url}/rest/v1/cases?select=id,kind,canonical_ref,display_query,status&organization_id=eq.${encodeURIComponent(organizationId)}&id=eq.${encodeURIComponent(caseId)}&limit=1`,
+      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+    ),
+    loadVersionContext(credentials, organizationId, reportVersionId),
+  ]);
+  if (!caseResponse.ok) throw new Error(`exact report case read failed (${caseResponse.status})`);
+  const rawCases = await caseResponse.json() as unknown;
+  const reportCase = Array.isArray(rawCases) ? asRecord(rawCases[0]) : {};
+  const kind = typeof reportCase.kind === "string" && CASE_KINDS.has(reportCase.kind) ? reportCase.kind : "";
+  const ref = typeof reportCase.canonical_ref === "string" ? reportCase.canonical_ref : "";
+  const status = reportCase.status === "open" || reportCase.status === "archived" ? reportCase.status : null;
+  if (!kind || !ref || !status || !versionContext || versionContext.caseId !== caseId) return null;
+  return {
+    caseStatus: status,
+    report: {
+      kind,
+      ref,
+      query: typeof reportCase.display_query === "string" ? reportCase.display_query : ref,
+      contributor: typeof version.contributor_label === "string" ? version.contributor_label : "anonymous",
+      payload: version.payload,
+      verdict: typeof version.verdict === "string" ? version.verdict : null,
+      score: typeof version.score === "number" ? version.score : null,
+      ts: typeof version.created_at === "string" ? version.created_at : versionContext.createdAt,
+      versionContext,
+    },
+  };
 }
 
 async function createImmutableVersion(
@@ -565,6 +642,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     if (req.method === "GET") {
+      if (req.query.versionId != null) {
+        const reportVersionId = typeof req.query.versionId === "string" && UUID.test(req.query.versionId)
+          ? req.query.versionId
+          : "";
+        if (!reportVersionId) {
+          res.status(400).json({ error: "valid_report_version_id_required" });
+          return;
+        }
+        const exact = await loadExactVersionReport(credentials, auth.organizationId, reportVersionId);
+        if (!exact) {
+          res.status(404).json({ error: "report_version_not_found" });
+          return;
+        }
+        res.status(200).json({ available: true, ...exact });
+        return;
+      }
       if (req.query.resolve != null) {
         const input = typeof req.query.resolve === "string" ? req.query.resolve.trim() : "";
         if (!input || input.length > 500) {

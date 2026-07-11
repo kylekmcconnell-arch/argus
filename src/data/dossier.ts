@@ -44,6 +44,12 @@ export interface Dossier {
   // version. Kept outside the immutable payload itself so loading metadata
   // never mutates (or silently rewrites) the evidence snapshot.
   versionContext?: ReportVersionContext;
+  // Live SSE completion records whether the immutable version was activated.
+  // Consumers must not bind fresh evidence to a durable case when this failed.
+  persistence?: {
+    state: "private" | "persisted" | "failed";
+    reportVersionId?: string | null;
+  };
   notableFollowers: NotableFollower[];
   contradictions: Contradiction[];
   webTeam: WebTeamMember[];
