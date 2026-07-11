@@ -1,9 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-const { issuePanelCostToken, recordProviderUsageBatch } = vi.hoisted(() => ({
+const { issuePanelCostToken, recordProviderUsageBatch, activateReportVersionWithAuthoritativeGraph } = vi.hoisted(() => ({
   issuePanelCostToken: vi.fn(),
   recordProviderUsageBatch: vi.fn(),
+  activateReportVersionWithAuthoritativeGraph: vi.fn(),
 }));
 
 vi.mock("./_cache.js", () => ({ issuePanelCostToken, recordProviderUsageBatch }));
@@ -33,6 +34,8 @@ vi.mock("./_provenance.js", () => ({
   activateReportVersion: vi.fn(),
   persistProvenance: vi.fn(),
 }));
+
+vi.mock("./_graph.js", () => ({ activateReportVersionWithAuthoritativeGraph }));
 
 import { consumeInvestigationQuota, requireArgusAuth, serviceCredentials } from "./_auth.js";
 import { activateReportVersion, persistProvenance } from "./_provenance.js";
@@ -74,6 +77,7 @@ describe("person audit input guard", () => {
     vi.clearAllMocks();
     issuePanelCostToken.mockReturnValue("signed-panel-token");
     recordProviderUsageBatch.mockResolvedValue(undefined);
+    activateReportVersionWithAuthoritativeGraph.mockResolvedValue(false);
   });
 
   afterEach(() => {
@@ -165,6 +169,18 @@ describe("person audit input guard", () => {
       vi.mocked(persistProvenance).mock.invocationCallOrder[0],
     );
     expect(vi.mocked(persistProvenance).mock.invocationCallOrder[0]).toBeLessThan(
+      activateReportVersionWithAuthoritativeGraph.mock.invocationCallOrder[0],
+    );
+    expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        organizationId: AUTH_ORGANIZATION_ID,
+        reportVersionId,
+        attestationState: "server_collected",
+        completeness: "partial",
+      }),
+    );
+    expect(activateReportVersionWithAuthoritativeGraph.mock.invocationCallOrder[0]).toBeLessThan(
       vi.mocked(activateReportVersion).mock.invocationCallOrder[0],
     );
     expect(issuePanelCostToken).toHaveBeenCalledWith(AUTH_ORGANIZATION_ID, reportVersionId);
@@ -190,6 +206,7 @@ describe("person audit input guard", () => {
     await handler(request("argus", { private: "1" }), res);
 
     expect(recordProviderUsageBatch).not.toHaveBeenCalled();
+    expect(activateReportVersionWithAuthoritativeGraph).not.toHaveBeenCalled();
     expect(issuePanelCostToken).not.toHaveBeenCalled();
     const stream = captured.chunks.join("");
     const done = JSON.parse(stream.match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
@@ -216,6 +233,7 @@ describe("person audit input guard", () => {
 
     expect(recordProviderUsageBatch).toHaveBeenCalledOnce();
     expect(persistProvenance).not.toHaveBeenCalled();
+    expect(activateReportVersionWithAuthoritativeGraph).not.toHaveBeenCalled();
     expect(activateReportVersion).not.toHaveBeenCalled();
     expect(issuePanelCostToken).not.toHaveBeenCalled();
     const stream = captured.chunks.join("");
@@ -243,6 +261,7 @@ describe("person audit input guard", () => {
 
     expect(recordProviderUsageBatch).not.toHaveBeenCalled();
     expect(persistProvenance).not.toHaveBeenCalled();
+    expect(activateReportVersionWithAuthoritativeGraph).not.toHaveBeenCalled();
     expect(activateReportVersion).not.toHaveBeenCalled();
     expect(issuePanelCostToken).not.toHaveBeenCalled();
     const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
@@ -273,5 +292,76 @@ describe("person audit input guard", () => {
     expect(issuePanelCostToken).toHaveBeenCalledWith(AUTH_ORGANIZATION_ID, reportVersionId);
     const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
     expect(done.persistence).toMatchObject({ state: "persisted", reportVersionId });
+  });
+
+  it("atomically activates a coverage-qualified live report with its graph", async () => {
+    const reportVersionId = "00000000-0000-4000-8000-000000000305";
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
+    activateReportVersionWithAuthoritativeGraph.mockResolvedValueOnce(true);
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@argus",
+      completeness_state: "complete",
+      report: { audit_id: "audit-run-graph", composite_verdict: "PASS", governing_score: 82 },
+      checkRuns: [{ checkId: "identity-resolution", label: "Identity resolution", status: "confirmed" }],
+      graph: {
+        nodes: [{ type: "Person", key: "@argus", subject: true }],
+        edges: [],
+      },
+      cost: { schemaVersion: 1, calls: [] },
+    } as never);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify([{ report_version_id: reportVersionId }]),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+    const { res } = response();
+
+    await handler(request("argus"), res);
+
+    expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        organizationId: AUTH_ORGANIZATION_ID,
+        reportVersionId,
+        userId: "00000000-0000-4000-8000-000000000010",
+        attestationState: "server_collected",
+        completeness: "complete",
+      }),
+    );
+    expect(vi.mocked(persistProvenance).mock.invocationCallOrder[0]).toBeLessThan(
+      activateReportVersionWithAuthoritativeGraph.mock.invocationCallOrder[0],
+    );
+    expect(activateReportVersion).not.toHaveBeenCalled();
+  });
+
+  it("does not activate a report when its authoritative graph write fails", async () => {
+    const reportVersionId = "00000000-0000-4000-8000-000000000306";
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
+    activateReportVersionWithAuthoritativeGraph.mockRejectedValueOnce(new Error("atomic report/graph activation failed (503)"));
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@argus",
+      completeness_state: "complete",
+      report: { audit_id: "audit-run-graph-failure", composite_verdict: "PASS", governing_score: 82 },
+      checkRuns: [{ checkId: "identity-resolution", label: "Identity resolution", status: "confirmed" }],
+      graph: { nodes: [{ type: "Person", key: "@argus", subject: true }], edges: [] },
+      cost: { schemaVersion: 1, calls: [] },
+    } as never);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify([{ report_version_id: reportVersionId }]),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+    const { res, captured } = response();
+
+    await handler(request("argus"), res);
+
+    expect(persistProvenance).toHaveBeenCalledOnce();
+    expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledOnce();
+    expect(activateReportVersion).not.toHaveBeenCalled();
+    expect(issuePanelCostToken).not.toHaveBeenCalled();
+    const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null });
   });
 });

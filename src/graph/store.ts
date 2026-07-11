@@ -211,7 +211,17 @@ export function tokenContribution(symbol: string, verdict: string, nodes: Panopt
 // or of another person tied to it, bridges to them automatically. Affiliation
 // edges become the connective tissue of the network.
 export function personContribution(d: Dossier): GraphContribution {
-  return { handle: d.handle, verdict: d.report.composite_verdict, nodes: d.graph.nodes, edges: d.graph.edges };
+  const reportVersionId = d.versionContext?.reportVersionId
+    ?? (d.persistence?.state === "persisted" ? d.persistence.reportVersionId ?? undefined : undefined);
+  return {
+    handle: d.handle,
+    verdict: d.report.composite_verdict,
+    nodes: d.graph.nodes,
+    edges: d.graph.edges,
+    ...(reportVersionId
+      ? { reportVersionId, provenanceState: "server_collected" as const }
+      : { provenanceState: "client_submitted" as const }),
+  };
 }
 
 // A project-centric discovery contributes the project node + everyone found to

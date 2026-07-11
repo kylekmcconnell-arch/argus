@@ -116,7 +116,9 @@ function repeatBackingSignal(ventures) {
 // src/engine/profiles.ts
 var SHARED_CAPS = {
   deception_confirmed: 10,
-  investigator_verified_fraud: 10
+  investigator_verified_fraud: 10,
+  trust_graph_hard_link: 10,
+  trust_graph_medium_link: 69
 };
 var PROFILES = {
   ["FOUNDER" /* FOUNDER */]: {
@@ -450,13 +452,13 @@ var PATTERNS = {
   ]
 };
 function classifySubject(bio = "", kb = null, selfLabel = null) {
-  const text = (bio || "").toLowerCase();
+  const text2 = (bio || "").toLowerCase();
   const scores = Object.fromEntries(
     Object.values(SubjectClass).map((c) => [c, 0])
   );
   for (const cls of Object.keys(PATTERNS)) {
     for (const p of PATTERNS[cls]) {
-      if (p.test(text)) scores[cls] += 1;
+      if (p.test(text2)) scores[cls] += 1;
     }
   }
   const rationale = [];
@@ -678,6 +680,30 @@ var Audit = class {
     );
     if (has("DeceptionFinding", "Verified")) keys.push("deception_confirmed");
     if (has("InvestigatorCallout", "Verified", 2)) keys.push("investigator_verified_fraud");
+    const frozenGraphFinding = (strength) => this.findings.some((finding) => {
+      const graph = finding.trust_graph;
+      const tieKey = typeof graph?.tie_key === "string" ? graph.tie_key.trim() : "";
+      const hardKey = /^(?:code:|email:|wallet:|funder:|mint:|token:|ga:|gtm:|adsense:|fbpixel:).+/i.test(tieKey);
+      const weakKey = /^(?:holder|amm|dex|pool|lp|market)(?::|$)|^(?:ip|favicon):/i.test(tieKey);
+      const tieType = typeof graph?.tie_type === "string" ? graph.tie_type.trim() : "";
+      const relationshipEdges = /* @__PURE__ */ new Set([
+        "TEAM",
+        "WORKED_ON",
+        "ASSOCIATES_WITH",
+        "FOUNDED",
+        "ADVISED",
+        "SERVICED",
+        "CLAIMED_ENDORSEMENT"
+      ]);
+      const hasRelationshipEdge = (value) => Array.isArray(value) && value.some((edgeType) => typeof edgeType === "string" && relationshipEdges.has(edgeType));
+      const personTie = tieType === "Person" && hasRelationshipEdge(graph?.subject_edge_types) && hasRelationshipEdge(graph?.other_edge_types);
+      const domainTie = /^(?:Domain|Website)$/i.test(tieType) && /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(tieKey) && Array.isArray(graph?.subject_edge_types) && graph.subject_edge_types.includes("LINKS") && Array.isArray(graph?.other_edge_types) && graph.other_edge_types.includes("LINKS");
+      const exactStrength = strength === "hard" ? hardKey && tieType.length > 0 : tieKey.length > 0 && !hardKey && !weakKey && (personTie || domainTie);
+      const validEdgeTypes = (value) => Array.isArray(value) && value.length > 0 && value.every((edgeType) => typeof edgeType === "string" && edgeType.trim().length > 0);
+      return finding.finding_type === "TrustGraphConnection" && finding.verification_status === "Verified" && finding.independent_source_count >= 1 && finding.evidence_origin === "deterministic" && finding.artifact_verified === true && typeof finding.content_hash === "string" && /^[a-f0-9]{64}$/i.test(finding.content_hash) && graph?.tie_strength === strength && exactStrength && validEdgeTypes(graph?.subject_edge_types) && validEdgeTypes(graph?.other_edge_types) && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(graph.other_report_version_id) && graph.other_attestation === "server_collected" && graph.other_completeness === "complete" && (graph.other_verdict === "FAIL" || graph.other_verdict === "AVOID");
+    });
+    if (frozenGraphFinding("hard")) keys.push("trust_graph_hard_link");
+    if (frozenGraphFinding("medium")) keys.push("trust_graph_medium_link");
     return keys;
   }
   artifactIsEligible(url, origin, artifactVerified) {
@@ -964,6 +990,8 @@ function assembleDossier(ev, live) {
     contradictions: ev.contradictions,
     webTeam: ev.webTeam ?? [],
     sourceArtifacts: ev.sourceArtifacts,
+    profileAuthenticity: ev.profileAuthenticity,
+    trustGraphScreen: ev.trustGraphScreen,
     report,
     graph,
     founderSummary: ev.roles.includes("FOUNDER" /* FOUNDER */) ? a.founderSummary() : void 0,
@@ -1566,6 +1594,81 @@ var compactObject = (value, depth = 0) => {
     Object.entries(value).slice(0, 24).map(([key, item]) => [key, compactObject(item, depth + 1)]).filter(([, item]) => item !== void 0)
   );
 };
+var compactProfileAuthenticity = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+  const row = value;
+  return {
+    provider: clip(row.provider, 80),
+    capturedAt: clip(row.capturedAt, 40),
+    imageUrl: clip(row.imageUrl, 420),
+    imageContentHash: clip(row.imageContentHash, 64),
+    mediaType: clip(row.mediaType, 40),
+    classification: clip(row.classification, 80),
+    confidence: typeof row.confidence === "number" && Number.isFinite(row.confidence) ? row.confidence : void 0,
+    isRealPerson: typeof row.isRealPerson === "boolean" ? row.isRealPerson : void 0,
+    flag: typeof row.flag === "boolean" ? row.flag : void 0,
+    tells: Array.isArray(row.tells) ? row.tells.slice(0, 8).map((tell) => clip(tell, 180)).filter(Boolean) : [],
+    note: clip(row.note, 420)
+  };
+};
+var compactTrustGraphPredicate = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+  const row = value;
+  const edgeTypes = (candidate) => Array.isArray(candidate) ? candidate.slice(0, 12).map((item) => clip(item, 80)).filter(Boolean) : [];
+  return {
+    tie_key: clip(row.tie_key, 240),
+    tie_type: clip(row.tie_type, 80),
+    tie_strength: clip(row.tie_strength, 20),
+    subject_edge_types: edgeTypes(row.subject_edge_types),
+    other_edge_types: edgeTypes(row.other_edge_types),
+    other_report_version_id: clip(row.other_report_version_id, 64),
+    other_attestation: clip(row.other_attestation, 40),
+    other_completeness: clip(row.other_completeness, 20),
+    other_verdict: clip(row.other_verdict, 40)
+  };
+};
+var compactTrustGraphScreen = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
+  const row = value;
+  const connections = Array.isArray(row.connections) ? row.connections.slice(0, 8).map((candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return void 0;
+    const connection = candidate;
+    const ties = Array.isArray(connection.ties) ? connection.ties.slice(0, 4).map((candidateTie) => {
+      if (!candidateTie || typeof candidateTie !== "object" || Array.isArray(candidateTie)) return void 0;
+      const tie = candidateTie;
+      const edges = (candidateEdges) => Array.isArray(candidateEdges) ? candidateEdges.slice(0, 8).map((item) => clip(item, 60)).filter(Boolean) : [];
+      return {
+        key: clip(tie.key, 180),
+        label: clip(tie.label, 180),
+        type: clip(tie.type, 80),
+        strength: clip(tie.strength, 20),
+        subjectEdgeTypes: edges(tie.subjectEdgeTypes),
+        otherEdgeTypes: edges(tie.otherEdgeTypes)
+      };
+    }).filter(Boolean) : [];
+    return {
+      other: clip(connection.other, 180),
+      otherReportVersionId: clip(connection.otherReportVersionId, 64),
+      otherAttestation: clip(connection.otherAttestation, 40),
+      otherCompleteness: clip(connection.otherCompleteness, 20),
+      otherVerdict: clip(connection.otherVerdict, 40),
+      qualified: typeof connection.qualified === "boolean" ? connection.qualified : void 0,
+      direct: typeof connection.direct === "boolean" ? connection.direct : void 0,
+      ties
+    };
+  }).filter(Boolean) : [];
+  return {
+    provider: clip(row.provider, 80),
+    capturedAt: clip(row.capturedAt, 40),
+    status: clip(row.status, 20),
+    contributionCount: typeof row.contributionCount === "number" && Number.isFinite(row.contributionCount) ? row.contributionCount : void 0,
+    qualifiedContributionCount: typeof row.qualifiedContributionCount === "number" && Number.isFinite(row.qualifiedContributionCount) ? row.qualifiedContributionCount : void 0,
+    sourceContentHash: clip(row.sourceContentHash, 64),
+    severity: clip(row.severity, 20),
+    line: clip(row.line, 500),
+    connections
+  };
+};
 var compactFinding = (value) => {
   if (!value || typeof value !== "object") return null;
   const f = value;
@@ -1579,7 +1682,9 @@ var compactFinding = (value) => {
     independent_source_count: typeof f.independent_source_count === "number" && Number.isFinite(f.independent_source_count) ? f.independent_source_count : void 0,
     polarity: typeof f.polarity === "number" && Number.isFinite(f.polarity) ? f.polarity : void 0,
     evidence_origin: clip(f.evidence_origin, 32),
-    artifact_verified: typeof f.artifact_verified === "boolean" ? f.artifact_verified : void 0
+    artifact_verified: typeof f.artifact_verified === "boolean" ? f.artifact_verified : void 0,
+    content_hash: clip(f.content_hash, 64),
+    trust_graph: compactTrustGraphPredicate(f.trust_graph)
   };
 };
 function buildAnalystEvidencePacket(input) {
@@ -1597,14 +1702,24 @@ function buildAnalystEvidencePacket(input) {
     providerRuns: 24
   };
   const findingsRaw = Array.isArray(input.findings) ? input.findings : [];
-  const findings = findingsRaw.slice(0, 24).map(compactFinding).filter((f) => !!f);
+  const findingPriority = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return 4;
+    const row = value;
+    if (row.finding_type === "TrustGraphConnection" && row.trust_graph) return 0;
+    if (row.verification_status === "Verified" && row.artifact_verified === true) return 1;
+    if (typeof row.polarity === "number" && row.polarity < 0) return 2;
+    return 3;
+  };
+  const findings = findingsRaw.map((value, index) => ({ value, index })).sort((a, b) => findingPriority(a.value) - findingPriority(b.value) || a.index - b.index).slice(0, 24).map(({ value }) => compactFinding(value)).filter((f) => !!f);
   const coverage = {
     findings: { available: findingsRaw.length, included: findings.length }
   };
   const packet = {
-    schema_version: 1,
+    schema_version: 2,
     coverage,
     profile: compactObject(input.profile),
+    profileAuthenticity: compactProfileAuthenticity(input.profileAuthenticity),
+    trustGraphScreen: compactTrustGraphScreen(input.trustGraphScreen),
     // Findings stay ahead of descriptive context in the budget. This prevents a
     // long social corpus from hiding the material facts that govern a verdict.
     findings
@@ -1647,7 +1762,11 @@ Score every listed axis, write the composite headline (one sentence on what gove
 
 ACTIVITY RULE: weigh posting cadence. profile.days_since_post is how long the account has been silent. For a PROJECT/token, going quiet for weeks (roughly 21+ days) is a real liveness flag (abandoned, winding down, or quiet after a raise) and should temper traction/execution axes; for an individual it is a milder signal. Recent, steady posting is mildly positive, not a free pass.
 
-IDENTITY RULE: if the evidence has a "team" array of named people tied to the project (especially any with a LinkedIn, or a named founder/CEO/CTO), the project's real-world identity is RESOLVED. A pseudonymous brand/company handle run on behalf of a publicly named team is NORMAL and is NOT an anonymity red flag: do not score identity/backing axes as if the operators were anonymous, and do NOT write a headline that calls the founder identity "unresolved", "unnamed", or "anonymous" when named leaders are present. Only treat identity as unresolved when the evidence genuinely names no one behind the project.`;
+IDENTITY RULE: if the evidence has a "team" array of named people tied to the project (especially any with a LinkedIn, or a named founder/CEO/CTO), the project's real-world identity is RESOLVED. A pseudonymous brand/company handle run on behalf of a publicly named team is NORMAL and is NOT an anonymity red flag: do not score identity/backing axes as if the operators were anonymous, and do NOT write a headline that calls the founder identity "unresolved", "unnamed", or "anonymous" when named leaders are present. Only treat identity as unresolved when the evidence genuinely names no one behind the project.
+
+PROFILE PHOTO RULE: profileAuthenticity is a visual-integrity triage screen, not identity proof. A real-looking photo never establishes who operates the account, and an AI, stock, celebrity, logo, cartoon, unclear, or missing photo never establishes impersonation by itself. Use it only as a review lead.
+
+TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection findings bound to an exact complete server-collected report may influence scoring. Weak or unqualified ties are context only. ARGUS applies any graph cap deterministically after your axis scoring; do not invent or strengthen one.`;
   const tool = {
     name: "record_verdict",
     description: "Record the per-axis scores, headline, and identity note.",
@@ -1723,7 +1842,7 @@ function personChecks(opts) {
 // server/checks.ts
 var CHECKS = [
   { id: "identity-resolution", label: "Identity resolution", defaultNote: "no completed server-side identity resolution was recorded" },
-  { id: "profile-photo-authenticity", label: "Profile-photo authenticity", defaultNote: "server collector did not run a photo-authenticity provider" },
+  { id: "profile-photo-authenticity", label: "Profile-photo integrity", defaultNote: "server collector did not run a profile-photo integrity screen" },
   { id: "code-footprint-github", label: "Code footprint (GitHub)", defaultNote: "no completed GitHub resolution was recorded" },
   { id: "identity-continuity", label: "Identity continuity", defaultNote: "no completed handle-history result was recorded" },
   { id: "affiliations-associates", label: "Affiliations & associates", defaultNote: "no corroborated affiliation collection outcome was recorded" },
@@ -1734,6 +1853,7 @@ var CHECKS = [
   { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check", requiresResolvedRealName: true },
   { id: "trust-graph-connections", label: "Trust-graph connections", defaultNote: "server collector did not run flagged-subject graph reconciliation" }
 ];
+var PERSON_CHECK_IDS = Object.freeze(CHECKS.map((check) => check.id));
 var STATUS_PRIORITY = {
   "not-applicable": 0,
   unknown: 1,
@@ -1875,9 +1995,9 @@ async function cacheGet(key, usage = {}) {
     return null;
   }
 }
-async function cacheSet(key, text) {
+async function cacheSet(key, text2) {
   const c = creds();
-  if (!c || !text) return;
+  if (!c || !text2) return;
   try {
     const now = Date.now();
     await fetch(`${c.url}/rest/v1/provider_cache?on_conflict=cache_key`, {
@@ -1885,7 +2005,7 @@ async function cacheSet(key, text) {
       headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
       body: JSON.stringify({
         cache_key: hash(key),
-        payload: { text },
+        payload: { text: text2 },
         expires_at: new Date(now + TTL_MS).toISOString(),
         updated_at: new Date(now).toISOString()
       }),
@@ -2335,16 +2455,16 @@ async function grokSearch(system, user, opts) {
       num_sources_used: optionalNumber(usageRecord.num_sources_used)
     };
     const nestedText = output.flatMap((item) => Array.isArray(item.content) ? item.content.map(asRecord) : []).map((content) => typeof content.text === "string" ? content.text : "").join(" ");
-    const text = typeof d.output_text === "string" ? d.output_text : nestedText;
+    const text2 = typeof d.output_text === "string" ? d.output_text : nestedText;
     console.log("[grok-usage]", JSON.stringify({ in: usage.input_tokens, out: usage.output_tokens, toolCalls }));
     addGrokUsage(
       usage,
       toolCalls,
       "live-search",
-      text ? "succeeded" : "partial",
-      text ? void 0 : "empty_output"
+      text2 ? "succeeded" : "partial",
+      text2 ? void 0 : "empty_output"
     );
-    return { status: res.status, text: text || null };
+    return { status: res.status, text: text2 || null };
   };
   let result = await call(true);
   if (result.status === 400) result = await call(false);
@@ -2505,12 +2625,12 @@ var KW_SHILL = ["aped", "sending", '"the play"', "entry", "accumulated", "convic
 var KW_CALLS = ["dexscreener.com", "pump.fun", "birdeye.so", "dextools.io", "geckoterminal.com", "photon-sol", '"CA"'];
 var CLAIM_RE = /\b(founder|co-?founder|ceo|cto|advisor|founded|building|built|launch|presale|mint|airdrop|raised|seed|series [a-d]|ido|tokenomics|backed|investors?|partnership|gem|100x|joined|aped?|shill|calling|conviction|printing|pumping|sending it)\b/i;
 function parseTweet(t) {
-  const text = (t.text ?? t.full_text ?? "").trim();
+  const text2 = (t.text ?? t.full_text ?? "").trim();
   const at = Date.parse(t.createdAt ?? t.created_at ?? "");
-  const isRt = /^RT @/.test(text) || !!t.retweeted_tweet || !!t.retweeted_status || t.isRetweet === true;
-  const isReply = !!(t.isReply ?? t.inReplyToId ?? t.in_reply_to_status_id ?? t.in_reply_to_user_id) || /^@\w/.test(text);
+  const isRt = /^RT @/.test(text2) || !!t.retweeted_tweet || !!t.retweeted_status || t.isRetweet === true;
+  const isReply = !!(t.isReply ?? t.inReplyToId ?? t.in_reply_to_status_id ?? t.in_reply_to_user_id) || /^@\w/.test(text2);
   return {
-    text,
+    text: text2,
     at: Number.isFinite(at) ? at : null,
     views: num(t.viewCount, t.view_count, t.views) ?? 0,
     likes: num(t.likeCount, t.favorite_count, t.favoriteCount, t.likes) ?? 0,
@@ -2716,9 +2836,9 @@ async function acknowledgments(endorsers, subject) {
   if (!key || !list.length) return out;
   const s = subject.replace(/^@/, "");
   const system = "You generate endorsement-verification leads for a due-diligence collector, with live web and X search. For EACH listed account, surface the strongest candidate public acknowledgment that account may have made of @" + s + ' on X, its sentiment, and the exact post URL. This is discovery only: do not call a relationship corroborated or contradicted. Without a direct post URL, return ack=none and sentiment=none. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none","source_url":"https://x.com/.../status/..."}]} \u2014 one entry per listed account, never invent posts.';
-  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
-  if (!text) return out;
-  const m = text.match(/\{[\s\S]*\}/);
+  const text2 = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
+  if (!text2) return out;
+  const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return out;
   try {
     const arr = JSON.parse(m[0]).results ?? [];
@@ -2740,9 +2860,9 @@ async function discoverAffiliations(handle, name, oldHandles = []) {
   const h = handle.replace(/^@/, "");
   const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} \u2014 search posts mentioning those old handles too.` : "";
   const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Work BOTH angles: (1) what the person's own footprint shows \u2014 accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase, beyond their bio and LinkedIn; (2) reverse mentions \u2014 project/company accounts that ever NAMED, TAGGED, or ANNOUNCED this person as a founder/team member (co-founder announcements and 'meet the team' posts are often YEARS old, on the project's timeline, search historical posts). There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role \u2014 from their own footprint AND from project accounts announcing them. Be exhaustive: a serial operator often has 5-15 ventures across years; keep searching until you have run down every lead. Search the web and X including historical posts.`, { maxToolCalls: 10, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
-  if (!text) return [];
-  const m = text.match(/\{[\s\S]*\}/);
+  const text2 = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role \u2014 from their own footprint AND from project accounts announcing them. Be exhaustive: a serial operator often has 5-15 ventures across years; keep searching until you have run down every lead. Search the web and X including historical posts.`, { maxToolCalls: 10, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
+  if (!text2) return [];
+  const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
     const parsed = JSON.parse(m[0]);
@@ -2766,24 +2886,24 @@ async function findTeam(handle, name, posts = []) {
 The account's recent posts (mine these for team intros / role + advisor announcements):
 ${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "";
   const system = `You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account: founders, cofounders, core team, engineers, AND advisors/backers. Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. Be PRECISE about each person's role AT THIS project: only call someone an advisor if they are actually named as one; if they are a founder/cofounder, say so \u2014 do NOT downgrade a founder to advisor. For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that live web/X search reveals \u2014 this exposes serial founders and cross-project ties. Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"founder|cofounder|ceo|cto|engineer|advisor|backer","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If none, return {"people":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects. Search the account's own posts and posts mentioning it.${postContext}`, { cacheKey: `team-x:${h}` });
-  return parseTeamJSON(text, h, "X content");
+  const text2 = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects. Search the account's own posts and posts mentioning it.${postContext}`, { cacheKey: `team-x:${h}` });
+  return parseTeamJSON(text2, h, "X content");
 }
 async function findTeamOnSite(domain, projectName) {
   const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
   if (!clean && !projectName) return [];
   const anchor = clean ? `website ${clean}${projectName ? ` (${projectName})` : ""}` : `project "${projectName}"`;
   const system = `You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project: founders, cofounders, the WHOLE leadership team (CEO/CTO/COO/CFO/CMO), engineering and product leads, AND advisors/backers. DIG hard and be COMPLETE: Google the project + 'team'/'leadership'/'about', open the project's LinkedIn company page and read its 'People' tab (list the employees it shows), check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people \u2014 do NOT stop at one or two; keep going until you have the full public roster you can verify. Connect each name to their X handle and LinkedIn where possible. Include ONLY real people genuinely tied to THIS specific project (match the domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT \u2014 do NOT downgrade a founder to advisor. For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal \u2014 this exposes serial founders and cross-project ties. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean || projectName}` });
-  return parseTeamJSON(text, void 0, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
+  const text2 = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean || projectName}` });
+  return parseTeamJSON(text2, void 0, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 async function enrichTeamIdentities(project, people) {
   if (!people.length) return [];
   const system = `You are an OSINT researcher with live web and X search. For each named team member of the given project, find their X (Twitter) handle and LinkedIn profile. Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/..."}]} \u2014 one entry per input name, fields omitted when unknown. NEVER invent. Never use em dashes.`;
   const list = people.map((p) => `${p.name}${p.role ? ` (${p.role})` : ""}`).join("; ");
-  const text = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich:${project}:${people.map((p) => p.name).sort().join("|")}` });
-  if (!text) return [];
-  const m = text.match(/\{[\s\S]*\}/);
+  const text2 = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich:${project}:${people.map((p) => p.name).sort().join("|")}` });
+  if (!text2) return [];
+  const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
     const arr = JSON.parse(m[0]).people ?? [];
@@ -2824,9 +2944,9 @@ function scanPostsForRoles(posts) {
   }
   return out.slice(0, 12);
 }
-function parseTeamJSON(text, selfHandle, source) {
-  if (!text) return [];
-  const m = text.match(/\{[\s\S]*\}/);
+function parseTeamJSON(text2, selfHandle, source) {
+  if (!text2) return [];
+  const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
     const parsed = JSON.parse(m[0]);
@@ -2856,9 +2976,9 @@ async function searchAdverseSignals(handle, kind, ticker) {
   const h = handle.replace(/^@/, "");
   const subject = kind === "project" ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}` : `the person behind X account @${h}`;
   const system = `You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, or general community complaints/FUD. Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. Reply with ONLY compact JSON: {"signals":[{"category":"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud","claim":"","source":"","source_url":""}]}. Never use em dashes.`;
-  const text = await grokSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`);
-  if (!text) return [];
-  const m = text.match(/\{[\s\S]*\}/);
+  const text2 = await grokSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`);
+  if (!text2) return [];
+  const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return [];
   try {
     const parsed = JSON.parse(m[0]);
@@ -2877,9 +2997,9 @@ async function searchAdverseSignals(handle, kind, ticker) {
 async function detectManipulationTooling(handle, name) {
   const h = handle.replace(/^@/, "");
   const system = `You are a forensic research lead generator with live web and X search. Surface candidate first-party pages that may connect the given person to a token bundler, wallet mixer, volume faker, wash-trading generator, or multi-wallet snipe bot. Return leads for an independent collector to verify; do not decide that the person operates the tool and do not call the connection verified. Prefer the product's own page, docs, or post and include the role claimed on that page. Legitimate general token-creation or analytics tools do not count. Reply with ONLY compact JSON: {"role_claim":"","tools":[{"name":"","kind":"bundler|mixer|volume_faker|snipe_bot|multi_wallet|other","url":"","evidence":""}]}. If none, return {"role_claim":"","tools":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Find candidate first-party pages that may link them to manipulation tooling. Return URLs for later independent verification only.`);
-  if (!text) return null;
-  const m = text.match(/\{[\s\S]*\}/);
+  const text2 = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Find candidate first-party pages that may link them to manipulation tooling. Return URLs for later independent verification only.`);
+  if (!text2) return null;
+  const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return null;
   try {
     const parsed = JSON.parse(m[0]);
@@ -2908,11 +3028,18 @@ var xAdapter = {
   available: () => !!env("TWITTERAPI_KEY") || !!env("XAI_API_KEY"),
   async run(ctx) {
     const haveProfile = ctx.evidence.profile.followers && ctx.evidence.profile.followers !== "\u2014";
-    const prof = haveProfile ? null : await getProfile2(ctx.handle);
+    const haveOfficialAvatar = ctx.evidence.profile.avatar_source_state != null;
+    const prof = haveProfile && haveOfficialAvatar ? null : await getProfile2(ctx.handle);
     if (prof) {
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
       ctx.evidence.profile.followers = fmtFollowers(prof.followers);
+      if (prof.image) {
+        ctx.evidence.profile.avatar_url = prof.image;
+        ctx.evidence.profile.avatar_source_state = "resolved";
+      } else {
+        ctx.evidence.profile.avatar_source_state = "none";
+      }
       if (prof.createdAt) {
         const d = new Date(prof.createdAt);
         if (!isNaN(d.getTime())) {
@@ -3025,13 +3152,13 @@ async function fetchPage(url) {
     recordCall("site-fetch", "team-page", 0, "response_text_error", "failed");
     return null;
   }
-  const text = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
-  if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) {
+  const text2 = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
+  if (text2.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text2)) {
     recordCall("site-fetch", "team-page", 0, "insufficient_team_content", "partial");
     return null;
   }
   recordCall("site-fetch", "team-page", 0, void 0, "succeeded");
-  return { url, text };
+  return { url, text: text2 };
 }
 async function fetchTeamPage(domain, projectName) {
   const urls = candidateUrls(domain);
@@ -3149,9 +3276,9 @@ async function checkSiteSubstance(domain) {
   if (isShell && body.length < 300) {
     for (const b of bundleUrls(page.html, page.url)) {
       const js = await get(b, { requireHtml: false }).catch(() => null);
-      const text = js?.html ?? "";
-      if (!text) continue;
-      if (COMING.test(text) || /ComingSoon|Waitlist|EarlyAccess|UnderConstruction/i.test(text)) {
+      const text2 = js?.html ?? "";
+      if (!text2) continue;
+      if (COMING.test(text2) || /ComingSoon|Waitlist|EarlyAccess|UnderConstruction/i.test(text2)) {
         return { url: page.url, status: "coming_soon", detail: `the live site is a coming-soon / waitlist page (client-rendered${meta ? `, "${meta.slice(0, 60)}"` : ""})` };
       }
     }
@@ -3811,11 +3938,11 @@ async function tokenByContract(chain, address) {
   const key = env("COINGECKO_API_KEY");
   const platform = PLATFORM[chain.toLowerCase()] ?? chain.toLowerCase();
   const base = key ? PRO : PUBLIC;
-  const headers3 = key ? { "x-cg-pro-api-key": key } : {};
+  const headers4 = key ? { "x-cg-pro-api-key": key } : {};
   const tier = key ? "subscription/keyed" : "keyless";
   let res;
   try {
-    res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers3 });
+    res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers4 });
   } catch {
     recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 transport_error`, "failed");
     return null;
@@ -4080,7 +4207,7 @@ var onchainAdapter = {
 };
 
 // server/adapters/offchain.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 
 // src/lib/offchainEvidence.ts
 var asRecord4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -4463,6 +4590,342 @@ async function collectOfacName(rawName, options = {}) {
   };
 }
 
+// server/adapters/profilePhoto.ts
+import { createHash as createHash2 } from "node:crypto";
+var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
+var MAX_IMAGE_BYTES = 75e4;
+var MIN_IMAGE_BYTES = 256;
+var MIN_ACTIONABLE_CONFIDENCE = 0.7;
+var REDIRECT_STATUSES = /* @__PURE__ */ new Set([301, 302, 303, 307, 308]);
+var IMAGE_TYPES = /* @__PURE__ */ new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
+var CLASSIFICATIONS = /* @__PURE__ */ new Set([
+  "real_candid",
+  "studio_or_stock",
+  "ai_generated",
+  "celebrity_or_public_figure",
+  "logo_or_cartoon",
+  "no_photo",
+  "unclear"
+]);
+var REVIEW_LEADS = /* @__PURE__ */ new Set([
+  "studio_or_stock",
+  "ai_generated",
+  "celebrity_or_public_figure"
+]);
+var sha2562 = (value) => createHash2("sha256").update(value).digest("hex");
+function safeOfficialAvatarUrl(raw) {
+  try {
+    const url = new URL(raw);
+    const host = url.hostname.toLowerCase();
+    const allowedHost = host === "pbs.twimg.com" || host === "abs.twimg.com" || host.endsWith(".twimg.com");
+    if (url.protocol !== "https:" || !allowedHost || url.username || url.password || url.port && url.port !== "443") return null;
+    url.hash = "";
+    return url;
+  } catch {
+    return null;
+  }
+}
+async function readBoundedImage(response) {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_IMAGE_BYTES) return null;
+  if (!response.body) return null;
+  const reader = response.body.getReader();
+  const chunks = [];
+  let total = 0;
+  for (; ; ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_IMAGE_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(Buffer.from(value));
+  }
+  if (total < MIN_IMAGE_BYTES) return null;
+  return Buffer.concat(chunks, total);
+}
+function matchesImageSignature(bytes, mediaType) {
+  if (mediaType === "image/jpeg") return bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255;
+  if (mediaType === "image/png") return bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]));
+  if (mediaType === "image/gif") return bytes.subarray(0, 6).toString("ascii") === "GIF87a" || bytes.subarray(0, 6).toString("ascii") === "GIF89a";
+  if (mediaType === "image/webp") return bytes.subarray(0, 4).toString("ascii") === "RIFF" && bytes.subarray(8, 12).toString("ascii") === "WEBP";
+  return false;
+}
+async function fetchTrustedProfileImage(rawUrl) {
+  let url = safeOfficialAvatarUrl(rawUrl);
+  if (!url) {
+    recordCall("x-avatar", "image-fetch", 0, "unsafe_or_untrusted_url", "failed");
+    return null;
+  }
+  for (let redirect = 0; redirect <= 3; redirect += 1) {
+    let response;
+    try {
+      response = await fetch(url, {
+        redirect: "manual",
+        signal: AbortSignal.timeout(7e3),
+        headers: { "user-agent": "argus-osint/1.0" }
+      });
+    } catch {
+      recordCall("x-avatar", "image-fetch", 0, "transport_error", "failed");
+      return null;
+    }
+    if (REDIRECT_STATUSES.has(response.status)) {
+      const location = response.headers.get("location");
+      let next;
+      try {
+        next = location ? safeOfficialAvatarUrl(new URL(location, url).toString()) : null;
+      } catch {
+        next = null;
+      }
+      if (!next || redirect === 3) {
+        recordCall("x-avatar", "image-fetch", 0, "unsafe_or_excessive_redirect", "failed");
+        return null;
+      }
+      url = next;
+      continue;
+    }
+    if (!response.ok) {
+      recordCall("x-avatar", "image-fetch", 0, `http_${response.status}`, "failed");
+      return null;
+    }
+    const mediaType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (!IMAGE_TYPES.has(mediaType)) {
+      recordCall("x-avatar", "image-fetch", 0, "unsupported_content_type", "failed");
+      return null;
+    }
+    const bytes = await readBoundedImage(response);
+    if (!bytes || !matchesImageSignature(bytes, mediaType)) {
+      recordCall("x-avatar", "image-fetch", 0, "empty_oversized_or_invalid_image", "failed");
+      return null;
+    }
+    recordCall("x-avatar", "image-fetch", 0, `${bytes.length} bytes`, "succeeded");
+    return { bytes, mediaType, url: url.toString(), contentHash: sha2562(bytes) };
+  }
+  return null;
+}
+function validateVisionInput(value) {
+  if (!value || typeof value !== "object") return null;
+  const raw = value;
+  if (typeof raw.classification !== "string" || !CLASSIFICATIONS.has(raw.classification)) return null;
+  if (typeof raw.confidence !== "number" || !Number.isFinite(raw.confidence) || raw.confidence < 0 || raw.confidence > 1) return null;
+  if (typeof raw.is_real_person !== "boolean" || typeof raw.flag !== "boolean") return null;
+  if (typeof raw.note !== "string" || !raw.note.trim()) return null;
+  if (!Array.isArray(raw.tells) || raw.tells.some((tell) => typeof tell !== "string")) return null;
+  const classification = raw.classification;
+  return {
+    classification,
+    confidence: raw.confidence,
+    isRealPerson: raw.is_real_person,
+    // Classification drives the product signal; a contradictory model boolean
+    // cannot silently clear or manufacture a finding.
+    flag: REVIEW_LEADS.has(classification),
+    tells: raw.tells.map((tell) => String(tell).trim().slice(0, 120)).filter(Boolean).slice(0, 6),
+    note: raw.note.trim().slice(0, 500)
+  };
+}
+async function classifyImage(image) {
+  const key = env("ANTHROPIC_API_KEY");
+  if (!key) return null;
+  let response;
+  try {
+    response = await fetch(ANTHROPIC_URL2, {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        model: ANALYST_MODEL,
+        max_tokens: 500,
+        system: "You are screening a crypto/tech account's profile image for due diligence. This is visual triage, not identity proof and not reverse-image search. Classify only what is visible. A professional headshot or public figure may be legitimate, so those are review leads rather than fraud findings. Never identify a person by name.",
+        messages: [{
+          role: "user",
+          content: [
+            { type: "image", source: { type: "base64", media_type: image.mediaType, data: image.bytes.toString("base64") } },
+            { type: "text", text: "Classify the profile image and list concrete visible tells. Use the record_profile_photo tool." }
+          ]
+        }],
+        tools: [{
+          name: "record_profile_photo",
+          description: "Record a bounded visual profile-image integrity assessment.",
+          input_schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: {
+              classification: { type: "string", enum: [...CLASSIFICATIONS].filter((value) => value !== "no_photo") },
+              confidence: { type: "number", minimum: 0, maximum: 1 },
+              is_real_person: { type: "boolean" },
+              flag: { type: "boolean" },
+              tells: { type: "array", maxItems: 6, items: { type: "string" } },
+              note: { type: "string" }
+            },
+            required: ["classification", "confidence", "is_real_person", "flag", "tells", "note"]
+          }
+        }],
+        tool_choice: { type: "tool", name: "record_profile_photo" }
+      }),
+      signal: AbortSignal.timeout(25e3)
+    });
+  } catch {
+    addClaudeUsage(void 0, "profile-photo-integrity", "failed", "transport_error");
+    return null;
+  }
+  if (!response.ok) {
+    addClaudeUsage(void 0, "profile-photo-integrity", "failed", `http_${response.status}`);
+    return null;
+  }
+  let body;
+  try {
+    body = await response.json();
+  } catch {
+    addClaudeUsage(void 0, "profile-photo-integrity", "failed", "response_json_error");
+    return null;
+  }
+  const tool = body.content?.find((item) => item.type === "tool_use" && item.name === "record_profile_photo");
+  const parsed = validateVisionInput(tool?.input);
+  addClaudeUsage(
+    body.usage,
+    "profile-photo-integrity",
+    parsed ? "succeeded" : "partial",
+    parsed ? void 0 : "invalid_tool_result"
+  );
+  return parsed;
+}
+function addArtifact(ctx, artifact) {
+  const exists = ctx.evidence.sourceArtifacts.some(
+    (candidate) => candidate.kind === artifact.kind && candidate.contentHash === artifact.contentHash
+  );
+  if (!exists) ctx.evidence.sourceArtifacts.push(artifact);
+}
+async function collectProfilePhoto(ctx) {
+  const capturedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const profileUrl = `https://x.com/${encodeURIComponent(ctx.handle.replace(/^@/, ""))}`;
+  if (ctx.evidence.profile.avatar_source_state === "none") {
+    const result2 = {
+      provider: "twitterapi",
+      capturedAt,
+      classification: "no_photo",
+      flag: false,
+      tells: [],
+      note: "The official X profile response contained no custom profile image. This is not proof of deception or identity."
+    };
+    ctx.evidence.profileAuthenticity = result2;
+    addArtifact(ctx, {
+      kind: "profile_photo",
+      provider: "twitterapi",
+      title: "Official X profile-photo presence screen",
+      sourceUrl: profileUrl,
+      capturedAt,
+      contentHash: sha2562(JSON.stringify(result2)),
+      excerpt: result2.note,
+      match: "screened_clear"
+    });
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "checked-empty",
+      note: "official X profile response contained no custom photo; visual ownership/reuse was not testable",
+      provider: "twitterapi.io"
+    });
+    return { status: "succeeded", detail: "official profile returned no custom photo" };
+  }
+  if (!env("ANTHROPIC_API_KEY")) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: "profile-photo integrity screen is unavailable because the vision analyst is not configured",
+      provider: "claude-vision"
+    });
+    return { status: "failed", detail: "vision analyst is not configured" };
+  }
+  const avatarUrl = ctx.evidence.profile.avatar_url;
+  if (!avatarUrl) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: "official X avatar source was not resolved; no photo conclusion was recorded",
+      provider: "twitterapi.io"
+    });
+    return { status: "failed", detail: "official avatar source unavailable" };
+  }
+  const image = await fetchTrustedProfileImage(avatarUrl);
+  if (!image) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: "official X avatar bytes could not be fetched safely; no photo conclusion was recorded",
+      provider: "x-avatar"
+    });
+    return { status: "failed", detail: "trusted avatar fetch failed" };
+  }
+  const classified = await classifyImage(image);
+  if (!classified) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: "vision provider failed or returned an invalid profile-photo result",
+      provider: "claude-vision"
+    });
+    return { status: "failed", detail: "vision result unavailable or invalid" };
+  }
+  const conclusive = classified.classification !== "unclear" && (classified.confidence ?? 0) >= MIN_ACTIONABLE_CONFIDENCE;
+  const result = {
+    provider: "claude-vision",
+    capturedAt,
+    imageUrl: image.url,
+    imageData: `data:${image.mediaType};base64,${image.bytes.toString("base64")}`,
+    mediaType: image.mediaType,
+    imageContentHash: image.contentHash,
+    ...classified,
+    flag: conclusive && classified.flag,
+    note: [
+      classified.note,
+      classified.classification === "real_candid" ? "A visually plausible personal photo does not prove ownership or identity." : classified.classification === "studio_or_stock" ? "A professional headshot can be legitimate; treat this only as a review lead." : classified.classification === "celebrity_or_public_figure" ? "A public figure may legitimately use their own image; verify identity before drawing a conclusion." : classified.classification === "ai_generated" ? "This is a vision-model lead and requires human or reverse-image verification." : "Visual classification does not establish who owns or originally published the image."
+    ].join(" ").slice(0, 700)
+  };
+  ctx.evidence.profileAuthenticity = result;
+  const artifactRecord = {
+    imageContentHash: image.contentHash,
+    model: ANALYST_MODEL,
+    classification: result.classification,
+    confidence: result.confidence,
+    flag: result.flag,
+    tells: result.tells,
+    note: result.note
+  };
+  const artifactHash = sha2562(JSON.stringify(artifactRecord));
+  addArtifact(ctx, {
+    kind: "profile_photo",
+    provider: "claude-vision",
+    title: "Profile-photo integrity screen",
+    sourceUrl: image.url,
+    capturedAt,
+    contentHash: artifactHash,
+    sourceContentHash: image.contentHash,
+    excerpt: `${result.classification.replace(/_/g, " ")} \xB7 ${result.note}`,
+    match: conclusive && result.flag ? "risk_signal" : conclusive ? "observed" : "candidate"
+  });
+  if (!conclusive) {
+    ctx.recordCheck?.({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: `vision result was ${result.classification} at ${Math.round((result.confidence ?? 0) * 100)}% confidence; no clean conclusion recorded`,
+      provider: "claude-vision",
+      sourceCount: 1
+    });
+    return { status: "partial", detail: "vision result was inconclusive" };
+  }
+  ctx.recordCheck?.({
+    id: "profile-photo-authenticity",
+    status: result.flag ? "finding" : "checked-empty",
+    note: result.flag ? `${result.classification.replace(/_/g, " ")} review lead at ${Math.round((result.confidence ?? 0) * 100)}% model confidence; not identity proof` : `${result.classification.replace(/_/g, " ")} observed; visual-only screen cannot prove image ownership or identity`,
+    provider: "claude-vision",
+    sourceCount: 1
+  });
+  return { status: "succeeded", detail: `${result.classification} at ${Math.round((result.confidence ?? 0) * 100)}%` };
+}
+
 // server/adapters/offchain.ts
 var asIso = (value) => {
   if (typeof value === "number" || typeof value === "string") {
@@ -4471,7 +4934,7 @@ var asIso = (value) => {
   }
   return void 0;
 };
-var hashArtifact = (artifact) => createHash2("sha256").update(JSON.stringify({
+var hashArtifact = (artifact) => createHash3("sha256").update(JSON.stringify({
   kind: artifact.kind,
   provider: artifact.provider,
   title: artifact.title,
@@ -4481,7 +4944,7 @@ var hashArtifact = (artifact) => createHash2("sha256").update(JSON.stringify({
   match: artifact.match,
   sourceContentHash: artifact.sourceContentHash ?? null
 })).digest("hex");
-var addArtifact = (ctx, input) => {
+var addArtifact2 = (ctx, input) => {
   const artifact = { ...input, contentHash: hashArtifact(input) };
   const exists = ctx.evidence.sourceArtifacts.some(
     (candidate) => candidate.provider === artifact.provider && candidate.kind === artifact.kind && candidate.sourceUrl === artifact.sourceUrl
@@ -4518,18 +4981,19 @@ var failedCheckNote = (label, status, attempts) => {
 };
 var offchainAdapter = {
   id: "offchain-diligence",
-  label: "News, legal, and sanctions",
+  label: "Photo, news, legal, and sanctions",
   available: () => true,
   async run(ctx) {
     const capturedAt = (/* @__PURE__ */ new Date()).toISOString();
     const name = resolvedRealName(ctx);
     ctx.emit({
       phase: "Off-chain",
-      label: "News / legal / sanctions",
-      detail: name ? `Freezing exact-name news, US court, and OFAC outcomes for ${name} before scoring\u2026` : "Freezing the subject's exact-name/handle news outcome before scoring; legal and OFAC require a resolved real person.",
+      label: "Photo / news / legal / sanctions",
+      detail: name ? `Freezing the official profile-photo, exact-name news, US court, and OFAC outcomes for ${name} before scoring\u2026` : "Freezing the official profile-photo and exact-name/handle news outcomes before scoring; legal and OFAC require a resolved real person.",
       tone: "neutral"
     });
     const newsPromise = collectNews(name ?? ctx.evidence.profile.display_name, ctx.handle);
+    const profilePhotoPromise = collectProfilePhoto(ctx);
     const legalPromise = name ? collectLegalCases(name) : null;
     const ofacPromise = name ? collectOfacName(name, {
       cache: {
@@ -4540,8 +5004,9 @@ var offchainAdapter = {
         write: (names) => cacheSet("ofacname:v2", names)
       }
     }) : null;
-    const [news, legal, ofac] = await Promise.all([
+    const [news, profilePhoto, legal, ofac] = await Promise.all([
       newsPromise,
+      profilePhotoPromise,
       legalPromise ?? Promise.resolve(null),
       ofacPromise ?? Promise.resolve(null)
     ]);
@@ -4566,7 +5031,7 @@ var offchainAdapter = {
     }
     for (const article of news.value.articles) {
       if (!article.url) continue;
-      addArtifact(ctx, {
+      addArtifact2(ctx, {
         kind: "press",
         provider: "google-news",
         title: article.title,
@@ -4601,7 +5066,7 @@ var offchainAdapter = {
         });
       }
       for (const item of inspectableCases) {
-        addArtifact(ctx, {
+        addArtifact2(ctx, {
           kind: "legal_case",
           provider: "courtlistener",
           title: item.caseName || "CourtListener case",
@@ -4641,7 +5106,7 @@ var offchainAdapter = {
           provider: "opensanctions",
           sourceCount: 1
         });
-        addArtifact(ctx, {
+        addArtifact2(ctx, {
           kind: "sanctions_screen",
           provider: "opensanctions",
           title: "US Treasury OFAC SDN exact-name screen",
@@ -4667,7 +5132,7 @@ var offchainAdapter = {
         }
       }
     }
-    const statuses = [news.status, legal?.status, ofac?.status].filter(
+    const statuses = [news.status, profilePhoto.status, legal?.status, ofac?.status].filter(
       (status) => Boolean(status)
     );
     const failed = statuses.filter((status) => status === "failed").length;
@@ -4678,7 +5143,7 @@ var offchainAdapter = {
       phase: "Off-chain",
       label: state === "failed" ? "Off-chain screens unavailable" : "Off-chain evidence frozen",
       detail: `${artifactCount} source artifact${artifactCount === 1 ? "" : "s"} available before scoring${state === "partial" ? "; at least one provider path was incomplete" : ""}.`,
-      source: "google-news \xB7 courtlistener \xB7 opensanctions",
+      source: "claude-vision \xB7 google-news \xB7 courtlistener \xB7 opensanctions",
       tone: state === "failed" ? "warn" : state === "partial" ? "warn" : "neutral"
     });
     return { state, detail: `${artifactCount} artifacts \xB7 ${failed} failed \xB7 ${partial} partial` };
@@ -4744,18 +5209,18 @@ async function archivedAffiliation(domain, name) {
         recordCall("wayback", "snapshot-fetch", 0, `http_${response.status}`, "failed");
         continue;
       }
-      let text;
+      let text2;
       try {
-        text = (await response.text()).toLowerCase();
+        text2 = (await response.text()).toLowerCase();
       } catch {
         recordCall("wayback", "snapshot-fetch", 0, "response_text_error", "failed");
         continue;
       }
-      if (!text.trim()) {
+      if (!text2.trim()) {
         recordCall("wayback", "snapshot-fetch", 0, "empty_snapshot", "partial");
         continue;
       }
-      const matched = needles.some((n) => text.includes(n));
+      const matched = needles.some((n) => text2.includes(n));
       recordCall("wayback", "snapshot-fetch", 0, matched ? "name_match" : "no_name_match", "succeeded");
       if (matched) {
         return {
@@ -4845,8 +5310,8 @@ async function farcasterWallets(handle) {
   const verifs = vd?.result?.verifications ?? [];
   return verifs.filter((v) => typeof v.address === "string" && /^0x[a-fA-F0-9]{40}$/.test(v.address)).map((v) => ({ address: v.address, chain: "evm", source: `Farcaster verified wallet (@${u})`, tier: "InvestigatorAttributed" }));
 }
-async function resolveWalletsFromText(text) {
-  if (!text) return [];
+async function resolveWalletsFromText(text2) {
+  if (!text2) return [];
   const out = [];
   const seen = /* @__PURE__ */ new Set();
   const add = (address, chain, source) => {
@@ -4856,16 +5321,16 @@ async function resolveWalletsFromText(text) {
     seen.add(k);
     out.push({ address, chain, source, tier: "SelfDoxxed" });
   };
-  for (const m of text.matchAll(ADDR_IN_TEXT)) add(m[0], "evm", "0x address self-disclosed in X bio/posts");
+  for (const m of text2.matchAll(ADDR_IN_TEXT)) add(m[0], "evm", "0x address self-disclosed in X bio/posts");
   const names = /* @__PURE__ */ new Set();
-  for (const m of text.matchAll(NAME_IN_TEXT)) names.add(m[0].toLowerCase());
+  for (const m of text2.matchAll(NAME_IN_TEXT)) names.add(m[0].toLowerCase());
   for (const nm of [...names].slice(0, 6)) {
     const r = await resolveName(nm);
     add(r?.address ?? null, r?.chain ?? "evm", `${nm} (self-disclosed in X bio/posts)`);
   }
   return out.slice(0, 6);
 }
-async function resolveForHandle(handle, text, opts = {}) {
+async function resolveForHandle(handle, text2, opts = {}) {
   const u = handle.replace(/^@/, "").toLowerCase();
   const out = [];
   const seen = /* @__PURE__ */ new Set();
@@ -4876,7 +5341,7 @@ async function resolveForHandle(handle, text, opts = {}) {
     seen.add(k);
     out.push(w);
   };
-  const [fromText, fromFc] = await Promise.all([resolveWalletsFromText(text), farcasterWallets(handle)]);
+  const [fromText, fromFc] = await Promise.all([resolveWalletsFromText(text2), farcasterWallets(handle)]);
   fromText.forEach(add);
   fromFc.forEach(add);
   if (opts.includePossible) {
@@ -4886,6 +5351,773 @@ async function resolveForHandle(handle, text, opts = {}) {
     }
   }
   return out.slice(0, 8);
+}
+
+// server/adapters/trustgraph.ts
+import { createHash as createHash4 } from "node:crypto";
+
+// src/lib/reportPresentation.ts
+var VERDICT_COLORS = Object.freeze({
+  PASS: "#16a34a",
+  CAUTION: "#d97706",
+  FAIL: "#ea580c",
+  AVOID: "#dc2626",
+  UNVERIFIABLE_IDENTITY: "#7c3aed",
+  INCOMPLETE: "#a1a1aa",
+  PROVISIONAL: "#d97706"
+});
+var ADVERSE_VERDICTS = /* @__PURE__ */ new Set([
+  "CAUTION",
+  "FAIL",
+  "AVOID",
+  "UNVERIFIABLE_IDENTITY"
+]);
+var FINAL_VERDICTS = /* @__PURE__ */ new Set([
+  "PASS",
+  ...ADVERSE_VERDICTS
+]);
+function normalizedCompleteness(value) {
+  if (value === "complete" || value === "failed") return value;
+  return "partial";
+}
+var TRUSTED_ATTESTATIONS = /* @__PURE__ */ new Set(["server_collected", "analyst_submitted"]);
+var SUCCESSFUL_CHECK_STATES = /* @__PURE__ */ new Set(["confirmed", "finding", "checked-empty", "complete"]);
+function checkRecord(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+}
+function checkIsStale(check, nowMs) {
+  const deadline = check.stale_at ?? check.staleAt;
+  if (typeof deadline !== "string" || !deadline.trim()) return false;
+  const deadlineMs = Date.parse(deadline);
+  return Number.isFinite(deadlineMs) && deadlineMs <= nowMs;
+}
+function coverageQualifiedCompleteness(input) {
+  const completeness = normalizedCompleteness(input.completeness);
+  if (completeness === "failed") return "failed";
+  if (input.attestation !== void 0 && !TRUSTED_ATTESTATIONS.has(input.attestation)) {
+    return "partial";
+  }
+  if (input.checks === void 0) return completeness;
+  const applicable = input.checks.filter((value) => {
+    const check = checkRecord(value);
+    const metadata = checkRecord(check.metadata);
+    return check.status !== "not-applicable" && check.state !== "not-applicable" && check.notApplicable !== true && metadata.notApplicable !== true;
+  });
+  if (!applicable.length) return "partial";
+  const everyCheckCompleted = applicable.every((value) => {
+    const check = checkRecord(value);
+    return !checkIsStale(check, Date.now()) && SUCCESSFUL_CHECK_STATES.has(String(check.status ?? check.state ?? ""));
+  });
+  return completeness === "complete" && everyCheckCompleted ? "complete" : "partial";
+}
+
+// src/graph/network.ts
+var EVM_ADDRESS = /^0x[0-9a-f]+$/i;
+var SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function normalizeChain(chain) {
+  return String(chain).trim().toLowerCase();
+}
+function normalizeAddress(chain, address) {
+  const value = String(address).trim();
+  return normalizeChain(chain) !== "solana" && EVM_ADDRESS.test(value) ? value.toLowerCase() : value;
+}
+function tokenEntityKey(chain, address) {
+  return `token:${normalizeChain(chain)}:${normalizeAddress(chain, address)}`;
+}
+function walletEntityKey(chain, address) {
+  return `wallet:${normalizeChain(chain)}:${normalizeAddress(chain, address)}`;
+}
+function canonical(raw) {
+  const value = String(raw).trim();
+  let m = value.match(/^token:([^:]+):(.+)$/i);
+  if (m) return tokenEntityKey(m[1], m[2]);
+  m = value.match(/^(?:wallet|holder|funder):([^:]+):(.+)$/i);
+  if (m) return walletEntityKey(m[1], m[2]);
+  m = value.match(/^(?:token|mint):(.+)$/i);
+  if (m && EVM_ADDRESS.test(m[1])) return tokenEntityKey("evm", m[1]);
+  if (m && SOLANA_ADDRESS.test(m[1])) return tokenEntityKey("solana", m[1]);
+  m = value.match(/^(?:wallet|holder|funder):(.+)$/i);
+  if (m && EVM_ADDRESS.test(m[1])) return walletEntityKey("evm", m[1]);
+  if (m && SOLANA_ADDRESS.test(m[1])) return walletEntityKey("solana", m[1]);
+  m = value.match(/^([^:]+):(.+)$/);
+  if (m && (EVM_ADDRESS.test(m[2]) || normalizeChain(m[1]) === "solana" && SOLANA_ADDRESS.test(m[2]))) {
+    return walletEntityKey(m[1], m[2]);
+  }
+  if (SOLANA_ADDRESS.test(value)) return value;
+  const lower = value.toLowerCase().replace(/\s+/g, "");
+  if (lower.startsWith("$")) return lower;
+  return lower.replace(/^@/, "");
+}
+var GENERIC_KEYS = /* @__PURE__ */ new Set([
+  "site",
+  "website",
+  "web",
+  "twitter",
+  "x",
+  "telegram",
+  "discord",
+  "github",
+  "docs",
+  "documentation",
+  "medium",
+  "linktree",
+  "whitepaper",
+  "mail",
+  "email",
+  "youtube",
+  "tiktok",
+  "instagram",
+  "reddit",
+  "facebook",
+  "warpcast",
+  "farcaster",
+  "coingecko",
+  "dexscreener",
+  "linkedin",
+  "blog",
+  "other",
+  "unknown"
+]);
+var isGenericKey = (raw) => GENERIC_KEYS.has(canonical(raw));
+function buildAliasResolver(contributions) {
+  const targets = /* @__PURE__ */ new Map();
+  const add = (alias, subject) => {
+    const a = canonical(alias);
+    if (!a) return;
+    const set = targets.get(a) ?? /* @__PURE__ */ new Set();
+    set.add(subject);
+    targets.set(a, set);
+  };
+  const DOMAIN2 = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i;
+  for (const c of contributions) {
+    const rawSubject = c.nodes.find((n) => n.subject)?.key ?? c.handle;
+    const subj = canonical(String(rawSubject));
+    const addressBacked = subj.startsWith("token:");
+    if (String(c.handle).startsWith("$")) add(c.handle, subj);
+    if (!addressBacked) continue;
+    for (const alias of c.aliases ?? []) add(alias, subj);
+    const subjectNode = c.nodes.find((n) => n.subject);
+    if (subjectNode) {
+      if (typeof subjectNode.label === "string") add(subjectNode.label, subj);
+      if (typeof subjectNode.symbol === "string") add("$" + subjectNode.symbol.replace(/^\$/, ""), subj);
+    }
+    for (const e of c.edges) {
+      if (canonical(e.src) !== subj) continue;
+      const dst = String(e.dst);
+      if (e.type === "TEAM" && dst.startsWith("@")) add(dst, subj);
+      else if (e.type === "LINKS" && DOMAIN2.test(dst)) add(dst, subj);
+    }
+  }
+  const unique = /* @__PURE__ */ new Map();
+  for (const [alias, ids] of targets) if (ids.size === 1) unique.set(alias, [...ids][0]);
+  return (key) => {
+    const id = canonical(key);
+    return unique.get(id) ?? id;
+  };
+}
+function tieStrength(rawKey) {
+  const k = String(rawKey).toLowerCase();
+  if (/^(code:|email:|wallet:|funder:|mint:|token:)/.test(k)) return "hard";
+  if (/^(ga:|gtm:|adsense:|fbpixel:)/.test(k)) return "hard";
+  if (/^risk:/.test(k)) return "hard";
+  if (/^(holder|amm|dex|pool|lp|market|ip:|favicon:)/.test(k)) return "weak";
+  return "medium";
+}
+function subjectConnections(handle, contributions, max = 12) {
+  const resolve = buildAliasResolver(contributions);
+  const me = resolve(handle);
+  const mine = /* @__PURE__ */ new Map();
+  for (const c of contributions) {
+    if (resolve(c.handle) !== me) continue;
+    for (const n of c.nodes) {
+      if (isGenericKey(String(n.key))) continue;
+      const k = resolve(n.key);
+      const label = typeof n.label === "string" && n.label.trim() ? n.label : String(n.key);
+      if (k !== me) mine.set(k, { label, type: String(n.type) });
+    }
+  }
+  if (!mine.size) return [];
+  const byOther = /* @__PURE__ */ new Map();
+  const ensure = (id, label, verdict) => {
+    if (!byOther.has(id)) byOther.set(id, { label, verdict, ties: /* @__PURE__ */ new Map(), direct: false });
+    return byOther.get(id);
+  };
+  for (const c of contributions) {
+    const other = resolve(c.handle);
+    if (other === me) continue;
+    const otherLabel = c.aliases?.[0] ?? (typeof c.nodes.find((n) => n.subject)?.label === "string" ? String(c.nodes.find((n) => n.subject).label) : c.handle);
+    if (mine.has(other)) {
+      const e = ensure(other, otherLabel, c.verdict);
+      e.direct = true;
+    }
+    for (const n of c.nodes) {
+      if (isGenericKey(String(n.key))) continue;
+      const k = resolve(n.key);
+      if (k !== me && k !== other && mine.has(k)) {
+        const e = ensure(other, otherLabel, c.verdict);
+        e.ties.set(k, { key: k, label: mine.get(k).label, type: mine.get(k).type });
+      }
+    }
+  }
+  return [...byOther.entries()].map(([, v]) => ({ other: v.label, otherVerdict: v.verdict, ties: [...v.ties.values()], direct: v.direct })).filter((x) => x.ties.length > 0 || x.direct).sort((a, b) => Number(b.direct) - Number(a.direct) || b.ties.length - a.ties.length).slice(0, max);
+}
+
+// server/adapters/trustgraph.ts
+var GRAPH_LIMIT = 1e3;
+var QUERY_LIMIT = 1e3;
+var VERSION_CHUNK = 50;
+var MAX_RESPONSE_BYTES = 25e6;
+var MAX_TOTAL_NODES = 4e4;
+var MAX_TOTAL_EDGES = 6e4;
+var UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+var HASH = /^[a-f0-9]{64}$/i;
+var FINAL_VERDICTS2 = /* @__PURE__ */ new Set(["PASS", "CAUTION", "FAIL", "AVOID", "UNVERIFIABLE_IDENTITY"]);
+var ADVERSE_VERDICTS2 = /* @__PURE__ */ new Set(["FAIL", "AVOID"]);
+var HARD_TIE_KEY = /^(?:code:|email:|wallet:|funder:|mint:|token:|ga:|gtm:|adsense:|fbpixel:)/i;
+var EXPECTED_PERSON_CHECK_IDS = new Set(PERSON_CHECK_IDS);
+var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+var text = (value, max = 1e3) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
+function credentials() {
+  const url = env("SUPABASE_URL")?.replace(/\/$/, "");
+  const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  return url && key ? { url, key } : null;
+}
+function headers3(key, extra = {}) {
+  const out = {
+    apikey: key,
+    "content-type": "application/json",
+    ...extra
+  };
+  if (!key.startsWith("sb_secret_")) out.authorization = `Bearer ${key}`;
+  return out;
+}
+function queryUrl(base, table, params) {
+  const url = new URL(`${base}/rest/v1/${table}`);
+  Object.entries(params).forEach(([key, value]) => url.searchParams.set(key, value));
+  return url.toString();
+}
+async function boundedJson(response) {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_RESPONSE_BYTES) {
+    throw new Error("graph response exceeded the bounded evidence budget");
+  }
+  if (!response.body) return [];
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let size = 0;
+  let body = "";
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.byteLength;
+    if (size > MAX_RESPONSE_BYTES) {
+      await reader.cancel();
+      throw new Error("graph response exceeded the bounded evidence budget");
+    }
+    body += decoder.decode(value, { stream: true });
+  }
+  body += decoder.decode();
+  try {
+    return body ? JSON.parse(body) : [];
+  } catch {
+    throw new Error("graph response was not valid JSON");
+  }
+}
+function exactCount(response, rowCount) {
+  const raw = response.headers.get("content-range")?.trim() ?? "";
+  if (raw === "*/0" && rowCount === 0) return 0;
+  const match = /^(\d+)-(\d+)\/(\d+)$/.exec(raw);
+  if (!match) throw new Error("graph response omitted its exact row count");
+  const start = Number(match[1]);
+  const end = Number(match[2]);
+  const total = Number(match[3]);
+  if (start !== 0 || end - start + 1 !== rowCount || total !== rowCount) {
+    throw new Error("graph response was truncated or inconsistently counted");
+  }
+  return total;
+}
+async function readExactRows(c, table, params) {
+  const op = `trust-graph/${table.replace(/_/g, "-")}`;
+  let response;
+  try {
+    response = await fetch(queryUrl(c.url, table, { ...params, limit: String(QUERY_LIMIT) }), {
+      headers: headers3(c.key, { prefer: "count=exact" }),
+      signal: AbortSignal.timeout(12e3)
+    });
+  } catch (error) {
+    recordCall("supabase", op, 0, `transport_error \xB7 ${String(error).slice(0, 160)}`, "failed");
+    throw error;
+  }
+  if (!response.ok) {
+    const detail = (await response.text()).slice(0, 200);
+    recordCall("supabase", op, 0, `http_${response.status}${detail ? ` \xB7 ${detail}` : ""}`, "failed");
+    throw new Error(`${table} read failed (${response.status}): ${detail}`);
+  }
+  try {
+    const parsed = await boundedJson(response);
+    if (!Array.isArray(parsed) || parsed.some((value) => !record(value))) {
+      throw new Error(`${table} returned malformed rows`);
+    }
+    exactCount(response, parsed.length);
+    recordCall("supabase", op, 0, `${parsed.length} exact row${parsed.length === 1 ? "" : "s"}`, "succeeded");
+    return parsed;
+  } catch (error) {
+    recordCall("supabase", op, 0, `invalid_or_truncated_response \xB7 ${String(error).slice(0, 160)}`, "failed");
+    throw error;
+  }
+}
+function parseNode(value) {
+  const row = record(value);
+  const key = row ? text(row.key, 1e3) : null;
+  const type = row ? text(row.type, 100) : null;
+  return row && key && type ? { ...row, key, type } : null;
+}
+function parseEdge(value) {
+  const row = record(value);
+  const src = row ? text(row.src, 1e3) : null;
+  const dst = row ? text(row.dst, 1e3) : null;
+  const type = row ? text(row.type, 100) : null;
+  return row && src && dst && type ? { ...row, src, dst, type } : null;
+}
+function parseGraphRows(rows) {
+  let totalNodes = 0;
+  let totalEdges = 0;
+  const seenVersions = /* @__PURE__ */ new Set();
+  return rows.map((raw) => {
+    const handle = text(raw.handle, 500);
+    const reportVersionId = text(raw.report_version_id, 64);
+    if (!handle || !reportVersionId || !UUID.test(reportVersionId)) {
+      throw new Error("authoritative graph row was not bound to a valid report version");
+    }
+    if (raw.provenance_state !== "server_collected") {
+      throw new Error("non-authoritative graph row entered the authoritative result set");
+    }
+    if (seenVersions.has(reportVersionId)) {
+      throw new Error("one immutable report version was bound to multiple graph subjects");
+    }
+    seenVersions.add(reportVersionId);
+    if (!Array.isArray(raw.nodes) || !Array.isArray(raw.edges) || !Array.isArray(raw.aliases)) {
+      throw new Error("authoritative graph row contained malformed graph arrays");
+    }
+    const nodes = raw.nodes.map(parseNode);
+    const edges = raw.edges.map(parseEdge);
+    if (!nodes.length || nodes.some((node) => !node) || edges.some((edge) => !edge)) {
+      throw new Error("authoritative graph row contained malformed nodes or edges");
+    }
+    const subjects = nodes.filter((node) => node?.subject === true);
+    if (subjects.length !== 1) {
+      throw new Error("authoritative graph row must contain exactly one subject node");
+    }
+    const aliases = raw.aliases.map((value) => text(value, 300));
+    if (aliases.some((alias) => !alias)) {
+      throw new Error("authoritative graph row contained a malformed alias");
+    }
+    totalNodes += nodes.length;
+    totalEdges += edges.length;
+    if (totalNodes > MAX_TOTAL_NODES || totalEdges > MAX_TOTAL_EDGES) {
+      throw new Error("authoritative graph exceeded the bounded reconciliation budget");
+    }
+    return {
+      handle,
+      reportVersionId: reportVersionId.toLowerCase(),
+      aliases,
+      nodes,
+      edges
+    };
+  });
+}
+function chunk(values, size) {
+  const out = [];
+  for (let index = 0; index < values.length; index += size) out.push(values.slice(index, index + size));
+  return out;
+}
+async function readVersions(c, organizationId, ids) {
+  const out = /* @__PURE__ */ new Map();
+  for (const group of chunk(ids, VERSION_CHUNK)) {
+    const rows = await readExactRows(c, "report_versions", {
+      select: "id,verdict,completeness_state,attestation_state",
+      organization_id: `eq.${organizationId}`,
+      id: `in.(${group.join(",")})`
+    });
+    if (rows.length !== group.length) throw new Error("one or more exact graph report versions were unavailable");
+    for (const raw of rows) {
+      const id = text(raw.id, 64)?.toLowerCase() ?? "";
+      const verdict = text(raw.verdict, 40)?.toUpperCase() ?? "";
+      const completeness = raw.completeness_state;
+      const attestation = raw.attestation_state;
+      if (!UUID.test(id) || !group.includes(id) || !FINAL_VERDICTS2.has(verdict) || completeness !== "complete" && completeness !== "partial" && completeness !== "failed" || attestation !== "server_collected" && attestation !== "analyst_submitted" && attestation !== "legacy_unattested" || out.has(id)) {
+        throw new Error("graph report-version metadata was malformed or ambiguous");
+      }
+      out.set(id, { id, verdict, completeness, attestation });
+    }
+  }
+  if (out.size !== ids.length) throw new Error("graph report-version qualification was incomplete");
+  return out;
+}
+async function readChecks(c, organizationId, ids) {
+  const out = new Map(ids.map((id) => [id, []]));
+  for (const group of chunk(ids, VERSION_CHUNK)) {
+    const rows = await readExactRows(c, "check_runs", {
+      select: "check_id,report_version_id,state,stale_at,attestation_state,metadata",
+      organization_id: `eq.${organizationId}`,
+      report_version_id: `in.(${group.join(",")})`
+    });
+    for (const raw of rows) {
+      const reportVersionId = text(raw.report_version_id, 64)?.toLowerCase() ?? "";
+      const checkId = text(raw.check_id, 160) ?? "";
+      const state = raw.state;
+      const staleAt = raw.stale_at;
+      const attestation = raw.attestation_state;
+      const metadata = record(raw.metadata);
+      if (!group.includes(reportVersionId) || !EXPECTED_PERSON_CHECK_IDS.has(checkId) || state !== "complete" && state !== "partial" && state !== "unavailable" && state !== "failed" && state !== "not_run" || staleAt !== null && (typeof staleAt !== "string" || !Number.isFinite(Date.parse(staleAt))) || attestation !== "server_collected" && attestation !== "analyst_submitted" && attestation !== "legacy_unattested" || !metadata) {
+        throw new Error("graph check-run metadata was malformed or outside the requested versions");
+      }
+      out.get(reportVersionId).push({
+        check_id: checkId,
+        report_version_id: reportVersionId,
+        state,
+        stale_at: staleAt,
+        attestation_state: attestation,
+        metadata
+      });
+    }
+  }
+  return out;
+}
+async function readActiveVersionIds(c, organizationId, ids) {
+  const out = /* @__PURE__ */ new Set();
+  for (const group of chunk(ids, VERSION_CHUNK)) {
+    const rows = await readExactRows(c, "reports", {
+      select: "report_version_id",
+      organization_id: `eq.${organizationId}`,
+      report_version_id: `in.(${group.join(",")})`
+    });
+    for (const raw of rows) {
+      const reportVersionId = text(raw.report_version_id, 64)?.toLowerCase() ?? "";
+      if (!group.includes(reportVersionId) || out.has(reportVersionId)) {
+        throw new Error("active report projection was malformed or ambiguously duplicated");
+      }
+      out.add(reportVersionId);
+    }
+  }
+  return out;
+}
+function stableValue(value) {
+  if (Array.isArray(value)) return value.map(stableValue);
+  const row = record(value);
+  if (!row) return value;
+  return Object.fromEntries(
+    Object.keys(row).sort().map((key) => [key, stableValue(row[key])])
+  );
+}
+function semanticHash(value) {
+  return createHash4("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
+}
+function semanticContribution(contribution) {
+  const stableJson = (value) => JSON.stringify(stableValue(value));
+  const nodes = [...contribution.nodes].sort((a, b) => {
+    const aKey = `${canonical(a.key)}
+${text(a.type, 100) ?? ""}
+${stableJson(a)}`;
+    const bKey = `${canonical(b.key)}
+${text(b.type, 100) ?? ""}
+${stableJson(b)}`;
+    return aKey.localeCompare(bKey);
+  });
+  const edges = [...contribution.edges].sort((a, b) => {
+    const aKey = `${canonical(a.src)}
+${canonical(a.dst)}
+${text(a.type, 100) ?? ""}
+${stableJson(a)}`;
+    const bKey = `${canonical(b.src)}
+${canonical(b.dst)}
+${text(b.type, 100) ?? ""}
+${stableJson(b)}`;
+    return aKey.localeCompare(bKey);
+  });
+  return {
+    handle: contribution.handle,
+    aliases: [...contribution.aliases ?? []].sort((a, b) => canonical(a).localeCompare(canonical(b))),
+    nodes,
+    edges
+  };
+}
+function marker(versionId) {
+  return `__argus_report_version__:${versionId}`;
+}
+function qualification(row, version, checks, active) {
+  const checkIds = new Set(checks.map((check) => check.check_id));
+  const checksAttested = checks.length === EXPECTED_PERSON_CHECK_IDS.size && checkIds.size === EXPECTED_PERSON_CHECK_IDS.size && [...EXPECTED_PERSON_CHECK_IDS].every((checkId) => checkIds.has(checkId)) && checks.every((check) => check.attestation_state === "server_collected");
+  const qualified = active && version.attestation === "server_collected" && checksAttested && coverageQualifiedCompleteness({
+    completeness: version.completeness,
+    attestation: version.attestation,
+    checks
+  }) === "complete";
+  const rowMarker = marker(row.reportVersionId);
+  return {
+    row,
+    version,
+    checks,
+    active,
+    qualified,
+    marker: rowMarker,
+    contribution: {
+      handle: row.handle,
+      aliases: [rowMarker, ...row.aliases],
+      nodes: row.nodes,
+      edges: row.edges,
+      ...qualified ? { verdict: version.verdict } : {},
+      reportVersionId: row.reportVersionId,
+      provenanceState: "server_collected"
+    }
+  };
+}
+function incidentEdgeTypes(contribution, key, resolve) {
+  const types = /* @__PURE__ */ new Set();
+  for (const edge of contribution.edges) {
+    if (resolve(edge.src) !== key && resolve(edge.dst) !== key) continue;
+    const type = text(edge.type, 100);
+    if (type) types.add(type);
+  }
+  return [...types].sort().slice(0, 20);
+}
+function safeTieStrength(key) {
+  const strength = tieStrength(key);
+  return strength === "hard" && !HARD_TIE_KEY.test(key) ? "medium" : strength;
+}
+function directTie(current, other, resolve) {
+  const subjectNode = other.contribution.nodes.find((node) => node.subject === true);
+  if (!subjectNode) return null;
+  const key = resolve(subjectNode.key);
+  const subjectEdgeTypes = incidentEdgeTypes(current, key, resolve);
+  const otherEdgeTypes = incidentEdgeTypes(other.contribution, key, resolve);
+  return {
+    key,
+    label: text(subjectNode.label, 300) ?? other.row.handle,
+    type: text(subjectNode.type, 100) ?? "Subject",
+    strength: safeTieStrength(key),
+    subjectEdgeTypes,
+    otherEdgeTypes
+  };
+}
+function strongestTie(ties) {
+  const rank = { hard: 3, medium: 2, weak: 1 };
+  return [...ties].filter((tie) => tie.subjectEdgeTypes.length > 0 && tie.otherEdgeTypes.length > 0).sort((a, b) => rank[b.strength] - rank[a.strength] || a.key.localeCompare(b.key))[0] ?? null;
+}
+function incompleteScreen(note) {
+  return {
+    provider: "argus-graph",
+    capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+    status: "incomplete",
+    contributionCount: 0,
+    qualifiedContributionCount: 0,
+    sourceContentHash: semanticHash({ status: "incomplete", note }),
+    line: note,
+    connections: []
+  };
+}
+function addGraphFinding(ctx, connection, tie, artifactHash, capturedAt) {
+  if (!connection.qualified || !connection.otherReportVersionId || connection.otherAttestation !== "server_collected" || connection.otherCompleteness !== "complete" || !connection.otherVerdict || !ADVERSE_VERDICTS2.has(connection.otherVerdict) || tie.strength === "weak" || tie.strength === "hard" && !HARD_TIE_KEY.test(tie.key) || !HASH.test(artifactHash) || !tie.subjectEdgeTypes.length || !tie.otherEdgeTypes.length) return;
+  const finding = {
+    finding_type: "TrustGraphConnection",
+    claim: `${ctx.evidence.profile.handle} is connected to ${connection.other} (${connection.otherVerdict}) through ${tie.label}. The link is bound to immutable report version ${connection.otherReportVersionId}.`,
+    source_url: "",
+    source_date: capturedAt,
+    source_author: "argus-graph",
+    verification_status: "Verified",
+    independent_source_count: 1,
+    polarity: -1,
+    evidence_origin: "deterministic",
+    artifact_verified: true,
+    content_hash: artifactHash,
+    trust_graph: {
+      tie_key: tie.key,
+      tie_type: tie.type,
+      tie_strength: tie.strength,
+      subject_edge_types: tie.subjectEdgeTypes,
+      other_edge_types: tie.otherEdgeTypes,
+      other_report_version_id: connection.otherReportVersionId,
+      other_attestation: "server_collected",
+      other_completeness: "complete",
+      other_verdict: connection.otherVerdict
+    }
+  };
+  ctx.evidence.findings.push(finding);
+}
+async function collectTrustGraph(ctx, current) {
+  const c = credentials();
+  const organizationId = ctx.organizationId?.trim().toLowerCase() ?? "";
+  if (!organizationId || !UUID.test(organizationId) || !c) {
+    const note = !organizationId || !UUID.test(organizationId) ? "Trust-graph reconciliation requires a valid authenticated organization identifier." : "Trust-graph storage is not configured.";
+    ctx.evidence.trustGraphScreen = incompleteScreen(note);
+    ctx.recordCheck?.({
+      id: "trust-graph-connections",
+      status: "unavailable",
+      note,
+      provider: "argus-graph"
+    });
+    ctx.emit({ phase: "Network", label: "Trust graph unavailable", detail: note, source: "argus-graph", tone: "warn" });
+    return { state: "partial", detail: note };
+  }
+  try {
+    const rawRows = await readExactRows(c, "graph_contributions", {
+      select: "handle,aliases,nodes,edges,report_version_id,provenance_state",
+      organization_id: `eq.${organizationId}`,
+      provenance_state: "eq.server_collected",
+      report_version_id: "not.is.null",
+      order: "updated_at.desc"
+    });
+    if (rawRows.length > GRAPH_LIMIT) throw new Error("authoritative graph read exceeded its exact row limit");
+    const stored = parseGraphRows(rawRows);
+    const ids = stored.map((row) => row.reportVersionId);
+    const versions = ids.length ? await readVersions(c, organizationId, ids) : /* @__PURE__ */ new Map();
+    const checks = ids.length ? await readChecks(c, organizationId, ids) : /* @__PURE__ */ new Map();
+    const activeVersions = ids.length ? await readActiveVersionIds(c, organizationId, ids) : /* @__PURE__ */ new Set();
+    const qualified = stored.map((row) => qualification(
+      row,
+      versions.get(row.reportVersionId),
+      checks.get(row.reportVersionId) ?? [],
+      activeVersions.has(row.reportVersionId)
+    ));
+    const initialResolver = buildAliasResolver([...qualified.map((item) => item.contribution), current]);
+    const currentId = initialResolver(current.handle);
+    const others = qualified.filter((item) => initialResolver(item.contribution.handle) !== currentId);
+    const contributions = [...others.map((item) => item.contribution), current];
+    const resolve = buildAliasResolver(contributions);
+    const byMarker = new Map(others.map((item) => [item.marker, item]));
+    const rawConnections = subjectConnections(current.handle, contributions, Math.max(1, others.length));
+    const connections = [];
+    for (const connection of rawConnections) {
+      const other = byMarker.get(connection.other);
+      if (!other) throw new Error("trust-graph connection could not be bound to one exact report version");
+      const ties = connection.ties.map((tie) => ({
+        key: tie.key,
+        label: tie.label,
+        type: tie.type,
+        strength: safeTieStrength(tie.key),
+        subjectEdgeTypes: incidentEdgeTypes(current, tie.key, resolve),
+        otherEdgeTypes: incidentEdgeTypes(other.contribution, tie.key, resolve)
+      }));
+      if (connection.direct && !ties.some((tie) => tie.key === resolve(other.row.handle))) {
+        const direct = directTie(current, other, resolve);
+        if (direct) ties.push(direct);
+      }
+      const frozen = {
+        other: other.row.handle,
+        otherReportVersionId: other.row.reportVersionId,
+        otherAttestation: other.version.attestation,
+        otherCompleteness: other.version.completeness,
+        ...other.qualified ? { otherVerdict: other.version.verdict } : {},
+        qualified: other.qualified,
+        direct: connection.direct,
+        ties: ties.sort((a, b) => a.key.localeCompare(b.key))
+      };
+      connections.push(frozen);
+    }
+    connections.sort((a, b) => (a.otherReportVersionId ?? "").localeCompare(b.otherReportVersionId ?? "") || a.other.localeCompare(b.other));
+    const capturedAt = (/* @__PURE__ */ new Date()).toISOString();
+    const artifactHash = semanticHash({
+      organizationId,
+      subject: semanticContribution(current),
+      contributions: qualified.map((item) => ({
+        graph: semanticContribution(item.contribution),
+        reportVersionId: item.row.reportVersionId,
+        version: item.version,
+        checks: [...item.checks].sort((a, b) => JSON.stringify(stableValue(a)).localeCompare(JSON.stringify(stableValue(b)))),
+        active: item.active,
+        qualified: item.qualified
+      })).sort((a, b) => a.reportVersionId.localeCompare(b.reportVersionId)),
+      connections
+    });
+    const connectedUnqualified = connections.filter((connection) => !connection.qualified);
+    const adverse = connections.filter((connection) => connection.qualified && connection.otherVerdict && ADVERSE_VERDICTS2.has(connection.otherVerdict));
+    const hasHardRisk = adverse.some((connection) => {
+      const tie = strongestTie(connection.ties);
+      return tie?.strength === "hard" && HARD_TIE_KEY.test(tie.key);
+    });
+    const status = connectedUnqualified.length ? "incomplete" : adverse.length ? "risk" : "clear";
+    const line = connectedUnqualified.length ? `${connectedUnqualified.length} graph connection${connectedUnqualified.length === 1 ? "" : "s"} could not be qualified because the linked immutable report is not the active case projection, or is stale, partial, or incompletely attested.` : adverse.length ? `${adverse.length} exact, coverage-qualified connection${adverse.length === 1 ? "" : "s"} lead to prior FAIL/AVOID reports. Review the frozen ties before relying on the score.` : connections.length ? `${connections.length} exact graph connection${connections.length === 1 ? "" : "s"} were reconciled; none lead to a coverage-qualified FAIL/AVOID report.` : "No connection to a prior authoritative ARGUS report was found in the organization graph.";
+    const screen = {
+      provider: "argus-graph",
+      capturedAt,
+      status,
+      contributionCount: others.length,
+      qualifiedContributionCount: others.filter((item) => item.qualified).length,
+      sourceContentHash: artifactHash,
+      ...adverse.length ? { severity: hasHardRisk ? "avoid" : "caution" } : {},
+      line,
+      connections
+    };
+    ctx.evidence.trustGraphScreen = screen;
+    ctx.evidence.sourceArtifacts.push({
+      kind: "trust_graph",
+      provider: "argus-graph",
+      title: "Organization trust-graph reconciliation",
+      capturedAt,
+      contentHash: artifactHash,
+      sourceContentHash: artifactHash,
+      excerpt: line,
+      match: status === "risk" ? "risk_signal" : status === "clear" ? "screened_clear" : "observed"
+    });
+    for (const connection of adverse) {
+      const tie = strongestTie(connection.ties);
+      if (tie) addGraphFinding(ctx, connection, tie, artifactHash, capturedAt);
+    }
+    if (connectedUnqualified.length) {
+      ctx.recordCheck?.({
+        id: "trust-graph-connections",
+        status: "unavailable",
+        note: line,
+        provider: "argus-graph",
+        sourceCount: connections.length
+      });
+    } else if (adverse.length) {
+      ctx.recordCheck?.({
+        id: "trust-graph-connections",
+        status: "finding",
+        note: line,
+        provider: "argus-graph",
+        sourceCount: adverse.length
+      });
+    } else if (connections.length) {
+      ctx.recordCheck?.({
+        id: "trust-graph-connections",
+        status: "confirmed",
+        note: line,
+        provider: "argus-graph",
+        sourceCount: connections.length
+      });
+    } else {
+      ctx.recordCheck?.({
+        id: "trust-graph-connections",
+        status: "checked-empty",
+        note: line,
+        provider: "argus-graph"
+      });
+    }
+    ctx.emit({
+      phase: "Network",
+      label: status === "risk" ? "Qualified graph risk" : status === "incomplete" ? "Graph qualification incomplete" : "Trust graph reconciled",
+      detail: line,
+      source: "argus-graph",
+      tone: status === "risk" ? hasHardRisk ? "bad" : "warn" : status === "incomplete" ? "warn" : "neutral"
+    });
+    return {
+      state: status === "incomplete" ? "partial" : "executed",
+      detail: `${others.length} authoritative contributions, ${connections.length} connected`
+    };
+  } catch (error) {
+    const detail = `Trust-graph reconciliation failed closed: ${String(error)}`.slice(0, 500);
+    ctx.evidence.trustGraphScreen = incompleteScreen(detail);
+    ctx.recordCheck?.({
+      id: "trust-graph-connections",
+      status: "unavailable",
+      note: detail,
+      provider: "argus-graph"
+    });
+    ctx.emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
+    return { state: "failed", detail };
+  }
 }
 
 // server/orchestrate.ts
@@ -4920,7 +6152,12 @@ async function coldIntake(ctx) {
   const prof = await getProfile2(ctx.handle);
   if (prof) {
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
-    if (prof.image) ctx.evidence.profile.avatar_url = prof.image;
+    if (prof.image) {
+      ctx.evidence.profile.avatar_url = prof.image;
+      ctx.evidence.profile.avatar_source_state = "resolved";
+    } else {
+      ctx.evidence.profile.avatar_source_state = "none";
+    }
     ctx.evidence.profile.bio = prof.bio ?? "";
     siteUrl = prof.website;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
@@ -5516,6 +6753,31 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     evidence.roles = route.applicable_classes.length ? route.applicable_classes : ["MEMBER" /* MEMBER */];
     emit({ phase: "P0 \xB7 Routing", label: "Classify roles", detail: `Routed to ${evidence.roles.join(", ")} (${route.confidence} confidence).`, tone: "neutral" });
   }
+  try {
+    const provisional = assembleDossier(evidence, true);
+    const graphResult = await collectTrustGraph(ctx, {
+      handle: provisional.handle,
+      nodes: provisional.graph.nodes,
+      edges: provisional.graph.edges,
+      aliases: [provisional.handle]
+    });
+    checkTracker.provider(
+      "trust-graph",
+      "Frozen trust-graph reconciliation",
+      graphResult.state,
+      graphResult.detail
+    );
+  } catch (error) {
+    const detail = `Trust-graph materialization failed: ${String(error)}`;
+    checkTracker.provider("trust-graph", "Frozen trust-graph reconciliation", "failed", detail);
+    checkTracker.record({
+      id: "trust-graph-connections",
+      status: "unavailable",
+      note: detail,
+      provider: "argus-graph"
+    });
+    emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
+  }
   const profileForLlm = { ...evidence.profile };
   delete profileForLlm.identity_confidence;
   delete profileForLlm.identity_note;
@@ -5544,6 +6806,8 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     notableFollowers: evidence.notableFollowers,
     recentActivity: evidence.recentActivity.slice(0, 12),
     sourceArtifacts: evidence.sourceArtifacts,
+    profileAuthenticity: evidence.profileAuthenticity,
+    trustGraphScreen: evidence.trustGraphScreen,
     checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
     providerRuns: checkTracker.providers().runs
   };
@@ -5596,22 +6860,6 @@ async function runAuditWithLedger(rawHandle, emit, options) {
 }
 function runAudit(rawHandle, emit, options) {
   return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
-}
-
-// src/graph/network.ts
-var EVM_ADDRESS = /^0x[0-9a-f]+$/i;
-function normalizeChain(chain) {
-  return String(chain).trim().toLowerCase();
-}
-function normalizeAddress(chain, address) {
-  const value = String(address).trim();
-  return normalizeChain(chain) !== "solana" && EVM_ADDRESS.test(value) ? value.toLowerCase() : value;
-}
-function tokenEntityKey(chain, address) {
-  return `token:${normalizeChain(chain)}:${normalizeAddress(chain, address)}`;
-}
-function walletEntityKey(chain, address) {
-  return `wallet:${normalizeChain(chain)}:${normalizeAddress(chain, address)}`;
 }
 
 // src/token/sources.ts

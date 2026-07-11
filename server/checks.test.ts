@@ -111,4 +111,27 @@ describe("PersonCheckTracker", () => {
     const readiness = deriveDecisionReadiness(tracker.snapshot(["FOUNDER"], { resolvedRealName: true }));
     expect(readiness).toMatchObject({ status: "provisional", successful: 7, applicable: 9, coveragePercent: 77 });
   });
+
+  it("reaches decision-ready coverage only after profile and trust-graph outcomes are frozen too", () => {
+    const tracker = new PersonCheckTracker();
+    for (const id of [
+      "identity-resolution",
+      "profile-photo-authenticity",
+      "code-footprint-github",
+      "identity-continuity",
+      "affiliations-associates",
+      "news-press",
+      "us-legal-history",
+      "ofac-sanctions-name",
+      "trust-graph-connections",
+    ] as const) {
+      tracker.record({ id, status: "checked-empty", note: `${id} completed`, provider: "test-provider" });
+    }
+
+    const checks = tracker.snapshot(["FOUNDER"], { resolvedRealName: true });
+    const readiness = deriveDecisionReadiness(checks);
+
+    expect(readiness).toMatchObject({ status: "ready", successful: 9, applicable: 9, coveragePercent: 100 });
+    expect(tracker.completeness(["FOUNDER"], { resolvedRealName: true })).toBe("complete");
+  });
 });

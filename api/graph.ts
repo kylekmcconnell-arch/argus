@@ -1,6 +1,7 @@
 // Authenticated, organization-scoped shared trust graph.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { requireArgusAuth, serviceCredentials, serviceHeaders } from "./_auth.js";
+import { canonicalGraphKey, graphSubjectKey } from "./_graph.js";
 
 export const config = { maxDuration: 15 };
 
@@ -9,7 +10,6 @@ const READ_LIMIT = 500;
 const MAX_NODES = 4_000;
 const MAX_EDGES = 4_000;
 const MAX_BODY = 1_500_000;
-const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 type JsonRecord = Record<string, unknown>;
 
 interface GraphRow {
@@ -18,30 +18,8 @@ interface GraphRow {
   verdict?: unknown;
   nodes?: unknown;
   edges?: unknown;
-}
-
-function canonical(raw: string): string {
-  const value = String(raw).trim();
-  const typed = value.match(/^(token|wallet):([^:]+):(.+)$/i);
-  if (typed) {
-    const type = typed[1].toLowerCase();
-    const chain = typed[2].trim().toLowerCase();
-    const address = typed[3].trim();
-    return `${type}:${chain}:${chain === "solana" ? address : address.toLowerCase()}`;
-  }
-  if (SOLANA_ADDRESS.test(value)) return value;
-  const lower = value.toLowerCase().replace(/\s+/g, "");
-  if (lower.startsWith("$")) return lower;
-  return lower.replace(/^@/, "");
-}
-
-function subjectKey(raw: JsonRecord, nodes: unknown[]): string {
-  const subject = nodes.find((node) => {
-    const record = node && typeof node === "object" ? node as JsonRecord : null;
-    return record?.subject === true && typeof record.key === "string";
-  });
-  const record = subject && typeof subject === "object" ? subject as JsonRecord : null;
-  return canonical((typeof record?.key === "string" ? record.key : null) || (typeof raw.handle === "string" ? raw.handle : ""));
+  report_version_id?: unknown;
+  provenance_state?: unknown;
 }
 
 function safeParse(value: string): unknown {
@@ -62,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (req.method === "GET") {
       const response = await fetch(
-        `${credentials.url}/rest/v1/${TABLE}?select=handle,aliases,verdict,nodes,edges&${orgFilter}&order=updated_at.desc&limit=${READ_LIMIT}`,
+        `${credentials.url}/rest/v1/${TABLE}?select=handle,aliases,verdict,nodes,edges,report_version_id,provenance_state&${orgFilter}&order=updated_at.desc&limit=${READ_LIMIT}`,
         { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
       );
       if (!response.ok) throw new Error(`graph read failed (${response.status})`);
@@ -73,6 +51,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         verdict: row.verdict ?? undefined,
         nodes: Array.isArray(row.nodes) ? row.nodes : [],
         edges: Array.isArray(row.edges) ? row.edges : [],
+        reportVersionId: typeof row.report_version_id === "string" ? row.report_version_id : undefined,
+        provenanceState: typeof row.provenance_state === "string" ? row.provenance_state : "legacy",
       }));
       res.status(200).json({ available: true, contributions });
       return;
@@ -91,9 +71,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const aliases = Array.isArray(raw.aliases)
         ? raw.aliases.filter((item: unknown) => typeof item === "string").map((item: string) => item.slice(0, 300)).slice(0, 30)
         : [];
-      const canonicalKey = subjectKey(raw, nodes);
+      const canonicalKey = graphSubjectKey(raw, nodes);
       if (!handle || !canonicalKey || !nodes.length) {
         res.status(400).json({ error: "handle_and_subject_nodes_required" });
+        return;
+      }
+      const existingResponse = await fetch(
+        `${credentials.url}/rest/v1/${TABLE}?select=provenance_state&${orgFilter}&canonical_key=eq.${encodeURIComponent(canonicalGraphKey(canonicalKey))}&limit=1`,
+        { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+      );
+      if (!existingResponse.ok) throw new Error(`graph provenance read failed (${existingResponse.status})`);
+      const existingRows = await existingResponse.json() as Array<{ provenance_state?: unknown }>;
+      if (existingRows[0]?.provenance_state === "server_collected") {
+        res.status(200).json({ ok: true, canonicalKey, preserved: true });
         return;
       }
       const row = {
@@ -106,6 +96,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         edges,
         contributor: auth.displayName.slice(0, 80),
         contributor_user_id: auth.userId,
+        provenance_state: "client_submitted",
       };
       const response = await fetch(
         `${credentials.url}/rest/v1/${TABLE}?on_conflict=organization_id,canonical_key`,

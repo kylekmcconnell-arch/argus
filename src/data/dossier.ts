@@ -9,7 +9,15 @@ import {
   type PanoptesNode,
   type PanoptesEdge,
 } from "../engine";
-import type { CollectedEvidence, NotableFollower, Contradiction, WebTeamMember, SourceArtifact } from "./evidence";
+import type {
+  CollectedEvidence,
+  NotableFollower,
+  Contradiction,
+  WebTeamMember,
+  SourceArtifact,
+  ProfileAuthenticityResult,
+  TrustGraphScreen,
+} from "./evidence";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
 import type { ScanCheck } from "../lib/scanChecklist";
 
@@ -56,6 +64,8 @@ export interface Dossier {
   contradictions: Contradiction[];
   webTeam: WebTeamMember[];
   sourceArtifacts?: SourceArtifact[];
+  profileAuthenticity?: ProfileAuthenticityResult;
+  trustGraphScreen?: TrustGraphScreen;
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
@@ -160,6 +170,8 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     contradictions: ev.contradictions,
     webTeam: ev.webTeam ?? [],
     sourceArtifacts: ev.sourceArtifacts,
+    profileAuthenticity: ev.profileAuthenticity,
+    trustGraphScreen: ev.trustGraphScreen,
     report,
     graph,
     founderSummary: ev.roles.includes(SubjectClass.FOUNDER) ? a.founderSummary() : undefined,

@@ -12,7 +12,7 @@ const harness = vi.hoisted(() => ({ livePanel: vi.fn() }));
 vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
 vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
-vi.mock("./RingAlert", () => ({ RingAlert: () => { harness.livePanel("ring-alert"); return null; } }));
+vi.mock("./RingAlert", () => ({ RingAlert: (props: Record<string, unknown>) => { harness.livePanel("ring-alert", props); return null; } }));
 vi.mock("./SanctionsNameScreen", () => ({ SanctionsNameScreen: () => { harness.livePanel("sanctions"); return null; } }));
 vi.mock("./LegalScreen", () => ({ LegalScreen: () => { harness.livePanel("legal"); return null; } }));
 vi.mock("./PfpCheck", () => ({ PfpCheck: () => { harness.livePanel("pfp"); return null; } }));
@@ -104,10 +104,76 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    expect(harness.livePanel).toHaveBeenCalledWith("ring-alert");
+    expect(harness.livePanel.mock.calls.map(([panel]) => panel)).toContain("ring-alert");
     expect(harness.livePanel.mock.calls.map(([panel]) => panel)).not.toContain("news");
     expect(harness.livePanel.mock.calls.map(([panel]) => panel)).not.toContain("legal");
     expect(harness.livePanel.mock.calls.map(([panel]) => panel)).not.toContain("sanctions");
+  });
+
+  it("does not auto-rerun unavailable frozen photo or graph checks", () => {
+    const dossier = {
+      ...buildReport(SUBJECTS[1]),
+      checkRuns: [
+        {
+          checkId: "profile-photo-authenticity",
+          label: "Profile-photo authenticity",
+          status: "unavailable" as const,
+          note: "official X avatar bytes were unavailable",
+        },
+        {
+          checkId: "trust-graph-connections",
+          label: "Trust-graph connections",
+          status: "unavailable" as const,
+          note: "qualified graph history was unavailable",
+        },
+      ],
+      completeness_state: "partial" as const,
+      persistence: {
+        state: "persisted" as const,
+        reportVersionId: "00000000-0000-4000-8000-000000000209",
+        panelCostToken: "signed-panel-capability",
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const mountedPanels = harness.livePanel.mock.calls.map(([panel]) => panel);
+    expect(mountedPanels).not.toContain("pfp");
+    expect(mountedPanels).not.toContain("ring-alert");
+    expect(container.textContent).toContain("2 unresolved");
+  });
+
+  it("keeps legacy snapshot graph intelligence behind an explicitly labeled current overlay", () => {
+    const dossier = {
+      ...buildReport(SUBJECTS[1]),
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000101",
+        reportVersionId: "00000000-0000-4000-8000-000000000221",
+        version: 6,
+        completenessState: "partial" as const,
+        attestationState: "legacy_unattested" as const,
+        methodologyVersion: null,
+        createdAt: "2026-06-03T12:00:00.000Z",
+        checks: [{ label: "Identity resolution", status: "confirmed" as const }],
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(harness.livePanel.mock.calls.map(([panel]) => panel)).not.toContain("ring-alert");
+    const loadOverlay = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Load current intelligence");
+    expect(loadOverlay).toBeDefined();
+    act(() => loadOverlay?.click());
+
+    expect(container.textContent).toContain("Current intelligence · fetched now · not part of snapshot v6 · does not change stored verdict");
+    expect(harness.livePanel.mock.calls.find(([panel]) => panel === "ring-alert")?.[1]).toEqual(
+      expect.objectContaining({ snapshotVersion: 6 }),
+    );
   });
 });
 
@@ -167,6 +233,113 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("SHA-256 unavailable");
     expect(container.querySelector('a[href="https://example.com/news/mara-voss"]')).not.toBeNull();
     expect(container.querySelector('a[href*="user:secret"]')).toBeNull();
+  });
+
+  it("renders frozen photo and graph evidence, links exact versions, and suppresses duplicate live panels", () => {
+    const currentVersionId = "00000000-0000-4000-8000-000000000211";
+    const connectedVersionId = "00000000-0000-4000-8000-000000000311";
+    const imageHash = "b".repeat(64);
+    const graphHash = "c".repeat(64);
+    const dossier = {
+      ...buildReport(SUBJECTS[1]),
+      profileAuthenticity: {
+        provider: "claude-vision" as const,
+        capturedAt: "2026-07-11T15:00:00.000Z",
+        imageUrl: "https://pbs.twimg.com/profile_images/founder.jpg",
+        imageData: "data:image/jpeg;base64,YWJj",
+        mediaType: "image/jpeg" as const,
+        imageContentHash: imageHash,
+        classification: "ai_generated" as const,
+        confidence: 0.91,
+        isRealPerson: false,
+        flag: true,
+        tells: ["warped glasses", "asymmetric background"],
+        note: "Synthetic-image characteristics were surfaced as a review lead, not identity proof.",
+      },
+      trustGraphScreen: {
+        provider: "argus-graph" as const,
+        capturedAt: "2026-07-11T15:01:00.000Z",
+        status: "risk" as const,
+        contributionCount: 12,
+        qualifiedContributionCount: 9,
+        sourceContentHash: graphHash,
+        severity: "caution" as const,
+        line: "A medium-strength shared team identity connects this subject to a failed project snapshot.",
+        connections: [{
+          other: "@failed_project",
+          otherReportVersionId: connectedVersionId,
+          otherAttestation: "server_collected" as const,
+          otherCompleteness: "complete" as const,
+          otherVerdict: "FAIL",
+          qualified: true,
+          direct: false,
+          ties: [{
+            key: "person:shared-founder",
+            label: "Shared founder",
+            type: "Person",
+            strength: "medium" as const,
+            subjectEdgeTypes: ["TEAM"],
+            otherEdgeTypes: ["TEAM"],
+          }],
+        }],
+        riskEntities: [{ key: "person:shared-founder", label: "Shared founder" }],
+      },
+      sourceArtifacts: [{
+        kind: "profile_photo" as const,
+        provider: "claude-vision" as const,
+        title: "Profile-photo integrity screen",
+        sourceUrl: "https://pbs.twimg.com/profile_images/founder.jpg",
+        capturedAt: "2026-07-11T15:00:00.000Z",
+        contentHash: "d".repeat(64),
+        sourceContentHash: imageHash,
+        excerpt: "AI-generated image review lead; identity remains unproven.",
+        match: "risk_signal" as const,
+      }, {
+        kind: "trust_graph" as const,
+        provider: "argus-graph" as const,
+        title: "Organization trust-graph reconciliation",
+        capturedAt: "2026-07-11T15:01:00.000Z",
+        contentHash: "e".repeat(64),
+        sourceContentHash: graphHash,
+        excerpt: "One decision-qualified connection was frozen.",
+        match: "risk_signal" as const,
+      }],
+      checkRuns: [
+        { checkId: "profile-photo-authenticity", label: "Profile-photo authenticity", status: "finding" as const },
+        { checkId: "trust-graph-connections", label: "Trust-graph connections", status: "finding" as const },
+      ],
+      completeness_state: "partial" as const,
+      persistence: {
+        state: "persisted" as const,
+        reportVersionId: currentVersionId,
+        panelCostToken: "signed-panel-capability",
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Profile-photo integrity");
+    expect(container.textContent).toContain("visual triage, not identity proof");
+    expect(container.textContent).toContain("AI-generated image lead");
+    expect(container.textContent).toContain("cannot prove image ownership, identity, or web-wide reuse");
+    expect(container.textContent).toContain(`Source image SHA-256 ${imageHash.slice(0, 12)}…`);
+    expect(container.querySelector('img[src="data:image/jpeg;base64,YWJj"]')).not.toBeNull();
+    expect(container.textContent).toContain("exact image bytes retained with this report");
+
+    expect(container.textContent).toContain("Frozen trust-graph screen");
+    expect(container.textContent).toContain("A shared person, wallet, funder, or project is an investigative lead");
+    expect(container.textContent).toContain("9 / 12");
+    expect(container.textContent).toContain("Shared founder");
+    expect(container.textContent).toContain(`Graph snapshot SHA-256 ${graphHash.slice(0, 12)}…`);
+
+    expect(container.querySelector(`a[href="/?version=${currentVersionId}"]`)).not.toBeNull();
+    expect(container.querySelector(`a[href="/?version=${connectedVersionId}"]`)?.textContent).toContain("Open exact connected report");
+    expect(container.textContent).toContain("Source link unavailable");
+    const mountedPanels = harness.livePanel.mock.calls.map(([panel]) => panel);
+    expect(mountedPanels).not.toContain("pfp");
+    expect(mountedPanels).not.toContain("ring-alert");
   });
 });
 

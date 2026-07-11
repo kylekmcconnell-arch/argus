@@ -73,23 +73,29 @@ function collectEvidence(payload: unknown, context: ProvenanceContext): JsonReco
     const rawUrl = textValue(record, urlKeys, 2_500)
       ?? (typeof record.source === "string" && /^https?:\/\//i.test(record.source) ? record.source : null);
     const sourceUrl = rawUrl ? safeSourceUrl(rawUrl) : null;
-    if (sourceUrl) {
-      const title = textValue(record, ["title", "name", "label", "project", "claim", "headline"], 500);
-      const excerpt = textValue(record, ["excerpt", "text", "summary", "description", "rationale", "evidence", "quote"], 2_000);
-      const provider = textValue(record, ["provider", "source_provider", "origin"], 100);
-      const sourceType = textValue(record, ["source_type", "sourceType", "kind", "type"], 100) || "web";
-      const suppliedHash = textValue(record, ["contentHash", "content_hash"], 64);
-      const artifactContentHash = suppliedHash && /^[a-f0-9]{64}$/i.test(suppliedHash)
-        ? suppliedHash.toLowerCase()
-        : null;
-      const suppliedSourceHash = textValue(record, ["sourceContentHash", "source_content_hash"], 64);
-      const sourceContentHash = suppliedSourceHash && /^[a-f0-9]{64}$/i.test(suppliedSourceHash)
-        ? suppliedSourceHash.toLowerCase()
-        : null;
+    const title = textValue(record, ["title", "name", "label", "project", "claim", "headline"], 500);
+    const excerpt = textValue(record, ["excerpt", "text", "summary", "description", "rationale", "evidence", "quote"], 2_000);
+    const provider = textValue(record, ["provider", "source_provider", "origin"], 100);
+    const explicitSourceType = textValue(record, ["source_type", "sourceType", "kind", "type"], 100);
+    const sourceType = explicitSourceType || "web";
+    const suppliedHash = textValue(record, ["contentHash", "content_hash"], 64);
+    const artifactContentHash = suppliedHash && /^[a-f0-9]{64}$/i.test(suppliedHash)
+      ? suppliedHash.toLowerCase()
+      : null;
+    const suppliedSourceHash = textValue(record, ["sourceContentHash", "source_content_hash"], 64);
+    const sourceContentHash = suppliedSourceHash && /^[a-f0-9]{64}$/i.test(suppliedSourceHash)
+      ? suppliedSourceHash.toLowerCase()
+      : null;
+    // Internal deterministic artifacts (for example the frozen trust graph)
+    // legitimately have no public URL. Accept them only when an exact SHA-256,
+    // explicit provider, and explicit source kind are all present; this avoids
+    // turning arbitrary URL-less payload objects into provenance records.
+    const hashOnlyArtifact = !sourceUrl && !!artifactContentHash && !!provider && !!explicitSourceType;
+    if (sourceUrl || hashOnlyArtifact) {
       const capturedAt = timestampValue(record.capturedAt ?? record.captured_at);
       const publishedAt = timestampValue(record.publishedAt ?? record.published_at);
       const match = textValue(record, ["match"], 40);
-      const evidenceKey = artifactContentHash ?? hash(`${sourceUrl}\n${title || ""}\n${excerpt || ""}`);
+      const evidenceKey = artifactContentHash ?? hash(`${sourceUrl || ""}\n${title || ""}\n${excerpt || ""}`);
       evidence.set(evidenceKey, {
         organization_id: context.organizationId,
         report_version_id: context.reportVersionId,
@@ -107,6 +113,7 @@ function collectEvidence(payload: unknown, context: ProvenanceContext): JsonReco
           ...(publishedAt ? { publishedAt } : {}),
           ...(match ? { match } : {}),
           ...(sourceContentHash ? { sourceContentHash } : {}),
+          ...(hashOnlyArtifact ? { hashOnly: true } : {}),
         },
       });
     }

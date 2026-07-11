@@ -16,7 +16,7 @@ import { PersonGithub } from "./PersonGithub";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { personChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
-import { coverageQualifiedCompleteness, presentPublicReport } from "../lib/reportPresentation";
+import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
@@ -359,8 +359,11 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
 }
 
 type FrozenSourceArtifact = NonNullable<Dossier["sourceArtifacts"]>[number];
+type FrozenProfileAuthenticity = NonNullable<Dossier["profileAuthenticity"]>;
+type FrozenTrustGraphScreen = NonNullable<Dossier["trustGraphScreen"]>;
 
-function safeSourceLink(value: string): { href: string; label: string } | null {
+function safeSourceLink(value?: string): { href: string; label: string } | null {
+  if (!value) return null;
   try {
     const parsed = new URL(value.trim());
     if (
@@ -391,6 +394,8 @@ const SOURCE_KIND_LABEL: Record<FrozenSourceArtifact["kind"], string> = {
   press: "Press",
   legal_case: "Court record lead",
   sanctions_screen: "Sanctions screen",
+  profile_photo: "Profile photo",
+  trust_graph: "Trust graph screen",
 };
 
 const SOURCE_MATCH_LABEL: Record<FrozenSourceArtifact["match"], string> = {
@@ -398,7 +403,235 @@ const SOURCE_MATCH_LABEL: Record<FrozenSourceArtifact["match"], string> = {
   exact_handle: "exact handle",
   candidate: "candidate match",
   no_match: "no exact match",
+  observed: "observed",
+  risk_signal: "risk signal",
+  screened_clear: "screened · no qualified match",
 };
+
+const PROFILE_CLASSIFICATION_LABEL: Record<FrozenProfileAuthenticity["classification"], string> = {
+  real_candid: "Visually plausible personal photo",
+  studio_or_stock: "Studio or stock-like image",
+  ai_generated: "AI-generated image lead",
+  celebrity_or_public_figure: "Public-figure image lead",
+  logo_or_cartoon: "Logo or illustration",
+  no_photo: "No custom profile photo",
+  unclear: "Inconclusive image",
+};
+
+function validHash(value?: string): string | null {
+  return value && /^[a-f0-9]{64}$/i.test(value) ? value.toLowerCase() : null;
+}
+
+function safeFrozenImageData(value?: string): string | null {
+  return value && /^data:image\/(?:jpeg|png|gif|webp);base64,[a-z0-9+/=]+$/i.test(value)
+    ? value
+    : null;
+}
+
+function ExactVersionLink({ reportVersionId, version, label = "Open exact report version" }: { reportVersionId?: string; version?: number; label?: string }) {
+  if (!reportVersionId) return null;
+  return (
+    <a
+      href={exactReportPath(reportVersionId)}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="mono text-[10.5px] text-signal-dim underline-offset-2 hover:text-signal hover:underline"
+    >
+      {label}{version != null ? ` v${version}` : ""}
+    </a>
+  );
+}
+
+function FrozenProfileAuthenticityPanel({
+  result,
+  artifact,
+  reportVersionId,
+  version,
+}: {
+  result: FrozenProfileAuthenticity;
+  artifact?: FrozenSourceArtifact;
+  reportVersionId?: string;
+  version?: number;
+}) {
+  const capturedAt = frozenSourceDate(result.capturedAt);
+  const imageHash = validHash(result.imageContentHash ?? artifact?.sourceContentHash);
+  const artifactHash = validHash(artifact?.contentHash);
+  const source = safeSourceLink(result.imageUrl ?? artifact?.sourceUrl);
+  const frozenImageData = safeFrozenImageData(result.imageData);
+  const imagePreview = frozenImageData ?? source?.href;
+  const confidence = typeof result.confidence === "number"
+    ? Math.round(Math.max(0, Math.min(1, result.confidence)) * 100)
+    : null;
+  const inconclusive = result.classification === "unclear";
+  const tone = result.flag || inconclusive ? "var(--color-caution)" : "var(--color-signal)";
+  const stateLabel = result.flag
+    ? "REVIEW LEAD"
+    : inconclusive
+      ? "INCONCLUSIVE"
+      : "VISUAL SCREEN RECORDED";
+
+  return (
+    <Section title="Profile-photo integrity" kicker="frozen before scoring · visual triage, not identity proof">
+      <Card className="p-4">
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-start">
+          {imagePreview && result.classification !== "no_photo" && (
+            <img
+              src={imagePreview}
+              alt="Profile image inspected by ARGUS"
+              referrerPolicy="no-referrer"
+              className="h-16 w-16 shrink-0 rounded-xl border border-line bg-void object-cover"
+            />
+          )}
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[13.5px] font-medium text-ink">{PROFILE_CLASSIFICATION_LABEL[result.classification]}</span>
+              <span className="mono rounded border px-1.5 py-0.5 text-[9.5px] font-semibold tracking-wide" style={{ borderColor: `${tone}66`, color: tone }}>
+                {stateLabel}
+              </span>
+              {confidence != null && <span className="mono text-[10px] text-ink-faint">{confidence}% model confidence</span>}
+            </div>
+            <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">{result.note}</p>
+            <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+              This screen can surface synthetic, stock-like, or public-figure image leads. It cannot prove image ownership, identity, or web-wide reuse.
+            </p>
+            {result.tells.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Visible profile-image indicators">
+                {result.tells.map((tell) => (
+                  <span key={tell} className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">{tell}</span>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 pt-3 text-[10.5px] text-ink-faint">
+          {capturedAt && <span>Captured <time dateTime={result.capturedAt}>{capturedAt}</time></span>}
+          <span className="mono" title={imageHash ?? undefined}>Source image SHA-256 {imageHash ? `${imageHash.slice(0, 12)}…` : "unavailable"}</span>
+          {artifactHash && <span className="mono" title={artifactHash}>Artifact {artifactHash.slice(0, 12)}…</span>}
+          {source && (
+            <a href={source.href} target="_blank" rel="noopener noreferrer" className="mono text-signal-dim underline-offset-2 hover:text-signal hover:underline">
+              Open image source
+            </a>
+          )}
+          <ExactVersionLink reportVersionId={reportVersionId} version={version} />
+        </div>
+        {imageHash && (
+          <p className="mt-2 text-[10.5px] leading-relaxed text-ink-faint">
+            {frozenImageData
+              ? "The preview uses the exact image bytes retained with this report; the source-image hash verifies them."
+              : source
+                ? "The preview is loaded from the source URL and may change. The source-image hash identifies the exact bytes inspected in this report."
+                : "No image preview is embedded in this snapshot. The source-image hash still identifies the exact bytes inspected."}
+          </p>
+        )}
+      </Card>
+    </Section>
+  );
+}
+
+function FrozenTrustGraphPanel({
+  screen,
+  reportVersionId,
+  version,
+}: {
+  screen: FrozenTrustGraphScreen;
+  reportVersionId?: string;
+  version?: number;
+}) {
+  const capturedAt = frozenSourceDate(screen.capturedAt);
+  const graphHash = validHash(screen.sourceContentHash);
+  const risk = screen.status === "risk";
+  const incomplete = screen.status === "incomplete";
+  const tone = risk
+    ? screen.severity === "avoid" ? "var(--color-avoid)" : "var(--color-caution)"
+    : incomplete ? "var(--color-caution)" : "var(--color-signal)";
+  const stateLabel = risk
+    ? "RISK SIGNAL"
+    : incomplete
+      ? "INCOMPLETE"
+      : "SCREENED · NO QUALIFIED FLAGGED LINK";
+
+  return (
+    <Section title="Frozen trust-graph screen" kicker="organization-scoped graph state captured before scoring">
+      <Card className="overflow-hidden">
+        <div className="p-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="mono rounded border px-2 py-0.5 text-[10px] font-semibold tracking-wide" style={{ borderColor: `${tone}66`, color: tone }}>
+              {stateLabel}
+            </span>
+            {screen.severity && risk && <span className="mono text-[10px] uppercase text-ink-faint">{screen.severity} policy tier</span>}
+          </div>
+          <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{screen.line}</p>
+          <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+            This is the graph state available at capture time. A shared person, wallet, funder, or project is an investigative lead; it is not proof of common control by itself.
+          </p>
+
+          <dl className="mt-3 grid gap-2 sm:grid-cols-3">
+            <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
+              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Qualified reports</dt>
+              <dd className="mono mt-0.5 text-[14px] font-semibold text-ink">{screen.qualifiedContributionCount} / {screen.contributionCount}</dd>
+            </div>
+            <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
+              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Connections surfaced</dt>
+              <dd className="mono mt-0.5 text-[14px] font-semibold text-ink">{screen.connections.length}</dd>
+            </div>
+            <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
+              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Graph snapshot</dt>
+              <dd className="mono mt-0.5 truncate text-[11px] text-ink-dim" title={graphHash ?? undefined}>{graphHash ? `${graphHash.slice(0, 16)}…` : "hash unavailable"}</dd>
+            </div>
+          </dl>
+        </div>
+
+        {screen.connections.length > 0 && (
+          <div className="divide-y divide-line/60 border-t border-line/60">
+            {screen.connections.map((connection) => {
+              const verdict = connection.otherVerdict ? verdictMeta(connection.otherVerdict) : null;
+              return (
+                <article key={`${connection.other}:${connection.otherReportVersionId ?? "unversioned"}`} className="px-4 py-3.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="mono text-[12.5px] font-medium text-ink">{connection.other}</span>
+                    {verdict && (
+                      <span className="mono rounded px-1.5 py-0.5 text-[9.5px] font-semibold" style={{ background: verdict.glow, color: verdict.color }}>
+                        {verdict.label}
+                      </span>
+                    )}
+                    <span className="mono rounded border border-line px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-ink-faint">
+                      {connection.qualified ? "decision-qualified snapshot" : "context only"}
+                    </span>
+                    {connection.direct && <span className="text-[10px] text-ink-faint">directly surfaced</span>}
+                    <span className="ml-auto">
+                      <ExactVersionLink reportVersionId={connection.otherReportVersionId} label="Open exact connected report" />
+                    </span>
+                  </div>
+                  <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-ink-faint">
+                    {connection.otherAttestation && <span>{connection.otherAttestation.replace(/_/g, " ")}</span>}
+                    {connection.otherCompleteness && <span>{connection.otherCompleteness} coverage</span>}
+                    {!connection.otherReportVersionId && <span>Exact report version unavailable</span>}
+                  </div>
+                  {connection.ties.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Frozen ties to ${connection.other}`}>
+                      {connection.ties.map((tie) => (
+                        <span key={`${tie.key}:${tie.strength}`} className="rounded border border-line bg-void/35 px-2 py-1 text-[10.5px] text-ink-dim" title={[...tie.subjectEdgeTypes, ...tie.otherEdgeTypes].join(" · ")}>
+                          <span className="mono mr-1 text-[9px] uppercase text-ink-faint">{tie.strength}</span>
+                          {tie.label}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              );
+            })}
+          </div>
+        )}
+
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 px-4 py-3 text-[10.5px] text-ink-faint">
+          {capturedAt && <span>Captured <time dateTime={screen.capturedAt}>{capturedAt}</time></span>}
+          <span className="mono" title={graphHash ?? undefined}>Graph snapshot SHA-256 {graphHash ? `${graphHash.slice(0, 12)}…` : "unavailable"}</span>
+          <ExactVersionLink reportVersionId={reportVersionId} version={version} />
+        </div>
+      </Card>
+    </Section>
+  );
+}
 
 function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }) {
   if (!artifacts.length) return null;
@@ -412,17 +645,22 @@ function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }
           const source = safeSourceLink(artifact.sourceUrl);
           const capturedAt = frozenSourceDate(artifact.capturedAt);
           const publishedAt = frozenSourceDate(artifact.publishedAt);
-          const hash = /^[a-f0-9]{64}$/i.test(artifact.contentHash)
-            ? artifact.contentHash.toLowerCase()
-            : null;
-          const sourceHash = artifact.sourceContentHash && /^[a-f0-9]{64}$/i.test(artifact.sourceContentHash)
-            ? artifact.sourceContentHash.toLowerCase()
-            : null;
-          const matchColor = artifact.match === "candidate"
+          const hash = validHash(artifact.contentHash);
+          const sourceHash = validHash(artifact.sourceContentHash);
+          const sourceHashLabel = artifact.kind === "sanctions_screen"
+            ? "Source index"
+            : artifact.kind === "profile_photo"
+              ? "Source image"
+              : artifact.kind === "trust_graph"
+                ? "Graph snapshot"
+                : "Source content";
+          const matchColor = artifact.match === "risk_signal"
             ? "var(--color-caution)"
-            : artifact.match === "no_match"
-              ? "var(--color-ink-dim)"
-              : "var(--color-signal)";
+            : artifact.match === "candidate"
+              ? "var(--color-caution)"
+              : artifact.match === "no_match" || artifact.match === "screened_clear"
+                ? "var(--color-ink-dim)"
+                : "var(--color-signal)";
           return (
             <article key={`${artifact.provider}:${artifact.contentHash}:${index}`} className="px-4 py-3.5">
               <div className="flex flex-wrap items-center gap-2">
@@ -440,7 +678,7 @@ function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }
                 {publishedAt && <span>Published <time dateTime={artifact.publishedAt}>{publishedAt}</time></span>}
                 {capturedAt && <span>Captured <time dateTime={artifact.capturedAt}>{capturedAt}</time></span>}
                 <span className="mono" title={hash ?? undefined}>SHA-256 {hash ? `${hash.slice(0, 12)}…` : "unavailable"}</span>
-                {sourceHash && <span className="mono" title={sourceHash}>Source index {sourceHash.slice(0, 12)}…</span>}
+                {sourceHash && <span className="mono" title={sourceHash}>{sourceHashLabel} {sourceHash.slice(0, 12)}…</span>}
               </div>
               {source ? (
                 <a
@@ -511,6 +749,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const panelCostToken = !versionContext && livePersistence?.state === "persisted"
     ? livePersistence.panelCostToken ?? undefined
     : undefined;
+  const evidenceReportVersionId = versionContext?.reportVersionId
+    ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId ?? undefined : undefined);
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
@@ -525,13 +765,35 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     ? currentIntelligenceEnabled
     : !privateSession && !persistencePending && !persistenceFailed && !persistenceMissingCapability;
   const frozenOutcomeChecks = versionContext?.checks ?? f.checkRuns ?? [];
+  const recordedFrozenCheck = (checkId: string) => frozenOutcomeChecks.some((check) =>
+    check.checkId === checkId
+    && check.status !== "unknown"
+    && check.status !== "stale",
+  );
+  const profilePhotoArtifact = f.sourceArtifacts?.find((artifact) => artifact.kind === "profile_photo");
+  const trustGraphArtifact = f.sourceArtifacts?.find((artifact) => artifact.kind === "trust_graph");
+  const hasFrozenProfilePhotoOutcome = Boolean(
+    f.profileAuthenticity
+    || profilePhotoArtifact
+    || recordedFrozenCheck("profile-photo-authenticity"),
+  );
+  const hasFrozenTrustGraphOutcome = Boolean(
+    f.trustGraphScreen
+    || trustGraphArtifact
+    || recordedFrozenCheck("trust-graph-connections"),
+  );
+  const explicitCurrentOverlay = Boolean(versionContext && currentIntelligenceEnabled);
   const hasFrozenOffchainOutcomes = ["news-press", "us-legal-history", "ofac-sanctions-name"].every(
     (checkId) => frozenOutcomeChecks.some((check) =>
       check.checkId === checkId && check.status !== "unknown" && check.status !== "stale",
     ),
   );
   const showOffchainSupplemental = showCurrentIntelligence
-    && (Boolean(versionContext && currentIntelligenceEnabled) || !hasFrozenOffchainOutcomes);
+    && (explicitCurrentOverlay || !hasFrozenOffchainOutcomes);
+  const showProfilePhotoSupplemental = showCurrentIntelligence
+    && (explicitCurrentOverlay || !hasFrozenProfilePhotoOutcome);
+  const showTrustGraphSupplemental = showCurrentIntelligence
+    && (explicitCurrentOverlay || !hasFrozenTrustGraphOutcome);
   const canRecordCurrentIntelligence = !versionContext && livePersistence?.state !== "private";
   const canMutateWorkspace = !versionContext && livePersistence?.state !== "private";
   const canShare = !embeddedFacet && Boolean(
@@ -757,7 +1019,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             Post-scan intelligence is paused because this audit is not safely bound to an immutable version. Rescan before spending on supplemental providers.
           </div>
         )}
-        {showCurrentIntelligence && <RingAlert handle={report.handle} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
+        {showTrustGraphSupplemental && <RingAlert handle={report.handle} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
         {/* subject identity */}
         <div className="mt-6 flex flex-wrap items-start gap-4">
           <Avatar src={f.avatar_url || xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />
@@ -1038,10 +1300,27 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </Section>
         )}
 
+        {f.profileAuthenticity && (
+          <FrozenProfileAuthenticityPanel
+            result={f.profileAuthenticity}
+            artifact={profilePhotoArtifact}
+            reportVersionId={evidenceReportVersionId}
+            version={versionContext?.version}
+          />
+        )}
+
+        {f.trustGraphScreen && (
+          <FrozenTrustGraphPanel
+            screen={f.trustGraphScreen}
+            reportVersionId={evidenceReportVersionId}
+            version={versionContext?.version}
+          />
+        )}
+
         <FrozenSourceLedger artifacts={f.sourceArtifacts ?? []} />
 
         {/* connections — the compounding web: other audited subjects tied to this one */}
-        {showCurrentIntelligence && connections.length > 0 && (
+        {showTrustGraphSupplemental && connections.length > 0 && (
           <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
             <Card className="divide-y divide-line/60">
               {connections.map((c) => {
@@ -1262,10 +1541,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
-          {showCurrentIntelligence && panelCostToken && (
+          {showProfilePhotoSupplemental && panelCostToken && (
             <div className="min-w-0 lg:col-span-2">
-              <Section title="Profile photo" kicker="current supplemental check · not part of the scored evidence verdict">
-                <PfpCheck handle={report.handle} brand={(webTeam?.length ?? 0) > 0} panelCostToken={panelCostToken} />
+              <Section title="Profile photo" kicker="current supplemental overlay · outside the frozen core evidence and stored verdict">
+                <PfpCheck handle={report.handle} brand={roles.some((role) => String(role) === "PROJECT") && !roles.some((role) => String(role) === "FOUNDER")} panelCostToken={panelCostToken} />
               </Section>
             </div>
           )}
@@ -1327,7 +1606,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <div className="min-w-0 lg:col-span-2">
             <Section title="Connection web" kicker="click any node to open it · subject → projects → the people behind them">
               <Card className="p-2">
-                <TrustGraph nodes={graph.nodes} edges={graph.edges} connections={showCurrentIntelligence ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} />
+                <TrustGraph nodes={graph.nodes} edges={graph.edges} connections={showTrustGraphSupplemental ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} />
               </Card>
             </Section>
           </div>
@@ -1344,7 +1623,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <AskReport subject={report.handle} context={[
               f.headline,
               `roles: ${roles.join(", ")}`,
-              !versionContext && connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
+              showTrustGraphSupplemental && !versionContext && connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
               (evidence.ventures ?? []).length ? `ventures: ${evidence.ventures.map((v) => v.project_name).join(", ")}` : "",
               (webTeam ?? []).length ? `team/associates: ${webTeam.map((p) => p.name).join(", ")}` : "",
             ].filter(Boolean).join(" | ")} />

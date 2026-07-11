@@ -89,6 +89,45 @@ describe("analyst verdict integrity", () => {
         contentHash: "a".repeat(64),
         match: "exact_name",
       }],
+      profileAuthenticity: {
+        provider: "claude-vision",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        imageData: "base64-secret-image-bytes",
+        mediaType: "image/jpeg",
+        imageContentHash: "b".repeat(64),
+        classification: "real_candid",
+        confidence: 0.9,
+        flag: false,
+        tells: ["natural lighting"],
+        note: "Visual triage only.",
+      },
+      trustGraphScreen: {
+        provider: "argus-graph",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        status: "risk",
+        contributionCount: 2,
+        qualifiedContributionCount: 2,
+        sourceContentHash: "c".repeat(64),
+        severity: "avoid",
+        line: "One exact adverse connection.",
+        connections: [{
+          other: "@failed",
+          otherReportVersionId: "00000000-0000-4000-8000-000000000033",
+          otherAttestation: "server_collected",
+          otherCompleteness: "complete",
+          otherVerdict: "FAIL",
+          qualified: true,
+          direct: false,
+          ties: [{
+            key: "wallet:evm:0xabc",
+            label: "shared deployer",
+            type: "Identity",
+            strength: "hard",
+            subjectEdgeTypes: ["DEPLOYED"],
+            otherEdgeTypes: ["DEPLOYED"],
+          }],
+        }],
+      },
       checkOutcomes: [{ checkId: "news-press", status: "confirmed", provider: "google-news" }],
       providerRuns: [{ id: "offchain-diligence", state: "partial", detail: "CourtListener failed" }],
     });
@@ -100,8 +139,55 @@ describe("analyst verdict integrity", () => {
     expect(parsed.coverage.recentActivity.available).toBe(100);
     expect(parsed.coverage.recentActivity.included).toBeLessThanOrEqual(12);
     expect(parsed.sourceArtifacts[0]).toMatchObject({ contentHash: "a".repeat(64) });
+    expect(parsed.profileAuthenticity).toMatchObject({ imageContentHash: "b".repeat(64), classification: "real_candid" });
+    expect(parsed.profileAuthenticity).not.toHaveProperty("imageData");
+    expect(packet).not.toContain("base64-secret-image-bytes");
+    expect(parsed.trustGraphScreen.connections[0]).toMatchObject({ qualified: true, otherVerdict: "FAIL" });
+    expect(parsed.trustGraphScreen.connections[0].ties[0]).toMatchObject({ key: "wallet:evm:0xabc", strength: "hard" });
     expect(parsed.checkOutcomes[0]).toMatchObject({ checkId: "news-press", status: "confirmed" });
     expect(parsed.providerRuns[0]).toMatchObject({ id: "offchain-diligence", state: "partial" });
+  });
+
+  it("prioritizes frozen graph predicates ahead of descriptive finding overflow", () => {
+    const descriptive = Array.from({ length: 30 }, (_, index) => ({
+      finding_type: "ContextLead",
+      claim: `descriptive lead ${index}`,
+      source_url: `https://example.com/${index}`,
+      verification_status: "Reported",
+      independent_source_count: 1,
+      polarity: 0,
+    }));
+    const graph = {
+      finding_type: "TrustGraphConnection",
+      claim: "Exact graph predicate must survive the evidence budget.",
+      source_url: "",
+      verification_status: "Verified",
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      content_hash: "d".repeat(64),
+      trust_graph: {
+        tie_key: "email:dev@example.com",
+        tie_type: "Identity",
+        tie_strength: "hard",
+        subject_edge_types: ["IDENTITY_EMAIL"],
+        other_edge_types: ["COMMIT_EMAIL"],
+        other_report_version_id: "00000000-0000-4000-8000-000000000044",
+        other_attestation: "server_collected",
+        other_completeness: "complete",
+        other_verdict: "FAIL",
+      },
+    };
+
+    const parsed = JSON.parse(buildAnalystEvidencePacket({ findings: [...descriptive, graph] }));
+
+    expect(parsed.coverage.findings).toEqual({ available: 31, included: 24 });
+    expect(parsed.findings[0]).toMatchObject({
+      finding_type: "TrustGraphConnection",
+      content_hash: "d".repeat(64),
+      trust_graph: expect.objectContaining({ tie_type: "Identity", other_verdict: "FAIL" }),
+    });
   });
 });
 

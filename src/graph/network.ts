@@ -118,6 +118,8 @@ export interface GraphContribution {
   // Search/display aliases only. They resolve to a subject solely when exactly
   // one address-backed token claims them.
   aliases?: string[];
+  reportVersionId?: string;
+  provenanceState?: "server_collected" | "client_submitted" | "legacy";
 }
 
 // Generic labels that older audits recorded as literal node keys ("site",
