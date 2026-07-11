@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { PersonCheckTracker } from "./checks";
+import { deriveDecisionReadiness } from "../src/lib/decisionReadiness";
+import { PersonCheckTracker, type PersonCheckScope } from "./checks";
 
-const byId = (tracker: PersonCheckTracker, roles: string[], id: string) =>
-  tracker.snapshot(roles).find((check) => check.checkId === id);
+const byId = (tracker: PersonCheckTracker, roles: string[], id: string, scope?: PersonCheckScope) =>
+  tracker.snapshot(roles, scope).find((check) => check.checkId === id);
 
 describe("PersonCheckTracker", () => {
   it("does not turn an executed provider into a completed check", () => {
@@ -72,5 +73,42 @@ describe("PersonCheckTracker", () => {
 
     expect(byId(tracker, ["FOUNDER"], "code-footprint-github")?.status).toBe("unavailable");
     expect(tracker.completeness(["FOUNDER"])).toBe("partial");
+  });
+
+  it("makes name-only screens applicable only after a real name is resolved", () => {
+    const tracker = new PersonCheckTracker();
+
+    expect(byId(tracker, ["FOUNDER"], "us-legal-history", { resolvedRealName: false })?.status).toBe("not-applicable");
+    expect(byId(tracker, ["FOUNDER"], "ofac-sanctions-name", { resolvedRealName: false })?.status).toBe("not-applicable");
+    expect(byId(tracker, ["FOUNDER"], "us-legal-history", { resolvedRealName: true })?.status).toBe("unknown");
+  });
+
+  it("preserves a partial provider run for the analyst snapshot", () => {
+    const tracker = new PersonCheckTracker();
+    tracker.provider("offchain-diligence", "News, legal, and sanctions", "partial", "one provider failed");
+
+    expect(tracker.providers().runs).toContainEqual(expect.objectContaining({
+      id: "offchain-diligence",
+      state: "partial",
+      detail: "one provider failed",
+    }));
+  });
+
+  it("lets the frozen off-chain tranche raise a resolved founder to provisional coverage", () => {
+    const tracker = new PersonCheckTracker();
+    for (const id of [
+      "identity-resolution",
+      "code-footprint-github",
+      "identity-continuity",
+      "affiliations-associates",
+      "news-press",
+      "us-legal-history",
+      "ofac-sanctions-name",
+    ] as const) {
+      tracker.record({ id, status: "checked-empty", note: `${id} completed`, provider: "test-provider" });
+    }
+
+    const readiness = deriveDecisionReadiness(tracker.snapshot(["FOUNDER"], { resolvedRealName: true }));
+    expect(readiness).toMatchObject({ status: "provisional", successful: 7, applicable: 9, coveragePercent: 77 });
   });
 });

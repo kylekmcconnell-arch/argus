@@ -4,10 +4,13 @@
 // be a Vercel cron over the collector later.
 
 import { normalizeSubjectRef } from "./subjectRef";
+import type { ReportCompletenessState } from "./reportVersion";
 
 export interface WatchSnapshot {
   verdict: string;
   score: number | null;
+  /** Frozen coverage state used to keep positive verdicts fail-closed. */
+  completenessState?: ReportCompletenessState;
   liquidityUsd?: number;
   mcap?: number;
 }

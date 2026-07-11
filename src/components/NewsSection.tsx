@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 // press trail (funding, launches, hacks, exits); a fresh shell leaves none, and
 // absence is itself a signal. Auto-runs on the report.
 type Article = { title: string; source: string; url: string; publishedAt: number | null };
+type NewsData = { available?: boolean; articles?: Article[]; note?: string };
 
 const ago = (ms: number | null) => {
   if (!ms) return "";
@@ -17,7 +18,8 @@ const ago = (ms: number | null) => {
 
 export function NewsSection({ query, handle }: { query: string; handle?: string }) {
   const [articles, setArticles] = useState<Article[] | null>(null);
-  const [state, setState] = useState<"loading" | "ok" | "none">("loading");
+  const [state, setState] = useState<"loading" | "ok" | "none" | "unavailable">("loading");
+  const [note, setNote] = useState("");
   const ran = useRef(false);
 
   useEffect(() => {
@@ -25,11 +27,30 @@ export function NewsSection({ query, handle }: { query: string; handle?: string 
     ran.current = true;
     fetch(`/api/news?q=${encodeURIComponent(query)}${handle ? `&h=${encodeURIComponent(handle.replace(/^@/, ""))}` : ""}`)
       .then((r) => r.json())
-      .then((d) => { const a: Article[] = d?.articles ?? []; setArticles(a); setState(a.length ? "ok" : "none"); })
-      .catch(() => setState("none"));
-  }, [query]);
+      .then((d: NewsData) => {
+        if (d?.available === false) {
+          setNote(d.note ?? "Current news search is unavailable.");
+          setState("unavailable");
+          return;
+        }
+        const a = d?.articles ?? [];
+        setArticles(a);
+        setState(a.length ? "ok" : "none");
+      })
+      .catch(() => {
+        setNote("Current news search is unavailable.");
+        setState("unavailable");
+      });
+  }, [handle, query]);
 
   if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">searching news…</div>;
+  if (state === "unavailable") {
+    return (
+      <div className="rounded-xl border border-caution/35 bg-caution/5 p-4 text-[12px] text-ink-dim" role="status">
+        <span className="font-medium text-ink">Current news search unavailable.</span> {note} The frozen report remains the source of truth.
+      </div>
+    );
+  }
   if (state === "none" || !articles) {
     return (
       <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-dim">

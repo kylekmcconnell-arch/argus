@@ -17,6 +17,7 @@ import { auditToken } from "../src/token/audit";
 import { subjectConnections, type GraphContribution } from "../src/graph/network";
 import type { RunnableTokenInput } from "../src/lib/resolveInput";
 import { normalizeSubjectRef } from "../src/lib/subjectRef";
+import { reportCompleteness } from "../src/lib/reports";
 
 const MAX_TOKEN_CHECKS = 15; // bound one sweep's spend/time
 
@@ -105,7 +106,16 @@ export async function runSweep(organizationId: string): Promise<{ checked: numbe
           found.push({ subject: w.id, label: w.label, type: "drift", detail: `liquidity halved: $${Math.round(s.liquidityUsd).toLocaleString()} → $${Math.round(d.liquidityUsd ?? 0).toLocaleString()}`, at: Date.now() });
         }
         // refresh the baseline so the same drift doesn't alert on every sweep
-        const item = { ...w, snapshot: { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap } };
+        const item = {
+          ...w,
+          snapshot: {
+            verdict: d.verdict,
+            score: d.score,
+            completenessState: reportCompleteness("token", d),
+            liquidityUsd: d.liquidityUsd,
+            mcap: d.mcap,
+          },
+        };
         await pg(c, "reports?on_conflict=organization_id,ref,kind", {
           method: "POST",
           headers: { prefer: "resolution=merge-duplicates,return=minimal" },

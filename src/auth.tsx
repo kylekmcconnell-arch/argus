@@ -171,7 +171,9 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       const { error: otpError } = await supabase.auth.signInWithOtp({
         email: email.trim().toLowerCase(),
         options: {
-          emailRedirectTo: window.location.origin,
+          // Preserve an exact immutable-version deep link through email OTP.
+          // Hash fragments can contain auth material, so never echo them.
+          emailRedirectTo: `${window.location.origin}${window.location.pathname}${window.location.search}`,
           shouldCreateUser: allowBootstrapSignup,
         },
       });

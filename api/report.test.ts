@@ -161,11 +161,21 @@ describe("report case lifecycle API", () => {
     const { res, captured } = response();
 
     await handler(request("POST", {
-      body: { kind: "token", ref: address, query: "$TEST", payload: { address } },
+      body: {
+        kind: "token",
+        ref: address,
+        query: "$TEST",
+        payload: { address },
+        completenessState: "complete",
+        checkRuns: [{ label: "Contract safety", status: "unknown" }],
+      },
     }), res);
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(fetchMock.mock.calls[0][0]).toBe("https://database.example/rest/v1/rpc/persist_report_version");
+    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
+      p_completeness_state: "partial",
+    });
     expect(activateReportVersion).toHaveBeenCalledWith(
       { url: "https://database.example", key: "test-service-key" },
       "00000000-0000-4000-8000-000000000001",

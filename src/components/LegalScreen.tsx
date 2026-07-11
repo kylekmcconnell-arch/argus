@@ -24,13 +24,20 @@ export function LegalScreen({ name, resolved }: { name?: string | null; resolved
       try {
         const r = await fetch(`/api/legal-screen?name=${encodeURIComponent(realName)}`);
         setData(await r.json());
-      } catch { /* non-fatal */ }
+      } catch { setData({ available: false, note: "Current CourtListener search is unavailable." }); }
       setState("done");
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!screenable || state === "loading" || !data || data.available === false) return null;
+  if (!screenable || state === "loading" || !data) return null;
+  if (data.available === false) {
+    return (
+      <div className="rounded-xl border border-caution/35 bg-caution/5 px-4 py-3 text-[11.5px] leading-relaxed text-ink-dim" role="status">
+        <span className="font-medium text-ink">Current US legal screen unavailable.</span> {data.note ?? "No clean result was inferred."} The frozen report remains the source of truth.
+      </div>
+    );
+  }
   const cases = data.cases ?? [];
   const asParty = data.asParty ?? 0;
   const flagged = asParty > 0;

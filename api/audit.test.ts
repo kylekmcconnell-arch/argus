@@ -123,6 +123,7 @@ describe("person audit input guard", () => {
     vi.mocked(runAudit).mockResolvedValue({
       live: true,
       handle: "@argus",
+      completeness_state: "complete",
       report: {
         audit_id: "audit-run-1",
         composite_verdict: "PASS",
@@ -145,6 +146,11 @@ describe("person audit input guard", () => {
     const { res, captured } = response();
 
     await handler(request("argus"), res);
+
+    const versionWrite = vi.mocked(fetch).mock.calls[0]?.[1];
+    expect(JSON.parse(String(versionWrite?.body))).toMatchObject({
+      p_completeness_state: "partial",
+    });
 
     expect(recordProviderUsageBatch).toHaveBeenCalledWith(
       AUTH_ORGANIZATION_ID,

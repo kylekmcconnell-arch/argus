@@ -80,6 +80,17 @@ describe("analyst verdict integrity", () => {
         evidence_origin: "deterministic",
         artifact_verified: true,
       }],
+      sourceArtifacts: [{
+        kind: "press",
+        provider: "google-news",
+        title: "Material source",
+        sourceUrl: "https://example.com/source",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        contentHash: "a".repeat(64),
+        match: "exact_name",
+      }],
+      checkOutcomes: [{ checkId: "news-press", status: "confirmed", provider: "google-news" }],
+      providerRuns: [{ id: "offchain-diligence", state: "partial", detail: "CourtListener failed" }],
     });
 
     expect(packet.length).toBeLessThanOrEqual(ANALYST_EVIDENCE_MAX_CHARS);
@@ -88,6 +99,9 @@ describe("analyst verdict integrity", () => {
     expect(parsed.findings[0].source_url).toBe("https://example.com/artifact");
     expect(parsed.coverage.recentActivity.available).toBe(100);
     expect(parsed.coverage.recentActivity.included).toBeLessThanOrEqual(12);
+    expect(parsed.sourceArtifacts[0]).toMatchObject({ contentHash: "a".repeat(64) });
+    expect(parsed.checkOutcomes[0]).toMatchObject({ checkId: "news-press", status: "confirmed" });
+    expect(parsed.providerRuns[0]).toMatchObject({ id: "offchain-diligence", state: "partial" });
   });
 });
 

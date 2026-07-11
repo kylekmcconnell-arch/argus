@@ -17,6 +17,7 @@ import {
   type ReportVersionMetadata,
   type StoredCheckRun,
 } from "../src/lib/reportVersion.js";
+import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
 
 export const config = { maxDuration: 20 };
 
@@ -486,6 +487,11 @@ async function createImmutableVersion(
 ): Promise<string> {
   const payload = row.payload;
   const payloadRecord = asRecord(payload);
+  const qualifiedCompleteness = coverageQualifiedCompleteness({
+    completeness: completeness(payload, raw?.completenessState),
+    attestation: "analyst_submitted",
+    checks: Array.isArray(raw.checkRuns) ? raw.checkRuns : [],
+  });
   const response = await fetch(`${credentials.url}/rest/v1/rpc/persist_report_version`, {
     method: "POST",
     headers: serviceHeaders(credentials.key),
@@ -502,7 +508,7 @@ async function createImmutableVersion(
       p_attestation_state: "analyst_submitted",
       p_verdict: row.verdict,
       p_score: row.score,
-      p_completeness_state: completeness(payload, raw?.completenessState),
+      p_completeness_state: qualifiedCompleteness,
       p_methodology_version: process.env.ARGUS_METHODOLOGY_VERSION || null,
       p_provider_snapshot: payloadRecord.providerSnapshot ?? payloadRecord.providers ?? {},
       p_cost: Object.keys(asRecord(payloadRecord.cost)).length ? asRecord(payloadRecord.cost) : {},

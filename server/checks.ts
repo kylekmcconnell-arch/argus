@@ -1,7 +1,7 @@
 import { summarizeChecks, type CheckStatus, type ScanCheck } from "../src/lib/scanChecklist";
 import type { CheckObservation, PersonCheckId } from "./adapters/types";
 
-export type ProviderRunState = "executed" | "failed" | "unavailable";
+export type ProviderRunState = "executed" | "partial" | "failed" | "unavailable";
 
 export interface ProviderRun {
   id: string;
@@ -21,6 +21,11 @@ interface CheckDefinition {
   label: string;
   defaultNote: string;
   role?: "KOL" | "INVESTOR";
+  requiresResolvedRealName?: boolean;
+}
+
+export interface PersonCheckScope {
+  resolvedRealName?: boolean;
 }
 
 const CHECKS: readonly CheckDefinition[] = [
@@ -32,8 +37,8 @@ const CHECKS: readonly CheckDefinition[] = [
   { id: "promoted-token-performance", label: "Promoted-token performance", defaultNote: "no completed promoted-token market result was recorded", role: "KOL" },
   { id: "vc-portfolio-track-record", label: "VC portfolio track record", defaultNote: "no completed portfolio-provider result was recorded", role: "INVESTOR" },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
-  { id: "us-legal-history", label: "US legal history", defaultNote: "server collector did not run a legal-history check" },
-  { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check" },
+  { id: "us-legal-history", label: "US legal history", defaultNote: "server collector did not run a legal-history check", requiresResolvedRealName: true },
+  { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check", requiresResolvedRealName: true },
   { id: "trust-graph-connections", label: "Trust-graph connections", defaultNote: "server collector did not run flagged-subject graph reconciliation" },
 ] as const;
 
@@ -97,7 +102,7 @@ export class PersonCheckTracker {
     });
   }
 
-  snapshot(roles: readonly string[]): ScanCheck[] {
+  snapshot(roles: readonly string[], scope: PersonCheckScope = {}): ScanCheck[] {
     const heldRoles = new Set(roles);
     return CHECKS.map((definition) => {
       if (definition.role && !heldRoles.has(definition.role)) {
@@ -106,6 +111,14 @@ export class PersonCheckTracker {
           label: definition.label,
           status: "not-applicable" as const,
           note: definition.role === "KOL" ? "not a KOL" : "not a fund/investor",
+        });
+      }
+      if (definition.requiresResolvedRealName && scope.resolvedRealName === false) {
+        return Object.freeze({
+          checkId: definition.id,
+          label: definition.label,
+          status: "not-applicable" as const,
+          note: "requires a resolved real-person name",
         });
       }
 
@@ -144,8 +157,8 @@ export class PersonCheckTracker {
     });
   }
 
-  completeness(roles: readonly string[]): "complete" | "partial" {
-    const summary = summarizeChecks(this.snapshot(roles));
+  completeness(roles: readonly string[], scope: PersonCheckScope = {}): "complete" | "partial" {
+    const summary = summarizeChecks(this.snapshot(roles, scope));
     return summary.inScope > 0 && summary.successful === summary.inScope
       ? "complete"
       : "partial";

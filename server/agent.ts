@@ -331,6 +331,9 @@ export function buildAnalystEvidencePacket(input: Record<string, unknown>): stri
     team: 16,
     notableFollowers: 16,
     recentActivity: 12,
+    sourceArtifacts: 24,
+    checkOutcomes: 20,
+    providerRuns: 24,
   };
   const findingsRaw = Array.isArray(input.findings) ? input.findings : [];
   const findings = findingsRaw.slice(0, 24).map(compactFinding).filter((f): f is Record<string, unknown> => !!f);
@@ -353,7 +356,7 @@ export function buildAnalystEvidencePacket(input: Record<string, unknown>): stri
     coverage[section] = { available: source.length, included: included.length };
   }
 
-  const pruneOrder = ["recentActivity", "notableFollowers", "wallets", "promotions", "advised", "testimonials", "ventures", "team"];
+  const pruneOrder = ["recentActivity", "notableFollowers", "wallets", "promotions", "advised", "testimonials", "ventures", "team", "providerRuns", "checkOutcomes", "sourceArtifacts"];
   let json = JSON.stringify(packet);
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
     const section = pruneOrder.find((key) => Array.isArray(packet[key]) && (packet[key] as unknown[]).length > 0);

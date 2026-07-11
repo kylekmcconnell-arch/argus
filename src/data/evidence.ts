@@ -18,6 +18,7 @@ import type {
 export interface SubjectProfile {
   handle: string;
   display_name: string;
+  resolved_name?: string; // licensed/deterministic real name; display name remains untouched for UX
   avatar: string;
   avatar_url?: string; // real X profile photo URL, when resolved (else derive from handle)
   website?: string;    // independently resolved first-party site, when available
@@ -65,6 +66,24 @@ export interface TraceStep {
   tone: "neutral" | "good" | "warn" | "bad";
 }
 
+// A provider artifact frozen into the report that was available to the analyst
+// before scoring. These records are deliberately neutral about identity: a
+// court-caption or sanctions-name match is a lead tied to a source, not proof
+// that the named person is the audited subject.
+export interface SourceArtifact {
+  kind: "press" | "legal_case" | "sanctions_screen";
+  provider: "google-news" | "courtlistener" | "opensanctions";
+  title: string;
+  sourceUrl: string;
+  capturedAt: string;
+  contentHash: string;
+  /** Fingerprint of a provider dataset/index when the source URL is mutable. */
+  sourceContentHash?: string;
+  publishedAt?: string;
+  excerpt?: string;
+  match: "exact_name" | "exact_handle" | "candidate" | "no_match";
+}
+
 // A person behind the project, dug from the website (web/LinkedIn), the account's
 // own posts (role-word scan), or its X content. Named-only people are kept — a
 // real name with a role is signal even without an X handle to audit.
@@ -94,6 +113,7 @@ export interface CollectedEvidence {
   recentActivity: string[]; // recent post text, fuel for claim extraction
   notableFollowers: NotableFollower[]; // respected accounts that follow the subject
   contradictions: Contradiction[]; // internal contradictions across materials
+  sourceArtifacts: SourceArtifact[]; // immutable off-chain sources collected before scoring
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to
@@ -129,5 +149,6 @@ export function emptyEvidence(handle: string): CollectedEvidence {
     recentActivity: [],
     notableFollowers: [],
     contradictions: [],
+    sourceArtifacts: [],
   };
 }

@@ -11,6 +11,11 @@ import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness, type DecisionReadiness } from "../lib/decisionReadiness";
+import {
+  coverageQualifiedCompleteness,
+  presentPublicReport,
+  type PublicReportPresentation,
+} from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
 import { Counterparties } from "./Counterparties";
 import { RiskPaths } from "./RiskPaths";
@@ -90,12 +95,11 @@ const TONE_GLYPH: Record<string, string> = { bad: "✗", warn: "⚠", good: "✓
 function tokenReportText(
   d: TokenDossier,
   readiness: DecisionReadiness,
+  presentation: PublicReportPresentation,
   evidence?: { reportVersionId?: string; version?: number; privateSession?: boolean },
 ): string {
   const moneyShort = (n?: number) => (n == null ? "—" : n >= 1e9 ? "$" + (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(0) + "K" : "$" + Math.round(n));
   const age = d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : "?";
-  const qualifiesPass = d.verdict === "PASS" && readiness.status !== "ready";
-  const presentedVerdict = qualifiesPass ? readiness.status.toUpperCase() : d.verdict;
   const findings = [...d.findings]
     .sort((a, b) => (TONE_RANK[b.tone] ?? 0) - (TONE_RANK[a.tone] ?? 0))
     .slice(0, 6)
@@ -111,9 +115,11 @@ function tokenReportText(
         ? "— private live ARGUS session"
         : "— live ARGUS analysis";
   return [
-    `$${d.symbol} — ${presentedVerdict} · ${d.chain}${d.capApplied ? ` (cap: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
+    `$${d.symbol} — ${presentation.resultLabel}: ${presentation.displayVerdict} · ${d.chain}${d.capApplied ? ` (cap: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
+    presentation.readinessLabel,
     `${readiness.successful}/${readiness.applicable} evidence outcomes recorded · ${readiness.unresolved} unresolved · ${readiness.coveragePercent}% coverage`,
-    `Underlying model signal: ${d.verdict} ${d.score ?? "—"}/100`,
+    `Stored model output: ${d.verdict} ${d.score ?? "—"}/100`,
+    presentation.note,
     d.headline,
     "",
     ...findings,
@@ -160,23 +166,27 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     d.versionContext?.reportVersionId
     || (d.persistence?.state === "persisted" && d.persistence.reportVersionId),
   );
-  const m = verdictMeta(d.verdict);
   const tokenSubjectGraphKey = String(d.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
   const checks = versionContext
     ? versionContext.checks
     : tokenChecks(d);
   const readiness = deriveDecisionReadiness(checks);
-  const qualifiesPass = d.verdict === "PASS" && readiness.status !== "ready";
-  const presentedVerdict = qualifiesPass
-    ? readiness.status === "provisional" ? "PROVISIONAL" : "INCOMPLETE"
-    : m.label;
-  const presentationColor = qualifiesPass
-    ? readiness.status === "provisional" ? "var(--color-caution)" : "var(--color-ink-dim)"
-    : m.color;
-  const presentationGlow = qualifiesPass
-    ? readiness.status === "provisional" ? "rgba(217,119,6,0.08)" : "transparent"
-    : m.glow;
-  const negativeSignal = d.verdict === "CAUTION" || d.verdict === "FAIL" || d.verdict === "AVOID";
+  const presentationCompleteness = coverageQualifiedCompleteness({
+    completeness: versionContext?.completenessState ?? (readiness.status === "ready" ? "complete" : "partial"),
+    attestation: versionContext?.attestationState ?? (d.live ? "server_collected" : "analyst_submitted"),
+    checks,
+  });
+  const presentation = presentPublicReport({
+    verdict: d.verdict,
+    score: d.score,
+    completeness: presentationCompleteness,
+  });
+  const presentedVerdict = presentation.displayVerdict === "UNVERIFIABLE"
+    ? "UNVERIFIABLE_IDENTITY"
+    : presentation.displayVerdict;
+  const presentationMeta = verdictMeta(presentedVerdict);
+  const presentationColor = presentationMeta.color;
+  const presentationGlow = presentationMeta.glow;
   const s = d.safety;
   const gp = d.safetyChecked;
   const isSol = d.chain === "solana";
@@ -193,7 +203,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
   const [copiedTxt, setCopiedTxt] = useState(false);
   const copyReport = () => {
-    navigator.clipboard?.writeText(tokenReportText(d, readiness, {
+    navigator.clipboard?.writeText(tokenReportText(d, readiness, presentation, {
       reportVersionId: versionContext?.reportVersionId
         ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId ?? undefined : undefined),
       version: versionContext?.version,
@@ -236,7 +246,13 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       toggleWatch({
         id: d.address, kind: "token", label: "$" + d.symbol, chain: d.chain,
         via: isSol ? "solana" : "evm", addedAt: 0,
-        snapshot: { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap },
+        snapshot: {
+          verdict: presentedVerdict,
+          score: presentation.primaryScore ? d.score : null,
+          completenessState: presentationCompleteness,
+          liquidityUsd: d.liquidityUsd,
+          mcap: d.mcap,
+        },
       }),
     );
   };
@@ -361,10 +377,15 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow" style={{ borderColor: `${presentationColor}55` }}>
           <div className="absolute right-0 top-0 h-full w-1/2" style={{ background: `radial-gradient(400px 200px at 100% 0%, ${presentationGlow}, transparent 70%)` }} />
           <div className="relative flex flex-wrap items-start gap-6">
-            <Ring score={d.score} verdict={d.verdict} color={presentationColor} />
+            <div className="shrink-0 text-center">
+              <Ring score={presentation.primaryScore ? d.score : null} verdict={presentedVerdict} color={presentationColor} />
+              <div className="mono mt-1 text-[9.5px] uppercase tracking-wider text-ink-faint">
+                {presentation.scoreLabel?.toLowerCase() ?? "score withheld"}
+              </div>
+            </div>
             <div className="min-w-0 flex-1">
               <div className="mb-1 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] uppercase tracking-[0.2em] text-ink-faint">{qualifiesPass ? "Decision readiness" : "Token verdict"}</span>
+                <span className="text-[11px] uppercase tracking-[0.2em] text-ink-faint">{presentation.resultLabel}</span>
                 <span
                   className="mono rounded px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide"
                   style={{
@@ -375,16 +396,15 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                   {readiness.status === "ready" ? "Evidence complete" : `${readiness.status} coverage`}
                 </span>
               </div>
-              <div className="text-[34px] font-bold leading-none tracking-tight" style={{ color: presentationColor }}>{presentedVerdict}</div>
-              {qualifiesPass && (
-                <div className="mono mt-2 text-[11px] text-ink-faint">
-                  Underlying model signal <span className="text-ink-dim">PASS · {d.score ?? "—"}/100</span>
-                </div>
+              <div className="text-[34px] font-bold leading-none tracking-tight" style={{ color: presentationColor }}>{presentationMeta.label}</div>
+              {presentation.secondarySignal && (
+                <div className="mono mt-2 text-[11px] text-caution">{presentation.secondarySignal}</div>
               )}
-              <p className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">{d.headline}</p>
+              <p className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
+                {presentation.final ? d.headline : presentation.note}
+              </p>
               <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-ink-faint">
-                {negativeSignal && readiness.status !== "ready" ? "Coverage gaps do not cancel recorded risk findings. " : ""}
-                {readiness.guidance}
+                {presentation.final ? readiness.guidance : <>Stored scored-evidence summary — not clearance: {d.headline}</>}
               </p>
               {d.capApplied && (
                 <div className="mt-3 inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[12px]" style={{ borderColor: "var(--color-avoid)", color: "var(--color-avoid)" }}>
@@ -476,7 +496,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         <section className="mt-5">
           <div className="mb-2.5 text-[13px] font-semibold tracking-tight text-ink">Forensic breakdown</div>
           <div className="rounded-xl border border-line bg-panel px-4 py-1 divide-y divide-line/60">
-            {d.axes.map((a) => <Bar key={a.key} a={a} color={m.color} />)}
+            {d.axes.map((a) => <Bar key={a.key} a={a} color={presentationColor} />)}
             <div className="flex items-center justify-between py-2.5 text-[11.5px] text-ink-faint">
               <span>weighted total</span>
               <span className="mono">= {d.score}{d.capApplied ? " (capped)" : ""}</span>

@@ -148,6 +148,7 @@ export const peopledatalabsAdapter: Adapter = {
       return;
     }
     ctx.evidence.profile.identity_confidence = person.linkedin ? "Probable" : ctx.evidence.profile.identity_confidence;
+    if (person.fullName) ctx.evidence.profile.resolved_name = person.fullName;
     // Carry the resolved emails so the graph can bridge them to leaked GitHub commit
     // emails (an email match is a near-courtroom-grade identity confirmation).
     if (person.emails.length) ctx.evidence.profile.identity_emails = person.emails;

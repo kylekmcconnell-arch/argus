@@ -819,6 +819,155 @@ function normalizeSubjectRef(value) {
   return clean.toLowerCase();
 }
 
+// src/lib/scanChecklist.ts
+var shortAddr = (address) => address.length > 12 ? `${address.slice(0, 5)}\u2026${address.slice(-4)}` : address;
+function contractSafetyConcerns(dossier) {
+  const safety = dossier.safety;
+  const concerns = [];
+  if (safety.serialScammerCreator) concerns.push("prior honeypots by creator");
+  if (safety.honeypot || safety.honeypotOnchain) concerns.push("honeypot indicator");
+  if (safety.nonTransferable || safety.cannotSellAll) concerns.push("transfer restriction");
+  if (safety.mintable) concerns.push("mint authority active");
+  if (safety.freezable) concerns.push("freeze authority active");
+  if (!safety.ownerRenounced) concerns.push(dossier.chain === "solana" ? "authorities retained" : "owner active");
+  if (safety.hiddenOwner || safety.takeBack) concerns.push("owner-control risk");
+  if (dossier.chain !== "solana" && !safety.openSource) concerns.push("source not verified");
+  if (safety.selfdestruct) concerns.push("contract can self-destruct/close");
+  if (safety.pausable) concerns.push("transfers can be paused");
+  if (safety.proxy) concerns.push("upgradeable proxy");
+  if (safety.metadataMutable) concerns.push("metadata mutable");
+  if (safety.balanceMutable || safety.ownerChangeBalance) concerns.push("balances can be changed");
+  if (safety.transferHook || safety.transferFee) concerns.push("programmable transfer controls");
+  if (safety.slippageModifiable) concerns.push("tax/slippage modifiable");
+  if (safety.blacklist || safety.tradingCooldown) concerns.push("wallet/trading restrictions");
+  if (safety.externalCall) concerns.push("external calls enabled");
+  return concerns;
+}
+function contractSafetyNote(dossier) {
+  const concerns = contractSafetyConcerns(dossier);
+  if (concerns.length) return concerns.slice(0, 3).join(" \xB7 ");
+  return "provider response recorded; no surfaced contract-control concern";
+}
+var outcomeNotRecorded = "completion outcome not recorded";
+function tokenChecks(dossier) {
+  const evm = dossier.chain !== "solana";
+  const safety = dossier.safety;
+  const checks = [];
+  checks.push(
+    safety.available ? {
+      label: "Contract safety",
+      status: contractSafetyConcerns(dossier).length ? "finding" : "confirmed",
+      note: contractSafetyNote(dossier)
+    } : {
+      label: "Contract safety",
+      status: "unavailable",
+      note: `no contract-safety provider response recorded for ${dossier.chain}`
+    }
+  );
+  checks.push(
+    safety.simChecked ? {
+      label: "Buy/sell simulation",
+      status: safety.honeypot || safety.cannotSellAll ? "finding" : "confirmed",
+      note: `buy ${safety.buyTax}% \xB7 sell ${safety.sellTax}%`
+    } : evm ? { label: "Buy/sell simulation", status: "unknown", note: outcomeNotRecorded } : { label: "Buy/sell simulation", status: "not-applicable", note: "Solana \u2014 static flags only" }
+  );
+  const holderCount = safety.holderCount || dossier.topHolders.length;
+  const topHolderPct = safety.topHolderPct ?? dossier.topHolders[0]?.percent ?? null;
+  checks.push(
+    holderCount > 0 ? {
+      label: "Holder distribution",
+      status: (topHolderPct ?? 0) > 50 ? "finding" : "confirmed",
+      note: `${holderCount.toLocaleString()} holder${holderCount === 1 ? "" : "s"} \xB7 top ${topHolderPct == null ? "unknown" : `${Math.round(topHolderPct)}%`}`
+    } : safety.available ? { label: "Holder distribution", status: "unknown", note: "safety data returned, but no holder-query outcome was recorded" } : { label: "Holder distribution", status: "unavailable", note: "holder provider response unavailable" }
+  );
+  const hasHolderRows = dossier.topHolders.length > 0;
+  const hasClusteringOutcome = hasHolderRows && (dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" || dossier.bundleCount > 0 || dossier.insiderPct > 0);
+  checks.push(
+    hasClusteringOutcome ? {
+      label: "Wallet clustering",
+      status: dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" ? "finding" : "confirmed",
+      note: dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" ? `${dossier.bundleCount} concentrated wallets \xB7 ~${Math.round(dossier.insiderPct)}% (${dossier.bundleRisk} risk)` : "holder rows analyzed; no elevated concentration surfaced"
+    } : hasHolderRows ? { label: "Wallet clustering", status: "unknown", note: "holder rows exist, but clustering completion/reliability is not recorded" } : safety.available ? { label: "Wallet clustering", status: "unknown", note: "no holder rows available to establish a clustering result" } : { label: "Wallet clustering", status: "unavailable", note: "requires holder-provider data" }
+  );
+  checks.push({
+    label: "Operator / funding trace",
+    status: "unknown",
+    note: dossier.deployer ? `deployer ${shortAddr(dossier.deployer)} resolved; trace ${outcomeNotRecorded}` : `deployer unresolved; trace ${outcomeNotRecorded}`
+  });
+  checks.push(evm ? { label: "Deployer trail (EVM)", status: "unknown", note: outcomeNotRecorded } : { label: "Deployer trail (EVM)", status: "not-applicable", note: "Solana" });
+  checks.push(evm ? { label: "Bytecode fingerprint (EVM)", status: "unknown", note: `redeployed-rug clone check; ${outcomeNotRecorded}` } : { label: "Bytecode fingerprint", status: "not-applicable", note: "Solana" });
+  checks.push(
+    dossier.cg?.listed ? {
+      label: "Market intelligence",
+      status: dossier.cg.cexCount > 0 ? "confirmed" : "finding",
+      note: `CoinGecko listing \xB7 ${dossier.cg.cexCount} CEX listing${dossier.cg.cexCount === 1 ? "" : "s"}${dossier.cg.rank ? ` \xB7 rank #${dossier.cg.rank}` : ""}`
+    } : dossier.cg ? { label: "Market intelligence", status: "checked-empty", note: "CoinGecko returned no matching asset" } : { label: "Market intelligence", status: "unknown", note: outcomeNotRecorded }
+  );
+  checks.push({ label: "OFAC sanctions screen", status: "unknown", note: `deployer + top holders; ${outcomeNotRecorded}` });
+  checks.push({ label: "Documents & audits", status: "unknown", note: `whitepaper, security audits, docs; ${outcomeNotRecorded}` });
+  checks.push({ label: "News & press", status: "unknown", note: outcomeNotRecorded });
+  checks.push({ label: "GitHub forensics", status: "unknown", note: `when a repo/org is linked; ${outcomeNotRecorded}` });
+  checks.push({ label: "Trust-graph reconciliation", status: "unknown", note: `shared deployers/funders with flagged subjects; ${outcomeNotRecorded}` });
+  return checks;
+}
+function personChecks(opts) {
+  const { identityConfidence, realName, roles, hasAssociates } = opts;
+  const resolved = identityConfidence === "Confirmed" || identityConfidence === "Probable";
+  const checks = [];
+  checks.push(
+    identityConfidence === "Confirmed" ? { label: "Identity resolution", status: "confirmed", note: "confirmed confidence" } : identityConfidence ? { label: "Identity resolution", status: "finding", note: `${identityConfidence.toLowerCase()} confidence` } : { label: "Identity resolution", status: "unknown", note: outcomeNotRecorded }
+  );
+  checks.push({ label: "Profile-photo authenticity", status: "unknown", note: `AI / stock / celebrity / logo; ${outcomeNotRecorded}` });
+  checks.push({ label: "Code footprint (GitHub)", status: "unknown", note: `resolved from handle / name / bio; ${outcomeNotRecorded}` });
+  checks.push({ label: "Identity continuity", status: "unknown", note: `prior handles, cross-platform accounts; ${outcomeNotRecorded}` });
+  checks.push(hasAssociates ? { label: "Affiliations & associates", status: "confirmed", note: "associate records present in the dossier" } : { label: "Affiliations & associates", status: "unknown", note: "no collection outcome recorded; an empty dossier is not a confirmed clean result" });
+  checks.push(roles.includes("KOL") ? { label: "Promoted-token performance", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` } : { label: "Promoted-token performance", status: "not-applicable", note: "not a KOL" });
+  checks.push(roles.includes("INVESTOR") ? { label: "VC portfolio track record", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` } : { label: "VC portfolio track record", status: "not-applicable", note: "not a fund/investor" });
+  checks.push({ label: "News & press", status: "unknown", note: outcomeNotRecorded });
+  checks.push(resolved && realName ? { label: "US legal history", status: "unknown", note: `eligible by resolved name; ${outcomeNotRecorded}` } : { label: "US legal history", status: "not-applicable", note: "needs a resolved real name" });
+  checks.push(resolved && realName ? { label: "OFAC sanctions (name)", status: "unknown", note: `eligible by resolved name; ${outcomeNotRecorded}` } : { label: "OFAC sanctions (name)", status: "not-applicable", note: "needs a resolved real name" });
+  checks.push({ label: "Trust-graph connections", status: "unknown", note: `ties to other audited subjects; ${outcomeNotRecorded}` });
+  return checks;
+}
+
+// src/lib/reports.ts
+function reportChecks(kind, payload) {
+  if (kind === "token") {
+    const dossier = payload;
+    return dossier.versionContext ? dossier.versionContext.checks.map((check) => ({ ...check })) : tokenChecks(dossier);
+  }
+  if (kind === "investigation") {
+    const investigation = payload;
+    return investigation.versionContext ? investigation.versionContext.checks.map((check) => ({ ...check })) : tokenChecks(investigation.token);
+  }
+  if (kind === "person") {
+    const dossier = payload;
+    if (Array.isArray(dossier.checkRuns) && dossier.checkRuns.length) {
+      return dossier.checkRuns.map((check) => ({ ...check }));
+    }
+    if (dossier.versionContext) {
+      return dossier.versionContext.checks.map((check) => ({ ...check }));
+    }
+    return personChecks({
+      identityConfidence: dossier.report.identity_confidence ?? void 0,
+      realName: (dossier.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
+      roles: dossier.report.roles ?? [],
+      hasAssociates: (dossier.evidence.associates ?? []).length > 0
+    });
+  }
+  return [];
+}
+function reportCompleteness(kind, payload, checks = reportChecks(kind, payload)) {
+  const dossier = kind === "person" ? payload : null;
+  if (dossier?.checkRuns?.length && (dossier.completeness_state === "complete" || dossier.completeness_state === "partial" || dossier.completeness_state === "failed")) {
+    return dossier.completeness_state;
+  }
+  const inScope = checks.filter((check) => check.status !== "not-applicable");
+  return inScope.length > 0 && inScope.every(
+    (check) => check.status === "confirmed" || check.status === "finding" || check.status === "checked-empty"
+  ) ? "complete" : "partial";
+}
+
 // server/sweep.ts
 var MAX_TOKEN_CHECKS = 15;
 function creds() {
@@ -865,10 +1014,10 @@ async function runSweep(organizationId) {
   const openCaseRows = await pg(c, `cases?select=canonical_ref&${orgFilter}&status=eq.open&kind=in.(person,token,investigation)&limit=500`);
   const openCases = new Set((openCaseRows ?? []).map((row) => normalizeSubjectRef(row.canonical_ref)).filter(Boolean));
   const found = [];
-  let tokenChecks = 0;
+  let tokenChecks2 = 0;
   for (const w of watches) {
-    if (w.kind === "token" && openCases.has(normalizeSubjectRef(w.id)) && tokenChecks < MAX_TOKEN_CHECKS) {
-      tokenChecks++;
+    if (w.kind === "token" && openCases.has(normalizeSubjectRef(w.id)) && tokenChecks2 < MAX_TOKEN_CHECKS) {
+      tokenChecks2++;
       const input = { kind: "token", ref: w.id, via: w.via ?? "evm" };
       const d = await auditToken(input, void 0, { skipSim: true }).catch(() => null);
       if (d && w.snapshot) {
@@ -881,7 +1030,16 @@ async function runSweep(organizationId) {
         if (typeof s.liquidityUsd === "number" && s.liquidityUsd > 5e3 && (d.liquidityUsd ?? 0) < s.liquidityUsd * 0.5) {
           found.push({ subject: w.id, label: w.label, type: "drift", detail: `liquidity halved: $${Math.round(s.liquidityUsd).toLocaleString()} \u2192 $${Math.round(d.liquidityUsd ?? 0).toLocaleString()}`, at: Date.now() });
         }
-        const item = { ...w, snapshot: { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap } };
+        const item = {
+          ...w,
+          snapshot: {
+            verdict: d.verdict,
+            score: d.score,
+            completenessState: reportCompleteness("token", d),
+            liquidityUsd: d.liquidityUsd,
+            mcap: d.mcap
+          }
+        };
         await pg(c, "reports?on_conflict=organization_id,ref,kind", {
           method: "POST",
           headers: { prefer: "resolution=merge-duplicates,return=minimal" },

@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { emptyEvidence } from "../../src/data/evidence";
 import { getCost, withCostLedger } from "../cost";
-import { enrichPerson } from "./peopledatalabs";
+import { enrichPerson, peopledatalabsAdapter } from "./peopledatalabs";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -133,5 +134,29 @@ describe("People Data Labs provider attempt accounting", () => {
         meta: expect.stringContaining("missing_full_name"),
       }),
     ]);
+  });
+
+  it("stores a licensed resolved name without replacing the X display name", async () => {
+    vi.stubEnv("PDL_API_KEY", "pdl-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      data: {
+        full_name: "Ada Lovelace",
+        linkedin_url: "linkedin.com/in/ada-lovelace",
+        experience: [],
+      },
+    })));
+    const evidence = emptyEvidence("@analytical_engine");
+    evidence.profile.display_name = "Analytical Engine";
+
+    await withCostLedger(() => peopledatalabsAdapter.run({
+      handle: evidence.profile.handle,
+      evidence,
+      emit: vi.fn(),
+      recordCheck: vi.fn(),
+    }));
+
+    expect(evidence.profile.display_name).toBe("Analytical Engine");
+    expect(evidence.profile.resolved_name).toBe("Ada Lovelace");
+    expect(evidence.profile.identity_confidence).toBe("Probable");
   });
 });

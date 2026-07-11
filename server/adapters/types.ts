@@ -46,11 +46,16 @@ export interface CollectContext {
   recordCheck?: (observation: CheckObservation) => void;
 }
 
+export interface AdapterRunResult {
+  state: "executed" | "partial" | "failed";
+  detail?: string;
+}
+
 // An adapter declares which provider key(s) it needs and a run() that mutates
 // the evidence bag. `available` lets the orchestrator skip and report cleanly.
 export interface Adapter {
   id: string;
   label: string;
   available: () => boolean;
-  run: (ctx: CollectContext) => Promise<void>;
+  run: (ctx: CollectContext) => Promise<void | AdapterRunResult>;
 }

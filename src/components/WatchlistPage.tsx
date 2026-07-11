@@ -1,12 +1,54 @@
 import { useEffect, useState, useCallback } from "react";
 import { getWatchlist, removeWatch, rebaseline, hydrateSharedWatchlist, type WatchItem, type WatchSnapshot } from "../lib/watchlist";
 import { auditToken } from "../token/audit";
-import { fetchReportState, type ReportLookup } from "../lib/reports";
+import { fetchReportState, reportCompleteness, type ReportLookup } from "../lib/reports";
+import { coverageQualifiedCompleteness, presentPublicReport, type PublicReportPresentation } from "../lib/reportPresentation";
 import { verdictMeta } from "../lib/verdict";
 
 const RANK: Record<string, number> = { PASS: 0, CAUTION: 1, FAIL: 2, AVOID: 3, UNVERIFIABLE_IDENTITY: 3 };
 
+// Older watch snapshots predate frozen coverage metadata. Keep reading those
+// records, but treat absent completeness as partial through the shared policy.
 type Row = { item: WatchItem; current?: WatchSnapshot; loading: boolean; error?: boolean; caseStatus?: ReportLookup["status"] };
+
+function presentationFor(snapshot: WatchSnapshot): PublicReportPresentation {
+  return presentPublicReport({
+    verdict: snapshot.verdict,
+    score: snapshot.score,
+    completeness: snapshot.completenessState,
+  });
+}
+
+function presentationLabel(presentation: PublicReportPresentation): string {
+  const label = presentation.resultLabel === "RISK SIGNAL"
+    ? `RISK · ${presentation.displayVerdict}`
+    : presentation.displayVerdict;
+  return presentation.readinessLabel === "INVESTIGATION FAILED" ? `${label} · FAILED` : label;
+}
+
+function presentationMeta(presentation: PublicReportPresentation) {
+  return verdictMeta(
+    presentation.rawVerdict === "UNVERIFIABLE_IDENTITY"
+      ? "UNVERIFIABLE_IDENTITY"
+      : presentation.displayVerdict,
+  );
+}
+
+function presentationRank(presentation: PublicReportPresentation): number {
+  const verdictRank = RANK[presentation.rawVerdict] ?? RANK[presentation.displayVerdict] ?? 0;
+  // Losing decision readiness is meaningful drift even when the underlying
+  // model signal remains PASS. Existing adverse evidence stays more severe.
+  const coverageRank = presentation.final
+    ? 0
+    : presentation.readinessLabel === "INVESTIGATION FAILED"
+      ? 2
+      : 1;
+  return verdictRank * 3 + coverageRank;
+}
+
+function completenessState(value: unknown): WatchSnapshot["completenessState"] {
+  return value === "complete" || value === "partial" || value === "failed" ? value : undefined;
+}
 
 async function check(item: WatchItem): Promise<{ current: WatchSnapshot | null; caseStatus: ReportLookup["status"] }> {
   const stored = await fetchReportState(item.id, item.kind);
@@ -14,15 +56,35 @@ async function check(item: WatchItem): Promise<{ current: WatchSnapshot | null; 
   if (item.kind === "token") {
     const d = await auditToken({ kind: "token", ref: item.id, via: item.via ?? "evm" });
     return {
-      current: d ? { verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap } : null,
+      current: d ? {
+        verdict: d.verdict,
+        score: d.score,
+        liquidityUsd: d.liquidityUsd,
+        mcap: d.mcap,
+        completenessState: reportCompleteness("token", d),
+      } : null,
       caseStatus: stored.status,
     };
   }
   // Person watches read the latest PERSISTED report (a rescan updates it);
   // there is no cheap live re-check for a person, so stored-latest is the truth.
-  const report = (stored.report?.payload as { report?: { composite_verdict?: string; governing_score?: number | null } } | undefined)?.report;
+  const payload = stored.report?.payload as {
+    completeness_state?: unknown;
+    report?: { composite_verdict?: string; governing_score?: number | null };
+  } | undefined;
+  const report = payload?.report;
+  const versionContext = stored.report?.versionContext;
+  const completeness = coverageQualifiedCompleteness({
+    completeness: completenessState(versionContext?.completenessState ?? payload?.completeness_state),
+    attestation: versionContext?.attestationState,
+    checks: versionContext?.checks ?? [],
+  });
   return {
-    current: report?.composite_verdict ? { verdict: report.composite_verdict, score: report.governing_score ?? null } : null,
+    current: report?.composite_verdict ? {
+      verdict: report.composite_verdict,
+      score: report.governing_score ?? null,
+      completenessState: completeness,
+    } : null,
     caseStatus: stored.status,
   };
 }
@@ -118,15 +180,43 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
       ) : (
         <div className="mt-6 space-y-2">
           {rows.map((r) => {
-            const baseM = verdictMeta(r.item.snapshot.verdict);
-            const curM = r.current ? verdictMeta(r.current.verdict) : baseM;
-            const verdictChanged = r.current && r.current.verdict !== r.item.snapshot.verdict;
-            const worsened = r.current && (RANK[r.current.verdict] ?? 0) > (RANK[r.item.snapshot.verdict] ?? 0);
+            const baseline = r.item.snapshot;
+            const basePresentation = presentationFor(baseline);
+            const currentPresentation = r.current ? presentationFor(r.current) : basePresentation;
+            const baseM = presentationMeta(basePresentation);
+            const curM = presentationMeta(currentPresentation);
+            const baseLabel = presentationLabel(basePresentation);
+            const currentLabel = presentationLabel(currentPresentation);
+            const verdictChanged = r.current && currentLabel !== baseLabel;
+            const worsened = r.current && presentationRank(currentPresentation) > presentationRank(basePresentation);
             const liqDrop =
               r.current?.liquidityUsd != null && r.item.snapshot.liquidityUsd
                 ? (r.current.liquidityUsd - r.item.snapshot.liquidityUsd) / r.item.snapshot.liquidityUsd
                 : null;
             const alert = worsened || (liqDrop != null && liqDrop < -0.25);
+            const statusLabel = r.loading
+              ? "…"
+              : r.caseStatus === "archived"
+                ? "ARCHIVED"
+                : r.caseStatus === "missing"
+                  ? "NO CASE"
+                  : r.caseStatus === "unavailable"
+                    ? "STATUS ERR"
+                    : r.error
+                      ? "ERR"
+                      : currentLabel;
+            const statusAria = r.loading
+              ? "Current assessment: checking."
+              : r.caseStatus === "archived"
+                ? "Current assessment unavailable: case archived."
+                : r.caseStatus === "missing"
+                  ? "Current assessment unavailable: no case."
+                  : r.caseStatus === "unavailable" || r.error
+                    ? "Current assessment unavailable: status error."
+                    : `Current assessment: ${currentPresentation.resultLabel}, ${currentPresentation.displayVerdict}. ${currentPresentation.readinessLabel}.`;
+            const statusTitle = !r.loading && r.caseStatus === "open" && !r.error
+              ? `${currentPresentation.coverageLabel}. ${currentPresentation.note}`
+              : undefined;
             return (
               <div key={r.item.id} className="flex items-center gap-3 rounded-xl border bg-panel px-4 py-3" style={alert ? { borderColor: "var(--color-avoid)" } : {}}>
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-panel-2 text-[12px] text-signal">
@@ -141,22 +231,17 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
                 <div className="flex items-center gap-1.5 text-[11px]">
                   {verdictChanged && (
                     <>
-                      <span className="mono" style={{ color: baseM.color }}>{baseM.label}</span>
+                      <span className="mono" style={{ color: baseM.color }}>{baseLabel}</span>
                       <span className="text-ink-faint">→</span>
                     </>
                   )}
-                  <span className="mono rounded-full border px-2 py-0.5 font-semibold tracking-wider" style={{ borderColor: curM.color, color: curM.color }}>
-                    {r.loading
-                      ? "…"
-                      : r.caseStatus === "archived"
-                        ? "ARCHIVED"
-                        : r.caseStatus === "missing"
-                          ? "NO CASE"
-                          : r.caseStatus === "unavailable"
-                            ? "STATUS ERR"
-                            : r.error
-                              ? "ERR"
-                              : curM.label}
+                  <span
+                    aria-label={statusAria}
+                    title={statusTitle}
+                    className="mono rounded-full border px-2 py-0.5 font-semibold tracking-wider"
+                    style={{ borderColor: curM.color, color: curM.color }}
+                  >
+                    {statusLabel}
                   </span>
                 </div>
 
