@@ -33,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (quota.error) { res.status(503).json({ error: quota.error }); return; }
   if (!quota.allowed) { res.status(429).json({ error: "daily_investigation_limit_reached", remaining: 0 }); return; }
   try {
-    const dossier = await runAudit(handle, () => {});
+    const dossier = await runAudit(handle, () => {}, { organizationId: auth.organizationId });
     if (!dossier) {
       res.status(404).json({ error: "could not resolve subject (no keys configured for live people audits)" });
       return;

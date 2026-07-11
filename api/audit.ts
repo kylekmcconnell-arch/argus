@@ -141,7 +141,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   send("quota", { remaining: quota.remaining });
 
   try {
-    const dossier = await runAudit(handle, emit) as ServerDossier | null;
+    const dossier = await runAudit(handle, emit, { organizationId: auth.organizationId }) as ServerDossier | null;
     if (!dossier) {
       send("error", { error: "not_found" });
     } else {

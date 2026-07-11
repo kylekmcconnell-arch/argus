@@ -40,6 +40,7 @@ export interface CheckObservation {
 
 export interface CollectContext {
   handle: string;
+  organizationId?: string;
   evidence: CollectedEvidence;
   emit: Emit;
   recordCheck?: (observation: CheckObservation) => void;
