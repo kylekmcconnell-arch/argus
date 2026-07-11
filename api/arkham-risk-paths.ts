@@ -6,8 +6,9 @@
 // Tornado.Cash". Seeds are labeled with their Arkham entity so they read as names,
 // not hashes. Top paths by USD contribution, deduped per seed, cached 24h.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore — bundled JS sibling
-import { cacheGetJson, cacheSetJson } from "./_cache.js";
+import { attachPanelCost, cacheGetJson, cacheSetJson, resolvePanelCostVersion } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
+import { providerAddressKey } from "../src/lib/providerAddress.js";
 
 export const config = { maxDuration: 20 };
 
@@ -15,30 +16,46 @@ const RISK = "https://api.arkm.com/risk/address/";
 const INTEL = "https://api.arkm.com/intelligence/address/";
 
 type PathOut = { seed: string; seedName?: string; seedType?: string; category?: string; direction: string; score: number; usd: number; hops: number };
+interface CallCounter { calls: number; succeeded: number }
 
-async function seedName(addr: string, key: string): Promise<{ name?: string; type?: string }> {
+async function seedName(addr: string, key: string, usage: CallCounter): Promise<{ name?: string; type?: string }> {
+  usage.calls += 1;
   try {
     const r = await fetch(`${INTEL}${encodeURIComponent(addr)}`, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(7000) });
     if (!r.ok) return {};
     const d = (await r.json()) as { arkhamEntity?: { name?: string; type?: string }; arkhamLabel?: { name?: string } };
+    usage.succeeded += 1;
     return { name: d.arkhamEntity?.name || d.arkhamLabel?.name, type: d.arkhamEntity?.type };
   } catch { return {}; }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
   const key = process.env.ARKHAM_API_KEY;
   if (!key) { res.status(200).json({ available: false, note: "Arkham not configured." }); return; }
   const addr = (typeof req.query.address === "string" ? req.query.address : "").trim();
   if (!addr || addr.length < 8) { res.status(400).json({ error: "address required" }); return; }
 
-  const ck = `arkham-paths:${addr.toLowerCase()}:v1`;
+  const ck = `arkham-paths:${providerAddressKey(addr)}:v1`;
   const cached = await cacheGetJson<any>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
+  const usage: CallCounter = { calls: 0, succeeded: 0 };
   try {
+    usage.calls += 1;
     const r = await fetch(`${RISK}${encodeURIComponent(addr)}/paths`, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(12000) });
     if (!r.ok) { res.status(200).json({ available: false, note: `Arkham ${r.status}` }); return; }
     const d = (await r.json()) as { paths?: any[] };
+    usage.succeeded += 1;
     const raw = Array.isArray(d?.paths) ? d.paths : [];
     // Best path per seed (highest USD contribution), then the top few overall.
     const bySeed = new Map<string, any>();
@@ -50,7 +67,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
     const top = [...bySeed.values()].sort((a, b) => Number(b?.contribution_usd ?? 0) - Number(a?.contribution_usd ?? 0)).slice(0, 6);
     // Label the seeds (parallel, bounded).
-    const labels = await Promise.all(top.map((p) => seedName(String(p.seed_address), key)));
+    const labels = await Promise.all(top.map((p) => seedName(String(p.seed_address), key, usage)));
     const paths: PathOut[] = top.map((p, i) => ({
       seed: String(p.seed_address),
       seedName: labels[i].name,
@@ -66,5 +83,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json(out);
   } catch (e) {
     res.status(200).json({ available: false, error: String(e), note: "Risk paths lookup failed." });
+  } finally {
+    if (usage.calls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "arkham",
+        op: "panel:arkham-risk-paths",
+        calls: usage.calls,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usage.succeeded === usage.calls ? "succeeded" : usage.succeeded > 0 ? "partial" : "failed",
+      });
+    }
   }
 }

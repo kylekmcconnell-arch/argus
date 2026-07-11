@@ -23,6 +23,7 @@ import { NamesakeCheck } from "./NamesakeCheck";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 import { TrustGraph } from "./TrustGraph";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 import { investigationContribution, getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
@@ -131,7 +132,10 @@ export function InvestigationReport({
     ? "INCOMPLETE"
     : projectAccount?.report.composite_verdict;
   // Arkham entity labels for the deployer + funder wallets.
-  const arkham = useArkhamLabels(showCurrentIntelligence && panelCostToken ? [token.deployer, deployerTrail?.funder?.address] : []);
+  const { labels: arkham, state: arkhamState } = useArkhamLabels(
+    showCurrentIntelligence && panelCostToken ? [token.deployer, deployerTrail?.funder?.address] : [],
+    panelCostToken,
+  );
   const tm = verdictMeta(presentedTokenVerdict);
   // The project's GitHub org (from its site links), for commit forensics.
   // The project's own website (first non-social link) → domain intelligence.
@@ -552,11 +556,14 @@ export function InvestigationReport({
             bytecode, and the OFAC sanctions screen, in one canonical order. */}
         {showCurrentIntelligence && panelCostToken && (
           <div className="mt-3">
-            <OnChainForensics token={token} onAudit={onAudit} record={canRecordCurrentIntelligence} />
+            <OnChainForensics token={token} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
+            {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
+              <PanelRequestNotice failure={arkhamState} label="Wallet identity labels" className="mt-3" />
+            )}
             {canRecordCurrentIntelligence && <ArkhamGraphBridge subject={`$${token.symbol}`} labels={arkham} />}
-            {token.deployer && <Counterparties address={token.deployer} subject={`$${token.symbol}`} chain={token.chain} record={canRecordCurrentIntelligence} />}
-            {token.deployer && <RiskPaths address={token.deployer} />}
-            {token.deployer && <div className="mt-3"><Holdings address={token.deployer} symbol={token.symbol} /></div>}
+            {token.deployer && <Counterparties address={token.deployer} subject={`$${token.symbol}`} chain={token.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />}
+            {token.deployer && <RiskPaths address={token.deployer} panelCostToken={panelCostToken} />}
+            {token.deployer && <div className="mt-3"><Holdings address={token.deployer} symbol={token.symbol} panelCostToken={panelCostToken} /></div>}
           </div>
         )}
 

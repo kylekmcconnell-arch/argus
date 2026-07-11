@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { attachPanelCost, cacheGetJson, cacheSetJson } from "./_cache.js";
+import { attachPanelCost, cacheGetJson, cacheSetJson, recordProviderUsageEvent } from "./_cache.js";
 
 const originalUrl = process.env.SUPABASE_URL;
 const originalSecret = process.env.SUPABASE_SECRET_KEY;
@@ -81,31 +81,81 @@ describe("service-only provider cache", () => {
 });
 
 describe("post-report cost ledger", () => {
-  it("attributes a panel line to the exact organization and immutable version", async () => {
+  it("appends a panel event to the exact organization and immutable version", async () => {
     process.env.SUPABASE_URL = "https://database.example";
     process.env.SUPABASE_SECRET_KEY = "sb_secret_test";
+    const organizationId = "00000000-0000-4000-8000-000000000001";
     const versionId = "00000000-0000-4000-8000-000000000201";
     const fetchMock = vi.fn().mockResolvedValueOnce(jsonResponse(null, 204));
     vi.stubGlobal("fetch", fetchMock);
 
     await attachPanelCost(
-      "org-1",
+      organizationId,
       versionId,
       { provider: "claude", op: "panel:pfp-check", calls: 1, usd: 0.123456, meta: "vision" },
     );
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("https://database.example/rest/v1/rpc/upsert_report_cost_line");
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toEqual({
-      p_organization_id: "org-1",
+    expect(fetchMock.mock.calls[0][0]).toBe("https://database.example/rest/v1/rpc/record_provider_usage_event");
+    const body = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    expect(body).toMatchObject({
+      p_organization_id: organizationId,
       p_report_version_id: versionId,
       p_provider: "claude",
       p_operation: "panel:pfp-check",
       p_calls: 1,
-      p_usd: 0.1235,
+      p_usd: 0.123456,
+      p_initiated_by: null,
+      p_status: "succeeded",
       p_meta: "vision",
     });
+    expect(body.p_idempotency_key).toMatch(/^api:[0-9a-f-]{36}$/);
     expect(fetchMock.mock.calls[0][1]?.headers).not.toHaveProperty("authorization");
+  });
+
+  it("generates a distinct idempotency key for each distinct helper invocation", async () => {
+    process.env.SUPABASE_URL = "https://database.example";
+    process.env.SUPABASE_SECRET_KEY = "sb_secret_test";
+    const organizationId = "00000000-0000-4000-8000-000000000001";
+    const versionId = "00000000-0000-4000-8000-000000000201";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse(null, 204))
+      .mockResolvedValueOnce(jsonResponse(null, 204));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const line = { provider: "grok", op: "panel:namesake", calls: 1, usd: 0.01 };
+    await recordProviderUsageEvent(organizationId, versionId, line);
+    await recordProviderUsageEvent(organizationId, versionId, line);
+
+    const first = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const second = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(first.p_idempotency_key).toMatch(/^api:[0-9a-f-]{36}$/);
+    expect(second.p_idempotency_key).toMatch(/^api:[0-9a-f-]{36}$/);
+    expect(first.p_idempotency_key).not.toBe(second.p_idempotency_key);
+  });
+
+  it("retries a transient accounting failure with the same immutable event key", async () => {
+    process.env.SUPABASE_URL = "https://database.example";
+    process.env.SUPABASE_SECRET_KEY = "sb_secret_test";
+    const organizationId = "00000000-0000-4000-8000-000000000001";
+    const versionId = "00000000-0000-4000-8000-000000000201";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "temporary" }, 503))
+      .mockResolvedValueOnce(jsonResponse(null, 204));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await recordProviderUsageEvent(organizationId, versionId, {
+      provider: "twitterapi",
+      op: "panel:x-find-profile",
+      calls: 1,
+      usd: 0.00000075,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const first = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const retry = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(first.p_usd).toBe(0.00000075);
+    expect(retry).toEqual(first);
   });
 
   it("never guesses a report version from a subject reference", async () => {
@@ -115,7 +165,7 @@ describe("post-report cost ledger", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await attachPanelCost(
-      "org-1",
+      "00000000-0000-4000-8000-000000000001",
       "0x1111111111111111111111111111111111111111",
       { provider: "grok", op: "panel:namesake", calls: 1, usd: 0.2 },
     );

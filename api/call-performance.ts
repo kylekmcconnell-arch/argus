@@ -35,23 +35,40 @@ const OFFSETS: [string, number][] = [
   ["1h", 1], ["12h", 12], ["24h", 24], ["1w", 168], ["1m", 720], ["2m", 1440], ["3m", 2160],
 ];
 
-async function gtOnce(base: string, headers: Record<string, string>, path: string): Promise<any | null> {
-  try { const r = await fetch(`${base}${path}`, { headers, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
+interface CallCounter { calls: number; succeeded: number }
+const usageStatus = (counter: CallCounter): "succeeded" | "partial" | "failed" => (
+  counter.succeeded === counter.calls ? "succeeded" : counter.succeeded > 0 ? "partial" : "failed"
+);
+
+async function gtOnce(base: string, headers: Record<string, string>, path: string, counter?: CallCounter): Promise<any | null> {
+  if (counter) counter.calls += 1;
+  try {
+    const r = await fetch(`${base}${path}`, { headers, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return null;
+    const data = await r.json();
+    if (counter) counter.succeeded += 1;
+    return data;
+  } catch { return null; }
 }
 // Prefer the paid CoinGecko on-chain endpoint (deeper history, higher limits)
 // when a key is set, but always fall back to the free GeckoTerminal API so a
 // missing/invalid key or an unsupported path can never break the feature.
-async function gt(path: string): Promise<any | null> {
+async function gt(path: string, proUsage: CallCounter): Promise<any | null> {
   if (CG_KEY) {
-    const pro = await gtOnce(GT_PRO, { accept: "application/json", "x-cg-pro-api-key": CG_KEY }, path);
+    const pro = await gtOnce(GT_PRO, { accept: "application/json", "x-cg-pro-api-key": CG_KEY }, path, proUsage);
     if (pro) return pro;
   }
   return gtOnce(GT_FREE, { accept: "application/json" }, path);
 }
-interface CallCounter { calls: number }
 async function tw(url: string, key: string, counter: CallCounter): Promise<any | null> {
   counter.calls += 1;
-  try { const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) }); return r.ok ? await r.json() : null; } catch { return null; }
+  try {
+    const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) });
+    if (!r.ok) return null;
+    const data = await r.json();
+    counter.succeeded += 1;
+    return data;
+  } catch { return null; }
 }
 
 type Candle = [number, number, number, number, number, number]; // ts,o,h,l,c,v
@@ -64,8 +81,8 @@ function nearest(candles: Candle[], targetSec: number): number | null {
   return best && bestD <= 2 * 86400 ? best[4] : null;
 }
 
-async function poolFor(network: string, address: string): Promise<string | null> {
-  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`);
+async function poolFor(network: string, address: string, proUsage: CallCounter): Promise<string | null> {
+  const d = await gt(`/networks/${network}/tokens/${address}/pools?page=1`, proUsage);
   const first = d?.data?.[0];
   const id: string | undefined = first?.attributes?.address ?? first?.id;
   return id ? id.replace(`${network}_`, "") : null;
@@ -108,9 +125,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const network = NETWORK[chain] ?? chain;
   if (!network) { res.status(200).json({ available: true, note: "unsupported chain" }); return; }
 
-  const twitterUsage: CallCounter = { calls: 0 };
+  const twitterUsage: CallCounter = { calls: 0, succeeded: 0 };
+  const coingeckoUsage: CallCounter = { calls: 0, succeeded: 0 };
+  const target = `${network}:${address}`.slice(0, 128);
   try {
-    const pool = await poolFor(network, address);
+    const pool = await poolFor(network, address, coingeckoUsage);
     if (!pool) { res.status(200).json({ available: true, note: "no pool indexed for this token" }); return; }
 
     // Find the call time (or fall back to the token's launch = oldest candle).
@@ -118,7 +137,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const call = twKey ? await findCall(handle, ticker, address, twKey, twitterUsage) : null;
 
     // Daily candles across the token's life (for launch anchor + long offsets).
-    const dailyD = await gt(`/networks/${network}/pools/${pool}/ohlcv/day?aggregate=1&limit=1000&currency=usd`);
+    const dailyD = await gt(`/networks/${network}/pools/${pool}/ohlcv/day?aggregate=1&limit=1000&currency=usd`, coingeckoUsage);
     const daily: Candle[] = (dailyD?.data?.attributes?.ohlcv_list ?? []).slice().sort((a: Candle, b: Candle) => a[0] - b[0]);
     if (daily.length < 2) { res.status(200).json({ available: true, note: "not enough price history" }); return; }
 
@@ -135,7 +154,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Hourly candles around the anchor for fine early offsets (1h..1w).
-    const hourlyD = await gt(`/networks/${network}/pools/${pool}/ohlcv/hour?aggregate=1&limit=200&before_timestamp=${anchorSec + 8 * 86400}&currency=usd`);
+    const hourlyD = await gt(`/networks/${network}/pools/${pool}/ohlcv/hour?aggregate=1&limit=200&before_timestamp=${anchorSec + 8 * 86400}&currency=usd`, coingeckoUsage);
     const hourly: Candle[] = (hourlyD?.data?.attributes?.ohlcv_list ?? []).slice().sort((a: Candle, b: Candle) => a[0] - b[0]);
 
     const priceAt = (sec: number): number | null => {
@@ -158,15 +177,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const curPrice = daily[daily.length - 1][4];
     const peak = Math.max(...daily.filter((c) => c[0] >= anchorSec).map((c) => c[4]), anchorPrice);
 
-    if (twitterUsage.calls) {
-      const target = `${network}:${address}`.slice(0, 128);
-      await attachPanelCost(auth.organizationId, panelCostVersionId, {
-        provider: "twitterapi",
-        op: `panel:call-performance:${target}`,
-        calls: twitterUsage.calls,
-        usd: twitterUsage.calls * 0.0002,
-      });
-    }
     res.status(200).json({
       available: true,
       anchor,
@@ -182,5 +192,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (e) {
     res.status(200).json({ available: true, error: String(e), note: "call-performance failed" });
+  } finally {
+    const lines: Promise<unknown>[] = [];
+    if (twitterUsage.calls > 0) {
+      lines.push(attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "twitterapi",
+        op: `panel:call-performance:${target}`,
+        calls: twitterUsage.calls,
+        usd: twitterUsage.calls * 0.0002,
+        initiatedBy: auth.userId,
+        status: usageStatus(twitterUsage),
+      }));
+    }
+    if (coingeckoUsage.calls > 0) {
+      lines.push(attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "coingecko",
+        op: `panel:call-performance:${target}`,
+        calls: coingeckoUsage.calls,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usageStatus(coingeckoUsage),
+      }));
+    }
+    await Promise.all(lines.map((line) => line.catch(() => undefined)));
   }
 }

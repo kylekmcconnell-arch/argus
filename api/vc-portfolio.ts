@@ -12,9 +12,12 @@ export const config = { maxDuration: 120 };
 
 const q = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 
-async function grok(key: string, system: string, user: string): Promise<{ parsed: any | null; usd: number }> {
+type GrokAttempt = { parsed: any | null; usd: number; status: "succeeded" | "partial" | "failed"; meta?: string };
+
+async function grok(key: string, system: string, user: string): Promise<GrokAttempt> {
+  let r: Response;
   try {
-    const r = await fetch("https://api.x.ai/v1/responses", {
+    r = await fetch("https://api.x.ai/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({
@@ -25,16 +28,23 @@ async function grok(key: string, system: string, user: string): Promise<{ parsed
       }),
       signal: AbortSignal.timeout(55000),
     });
-    if (!r.ok) return { parsed: null, usd: 0 };
-    const d = (await r.json()) as any;
-    const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : 0;
-    const usd = grokUsd(d.usage, toolCalls);
-    const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
-    const m = text.match(/\{[\s\S]*\}/);
-    return { parsed: m ? JSON.parse(m[0]) : null, usd };
-  } catch {
-    return { parsed: null, usd: 0 };
-  }
+  } catch { return { parsed: null, usd: 0, status: "failed", meta: "transport_error" }; }
+  if (!r.ok) return { parsed: null, usd: 0, status: "failed", meta: `http_${r.status}` };
+
+  let d: any;
+  try { d = await r.json(); }
+  catch { return { parsed: null, usd: 0, status: "failed", meta: "response_json_error" }; }
+  const toolCalls = Array.isArray(d?.output) ? d.output.filter((o: any) => /search|tool/.test(String(o?.type ?? ""))).length : 0;
+  const usd = grokUsd(d?.usage, toolCalls);
+  const text = d?.output_text ?? (Array.isArray(d?.output) ? d.output.flatMap((o: any) => o?.content ?? []).map((c: any) => c?.text ?? "").join(" ") : "") ?? "";
+  const m = typeof text === "string" ? text.match(/\{[\s\S]*\}/) : null;
+  if (!m) return { parsed: null, usd, status: "partial", meta: "output_contract_error" };
+  let parsed: any;
+  try { parsed = JSON.parse(m[0]); }
+  catch { return { parsed: null, usd, status: "partial", meta: "output_contract_error" }; }
+  return Array.isArray(parsed?.investments)
+    ? { parsed, usd, status: "succeeded" }
+    : { parsed, usd, status: "partial", meta: "output_contract_error" };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -74,13 +84,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   // Grok is nondeterministic and often returns a THIN list for a fund with a big
   // public portfolio. When the first pass comes back short, run a second pass and
   // MERGE (dedupe by project) to deepen coverage — a fund's page can list 40+.
-  let spend = 0;
   const g = await grok(key, system, user);
-  spend += g.usd;
-  let list: any[] = Array.isArray(g.parsed?.investments) ? g.parsed.investments : [];
+  const attempts: GrokAttempt[] = [g];
+  const list: any[] = Array.isArray(g.parsed?.investments) ? g.parsed.investments : [];
   if (list.length < 15) {
     const g2 = await grok(key, system, user + " Be exhaustive: list at least 25-40 holdings, including earlier-stage and less-famous portfolio companies — do NOT stop at the well-known ones.");
-    spend += g2.usd;
+    attempts.push(g2);
     const more: any[] = Array.isArray(g2.parsed?.investments) ? g2.parsed.investments : [];
     const seen = new Set(list.map((i) => String(i?.project ?? "").trim().toLowerCase()).filter(Boolean));
     for (const i of more) {
@@ -104,7 +113,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }));
 
   // Fold the panel spend into the KOL/VC's stored person report + cache the answer.
-  await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "grok", op: "panel:vc-portfolio", calls: spend > 0 ? (g.usd < spend ? 2 : 1) : 0, usd: spend });
+  const spend = attempts.reduce((sum, attempt) => sum + attempt.usd, 0);
+  const status = attempts.every((attempt) => attempt.status === "succeeded")
+    ? "succeeded"
+    : attempts.every((attempt) => attempt.status === "failed")
+      ? "failed"
+      : "partial";
+  await attachPanelCost(auth.organizationId, panelCostVersionId, {
+    provider: "grok",
+    op: "panel:vc-portfolio",
+    calls: attempts.length,
+    usd: spend,
+    initiatedBy: auth.userId,
+    status,
+    ...(status === "succeeded" ? {} : { meta: `succeeded_${attempts.filter((attempt) => attempt.status === "succeeded").length}_of_${attempts.length}` }),
+  });
   const result = { available: true, name, count: investments.length, investments };
   if (investments.length) await cacheSetJson(cacheKey, result);
   res.status(200).json(result);

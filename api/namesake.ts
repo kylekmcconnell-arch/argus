@@ -45,7 +45,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     "Reply with ONLY compact JSON: {\"named_after\":\"\",\"x_handle\":\"@...\",\"who\":\"one line on who they are\",\"relationship\":\"created|endorsed|acknowledged|denied|unaffiliated|not_a_person|unclear\",\"evidence\":\"the specific post/statement/fact, dated\",\"note\":\"one-sentence bottom line for an investor\"}. NEVER invent a statement. Never use em dashes.";
   const user = `Token: $${symbol}${name && name.toLowerCase() !== symbol.toLowerCase() ? ` ("${name}")` : ""}${contract ? ` | contract ${contract}` : ""}${chain ? ` on ${chain}` : ""}. Who is it named after, and what is the namesake's actual relationship to THIS token?`;
 
+  let cost = { calls: 0, usd: 0, meta: "provider request failed", status: "failed" as "succeeded" | "failed" | "partial" };
   try {
+    cost.calls = 1;
     const r = await fetch("https://api.x.ai/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
@@ -59,14 +61,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (!r.ok) { res.status(200).json({ available: true, error: `grok ${r.status}: ${(await r.text()).slice(0, 200)}` }); return; }
     const d = (await r.json()) as any;
+    const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : 0;
+    cost = {
+      calls: 1,
+      usd: grokUsd(d.usage, toolCalls),
+      meta: `${(d.usage?.input_tokens ?? 0) + (d.usage?.output_tokens ?? 0)} tok`,
+      status: "partial",
+    };
     const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
     const m = text.match(/\{[\s\S]*\}/);
     if (!m) { res.status(200).json({ available: true, relationship: "unclear", note: "No determination." }); return; }
     const p = JSON.parse(m[0]);
-    // Fold this panel's spend into the subject's stored report (investigations
-    // are stored under the contract address), then cache the answer.
-    const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : 0;
-    await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "grok", op: "panel:namesake", calls: 1, usd: grokUsd(d.usage, toolCalls), meta: `${(d.usage?.input_tokens ?? 0) + (d.usage?.output_tokens ?? 0)} tok` });
+    cost.status = "succeeded";
     const out = {
       available: true,
       named_after: typeof p.named_after === "string" ? p.named_after.slice(0, 80) : null,
@@ -80,5 +86,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json(out);
   } catch (e) {
     res.status(200).json({ available: true, error: String(e), relationship: "unclear" });
+  } finally {
+    if (cost.calls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "grok",
+        op: "panel:namesake",
+        ...cost,
+        initiatedBy: auth.userId,
+      });
+    }
   }
 }

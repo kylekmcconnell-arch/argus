@@ -1103,7 +1103,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           {/* code footprint — resolve the subject's GitHub from their handle/name/bio
               and analyse it (self-hides when no account is confidently matched) */}
-          {showCurrentIntelligence && panelCostToken && <PersonGithub className="min-w-0 lg:col-span-2" handle={report.handle} name={f.display_name} bio={f.bio} record={canRecordCurrentIntelligence} />}
+          {showCurrentIntelligence && panelCostToken && <PersonGithub className="min-w-0 lg:col-span-2" handle={report.handle} name={f.display_name} bio={f.bio} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />}
 
           {/* The old "On-chain reality check" (a single promoted token → deployer)
               was removed: for KOLs the KOL report below is the richer superset, for
@@ -1150,7 +1150,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           {showCurrentIntelligence && panelCostToken && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="Identity continuity" kicker="current supplemental search · not part of the stored score">
-                <IdentitySweep handle={report.handle} auto record={canRecordCurrentIntelligence} />
+                <IdentitySweep handle={report.handle} auto panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
               </Section>
             </div>
           )}

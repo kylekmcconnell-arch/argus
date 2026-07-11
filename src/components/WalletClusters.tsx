@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { shortAddr } from "../lib/wallets";
 import { recordForensicEntities } from "../graph/store";
-import { HolderBubbleMap } from "./HolderBubbleMap";
+import { HolderBubbleMap, type BubbleEdge, type BubbleWallet } from "./HolderBubbleMap";
 import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { ArkhamName } from "./ArkhamName";
 import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
+import { fetchPanelJson, panelRequestFailure, requiredPanelHeaders, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // Wallet identity clustering (/api/cluster). "Top 10 hold 40%" is only alarming
 // once you know how many of those ten are the same hand — a team that splits its
@@ -23,6 +25,14 @@ const TONE = { bad: "var(--color-avoid)", warn: "var(--color-caution)", good: "v
 
 type ClusterWallet = { address: string; pct: number; insider: boolean; isCreator: boolean };
 type Cluster = { wallets: ClusterWallet[]; size: number; combinedPct: number; sharedFunders: string[]; includesCreator: boolean; links: { a: string; b: string; type: string; via?: string }[] };
+type ClusterData = {
+  available?: boolean;
+  note?: string;
+  clusters?: Cluster[];
+  walletsAnalyzed?: number;
+  allWallets?: BubbleWallet[];
+  edges?: BubbleEdge[];
+};
 
 function LinkIcon({ live }: { live?: boolean }) {
   return (
@@ -35,16 +45,22 @@ function LinkIcon({ live }: { live?: boolean }) {
   );
 }
 
-export function WalletClusters({ mint, chain, symbol, record = true }: { mint: string; chain: string; symbol?: string; record?: boolean }) {
-  const [data, setData] = useState<any | null>(null);
+export function WalletClusters({ mint, chain, symbol, panelCostToken, record = true }: { mint: string; chain: string; symbol?: string; panelCostToken?: string; record?: boolean }) {
+  const [data, setData] = useState<ClusterData | null>(null);
   const [loading, setLoading] = useState(false);
   const [stage, setStage] = useState(0);
+  const [failure, setFailure] = useState<{ key: string; failure: PanelRequestFailure } | null>(null);
+  const requestKey = [mint, chain, panelCostToken ?? ""].join("\u0000");
+  const currentFailure = failure?.key === requestKey ? failure.failure : null;
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
 
   // Arkham entity labels + risk for the cluster wallets and their shared funders.
-  const arkham = useArkhamLabels(data ? [...(data.clusters ?? []).flatMap((c: any) => [...(c.wallets ?? []).map((w: any) => w.address), ...(c.sharedFunders ?? [])])] : []);
+  const { labels: arkham, state: arkhamState } = useArkhamLabels(
+    data ? [...(data.clusters ?? []).flatMap((cluster) => [...cluster.wallets.map((wallet) => wallet.address), ...cluster.sharedFunders])] : [],
+    panelCostToken,
+  );
 
   // Runs on Solana (RugCheck+Helius) and EVM (GoPlus+Etherscan) via matching
   // endpoints that return the same shape. Needs a token address + a supported chain.
@@ -62,7 +78,7 @@ export function WalletClusters({ mint, chain, symbol, record = true }: { mint: s
   ) : null;
 
   const run = async () => {
-    if (loading || data) return;
+    if (loading || data || currentFailure || !panelCostToken) return;
     setLoading(true);
     setStage(0);
     timer.current = setInterval(() => setStage((s) => Math.min(s + 1, STAGES.length - 1)), 6000);
@@ -70,9 +86,12 @@ export function WalletClusters({ mint, chain, symbol, record = true }: { mint: s
       const url = chain === "solana"
         ? `/api/cluster?mint=${encodeURIComponent(mint)}&chain=solana`
         : `/api/evm-cluster?address=${encodeURIComponent(mint)}&chain=${encodeURIComponent(chain)}`;
-      const r = await fetch(url);
-      const d = await r.json();
-      setData(d?.available === false ? { note: d.note ?? "Clustering unavailable (provider not configured)." } : d);
+      const d = await fetchPanelJson<ClusterData>(url, { headers: requiredPanelHeaders(panelCostToken) });
+      if (d.available === false) {
+        setFailure({ key: requestKey, failure: "unavailable" });
+        return;
+      }
+      setData(d);
       // Feed the graph: attach every clustered wallet to the token, keyed the same
       // way the audit graphs key wallets, so a wallet that reappears as a deployer
       // or holder in another audit collapses to one node and bridges the two.
@@ -83,13 +102,15 @@ export function WalletClusters({ mint, chain, symbol, record = true }: { mint: s
         edgeType: "CLUSTER_HOLDER", label: shortAddr(w.address),
       })));
       if (record && ents.length) recordForensicEntities(subjectKey, ents);
-    } catch {
-      setData({ note: "Clustering failed." });
+    } catch (error) {
+      setFailure({ key: requestKey, failure: panelRequestFailure(error) });
     } finally {
       if (timer.current) clearInterval(timer.current);
       setLoading(false);
     }
   };
+
+  if (currentFailure) return <PanelRequestNotice failure={currentFailure} label="Wallet clustering" />;
 
   // ── loading ──
   if (loading) {
@@ -115,7 +136,7 @@ export function WalletClusters({ mint, chain, symbol, record = true }: { mint: s
   }
 
   // ── CTA ──
-  if (!data) {
+  if (!data && panelCostToken) {
     return (
       <div className="rounded-xl border border-line bg-panel p-4">
         <button onClick={run} className="group flex w-full items-center justify-between gap-3 rounded-lg border border-signal/40 bg-signal/[0.08] px-3.5 py-2.5 text-left transition hover:border-signal hover:bg-signal/[0.14]">
@@ -133,6 +154,8 @@ export function WalletClusters({ mint, chain, symbol, record = true }: { mint: s
     );
   }
 
+  if (!data) return null;
+
   // ── result ──
   const clusters: Cluster[] = data.clusters ?? [];
   const top = clusters[0];
@@ -149,6 +172,10 @@ export function WalletClusters({ mint, chain, symbol, record = true }: { mint: s
       </div>
 
       {data.note && <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: tone === "good" ? "var(--color-ink-dim)" : color }}>{data.note}</p>}
+
+      {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
+        <PanelRequestNotice failure={arkhamState} label="Wallet identity labels" className="mt-3" />
+      )}
 
       {Array.isArray(data.allWallets) && data.allWallets.length >= 2 && (
         <HolderBubbleMap wallets={data.allWallets} edges={data.edges ?? []} chain={chain} />

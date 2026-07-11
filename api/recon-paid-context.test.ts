@@ -43,7 +43,10 @@ describe("Recon paid supplemental context", () => {
     attachPanelCost.mockReset().mockResolvedValue(undefined);
     cacheGetJson.mockReset().mockResolvedValue(null);
     cacheSetJson.mockReset().mockResolvedValue(undefined);
-    requireArgusAuth.mockReset().mockResolvedValue({ organizationId: ORGANIZATION_ID });
+    requireArgusAuth.mockReset().mockResolvedValue({
+      organizationId: ORGANIZATION_ID,
+      userId: "00000000-0000-4000-8000-000000000010",
+    });
     resolvePanelCostVersion.mockReset().mockReturnValue(undefined);
     vi.stubEnv("XAI_API_KEY", "");
     vi.stubEnv("TWITTERAPI_KEY", "");
@@ -125,6 +128,8 @@ describe("Recon paid supplemental context", () => {
       op: "panel:recon-team",
       calls: 1,
       usd: 0.125,
+      initiatedBy: "00000000-0000-4000-8000-000000000010",
+      status: "succeeded",
     });
   });
 });

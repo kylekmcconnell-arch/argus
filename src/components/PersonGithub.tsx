@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { GithubForensics } from "./GithubForensics";
+import { fetchPanelJson, panelRequestFailure, requiredPanelHeaders, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // A person's code footprint. A report only knows the subject's X handle / name /
 // bio, so this resolves their GitHub account first (via /api/resolve-github —
@@ -10,23 +12,30 @@ type Resolved = { available: boolean; login?: string; followers?: number; repos?
 
 const enc = encodeURIComponent;
 
-export function PersonGithub({ handle, name, bio, className, record = true }: { handle: string; name?: string | null; bio?: string | null; className?: string; record?: boolean }) {
-  const [data, setData] = useState<Resolved | null>(null);
-  const ran = useRef(false);
+export function PersonGithub({ handle, name, bio, className, panelCostToken, record = true }: { handle: string; name?: string | null; bio?: string | null; className?: string; panelCostToken?: string; record?: boolean }) {
+  const requestKey = [handle, name ?? "", bio ?? "", panelCostToken ?? ""].join("\u0000");
+  const [result, setResult] = useState<{ key: string; data: Resolved | null; failure?: PanelRequestFailure } | null>(null);
+  const ran = useRef("");
 
   useEffect(() => {
-    if (ran.current || !handle) return;
-    ran.current = true;
+    if (ran.current === requestKey || !handle || !panelCostToken) return;
+    ran.current = requestKey;
+    let live = true;
     (async () => {
       try {
         const qs = [`handle=${enc(handle)}`, name && `name=${enc(name)}`, bio && `bio=${enc(bio.slice(0, 400))}`].filter(Boolean).join("&");
-        const r = await fetch(`/api/resolve-github?${qs}`);
-        setData(await r.json());
-      } catch { /* non-fatal */ }
+        const data = await fetchPanelJson<Resolved>(`/api/resolve-github?${qs}`, { headers: requiredPanelHeaders(panelCostToken) });
+        if (live) setResult({ key: requestKey, data });
+      } catch (error) {
+        if (live) setResult({ key: requestKey, data: null, failure: panelRequestFailure(error) });
+      }
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    return () => { live = false; };
+  }, [bio, handle, name, panelCostToken, requestKey]);
 
+  const current = result?.key === requestKey ? result : null;
+  if (current?.failure) return <PanelRequestNotice failure={current.failure} label="GitHub identity resolution" className={className} />;
+  const data = current?.data;
   if (!data || !data.available || !data.login) return null;
   return (
     <div className={className}>
@@ -35,7 +44,7 @@ export function PersonGithub({ handle, name, bio, className, record = true }: { 
         {data.confidence && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: data.confidence === "high" ? "var(--color-pass)14" : "var(--color-caution)14", color: data.confidence === "high" ? "var(--color-pass)" : "var(--color-caution)" }}>{data.confidence}-confidence match</span>}
         {data.why && data.why.length > 0 && <span className="text-[10px] text-ink-faint">· {data.why[0]}</span>}
       </div>
-      <GithubForensics login={data.login} subjectKey={handle} record={record} />
+      <GithubForensics login={data.login} subjectKey={handle} panelCostToken={panelCostToken} record={record} />
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { traceOperator, type OperatorCluster } from "../lib/operatorTrace";
 import { useArkhamLabels, arkhamOf } from "../lib/useArkhamLabels";
 import { ArkhamName } from "./ArkhamName";
 import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
+import { panelRequestFailure, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // The recursive collector's face. Where FunderSweep does a single forward hop off
 // one wallet, this traces the whole operator: up from the deployer to the topmost
@@ -26,40 +28,55 @@ function NetIcon({ live }: { live?: boolean }) {
   );
 }
 
-export function OperatorNetwork({ deployer, chain, label, onAudit, record = true }: { deployer?: string | null; chain?: string; label?: string; onAudit?: (q: string) => void; record?: boolean }) {
+export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToken, record = true }: { deployer?: string | null; chain?: string; label?: string; onAudit?: (q: string) => void; panelCostToken?: string; record?: boolean }) {
   const [cluster, setCluster] = useState<OperatorCluster | null>(null);
   const [steps, setSteps] = useState<Step[]>([]);
   const [loading, setLoading] = useState(false);
   const [done, setDone] = useState(false);
+  const [failure, setFailure] = useState<{ key: string; failure: PanelRequestFailure } | null>(null);
+  const requestKey = [deployer ?? "", chain ?? "", panelCostToken ?? ""].join("\u0000");
+  const currentFailure = failure?.key === requestKey ? failure.failure : null;
   const running = useRef(false);
 
   useEffect(() => () => { running.current = false; }, []);
 
   // Arkham entity labels + risk for every wallet in the traced cluster.
-  const arkham = useArkhamLabels(cluster ? [cluster.rootDeployer, cluster.hub, cluster.origin?.address, ...cluster.wallets.map((w) => w.address)] : []);
+  const { labels: arkham, state: arkhamState } = useArkhamLabels(
+    cluster ? [cluster.rootDeployer, cluster.hub, cluster.origin?.address, ...cluster.wallets.map((w) => w.address)] : [],
+    panelCostToken,
+  );
   const nameOf = (addr?: string | null) => (addr ? arkhamOf(arkham, addr)?.name ?? shortAddr(addr) : "");
 
   // Serial-operator tracing runs on Solana (Helius) and EVM (Etherscan) alike, and
   // needs a deployer wallet to root the trace. Gate to chains we have endpoints for.
   const SUPPORTED = new Set(["solana", "ethereum", "base", "bsc", "polygon", "arbitrum", "optimism", "avalanche"]);
-  if (!deployer || (chain && !SUPPORTED.has(chain))) return null;
+  if (!deployer || !panelCostToken || (chain && !SUPPORTED.has(chain))) return null;
 
   const run = async () => {
-    if (running.current || loading || done) return;
+    if (running.current || loading || done || currentFailure) return;
     running.current = true;
     setLoading(true);
     setSteps([]);
-    const c = await traceOperator(deployer, {
-      rootLabel: label,
-      checkLiveness: true,
-      chain,
-      record,
-    }, (s) => setSteps((prev) => [...prev, s]));
-    if (!running.current) return; // unmounted mid-run
-    setCluster(c);
-    setLoading(false);
-    setDone(true);
+    try {
+      const c = await traceOperator(deployer, {
+        rootLabel: label,
+        checkLiveness: true,
+        chain,
+        record,
+        panelCostToken,
+      }, (s) => setSteps((prev) => [...prev, s]));
+      if (!running.current) return; // unmounted mid-run
+      setCluster(c);
+      setDone(true);
+    } catch (error) {
+      if (running.current) setFailure({ key: requestKey, failure: panelRequestFailure(error) });
+    } finally {
+      if (running.current) setLoading(false);
+      running.current = false;
+    }
   };
+
+  if (currentFailure) return <PanelRequestNotice failure={currentFailure} label="Operator trace" />;
 
   // ── CTA (not run yet) ──
   if (!cluster && !loading) {
@@ -143,6 +160,10 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, record = true
       </div>
 
       <p className="mt-2 text-[12.5px] leading-relaxed" style={{ color: verdict.tone === "good" ? "var(--color-ink-dim)" : tone }}>{verdict.line}</p>
+
+      {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
+        <PanelRequestNotice failure={arkhamState} label="Operator wallet labels" className="mt-3" />
+      )}
 
       {label && <ArkhamGraphBridge subject={label} labels={arkham} />}
 

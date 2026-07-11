@@ -1,45 +1,57 @@
 import { useState } from "react";
 import { recordForensicEntities } from "../graph/store";
+import { fetchPanelJson, panelRequestFailure, requiredPanelHeaders, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // GitHub commit forensics (/api/github-forensics): the real people behind a repo
 // or org, recovered from commit-author metadata. Personal-email leaks tie a
 // pseudonymous project to real identities; forks reveal copied code. On-click
 // (a few API calls), like the other deep tools.
 type Ident = { name: string; email: string; login?: string; commits: number; kind: "personal" | "corporate" | "unknown" };
+type GithubData = {
+  available?: boolean;
+  note?: string;
+  emailLeaks?: Ident[];
+  identities?: Ident[];
+  forks?: { repo: string; parent: string }[];
+};
 
-export function GithubForensics({ org, login, subjectKey, record = true }: { org?: string; login?: string; subjectKey?: string; record?: boolean }) {
-  const [data, setData] = useState<any | null>(null);
+export function GithubForensics({ org, login, subjectKey, panelCostToken, record = true }: { org?: string; login?: string; subjectKey?: string; panelCostToken?: string; record?: boolean }) {
+  const [data, setData] = useState<GithubData | null>(null);
   const [loading, setLoading] = useState(false);
+  const [failure, setFailure] = useState<{ key: string; failure: PanelRequestFailure } | null>(null);
+  const requestKey = [org ?? "", login ?? "", panelCostToken ?? ""].join("\u0000");
+  const currentFailure = failure?.key === requestKey ? failure.failure : null;
   const label = org ? `github.com/${org}` : `github.com/${login}`;
   const run = async () => {
-    if (loading || data) return;
+    if (loading || data || currentFailure || !panelCostToken) return;
     setLoading(true);
     try {
       const qs = org ? `org=${encodeURIComponent(org)}` : `login=${encodeURIComponent(login ?? "")}`;
-      const r = await fetch(`/api/github-forensics?${qs}`);
-      const d = await r.json();
+      const d = await fetchPanelJson<GithubData>(`/api/github-forensics?${qs}`, { headers: requiredPanelHeaders(panelCostToken) });
       setData(d?.available === false ? { note: d.note ?? "GitHub forensics unavailable (no GITHUB_TOKEN)." } : d);
       // A leaked dev email is the strongest bridge key — two projects sharing one
       // are the same team. Record them so the graph connects them automatically.
-      const leaks = Array.isArray(d?.emailLeaks) ? d.emailLeaks : [];
+      const leaks = Array.isArray(d.emailLeaks) ? d.emailLeaks : [];
       const key = subjectKey || org || login;
       if (record && key && leaks.length) {
-        recordForensicEntities(key, leaks.map((l: any) => ({ key: `email:${String(l.email).toLowerCase()}`, type: "Identity", subtype: "Email", edgeType: "COMMIT_EMAIL", label: `${l.name} · ${l.email}` })));
+        recordForensicEntities(key, leaks.map((leak) => ({ key: `email:${leak.email.toLowerCase()}`, type: "Identity", subtype: "Email", edgeType: "COMMIT_EMAIL", label: `${leak.name} · ${leak.email}` })));
       }
-    } catch {
-      setData({ note: "GitHub forensics failed." });
+    } catch (error) {
+      setFailure({ key: requestKey, failure: panelRequestFailure(error) });
     } finally {
       setLoading(false);
     }
   };
 
+  if (currentFailure) return <PanelRequestNotice failure={currentFailure} label="GitHub commit forensics" className="mt-3" />;
   if (!data) {
     return (
       <div className="mt-3 rounded-xl border border-line bg-panel p-4">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Commit forensics · {label}</span>
-          <button onClick={run} disabled={loading} className="mono rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-dim transition hover:text-ink disabled:opacity-50">
-            {loading ? "mining commits…" : "reveal the devs →"}
+          <button onClick={run} disabled={loading || !panelCostToken} className="mono rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-dim transition hover:text-ink disabled:opacity-50">
+            {loading ? "mining commits…" : panelCostToken ? "reveal the devs →" : "saved report required"}
           </button>
         </div>
         <p className="mt-1.5 text-[12px] leading-relaxed text-ink-faint">

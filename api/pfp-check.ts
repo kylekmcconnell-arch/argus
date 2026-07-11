@@ -12,6 +12,7 @@ import { requireArgusAuth } from "./_auth.js";
 export const config = { maxDuration: 45 };
 
 const HANDLE = /^[A-Za-z0-9_]{1,30}$/;
+interface TwitterUsage { calls: number; succeeded: number }
 
 async function fetchImage(url: string): Promise<{ media: string; data: string } | null> {
   try {
@@ -29,13 +30,15 @@ async function fetchImage(url: string): Promise<{ media: string; data: string } 
 
 // twitterapi.io gives the real X avatar URL when unavatar can't resolve one.
 // Field name varies, so check the common ones (+ nested legacy).
-async function twitterAvatar(handle: string): Promise<string | null> {
+async function twitterAvatar(handle: string, usage: TwitterUsage): Promise<string | null> {
   const key = process.env.TWITTERAPI_KEY;
   if (!key || !HANDLE.test(handle)) return null;
+  usage.calls += 1;
   try {
     const r = await fetch(`https://api.twitterapi.io/twitter/user/info?userName=${encodeURIComponent(handle)}`, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(7000) });
     if (!r.ok) return null;
     const d = (await r.json()) as any;
+    usage.succeeded += 1;
     const p = d?.data ?? d ?? {};
     const u = p.profilePicture || p.profile_image_url_https || p.profile_image_url || p.profileImage || p.image || p.avatar || p?.legacy?.profile_image_url_https;
     // twitter's "_normal" suffix is a 48px thumbnail; request the original.
@@ -47,10 +50,10 @@ async function twitterAvatar(handle: string): Promise<string | null> {
 
 // Resolve a usable avatar image, trying every source with one retry each — the
 // providers (unavatar especially) are intermittently flaky.
-async function resolveAvatar(handle: string, urlParam: string): Promise<{ img: { media: string; data: string }; url: string } | null> {
+async function resolveAvatar(handle: string, urlParam: string, usage: TwitterUsage): Promise<{ img: { media: string; data: string }; url: string } | null> {
   const urls: string[] = [];
   if (urlParam) urls.push(urlParam);
-  const tw = await twitterAvatar(handle);
+  const tw = await twitterAvatar(handle, usage);
   if (tw) urls.push(tw);
   if (handle && HANDLE.test(handle)) urls.push(`https://unavatar.io/x/${encodeURIComponent(handle)}?fallback=false`, `https://unavatar.io/twitter/${encodeURIComponent(handle)}?fallback=false`);
   for (const url of urls) {
@@ -79,12 +82,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!imageUrl) { res.status(400).json({ error: "handle or url required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "Photo check unavailable (no analyst key)." }); return; }
 
-  const resolved = await resolveAvatar(handle, imageUrl);
+  const twitterUsage: TwitterUsage = { calls: 0, succeeded: 0 };
+  const resolved = await resolveAvatar(handle, imageUrl, twitterUsage);
+  if (twitterUsage.calls > 0) {
+    await attachPanelCost(auth.organizationId, panelCostVersionId, {
+      provider: "twitterapi",
+      op: "panel:pfp-avatar",
+      calls: twitterUsage.calls,
+      usd: twitterUsage.calls * 0.0002,
+      meta: "per-request estimate",
+      initiatedBy: auth.userId,
+      status: twitterUsage.succeeded === twitterUsage.calls ? "succeeded" : twitterUsage.succeeded > 0 ? "partial" : "failed",
+    });
+  }
   const img = resolved?.img ?? null;
   const usedUrl = resolved?.url ?? imageUrl;
   if (!img) { res.status(200).json({ available: true, imageUrl: usedUrl, classification: "no_photo", flag: false, note: "No profile photo found (default avatar or unreachable). An anonymous project with no face is a soft flag on its own." }); return; }
 
+  let cost = { calls: 0, usd: 0, meta: "vision", status: "failed" as "succeeded" | "failed" | "partial" };
   try {
+    cost.calls = 1;
     const r = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
@@ -102,11 +119,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
     if (!r.ok) { res.status(200).json({ available: true, imageUrl: usedUrl, note: `vision ${r.status}` }); return; }
     const d = (await r.json()) as any;
-    await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "claude", op: "panel:pfp-check", calls: 1, usd: claudeUsd(d.usage), meta: "vision" });
+    cost.usd = claudeUsd(d.usage);
+    cost.status = "partial";
     const text = (d.content ?? []).map((b: any) => b.text ?? "").join(" ");
     const m = text.match(/\{[\s\S]*\}/);
     let parsed: any = {};
-    if (m) { try { parsed = JSON.parse(m[0]); } catch { /* */ } }
+    if (m) {
+      try {
+        parsed = JSON.parse(m[0]);
+        cost.status = "succeeded";
+      } catch { /* preserve partial status */ }
+    }
     res.status(200).json({
       available: true,
       imageUrl: usedUrl,
@@ -123,5 +146,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (e) {
     res.status(200).json({ available: true, imageUrl, error: String(e), note: "Photo check failed." });
+  } finally {
+    if (cost.calls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "claude",
+        op: "panel:pfp-check",
+        ...cost,
+        initiatedBy: auth.userId,
+      });
+    }
   }
 }

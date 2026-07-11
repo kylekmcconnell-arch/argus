@@ -13,12 +13,18 @@ export const config = { maxDuration: 30 };
 const TW = "https://api.twitterapi.io";
 const HANDLE = /^[A-Za-z0-9_]{1,30}$/;
 
-interface CallCounter { calls: number }
+interface CallCounter { calls: number; succeeded: number }
+const usageStatus = (counter: CallCounter): "succeeded" | "partial" | "failed" => (
+  counter.succeeded === counter.calls ? "succeeded" : counter.succeeded > 0 ? "partial" : "failed"
+);
 async function tw(url: string, key: string, counter: CallCounter): Promise<any> {
   counter.calls += 1;
   try {
     const r = await fetch(url, { headers: { "x-api-key": key }, signal: AbortSignal.timeout(12000) });
-    return r.ok ? await r.json() : null;
+    if (!r.ok) return null;
+    const data = await r.json();
+    counter.succeeded += 1;
+    return data;
   } catch {
     return null;
   }
@@ -55,7 +61,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!panelCostVersionId) { res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." }); return; }
   if (!handle || !HANDLE.test(handle)) { res.status(400).json({ error: "handle required" }); return; }
   if (!key) { res.status(200).json({ available: false, note: "twitterapi not configured." }); return; }
-  const twitterUsage: CallCounter = { calls: 0 };
+  const twitterUsage: CallCounter = { calls: 0, succeeded: 0 };
 
   try {
     const prof = await tw(`${TW}/twitter/user/info?userName=${encodeURIComponent(handle)}`, key, twitterUsage);
@@ -103,7 +109,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ? `No strong bot/bought-engagement signal in the sample (${botPct}% of ${sampled} sampled followers flagged, ~${avgLikes} likes & ~${avgReplies} replies/post on ${totalFollowers.toLocaleString()} followers).`
         : "Could not sample followers.";
 
-    await attachPanelCost(auth.organizationId, panelCostVersionId, { provider: "twitterapi", op: "panel:kol-signals", calls: twitterUsage.calls, usd: twitterUsage.calls * 0.0002 });
     res.status(200).json({
       available: true,
       handle,
@@ -116,5 +121,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (e) {
     res.status(200).json({ available: true, error: String(e), note: "KOL signals failed." });
+  } finally {
+    if (twitterUsage.calls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "twitterapi",
+        op: "panel:kol-signals",
+        calls: twitterUsage.calls,
+        usd: twitterUsage.calls * 0.0002,
+        initiatedBy: auth.userId,
+        status: usageStatus(twitterUsage),
+      }).catch(() => undefined);
+    }
   }
 }

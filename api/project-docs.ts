@@ -92,7 +92,13 @@ async function crawlNav(domain: string): Promise<Resource[]> {
 }
 
 // Grok: whitepaper, audits, and any resource not linked from the homepage.
-type GrokResult = { parsed: any | null; calls: number; usd: number };
+type GrokResult = {
+  parsed: any | null;
+  calls: number;
+  usd: number;
+  status: "succeeded" | "partial" | "failed";
+  meta?: string;
+};
 
 async function findViaGrok(name: string, domain: string, symbol: string, key: string): Promise<GrokResult> {
   const cats = "api, docs, about, team, press, blog, tokenomics, governance, roadmap, faq, legal";
@@ -103,30 +109,42 @@ async function findViaGrok(name: string, domain: string, symbol: string, key: st
     "For 'press', include the project's own press/newsroom page AND notable independent media coverage (a real article URL). For 'team', the page that names the people. Only include a category you actually found a link for. " +
     "Reply with ONLY compact JSON, no prose: {\"whitepaper\":{\"url\":\"...\",\"kind\":\"whitepaper|litepaper|docs|gitbook\"}|null,\"resources\":[{\"category\":\"api|docs|about|team|press|blog|tokenomics|governance|roadmap|faq|legal\",\"title\":\"short\",\"url\":\"...\"}],\"audits\":[{\"auditor\":\"...\",\"url\":\"...\",\"date\":\"YYYY-MM\"|null}]}";
   const user = `Project: "${name}"${symbol ? ` ($${symbol})` : ""}${domain ? `, website ${domain}` : ""}. Find its whitepaper, security audits, and official resources (API/developer docs, about, team, press/newsroom + notable coverage, blog, tokenomics, governance, roadmap, FAQ, legal).`;
+  let r: Response;
   try {
-    const r = await fetch("https://api.x.ai/v1/responses", {
+    r = await fetch("https://api.x.ai/v1/responses", {
       method: "POST",
       headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
       body: JSON.stringify({ model: process.env.ARGUS_GROK_MODEL || "grok-4-fast", input: [{ role: "system", content: system }, { role: "user", content: user }], tools: [{ type: "web_search" }, { type: "x_search" }], max_tool_calls: 8 }),
       signal: AbortSignal.timeout(27000),
     });
-    if (!r.ok) return { parsed: null, calls: 1, usd: 0 };
-    const d = (await r.json()) as any;
-    const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ") : "") ?? "";
-    const m = text.match(/\{[\s\S]*\}/);
-    let parsed: any | null = null;
-    if (m) {
-      try { parsed = JSON.parse(m[0]); } catch { /* malformed model output */ }
-    }
-    const toolCalls = Array.isArray(d.output)
-      ? d.output.filter((item: any) => /search|tool/.test(String(item.type ?? ""))).length
-      : 0;
-    return {
-      parsed,
-      calls: 1,
-      usd: grokUsd(d.usage, toolCalls),
-    };
-  } catch { return { parsed: null, calls: 1, usd: 0 }; }
+  } catch { return { parsed: null, calls: 1, usd: 0, status: "failed", meta: "transport_error" }; }
+  if (!r.ok) return { parsed: null, calls: 1, usd: 0, status: "failed", meta: `http_${r.status}` };
+
+  let d: any;
+  try { d = await r.json(); }
+  catch { return { parsed: null, calls: 1, usd: 0, status: "failed", meta: "response_json_error" }; }
+  const text = d?.output_text ?? (Array.isArray(d?.output) ? d.output.flatMap((o: any) => o?.content ?? []).map((c: any) => c?.text ?? "").join(" ") : "") ?? "";
+  const m = typeof text === "string" ? text.match(/\{[\s\S]*\}/) : null;
+  let parsed: any | null = null;
+  if (m) {
+    try { parsed = JSON.parse(m[0]); } catch { /* malformed model output */ }
+  }
+  const toolCalls = Array.isArray(d?.output)
+    ? d.output.filter((item: any) => /search|tool/.test(String(item?.type ?? ""))).length
+    : 0;
+  const validContract = parsed
+    && typeof parsed === "object"
+    && !Array.isArray(parsed)
+    && Object.hasOwn(parsed, "whitepaper")
+    && Array.isArray(parsed.resources)
+    && Array.isArray(parsed.audits);
+  return {
+    parsed,
+    calls: 1,
+    usd: grokUsd(d?.usage, toolCalls),
+    status: validContract ? "succeeded" : "partial",
+    ...(validContract ? {} : { meta: "output_contract_error" }),
+  };
 }
 
 function assembleResult(nav: Resource[], raw: any | null, searchedWithGrok: boolean) {
@@ -224,8 +242,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     op: "panel:project-docs",
     calls: grok.calls,
     usd: grok.usd,
+    initiatedBy: auth.userId,
+    status: grok.status,
+    ...(grok.meta ? { meta: grok.meta } : {}),
   });
   const out = assembleResult(nav, grok.parsed, true);
-  await cacheSetJson(enhancedCacheKey, out);
+  if (grok.status === "succeeded") await cacheSetJson(enhancedCacheKey, out);
   res.status(200).json(out);
 }

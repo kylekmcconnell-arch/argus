@@ -15,6 +15,7 @@ const VIEWER_GET_PATHS = new Set([
   "/api/providers",
   "/api/changelog",
   "/api/keys-status",
+  "/api/provider-usage",
   "/api/alerts",
   "/api/augment",
 ]);

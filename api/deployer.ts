@@ -10,10 +10,13 @@
 //
 // Solana only (Helius RPC). Gated on HELIUS_API_KEY. ~a few RPC calls per wallet.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { requireArgusAuth } from "./_auth.js";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
 export const config = { maxDuration: 30 };
 
 const MAX_SIG_PAGES = 10; // 1000 sigs/page; bounds pagination on busy wallets
+interface ProviderUsage { calls: number; succeeded: number }
 
 // Well-known Solana CEX hot wallets. A funder match here means the trail leads to
 // a KYC'd exchange account (a real subpoena target), not an anonymous wallet.
@@ -31,7 +34,8 @@ const CEX: Record<string, string> = {
   "6gnCPhXtLnUD76HjQuSYPENLSZdG8RvDB1pTLM5aLSss": "MEXC",
 };
 
-async function rpc(url: string, method: string, params: unknown): Promise<any> {
+async function rpc(url: string, method: string, params: unknown, usage: ProviderUsage): Promise<any> {
+  usage.calls += 1;
   const res = await fetch(url, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -41,17 +45,18 @@ async function rpc(url: string, method: string, params: unknown): Promise<any> {
   if (!res.ok) throw new Error(`rpc ${method} ${res.status}`);
   const d = (await res.json()) as any;
   if (d.error) throw new Error(`rpc ${method}: ${d.error.message}`);
+  usage.succeeded += 1;
   return d.result;
 }
 
 // Walk getSignaturesForAddress back to the wallet's very first signatures. We
 // keep the oldest few (not just one) because the absolute-oldest tx is sometimes
 // the token mint itself; the funding sits in a neighbouring early tx.
-async function oldestActivity(url: string, wallet: string, maxPages = MAX_SIG_PAGES): Promise<{ oldestSigs: string[]; firstBlockTime: number | null; truncated: boolean }> {
+async function oldestActivity(url: string, wallet: string, usage: ProviderUsage, maxPages = MAX_SIG_PAGES): Promise<{ oldestSigs: string[]; firstBlockTime: number | null; truncated: boolean }> {
   let before: string | undefined;
   let lastBatch: any[] = [];
   for (let pages = 0; pages < maxPages; pages++) {
-    const batch: any[] = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }]);
+    const batch: any[] = await rpc(url, "getSignaturesForAddress", [wallet, { limit: 1000, ...(before ? { before } : {}) }], usage);
     if (!batch?.length) break;
     lastBatch = batch;
     if (batch.length < 1000) {
@@ -71,14 +76,14 @@ interface Hop { from: string; to: string; label: string | null; kind: "cex" | "w
 // hits the hop/time budget. Intermediary hops use shallow pagination to stay fast;
 // a deep, multi-hop chain through fresh wallets is the classic launder-before-launch
 // pattern, and a CEX terminus is where a subpoena would actually land.
-async function traceChain(url: string, deployer: string, maxHops: number, deadline: number): Promise<{ chain: Hop[]; origin: { address: string; label: string | null; kind: "cex" | "wallet" } | null; truncatedAt: string | null }> {
+async function traceChain(url: string, deployer: string, maxHops: number, deadline: number, usage: ProviderUsage): Promise<{ chain: Hop[]; origin: { address: string; label: string | null; kind: "cex" | "wallet" } | null; truncatedAt: string | null }> {
   const chain: Hop[] = [];
   const seen = new Set<string>([deployer]);
   let current = deployer;
   for (let hop = 0; hop < maxHops; hop++) {
     if (Date.now() > deadline) return { chain, origin: chain.length ? { address: current, label: CEX[current] ?? null, kind: CEX[current] ? "cex" : "wallet" } : null, truncatedAt: current };
-    const { oldestSigs, truncated } = await oldestActivity(url, current, hop === 0 ? MAX_SIG_PAGES : 3);
-    const funder = oldestSigs.length ? await fundingSource(url, current, oldestSigs) : null;
+    const { oldestSigs, truncated } = await oldestActivity(url, current, usage, hop === 0 ? MAX_SIG_PAGES : 3);
+    const funder = oldestSigs.length ? await fundingSource(url, current, oldestSigs, usage) : null;
     if (!funder) {
       const originAddr = chain.length ? current : null;
       return { chain, origin: originAddr ? { address: originAddr, label: CEX[originAddr] ?? null, kind: CEX[originAddr] ? "cex" : "wallet" } : null, truncatedAt: truncated ? current : null };
@@ -97,7 +102,7 @@ async function traceChain(url: string, deployer: string, maxHops: number, deadli
 
 // Find the account that first sent SOL INTO the wallet, scanning the oldest few
 // transactions (oldest first) and recognising the common funding shapes.
-async function fundingSource(url: string, wallet: string, sigs: string[]): Promise<string | null> {
+async function fundingSource(url: string, wallet: string, sigs: string[], usage: ProviderUsage): Promise<string | null> {
   const scan = (instrs: any[]): string | null => {
     for (const ix of instrs ?? []) {
       const p = ix.parsed;
@@ -110,7 +115,7 @@ async function fundingSource(url: string, wallet: string, sigs: string[]): Promi
     return null;
   };
   for (const sig of sigs) {
-    const tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }]);
+    const tx = await rpc(url, "getTransaction", [sig, { maxSupportedTransactionVersion: 0, encoding: "jsonParsed" }], usage);
     if (!tx) continue;
     const direct = scan(tx.transaction?.message?.instructions);
     if (direct) return direct;
@@ -146,11 +151,13 @@ const DENY_MINT = new Set<string>([
   "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
   "So11111111111111111111111111111111111111112", // wSOL
 ]);
-async function tokensCreated(key: string, wallet: string): Promise<number | null> {
+async function tokensCreated(key: string, wallet: string, usage: ProviderUsage): Promise<number | null> {
+  usage.calls += 1;
   try {
     const r = await fetch(`https://api.helius.xyz/v0/addresses/${wallet}/transactions?api-key=${key}&limit=100`, { signal: AbortSignal.timeout(10000) });
     if (!r.ok) return null;
     const txs = await r.json();
+    usage.succeeded += 1;
     if (!Array.isArray(txs)) return null;
     const mints = new Set<string>();
     for (const t of txs) {
@@ -164,6 +171,16 @@ async function tokensCreated(key: string, wallet: string): Promise<number | null
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
   const key = process.env.HELIUS_API_KEY;
   const wallet = typeof req.query.wallet === "string" ? req.query.wallet.trim() : "";
   if (!wallet || !/^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(wallet)) {
@@ -175,13 +192,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
   const url = `https://mainnet.helius-rpc.com/?api-key=${key}`;
+  const usage: ProviderUsage = { calls: 0, succeeded: 0 };
   try {
     // Deployer's own age + mint count, in parallel with the chain trace.
     const deadline = Date.now() + 22000; // leave margin under the 30s function cap
     const [created, ageInfo, traced] = await Promise.all([
-      tokensCreated(key, wallet),
-      oldestActivity(url, wallet).then((a) => ({ firstBlockTime: a.firstBlockTime, truncated: a.truncated })),
-      traceChain(url, wallet, 4, deadline),
+      tokensCreated(key, wallet, usage),
+      oldestActivity(url, wallet, usage).then((a) => ({ firstBlockTime: a.firstBlockTime, truncated: a.truncated })),
+      traceChain(url, wallet, 4, deadline, usage),
     ]);
     const { chain, origin, truncatedAt } = traced;
     const walletAgeDays = ageInfo.firstBlockTime ? Math.max(0, Math.round((Date.now() / 1000 - ageInfo.firstBlockTime) / 86400)) : null;
@@ -216,5 +234,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (e) {
     res.status(200).json({ wallet, available: true, error: String(e), note: "Funding-trail lookup failed." });
+  } finally {
+    if (usage.calls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "helius",
+        op: "panel:solana-deployer",
+        calls: usage.calls,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usage.succeeded === usage.calls ? "succeeded" : usage.succeeded > 0 ? "partial" : "failed",
+      });
+    }
   }
 }

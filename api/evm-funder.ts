@@ -9,6 +9,8 @@
 //
 // EVM only, via Etherscan v2 multichain. Gated on ETHERSCAN_API_KEY. Bounded.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { requireArgusAuth } from "./_auth.js";
+import { attachPanelCost, resolvePanelCostVersion } from "./_cache.js";
 
 export const config = { maxDuration: 60 };
 
@@ -34,21 +36,24 @@ const CEX = new Set<string>([
 ]);
 
 const ES = "https://api.etherscan.io/v2/api";
+interface CallCounter { calls: number; succeeded: number }
 const isAddr = (s: string) => /^0x[a-fA-F0-9]{40}$/.test(s);
 const lc = (s: string) => s.toLowerCase();
 
-async function txlist(chainid: number, address: string, key: string, offset: number): Promise<any[]> {
+async function txlist(chainid: number, address: string, key: string, offset: number, usage: CallCounter): Promise<any[]> {
+  usage.calls += 1;
   const q = new URLSearchParams({ chainid: String(chainid), module: "account", action: "txlist", address, startblock: "0", endblock: "99999999", page: "1", offset: String(offset), sort: "asc", apikey: key });
   const r = await fetch(`${ES}?${q}`, { signal: AbortSignal.timeout(12000) }).catch(() => null);
   if (!r || !r.ok) return [];
   const d = (await r.json().catch(() => null)) as any;
+  if (d != null) usage.succeeded += 1;
   return Array.isArray(d?.result) ? d.result : [];
 }
 
 // Distinct contract addresses this wallet has deployed (creation txs: empty `to`,
 // populated contractAddress, sent BY the wallet).
-async function deployments(chainid: number, wallet: string, key: string): Promise<string[]> {
-  const txs = await txlist(chainid, wallet, key, 10000);
+async function deployments(chainid: number, wallet: string, key: string, usage: CallCounter): Promise<string[]> {
+  const txs = await txlist(chainid, wallet, key, 10000, usage);
   const created = new Set<string>();
   for (const t of txs) {
     if ((!t.to || t.to === "") && t.contractAddress && isAddr(t.contractAddress) && lc(t.from) === lc(wallet)) created.add(lc(t.contractAddress));
@@ -58,8 +63,8 @@ async function deployments(chainid: number, wallet: string, key: string): Promis
 
 // Wallets this funder sent ETH to, in the gas-seeding band, excluding exchanges
 // and itself — the candidate deployers it may have seeded.
-async function seedRecipients(chainid: number, funder: string, key: string): Promise<string[]> {
-  const txs = await txlist(chainid, funder, key, 4000);
+async function seedRecipients(chainid: number, funder: string, key: string, usage: CallCounter): Promise<string[]> {
+  const txs = await txlist(chainid, funder, key, 4000, usage);
   const recipients = new Set<string>();
   for (const t of txs) {
     if (lc(t.from) !== lc(funder)) continue;
@@ -80,6 +85,16 @@ async function inChunks<T, R>(items: T[], size: number, fn: (t: T) => Promise<R>
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
   const key = process.env.ETHERSCAN_API_KEY;
   const wallet = typeof req.query.wallet === "string" ? req.query.wallet.trim() : "";
   const chain = (typeof req.query.chain === "string" ? req.query.chain : "").toLowerCase();
@@ -89,14 +104,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!key) { res.status(200).json({ wallet, available: false, note: "Etherscan not configured; funder sweep unavailable." }); return; }
 
   const deadline = Date.now() + 50000;
+  const usage: CallCounter = { calls: 0, succeeded: 0 };
   try {
     const [own, recipients] = await Promise.all([
-      deployments(chainid, wallet, key),
-      seedRecipients(chainid, wallet, key),
+      deployments(chainid, wallet, key, usage),
+      seedRecipients(chainid, wallet, key, usage),
     ]);
     const checked = await inChunks(recipients, CHECK_CHUNK, async (w) => {
       if (Date.now() > deadline) return null;
-      const created = await deployments(chainid, w, key);
+      const created = await deployments(chainid, w, key, usage);
       return created.length ? { wallet: w, tokensCreated: created.length, sampleTokens: created.slice(0, 6).map((mint) => ({ mint })) } : null;
     });
     const seededDeployers = (checked.filter(Boolean) as { wallet: string; tokensCreated: number; sampleTokens: { mint: string }[] }[]).sort((a, b) => b.tokensCreated - a.tokensCreated);
@@ -119,5 +135,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (e) {
     res.status(200).json({ wallet, available: true, seededDeployers: [], error: String(e), note: "Funder sweep failed." });
+  } finally {
+    if (usage.calls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "etherscan",
+        op: "panel:evm-funder",
+        calls: usage.calls,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usage.succeeded === usage.calls ? "succeeded" : usage.succeeded > 0 ? "partial" : "failed",
+      });
+    }
   }
 }

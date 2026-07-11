@@ -9,8 +9,8 @@
 //   3. GitHub user-search for the X handle IN A BIO (the memo's exact case).
 // Returns the best-matching login for /api/github-forensics to analyse. Cached 24h.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore — bundled JS sibling
-import { cacheGetJson, cacheSetJson } from "./_cache.js";
+import { attachPanelCost, cacheGetJson, cacheSetJson, resolvePanelCostVersion } from "./_cache.js";
+import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 20 };
 
@@ -19,25 +19,41 @@ const LOGIN_RE = /^[a-zA-Z0-9](?:[a-zA-Z0-9]|-(?=[a-zA-Z0-9])){0,38}$/;
 const RESERVED = /^(orgs|sponsors|topics|features|about|marketplace|explore|pricing|settings|login|join|team|enterprise|readme|search|apps|collections)$/i;
 
 type GhUser = { login: string; name?: string | null; twitter_username?: string | null; followers?: number; public_repos?: number; bio?: string | null; html_url?: string };
+interface CallCounter { calls: number; succeeded: number }
 
-async function ghUser(login: string, key: string): Promise<GhUser | null> {
+async function ghUser(login: string, key: string, usage: CallCounter): Promise<GhUser | null> {
+  usage.calls += 1;
   try {
     const r = await fetch(`${GH}/users/${encodeURIComponent(login)}`, { headers: { authorization: `Bearer ${key}`, accept: "application/vnd.github+json", "user-agent": "argus-due-diligence" }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return null;
-    return (await r.json()) as GhUser;
+    const data = (await r.json()) as GhUser;
+    usage.succeeded += 1;
+    return data;
   } catch { return null; }
 }
 
-async function searchBio(handle: string, key: string): Promise<string[]> {
+async function searchBio(handle: string, key: string, usage: CallCounter): Promise<string[]> {
+  usage.calls += 1;
   try {
     const r = await fetch(`${GH}/search/users?q=${encodeURIComponent(`"${handle}" in:bio`)}&per_page=5`, { headers: { authorization: `Bearer ${key}`, accept: "application/vnd.github+json", "user-agent": "argus-due-diligence" }, signal: AbortSignal.timeout(8000) });
     if (!r.ok) return [];
     const d = (await r.json()) as { items?: { login: string }[] };
+    usage.succeeded += 1;
     return (d.items ?? []).map((i) => i.login).filter(Boolean).slice(0, 5);
   } catch { return []; }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+  const panelTokenHeader = req.headers["x-argus-panel-token"];
+  const panelToken = Array.isArray(panelTokenHeader) ? panelTokenHeader[0] : panelTokenHeader;
+  const panelCostVersionId = resolvePanelCostVersion(auth.organizationId, panelToken);
+  if (!panelCostVersionId) {
+    res.status(409).json({ error: "invalid_panel_context", message: "This paid supplemental check needs a fresh persisted report. Rescan before running it." });
+    return;
+  }
+
   const handle = (typeof req.query.handle === "string" ? req.query.handle : "").replace(/^@/, "").trim().slice(0, 40);
   const name = (typeof req.query.name === "string" ? req.query.name : "").trim().slice(0, 80);
   const bio = (typeof req.query.bio === "string" ? req.query.bio : "").slice(0, 400);
@@ -49,6 +65,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cached = await cacheGetJson<any>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
+  const usage: CallCounter = { calls: 0, succeeded: 0 };
   try {
     const hlow = handle.toLowerCase();
     const nlow = name.toLowerCase();
@@ -66,10 +83,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (bioLink) bump(bioLink, 4, "linked from the X bio");
 
     // 2. Candidates: same-username, the bio-link login, and a bio-search for the handle.
-    const candidates = new Set<string>([handle, bioLink, ...(handle ? await searchBio(handle, key) : [])].filter(Boolean) as string[]);
+    const candidates = new Set<string>([handle, bioLink, ...(handle ? await searchBio(handle, key, usage) : [])].filter(Boolean) as string[]);
     for (const login of candidates) {
       if (!LOGIN_RE.test(login) || RESERVED.test(login)) continue;
-      const u = await ghUser(login, key);
+      const u = await ghUser(login, key, usage);
       if (!u || !LOGIN_RE.test(u.login) || RESERVED.test(u.login)) continue;
       if (u.login.toLowerCase() === hlow) bump(u.login, 1, "same username as the X handle");
       // Self-declared on the GitHub side, so spoofable — corroborating, not proof.
@@ -89,5 +106,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(200).json(out);
   } catch (e) {
     res.status(200).json({ available: false, error: String(e), note: "GitHub resolution failed." });
+  } finally {
+    if (usage.calls > 0) {
+      await attachPanelCost(auth.organizationId, panelCostVersionId, {
+        provider: "github",
+        op: "panel:resolve-github",
+        calls: usage.calls,
+        usd: 0,
+        meta: "subscription/keyed",
+        initiatedBy: auth.userId,
+        status: usage.succeeded === usage.calls ? "succeeded" : usage.succeeded > 0 ? "partial" : "failed",
+      });
+    }
   }
 }

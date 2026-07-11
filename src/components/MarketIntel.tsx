@@ -1,4 +1,6 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
+import { fetchPanelJson, panelRequestFailure, requiredPanelHeaders, type PanelRequestFailure } from "../lib/panelCostHeaders";
+import { PanelRequestNotice } from "./PanelRequestNotice";
 
 // Market intelligence (CryptoRank): impersonation check, drawdown from ATH,
 // dilution + unlock flags, sector rank placement, cross-chain footprint, and
@@ -32,28 +34,38 @@ const monthYear = (ms?: number) => (ms ? new Date(ms).toLocaleDateString(undefin
 const shortAddr = (a?: string | null) => (a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a ?? "");
 const px = (v?: number | null) => (v == null ? "" : v < 1 ? v.toPrecision(3) : v.toLocaleString());
 
-export function MarketIntel({ symbol, contract, chain }: { symbol: string; contract?: string; chain?: string }) {
-  const [d, setD] = useState<Intel | null>(null);
-  const [state, setState] = useState<"loading" | "ok" | "none">("loading");
-  const ran = useRef(false);
+export function MarketIntel({ symbol, contract, chain, panelCostToken }: { symbol: string; contract?: string; chain?: string; panelCostToken?: string }) {
+  const requestKey = [symbol, contract ?? "", chain ?? "", panelCostToken ?? ""].join("\u0000");
+  const [result, setResult] = useState<{ key: string; state: "ok" | "none" | PanelRequestFailure; data: Intel | null } | null>(null);
 
   useEffect(() => {
-    if (ran.current) return;
-    ran.current = true;
+    if (!panelCostToken) return;
+    const controller = new AbortController();
     const qs = new URLSearchParams({ symbol, contract: contract ?? "", chain: chain ?? "" });
-    fetch(`/api/cryptorank?${qs}`)
-      .then((r) => r.json())
-      .then((j: Intel) => {
+    fetchPanelJson<Intel>(`/api/cryptorank?${qs}`, { headers: requiredPanelHeaders(panelCostToken), signal: controller.signal })
+      .then((j) => {
+        if (controller.signal.aborted) return;
         // Show if we matched a token OR detected impersonation (both are signal).
-        if (j?.available === false || (!j?.matched && !j?.impersonation)) { setState("none"); return; }
-        setD(j);
-        setState("ok");
+        if (j?.available === false || (!j?.matched && !j?.impersonation)) {
+          setResult({ key: requestKey, state: "none", data: null });
+          return;
+        }
+        setResult({ key: requestKey, state: "ok", data: j });
       })
-      .catch(() => setState("none"));
-  }, [symbol, contract, chain]);
+      .catch((error: unknown) => {
+        if (!controller.signal.aborted) setResult({ key: requestKey, state: panelRequestFailure(error), data: null });
+      });
+    return () => controller.abort();
+  }, [symbol, contract, chain, panelCostToken, requestKey]);
 
-  if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">pulling market fundamentals…</div>;
-  if (state === "none" || !d) return null;
+  if (!panelCostToken) return null;
+  const current = result?.key === requestKey ? result : null;
+  if (!current) return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">pulling market fundamentals…</div>;
+  if (current.state === "rescan_required" || current.state === "unavailable") {
+    return <PanelRequestNotice failure={current.state} label="Market intelligence" />;
+  }
+  if (current.state === "none" || !current.data) return null;
+  const d = current.data;
 
   const imp = d.impersonation;
   const dd = d.ath?.drawdownPct ?? null;
