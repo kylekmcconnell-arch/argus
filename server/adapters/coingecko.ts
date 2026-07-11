@@ -24,21 +24,50 @@ export async function tokenByContract(chain: string, address: string) {
   const platform = PLATFORM[chain.toLowerCase()] ?? chain.toLowerCase();
   const base = key ? PRO : PUBLIC;
   const headers: Record<string, string> = key ? { "x-cg-pro-api-key": key } : {};
+  const tier = key ? "subscription/keyed" : "keyless";
+  let res: Response;
   try {
-    recordCall("coingecko", "contract-lookup", 0);
-    const res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers });
-    if (!res.ok) return null;
-    const d = (await res.json()) as any;
-    return {
-      symbol: d.symbol,
-      name: d.name,
-      priceUsd: d.market_data?.current_price?.usd,
-      mcapUsd: d.market_data?.market_cap?.usd,
-      ath_change_pct: d.market_data?.ath_change_percentage?.usd,
-    };
+    res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers });
   } catch {
+    recordCall("coingecko", "contract-lookup", 0, `${tier} · transport_error`, "failed");
     return null;
   }
+  if (!res.ok) {
+    recordCall("coingecko", "contract-lookup", 0, `${tier} · http_${res.status}`, "failed");
+    return null;
+  }
+
+  let d: any;
+  try { d = await res.json(); }
+  catch {
+    recordCall("coingecko", "contract-lookup", 0, `${tier} · response_json_error`, "failed");
+    return null;
+  }
+  if (!d || typeof d !== "object" || Array.isArray(d)) {
+    recordCall("coingecko", "contract-lookup", 0, `${tier} · result_shape_error`, "partial");
+    return null;
+  }
+  const hasSymbol = typeof d.symbol === "string" && !!d.symbol.trim();
+  const hasName = typeof d.name === "string" && !!d.name.trim();
+  if (!hasSymbol && !hasName) {
+    recordCall("coingecko", "contract-lookup", 0, `${tier} · missing_identity`, "partial");
+    return null;
+  }
+  const complete = hasSymbol && hasName && (d.market_data == null || (typeof d.market_data === "object" && !Array.isArray(d.market_data)));
+  recordCall(
+    "coingecko",
+    "contract-lookup",
+    0,
+    complete ? tier : `${tier} · incomplete_market_shape`,
+    complete ? "succeeded" : "partial",
+  );
+  return {
+    symbol: d.symbol,
+    name: d.name,
+    priceUsd: d.market_data?.current_price?.usd,
+    mcapUsd: d.market_data?.market_cap?.usd,
+    ath_change_pct: d.market_data?.ath_change_percentage?.usd,
+  };
 }
 
 export const coingeckoAdapter: Adapter = {

@@ -1269,22 +1269,45 @@ var currentState = () => auditCostState.getStore() ?? fallbackState;
 function withCostLedger(work) {
   return auditCostState.run(createState(), work);
 }
-function recordCall(provider, op, usd = 0, meta) {
+var statusCounts = (status) => ({
+  succeeded: status === "succeeded" ? 1 : 0,
+  partial: status === "partial" ? 1 : 0,
+  failed: status === "failed" ? 1 : 0,
+  cached: status === "cached" ? 1 : 0
+});
+var aggregateStatus = (line) => {
+  if (line.succeeded === line.calls) return "succeeded";
+  if (line.failed === line.calls) return "failed";
+  if (line.cached === line.calls) return "cached";
+  return "partial";
+};
+function mergeMeta(current, next) {
+  const clean = next?.trim();
+  if (!clean || current?.includes(clean)) return current;
+  return [current, clean].filter(Boolean).join(" \xB7 ").slice(0, 500);
+}
+function recordCall(provider, op, usd = 0, meta, status = "succeeded") {
   const { ledger } = currentState();
   const key = `${provider}|${op}`;
   const cur = ledger.get(key);
   if (cur) {
     cur.calls += 1;
+    cur.succeeded += status === "succeeded" ? 1 : 0;
+    cur.partial += status === "partial" ? 1 : 0;
+    cur.failed += status === "failed" ? 1 : 0;
+    cur.cached += status === "cached" ? 1 : 0;
+    cur.status = aggregateStatus(cur);
     cur.usd += usd;
-    if (meta) cur.meta = meta;
+    cur.meta = mergeMeta(cur.meta, meta);
   } else {
-    ledger.set(key, { provider, op, calls: 1, usd, meta });
+    const counts = statusCounts(status);
+    ledger.set(key, { provider, op, calls: 1, ...counts, status, usd, ...meta ? { meta } : {} });
   }
 }
-function recordTwitterapi(op) {
-  recordCall("twitterapi", op, PRICE.twitterapiCall);
+function recordTwitterapi(op, status = "succeeded", meta) {
+  recordCall("twitterapi", op, PRICE.twitterapiCall, meta, status);
 }
-function addGrokUsage(u, toolCalls, op = "live-search") {
+function addGrokUsage(u, toolCalls, op = "live-search", status = "succeeded", outcomeMeta) {
   const { grok } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
@@ -1293,22 +1316,40 @@ function addGrokUsage(u, toolCalls, op = "live-search") {
   grok.in += tin;
   grok.out += tout;
   grok.sources += sources;
-  recordCall("grok", op, tin * PRICE.grokIn + tout * PRICE.grokOut + sources * PRICE.grokSource, `${tin + tout} tok \xB7 ~${sources} sources`);
+  recordCall(
+    "grok",
+    op,
+    tin * PRICE.grokIn + tout * PRICE.grokOut + sources * PRICE.grokSource,
+    [`${tin + tout} tok \xB7 ~${sources} sources`, outcomeMeta].filter(Boolean).join(" \xB7 "),
+    status
+  );
 }
-function addClaudeUsage(u, op = "analysis") {
+function addClaudeUsage(u, op = "analysis", status = "succeeded", outcomeMeta) {
   const { claude } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
   claude.calls += 1;
   claude.in += tin;
   claude.out += tout;
-  recordCall("claude", op, tin * PRICE.claudeIn + tout * PRICE.claudeOut, `${tin + tout} tok`);
+  recordCall(
+    "claude",
+    op,
+    tin * PRICE.claudeIn + tout * PRICE.claudeOut,
+    [`${tin + tout} tok`, outcomeMeta].filter(Boolean).join(" \xB7 "),
+    status
+  );
 }
-function recordPdlMatch(matched) {
-  recordCall("peopledatalabs", "person/enrich", matched ? PRICE.pdlMatch : 0, matched ? "per-match est" : "no match (free)");
+function recordPdlMatch(matched, status = "succeeded", meta) {
+  recordCall(
+    "peopledatalabs",
+    "person/enrich",
+    matched && status !== "failed" ? PRICE.pdlMatch : 0,
+    meta ?? (status === "succeeded" ? matched ? "per-match est" : "no match (free)" : void 0),
+    status
+  );
 }
-function recordHelius(op) {
-  recordCall("helius", op, PRICE.heliusCall);
+function recordHelius(op, status = "succeeded", meta) {
+  recordCall("helius", op, PRICE.heliusCall, meta, status);
 }
 var round4 = (n) => Math.round(n * 1e4) / 1e4;
 function getCost() {
@@ -1319,6 +1360,7 @@ function getCost() {
   const total = lines.reduce((a, l) => a + l.usd, 0);
   const round2 = (n) => Math.round(n * 100) / 100;
   return {
+    schemaVersion: 1,
     usd: round2(total),
     grokUsd: round2(grokUsd),
     claudeUsd: round2(claudeUsd),
@@ -1338,8 +1380,9 @@ function analystAvailable() {
 async function structured(system, user, tool, maxTokens = 2048) {
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
+  let res;
   try {
-    const res = await fetch(ANTHROPIC_URL, {
+    res = await fetch(ANTHROPIC_URL, {
       method: "POST",
       headers: {
         "x-api-key": key,
@@ -1355,18 +1398,37 @@ async function structured(system, user, tool, maxTokens = 2048) {
         tool_choice: { type: "tool", name: tool.name }
       })
     });
-    if (!res.ok) {
-      console.error("[agent] anthropic error", res.status, await res.text());
-      return null;
-    }
-    const data = await res.json();
-    addClaudeUsage(data.usage, tool.name);
-    const block = data.content.find((b) => b.type === "tool_use");
-    return block?.input ?? null;
   } catch (e) {
+    addClaudeUsage(void 0, tool.name, "failed", "transport_error");
     console.error("[agent] request failed", e);
     return null;
   }
+  if (!res.ok) {
+    addClaudeUsage(void 0, tool.name, "failed", `http_${res.status}`);
+    let detail = "";
+    try {
+      detail = await res.text();
+    } catch {
+    }
+    console.error("[agent] anthropic error", res.status, detail);
+    return null;
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch (e) {
+    addClaudeUsage(void 0, tool.name, "failed", "response_json_error");
+    console.error("[agent] response parse failed", e);
+    return null;
+  }
+  const block = Array.isArray(data.content) ? data.content.find((candidate) => candidate.type === "tool_use" && candidate.name === tool.name && candidate.input != null) : void 0;
+  addClaudeUsage(
+    data.usage,
+    tool.name,
+    block ? "succeeded" : "partial",
+    block ? void 0 : "missing_tool_use"
+  );
+  return block?.input ?? null;
 }
 async function extractClaims(handle, bio, posts) {
   const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization \u2014 a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official brand account), a GP/partner/principal at one, or an angel with NAMED, verifiable investments (led or joined specific rounds). Buying/trading tokens, 'investing in gems', or calling oneself an investor with no documented deals is NOT INVESTOR \u2014 a caller who trades is a KOL, nothing more. Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts shipping a product/token, not allocating capital); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token, and do not tag INVESTOR merely for trading talk. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, listing each ticker once with its contract address and chain when a chart link or CA is present. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
@@ -1792,7 +1854,7 @@ async function cacheGet(key) {
     const p = rows?.[0]?.payload;
     const expiresAt = rows?.[0]?.expires_at ? Date.parse(rows[0].expires_at) : Number.NaN;
     if (!p?.text || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
-    recordCall("cache", "grok-hit", 0, "24h search cache");
+    recordCall("cache", "grok-hit", 0, "24h search cache", "cached");
     return p.text;
   } catch {
     return null;
@@ -2211,6 +2273,8 @@ var NOTABLE_ACCOUNTS = [
 
 // server/adapters/x.ts
 var TWITTERAPI = "https://api.twitterapi.io";
+var asRecord = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
+var optionalNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : void 0;
 async function grokSearch(system, user, opts) {
   const key = env("XAI_API_KEY");
   if (!key) return null;
@@ -2218,45 +2282,88 @@ async function grokSearch(system, user, opts) {
     const hit = await cacheGet(opts.cacheKey);
     if (hit) return hit;
   }
-  try {
-    const call = (withCap) => fetch("https://api.x.ai/v1/responses", {
-      method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
-        input: [{ role: "system", content: system }, { role: "user", content: user }],
-        tools: [{ type: "web_search" }, { type: "x_search" }],
-        ...withCap ? { max_tool_calls: opts?.maxToolCalls ?? 6 } : {}
-      }),
-      signal: AbortSignal.timeout(45e3)
-    });
-    let res = await call(true);
-    if (res.status === 400) res = await call(false);
-    if (!res.ok) return null;
-    const d = await res.json();
+  const call = async (withCap) => {
+    let res;
     try {
-      const toolCalls = Array.isArray(d.output) ? d.output.filter((o) => /search|tool/.test(String(o.type ?? ""))).length : void 0;
-      console.log("[grok-usage]", JSON.stringify({ in: d.usage?.input_tokens, out: d.usage?.output_tokens, toolCalls }));
-      addGrokUsage(d.usage, toolCalls);
+      res = await fetch("https://api.x.ai/v1/responses", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
+          input: [{ role: "system", content: system }, { role: "user", content: user }],
+          tools: [{ type: "web_search" }, { type: "x_search" }],
+          ...withCap ? { max_tool_calls: opts?.maxToolCalls ?? 6 } : {}
+        }),
+        signal: AbortSignal.timeout(45e3)
+      });
     } catch {
+      addGrokUsage(void 0, 0, "live-search", "failed", "transport_error");
+      return { status: null, text: null };
     }
-    const text = d.output_text ?? (Array.isArray(d.output) ? d.output.flatMap((o) => o.content ?? []).map((c) => c.text ?? "").join(" ") : "") ?? "";
-    if (text && opts?.cacheKey) void cacheSet(opts.cacheKey, text);
-    return text || null;
-  } catch {
-    return null;
-  }
+    if (!res.ok) {
+      addGrokUsage(void 0, 0, "live-search", "failed", `http_${res.status}`);
+      return { status: res.status, text: null };
+    }
+    let d;
+    try {
+      d = asRecord(await res.json());
+    } catch {
+      addGrokUsage(void 0, 0, "live-search", "failed", "response_json_error");
+      return { status: res.status, text: null };
+    }
+    const output = Array.isArray(d.output) ? d.output.map(asRecord) : [];
+    const toolCalls = output.length ? output.filter((item) => /search|tool/.test(String(item.type ?? ""))).length : void 0;
+    const usageRecord = asRecord(d.usage);
+    const usage = {
+      input_tokens: optionalNumber(usageRecord.input_tokens),
+      output_tokens: optionalNumber(usageRecord.output_tokens),
+      num_sources_used: optionalNumber(usageRecord.num_sources_used)
+    };
+    const nestedText = output.flatMap((item) => Array.isArray(item.content) ? item.content.map(asRecord) : []).map((content) => typeof content.text === "string" ? content.text : "").join(" ");
+    const text = typeof d.output_text === "string" ? d.output_text : nestedText;
+    console.log("[grok-usage]", JSON.stringify({ in: usage.input_tokens, out: usage.output_tokens, toolCalls }));
+    addGrokUsage(
+      usage,
+      toolCalls,
+      "live-search",
+      text ? "succeeded" : "partial",
+      text ? void 0 : "empty_output"
+    );
+    return { status: res.status, text: text || null };
+  };
+  let result = await call(true);
+  if (result.status === 400) result = await call(false);
+  if (result.text && opts?.cacheKey) void cacheSet(opts.cacheKey, result.text);
+  return result.text;
 }
 async function twFetch(url, key, tries = 2) {
-  recordTwitterapi(url.match(/\/twitter\/([a-z_/]+)/i)?.[1] ?? "other");
-  let last = null;
+  const op = url.match(/\/twitter\/([a-z_/]+)/i)?.[1] ?? "other";
   for (let i = 0; i < tries; i++) {
-    const res = await fetch(url, { headers: { "x-api-key": key } });
-    last = res;
+    let res;
+    try {
+      res = await fetch(url, { headers: { "x-api-key": key } });
+    } catch {
+      recordTwitterapi(op, "failed", "transport_error");
+      if (i + 1 >= tries) return null;
+      await new Promise((resolve) => setTimeout(resolve, 700 * (i + 1)));
+      continue;
+    }
+    if (!res.ok) {
+      recordTwitterapi(op, "failed", `http_${res.status}`);
+    } else {
+      try {
+        const payload = asRecord(await res.clone().json());
+        const providerError = payload.status === "error" || payload.data === null;
+        recordTwitterapi(op, providerError ? "failed" : "succeeded", providerError ? "provider_error_envelope" : void 0);
+      } catch {
+        recordTwitterapi(op, "failed", "response_json_error");
+      }
+    }
     if (res.status !== 429 && res.status !== 502 && res.status !== 503) return res;
+    if (i + 1 >= tries) return res;
     await new Promise((r) => setTimeout(r, res.status === 429 ? 1200 : 700 * (i + 1)));
   }
-  return last;
+  return null;
 }
 function pickWebsite(p) {
   const cands = [
@@ -2307,19 +2414,42 @@ async function getProfile2(handle) {
 }
 async function handleHistory(handle) {
   const u = handle.replace(/^@/, "");
+  let response;
   try {
-    recordCall("memory.lol", "tw-history", 0);
-    const res = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8e3) });
-    if (!res.ok) return null;
-    const d = await res.json();
-    const acct = (d.accounts ?? [])[0];
-    if (!acct?.screen_names) return { priorHandles: [], idStr: acct?.id_str };
-    const names = Object.keys(acct.screen_names);
-    const prior = names.filter((n) => n.toLowerCase() !== u.toLowerCase());
-    return { priorHandles: prior, idStr: acct.id_str };
+    response = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8e3) });
   } catch {
+    recordCall("memory.lol", "tw-history", 0, "transport_error", "failed");
     return null;
   }
+  if (!response.ok) {
+    recordCall("memory.lol", "tw-history", 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = await response.json();
+  } catch {
+    recordCall("memory.lol", "tw-history", 0, "response_json_error", "failed");
+    return null;
+  }
+  const envelope = asRecord(parsed);
+  if (!Array.isArray(envelope.accounts)) {
+    recordCall("memory.lol", "tw-history", 0, "invalid_result_shape", "partial");
+    return null;
+  }
+  if (!envelope.accounts.length) {
+    recordCall("memory.lol", "tw-history", 0, "no_match", "succeeded");
+    return { priorHandles: [] };
+  }
+  const acct = asRecord(envelope.accounts[0]);
+  if (!acct.screen_names || typeof acct.screen_names !== "object" || Array.isArray(acct.screen_names)) {
+    recordCall("memory.lol", "tw-history", 0, "screen_names_missing", "partial");
+    return { priorHandles: [], ...typeof acct.id_str === "string" ? { idStr: acct.id_str } : {} };
+  }
+  const names = Object.keys(acct.screen_names);
+  const prior = names.filter((n) => n.toLowerCase() !== u.toLowerCase());
+  recordCall("memory.lol", "tw-history", 0, prior.length ? "history_found" : "no_prior_handles", "succeeded");
+  return { priorHandles: prior, ...typeof acct.id_str === "string" ? { idStr: acct.id_str } : {} };
 }
 async function getRecentPosts(handle, limit = 20) {
   const key = env("TWITTERAPI_KEY");
@@ -2382,7 +2512,6 @@ async function lastTweetsPage(handle, key, cursor) {
 }
 async function searchFrom(handle, terms, key) {
   const q = `from:${handle} (${terms.join(" OR ")})`;
-  recordTwitterapi("tweet/advanced_search");
   const res = await twFetch(`${TWITTERAPI}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=Top`, key);
   if (!res || !res.ok) return [];
   const d = await res.json();
@@ -2858,19 +2987,36 @@ function htmlToText(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 }
 async function fetchPage(url) {
+  let response;
   try {
-    recordCall("site-fetch", "team-page", 0);
-    const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
-    if (!r.ok) return null;
-    const ct = r.headers.get("content-type") ?? "";
-    if (!/html|markdown|text\/plain/i.test(ct)) return null;
-    const raw = await r.text();
-    const text = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
-    if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) return null;
-    return { url, text };
+    response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
   } catch {
+    recordCall("site-fetch", "team-page", 0, "transport_error", "failed");
     return null;
   }
+  if (!response.ok) {
+    recordCall("site-fetch", "team-page", 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  const ct = response.headers.get("content-type") ?? "";
+  if (!/html|markdown|text\/plain/i.test(ct)) {
+    recordCall("site-fetch", "team-page", 0, "unexpected_content_type", "partial");
+    return null;
+  }
+  let raw;
+  try {
+    raw = await response.text();
+  } catch {
+    recordCall("site-fetch", "team-page", 0, "response_text_error", "failed");
+    return null;
+  }
+  const text = /markdown|text\/plain/i.test(ct) || url.endsWith(".md") ? raw.replace(/!\[[^\]]*\]\([^)]*\)/g, " ").replace(/\s+/g, " ").trim() : htmlToText(raw);
+  if (text.length < 300 || !/founder|ceo|cto|team|advisor|lead|head of|engineer|officer/i.test(text)) {
+    recordCall("site-fetch", "team-page", 0, "insufficient_team_content", "partial");
+    return null;
+  }
+  recordCall("site-fetch", "team-page", 0, void 0, "succeeded");
+  return { url, text };
 }
 async function fetchTeamPage(domain, projectName) {
   const urls = candidateUrls(domain);
@@ -2930,15 +3076,34 @@ function stripText(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
 }
 async function get(url, opts) {
+  let response;
   try {
-    recordCall("site-fetch", "substance", 0);
-    const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,application/javascript" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
-    if (!r.ok) return null;
-    if ((opts?.requireHtml ?? true) && !/html/i.test(r.headers.get("content-type") ?? "")) return null;
-    return { url: r.url || url, html: await r.text() };
+    response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,application/javascript" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
   } catch {
+    recordCall("site-fetch", "substance", 0, "transport_error", "failed");
     return null;
   }
+  if (!response.ok) {
+    recordCall("site-fetch", "substance", 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  if ((opts?.requireHtml ?? true) && !/html/i.test(response.headers.get("content-type") ?? "")) {
+    recordCall("site-fetch", "substance", 0, "unexpected_content_type", "partial");
+    return null;
+  }
+  let html;
+  try {
+    html = await response.text();
+  } catch {
+    recordCall("site-fetch", "substance", 0, "response_text_error", "failed");
+    return null;
+  }
+  if (!html.trim()) {
+    recordCall("site-fetch", "substance", 0, "empty_body", "partial");
+    return null;
+  }
+  recordCall("site-fetch", "substance", 0, void 0, "succeeded");
+  return { url: response.url || url, html };
 }
 function bundleUrls(html, base) {
   const out = [];
@@ -2982,42 +3147,96 @@ async function checkSiteSubstance(domain) {
 
 // server/adapters/dexscreener.ts
 var BASE = "https://api.dexscreener.com";
+var isRecord = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+var recordDex = (op, status, detail) => {
+  recordCall("dexscreener", op, 0, ["keyless", detail].filter(Boolean).join(" \xB7 "), status);
+};
 async function lookupToken(address) {
+  let res;
   try {
-    recordCall("dexscreener", "token-pairs", 0);
-    const res = await fetch(`${BASE}/latest/dex/tokens/${address}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const pairs = data.pairs ?? [];
-    if (!pairs.length) return { address };
-    const top = pairs.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
-    return {
-      address,
-      chain: top.chainId,
-      symbol: top.baseToken?.symbol,
-      priceUsd: top.priceUsd ? Number(top.priceUsd) : void 0,
-      liquidityUsd: top.liquidity?.usd,
-      volume24h: top.volume?.h24,
-      fdv: top.fdv,
-      pairCreatedAt: top.pairCreatedAt
-    };
+    res = await fetch(`${BASE}/latest/dex/tokens/${address}`);
   } catch {
+    recordDex("token-pairs", "failed", "transport_error");
     return null;
   }
+  if (!res.ok) {
+    recordDex("token-pairs", "failed", `http_${res.status}`);
+    return null;
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    recordDex("token-pairs", "failed", "response_json_error");
+    return null;
+  }
+  if (!isRecord(data) || !Array.isArray(data.pairs)) {
+    recordDex("token-pairs", "partial", "result_shape_error");
+    return null;
+  }
+  if (!data.pairs.length) {
+    recordDex("token-pairs", "succeeded", "no_pairs");
+    return { address };
+  }
+  const pairs = data.pairs.filter(isRecord);
+  if (!pairs.length) {
+    recordDex("token-pairs", "partial", "invalid_pair_rows");
+    return null;
+  }
+  const top = pairs.reduce((a, b) => (b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a);
+  const incomplete = pairs.length !== data.pairs.length || !top.chainId && !top.baseToken?.symbol && top.priceUsd == null && top.liquidity?.usd == null;
+  recordDex("token-pairs", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : void 0);
+  return {
+    address,
+    chain: top.chainId,
+    symbol: top.baseToken?.symbol,
+    priceUsd: top.priceUsd ? Number(top.priceUsd) : void 0,
+    liquidityUsd: top.liquidity?.usd,
+    volume24h: top.volume?.h24,
+    fdv: top.fdv,
+    pairCreatedAt: top.pairCreatedAt
+  };
 }
 async function detectTokenLifecycle(ticker, knownAddress) {
   const sym = ticker.replace(/^\$/, "").trim();
   if (!sym) return null;
+  let res;
   try {
-    const res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const pairs = (data.pairs ?? []).filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
-    if (!pairs.length) return null;
+    res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`);
+  } catch {
+    recordDex("token-search", "failed", "transport_error");
+    return null;
+  }
+  if (!res.ok) {
+    recordDex("token-search", "failed", `http_${res.status}`);
+    return null;
+  }
+  let data;
+  try {
+    data = await res.json();
+  } catch {
+    recordDex("token-search", "failed", "response_json_error");
+    return null;
+  }
+  if (!isRecord(data) || !Array.isArray(data.pairs)) {
+    recordDex("token-search", "partial", "result_shape_error");
+    return null;
+  }
+  try {
+    const validRows = data.pairs.filter(isRecord);
+    const pairs = validRows.filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
+    if (!pairs.length) {
+      recordDex("token-search", validRows.length === data.pairs.length ? "succeeded" : "partial", validRows.length === data.pairs.length ? "no_match" : "invalid_pair_rows");
+      return null;
+    }
     const byAddr = /* @__PURE__ */ new Map();
+    let missingAddress = 0;
     for (const p of pairs) {
       const a = p.baseToken?.address;
-      if (!a) continue;
+      if (!a) {
+        missingAddress += 1;
+        continue;
+      }
       let arr = byAddr.get(a);
       if (!arr) {
         arr = [];
@@ -3050,8 +3269,11 @@ async function detectTokenLifecycle(ticker, knownAddress) {
         };
       }
     }
+    const incomplete = validRows.length !== data.pairs.length || missingAddress > 0;
+    recordDex("token-search", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : void 0);
     return { ticker: sym, generations, migrated, dive };
   } catch {
+    recordDex("token-search", "partial", "result_processing_error");
     return null;
   }
 }
@@ -3114,6 +3336,8 @@ function analyzeCadence(posts, now) {
 
 // server/adapters/peopledatalabs.ts
 var BASE2 = "https://api.peopledatalabs.com/v5";
+var asRecord2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+var optionalString = (value) => typeof value === "string" && value.trim() ? value : void 0;
 async function enrichPerson(params) {
   const key = env("PDL_API_KEY");
   if (!key) return null;
@@ -3122,41 +3346,82 @@ async function enrichPerson(params) {
   if (params.name) qs.set("name", params.name);
   if (params.company) qs.set("company", params.company);
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
+  let res;
   try {
-    const res = await fetch(`${BASE2}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
-    if (!res.ok) {
-      recordPdlMatch(false);
-      return null;
-    }
-    const d = await res.json();
-    const p = d.data;
-    recordPdlMatch(!!p);
-    if (!p) return null;
-    return {
-      fullName: p.full_name,
-      jobTitle: p.job_title,
-      jobCompany: p.job_company_name,
-      experience: (p.experience ?? []).map((x) => ({
-        company: x.company?.name,
-        title: x.title?.name,
-        start: x.start_date,
-        end: x.end_date,
-        url: x.company?.website || x.company?.linkedin_url || null
-      })),
-      linkedin: p.linkedin_url,
-      // Emails are the strongest cross-source bridge key: a PDL-resolved email that
-      // MATCHES a leaked GitHub commit email proves the anon dev is this named person.
-      emails: [...new Set([
-        p.work_email,
-        ...Array.isArray(p.personal_emails) ? p.personal_emails : [],
-        ...Array.isArray(p.emails) ? p.emails.map((e) => typeof e === "string" ? e : e?.address) : []
-      ].filter((e) => typeof e === "string" && e.includes("@")).map((e) => e.toLowerCase()))],
-      github: typeof p.github_username === "string" ? p.github_username : null,
-      location: typeof p.location_name === "string" ? p.location_name : null
-    };
+    res = await fetch(`${BASE2}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
   } catch {
+    recordPdlMatch(false, "failed", "transport_error");
     return null;
   }
+  if (!res.ok) {
+    recordPdlMatch(false, "failed", `http_${res.status}`);
+    return null;
+  }
+  let raw;
+  try {
+    raw = await res.json();
+  } catch {
+    recordPdlMatch(false, "failed", "response_json_error");
+    return null;
+  }
+  const payload = asRecord2(raw);
+  if (!payload || !("data" in payload)) {
+    recordPdlMatch(false, "partial", "missing_data");
+    return null;
+  }
+  if (payload.data == null) {
+    recordPdlMatch(false, "succeeded", "no_match");
+    return null;
+  }
+  const p = asRecord2(payload.data);
+  if (!p) {
+    recordPdlMatch(false, "partial", "invalid_person_shape");
+    return null;
+  }
+  const issues = [];
+  const fullName = optionalString(p.full_name);
+  if (!fullName) issues.push("missing_full_name");
+  const rawExperience = p.experience;
+  if (rawExperience != null && !Array.isArray(rawExperience)) issues.push("invalid_experience");
+  const experience = (Array.isArray(rawExperience) ? rawExperience : []).flatMap((value) => {
+    const x = asRecord2(value);
+    if (!x) {
+      issues.push("invalid_experience_item");
+      return [];
+    }
+    const company = asRecord2(x.company);
+    const title = asRecord2(x.title);
+    return [{
+      company: optionalString(company?.name),
+      title: optionalString(title?.name),
+      start: optionalString(x.start_date),
+      end: optionalString(x.end_date),
+      url: optionalString(company?.website) || optionalString(company?.linkedin_url) || null
+    }];
+  });
+  const emailCandidates = [
+    p.work_email,
+    ...Array.isArray(p.personal_emails) ? p.personal_emails : [],
+    ...Array.isArray(p.emails) ? p.emails.map((email) => typeof email === "string" ? email : asRecord2(email)?.address) : []
+  ];
+  const person = {
+    fullName,
+    jobTitle: optionalString(p.job_title),
+    jobCompany: optionalString(p.job_company_name),
+    experience,
+    linkedin: optionalString(p.linkedin_url),
+    // Emails are the strongest cross-source bridge key: a PDL-resolved email that
+    // MATCHES a leaked GitHub commit email proves the anon dev is this named person.
+    emails: [...new Set(emailCandidates.filter((email) => typeof email === "string" && email.includes("@")).map((email) => email.toLowerCase()))],
+    github: optionalString(p.github_username) ?? null,
+    location: optionalString(p.location_name) ?? null
+  };
+  recordPdlMatch(
+    true,
+    issues.length ? "partial" : "succeeded",
+    issues.length ? `incomplete_result:${[...new Set(issues)].join(",")}` : void 0
+  );
+  return person;
 }
 var httpify = (u) => u ? /^https?:\/\//.test(u) ? u : "https://" + u : null;
 var peopledatalabsAdapter = {
@@ -3255,15 +3520,41 @@ var headers2 = (key) => ({
   accept: "application/vnd.github+json",
   "user-agent": "argus-due-diligence"
 });
+var isRecord2 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
+function validGithubResult(path, value) {
+  const clean = path.split("?")[0];
+  if (clean === "/search/users") return isRecord2(value) && Array.isArray(value.items);
+  if (/^\/users\/[^/]+\/(orgs|repos)$/.test(clean)) return Array.isArray(value);
+  if (/^\/users\/[^/]+$/.test(clean)) return isRecord2(value) && typeof value.login === "string" && !!value.login.trim();
+  return isRecord2(value) || Array.isArray(value);
+}
 async function ghJson(path, key) {
+  const op = path.split("?")[0].split("/").slice(1, 3).join("/") || "api";
+  const tier = "subscription/keyed";
+  let res;
   try {
-    recordCall("github", path.split("?")[0].split("/").slice(1, 3).join("/") || "api", 0);
-    const res = await fetch(GH + path, { headers: headers2(key), signal: AbortSignal.timeout(8e3) });
-    if (!res.ok) return null;
-    return await res.json();
+    res = await fetch(GH + path, { headers: headers2(key), signal: AbortSignal.timeout(8e3) });
   } catch {
+    recordCall("github", op, 0, `${tier} \xB7 transport_error`, "failed");
     return null;
   }
+  if (!res.ok) {
+    recordCall("github", op, 0, `${tier} \xB7 http_${res.status}`, "failed");
+    return null;
+  }
+  let value;
+  try {
+    value = await res.json();
+  } catch {
+    recordCall("github", op, 0, `${tier} \xB7 response_json_error`, "failed");
+    return null;
+  }
+  if (!validGithubResult(path, value)) {
+    recordCall("github", op, 0, `${tier} \xB7 result_shape_error`, "partial");
+    return null;
+  }
+  recordCall("github", op, 0, tier, "succeeded");
+  return value;
 }
 async function resolveGithub(handle, name, key) {
   const h = handle.replace(/^@/, "").toLowerCase();
@@ -3391,9 +3682,10 @@ var BASE3 = "https://api.crunchbase.com/api/v4";
 async function lookupOrganization(name) {
   const key = env("CRUNCHBASE_API_KEY");
   if (!key) return null;
+  const meta = "plan-billed";
+  let res;
   try {
-    recordCall("crunchbase", "org-search", 0, "plan-billed");
-    const res = await fetch(`${BASE3}/searches/organizations`, {
+    res = await fetch(`${BASE3}/searches/organizations`, {
       method: "POST",
       headers: { "X-cb-user-key": key, "content-type": "application/json" },
       body: JSON.stringify({
@@ -3402,20 +3694,52 @@ async function lookupOrganization(name) {
         limit: 1
       })
     });
-    if (!res.ok) return null;
-    const d = await res.json();
-    const e = d.entities?.[0]?.properties;
-    if (!e) return null;
-    return {
-      name: e.identifier?.value,
-      fundingTotal: e.funding_total?.value_usd,
-      rounds: e.num_funding_rounds,
-      investors: (e.investor_identifiers ?? []).map((i) => i.value),
-      acquirer: e.acquirer_identifier?.value
-    };
   } catch {
+    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 transport_error`, "failed");
     return null;
   }
+  if (!res.ok) {
+    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 http_${res.status}`, "failed");
+    return null;
+  }
+  let d;
+  try {
+    d = await res.json();
+  } catch {
+    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 response_json_error`, "failed");
+    return null;
+  }
+  if (!d || typeof d !== "object" || !Array.isArray(d.entities)) {
+    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 result_shape_error`, "partial");
+    return null;
+  }
+  if (!d.entities.length) {
+    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 no_match`, "succeeded");
+    return null;
+  }
+  const e = d.entities[0]?.properties;
+  const resolvedName = e?.identifier?.value;
+  if (!e || typeof e !== "object" || typeof resolvedName !== "string" || !resolvedName.trim()) {
+    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 result_shape_error`, "partial");
+    return null;
+  }
+  const rawInvestors = e.investor_identifiers;
+  const investorShapeOkay = rawInvestors == null || Array.isArray(rawInvestors);
+  const investors = (Array.isArray(rawInvestors) ? rawInvestors : []).map((investor) => investor?.value).filter((value) => typeof value === "string" && !!value.trim());
+  recordCall(
+    "crunchbase",
+    "org-search",
+    0,
+    investorShapeOkay ? meta : `${meta} \xB7 incomplete_investor_shape`,
+    investorShapeOkay ? "succeeded" : "partial"
+  );
+  return {
+    name: resolvedName,
+    fundingTotal: e.funding_total?.value_usd,
+    rounds: e.num_funding_rounds,
+    investors,
+    acquirer: e.acquirer_identifier?.value
+  };
 }
 var crunchbaseAdapter = {
   id: "crunchbase",
@@ -3472,21 +3796,50 @@ async function tokenByContract(chain, address) {
   const platform = PLATFORM[chain.toLowerCase()] ?? chain.toLowerCase();
   const base = key ? PRO : PUBLIC;
   const headers3 = key ? { "x-cg-pro-api-key": key } : {};
+  const tier = key ? "subscription/keyed" : "keyless";
+  let res;
   try {
-    recordCall("coingecko", "contract-lookup", 0);
-    const res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers3 });
-    if (!res.ok) return null;
-    const d = await res.json();
-    return {
-      symbol: d.symbol,
-      name: d.name,
-      priceUsd: d.market_data?.current_price?.usd,
-      mcapUsd: d.market_data?.market_cap?.usd,
-      ath_change_pct: d.market_data?.ath_change_percentage?.usd
-    };
+    res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers3 });
   } catch {
+    recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 transport_error`, "failed");
     return null;
   }
+  if (!res.ok) {
+    recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 http_${res.status}`, "failed");
+    return null;
+  }
+  let d;
+  try {
+    d = await res.json();
+  } catch {
+    recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 response_json_error`, "failed");
+    return null;
+  }
+  if (!d || typeof d !== "object" || Array.isArray(d)) {
+    recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 result_shape_error`, "partial");
+    return null;
+  }
+  const hasSymbol = typeof d.symbol === "string" && !!d.symbol.trim();
+  const hasName = typeof d.name === "string" && !!d.name.trim();
+  if (!hasSymbol && !hasName) {
+    recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 missing_identity`, "partial");
+    return null;
+  }
+  const complete = hasSymbol && hasName && (d.market_data == null || typeof d.market_data === "object" && !Array.isArray(d.market_data));
+  recordCall(
+    "coingecko",
+    "contract-lookup",
+    0,
+    complete ? tier : `${tier} \xB7 incomplete_market_shape`,
+    complete ? "succeeded" : "partial"
+  );
+  return {
+    symbol: d.symbol,
+    name: d.name,
+    priceUsd: d.market_data?.current_price?.usd,
+    mcapUsd: d.market_data?.market_cap?.usd,
+    ath_change_pct: d.market_data?.ath_change_percentage?.usd
+  };
 }
 var coingeckoAdapter = {
   id: "coingecko",
@@ -3521,13 +3874,18 @@ var coingeckoAdapter = {
 
 // server/adapters/reddit.ts
 var cachedToken = null;
+var asRecord3 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+function recordRedditAttempt(op, status, meta) {
+  recordCall("reddit", op, 0, meta, status);
+}
 async function getToken() {
   const id = env("REDDIT_CLIENT_ID");
   const secret = env("REDDIT_CLIENT_SECRET");
   if (!id || !secret) return null;
   if (cachedToken && cachedToken.exp > Date.now()) return cachedToken.token;
+  let res;
   try {
-    const res = await fetch("https://www.reddit.com/api/v1/access_token", {
+    res = await fetch("https://www.reddit.com/api/v1/access_token", {
       method: "POST",
       headers: {
         authorization: "Basic " + Buffer.from(`${id}:${secret}`).toString("base64"),
@@ -3536,33 +3894,88 @@ async function getToken() {
       },
       body: "grant_type=client_credentials"
     });
-    if (!res.ok) return null;
-    const d = await res.json();
-    cachedToken = { token: d.access_token, exp: Date.now() + (d.expires_in - 60) * 1e3 };
-    return cachedToken.token;
   } catch {
+    recordRedditAttempt("oauth-token", "failed", "transport_error");
     return null;
   }
+  if (!res.ok) {
+    recordRedditAttempt("oauth-token", "failed", `http_${res.status}`);
+    return null;
+  }
+  let raw;
+  try {
+    raw = await res.json();
+  } catch {
+    recordRedditAttempt("oauth-token", "failed", "response_json_error");
+    return null;
+  }
+  const d = asRecord3(raw);
+  const token = typeof d?.access_token === "string" && d.access_token ? d.access_token : null;
+  if (!token) {
+    recordRedditAttempt("oauth-token", "partial", "missing_access_token");
+    return null;
+  }
+  const expiresIn = typeof d?.expires_in === "number" && Number.isFinite(d.expires_in) ? d.expires_in : null;
+  if (expiresIn == null) {
+    recordRedditAttempt("oauth-token", "partial", "missing_expiry");
+    return token;
+  }
+  cachedToken = { token, exp: Date.now() + (expiresIn - 60) * 1e3 };
+  recordRedditAttempt("oauth-token", "succeeded");
+  return token;
 }
 async function searchMentions(query) {
   const token = await getToken();
   if (!token) return [];
+  let res;
   try {
-    recordCall("reddit", "search", 0);
-    const res = await fetch(`https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=15&t=year`, {
+    res = await fetch(`https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=15&t=year`, {
       headers: { authorization: `Bearer ${token}`, "user-agent": "argus-dd/1.0" }
     });
-    if (!res.ok) return [];
-    const d = await res.json();
-    return (d.data?.children ?? []).map((c) => ({
-      title: c.data.title,
-      sub: c.data.subreddit_name_prefixed,
-      score: c.data.score,
-      url: "https://reddit.com" + c.data.permalink
-    }));
   } catch {
+    recordRedditAttempt("search", "failed", "transport_error");
     return [];
   }
+  if (!res.ok) {
+    recordRedditAttempt("search", "failed", `http_${res.status}`);
+    return [];
+  }
+  let raw;
+  try {
+    raw = await res.json();
+  } catch {
+    recordRedditAttempt("search", "failed", "response_json_error");
+    return [];
+  }
+  const d = asRecord3(raw);
+  const data = asRecord3(d?.data);
+  if (!Array.isArray(data?.children)) {
+    recordRedditAttempt("search", "partial", "missing_children");
+    return [];
+  }
+  let invalidChildren = 0;
+  const hits = data.children.flatMap((child) => {
+    const item = asRecord3(asRecord3(child)?.data);
+    const title = typeof item?.title === "string" ? item.title : null;
+    const sub = typeof item?.subreddit_name_prefixed === "string" ? item.subreddit_name_prefixed : null;
+    const permalink = typeof item?.permalink === "string" ? item.permalink : null;
+    if (!title || !sub || !permalink) {
+      invalidChildren += 1;
+      return [];
+    }
+    return [{
+      title,
+      sub,
+      score: typeof item?.score === "number" && Number.isFinite(item.score) ? item.score : 0,
+      url: "https://reddit.com" + permalink
+    }];
+  });
+  recordRedditAttempt(
+    "search",
+    invalidChildren ? "partial" : "succeeded",
+    invalidChildren ? `dropped_${invalidChildren}_invalid_results` : `${hits.length}_results`
+  );
+  return hits;
 }
 var redditAdapter = {
   id: "reddit",
@@ -3595,15 +4008,36 @@ var redditAdapter = {
 async function heliusWalletActivity(address) {
   const key = env("HELIUS_API_KEY");
   if (!key) return null;
+  let res;
   try {
-    recordHelius("address-transactions");
-    const res = await fetch(`https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${key}&limit=50`);
-    if (!res.ok) return null;
-    const txs = await res.json();
-    return { count: txs.length, latest: txs[0]?.timestamp };
+    res = await fetch(`https://api.helius.xyz/v0/addresses/${address}/transactions?api-key=${key}&limit=50`);
   } catch {
+    recordHelius("address-transactions", "failed", "subscription/keyed \xB7 transport_error");
     return null;
   }
+  if (!res.ok) {
+    recordHelius("address-transactions", "failed", `subscription/keyed \xB7 http_${res.status}`);
+    return null;
+  }
+  let value;
+  try {
+    value = await res.json();
+  } catch {
+    recordHelius("address-transactions", "failed", "subscription/keyed \xB7 response_json_error");
+    return null;
+  }
+  if (!Array.isArray(value)) {
+    recordHelius("address-transactions", "partial", "subscription/keyed \xB7 result_shape_error");
+    return null;
+  }
+  const malformed = value.some((transaction) => transaction == null || typeof transaction !== "object" || Array.isArray(transaction));
+  recordHelius(
+    "address-transactions",
+    malformed ? "partial" : "succeeded",
+    malformed ? "subscription/keyed \xB7 incomplete_transaction_shape" : "subscription/keyed"
+  );
+  const txs = value;
+  return { count: txs.length, latest: typeof txs[0]?.timestamp === "number" ? txs[0].timestamp : void 0 };
 }
 var onchainAdapter = {
   id: "onchain",
@@ -3632,21 +4066,44 @@ var onchainAdapter = {
 // server/adapters/wayback.ts
 var CDX = "https://web.archive.org/cdx/search/cdx";
 async function newestSnapshot(urlPath) {
+  let response;
   try {
     const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-1`;
-    recordCall("wayback", "cdx-search", 0);
-    const res = await fetch(CDX + qs, { signal: AbortSignal.timeout(4e3) });
-    if (!res.ok) return null;
-    const rows = await res.json();
-    if (!Array.isArray(rows) || rows.length < 2) return null;
-    const last = rows[rows.length - 1];
-    const ti = rows[0].indexOf("timestamp");
-    const oi = rows[0].indexOf("original");
-    if (ti < 0 || oi < 0) return null;
-    return { timestamp: last[ti], original: last[oi] };
+    response = await fetch(CDX + qs, { signal: AbortSignal.timeout(4e3) });
   } catch {
+    recordCall("wayback", "cdx-search", 0, "transport_error", "failed");
     return null;
   }
+  if (!response.ok) {
+    recordCall("wayback", "cdx-search", 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  let parsed;
+  try {
+    parsed = await response.json();
+  } catch {
+    recordCall("wayback", "cdx-search", 0, "response_json_error", "failed");
+    return null;
+  }
+  if (!Array.isArray(parsed) || !parsed.every(Array.isArray)) {
+    recordCall("wayback", "cdx-search", 0, "invalid_result_shape", "partial");
+    return null;
+  }
+  const rows = parsed;
+  if (rows.length < 2) {
+    recordCall("wayback", "cdx-search", 0, "no_snapshot", "succeeded");
+    return null;
+  }
+  const header = rows[0];
+  const last = rows[rows.length - 1];
+  const ti = header.indexOf("timestamp");
+  const oi = header.indexOf("original");
+  if (ti < 0 || oi < 0 || typeof last[ti] !== "string" || typeof last[oi] !== "string") {
+    recordCall("wayback", "cdx-search", 0, "invalid_result_shape", "partial");
+    return null;
+  }
+  recordCall("wayback", "cdx-search", 0, void 0, "succeeded");
+  return { timestamp: last[ti], original: last[oi] };
 }
 async function archivedAffiliation(domain, name) {
   const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
@@ -3657,13 +4114,28 @@ async function archivedAffiliation(domain, name) {
   for (const p of paths) {
     const snap = await newestSnapshot(p);
     if (!snap) continue;
+    let response;
     try {
       const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
-      recordCall("wayback", "snapshot-fetch", 0);
-      const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(5e3) });
-      if (!res.ok) continue;
-      const text = (await res.text()).toLowerCase();
-      if (needles.some((n) => text.includes(n))) {
+      response = await fetch(archiveUrl, { signal: AbortSignal.timeout(5e3) });
+      if (!response.ok) {
+        recordCall("wayback", "snapshot-fetch", 0, `http_${response.status}`, "failed");
+        continue;
+      }
+      let text;
+      try {
+        text = (await response.text()).toLowerCase();
+      } catch {
+        recordCall("wayback", "snapshot-fetch", 0, "response_text_error", "failed");
+        continue;
+      }
+      if (!text.trim()) {
+        recordCall("wayback", "snapshot-fetch", 0, "empty_snapshot", "partial");
+        continue;
+      }
+      const matched = needles.some((n) => text.includes(n));
+      recordCall("wayback", "snapshot-fetch", 0, matched ? "name_match" : "no_name_match", "succeeded");
+      if (matched) {
         return {
           url: `https://web.archive.org/web/${snap.timestamp}/${snap.original}`,
           year: snap.timestamp.slice(0, 4),
@@ -3671,6 +4143,7 @@ async function archivedAffiliation(domain, name) {
         };
       }
     } catch {
+      recordCall("wayback", "snapshot-fetch", 0, "transport_error", "failed");
     }
   }
   return null;
@@ -3687,13 +4160,36 @@ function nameNeedles(name) {
 var ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
 var NAME_IN_TEXT = /\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b/gi;
 async function getJson(url) {
+  let operation;
   try {
-    recordCall("wallet-resolve", new URL(url).host, 0);
-    const r = await fetch(url, { signal: AbortSignal.timeout(9e3) });
-    return r.ok ? await r.json() : null;
+    operation = new URL(url).host;
   } catch {
     return null;
   }
+  let response;
+  try {
+    response = await fetch(url, { signal: AbortSignal.timeout(9e3) });
+  } catch {
+    recordCall("wallet-resolve", operation, 0, "transport_error", "failed");
+    return null;
+  }
+  if (!response.ok) {
+    recordCall("wallet-resolve", operation, 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    recordCall("wallet-resolve", operation, 0, "response_json_error", "failed");
+    return null;
+  }
+  if (result === null || typeof result !== "object") {
+    recordCall("wallet-resolve", operation, 0, "invalid_result_shape", "partial");
+    return null;
+  }
+  recordCall("wallet-resolve", operation, 0, void 0, "succeeded");
+  return result;
 }
 async function web3bio(name) {
   const d = await getJson(`https://api.web3.bio/profile/${encodeURIComponent(name)}`);

@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ANALYST_EVIDENCE_MAX_CHARS,
   buildAnalystEvidencePacket,
+  structured,
   validateAnalystVerdict,
   type AnalystAxis,
 } from "./agent";
+import { getCost, withCostLedger } from "./cost";
 
 const catalog: AnalystAxis[] = [
   { axis: "F1_identity_verifiability", weight: 12, role: "FOUNDER" },
@@ -86,5 +88,66 @@ describe("analyst verdict integrity", () => {
     expect(parsed.findings[0].source_url).toBe("https://example.com/artifact");
     expect(parsed.coverage.recentActivity.available).toBe(100);
     expect(parsed.coverage.recentActivity.included).toBeLessThanOrEqual(12);
+  });
+});
+
+describe("Claude attempt accounting", () => {
+  const tool = {
+    name: "record_test",
+    description: "Record a test result.",
+    input_schema: { type: "object", properties: { ok: { type: "boolean" } }, required: ["ok"] },
+  };
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
+  });
+
+  it("records an HTTP failure as a failed paid attempt", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("unavailable", { status: 503 })));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const captured = await withCostLedger(async () => {
+      const result = await structured<{ ok: boolean }>("system", "user", tool);
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBeNull();
+    expect(captured.cost.claudeCalls).toBe(1);
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "claude",
+      op: "record_test",
+      calls: 1,
+      failed: 1,
+      status: "failed",
+      usd: 0,
+      meta: expect.stringContaining("http_503"),
+    }));
+  });
+
+  it("records billed usage as partial when the required tool result is missing", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      content: [{ type: "text", text: "not a tool call" }],
+      usage: { input_tokens: 1_000, output_tokens: 100 },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    const captured = await withCostLedger(async () => {
+      const result = await structured<{ ok: boolean }>("system", "user", tool);
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBeNull();
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "claude",
+      calls: 1,
+      succeeded: 0,
+      partial: 1,
+      failed: 0,
+      status: "partial",
+      meta: expect.stringContaining("missing_tool_use"),
+    }));
   });
 });

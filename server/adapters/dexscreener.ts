@@ -7,6 +7,10 @@ import type { Adapter, CollectContext } from "./types";
 import { recordCall } from "../cost";
 
 const BASE = "https://api.dexscreener.com";
+const isRecord = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
+const recordDex = (op: string, status: "succeeded" | "partial" | "failed", detail?: string) => {
+  recordCall("dexscreener", op, 0, ["keyless", detail].filter(Boolean).join(" · "), status);
+};
 
 export interface DexTokenSnapshot {
   address: string;
@@ -21,28 +25,52 @@ export interface DexTokenSnapshot {
 
 // Public helper so the orchestrator / tests can hit it directly.
 export async function lookupToken(address: string): Promise<DexTokenSnapshot | null> {
+  let res: Response;
   try {
-    recordCall("dexscreener", "token-pairs", 0);
-    const res = await fetch(`${BASE}/latest/dex/tokens/${address}`);
-    if (!res.ok) return null;
-    const data = (await res.json()) as { pairs?: any[] };
-    const pairs = data.pairs ?? [];
-    if (!pairs.length) return { address };
-    // pick the deepest-liquidity pair as canonical
-    const top = pairs.reduce((a, b) => ((b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a));
-    return {
-      address,
-      chain: top.chainId,
-      symbol: top.baseToken?.symbol,
-      priceUsd: top.priceUsd ? Number(top.priceUsd) : undefined,
-      liquidityUsd: top.liquidity?.usd,
-      volume24h: top.volume?.h24,
-      fdv: top.fdv,
-      pairCreatedAt: top.pairCreatedAt,
-    };
+    res = await fetch(`${BASE}/latest/dex/tokens/${address}`);
   } catch {
+    recordDex("token-pairs", "failed", "transport_error");
     return null;
   }
+  if (!res.ok) {
+    recordDex("token-pairs", "failed", `http_${res.status}`);
+    return null;
+  }
+
+  let data: unknown;
+  try { data = await res.json(); }
+  catch {
+    recordDex("token-pairs", "failed", "response_json_error");
+    return null;
+  }
+  if (!isRecord(data) || !Array.isArray(data.pairs)) {
+    recordDex("token-pairs", "partial", "result_shape_error");
+    return null;
+  }
+  if (!data.pairs.length) {
+    recordDex("token-pairs", "succeeded", "no_pairs");
+    return { address };
+  }
+  const pairs = data.pairs.filter(isRecord);
+  if (!pairs.length) {
+    recordDex("token-pairs", "partial", "invalid_pair_rows");
+    return null;
+  }
+  // pick the deepest-liquidity pair as canonical
+  const top = pairs.reduce((a, b) => ((b.liquidity?.usd ?? 0) > (a.liquidity?.usd ?? 0) ? b : a));
+  const incomplete = pairs.length !== data.pairs.length
+    || (!top.chainId && !top.baseToken?.symbol && top.priceUsd == null && top.liquidity?.usd == null);
+  recordDex("token-pairs", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : undefined);
+  return {
+    address,
+    chain: top.chainId,
+    symbol: top.baseToken?.symbol,
+    priceUsd: top.priceUsd ? Number(top.priceUsd) : undefined,
+    liquidityUsd: top.liquidity?.usd,
+    volume24h: top.volume?.h24,
+    fdv: top.fdv,
+    pairCreatedAt: top.pairCreatedAt,
+  };
 }
 
 // ── Token-lifecycle / migration-dive detection ──
@@ -72,17 +100,42 @@ export interface LifecycleSignal {
 export async function detectTokenLifecycle(ticker: string, knownAddress?: string): Promise<LifecycleSignal | null> {
   const sym = ticker.replace(/^\$/, "").trim();
   if (!sym) return null;
+  let res: Response;
   try {
-    const res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`);
-    if (!res.ok) return null;
-    const data = (await res.json()) as { pairs?: any[] };
-    const pairs = (data.pairs ?? []).filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
-    if (!pairs.length) return null;
+    res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`);
+  } catch {
+    recordDex("token-search", "failed", "transport_error");
+    return null;
+  }
+  if (!res.ok) {
+    recordDex("token-search", "failed", `http_${res.status}`);
+    return null;
+  }
+
+  let data: unknown;
+  try { data = await res.json(); }
+  catch {
+    recordDex("token-search", "failed", "response_json_error");
+    return null;
+  }
+  if (!isRecord(data) || !Array.isArray(data.pairs)) {
+    recordDex("token-search", "partial", "result_shape_error");
+    return null;
+  }
+
+  try {
+    const validRows = data.pairs.filter(isRecord);
+    const pairs = validRows.filter((p) => (p.baseToken?.symbol ?? "").toLowerCase() === sym.toLowerCase());
+    if (!pairs.length) {
+      recordDex("token-search", validRows.length === data.pairs.length ? "succeeded" : "partial", validRows.length === data.pairs.length ? "no_match" : "invalid_pair_rows");
+      return null;
+    }
 
     const byAddr = new Map<string, any[]>();
+    let missingAddress = 0;
     for (const p of pairs) {
       const a = p.baseToken?.address;
-      if (!a) continue;
+      if (!a) { missingAddress += 1; continue; }
       let arr = byAddr.get(a);
       if (!arr) { arr = []; byAddr.set(a, arr); }
       arr.push(p);
@@ -123,8 +176,11 @@ export async function detectTokenLifecycle(ticker: string, knownAddress?: string
         };
       }
     }
+    const incomplete = validRows.length !== data.pairs.length || missingAddress > 0;
+    recordDex("token-search", incomplete ? "partial" : "succeeded", incomplete ? "incomplete_pair_shape" : undefined);
     return { ticker: sym, generations, migrated, dive };
   } catch {
+    recordDex("token-search", "partial", "result_processing_error");
     return null;
   }
 }

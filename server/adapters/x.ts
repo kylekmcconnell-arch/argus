@@ -16,6 +16,11 @@ import type { NotableFollower } from "../../src/data/evidence";
 import { NOTABLE_ACCOUNTS } from "./notableAccounts";
 
 const TWITTERAPI = "https://api.twitterapi.io";
+type JsonRecord = Record<string, unknown>;
+const asRecord = (value: unknown): JsonRecord =>
+  value !== null && typeof value === "object" && !Array.isArray(value) ? value as JsonRecord : {};
+const optionalNumber = (value: unknown): number | undefined =>
+  typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
 // Grok search via the current Responses API + tools (the legacy search_parameters
 // Live Search API was retired -> 410 Gone). Returns the model's text, or null.
@@ -29,44 +34,70 @@ export async function grokSearch(system: string, user: string, opts?: { maxToolC
     const hit = await cacheGet(opts.cacheKey);
     if (hit) return hit;
   }
-  try {
-    // COST: xAI bills live search PER SOURCE on top of tokens, and an unbounded
-    // agentic loop can pull dozens of sources per call. max_tool_calls caps the
-    // search loop (the dominant spend); if the API rejects the param we retry
-    // once without it. Timeout also bounds a slow loop for the streaming audit.
-    const call = (withCap: boolean) => fetch("https://api.x.ai/v1/responses", {
-      method: "POST",
-      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-      body: JSON.stringify({
-        model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
-        input: [{ role: "system", content: system }, { role: "user", content: user }],
-        tools: [{ type: "web_search" }, { type: "x_search" }],
-        ...(withCap ? { max_tool_calls: opts?.maxToolCalls ?? 6 } : {}),
-      }),
-      signal: AbortSignal.timeout(45000),
-    });
-    let res = await call(true);
-    if (res.status === 400) res = await call(false); // param unsupported -> compat retry
-    if (!res.ok) return null;
-    const d = (await res.json()) as any;
-    // Burn visibility: log usage AND accumulate it into the per-audit cost
-    // that gets attached to the dossier.
+  // COST: xAI bills live search PER SOURCE on top of tokens, and an unbounded
+  // agentic loop can pull dozens of sources per call. max_tool_calls caps the
+  // search loop (the dominant spend); if the API rejects the param we retry
+  // once without it. Every physical attempt is recorded, including the rejected
+  // compatibility call and transport/parse failures.
+  const call = async (withCap: boolean): Promise<{ status: number | null; text: string | null }> => {
+    let res: Response;
     try {
-      const toolCalls = Array.isArray(d.output) ? d.output.filter((o: any) => /search|tool/.test(String(o.type ?? ""))).length : undefined;
-      console.log("[grok-usage]", JSON.stringify({ in: d.usage?.input_tokens, out: d.usage?.output_tokens, toolCalls }));
-      addGrokUsage(d.usage, toolCalls);
-    } catch { /* accounting only */ }
-    const text =
-      d.output_text ??
-      (Array.isArray(d.output)
-        ? d.output.flatMap((o: any) => o.content ?? []).map((c: any) => c.text ?? "").join(" ")
-        : "") ??
-      "";
-    if (text && opts?.cacheKey) void cacheSet(opts.cacheKey, text);
-    return text || null;
-  } catch {
-    return null;
-  }
+      res = await fetch("https://api.x.ai/v1/responses", {
+        method: "POST",
+        headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+        body: JSON.stringify({
+          model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
+          input: [{ role: "system", content: system }, { role: "user", content: user }],
+          tools: [{ type: "web_search" }, { type: "x_search" }],
+          ...(withCap ? { max_tool_calls: opts?.maxToolCalls ?? 6 } : {}),
+        }),
+        signal: AbortSignal.timeout(45000),
+      });
+    } catch {
+      addGrokUsage(undefined, 0, "live-search", "failed", "transport_error");
+      return { status: null, text: null };
+    }
+    if (!res.ok) {
+      addGrokUsage(undefined, 0, "live-search", "failed", `http_${res.status}`);
+      return { status: res.status, text: null };
+    }
+
+    let d: JsonRecord;
+    try { d = asRecord(await res.json()); }
+    catch {
+      addGrokUsage(undefined, 0, "live-search", "failed", "response_json_error");
+      return { status: res.status, text: null };
+    }
+    const output = Array.isArray(d.output) ? d.output.map(asRecord) : [];
+    const toolCalls = output.length
+      ? output.filter((item) => /search|tool/.test(String(item.type ?? ""))).length
+      : undefined;
+    const usageRecord = asRecord(d.usage);
+    const usage = {
+      input_tokens: optionalNumber(usageRecord.input_tokens),
+      output_tokens: optionalNumber(usageRecord.output_tokens),
+      num_sources_used: optionalNumber(usageRecord.num_sources_used),
+    };
+    const nestedText = output
+      .flatMap((item) => Array.isArray(item.content) ? item.content.map(asRecord) : [])
+      .map((content) => typeof content.text === "string" ? content.text : "")
+      .join(" ");
+    const text = typeof d.output_text === "string" ? d.output_text : nestedText;
+    console.log("[grok-usage]", JSON.stringify({ in: usage.input_tokens, out: usage.output_tokens, toolCalls }));
+    addGrokUsage(
+      usage,
+      toolCalls,
+      "live-search",
+      text ? "succeeded" : "partial",
+      text ? undefined : "empty_output",
+    );
+    return { status: res.status, text: text || null };
+  };
+
+  let result = await call(true);
+  if (result.status === 400) result = await call(false); // param unsupported -> compat retry
+  if (result.text && opts?.cacheKey) void cacheSet(opts.cacheKey, result.text);
+  return result.text;
 }
 
 // twitterapi.io throttles hard (429) under bursty use, and occasionally 502/503.
@@ -74,19 +105,38 @@ export async function grokSearch(system: string, user: string, opts?: { maxToolC
 // the caller can still inspect a terminal error.
 async function twFetch(url: string, key: string, tries = 2): Promise<Response | null> {
   // Ledger: op = the endpoint path (e.g. "user/info"), one line per endpoint.
-  recordTwitterapi(url.match(/\/twitter\/([a-z_/]+)/i)?.[1] ?? "other");
-  let last: Response | null = null;
+  // Count each physical retry, not just the logical caller invocation.
+  const op = url.match(/\/twitter\/([a-z_/]+)/i)?.[1] ?? "other";
   for (let i = 0; i < tries; i++) {
-    const res = await fetch(url, { headers: { "x-api-key": key } });
-    last = res;
+    let res: Response;
+    try {
+      res = await fetch(url, { headers: { "x-api-key": key } });
+    } catch {
+      recordTwitterapi(op, "failed", "transport_error");
+      if (i + 1 >= tries) return null;
+      await new Promise((resolve) => setTimeout(resolve, 700 * (i + 1)));
+      continue;
+    }
+    if (!res.ok) {
+      recordTwitterapi(op, "failed", `http_${res.status}`);
+    } else {
+      try {
+        const payload = asRecord(await res.clone().json());
+        const providerError = payload.status === "error" || payload.data === null;
+        recordTwitterapi(op, providerError ? "failed" : "succeeded", providerError ? "provider_error_envelope" : undefined);
+      } catch {
+        recordTwitterapi(op, "failed", "response_json_error");
+      }
+    }
     if (res.status !== 429 && res.status !== 502 && res.status !== 503) return res;
+    if (i + 1 >= tries) return res;
     // Short backoff: a full 5s wait per 429 (free-tier QPS) balloons the whole
     // audit past its budget when many calls are made, so we keep this fast and
     // accept that a busy free-tier audit drops some calls. The real fix is a paid
     // tier (no QPS cap); see notableFollowers for the single-call accommodation.
     await new Promise((r) => setTimeout(r, res.status === 429 ? 1200 : 700 * (i + 1)));
   }
-  return last;
+  return null;
 }
 
 // ── twitterapi.io: profile ───────────────────────────────────────────────
@@ -158,19 +208,42 @@ export async function getProfile(handle: string): Promise<XProfile | null> {
 // result means "not in the index", never a guarantee of no change.
 export async function handleHistory(handle: string): Promise<{ priorHandles: string[]; idStr?: string } | null> {
   const u = handle.replace(/^@/, "");
+  let response: Response;
   try {
-    recordCall("memory.lol", "tw-history", 0);
-    const res = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    const d = (await res.json()) as any;
-    const acct = (d.accounts ?? [])[0];
-    if (!acct?.screen_names) return { priorHandles: [], idStr: acct?.id_str };
-    const names = Object.keys(acct.screen_names);
-    const prior = names.filter((n) => n.toLowerCase() !== u.toLowerCase());
-    return { priorHandles: prior, idStr: acct.id_str };
+    response = await fetch(`https://api.memory.lol/v1/tw/${encodeURIComponent(u)}`, { signal: AbortSignal.timeout(8000) });
   } catch {
+    recordCall("memory.lol", "tw-history", 0, "transport_error", "failed");
     return null;
   }
+  if (!response.ok) {
+    recordCall("memory.lol", "tw-history", 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = await response.json();
+  } catch {
+    recordCall("memory.lol", "tw-history", 0, "response_json_error", "failed");
+    return null;
+  }
+  const envelope = asRecord(parsed);
+  if (!Array.isArray(envelope.accounts)) {
+    recordCall("memory.lol", "tw-history", 0, "invalid_result_shape", "partial");
+    return null;
+  }
+  if (!envelope.accounts.length) {
+    recordCall("memory.lol", "tw-history", 0, "no_match", "succeeded");
+    return { priorHandles: [] };
+  }
+  const acct = asRecord(envelope.accounts[0]);
+  if (!acct.screen_names || typeof acct.screen_names !== "object" || Array.isArray(acct.screen_names)) {
+    recordCall("memory.lol", "tw-history", 0, "screen_names_missing", "partial");
+    return { priorHandles: [], ...(typeof acct.id_str === "string" ? { idStr: acct.id_str } : {}) };
+  }
+  const names = Object.keys(acct.screen_names);
+  const prior = names.filter((n) => n.toLowerCase() !== u.toLowerCase());
+  recordCall("memory.lol", "tw-history", 0, prior.length ? "history_found" : "no_prior_handles", "succeeded");
+  return { priorHandles: prior, ...(typeof acct.id_str === "string" ? { idStr: acct.id_str } : {}) };
 }
 
 // twitterapi.io: recent posts, fuel for claim extraction + activity signal.
@@ -266,7 +339,6 @@ async function lastTweetsPage(handle: string, key: string, cursor?: string): Pro
 
 async function searchFrom(handle: string, terms: string[], key: string): Promise<any[]> {
   const q = `from:${handle} (${terms.join(" OR ")})`;
-  recordTwitterapi("tweet/advanced_search");
   const res = await twFetch(`${TWITTERAPI}/twitter/tweet/advanced_search?query=${encodeURIComponent(q)}&queryType=Top`, key);
   if (!res || !res.ok) return [];
   const d = (await res.json()) as any;

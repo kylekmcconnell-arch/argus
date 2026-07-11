@@ -31,8 +31,9 @@ export async function structured<T>(
 ): Promise<T | null> {
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
+  let res: Response;
   try {
-    const res = await fetch(ANTHROPIC_URL, {
+    res = await fetch(ANTHROPIC_URL, {
       method: "POST",
       headers: {
         "x-api-key": key,
@@ -48,21 +49,40 @@ export async function structured<T>(
         tool_choice: { type: "tool", name: tool.name },
       }),
     });
-    if (!res.ok) {
-      console.error("[agent] anthropic error", res.status, await res.text());
-      return null;
-    }
-    const data = (await res.json()) as {
-      content: { type: string; name?: string; input?: unknown }[];
-      usage?: { input_tokens?: number; output_tokens?: number };
-    };
-    addClaudeUsage(data.usage, tool.name); // per-audit cost accounting, one ledger line per tool
-    const block = data.content.find((b) => b.type === "tool_use");
-    return (block?.input as T) ?? null;
   } catch (e) {
+    addClaudeUsage(undefined, tool.name, "failed", "transport_error");
     console.error("[agent] request failed", e);
     return null;
   }
+  if (!res.ok) {
+    addClaudeUsage(undefined, tool.name, "failed", `http_${res.status}`);
+    let detail = "";
+    try { detail = await res.text(); } catch { /* response detail is diagnostic only */ }
+    console.error("[agent] anthropic error", res.status, detail);
+    return null;
+  }
+
+  let data: {
+    content?: { type: string; name?: string; input?: unknown }[];
+    usage?: { input_tokens?: number; output_tokens?: number };
+  };
+  try {
+    data = (await res.json()) as typeof data;
+  } catch (e) {
+    addClaudeUsage(undefined, tool.name, "failed", "response_json_error");
+    console.error("[agent] response parse failed", e);
+    return null;
+  }
+  const block = Array.isArray(data.content)
+    ? data.content.find((candidate) => candidate.type === "tool_use" && candidate.name === tool.name && candidate.input != null)
+    : undefined;
+  addClaudeUsage(
+    data.usage,
+    tool.name,
+    block ? "succeeded" : "partial",
+    block ? undefined : "missing_tool_use",
+  );
+  return (block?.input as T) ?? null;
 }
 
 // Claim extraction: for an UNKNOWN handle, read the subject's own surfaces (bio

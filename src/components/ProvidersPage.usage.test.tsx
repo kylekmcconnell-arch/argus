@@ -39,11 +39,11 @@ describe("Providers immutable usage trail", () => {
             id: "event-1",
             reportVersionId: "version-1",
             provider: "grok",
-            operation: "panel:recon-team",
+            operation: "live-search",
             calls: 2,
             usd: 0.125,
-            status: "succeeded",
-            meta: "web + X search",
+            status: "partial",
+            meta: "http_400 · retry_ok",
             createdAt: "2026-07-11T11:00:00.000Z",
             actor: "Kyle",
             report: { kind: "site", ref: "argus.example", label: "argus.example", version: 4 },
@@ -65,7 +65,8 @@ describe("Providers immutable usage trail", () => {
     expect(container.textContent).toContain("$0.125001 estimated");
     expect(container.textContent).toContain("Latest 1 of 9 recorded events");
     expect(container.textContent).toContain("grok");
-    expect(container.textContent).toContain("recon team");
+    expect(container.textContent).toContain("live search");
+    expect(container.textContent).toContain("partial");
     expect(container.textContent).toContain("Kyle");
   });
 });

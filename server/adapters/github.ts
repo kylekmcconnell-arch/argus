@@ -21,15 +21,42 @@ const headers = (key: string) => ({
   "user-agent": "argus-due-diligence",
 });
 
+const isRecord = (value: unknown): value is Record<string, unknown> => !!value && typeof value === "object" && !Array.isArray(value);
+function validGithubResult(path: string, value: unknown): boolean {
+  const clean = path.split("?")[0];
+  if (clean === "/search/users") return isRecord(value) && Array.isArray(value.items);
+  if (/^\/users\/[^/]+\/(orgs|repos)$/.test(clean)) return Array.isArray(value);
+  if (/^\/users\/[^/]+$/.test(clean)) return isRecord(value) && typeof value.login === "string" && !!value.login.trim();
+  return isRecord(value) || Array.isArray(value);
+}
+
 async function ghJson<T>(path: string, key: string): Promise<T | null> {
+  const op = path.split("?")[0].split("/").slice(1, 3).join("/") || "api";
+  const tier = "subscription/keyed";
+  let res: Response;
   try {
-    recordCall("github", path.split("?")[0].split("/").slice(1, 3).join("/") || "api", 0);
-    const res = await fetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(8000) });
-    if (!res.ok) return null;
-    return (await res.json()) as T;
+    res = await fetch(GH + path, { headers: headers(key), signal: AbortSignal.timeout(8000) });
   } catch {
+    recordCall("github", op, 0, `${tier} · transport_error`, "failed");
     return null;
   }
+  if (!res.ok) {
+    recordCall("github", op, 0, `${tier} · http_${res.status}`, "failed");
+    return null;
+  }
+
+  let value: unknown;
+  try { value = await res.json(); }
+  catch {
+    recordCall("github", op, 0, `${tier} · response_json_error`, "failed");
+    return null;
+  }
+  if (!validGithubResult(path, value)) {
+    recordCall("github", op, 0, `${tier} · result_shape_error`, "partial");
+    return null;
+  }
+  recordCall("github", op, 0, tier, "succeeded");
+  return value as T;
 }
 
 interface GhUser { login: string; name?: string; bio?: string; company?: string; twitter_username?: string; blog?: string }

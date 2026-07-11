@@ -52,6 +52,8 @@ describe("orchestrator provider cache", () => {
       provider: "cache",
       op: "grok-hit",
       calls: 1,
+      cached: 1,
+      status: "cached",
       usd: 0,
     }));
     const [url, options] = fetchMock.mock.calls[0];

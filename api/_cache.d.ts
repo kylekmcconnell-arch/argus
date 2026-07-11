@@ -15,5 +15,11 @@ export function issuePanelCostToken(organizationId: string, reportVersionId: str
 export function resolvePanelCostVersion(organizationId: string, token: string | null | undefined): string | undefined;
 export function attachPanelCost(organizationId: string, reportVersionId: string | undefined, line: PanelCostLine): Promise<void>;
 export function recordProviderUsageEvent(organizationId: string, reportVersionId: string | undefined, line: PanelCostLine): Promise<void>;
+export function recordProviderUsageBatch(
+  organizationId: string,
+  reportVersionId: string,
+  initiatedBy: string,
+  lines: readonly PanelCostLine[],
+): Promise<void>;
 export function grokUsd(usage: { input_tokens?: number; output_tokens?: number } | undefined, toolCalls?: number): number;
 export function claudeUsd(usage: { input_tokens?: number; output_tokens?: number } | undefined): number;

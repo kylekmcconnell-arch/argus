@@ -12,9 +12,10 @@ const BASE = "https://api.crunchbase.com/api/v4";
 export async function lookupOrganization(name: string) {
   const key = env("CRUNCHBASE_API_KEY");
   if (!key) return null;
+  const meta = "plan-billed";
+  let res: Response;
   try {
-    recordCall("crunchbase", "org-search", 0, "plan-billed");
-    const res = await fetch(`${BASE}/searches/organizations`, {
+    res = await fetch(`${BASE}/searches/organizations`, {
       method: "POST",
       headers: { "X-cb-user-key": key, "content-type": "application/json" },
       body: JSON.stringify({
@@ -23,20 +24,54 @@ export async function lookupOrganization(name: string) {
         limit: 1,
       }),
     });
-    if (!res.ok) return null;
-    const d = (await res.json()) as any;
-    const e = d.entities?.[0]?.properties;
-    if (!e) return null;
-    return {
-      name: e.identifier?.value,
-      fundingTotal: e.funding_total?.value_usd,
-      rounds: e.num_funding_rounds,
-      investors: (e.investor_identifiers ?? []).map((i: any) => i.value),
-      acquirer: e.acquirer_identifier?.value,
-    };
   } catch {
+    recordCall("crunchbase", "org-search", 0, `${meta} · transport_error`, "failed");
     return null;
   }
+  if (!res.ok) {
+    recordCall("crunchbase", "org-search", 0, `${meta} · http_${res.status}`, "failed");
+    return null;
+  }
+
+  let d: any;
+  try { d = await res.json(); }
+  catch {
+    recordCall("crunchbase", "org-search", 0, `${meta} · response_json_error`, "failed");
+    return null;
+  }
+  if (!d || typeof d !== "object" || !Array.isArray(d.entities)) {
+    recordCall("crunchbase", "org-search", 0, `${meta} · result_shape_error`, "partial");
+    return null;
+  }
+  if (!d.entities.length) {
+    recordCall("crunchbase", "org-search", 0, `${meta} · no_match`, "succeeded");
+    return null;
+  }
+  const e = d.entities[0]?.properties;
+  const resolvedName = e?.identifier?.value;
+  if (!e || typeof e !== "object" || typeof resolvedName !== "string" || !resolvedName.trim()) {
+    recordCall("crunchbase", "org-search", 0, `${meta} · result_shape_error`, "partial");
+    return null;
+  }
+  const rawInvestors = e.investor_identifiers;
+  const investorShapeOkay = rawInvestors == null || Array.isArray(rawInvestors);
+  const investors = (Array.isArray(rawInvestors) ? rawInvestors : [])
+    .map((investor: any) => investor?.value)
+    .filter((value: unknown): value is string => typeof value === "string" && !!value.trim());
+  recordCall(
+    "crunchbase",
+    "org-search",
+    0,
+    investorShapeOkay ? meta : `${meta} · incomplete_investor_shape`,
+    investorShapeOkay ? "succeeded" : "partial",
+  );
+  return {
+    name: resolvedName,
+    fundingTotal: e.funding_total?.value_usd,
+    rounds: e.num_funding_rounds,
+    investors,
+    acquirer: e.acquirer_identifier?.value,
+  };
 }
 
 export const crunchbaseAdapter: Adapter = {

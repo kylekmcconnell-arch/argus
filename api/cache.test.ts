@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { attachPanelCost, cacheGetJson, cacheSetJson, recordProviderUsageEvent } from "./_cache.js";
+import {
+  attachPanelCost,
+  cacheGetJson,
+  cacheSetJson,
+  recordProviderUsageBatch,
+  recordProviderUsageEvent,
+} from "./_cache.js";
 
 const originalUrl = process.env.SUPABASE_URL;
 const originalSecret = process.env.SUPABASE_SECRET_KEY;
@@ -171,5 +177,92 @@ describe("post-report cost ledger", () => {
     );
 
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("retries a core audit batch with stable exact-version event keys", async () => {
+    process.env.SUPABASE_URL = "https://database.example";
+    process.env.SUPABASE_SECRET_KEY = "sb_secret_test";
+    const organizationId = "00000000-0000-4000-8000-000000000001";
+    const versionId = "00000000-0000-4000-8000-000000000201";
+    const actorId = "00000000-0000-4000-8000-000000000010";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ error: "temporary" }, 503))
+      .mockResolvedValueOnce(jsonResponse([{ event_count: 2 }], 200));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await recordProviderUsageBatch(organizationId, versionId, actorId, [
+      { provider: "grok", op: "live-search", calls: 2, usd: 0.123456789, status: "partial", meta: "one retry" },
+      { provider: "claude", op: "record_claims", calls: 1, usd: 0.01, status: "succeeded" },
+    ]);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0][0]).toBe("https://database.example/rest/v1/rpc/record_provider_usage_batch");
+    const firstBody = JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+    const retryBody = JSON.parse(String(fetchMock.mock.calls[1][1]?.body));
+    expect(retryBody).toEqual(firstBody);
+    expect(firstBody).toMatchObject({
+      p_organization_id: organizationId,
+      p_report_version_id: versionId,
+      p_initiated_by: actorId,
+      p_lines: [
+        {
+          provider: "grok",
+          operation: "live-search",
+          calls: 2,
+          usd: 0.12345679,
+          status: "partial",
+          meta: "one retry",
+        },
+        {
+          provider: "claude",
+          operation: "record_claims",
+          calls: 1,
+          usd: 0.01,
+          status: "succeeded",
+          meta: null,
+        },
+      ],
+    });
+    for (const line of firstBody.p_lines) {
+      expect(line.idempotency_key).toMatch(new RegExp(`^core:${versionId}:[0-9a-f]{40}$`));
+    }
+    expect(firstBody.p_lines[0].idempotency_key).not.toBe(firstBody.p_lines[1].idempotency_key);
+  });
+
+  it("rejects malformed or duplicate core audit lines before storage", async () => {
+    process.env.SUPABASE_URL = "https://database.example";
+    process.env.SUPABASE_SECRET_KEY = "sb_secret_test";
+    const organizationId = "00000000-0000-4000-8000-000000000001";
+    const versionId = "00000000-0000-4000-8000-000000000201";
+    const actorId = "00000000-0000-4000-8000-000000000010";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(recordProviderUsageBatch(organizationId, versionId, actorId, []))
+      .rejects.toThrow("valid provider usage batch required");
+    await expect(recordProviderUsageBatch(organizationId, versionId, actorId, [
+      { provider: "grok", op: "live-search", calls: 1, usd: 0.1 },
+      { provider: "grok", op: "live-search", calls: 1, usd: 0.1 },
+    ])).rejects.toThrow("duplicate provider usage batch line");
+    await expect(recordProviderUsageBatch(organizationId, versionId, actorId, [
+      { provider: "grok", op: "", calls: 1, usd: 0.1 },
+    ])).rejects.toThrow("invalid provider usage batch line");
+    await expect(recordProviderUsageBatch(organizationId, versionId, actorId, [
+      { provider: "grok", op: "live-search", calls: 2_147_483_648, usd: 0.1 },
+    ])).rejects.toThrow("invalid provider usage batch line");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when a core usage batch cannot be recorded", async () => {
+    process.env.SUPABASE_URL = "https://database.example";
+    process.env.SUPABASE_SECRET_KEY = "sb_secret_test";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse({ error: "forbidden" }, 403)));
+
+    await expect(recordProviderUsageBatch(
+      "00000000-0000-4000-8000-000000000001",
+      "00000000-0000-4000-8000-000000000201",
+      "00000000-0000-4000-8000-000000000010",
+      [{ provider: "claude", op: "analysis", calls: 1, usd: 0.01 }],
+    )).rejects.toThrow("provider usage batch attribution failed (403)");
   });
 });

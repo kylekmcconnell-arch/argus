@@ -12,22 +12,45 @@ const CDX = "https://web.archive.org/cdx/search/cdx";
 interface Snapshot { timestamp: string; original: string }
 
 async function newestSnapshot(urlPath: string): Promise<Snapshot | null> {
+  let response: Response;
   try {
     const qs = `?url=${encodeURIComponent(urlPath)}&output=json&filter=statuscode:200&collapse=digest&limit=-1`;
-    recordCall("wayback", "cdx-search", 0);
-    const res = await fetch(CDX + qs, { signal: AbortSignal.timeout(4000) });
-    if (!res.ok) return null;
-    const rows = (await res.json()) as string[][];
-    if (!Array.isArray(rows) || rows.length < 2) return null;
-    // rows[0] is the header: [urlkey, timestamp, original, mimetype, statuscode, digest, length]
-    const last = rows[rows.length - 1];
-    const ti = rows[0].indexOf("timestamp");
-    const oi = rows[0].indexOf("original");
-    if (ti < 0 || oi < 0) return null;
-    return { timestamp: last[ti], original: last[oi] };
+    response = await fetch(CDX + qs, { signal: AbortSignal.timeout(4000) });
   } catch {
+    recordCall("wayback", "cdx-search", 0, "transport_error", "failed");
     return null;
   }
+  if (!response.ok) {
+    recordCall("wayback", "cdx-search", 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  let parsed: unknown;
+  try {
+    parsed = await response.json();
+  } catch {
+    recordCall("wayback", "cdx-search", 0, "response_json_error", "failed");
+    return null;
+  }
+  if (!Array.isArray(parsed) || !parsed.every(Array.isArray)) {
+    recordCall("wayback", "cdx-search", 0, "invalid_result_shape", "partial");
+    return null;
+  }
+  const rows = parsed as unknown[][];
+  if (rows.length < 2) {
+    recordCall("wayback", "cdx-search", 0, "no_snapshot", "succeeded");
+    return null;
+  }
+  // rows[0] is the header: [urlkey, timestamp, original, mimetype, statuscode, digest, length]
+  const header = rows[0];
+  const last = rows[rows.length - 1];
+  const ti = header.indexOf("timestamp");
+  const oi = header.indexOf("original");
+  if (ti < 0 || oi < 0 || typeof last[ti] !== "string" || typeof last[oi] !== "string") {
+    recordCall("wayback", "cdx-search", 0, "invalid_result_shape", "partial");
+    return null;
+  }
+  recordCall("wayback", "cdx-search", 0, undefined, "succeeded");
+  return { timestamp: last[ti], original: last[oi] };
 }
 
 // Does the subject's name appear in an archived team/about/home page of `domain`?
@@ -45,13 +68,28 @@ export async function archivedAffiliation(
   for (const p of paths) {
     const snap = await newestSnapshot(p);
     if (!snap) continue;
+    let response: Response;
     try {
       const archiveUrl = `https://web.archive.org/web/${snap.timestamp}id_/${snap.original}`;
-      recordCall("wayback", "snapshot-fetch", 0);
-      const res = await fetch(archiveUrl, { signal: AbortSignal.timeout(5000) });
-      if (!res.ok) continue;
-      const text = (await res.text()).toLowerCase();
-      if (needles.some((n) => text.includes(n))) {
+      response = await fetch(archiveUrl, { signal: AbortSignal.timeout(5000) });
+      if (!response.ok) {
+        recordCall("wayback", "snapshot-fetch", 0, `http_${response.status}`, "failed");
+        continue;
+      }
+      let text: string;
+      try {
+        text = (await response.text()).toLowerCase();
+      } catch {
+        recordCall("wayback", "snapshot-fetch", 0, "response_text_error", "failed");
+        continue;
+      }
+      if (!text.trim()) {
+        recordCall("wayback", "snapshot-fetch", 0, "empty_snapshot", "partial");
+        continue;
+      }
+      const matched = needles.some((n) => text.includes(n));
+      recordCall("wayback", "snapshot-fetch", 0, matched ? "name_match" : "no_name_match", "succeeded");
+      if (matched) {
         return {
           url: `https://web.archive.org/web/${snap.timestamp}/${snap.original}`,
           year: snap.timestamp.slice(0, 4),
@@ -59,7 +97,7 @@ export async function archivedAffiliation(
         };
       }
     } catch {
-      /* skip this path */
+      recordCall("wayback", "snapshot-fetch", 0, "transport_error", "failed");
     }
   }
   return null;
