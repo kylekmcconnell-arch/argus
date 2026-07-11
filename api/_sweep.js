@@ -7,6 +7,149 @@ function env(key) {
 }
 var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
 
+// src/graph/network.ts
+var EVM_ADDRESS = /^0x[0-9a-f]+$/i;
+var SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+function normalizeChain(chain) {
+  return String(chain).trim().toLowerCase();
+}
+function normalizeAddress(chain, address) {
+  const value = String(address).trim();
+  return normalizeChain(chain) !== "solana" && EVM_ADDRESS.test(value) ? value.toLowerCase() : value;
+}
+function tokenEntityKey(chain, address) {
+  return `token:${normalizeChain(chain)}:${normalizeAddress(chain, address)}`;
+}
+function walletEntityKey(chain, address) {
+  return `wallet:${normalizeChain(chain)}:${normalizeAddress(chain, address)}`;
+}
+function canonical(raw) {
+  const value = String(raw).trim();
+  let m = value.match(/^token:([^:]+):(.+)$/i);
+  if (m) return tokenEntityKey(m[1], m[2]);
+  m = value.match(/^(?:wallet|holder|funder):([^:]+):(.+)$/i);
+  if (m) return walletEntityKey(m[1], m[2]);
+  m = value.match(/^(?:token|mint):(.+)$/i);
+  if (m && EVM_ADDRESS.test(m[1])) return tokenEntityKey("evm", m[1]);
+  if (m && SOLANA_ADDRESS.test(m[1])) return tokenEntityKey("solana", m[1]);
+  m = value.match(/^(?:wallet|holder|funder):(.+)$/i);
+  if (m && EVM_ADDRESS.test(m[1])) return walletEntityKey("evm", m[1]);
+  if (m && SOLANA_ADDRESS.test(m[1])) return walletEntityKey("solana", m[1]);
+  m = value.match(/^([^:]+):(.+)$/);
+  if (m && (EVM_ADDRESS.test(m[2]) || normalizeChain(m[1]) === "solana" && SOLANA_ADDRESS.test(m[2]))) {
+    return walletEntityKey(m[1], m[2]);
+  }
+  if (SOLANA_ADDRESS.test(value)) return value;
+  const lower = value.toLowerCase().replace(/\s+/g, "");
+  if (lower.startsWith("$")) return lower;
+  return lower.replace(/^@/, "");
+}
+var GENERIC_KEYS = /* @__PURE__ */ new Set([
+  "site",
+  "website",
+  "web",
+  "twitter",
+  "x",
+  "telegram",
+  "discord",
+  "github",
+  "docs",
+  "documentation",
+  "medium",
+  "linktree",
+  "whitepaper",
+  "mail",
+  "email",
+  "youtube",
+  "tiktok",
+  "instagram",
+  "reddit",
+  "facebook",
+  "warpcast",
+  "farcaster",
+  "coingecko",
+  "dexscreener",
+  "linkedin",
+  "blog",
+  "other",
+  "unknown"
+]);
+var isGenericKey = (raw) => GENERIC_KEYS.has(canonical(raw));
+function buildAliasResolver(contributions) {
+  const targets = /* @__PURE__ */ new Map();
+  const add = (alias, subject) => {
+    const a = canonical(alias);
+    if (!a) return;
+    const set = targets.get(a) ?? /* @__PURE__ */ new Set();
+    set.add(subject);
+    targets.set(a, set);
+  };
+  const DOMAIN = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i;
+  for (const c of contributions) {
+    const rawSubject = c.nodes.find((n) => n.subject)?.key ?? c.handle;
+    const subj = canonical(String(rawSubject));
+    const addressBacked = subj.startsWith("token:");
+    if (String(c.handle).startsWith("$")) add(c.handle, subj);
+    if (!addressBacked) continue;
+    for (const alias of c.aliases ?? []) add(alias, subj);
+    const subjectNode = c.nodes.find((n) => n.subject);
+    if (subjectNode) {
+      if (typeof subjectNode.label === "string") add(subjectNode.label, subj);
+      if (typeof subjectNode.symbol === "string") add("$" + subjectNode.symbol.replace(/^\$/, ""), subj);
+    }
+    for (const e of c.edges) {
+      if (canonical(e.src) !== subj) continue;
+      const dst = String(e.dst);
+      if (e.type === "TEAM" && dst.startsWith("@")) add(dst, subj);
+      else if (e.type === "LINKS" && DOMAIN.test(dst)) add(dst, subj);
+    }
+  }
+  const unique = /* @__PURE__ */ new Map();
+  for (const [alias, ids] of targets) if (ids.size === 1) unique.set(alias, [...ids][0]);
+  return (key) => {
+    const id = canonical(key);
+    return unique.get(id) ?? id;
+  };
+}
+function subjectConnections(handle, contributions, max = 12) {
+  const resolve = buildAliasResolver(contributions);
+  const me = resolve(handle);
+  const mine = /* @__PURE__ */ new Map();
+  for (const c of contributions) {
+    if (resolve(c.handle) !== me) continue;
+    for (const n of c.nodes) {
+      if (isGenericKey(String(n.key))) continue;
+      const k = resolve(n.key);
+      const label = typeof n.label === "string" && n.label.trim() ? n.label : String(n.key);
+      if (k !== me) mine.set(k, { label, type: String(n.type) });
+    }
+  }
+  if (!mine.size) return [];
+  const byOther = /* @__PURE__ */ new Map();
+  const ensure = (id, label, verdict) => {
+    if (!byOther.has(id)) byOther.set(id, { label, verdict, ties: /* @__PURE__ */ new Map(), direct: false });
+    return byOther.get(id);
+  };
+  for (const c of contributions) {
+    const other = resolve(c.handle);
+    if (other === me) continue;
+    const otherLabel = c.aliases?.[0] ?? (typeof c.nodes.find((n) => n.subject)?.label === "string" ? String(c.nodes.find((n) => n.subject).label) : c.handle);
+    if (mine.has(other)) {
+      const e = ensure(other, otherLabel, c.verdict);
+      e.direct = true;
+    }
+    for (const n of c.nodes) {
+      if (isGenericKey(String(n.key))) continue;
+      const k = resolve(n.key);
+      if (k !== me && k !== other && mine.has(k)) {
+        const e = ensure(other, otherLabel, c.verdict);
+        e.ties.set(k, { key: k, label: mine.get(k).label, type: mine.get(k).type });
+      }
+    }
+  }
+  return [...byOther.entries()].map(([, v]) => ({ other: v.label, otherVerdict: v.verdict, ties: [...v.ties.values()], direct: v.direct })).filter((x) => x.ties.length > 0 || x.direct).sort((a, b) => Number(b.direct) - Number(a.direct) || b.ties.length - a.ties.length).slice(0, max);
+}
+
 // src/token/sources.ts
 var GOPLUS_CHAIN = {
   ethereum: "1",
@@ -555,7 +698,7 @@ async function runTokenAudit(input, emit, opts) {
     tag: h.tag || void 0,
     isContract: h.is_contract === 1 || h.is_contract === "1"
   })).filter((h) => h.address);
-  const graph = buildGraph(pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
+  const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} \xB7 ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
   return {
@@ -593,22 +736,31 @@ async function runTokenAudit(input, emit, opts) {
     safetyChecked: s.available
   };
 }
-function buildGraph(symbol, verdict, projectX, deployer, holders, socials) {
-  const center = "$" + symbol;
-  const nodes = [{ type: "Company", key: center, subject: true, was_rug: verdict === "AVOID" }];
+function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders, socials) {
+  const center = tokenEntityKey(chain, address);
+  const nodes = [{
+    type: "Token",
+    key: center,
+    label: "$" + symbol,
+    symbol,
+    chain,
+    address,
+    subject: true,
+    was_rug: verdict === "AVOID"
+  }];
   const edges = [];
   if (projectX) {
     nodes.push({ type: "Person", key: projectX });
     edges.push({ src: center, dst: projectX, type: "TEAM" });
   }
   if (deployer) {
-    const k = "wallet:" + deployer.slice(0, 8);
-    nodes.push({ type: "Identity", subtype: "Wallet", key: k });
+    const k = walletEntityKey(chain, deployer);
+    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: "wallet:" + deployer.slice(0, 8), chain, address: deployer });
     edges.push({ src: center, dst: k, type: "DEPLOYED_BY" });
   }
   holders.slice(0, 4).forEach((h) => {
-    const k = (h.tag || "holder") + ":" + h.address.slice(0, 8);
-    nodes.push({ type: "Identity", subtype: "Wallet", key: k, concentration: h.percent });
+    const k = walletEntityKey(chain, h.address);
+    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: (h.tag || "holder") + ":" + h.address.slice(0, 8), chain, address: h.address, concentration: h.percent });
     edges.push({ src: center, dst: k, type: "HELD_BY", verdict: h.percent > 25 ? "Contradicted" : void 0 });
   });
   socials.slice(0, 3).forEach((x) => {
@@ -631,111 +783,6 @@ function buildHeadline(verdict, cap, s, liq, projectX) {
   if (verdict === "CAUTION") return `Tradeable but with reservations${liq < 15e3 ? "; liquidity is thin" : ""}. Size accordingly.`;
   if (!s.available) return "Scored on market data only; on-chain contract safety could not be verified keyless on this chain.";
   return "Falls short on the forensic checks. Treat as high risk.";
-}
-
-// src/graph/network.ts
-var ALIAS = {
-  zenith: "zenithdao",
-  $zenith: "zenithdao"
-};
-function canonical(raw) {
-  let k = String(raw).trim().toLowerCase().replace(/^[@$]/, "").replace(/\s+/g, "");
-  return ALIAS[k] ?? k;
-}
-var GENERIC_KEYS = /* @__PURE__ */ new Set([
-  "site",
-  "website",
-  "web",
-  "twitter",
-  "x",
-  "telegram",
-  "discord",
-  "github",
-  "docs",
-  "documentation",
-  "medium",
-  "linktree",
-  "whitepaper",
-  "mail",
-  "email",
-  "youtube",
-  "tiktok",
-  "instagram",
-  "reddit",
-  "facebook",
-  "warpcast",
-  "farcaster",
-  "coingecko",
-  "dexscreener",
-  "linkedin",
-  "blog",
-  "other",
-  "unknown"
-]);
-var isGenericKey = (raw) => GENERIC_KEYS.has(canonical(raw));
-function buildAliasResolver(contributions) {
-  const parent = /* @__PURE__ */ new Map();
-  const find = (x) => {
-    if (!parent.has(x)) return x;
-    let r = x;
-    while (parent.get(r) !== r) r = parent.get(r);
-    parent.set(x, r);
-    return r;
-  };
-  const union = (a, b) => {
-    if (!parent.has(a)) parent.set(a, a);
-    if (!parent.has(b)) parent.set(b, b);
-    const ra = find(a), rb = find(b);
-    if (ra !== rb) parent.set(rb, ra);
-  };
-  const DOMAIN = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i;
-  for (const c of contributions) {
-    if (!String(c.handle).startsWith("$")) continue;
-    const subj = canonical(c.handle);
-    for (const e of c.edges) {
-      if (canonical(e.src) !== subj) continue;
-      const dst = String(e.dst);
-      if (e.type === "TEAM" && dst.startsWith("@")) union(subj, canonical(dst));
-      else if (e.type === "LINKS" && DOMAIN.test(dst)) union(subj, canonical(dst));
-    }
-  }
-  return (key) => find(canonical(key));
-}
-function subjectConnections(handle, contributions, max = 12) {
-  const resolve = buildAliasResolver(contributions);
-  const me = resolve(handle);
-  const mine = /* @__PURE__ */ new Map();
-  for (const c of contributions) {
-    if (resolve(c.handle) !== me) continue;
-    for (const n of c.nodes) {
-      if (isGenericKey(String(n.key))) continue;
-      const k = resolve(n.key);
-      if (k !== me) mine.set(k, { label: String(n.key), type: String(n.type) });
-    }
-  }
-  if (!mine.size) return [];
-  const byOther = /* @__PURE__ */ new Map();
-  const ensure = (h, verdict) => {
-    if (!byOther.has(h)) byOther.set(h, { verdict, ties: /* @__PURE__ */ new Map(), direct: false });
-    return byOther.get(h);
-  };
-  for (const c of contributions) {
-    const other = resolve(c.handle);
-    if (other === me) continue;
-    if (mine.has(other)) {
-      const e = ensure(c.handle, c.verdict);
-      e.direct = true;
-    }
-    for (const n of c.nodes) {
-      if (isGenericKey(String(n.key))) continue;
-      const k = resolve(n.key);
-      if (k !== me && k !== other && mine.has(k)) {
-        const e = ensure(c.handle, c.verdict);
-        e.ties.set(k, { key: k, label: mine.get(k).label, type: mine.get(k).type });
-      }
-    }
-  }
-  return [...byOther.entries()].map(([other, v]) => ({ other, otherVerdict: v.verdict, ties: [...v.ties.values()], direct: v.direct })).filter((x) => x.ties.length > 0 || x.direct).sort((a, b) => Number(b.direct) - Number(a.direct) || b.ties.length - a.ties.length).slice(0, max);
 }
 
 // server/sweep.ts

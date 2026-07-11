@@ -530,8 +530,11 @@ var SEVERITY = {
 var _counter = 0;
 function makeAuditId(handle) {
   _counter += 1;
-  const h = (handle + _counter).split("").reduce((a, c) => a * 33 + c.charCodeAt(0) >>> 0, 5381);
-  return "PA-" + h.toString(16).toUpperCase().padStart(8, "0").slice(0, 12);
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return `PA-${uuid.replace(/-/g, "").slice(0, 20).toUpperCase()}`;
+  const seed = `${handle}:${Date.now()}:${_counter}:${Math.random()}`;
+  const h = seed.split("").reduce((value, char) => value * 33 + char.charCodeAt(0) >>> 0, 5381);
+  return `PA-${Date.now().toString(36).toUpperCase()}-${h.toString(16).toUpperCase().padStart(8, "0")}`;
 }
 function asClass(x) {
   return x;
@@ -646,6 +649,7 @@ var Audit = class {
       throw new Error(`axis ${axis} belongs to ${role}, not a held role`);
     }
     const w = getProfile(role).axes[axis];
+    if (!Number.isFinite(score)) throw new Error(`axis ${axis} score must be finite`);
     this.axisScores[axis] = {
       score: Math.max(0, Math.min(score, w)),
       weight: w,
@@ -670,37 +674,54 @@ var Audit = class {
   sharedCapsTriggered() {
     const keys = [];
     const has = (ftype, status, n = 1) => this.findings.some(
-      (f) => f.finding_type === ftype && f.verification_status === status && f.independent_source_count >= n
+      (f) => f.finding_type === ftype && f.verification_status === status && f.independent_source_count >= n && this.findingHasVerifiedArtifact(f)
     );
     if (has("DeceptionFinding", "Verified")) keys.push("deception_confirmed");
     if (has("InvestigatorCallout", "Verified", 2)) keys.push("investigator_verified_fraud");
     return keys;
   }
+  artifactIsEligible(url, origin, artifactVerified) {
+    if (origin === "model_lead" || artifactVerified === false) return false;
+    return !!url && /^https?:\/\/[^\s]+$/i.test(url);
+  }
+  findingHasVerifiedArtifact(f) {
+    return this.artifactIsEligible(f.source_url, f.evidence_origin, f.artifact_verified);
+  }
   roleCapsTriggered(role) {
     const keys = [];
     if (role === "FOUNDER" /* FOUNDER */) {
-      if (this.ventures.some((v) => v.outcome === "Rug" /* RUG */)) keys.push("prior_rug_as_principal");
-      if (this.findings.some((f) => f.finding_type === "ManipulationTooling" && f.verification_status === "Verified"))
+      if (this.ventures.some(
+        (v) => v.outcome === "Rug" /* RUG */ && v.evidence_origin !== "model_lead" && v.artifact_verified !== false
+      )) keys.push("prior_rug_as_principal");
+      if (this.findings.some((f) => f.finding_type === "ManipulationTooling" && f.verification_status === "Verified" && this.findingHasVerifiedArtifact(f)))
         keys.push("operates_manipulation_tooling");
     } else if (role === "KOL" /* KOL */) {
       if (this.wallets.some(
         (w) => w.sold_into_own_promo && (w.link_tier === "SelfDoxxed" || w.link_tier === "InvestigatorAttributed")
       ))
         keys.push("wallet_sold_into_promo");
-      if (this.promotions.some((p) => p.paid_promo && p.outcome_was_rug))
+      if (this.promotions.some(
+        (p) => p.paid_promo && p.outcome_was_rug && p.evidence_origin !== "model_lead" && p.artifact_verified !== false
+      ))
         keys.push("paid_to_shill_confirmed_rug");
     } else if (role === "INVESTOR" /* INVESTOR */) {
-      if (this.testimonials.some((t) => t.corroboration_verdict === "Contradicted" /* CONTRADICTED */))
+      if (this.testimonials.some(
+        (t) => t.corroboration_verdict === "Contradicted" /* CONTRADICTED */ && t.evidence_origin !== "model_lead" && t.artifact_verified !== false
+      ))
         keys.push("contradicted_testimonial");
-      if (this.findings.some((f) => f.finding_type === "PredatoryTerms" && f.verification_status === "Verified"))
+      if (this.findings.some((f) => f.finding_type === "PredatoryTerms" && f.verification_status === "Verified" && this.findingHasVerifiedArtifact(f)))
         keys.push("predatory_terms_verified");
     } else if (role === "ADVISOR" /* ADVISOR */) {
-      if (this.advisedProjects.some((p) => p.corroboration_verdict === "Contradicted" /* CONTRADICTED */))
+      if (this.advisedProjects.some(
+        (p) => p.corroboration_verdict === "Contradicted" /* CONTRADICTED */ && p.evidence_origin !== "model_lead" && p.artifact_verified !== false
+      ))
         keys.push("claimed_advisory_contradicted");
-      if (this.advisedProjects.some((p) => p.project_outcome === "Rug" && p.paid_or_allocated))
+      if (this.advisedProjects.some(
+        (p) => p.project_outcome === "Rug" && p.paid_or_allocated && p.evidence_origin !== "model_lead" && p.artifact_verified !== false
+      ))
         keys.push("advised_rug_with_allocation");
     } else if (role === "AGENCY" /* AGENCY */) {
-      if (this.clientEngagements.some((c) => c.manipulation_service_flag))
+      if (this.clientEngagements.some((c) => c.manipulation_service_flag && this.artifactIsEligible(c.evidence_url, c.evidence_origin, c.artifact_verified)))
         keys.push("market_manipulation_services");
     }
     return keys;
@@ -718,7 +739,9 @@ var Audit = class {
       for (const [ax, a] of Object.entries(this.axisScores)) {
         if (classForAxis(ax) === role) axes[ax] = a;
       }
-      if (Object.keys(axes).length === 0) {
+      const expectedAxes = Object.keys(getProfile(role).axes);
+      const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
+      if (!complete || Object.keys(axes).length !== expectedAxes.length) {
         roleReports.push({
           role,
           verdict: "INCOMPLETE",
@@ -726,7 +749,7 @@ var Audit = class {
           score_total: null,
           cap_applied: null,
           dox_bonus: doxBonus,
-          axes: {}
+          axes
         });
         continue;
       }
@@ -773,7 +796,7 @@ var Audit = class {
     let govRole = null;
     let govScore = null;
     let govCap = null;
-    if (scored.length) {
+    if (scored.length === roleReports.length && roleReports.length > 0) {
       const governing = scored.reduce((m, r) => SEVERITY[r.verdict] > SEVERITY[m.verdict] ? r : m);
       composite = governing.verdict;
       govRole = governing.role;
@@ -1426,7 +1449,113 @@ ${evidenceJson}`;
   if (!r) return null;
   return (r.contradictions ?? []).filter((c) => c && c.claim?.trim() && c.conflict?.trim()).map((c) => ({ claim: c.claim.trim(), conflict: c.conflict.trim(), severity: lvl(c.severity), confidence: lvl(c.confidence) })).slice(0, 10);
 }
+function validateAnalystVerdict(value, axisCatalog2) {
+  if (!value || typeof value !== "object" || !axisCatalog2.length) return null;
+  const raw = value;
+  if (!Array.isArray(raw.axes) || raw.axes.length !== axisCatalog2.length) return null;
+  if (typeof raw.headline !== "string" || typeof raw.identity_note !== "string") return null;
+  const expected = /* @__PURE__ */ new Map();
+  for (const spec of axisCatalog2) {
+    if (!spec.axis || expected.has(spec.axis) || !Number.isFinite(spec.weight) || spec.weight < 0) return null;
+    expected.set(spec.axis, spec);
+  }
+  const seen = /* @__PURE__ */ new Map();
+  for (const candidate of raw.axes) {
+    if (!candidate || typeof candidate !== "object") return null;
+    const row = candidate;
+    if (typeof row.axis !== "string" || typeof row.score !== "number" || typeof row.rationale !== "string") return null;
+    const spec = expected.get(row.axis);
+    if (!spec || seen.has(row.axis) || !Number.isFinite(row.score) || row.score < 0 || row.score > spec.weight) return null;
+    seen.set(row.axis, { axis: row.axis, score: row.score, rationale: row.rationale.trim() });
+  }
+  if (seen.size !== expected.size) return null;
+  return {
+    // Canonical order makes downstream completeness checks and snapshots stable.
+    axes: axisCatalog2.map((spec) => seen.get(spec.axis)),
+    headline: raw.headline.trim(),
+    identity_note: raw.identity_note.trim()
+  };
+}
+var ANALYST_EVIDENCE_MAX_CHARS = 24e3;
+var clip = (value, max) => {
+  if (typeof value !== "string") return void 0;
+  return value.length <= max ? value : value.slice(0, max) + "\u2026";
+};
+var compactObject = (value, depth = 0) => {
+  if (value == null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") return clip(value, 320);
+  if (depth >= 3) return void 0;
+  if (Array.isArray(value)) return value.slice(0, 8).map((item) => compactObject(item, depth + 1)).filter((item) => item !== void 0);
+  if (typeof value !== "object") return void 0;
+  return Object.fromEntries(
+    Object.entries(value).slice(0, 24).map(([key, item]) => [key, compactObject(item, depth + 1)]).filter(([, item]) => item !== void 0)
+  );
+};
+var compactFinding = (value) => {
+  if (!value || typeof value !== "object") return null;
+  const f = value;
+  return {
+    finding_type: clip(f.finding_type, 80),
+    claim: clip(f.claim, 420),
+    source_url: clip(f.source_url, 420),
+    source_date: clip(f.source_date, 40),
+    source_author: clip(f.source_author, 100),
+    verification_status: clip(f.verification_status, 32),
+    independent_source_count: typeof f.independent_source_count === "number" && Number.isFinite(f.independent_source_count) ? f.independent_source_count : void 0,
+    polarity: typeof f.polarity === "number" && Number.isFinite(f.polarity) ? f.polarity : void 0,
+    evidence_origin: clip(f.evidence_origin, 32),
+    artifact_verified: typeof f.artifact_verified === "boolean" ? f.artifact_verified : void 0
+  };
+};
+function buildAnalystEvidencePacket(input) {
+  const sectionLimits = {
+    ventures: 12,
+    testimonials: 12,
+    advised: 12,
+    promotions: 16,
+    wallets: 12,
+    team: 16,
+    notableFollowers: 16,
+    recentActivity: 12
+  };
+  const findingsRaw = Array.isArray(input.findings) ? input.findings : [];
+  const findings = findingsRaw.slice(0, 24).map(compactFinding).filter((f) => !!f);
+  const coverage = {
+    findings: { available: findingsRaw.length, included: findings.length }
+  };
+  const packet = {
+    schema_version: 1,
+    coverage,
+    profile: compactObject(input.profile),
+    // Findings stay ahead of descriptive context in the budget. This prevents a
+    // long social corpus from hiding the material facts that govern a verdict.
+    findings
+  };
+  for (const [section, limit] of Object.entries(sectionLimits)) {
+    const source = Array.isArray(input[section]) ? input[section] : [];
+    const included = source.slice(0, limit).map((item) => compactObject(item)).filter((item) => item !== void 0);
+    packet[section] = included;
+    coverage[section] = { available: source.length, included: included.length };
+  }
+  const pruneOrder = ["recentActivity", "notableFollowers", "wallets", "promotions", "advised", "testimonials", "ventures", "team"];
+  let json = JSON.stringify(packet);
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
+    const section = pruneOrder.find((key) => Array.isArray(packet[key]) && packet[key].length > 0);
+    if (!section) break;
+    packet[section].pop();
+    coverage[section].included = packet[section].length;
+    json = JSON.stringify(packet);
+  }
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS && findings.length > 1) {
+    findings.pop();
+    coverage.findings.included = findings.length;
+    json = JSON.stringify(packet);
+  }
+  return json;
+}
 async function analyzeSubject(handle, roles, axisCatalog2, evidenceJson) {
+  if (!axisCatalog2.length) return null;
   const system = "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject on a fixed set of axes from collected evidence only. Be skeptical: a strong story never papers over a disqualifying fact. Score conservatively when evidence is thin. Each axis score must be between 0 and its weight. Write one tight rationale per axis citing the evidence. Never use em dashes.";
   const user = `Subject: ${handle}
 Held roles: ${roles.join(", ")}
@@ -1450,11 +1579,13 @@ IDENTITY RULE: if the evidence has a "team" array of named people tied to the pr
       properties: {
         axes: {
           type: "array",
+          minItems: axisCatalog2.length,
+          maxItems: axisCatalog2.length,
           items: {
             type: "object",
             properties: {
-              axis: { type: "string" },
-              score: { type: "number" },
+              axis: { type: "string", enum: axisCatalog2.map((a) => a.axis) },
+              score: { type: "number", minimum: 0, maximum: Math.max(...axisCatalog2.map((a) => a.weight)) },
               rationale: { type: "string" }
             },
             required: ["axis", "score", "rationale"]
@@ -1466,8 +1597,165 @@ IDENTITY RULE: if the evidence has a "team" array of named people tied to the pr
       required: ["axes", "headline", "identity_note"]
     }
   };
-  return structured(system, user, tool, 3e3);
+  const raw = await structured(system, user, tool, 3e3);
+  const validated = validateAnalystVerdict(raw, axisCatalog2);
+  if (raw && !validated) console.warn("[agent] rejected incomplete or invalid analyst axis set");
+  return validated;
 }
+
+// src/lib/scanChecklist.ts
+var SUCCESSFUL = /* @__PURE__ */ new Set(["confirmed", "finding", "checked-empty"]);
+var UNKNOWN_OR_FAILED = /* @__PURE__ */ new Set(["unknown", "unavailable", "stale"]);
+function summarizeChecks(checks) {
+  const count = (status) => checks.filter((check) => check.status === status).length;
+  const notApplicable = count("not-applicable");
+  return {
+    total: checks.length,
+    inScope: checks.length - notApplicable,
+    successful: checks.filter((check) => SUCCESSFUL.has(check.status)).length,
+    unknownOrFailed: checks.filter((check) => UNKNOWN_OR_FAILED.has(check.status)).length,
+    findings: count("finding"),
+    checkedEmpty: count("checked-empty"),
+    notApplicable,
+    unavailable: count("unavailable"),
+    stale: count("stale"),
+    unknown: count("unknown")
+  };
+}
+var outcomeNotRecorded = "completion outcome not recorded";
+function personChecks(opts) {
+  const { identityConfidence, realName, roles, hasAssociates } = opts;
+  const resolved = identityConfidence === "Confirmed" || identityConfidence === "Probable";
+  const checks = [];
+  checks.push(
+    identityConfidence === "Confirmed" ? { label: "Identity resolution", status: "confirmed", note: "confirmed confidence" } : identityConfidence ? { label: "Identity resolution", status: "finding", note: `${identityConfidence.toLowerCase()} confidence` } : { label: "Identity resolution", status: "unknown", note: outcomeNotRecorded }
+  );
+  checks.push({ label: "Profile-photo authenticity", status: "unknown", note: `AI / stock / celebrity / logo; ${outcomeNotRecorded}` });
+  checks.push({ label: "Code footprint (GitHub)", status: "unknown", note: `resolved from handle / name / bio; ${outcomeNotRecorded}` });
+  checks.push({ label: "Identity continuity", status: "unknown", note: `prior handles, cross-platform accounts; ${outcomeNotRecorded}` });
+  checks.push(hasAssociates ? { label: "Affiliations & associates", status: "confirmed", note: "associate records present in the dossier" } : { label: "Affiliations & associates", status: "unknown", note: "no collection outcome recorded; an empty dossier is not a confirmed clean result" });
+  checks.push(roles.includes("KOL") ? { label: "Promoted-token performance", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` } : { label: "Promoted-token performance", status: "not-applicable", note: "not a KOL" });
+  checks.push(roles.includes("INVESTOR") ? { label: "VC portfolio track record", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` } : { label: "VC portfolio track record", status: "not-applicable", note: "not a fund/investor" });
+  checks.push({ label: "News & press", status: "unknown", note: outcomeNotRecorded });
+  checks.push(resolved && realName ? { label: "US legal history", status: "unknown", note: `eligible by resolved name; ${outcomeNotRecorded}` } : { label: "US legal history", status: "not-applicable", note: "needs a resolved real name" });
+  checks.push(resolved && realName ? { label: "OFAC sanctions (name)", status: "unknown", note: `eligible by resolved name; ${outcomeNotRecorded}` } : { label: "OFAC sanctions (name)", status: "not-applicable", note: "needs a resolved real name" });
+  checks.push({ label: "Trust-graph connections", status: "unknown", note: `ties to other audited subjects; ${outcomeNotRecorded}` });
+  return checks;
+}
+
+// server/checks.ts
+var CHECKS = [
+  { id: "identity-resolution", label: "Identity resolution", defaultNote: "no completed server-side identity resolution was recorded" },
+  { id: "profile-photo-authenticity", label: "Profile-photo authenticity", defaultNote: "server collector did not run a photo-authenticity provider" },
+  { id: "code-footprint-github", label: "Code footprint (GitHub)", defaultNote: "no completed GitHub resolution was recorded" },
+  { id: "identity-continuity", label: "Identity continuity", defaultNote: "no completed handle-history result was recorded" },
+  { id: "affiliations-associates", label: "Affiliations & associates", defaultNote: "no corroborated affiliation collection outcome was recorded" },
+  { id: "promoted-token-performance", label: "Promoted-token performance", defaultNote: "no completed promoted-token market result was recorded", role: "KOL" },
+  { id: "vc-portfolio-track-record", label: "VC portfolio track record", defaultNote: "no completed portfolio-provider result was recorded", role: "INVESTOR" },
+  { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
+  { id: "us-legal-history", label: "US legal history", defaultNote: "server collector did not run a legal-history check" },
+  { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check" },
+  { id: "trust-graph-connections", label: "Trust-graph connections", defaultNote: "server collector did not run flagged-subject graph reconciliation" }
+];
+var STATUS_PRIORITY = {
+  "not-applicable": 0,
+  unknown: 1,
+  unavailable: 2,
+  stale: 3,
+  "checked-empty": 4,
+  confirmed: 5,
+  finding: 6
+};
+var SUCCESS = /* @__PURE__ */ new Set(["confirmed", "finding", "checked-empty"]);
+function iso(value) {
+  const date = value ? new Date(value) : /* @__PURE__ */ new Date();
+  return Number.isFinite(date.getTime()) ? date.toISOString() : (/* @__PURE__ */ new Date()).toISOString();
+}
+function uniqueObservations(values) {
+  const seen = /* @__PURE__ */ new Set();
+  return values.filter((value) => {
+    const key = `${value.id}
+${value.provider}
+${value.status}
+${value.note}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+var PersonCheckTracker = class {
+  observations = /* @__PURE__ */ new Map();
+  providerRuns = /* @__PURE__ */ new Map();
+  record(observation) {
+    const normalized = {
+      ...observation,
+      note: observation.note.trim(),
+      provider: observation.provider.trim(),
+      sourceCount: observation.sourceCount == null ? void 0 : Math.max(0, Math.floor(observation.sourceCount)),
+      completedAt: iso(observation.completedAt)
+    };
+    if (!normalized.note || !normalized.provider) return;
+    const current = this.observations.get(normalized.id) ?? [];
+    this.observations.set(normalized.id, uniqueObservations([...current, normalized]));
+  }
+  provider(id, label, state, detail) {
+    this.providerRuns.set(id, {
+      id,
+      label,
+      state,
+      observedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      ...detail?.trim() ? { detail: detail.trim().slice(0, 500) } : {}
+    });
+  }
+  snapshot(roles) {
+    const heldRoles = new Set(roles);
+    return CHECKS.map((definition) => {
+      if (definition.role && !heldRoles.has(definition.role)) {
+        return Object.freeze({
+          checkId: definition.id,
+          label: definition.label,
+          status: "not-applicable",
+          note: definition.role === "KOL" ? "not a KOL" : "not a fund/investor"
+        });
+      }
+      const observations = this.observations.get(definition.id) ?? [];
+      if (!observations.length) {
+        return Object.freeze({
+          checkId: definition.id,
+          label: definition.label,
+          status: "unknown",
+          note: definition.defaultNote
+        });
+      }
+      const strongest = observations.reduce(
+        (best, candidate) => STATUS_PRIORITY[candidate.status] > STATUS_PRIORITY[best.status] ? candidate : best
+      );
+      const providers = [...new Set(observations.map((item) => item.provider))];
+      const notes = [...new Set(observations.filter((item) => item.status === strongest.status || SUCCESS.has(item.status)).map((item) => item.note))];
+      const sourceCount = observations.reduce((total, item) => total + (item.sourceCount ?? 0), 0);
+      const completedAt = observations.map((item) => item.completedAt).filter((value) => !!value).sort().at(-1);
+      return Object.freeze({
+        checkId: definition.id,
+        label: definition.label,
+        status: strongest.status,
+        note: notes.slice(0, 3).join(" \xB7 ") || strongest.note,
+        provider: providers.join(","),
+        ...sourceCount > 0 ? { sourceCount } : {},
+        ...completedAt ? { completedAt } : {}
+      });
+    });
+  }
+  completeness(roles) {
+    const summary = summarizeChecks(this.snapshot(roles));
+    return summary.inScope > 0 && summary.successful === summary.inScope ? "complete" : "partial";
+  }
+  providers() {
+    return Object.freeze({
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      runs: [...this.providerRuns.values()].map((run) => Object.freeze({ ...run }))
+    });
+  }
+};
 
 // server/cache.ts
 import { createHash } from "node:crypto";
@@ -2249,16 +2537,21 @@ async function notableFollowers(subject, opts) {
   const toCheck = candidates.slice(0, REVERSE_CAP);
   const hits = [];
   const CHUNK = 15;
+  const deadline = Date.now() + (opts?.budgetMs ?? 45e3);
+  let checked = 0;
   for (let i = 0; i < toCheck.length; i += CHUNK) {
+    if (Date.now() > deadline) break;
+    const slice = toCheck.slice(i, i + CHUNK);
     const res = await Promise.all(
-      toCheck.slice(i, i + CHUNK).map(async (n) => {
+      slice.map(async (n) => {
         const rel = await checkFollow(n.handle, subject);
         return rel?.following ? { handle: n.handle, label: n.label, size: "" } : null;
       })
     );
+    checked += slice.length;
     for (const r of res) if (r) hits.push(r);
   }
-  return { list: hits, checked: toCheck.length };
+  return { list: hits, checked };
 }
 async function acknowledgments(endorsers, subject) {
   const out = /* @__PURE__ */ new Map();
@@ -2266,7 +2559,7 @@ async function acknowledgments(endorsers, subject) {
   const list = [...new Set(endorsers.map((e) => e.replace(/^@/, "")).filter(Boolean))];
   if (!key || !list.length) return out;
   const s = subject.replace(/^@/, "");
-  const system = "You verify endorsements for a due-diligence engine, with live web and X search. For EACH listed account, decide the strongest public acknowledgment that account has ever made of @" + s + ' on X, and its overall sentiment. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}]} \u2014 one entry per listed account, never invent posts.';
+  const system = "You generate endorsement-verification leads for a due-diligence collector, with live web and X search. For EACH listed account, surface the strongest candidate public acknowledgment that account may have made of @" + s + ' on X, its sentiment, and the exact post URL. This is discovery only: do not call a relationship corroborated or contradicted. Without a direct post URL, return ack=none and sentiment=none. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none","source_url":"https://x.com/.../status/..."}]} \u2014 one entry per listed account, never invent posts.';
   const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
   if (!text) return out;
   const m = text.match(/\{[\s\S]*\}/);
@@ -2276,7 +2569,12 @@ async function acknowledgments(endorsers, subject) {
     for (const r of arr) {
       const h = typeof r?.handle === "string" ? r.handle.replace(/^@/, "").toLowerCase() : "";
       if (!h) continue;
-      out.set(h, { ack: r.ack ?? "none", sentiment: r.sentiment ?? "none" });
+      const sourceUrl = typeof r?.source_url === "string" && /^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[A-Za-z0-9_]+\/status\/\d+/i.test(r.source_url) ? r.source_url : void 0;
+      out.set(h, {
+        ack: sourceUrl && ["mention", "thanks", "endorsement"].includes(r.ack) ? r.ack : "none",
+        sentiment: sourceUrl && ["positive", "neutral", "negative"].includes(r.sentiment) ? r.sentiment : "none",
+        source_url: sourceUrl
+      });
     }
   } catch {
   }
@@ -2401,8 +2699,8 @@ function parseTeamJSON(text, selfHandle, source) {
 async function searchAdverseSignals(handle, kind, ticker) {
   const h = handle.replace(/^@/, "");
   const subject = kind === "project" ? `the project / company behind X account @${h}${ticker ? ` (token $${ticker.replace(/^\$/, "")})` : ""}` : `the person behind X account @${h}`;
-  const system = `You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, or general community complaints/FUD. Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. Be STRICT and grounded: report ONLY complaints that actually exist with a real source. For EACH, grade credibility: 'evidenced' = backed by on-chain proof, receipts, or many consistent first-hand reports; 'reported' = a real named complaint but unverified; 'rumor' = vague unbacked FUD. Count distinct independent sources. Do NOT invent, do NOT infer guilt, do NOT repeat the subject's own marketing. If there are no real complaints, return an empty list. Reply with ONLY compact JSON: {"signals":[{"category":"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud","claim":"","source":"","source_url":"","independent_source_count":1,"credibility":"evidenced|reported|rumor"}]}. Never use em dashes.`;
-  const text = await grokSearch(system, `Subject: ${subject}. Find real, sourced complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. Grade each by credibility and count independent sources.`);
+  const system = `You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, or general community complaints/FUD. Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. Reply with ONLY compact JSON: {"signals":[{"category":"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud","claim":"","source":"","source_url":""}]}. Never use em dashes.`;
+  const text = await grokSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`);
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -2414,9 +2712,7 @@ async function searchAdverseSignals(handle, kind, ticker) {
       category: s.category,
       claim: s.claim.trim(),
       source: (s.source || "unattributed").toString().trim(),
-      source_url: typeof s.source_url === "string" && /^https?:\/\//.test(s.source_url) ? s.source_url : void 0,
-      independent_source_count: Math.max(1, Math.min(50, Number(s.independent_source_count) || 1)),
-      credibility: s.credibility === "evidenced" ? "evidenced" : s.credibility === "rumor" ? "rumor" : "reported"
+      source_url: typeof s.source_url === "string" && /^https?:\/\//.test(s.source_url) ? s.source_url : void 0
     })).slice(0, 12);
   } catch {
     return [];
@@ -2424,8 +2720,8 @@ async function searchAdverseSignals(handle, kind, ticker) {
 }
 async function detectManipulationTooling(handle, name) {
   const h = handle.replace(/^@/, "");
-  const system = `You are a forensic researcher with live web and X search. Determine whether the given person BUILDS, OWNS, or OPERATES any tool whose primary use is undetectable market manipulation of crypto tokens: token BUNDLERS (buy/sell a token across many wallets to disguise concentration), wallet MIXERS / privacy 'cash' tools (move funds without a public trace), VOLUME FAKERS / wash-trading generators, or multi-wallet SNIPE bots. Ground the finding in the operator's OWN public product pages, docs, or posts, not rumor. Report their role (founder|ceo|operator|builder|affiliate) and each qualifying tool with a short evidence phrase and URL if found. Legitimate general token-creation or analytics tools do NOT count; only tools built to hide manipulation. Reply with ONLY compact JSON: {"operates":true|false,"role":"","tools":[{"name":"","kind":"bundler|mixer|volume_faker|snipe_bot|multi_wallet|other","url":"","evidence":""}]}. If none, return {"operates":false,"role":"","tools":[]}. NEVER invent. Never use em dashes.`;
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Do they build, own, or operate any token bundler, wallet mixer, volume faker, or multi-wallet snipe tool? Cite their own product pages.`);
+  const system = `You are a forensic research lead generator with live web and X search. Surface candidate first-party pages that may connect the given person to a token bundler, wallet mixer, volume faker, wash-trading generator, or multi-wallet snipe bot. Return leads for an independent collector to verify; do not decide that the person operates the tool and do not call the connection verified. Prefer the product's own page, docs, or post and include the role claimed on that page. Legitimate general token-creation or analytics tools do not count. Reply with ONLY compact JSON: {"role_claim":"","tools":[{"name":"","kind":"bundler|mixer|volume_faker|snipe_bot|multi_wallet|other","url":"","evidence":""}]}. If none, return {"role_claim":"","tools":[]}. NEVER invent. Never use em dashes.`;
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Find candidate first-party pages that may link them to manipulation tooling. Return URLs for later independent verification only.`);
   if (!text) return null;
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
@@ -2438,8 +2734,8 @@ async function detectManipulationTooling(handle, name) {
       url: typeof t.url === "string" && /^https?:\/\//.test(t.url) ? t.url : void 0,
       evidence: (t.evidence || "").toString().trim()
     })).slice(0, 8);
-    if (!tools.length) return { operates: false, role: "", tools: [] };
-    return { operates: true, role: (parsed.role || "operator").toString().trim(), tools };
+    if (!tools.length) return { role_claim: "", tools: [] };
+    return { role_claim: (parsed.role_claim || "claimed operator").toString().trim(), tools };
   } catch {
     return null;
   }
@@ -2498,24 +2794,37 @@ var xAdapter = {
       }
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);
+    let observedRelationships = 0;
+    let adverseRelationships = 0;
     const ackMap = await acknowledgments(claims.map((t) => t.claimed_endorser_handle || t.project_handle), ctx.handle);
     await Promise.all(
       claims.map(async (t) => {
         const endorser = t.claimed_endorser_handle || t.project_handle;
         const follows = await followsSubject(endorser, ctx.handle);
         const ack = ackMap.get(String(endorser).replace(/^@/, "").toLowerCase()) ?? null;
-        if (follows !== null) t.follows_subject = follows;
-        if (ack) {
-          t.public_acknowledgment = ack.ack;
-          t.sentiment = ack.sentiment;
-          t.relationship_corroborated = ack.ack === "endorsement" || ack.ack === "thanks";
-          t.fud_present = ack.sentiment === "negative";
+        if (follows !== null) {
+          t.follows_subject = follows;
+          observedRelationships += 1;
+          if (!follows) adverseRelationships += 1;
+        }
+        if (ack?.source_url) {
+          const lead = `Model-search acknowledgment lead: ${ack.ack}, ${ack.sentiment} (${ack.source_url}); independent artifact verification required`;
+          t.notes = [t.notes, lead].filter(Boolean).join(" \xB7 ");
         }
         t.corroboration_verdict = classifyTestimonial(t);
         const tone = t.corroboration_verdict === "Contradicted" /* CONTRADICTED */ ? "bad" : t.corroboration_verdict === "Corroborated" /* CORROBORATED */ ? "good" : "warn";
         ctx.emit({ phase: "Corroborate", label: `${endorser}`, detail: `${t.claimed_relationship ?? "endorser"}: ${t.corroboration_verdict}${follows === false ? " \xB7 does not follow subject" : ""}`, source: "X", tone });
       })
     );
+    if (observedRelationships) {
+      ctx.recordCheck?.({
+        id: "affiliations-associates",
+        status: adverseRelationships ? "finding" : "confirmed",
+        note: `${observedRelationships} claimed relationship${observedRelationships === 1 ? "" : "s"} checked in the X follow graph${adverseRelationships ? ` \xB7 ${adverseRelationships} did not follow the subject` : ""}`,
+        provider: "twitterapi.io",
+        sourceCount: observedRelationships
+      });
+    }
   }
 };
 
@@ -2601,6 +2910,64 @@ ${corpus}`,
   });
 }
 
+// server/adapters/sitecheck.ts
+var COMING = /coming[\s_-]*soon|under[\s_-]*construction|launching[\s_-]*soon|join[\s_-]*(the[\s_-]*)?waitlist|\bwaitlist\b|early[\s_-]*access|get[\s_-]*notified|notify[\s_-]*me|be[\s_-]*the[\s_-]*first|request[\s_-]*access|sign[\s_-]*up[\s_-]*for[\s_-]*(early[\s_-]*)?access/i;
+var PARKED = /this[\s_-]*domain[\s_-]*is[\s_-]*for[\s_-]*sale|buy[\s_-]*this[\s_-]*domain|hugedomains|sedoparking|parkingcrew|domain[\s_-]*(is[\s_-]*)?parked/i;
+var PRODUCT = /\b(docs|whitepaper|dashboard|pricing|features|roadmap|marketplace|explorer|portfolio|order\s*book|connect\s*wallet|launch\s*app|sign\s*in|log\s*in|deposit|withdraw|governance|staking)\b/i;
+function stripText(html) {
+  return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+}
+async function get(url, opts) {
+  try {
+    recordCall("site-fetch", "substance", 0);
+    const r = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,application/javascript" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
+    if (!r.ok) return null;
+    if ((opts?.requireHtml ?? true) && !/html/i.test(r.headers.get("content-type") ?? "")) return null;
+    return { url: r.url || url, html: await r.text() };
+  } catch {
+    return null;
+  }
+}
+function bundleUrls(html, base) {
+  const out = [];
+  const re = /<script[^>]+src=["']([^"']+)["']/gi;
+  let m;
+  while ((m = re.exec(html)) && out.length < 3) {
+    const src = m[1];
+    if (/\.js(\?|$)/i.test(src) && !/googletagmanager|gtag|analytics|hotjar|intercom|segment|cdn\.jsdelivr|unpkg/i.test(src)) {
+      try {
+        out.push(new URL(src, base).href);
+      } catch {
+      }
+    }
+  }
+  return out;
+}
+async function checkSiteSubstance(domain) {
+  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase().trim();
+  if (!d || !/\.[a-z]{2,}$/i.test(d)) return null;
+  const page = await get(`https://${d}`) || await get(`https://www.${d}`);
+  if (!page) return { url: `https://${d}`, status: "unreachable", detail: "the site does not resolve or returns no page" };
+  const meta = page.html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1] ?? "";
+  const body = stripText(page.html);
+  if (PARKED.test(page.html)) return { url: page.url, status: "coming_soon", detail: "the domain is parked / for sale, not a live project site" };
+  if (COMING.test(body) || COMING.test(meta)) return { url: page.url, status: "coming_soon", detail: `the homepage is a coming-soon / waitlist page${meta ? ` ("${meta.slice(0, 80)}")` : ""}` };
+  if (body.length >= 400 && PRODUCT.test(body)) return { url: page.url, status: "live", detail: `live site${meta ? ` \u2014 "${meta.slice(0, 80)}"` : ""}` };
+  const isShell = /id=["'](root|__next|app|__nuxt)["']/i.test(page.html) || /<script[^>]+type=["']module["']/i.test(page.html);
+  if (isShell && body.length < 300) {
+    for (const b of bundleUrls(page.html, page.url)) {
+      const js = await get(b, { requireHtml: false }).catch(() => null);
+      const text = js?.html ?? "";
+      if (!text) continue;
+      if (COMING.test(text) || /ComingSoon|Waitlist|EarlyAccess|UnderConstruction/i.test(text)) {
+        return { url: page.url, status: "coming_soon", detail: `the live site is a coming-soon / waitlist page (client-rendered${meta ? `, "${meta.slice(0, 60)}"` : ""})` };
+      }
+    }
+    return { url: page.url, status: "client_rendered", detail: `client-rendered app; static read couldn't confirm a live product surface${meta ? ` ("${meta.slice(0, 80)}")` : ""}` };
+  }
+  return { url: page.url, status: "live", detail: `site is up${meta ? ` \u2014 "${meta.slice(0, 80)}"` : ""}` };
+}
+
 // server/adapters/dexscreener.ts
 var BASE = "https://api.dexscreener.com";
 async function lookupToken(address) {
@@ -2659,7 +3026,7 @@ async function detectTokenLifecycle(ticker, knownAddress) {
       };
     }).sort((a, b) => (a.firstLaunch ?? 0) - (b.firstLaunch ?? 0));
     const migrated = generations.length >= 2;
-    const canon = knownAddress && generations.find((g) => g.address.toLowerCase() === knownAddress.toLowerCase()) || generations[generations.length - 1];
+    const canon = knownAddress ? generations.find((g) => g.address.toLowerCase() === knownAddress.toLowerCase()) : null;
     let dive = null;
     if (canon) {
       const nearZeroLiq = canon.liquidityUsd < 5e3;
@@ -2690,6 +3057,13 @@ var dexscreenerAdapter = {
       if (!snap) continue;
       const thin = (snap.liquidityUsd ?? 0) < 1e4;
       p.perf_current = snap.priceUsd;
+      ctx.recordCheck?.({
+        id: "promoted-token-performance",
+        status: thin ? "finding" : "confirmed",
+        note: `$${snap.symbol ?? p.ticker} liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}${thin ? " (thin liquidity)" : ""}`,
+        provider: "dexscreener",
+        sourceCount: 1
+      });
       ctx.emit({
         phase: "On-chain",
         label: `$${snap.symbol ?? p.ticker}`,
@@ -2793,6 +3167,12 @@ var peopledatalabsAdapter = {
     }
     if (!person) person = await enrichPerson({ profile: `twitter.com/${handle}` });
     if (!person) {
+      ctx.recordCheck?.({
+        id: "identity-resolution",
+        status: "checked-empty",
+        note: "licensed identity provider completed without a matching real-world record",
+        provider: "peopledatalabs"
+      });
       ctx.emit({ phase: "P1 \xB7 Identity", label: "No match", detail: "No real-world identity record matched; scored as pseudonymous (no penalty).", source: "peopledatalabs", tone: "neutral" });
       return;
     }
@@ -2800,6 +3180,20 @@ var peopledatalabsAdapter = {
     if (person.emails.length) ctx.evidence.profile.identity_emails = person.emails;
     const emailNote = person.emails.length ? ` Email on record: ${person.emails[0]}.` : "";
     ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.${emailNote}`;
+    ctx.recordCheck?.({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: `licensed identity record resolved to ${person.fullName}`,
+      provider: "peopledatalabs",
+      sourceCount: 1
+    });
+    ctx.recordCheck?.({
+      id: "affiliations-associates",
+      status: person.experience.length ? "confirmed" : "checked-empty",
+      note: person.experience.length ? `${person.experience.length} employment record${person.experience.length === 1 ? "" : "s"} returned` : "resolved identity record returned no employment history",
+      provider: "peopledatalabs",
+      sourceCount: person.experience.length
+    });
     ctx.emit({ phase: "P1 \xB7 Identity", label: "Identity resolved", detail: `${person.fullName} \xB7 ${person.experience.length} employment records${person.emails.length ? ` \xB7 ${person.emails[0]}` : ""}${person.linkedin ? ` \xB7 ${person.linkedin}` : ""}`, source: "peopledatalabs", tone: "good" });
     const byName = new Map(ctx.evidence.ventures.map((v) => [v.project_name.toLowerCase(), v]));
     const added = [];
@@ -2906,18 +3300,50 @@ var githubAdapter = {
     ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub resolution", detail: `Matching ${ctx.handle} to a GitHub account by linked X handle\u2026`, source: "github", tone: "neutral" });
     const match = await resolveGithub(ctx.handle, name, key);
     if (!match) {
+      ctx.recordCheck?.({
+        id: "code-footprint-github",
+        status: "checked-empty",
+        note: "GitHub resolution completed without an account that links back to this X handle",
+        provider: "github"
+      });
       ctx.emit({ phase: "P1 \xB7 Identity", label: "No GitHub match", detail: "No GitHub account links back to this X handle.", source: "github", tone: "neutral" });
       return;
     }
     if (match.confidence === "weak") {
+      ctx.recordCheck?.({
+        id: "code-footprint-github",
+        status: "unknown",
+        note: `github.com/${match.login} shares the username but does not link back to the X account`,
+        provider: "github"
+      });
       ctx.emit({ phase: "P1 \xB7 Identity", label: "Possible GitHub", detail: `github.com/${match.login} shares the handle but does not link back to X. Unconfirmed, not attributed.`, source: "github", tone: "warn" });
       return;
     }
     ctx.evidence.profile.identity_confidence = "Probable";
     ctx.evidence.profile.identity_note = `GitHub github.com/${match.login}${match.name ? ` (${match.name})` : ""} links back to this X handle.`;
+    ctx.recordCheck?.({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: `GitHub account ${match.login} links back to ${ctx.handle}`,
+      provider: "github",
+      sourceCount: 1
+    });
+    ctx.recordCheck?.({
+      id: "code-footprint-github",
+      status: "confirmed",
+      note: `github.com/${match.login} resolved through its X handle field`,
+      provider: "github",
+      sourceCount: 1
+    });
     ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub confirmed", detail: `github.com/${match.login} links back to ${ctx.handle} (twitter_username match).`, source: "github", tone: "good" });
     const affs = await githubAffiliations(match.login, key);
     if (!affs.length) {
+      ctx.recordCheck?.({
+        id: "affiliations-associates",
+        status: "checked-empty",
+        note: "resolved GitHub account has no public organization memberships or organization-repo contributions",
+        provider: "github"
+      });
       ctx.emit({ phase: "P1 \xB7 Identity", label: "No public orgs", detail: "GitHub account has no public org memberships or org-repo contributions.", source: "github", tone: "neutral" });
       return;
     }
@@ -2937,6 +3363,13 @@ var githubAdapter = {
       ctx.evidence.associates.push({ associate_handle: a.org, relation: "github org", evidence_url: `https://github.com/${a.org}` });
       added.push(a.org);
     }
+    ctx.recordCheck?.({
+      id: "affiliations-associates",
+      status: "confirmed",
+      note: `${affs.length} public GitHub organization affiliation${affs.length === 1 ? "" : "s"} returned`,
+      provider: "github",
+      sourceCount: affs.length
+    });
     ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub affiliations", detail: `${added.length} org(s) this account builds with (near-permanent, hard to scrub): ${added.slice(0, 5).join(", ")}.`, source: "github", tone: "good" });
   }
 };
@@ -2979,15 +3412,33 @@ var crunchbaseAdapter = {
   async run(ctx) {
     if (!ctx.evidence.ventures.length) return;
     ctx.emit({ phase: "Founder", label: "Verify funding", detail: `Cross-referencing ${ctx.evidence.ventures.length} venture(s) against Crunchbase\u2026`, tone: "neutral" });
+    let matched = 0;
     for (const v of ctx.evidence.ventures) {
       const org = await lookupOrganization(v.project_name);
       if (!org) {
         ctx.emit({ phase: "Founder", label: v.project_name, detail: "no Crunchbase record found for claimed venture", source: "crunchbase", tone: "warn" });
         continue;
       }
+      matched += 1;
       if (org.investors?.length) v.investors = Array.from(/* @__PURE__ */ new Set([...v.investors ?? [], ...org.investors]));
       if (org.acquirer && !v.acquirer) v.acquirer = org.acquirer;
       ctx.emit({ phase: "Founder", label: v.project_name, detail: `verified \xB7 ${org.rounds ?? 0} rounds, backers: ${(org.investors ?? []).slice(0, 3).join(", ") || "n/a"}`, source: "crunchbase", tone: "good" });
+    }
+    if (matched) {
+      ctx.recordCheck?.({
+        id: "vc-portfolio-track-record",
+        status: "confirmed",
+        note: `${matched} claimed venture${matched === 1 ? "" : "s"} matched to Crunchbase records`,
+        provider: "crunchbase",
+        sourceCount: matched
+      });
+    } else {
+      ctx.recordCheck?.({
+        id: "vc-portfolio-track-record",
+        status: "checked-empty",
+        note: `Crunchbase lookup completed for ${ctx.evidence.ventures.length} claimed venture${ctx.evidence.ventures.length === 1 ? "" : "s"} without a matching record`,
+        provider: "crunchbase"
+      });
     }
   }
 };
@@ -3038,6 +3489,13 @@ var coingeckoAdapter = {
       const t = await tokenByContract(p.chain, p.contract_address);
       if (!t) continue;
       const downBad = (t.ath_change_pct ?? 0) < -90;
+      ctx.recordCheck?.({
+        id: "promoted-token-performance",
+        status: downBad ? "finding" : "confirmed",
+        note: `$${t.symbol?.toUpperCase() ?? p.ticker} market record returned${t.ath_change_pct == null ? "" : ` \xB7 ${Math.round(t.ath_change_pct)}% from ATH`}`,
+        provider: "coingecko",
+        sourceCount: 1
+      });
       ctx.emit({
         phase: "On-chain",
         label: `$${t.symbol?.toUpperCase() ?? p.ticker}`,
@@ -3346,8 +3804,21 @@ async function coldIntake(ctx) {
   const hist = await handleHistory(ctx.handle);
   if (hist && hist.priorHandles.length) {
     ctx.evidence.profile.prior_handles = hist.priorHandles;
+    ctx.recordCheck?.({
+      id: "identity-continuity",
+      status: "finding",
+      note: `prior handles found: ${hist.priorHandles.map((handle) => `@${handle}`).join(", ")}`,
+      provider: "memory.lol",
+      sourceCount: hist.priorHandles.length
+    });
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")} \u2014 a rebrand. Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
   } else if (hist) {
+    ctx.recordCheck?.({
+      id: "identity-continuity",
+      status: "checked-empty",
+      note: "handle-history provider returned no prior handle (provider coverage is partial)",
+      provider: "memory.lol"
+    });
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Handle history", detail: "No prior X handle on record for this account (no rebrand found; memory.lol coverage is partial).", source: "memory.lol", tone: "neutral" });
   }
   const corpus = await collectCorpus(ctx.handle);
@@ -3372,23 +3843,31 @@ async function coldIntake(ctx) {
       project_name: v.project_name,
       role: v.role ?? "founder",
       period: v.period ?? "",
-      outcome: parseOutcome(v.claimed_outcome)
+      outcome: parseOutcome(v.claimed_outcome),
+      evidence_origin: "model_lead",
+      artifact_verified: false
     }));
     ctx.evidence.testimonials = claims.testimonials.map((t) => ({
       claimed_endorser_handle: t.claimed_endorser_handle,
       claimed_relationship: t.claimed_relationship,
-      appears_at: "subject surfaces"
+      appears_at: "subject surfaces",
+      evidence_origin: "model_lead",
+      artifact_verified: false
     }));
     ctx.evidence.advised = claims.advised.map((p) => ({
       project_name: p.project_name,
       project_handle: p.project_handle,
       claimed_role: p.claimed_role ?? "advisor",
-      appears_at: "subject surfaces"
+      appears_at: "subject surfaces",
+      evidence_origin: "model_lead",
+      artifact_verified: false
     }));
     ctx.evidence.promotions = claims.promotions.map((p) => ({
       ticker: p.ticker,
       contract_address: p.contract_address,
-      chain: p.chain
+      chain: p.chain,
+      evidence_origin: "model_lead",
+      artifact_verified: false
     }));
     const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} \u2014 now verifying each.`, source: "claude", tone: "neutral" });
@@ -3458,19 +3937,66 @@ async function coldIntake(ctx) {
   if (webTeam.length) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
     const isLeader = (r) => /founder|cofounder|co-founder|ceo|cto|coo|president|chief/i.test(r ?? "");
-    const leaders = webTeam.filter((t) => isLeader(t.role));
-    const leaderWithLinkedin = leaders.some((t) => !!t.linkedin);
+    const backedTeam = [...pageTeam, ...postRoleTeam].filter(
+      (candidate) => webTeam.some(
+        (member) => !!candidate.handle && norm2(candidate.handle) === norm2(member.handle) || !!candidate.name && norm2(candidate.name) === norm2(member.name)
+      )
+    );
+    const leaders = backedTeam.filter((t) => isLeader(t.role));
+    const leaderWithLinkedin = pageTeam.some((t) => isLeader(t.role) && !!t.linkedin);
     const rank = { Unverified: 0, Probable: 1, Confirmed: 2 };
     const cur = ctx.evidence.profile.identity_confidence;
+    if (backedTeam.length) {
+      ctx.recordCheck?.({
+        id: "affiliations-associates",
+        status: "confirmed",
+        note: `${backedTeam.length} team identit${backedTeam.length === 1 ? "y" : "ies"} backed by a first-party team page or deterministic post scan`,
+        provider: "team-page/post-scan",
+        sourceCount: backedTeam.length
+      });
+    }
     if (cur !== "SuspectedImpersonation") {
-      const target = leaderWithLinkedin ? "Confirmed" : leaders.length || webTeam.length >= 2 ? "Probable" : null;
+      const target = leaderWithLinkedin ? "Confirmed" : leaders.length || backedTeam.length >= 2 ? "Probable" : null;
+      if (target) {
+        ctx.recordCheck?.({
+          id: "identity-resolution",
+          status: "confirmed",
+          note: `project identity resolved through ${backedTeam.length} independently collected team record${backedTeam.length === 1 ? "" : "s"}`,
+          provider: "team-page/post-scan",
+          sourceCount: backedTeam.length
+        });
+      }
       if (target && (rank[target] ?? 0) > (rank[cur ?? "Unverified"] ?? 0)) {
         ctx.evidence.profile.identity_confidence = target;
-        ctx.emit({ phase: "P1 \xB7 Team", label: `Identity ${target.toLowerCase()}`, detail: `Project identity resolved through its named team${leaderWithLinkedin ? " (LinkedIn-corroborated leadership)" : ""}; a brand handle over a public team is not an anonymity flag.`, source: "team-search", tone: "good" });
+        ctx.emit({ phase: "P1 \xB7 Team", label: `Identity ${target.toLowerCase()}`, detail: `Project identity resolved through independently fetched team evidence${leaderWithLinkedin ? " (a first-party team page links its leadership)" : ""}; a brand handle over a public team is not an anonymity flag.`, source: "team-page / post scan", tone: "good" });
       }
     }
   } else if (domain) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "No named team", detail: `Dug ${domain} and the account's posts; no individual team members could be attributed. For a project raising money, an unnamed team is itself a flag.`, source: "team-search", tone: "warn" });
+  }
+  if (domain) {
+    const site = await checkSiteSubstance(domain).catch(() => null);
+    if (site) {
+      ctx.evidence.profile.website = site.url;
+      if (site.status === "coming_soon" || site.status === "unreachable") {
+        const notLive = site.status === "unreachable" ? "does not resolve" : "is not live yet";
+        ctx.evidence.findings.push({
+          finding_type: "SiteNotLive",
+          claim: `The project's own website (${domain}) ${notLive}: ${site.detail}. No live product surface despite the account promoting a token.`,
+          source_url: site.url,
+          source_date: "",
+          source_author: "site-fetch",
+          verification_status: "Verified",
+          independent_source_count: 1,
+          polarity: -1
+        });
+        ctx.emit({ phase: "P2 \xB7 Substance", label: "Website not live", detail: `${domain} ${notLive} \u2014 ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
+      } else if (site.status === "client_rendered") {
+        ctx.emit({ phase: "P2 \xB7 Substance", label: "Website live (app)", detail: `${domain} serves a client-rendered app; ${site.detail}.`, source: "site-fetch", tone: "neutral" });
+      } else {
+        ctx.emit({ phase: "P2 \xB7 Substance", label: "Website live", detail: `${domain} is a live site \u2014 ${site.detail}.`, source: "site-fetch", tone: "good" });
+      }
+    }
   }
   if (people.length) {
     const teamList = people.filter((p) => p.kind === "team");
@@ -3492,7 +4018,13 @@ async function coldIntake(ctx) {
       const key = a.handle.replace(/^@/, "").toLowerCase();
       if (haveTest.has(key)) continue;
       haveTest.add(key);
-      ctx.evidence.testimonials.push({ claimed_endorser_handle: a.handle, claimed_relationship: "advisor", appears_at: "project X content" });
+      ctx.evidence.testimonials.push({
+        claimed_endorser_handle: a.handle,
+        claimed_relationship: "advisor",
+        appears_at: "model search of project X content",
+        evidence_origin: "model_lead",
+        artifact_verified: false
+      });
       addedAdv.push(`${a.name} (${a.handle})`);
     }
     const namedOnly = people.filter((p) => !p.handle).map((p) => `${p.name} (${p.kind === "advisor" ? "advisor" : p.role})`);
@@ -3527,7 +4059,9 @@ async function coldIntake(ctx) {
         period: v.year ?? "",
         outcome: "Active" /* ACTIVE */,
         evidence_url: null,
-        notes: [v.evidence, "single-source lead, unverified"].filter(Boolean).join(" \xB7 ")
+        notes: [v.evidence, "single-source lead, unverified"].filter(Boolean).join(" \xB7 "),
+        evidence_origin: "model_lead",
+        artifact_verified: false
       };
       ctx.evidence.ventures.push(rec);
       return { v, rec };
@@ -3537,6 +4071,7 @@ async function coldIntake(ctx) {
       ctx.evidence.roles = ["FOUNDER" /* FOUNDER */];
     }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Affiliations discovered", detail: `${discovered.length} public affiliation${discovered.length === 1 ? "" : "s"} tied to the subject: ${discovered.slice(0, 5).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
+    let corroboratedAffiliations = 0;
     await Promise.all(
       pending.slice(0, 5).map(async ({ v, rec }) => {
         const corrob = [];
@@ -3558,11 +4093,21 @@ async function coldIntake(ctx) {
         } catch {
         }
         if (corrob.length) {
+          corroboratedAffiliations += 1;
           rec.notes = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" \xB7 ");
           ctx.emit({ phase: "P0 \xB7 Intake", label: `Affiliation corroborated \xB7 ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""} \u2014 ${corrob.join("; ")}.`, source: "argus", tone: "good" });
         }
       })
     );
+    if (corroboratedAffiliations) {
+      ctx.recordCheck?.({
+        id: "affiliations-associates",
+        status: "confirmed",
+        note: `${corroboratedAffiliations} discovered affiliation${corroboratedAffiliations === 1 ? "" : "s"} corroborated against an independent artifact or follow-graph result`,
+        provider: "wayback/twitterapi.io",
+        sourceCount: corroboratedAffiliations
+      });
+    }
   } else {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "No affiliations found", detail: "No public company affiliations could be attributed to this person via web/X search.", source: "grok", tone: "neutral" });
   }
@@ -3579,17 +4124,18 @@ function axisCatalog(roles) {
 }
 var handleFrom = (s) => s?.match(/@([A-Za-z0-9_]{2,30})/)?.[1];
 function toFinding(sig, aboutHandle) {
-  const verification = sig.credibility === "evidenced" && sig.independent_source_count >= 2 ? "Verified" : sig.credibility === "rumor" ? "Rumor" : "Reported";
-  const finding_type = sig.category === "drain" || sig.category === "rug" || sig.category === "liquidity_pull" ? "InvestigatorCallout" : "DeceptionFinding";
+  const hasCandidateArtifact = !!sig.source_url;
   return {
-    finding_type,
-    claim: `@${aboutHandle.replace(/^@/, "")}: ${sig.claim}`,
+    finding_type: "AdverseLead",
+    claim: `@${aboutHandle.replace(/^@/, "")} (${sig.category.replace(/_/g, " ")} lead): ${sig.claim}`,
     source_url: sig.source_url ?? "",
     source_date: "",
     source_author: sig.source,
-    verification_status: verification,
-    independent_source_count: sig.independent_source_count,
-    polarity: -1
+    verification_status: hasCandidateArtifact ? "Reported" : "Rumor",
+    independent_source_count: hasCandidateArtifact ? 1 : 0,
+    polarity: -1,
+    evidence_origin: "model_lead",
+    artifact_verified: false
   };
 }
 async function adverseSignalsAndTooling(ctx) {
@@ -3605,55 +4151,55 @@ async function adverseSignalsAndTooling(ctx) {
     Promise.all(projectTargets.map((p) => searchAdverseSignals(p.handle, "project"))),
     Promise.all(associateTargets.map((h) => searchAdverseSignals(h, "person")))
   ]);
-  if (tooling?.operates && tooling.tools.length) {
+  if (tooling?.tools.length) {
     const list = tooling.tools.map((t) => `${t.name} (${t.kind.replace(/_/g, " ")})`).join(", ");
+    const candidateUrl = tooling.tools.find((t) => t.url)?.url;
     evidence.findings.push({
-      finding_type: "ManipulationTooling",
-      claim: `Subject ${tooling.role || "operates"} tooling built for undetectable token manipulation: ${list}.`,
-      source_url: tooling.tools.find((t) => t.url)?.url ?? "",
+      finding_type: "ManipulationToolingLead",
+      claim: `Model-discovered lead: subject may be connected as ${tooling.role_claim || "operator"} to manipulation tooling: ${list}.`,
+      source_url: candidateUrl ?? "",
       source_date: "",
-      source_author: "own product pages",
-      verification_status: "Verified",
-      independent_source_count: tooling.tools.length,
-      polarity: -1
+      source_author: "model-discovered candidate page",
+      verification_status: candidateUrl ? "Reported" : "Rumor",
+      independent_source_count: candidateUrl ? 1 : 0,
+      polarity: -1,
+      evidence_origin: "model_lead",
+      artifact_verified: false
     });
     for (const t of tooling.tools) {
       evidence.clientEngagements.push({
         client_name: t.name,
-        service_type: `manipulation_tooling:${t.kind}`,
-        manipulation_service_flag: true,
+        service_type: `possible_manipulation_tooling:${t.kind}`,
+        manipulation_service_flag: false,
         evidence_url: t.url,
-        notes: t.evidence
+        notes: [t.evidence, "model-discovered lead; relationship not independently verified"].filter(Boolean).join(" \xB7 "),
+        evidence_origin: "model_lead",
+        artifact_verified: false
       });
     }
-    ctx.emit({ phase: "Adverse", label: "Manipulation tooling", detail: `Subject builds/operates ${list}. Tools designed to bundle, mix, or fake volume undetectably.`, source: "grok", tone: "bad" });
+    ctx.emit({ phase: "Adverse", label: "Manipulation-tooling lead", detail: `Candidate connection surfaced for ${list}; independent artifact verification is still required before this can affect a hard cap.`, source: "grok", tone: "warn" });
   }
   const pushSigs = (sigs, about) => {
-    let verified = 0;
     for (const s of sigs) {
-      const f = toFinding(s, about);
-      evidence.findings.push(f);
-      if (f.verification_status === "Verified") verified++;
+      evidence.findings.push(toFinding(s, about));
     }
-    return verified;
   };
-  let totalSigs = 0, totalVerified = 0;
-  totalVerified += pushSigs(subjectSigs, self);
+  let totalSigs = 0;
+  pushSigs(subjectSigs, self);
   totalSigs += subjectSigs.length;
   projectSigs.forEach((sigs, i) => {
-    totalVerified += pushSigs(sigs, projectTargets[i].handle);
+    pushSigs(sigs, projectTargets[i].handle);
     totalSigs += sigs.length;
   });
   assocSigs.forEach((sigs, i) => {
-    totalVerified += pushSigs(sigs, associateTargets[i]);
+    pushSigs(sigs, associateTargets[i]);
     totalSigs += sigs.length;
   });
   if (totalSigs) {
-    const worst = totalVerified ? "bad" : "warn";
-    const top = [...subjectSigs, ...projectSigs.flat(), ...assocSigs.flat()].sort((a, b) => b.independent_source_count - a.independent_source_count).slice(0, 3).map((s) => `${s.category.replace(/_/g, " ")}: ${s.claim}`).join(" \xB7 ");
-    ctx.emit({ phase: "Adverse", label: `${totalSigs} adverse signal${totalSigs === 1 ? "" : "s"}`, detail: `${totalVerified} multi-source / evidenced. ${top}`, source: "grok", tone: worst });
+    const top = [...subjectSigs, ...projectSigs.flat(), ...assocSigs.flat()].slice(0, 3).map((s) => `${s.category.replace(/_/g, " ")}: ${s.claim}`).join(" \xB7 ");
+    ctx.emit({ phase: "Adverse", label: `${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}`, detail: `Unverified candidate sources for follow-up. ${top}`, source: "grok", tone: "warn" });
   } else {
-    ctx.emit({ phase: "Adverse", label: "No adverse signals", detail: "No credible rug/scam/drain/FUD complaints surfaced for the subject, its projects, or associates.", source: "grok", tone: "good" });
+    ctx.emit({ phase: "Adverse", label: "No adverse leads surfaced", detail: "The model search returned no candidate rug/scam/drain/FUD source URLs for follow-up; this is not proof that none exist.", source: "grok", tone: "neutral" });
   }
   if (projectTargets.length >= 2) {
     const teams = await Promise.all(projectTargets.map((p) => findTeam(p.handle, p.name)));
@@ -3695,39 +4241,31 @@ async function adverseSignalsAndTooling(ctx) {
 }
 async function tokenLifecycle(ctx) {
   const { evidence } = ctx;
-  const promos = evidence.promotions.filter((p) => p.ticker).slice(0, 3);
+  const promos = evidence.promotions.filter((p) => p.ticker && p.contract_address).slice(0, 3);
   if (!promos.length) return;
   await Promise.all(
     promos.map(async (p) => {
       const sig = await detectTokenLifecycle(p.ticker, p.contract_address);
       if (!sig) return;
-      if (sig.dive) {
-        evidence.findings.push({
-          finding_type: "TokenCollapse",
-          claim: `$${sig.ticker} launched and collapsed to near-zero (${sig.dive.detail}).`,
-          source_url: `https://dexscreener.com/search?q=${encodeURIComponent(sig.dive.address)}`,
-          source_date: "",
-          source_author: "dexscreener",
-          verification_status: "Verified",
-          independent_source_count: 1,
-          polarity: -1
-        });
-        ctx.emit({ phase: "Token", label: `$${sig.ticker} collapse`, detail: `${sig.dive.detail}. The dive-after-launch pattern.`, source: "dexscreener", tone: "bad" });
-      }
-      if (sig.migrated) {
-        const gens = sig.generations.length;
-        evidence.findings.push({
-          finding_type: "TokenMigration",
-          claim: `$${sig.ticker} has ${gens} distinct same-ticker contracts on-chain (possible migration/relaunch; unverified same-team).`,
-          source_url: "",
-          source_date: "",
-          source_author: "dexscreener",
-          verification_status: "Reported",
-          independent_source_count: 1,
-          polarity: -1
-        });
-        ctx.emit({ phase: "Token", label: `$${sig.ticker} migration?`, detail: `${gens} same-ticker contracts on-chain. A relaunch restarts the chart; watch what happened right after. (Heuristic: could be an unrelated same-ticker token.)`, source: "dexscreener", tone: "warn" });
-      }
+      ctx.recordCheck?.({
+        id: "promoted-token-performance",
+        status: sig.dive ? "finding" : "confirmed",
+        note: sig.dive ? `$${sig.ticker} verified contract collapse: ${sig.dive.detail}` : `$${sig.ticker} lifecycle lookup completed with no collapse surfaced`,
+        provider: "dexscreener",
+        sourceCount: 1
+      });
+      if (!sig.dive) return;
+      evidence.findings.push({
+        finding_type: "TokenCollapse",
+        claim: `$${sig.ticker} (${p.contract_address.slice(0, 8)}\u2026) launched and collapsed to near-zero (${sig.dive.detail}).`,
+        source_url: `https://dexscreener.com/search?q=${encodeURIComponent(sig.dive.address)}`,
+        source_date: "",
+        source_author: "dexscreener",
+        verification_status: "Verified",
+        independent_source_count: 1,
+        polarity: -1
+      });
+      ctx.emit({ phase: "Token", label: `$${sig.ticker} collapse`, detail: `${sig.dive.detail}. The dive-after-launch pattern.`, source: "dexscreener", tone: "bad" });
     })
   );
 }
@@ -3762,34 +4300,84 @@ async function runAudit(rawHandle, emit) {
       await delay(420 + Math.random() * 360);
     }
     await delay(500);
-    return assembleDossier(toEvidence(fixture), false);
+    const dossier2 = assembleDossier(toEvidence(fixture), false);
+    dossier2.checkRuns = personChecks({
+      identityConfidence: dossier2.report.identity_confidence ?? void 0,
+      realName: dossier2.display_name.trim().split(/\s+/).filter(Boolean).length >= 2,
+      roles: dossier2.report.roles ?? [],
+      hasAssociates: (dossier2.evidence.associates ?? []).length > 0
+    });
+    dossier2.completeness_state = "partial";
+    dossier2.providerSnapshot = { capturedAt: (/* @__PURE__ */ new Date()).toISOString(), runs: [] };
+    return dossier2;
   }
   const evidence = fixture ? toEvidence(fixture) : emptyEvidence(rawHandle);
+  const checkTracker = new PersonCheckTracker();
   emit({ phase: "P0 \xB7 Intake", label: "Resolve handle", detail: `Normalizing ${rawHandle} and opening the audit ledger.`, tone: "neutral" });
-  const ctx = { handle: evidence.profile.handle, evidence, emit };
+  const ctx = {
+    handle: evidence.profile.handle,
+    evidence,
+    emit,
+    recordCheck: (observation) => checkTracker.record(observation)
+  };
   if (!fixture) await coldIntake(ctx);
   for (const a of ADAPTERS) {
-    if (!a.available()) continue;
+    if (!a.available()) {
+      checkTracker.provider(a.id, a.label, "unavailable", "provider is not configured");
+      if (a.id === "github") {
+        checkTracker.record({
+          id: "code-footprint-github",
+          status: "unavailable",
+          note: "GitHub provider is not configured",
+          provider: "github"
+        });
+      } else if (a.id === "crunchbase") {
+        checkTracker.record({
+          id: "vc-portfolio-track-record",
+          status: "unavailable",
+          note: "Crunchbase provider is not configured",
+          provider: "crunchbase"
+        });
+      }
+      continue;
+    }
     try {
       await a.run(ctx);
+      checkTracker.provider(a.id, a.label, "executed");
     } catch (e) {
+      checkTracker.provider(a.id, a.label, "failed", String(e));
+      if (a.id === "github") {
+        checkTracker.record({ id: "code-footprint-github", status: "unavailable", note: `GitHub adapter failed: ${String(e)}`, provider: "github" });
+      } else if (a.id === "crunchbase") {
+        checkTracker.record({ id: "vc-portfolio-track-record", status: "unavailable", note: `Crunchbase adapter failed: ${String(e)}`, provider: "crunchbase" });
+      }
       emit({ phase: "Collect", label: `${a.label} error`, detail: String(e), tone: "warn" });
     }
   }
+  const trackedPass = (id, label, pass, onError) => pass.then(() => {
+    checkTracker.provider(id, label, "executed");
+  }).catch((error) => {
+    checkTracker.provider(id, label, "failed", String(error));
+    onError(error);
+  });
   const signalPasses = [
-    tokenLifecycle(ctx).catch((e) => {
+    trackedPass("token-lifecycle", "Promoted-token lifecycle", tokenLifecycle(ctx), (e) => {
       emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
     })
   ];
   if (env("TWITTERAPI_KEY")) {
-    signalPasses.push(postCadence(ctx).catch((e) => {
+    signalPasses.push(trackedPass("post-cadence", "Posting cadence", postCadence(ctx), (e) => {
       emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" });
     }));
+  } else {
+    checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
   }
   if (analystAvailable() || env("XAI_API_KEY")) {
-    signalPasses.push(adverseSignalsAndTooling(ctx).catch((e) => {
+    signalPasses.push(trackedPass("adverse-sweep", "Adverse-signal sweep", adverseSignalsAndTooling(ctx), (e) => {
       emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
     }));
+  } else {
+    checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
   }
   await Promise.all(signalPasses);
   if (!evidence.roles.length) {
@@ -3797,7 +4385,9 @@ async function runAudit(rawHandle, emit) {
     evidence.roles = route.applicable_classes.length ? route.applicable_classes : ["MEMBER" /* MEMBER */];
     emit({ phase: "P0 \xB7 Routing", label: "Classify roles", detail: `Routed to ${evidence.roles.join(", ")} (${route.confidence} confidence).`, tone: "neutral" });
   }
-  const { identity_confidence: _ic, identity_note: _in, ...profileForLlm } = evidence.profile;
+  const profileForLlm = { ...evidence.profile };
+  delete profileForLlm.identity_confidence;
+  delete profileForLlm.identity_note;
   const baseEvidence = {
     profile: profileForLlm,
     ventures: evidence.ventures,
@@ -3805,9 +4395,20 @@ async function runAudit(rawHandle, emit) {
     advised: evidence.advised,
     promotions: evidence.promotions,
     wallets: evidence.wallets,
+    clientEngagements: evidence.clientEngagements,
+    associates: evidence.associates,
     // The named people behind the project (from the site + LinkedIn + X content),
     // so identity/founder scoring reflects the team we actually found.
-    team: (evidence.webTeam ?? []).map((p) => ({ name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, otherProjects: p.projects })),
+    team: (evidence.webTeam ?? []).map((p) => ({
+      name: p.name,
+      handle: p.handle,
+      role: p.role,
+      linkedin: p.linkedin,
+      source: p.source,
+      evidence: p.evidence,
+      otherProjects: p.projects
+    })),
+    ventureTeams: evidence.ventureTeams,
     findings: evidence.findings,
     notableFollowers: evidence.notableFollowers,
     recentActivity: evidence.recentActivity.slice(0, 12)
@@ -3815,7 +4416,8 @@ async function runAudit(rawHandle, emit) {
   if (analystAvailable()) {
     emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions\u2026", tone: "neutral" });
     emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence\u2026", tone: "neutral" });
-    const evidenceJson = JSON.stringify(baseEvidence, null, 0).slice(0, 12e3);
+    const evidenceJson = buildAnalystEvidencePacket(baseEvidence);
+    evidence.axes = [];
     const [found, verdict] = await Promise.all([
       scanContradictions(evidence.profile.handle, evidenceJson),
       analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson)
@@ -3824,8 +4426,10 @@ async function runAudit(rawHandle, emit) {
       evidence.contradictions = found;
       const worst = found.some((c) => c.severity === "high") ? "bad" : "warn";
       emit({ phase: "Contradictions", label: `${found.length} contradiction${found.length === 1 ? "" : "s"}`, detail: found.slice(0, 3).map((c) => `${c.claim} vs ${c.conflict}`).join(" \xB7 "), source: "claude", tone: worst });
-    } else {
+    } else if (found) {
       emit({ phase: "Contradictions", label: "None found", detail: "No internal contradictions surfaced across the subject's claims and the evidence.", source: "claude", tone: "good" });
+    } else {
+      emit({ phase: "Contradictions", label: "Incomplete", detail: "Contradiction analysis did not return a complete result.", source: "claude", tone: "warn" });
     }
     if (verdict) {
       evidence.axes = verdict.axes;
@@ -3833,20 +4437,43 @@ async function runAudit(rawHandle, emit) {
       if (verdict.identity_note) evidence.profile.identity_note = verdict.identity_note;
       emit({ phase: "Analyst", label: "Scored", detail: `${verdict.axes.length} axes scored.`, source: "claude", tone: "good" });
     } else {
-      emit({ phase: "Analyst", label: "Fell back", detail: "Analyst unavailable; using seeded axis scores.", tone: "warn" });
+      evidence.headline = "Investigation incomplete: the analyst did not return one valid score for every required axis.";
+      emit({ phase: "Analyst", label: "Incomplete", detail: "The analyst response was unavailable, partial, duplicated an axis, or contained an invalid score. No verdict score will be published.", tone: "warn" });
     }
+    checkTracker.provider("claude-analyst", "Claude analyst", "executed", verdict ? "complete axis set returned" : "axis result incomplete");
+  } else {
+    checkTracker.provider("claude-analyst", "Claude analyst", "unavailable", "analyst provider is not configured");
   }
-  if (!evidence.axes.length && !fixture) {
-    emit({ phase: "Finalize", label: "Incomplete", detail: "Not enough evidence to score this subject.", tone: "warn" });
-    return null;
+  if (!evidence.axes.length) {
+    if (!evidence.headline) evidence.headline = "Investigation incomplete: not enough validated evidence to score every required axis.";
+    emit({ phase: "Finalize", label: "Incomplete", detail: "Not enough validated evidence to score every required axis; publishing an incomplete report with no verdict score.", tone: "warn" });
   }
   emit({ phase: "Finalize", label: "Govern composite", detail: "Applying caps and selecting the governing role.", tone: "neutral" });
   await delay(300);
   const dossier = assembleDossier(evidence, true);
+  dossier.checkRuns = checkTracker.snapshot(evidence.roles);
+  dossier.completeness_state = checkTracker.completeness(evidence.roles);
+  dossier.providerSnapshot = checkTracker.providers();
   const cost = getCost();
   dossier.cost = cost;
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches \u2248${cost.sources} sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
   return dossier;
+}
+
+// src/graph/network.ts
+var EVM_ADDRESS = /^0x[0-9a-f]+$/i;
+function normalizeChain(chain) {
+  return String(chain).trim().toLowerCase();
+}
+function normalizeAddress(chain, address) {
+  const value = String(address).trim();
+  return normalizeChain(chain) !== "solana" && EVM_ADDRESS.test(value) ? value.toLowerCase() : value;
+}
+function tokenEntityKey(chain, address) {
+  return `token:${normalizeChain(chain)}:${normalizeAddress(chain, address)}`;
+}
+function walletEntityKey(chain, address) {
+  return `wallet:${normalizeChain(chain)}:${normalizeAddress(chain, address)}`;
 }
 
 // src/token/sources.ts
@@ -4397,7 +5024,7 @@ async function runTokenAudit(input, emit, opts) {
     tag: h.tag || void 0,
     isContract: h.is_contract === 1 || h.is_contract === "1"
   })).filter((h) => h.address);
-  const graph = buildGraph(pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
+  const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} \xB7 ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
   return {
@@ -4435,22 +5062,31 @@ async function runTokenAudit(input, emit, opts) {
     safetyChecked: s.available
   };
 }
-function buildGraph(symbol, verdict, projectX, deployer, holders, socials) {
-  const center = "$" + symbol;
-  const nodes = [{ type: "Company", key: center, subject: true, was_rug: verdict === "AVOID" }];
+function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders, socials) {
+  const center = tokenEntityKey(chain, address);
+  const nodes = [{
+    type: "Token",
+    key: center,
+    label: "$" + symbol,
+    symbol,
+    chain,
+    address,
+    subject: true,
+    was_rug: verdict === "AVOID"
+  }];
   const edges = [];
   if (projectX) {
     nodes.push({ type: "Person", key: projectX });
     edges.push({ src: center, dst: projectX, type: "TEAM" });
   }
   if (deployer) {
-    const k = "wallet:" + deployer.slice(0, 8);
-    nodes.push({ type: "Identity", subtype: "Wallet", key: k });
+    const k = walletEntityKey(chain, deployer);
+    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: "wallet:" + deployer.slice(0, 8), chain, address: deployer });
     edges.push({ src: center, dst: k, type: "DEPLOYED_BY" });
   }
   holders.slice(0, 4).forEach((h) => {
-    const k = (h.tag || "holder") + ":" + h.address.slice(0, 8);
-    nodes.push({ type: "Identity", subtype: "Wallet", key: k, concentration: h.percent });
+    const k = walletEntityKey(chain, h.address);
+    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: (h.tag || "holder") + ":" + h.address.slice(0, 8), chain, address: h.address, concentration: h.percent });
     edges.push({ src: center, dst: k, type: "HELD_BY", verdict: h.percent > 25 ? "Contradicted" : void 0 });
   });
   socials.slice(0, 3).forEach((x) => {

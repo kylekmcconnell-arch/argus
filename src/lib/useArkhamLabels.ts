@@ -27,7 +27,10 @@ export function useArkhamLabels(addresses: (string | undefined | null)[]): Recor
     let live = true;
     fetch(`/api/arkham?addresses=${encodeURIComponent(clean.slice(0, 30).join(","))}`)
       .then((r) => r.json())
-      .then((d) => { if (live && d?.available && d.labels) setLabels(d.labels); })
+      .then((raw) => {
+        const d = raw as { available?: boolean; labels?: Record<string, ArkhamLabel> };
+        if (live && d.available && d.labels) setLabels(d.labels);
+      })
       .catch(() => { /* best-effort */ });
     return () => { live = false; };
     // eslint-disable-next-line react-hooks/exhaustive-deps

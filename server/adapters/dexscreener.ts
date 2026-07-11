@@ -142,6 +142,13 @@ export const dexscreenerAdapter: Adapter = {
       if (!snap) continue;
       const thin = (snap.liquidityUsd ?? 0) < 10000;
       p.perf_current = snap.priceUsd;
+      ctx.recordCheck?.({
+        id: "promoted-token-performance",
+        status: thin ? "finding" : "confirmed",
+        note: `$${snap.symbol ?? p.ticker} liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}${thin ? " (thin liquidity)" : ""}`,
+        provider: "dexscreener",
+        sourceCount: 1,
+      });
       ctx.emit({
         phase: "On-chain",
         label: `$${snap.symbol ?? p.ticker}`,

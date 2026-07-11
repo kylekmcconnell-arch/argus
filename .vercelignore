@@ -1,0 +1,20 @@
+# Local secrets and audit artifacts never belong in a deployment bundle.
+.env
+.env.*
+.artifacts/
+.git/
+.vercel/
+node_modules/
+dist/
+logs/
+*.log
+.DS_Store
+
+# Untracked conflict copies are preserved locally but are not valid Vercel
+# function paths because their filenames contain spaces.
+api/audit 2.ts
+api/auditlog 2.ts
+api/og 2.tsx
+api/report 2.ts
+src/components/MethodologyChecklist 2.tsx
+src/lib/scanChecklist 2.ts

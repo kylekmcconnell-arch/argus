@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { HeroBackdrop } from "./ArgusMark";
-import { ScoreTicker, recentScored } from "./ScoreTicker";
+import { ScoreTicker } from "./ScoreTicker";
+import { recentScored } from "../lib/recentScored";
 import { PrivateToggle } from "./PrivateToggle";
 
 // Origami-style hero: centered heading + chat-style input + quick-start dossiers,
@@ -23,7 +24,7 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
 
         <p className="mt-3 max-w-lg text-center text-[14px] leading-relaxed text-ink-dim">
           Paste an X handle, a token contract, or a project website. ARGUS audits the people on their
-          evidence and the tokens on-chain, and returns a verdict you can stake money on.
+          evidence and the tokens on-chain, then shows the assessment, supporting evidence, and unresolved gaps before capital is at risk.
         </p>
 
         {/* chat-style input */}

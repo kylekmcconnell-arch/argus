@@ -1,29 +1,15 @@
 import { useEffect, useState } from "react";
 import { verdictMeta } from "../lib/verdict";
-import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
+import { auditReadinessLabel, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
-
-// Most recent audits that carry a score/verdict, one per subject, newest first.
-// An optional filter scopes it to a directory (e.g. only Founder-role audits).
-export function recentScored(max: number, filter?: (e: LogEntry) => boolean): LogEntry[] {
-  const seen = new Set<string>();
-  const out: LogEntry[] = [];
-  for (const e of mergedLog()) {
-    if (e.score == null && !e.verdict) continue;
-    if (filter && !filter(e)) continue;
-    const k = `${e.kind}:${(e.ref ?? e.query).toLowerCase()}`;
-    if (seen.has(k)) continue;
-    seen.add(k);
-    out.push(e);
-    if (out.length >= max) break;
-  }
-  return out;
-}
+import { recentScored } from "../lib/recentScored";
 
 // A clickable score card → opens the full report (persisted, no re-run).
 function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void }) {
-  const m = e.verdict ? verdictMeta(e.verdict) : null;
+  const presentedVerdict = presentedAuditVerdict(e);
+  const presentedLabel = auditReadinessLabel(e);
+  const m = presentedVerdict ? verdictMeta(presentedVerdict) : null;
   const color = m?.color ?? "var(--color-ink-faint)";
   const letter = (e.query.replace(/^[@$]/, "").replace(/^https?:\/\//, "")[0] ?? "?").toUpperCase();
   const img = auditImage(e);
@@ -31,8 +17,8 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void }
   return (
     <button
       onClick={() => onOpen(e.ref ?? e.query)}
-      title="Open the full report"
-      className="group flex w-[180px] shrink-0 items-center gap-2.5 rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:bg-panel/80 soft-shadow"
+      title={presentedVerdict === "INCOMPLETE" ? "Open the report — positive score is not cleared because evidence coverage is incomplete" : "Open the full report"}
+      className="group flex w-[260px] shrink-0 items-center gap-2.5 rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:bg-panel/80 soft-shadow"
     >
       {img ? (
         <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-lg border border-line object-cover" />
@@ -47,7 +33,7 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void }
       </span>
       <span className="mono shrink-0 text-right leading-none" style={{ color }}>
         <span className="block text-[19px] font-semibold tabular">{e.score ?? "—"}</span>
-        <span className="block text-[8px] tracking-wider">{e.verdict ?? ""}</span>
+        <span className="block text-[8px] tracking-wider">{presentedLabel ?? ""}</span>
       </span>
     </button>
   );
@@ -59,7 +45,7 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void }
 export function ScoreTicker({
   onOpen,
   filter,
-  label = "Recent scores · click to open the report",
+  label = "Recent investigations · coverage-qualified",
   max = 12,
 }: {
   onOpen: (ref: string) => void;

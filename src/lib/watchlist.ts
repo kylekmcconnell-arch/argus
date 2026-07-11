@@ -63,7 +63,7 @@ export async function hydrateSharedWatchlist(): Promise<void> {
   try {
     const r = await fetch("/api/report?watches=1", { signal: AbortSignal.timeout(8000) });
     if (!r.ok) return;
-    const d = await r.json();
+    const d = await r.json() as { watches?: WatchItem[] };
     const shared: WatchItem[] = Array.isArray(d?.watches) ? d.watches : [];
     if (!shared.length) return;
     const local = getWatchlist();

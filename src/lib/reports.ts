@@ -2,7 +2,61 @@
 // down when a recent audit is re-opened — so a click shows the real report even
 // after a reload or from another analyst, instead of re-running. No-op when no
 // backend is configured. Local session cache still handles the same-session case.
-import { getAnalyst } from "./analyst";
+import type { Dossier } from "../data/dossier";
+import type { Investigation } from "./investigation";
+import type { TokenDossier } from "../token/audit";
+import { personChecks, tokenChecks, type ScanCheck } from "./scanChecklist";
+import type {
+  ReportAttestationState,
+  ReportCompletenessState,
+  ReportVersionContext,
+} from "./reportVersion";
+
+export function reportChecks(
+  kind: "person" | "token" | "investigation" | "site",
+  payload: unknown,
+): ScanCheck[] {
+  if (kind === "token") return tokenChecks(payload as TokenDossier);
+  if (kind === "investigation") return tokenChecks((payload as Investigation).token);
+  if (kind === "person") {
+    const dossier = payload as Dossier;
+    // A live collector dossier owns its completed-check record. Re-deriving
+    // from rendered evidence would turn fixture seeds or lazy panels into work
+    // the server did not actually perform.
+    if (Array.isArray(dossier.checkRuns) && dossier.checkRuns.length) {
+      return dossier.checkRuns.map((check) => ({ ...check }));
+    }
+    if (Array.isArray(dossier.versionContext?.checks) && dossier.versionContext.checks.length) {
+      return dossier.versionContext.checks.map((check) => ({ ...check }));
+    }
+    return personChecks({
+      identityConfidence: dossier.report.identity_confidence ?? undefined,
+      realName: (dossier.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
+      roles: dossier.report.roles ?? [],
+      hasAssociates: (dossier.evidence.associates ?? []).length > 0,
+    });
+  }
+  return [];
+}
+
+export function reportCompleteness(
+  kind: "person" | "token" | "investigation" | "site",
+  payload: unknown,
+  checks = reportChecks(kind, payload),
+): ReportCompletenessState {
+  const dossier = kind === "person" ? payload as Dossier : null;
+  if (dossier?.checkRuns?.length && (
+    dossier.completeness_state === "complete"
+    || dossier.completeness_state === "partial"
+    || dossier.completeness_state === "failed"
+  )) {
+    return dossier.completeness_state;
+  }
+  const inScope = checks.filter((check) => check.status !== "not-applicable");
+  return inScope.length > 0 && inScope.every((check) =>
+    check.status === "confirmed" || check.status === "finding" || check.status === "checked-empty"
+  ) ? "complete" : "partial";
+}
 
 export async function syncReport(
   kind: "person" | "token" | "investigation" | "site",
@@ -13,10 +67,12 @@ export async function syncReport(
   score?: number | null,
 ): Promise<void> {
   try {
+    const checkRuns = reportChecks(kind, payload);
+    const completenessState = reportCompleteness(kind, payload, checkRuns);
     await fetch("/api/report", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ kind, ref, query, contributor: getAnalyst(), payload, verdict, score }),
+      body: JSON.stringify({ kind, ref, query, payload, verdict, score, checkRuns, completenessState }),
     });
   } catch {
     /* offline or no backend — the session cache still holds it */
@@ -27,8 +83,17 @@ export interface StoredReport {
   kind: "person" | "token" | "investigation";
   query?: string;
   contributor?: string;
-  payload: any;
+  payload: unknown;
   ts?: string;
+  versionContext?: ReportVersionContext;
+}
+
+/** Attach read-only version context without modifying the immutable payload. */
+export function storedPersonDossier(report: StoredReport): Dossier {
+  const payload = report.payload as Dossier;
+  return report.versionContext
+    ? { ...payload, versionContext: report.versionContext }
+    : { ...payload };
 }
 
 // One row per persisted report (no payload — heavy; fetched per-ref on open).
@@ -40,6 +105,11 @@ export interface ReportListing {
   verdict?: string | null;
   score?: number | null;
   ts?: string;
+  reportVersionId?: string;
+  completenessState?: ReportCompletenessState;
+  attestationState?: ReportAttestationState;
+  methodologyVersion?: string | null;
+  createdAt?: string;
   // Provider spend of the audit run (person audits; token audits are keyless-free).
   cost?: {
     usd?: number;
@@ -83,7 +153,7 @@ export async function listReports(): Promise<ReportListing[]> {
   try {
     const r = await fetch("/api/report?list=1", { signal: AbortSignal.timeout(9000) });
     if (!r.ok) return [];
-    const d = await r.json();
+    const d = await r.json() as { reports?: ReportListing[] };
     return Array.isArray(d?.reports) ? d.reports : [];
   } catch {
     return [];
@@ -99,7 +169,7 @@ export async function fetchReport(ref: string): Promise<StoredReport | null> {
     try {
       const r = await fetch(url, { signal: AbortSignal.timeout(15000) });
       if (!r.ok) { if (attempt === 0) continue; return null; }
-      const d = await r.json();
+      const d = await r.json() as { report?: StoredReport | null };
       return d?.report ?? null;
     } catch {
       if (attempt === 0) continue;

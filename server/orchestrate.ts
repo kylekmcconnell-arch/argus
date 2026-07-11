@@ -16,14 +16,16 @@ import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence } from "../src/data/evidence";
 import type { CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
-import { analystAvailable, analyzeSubject, extractClaims, scanContradictions } from "./agent";
+import { analystAvailable, analyzeSubject, buildAnalystEvidencePacket, extractClaims, scanContradictions } from "./agent";
 import { resetCost, getCost } from "./cost";
+import { PersonCheckTracker } from "./checks";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance } from "./adapters/sitecheck";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
+import { personChecks } from "../src/lib/scanChecklist";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
@@ -98,8 +100,21 @@ async function coldIntake(ctx: CollectContext) {
   const hist = await handleHistory(ctx.handle);
   if (hist && hist.priorHandles.length) {
     ctx.evidence.profile.prior_handles = hist.priorHandles;
+    ctx.recordCheck?.({
+      id: "identity-continuity",
+      status: "finding",
+      note: `prior handles found: ${hist.priorHandles.map((handle) => `@${handle}`).join(", ")}`,
+      provider: "memory.lol",
+      sourceCount: hist.priorHandles.length,
+    });
     ctx.emit({ phase: "P0 · Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")} — a rebrand. Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
   } else if (hist) {
+    ctx.recordCheck?.({
+      id: "identity-continuity",
+      status: "checked-empty",
+      note: "handle-history provider returned no prior handle (provider coverage is partial)",
+      provider: "memory.lol",
+    });
     ctx.emit({ phase: "P0 · Intake", label: "Handle history", detail: "No prior X handle on record for this account (no rebrand found; memory.lol coverage is partial).", source: "memory.lol", tone: "neutral" });
   }
 
@@ -133,22 +148,30 @@ async function coldIntake(ctx: CollectContext) {
       role: v.role ?? "founder",
       period: v.period ?? "",
       outcome: parseOutcome(v.claimed_outcome),
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
     }));
     ctx.evidence.testimonials = claims.testimonials.map((t) => ({
       claimed_endorser_handle: t.claimed_endorser_handle,
       claimed_relationship: t.claimed_relationship,
       appears_at: "subject surfaces",
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
     }));
     ctx.evidence.advised = claims.advised.map((p) => ({
       project_name: p.project_name,
       project_handle: p.project_handle,
       claimed_role: p.claimed_role ?? "advisor",
       appears_at: "subject surfaces",
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
     }));
     ctx.evidence.promotions = claims.promotions.map((p) => ({
       ticker: p.ticker,
       contract_address: p.contract_address,
       chain: p.chain,
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
     }));
     const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
     ctx.emit({ phase: "P0 · Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} — now verifying each.`, source: "claude", tone: "neutral" });
@@ -258,15 +281,42 @@ async function coldIntake(ctx: CollectContext) {
     // a named leader / two named people -> Probable. Only ever raises, and never
     // overrides a suspected-impersonation finding.
     const isLeader = (r?: string) => /founder|cofounder|co-founder|ceo|cto|coo|president|chief/i.test(r ?? "");
-    const leaders = webTeam.filter((t) => isLeader(t.role));
-    const leaderWithLinkedin = leaders.some((t) => !!t.linkedin);
+    // Only directly fetched first-party team pages and deterministic role scans
+    // can raise identity confidence. Grok web/X results remain useful leads in
+    // the roster, but cannot confirm the very identity it was asked to discover.
+    const backedTeam = [...pageTeam, ...postRoleTeam].filter((candidate) =>
+      webTeam.some((member) =>
+        (!!candidate.handle && norm(candidate.handle) === norm(member.handle)) ||
+        (!!candidate.name && norm(candidate.name) === norm(member.name)),
+      ),
+    );
+    const leaders = backedTeam.filter((t) => isLeader(t.role));
+    const leaderWithLinkedin = pageTeam.some((t) => isLeader(t.role) && !!t.linkedin);
     const rank: Record<string, number> = { Unverified: 0, Probable: 1, Confirmed: 2 };
     const cur = ctx.evidence.profile.identity_confidence;
+    if (backedTeam.length) {
+      ctx.recordCheck?.({
+        id: "affiliations-associates",
+        status: "confirmed",
+        note: `${backedTeam.length} team identit${backedTeam.length === 1 ? "y" : "ies"} backed by a first-party team page or deterministic post scan`,
+        provider: "team-page/post-scan",
+        sourceCount: backedTeam.length,
+      });
+    }
     if (cur !== "SuspectedImpersonation") {
-      const target = leaderWithLinkedin ? "Confirmed" : leaders.length || webTeam.length >= 2 ? "Probable" : null;
+      const target = leaderWithLinkedin ? "Confirmed" : leaders.length || backedTeam.length >= 2 ? "Probable" : null;
+      if (target) {
+        ctx.recordCheck?.({
+          id: "identity-resolution",
+          status: "confirmed",
+          note: `project identity resolved through ${backedTeam.length} independently collected team record${backedTeam.length === 1 ? "" : "s"}`,
+          provider: "team-page/post-scan",
+          sourceCount: backedTeam.length,
+        });
+      }
       if (target && (rank[target] ?? 0) > (rank[cur ?? "Unverified"] ?? 0)) {
         ctx.evidence.profile.identity_confidence = target as typeof cur;
-        ctx.emit({ phase: "P1 · Team", label: `Identity ${target.toLowerCase()}`, detail: `Project identity resolved through its named team${leaderWithLinkedin ? " (LinkedIn-corroborated leadership)" : ""}; a brand handle over a public team is not an anonymity flag.`, source: "team-search", tone: "good" });
+        ctx.emit({ phase: "P1 · Team", label: `Identity ${target.toLowerCase()}`, detail: `Project identity resolved through independently fetched team evidence${leaderWithLinkedin ? " (a first-party team page links its leadership)" : ""}; a brand handle over a public team is not an anonymity flag.`, source: "team-page / post scan", tone: "good" });
       }
     }
   } else if (domain) {
@@ -327,7 +377,13 @@ async function coldIntake(ctx: CollectContext) {
       const key = a.handle.replace(/^@/, "").toLowerCase();
       if (haveTest.has(key)) continue;
       haveTest.add(key);
-      ctx.evidence.testimonials.push({ claimed_endorser_handle: a.handle, claimed_relationship: "advisor", appears_at: "project X content" });
+      ctx.evidence.testimonials.push({
+        claimed_endorser_handle: a.handle,
+        claimed_relationship: "advisor",
+        appears_at: "model search of project X content",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+      });
       addedAdv.push(`${a.name} (${a.handle})`);
     }
     const namedOnly = people.filter((p) => !p.handle).map((p) => `${p.name} (${p.kind === "advisor" ? "advisor" : p.role})`);
@@ -363,6 +419,8 @@ async function coldIntake(ctx: CollectContext) {
           outcome: VentureOutcome.ACTIVE,
           evidence_url: null as string | null,
           notes: [v.evidence, "single-source lead, unverified"].filter(Boolean).join(" · "),
+          evidence_origin: "model_lead" as const,
+          artifact_verified: false,
         };
         ctx.evidence.ventures.push(rec);
         return { v, rec };
@@ -376,6 +434,7 @@ async function coldIntake(ctx: CollectContext) {
     // 2. Corroborate the top leads against a second, independent source, all in
     //    parallel and time-boxed, so wall-clock is one slow check, not N. Each
     //    confirmed tie refines its record in place and emits a step.
+    let corroboratedAffiliations = 0;
     await Promise.all(
       pending.slice(0, 5).map(async ({ v, rec }) => {
         const corrob: string[] = [];
@@ -395,11 +454,21 @@ async function coldIntake(ctx: CollectContext) {
           }
         } catch { /* corroboration is best-effort; the lead still stands */ }
         if (corrob.length) {
+          corroboratedAffiliations += 1;
           rec.notes = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" · ");
           ctx.emit({ phase: "P0 · Intake", label: `Affiliation corroborated · ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""} — ${corrob.join("; ")}.`, source: "argus", tone: "good" });
         }
       }),
     );
+    if (corroboratedAffiliations) {
+      ctx.recordCheck?.({
+        id: "affiliations-associates",
+        status: "confirmed",
+        note: `${corroboratedAffiliations} discovered affiliation${corroboratedAffiliations === 1 ? "" : "s"} corroborated against an independent artifact or follow-graph result`,
+        provider: "wayback/twitterapi.io",
+        sourceCount: corroboratedAffiliations,
+      });
+    }
   } else {
     ctx.emit({ phase: "P0 · Intake", label: "No affiliations found", detail: "No public company affiliations could be attributed to this person via web/X search.", source: "grok", tone: "neutral" });
   }
@@ -426,25 +495,23 @@ function axisCatalog(roles: SubjectClass[]) {
 const handleFrom = (s?: string | null): string | undefined =>
   s?.match(/@([A-Za-z0-9_]{2,30})/)?.[1];
 
-// Map a graded adverse signal onto the engine's Finding shape. Only a multi-
-// source, on-chain/receipts-backed accusation is "Verified" (which trips the
-// investigator_verified_fraud cap); everything else surfaces as Reported/Rumor
-// so a single Grok hit can never sink a subject on its own.
+// Grok is discovery, not corroboration. A URL it returns is one candidate
+// artifact, never proof that the page exists or supports the claim. These rows
+// remain model leads until a deterministic collector fetches and verifies them;
+// the engine explicitly excludes model leads from every hard cap.
 function toFinding(sig: AdverseSignal, aboutHandle: string) {
-  const verification =
-    sig.credibility === "evidenced" && sig.independent_source_count >= 2 ? "Verified"
-      : sig.credibility === "rumor" ? "Rumor" : "Reported";
-  const finding_type = sig.category === "drain" || sig.category === "rug" || sig.category === "liquidity_pull"
-    ? "InvestigatorCallout" : "DeceptionFinding";
+  const hasCandidateArtifact = !!sig.source_url;
   return {
-    finding_type,
-    claim: `@${aboutHandle.replace(/^@/, "")}: ${sig.claim}`,
+    finding_type: "AdverseLead",
+    claim: `@${aboutHandle.replace(/^@/, "")} (${sig.category.replace(/_/g, " ")} lead): ${sig.claim}`,
     source_url: sig.source_url ?? "",
     source_date: "",
     source_author: sig.source,
-    verification_status: verification,
-    independent_source_count: sig.independent_source_count,
+    verification_status: hasCandidateArtifact ? "Reported" : "Rumor",
+    independent_source_count: hasCandidateArtifact ? 1 : 0,
     polarity: -1,
+    evidence_origin: "model_lead" as const,
+    artifact_verified: false,
   };
 }
 
@@ -475,60 +542,59 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
     Promise.all(associateTargets.map((h) => searchAdverseSignals(h, "person"))),
   ]);
 
-  // 1. Manipulation tooling: the strongest, most objective flag. Record it as a
-  //    finding AND a flagged engagement (so the manipulation-services cap can
-  //    fire for a role that holds it), and note the founder-cap follow-up.
-  if (tooling?.operates && tooling.tools.length) {
+  // 1. Manipulation-tooling discovery. Grok can surface the page, but cannot
+  //    verify either the page or the subject-to-product relationship. Keep the
+  //    candidate visible and explicitly non-capping until a deterministic fetch
+  //    produces a verified artifact.
+  if (tooling?.tools.length) {
     const list = tooling.tools.map((t) => `${t.name} (${t.kind.replace(/_/g, " ")})`).join(", ");
+    const candidateUrl = tooling.tools.find((t) => t.url)?.url;
     evidence.findings.push({
-      finding_type: "ManipulationTooling",
-      claim: `Subject ${tooling.role || "operates"} tooling built for undetectable token manipulation: ${list}.`,
-      source_url: tooling.tools.find((t) => t.url)?.url ?? "",
+      finding_type: "ManipulationToolingLead",
+      claim: `Model-discovered lead: subject may be connected as ${tooling.role_claim || "operator"} to manipulation tooling: ${list}.`,
+      source_url: candidateUrl ?? "",
       source_date: "",
-      source_author: "own product pages",
-      verification_status: "Verified",
-      independent_source_count: tooling.tools.length,
+      source_author: "model-discovered candidate page",
+      verification_status: candidateUrl ? "Reported" : "Rumor",
+      independent_source_count: candidateUrl ? 1 : 0,
       polarity: -1,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
     });
     for (const t of tooling.tools) {
       evidence.clientEngagements.push({
         client_name: t.name,
-        service_type: `manipulation_tooling:${t.kind}`,
-        manipulation_service_flag: true,
+        service_type: `possible_manipulation_tooling:${t.kind}`,
+        manipulation_service_flag: false,
         evidence_url: t.url,
-        notes: t.evidence,
+        notes: [t.evidence, "model-discovered lead; relationship not independently verified"].filter(Boolean).join(" · "),
+        evidence_origin: "model_lead",
+        artifact_verified: false,
       });
     }
-    ctx.emit({ phase: "Adverse", label: "Manipulation tooling", detail: `Subject builds/operates ${list}. Tools designed to bundle, mix, or fake volume undetectably.`, source: "grok", tone: "bad" });
+    ctx.emit({ phase: "Adverse", label: "Manipulation-tooling lead", detail: `Candidate connection surfaced for ${list}; independent artifact verification is still required before this can affect a hard cap.`, source: "grok", tone: "warn" });
   }
 
-  // 2. Adverse signals across every target. Verified multi-source accusations
-  //    trip the engine's fraud caps; the rest surface with their credibility.
+  // 2. Adverse discovery across every target. Every row stays a non-capping lead.
   const pushSigs = (sigs: AdverseSignal[], about: string) => {
-    let verified = 0;
     for (const s of sigs) {
-      const f = toFinding(s, about);
-      evidence.findings.push(f);
-      if (f.verification_status === "Verified") verified++;
+      evidence.findings.push(toFinding(s, about));
     }
-    return verified;
   };
-  let totalSigs = 0, totalVerified = 0;
-  totalVerified += pushSigs(subjectSigs, self);
+  let totalSigs = 0;
+  pushSigs(subjectSigs, self);
   totalSigs += subjectSigs.length;
-  projectSigs.forEach((sigs, i) => { totalVerified += pushSigs(sigs, projectTargets[i].handle!); totalSigs += sigs.length; });
-  assocSigs.forEach((sigs, i) => { totalVerified += pushSigs(sigs, associateTargets[i]); totalSigs += sigs.length; });
+  projectSigs.forEach((sigs, i) => { pushSigs(sigs, projectTargets[i].handle!); totalSigs += sigs.length; });
+  assocSigs.forEach((sigs, i) => { pushSigs(sigs, associateTargets[i]); totalSigs += sigs.length; });
 
   if (totalSigs) {
-    const worst = totalVerified ? "bad" : "warn";
     const top = [...subjectSigs, ...projectSigs.flat(), ...assocSigs.flat()]
-      .sort((a, b) => b.independent_source_count - a.independent_source_count)
       .slice(0, 3)
       .map((s) => `${s.category.replace(/_/g, " ")}: ${s.claim}`)
       .join(" · ");
-    ctx.emit({ phase: "Adverse", label: `${totalSigs} adverse signal${totalSigs === 1 ? "" : "s"}`, detail: `${totalVerified} multi-source / evidenced. ${top}`, source: "grok", tone: worst });
+    ctx.emit({ phase: "Adverse", label: `${totalSigs} adverse lead${totalSigs === 1 ? "" : "s"}`, detail: `Unverified candidate sources for follow-up. ${top}`, source: "grok", tone: "warn" });
   } else {
-    ctx.emit({ phase: "Adverse", label: "No adverse signals", detail: "No credible rug/scam/drain/FUD complaints surfaced for the subject, its projects, or associates.", source: "grok", tone: "good" });
+    ctx.emit({ phase: "Adverse", label: "No adverse leads surfaced", detail: "The model search returned no candidate rug/scam/drain/FUD source URLs for follow-up; this is not proof that none exist.", source: "grok", tone: "neutral" });
   }
 
   // 3. Cross-project overlap ("the Venn"): second hop over the ventures' teams to
@@ -600,7 +666,17 @@ async function tokenLifecycle(ctx: CollectContext) {
   await Promise.all(
     promos.map(async (p) => {
       const sig = await detectTokenLifecycle(p.ticker, p.contract_address);
-      if (!sig?.dive) return; // dive is now gated on the verified contract inside detect
+      if (!sig) return;
+      ctx.recordCheck?.({
+        id: "promoted-token-performance",
+        status: sig.dive ? "finding" : "confirmed",
+        note: sig.dive
+          ? `$${sig.ticker} verified contract collapse: ${sig.dive.detail}`
+          : `$${sig.ticker} lifecycle lookup completed with no collapse surfaced`,
+        provider: "dexscreener",
+        sourceCount: 1,
+      });
+      if (!sig.dive) return; // dive is gated on the verified contract inside detect
       evidence.findings.push({
         finding_type: "TokenCollapse",
         claim: `$${sig.ticker} (${p.contract_address!.slice(0, 8)}…) launched and collapsed to near-zero (${sig.dive.detail}).`,
@@ -654,24 +730,64 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
       await delay(420 + Math.random() * 360);
     }
     await delay(500);
-    return assembleDossier(toEvidence(fixture), false);
+    const dossier = assembleDossier(toEvidence(fixture), false);
+    dossier.checkRuns = personChecks({
+      identityConfidence: dossier.report.identity_confidence ?? undefined,
+      realName: dossier.display_name.trim().split(/\s+/).filter(Boolean).length >= 2,
+      roles: dossier.report.roles ?? [],
+      hasAssociates: (dossier.evidence.associates ?? []).length > 0,
+    });
+    dossier.completeness_state = "partial";
+    dossier.providerSnapshot = { capturedAt: new Date().toISOString(), runs: [] };
+    return dossier;
   }
 
   // ── Live pipeline ──
   const evidence: CollectedEvidence = fixture ? toEvidence(fixture) : emptyEvidence(rawHandle);
+  const checkTracker = new PersonCheckTracker();
   emit({ phase: "P0 · Intake", label: "Resolve handle", detail: `Normalizing ${rawHandle} and opening the audit ledger.`, tone: "neutral" });
 
-  const ctx: CollectContext = { handle: evidence.profile.handle, evidence, emit };
+  const ctx: CollectContext = {
+    handle: evidence.profile.handle,
+    evidence,
+    emit,
+    recordCheck: (observation) => checkTracker.record(observation),
+  };
 
   // cold handle: resolve profile + extract self-claims before verification
   if (!fixture) await coldIntake(ctx);
 
   // run each available adapter
   for (const a of ADAPTERS) {
-    if (!a.available()) continue;
+    if (!a.available()) {
+      checkTracker.provider(a.id, a.label, "unavailable", "provider is not configured");
+      if (a.id === "github") {
+        checkTracker.record({
+          id: "code-footprint-github",
+          status: "unavailable",
+          note: "GitHub provider is not configured",
+          provider: "github",
+        });
+      } else if (a.id === "crunchbase") {
+        checkTracker.record({
+          id: "vc-portfolio-track-record",
+          status: "unavailable",
+          note: "Crunchbase provider is not configured",
+          provider: "crunchbase",
+        });
+      }
+      continue;
+    }
     try {
       await a.run(ctx);
+      checkTracker.provider(a.id, a.label, "executed");
     } catch (e) {
+      checkTracker.provider(a.id, a.label, "failed", String(e));
+      if (a.id === "github") {
+        checkTracker.record({ id: "code-footprint-github", status: "unavailable", note: `GitHub adapter failed: ${String(e)}`, provider: "github" });
+      } else if (a.id === "crunchbase") {
+        checkTracker.record({ id: "vc-portfolio-track-record", status: "unavailable", note: `Crunchbase adapter failed: ${String(e)}`, provider: "crunchbase" });
+      }
       emit({ phase: "Collect", label: `${a.label} error`, detail: String(e), tone: "warn" });
     }
   }
@@ -680,14 +796,35 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
   // the scoring. Token lifecycle is keyless (DexScreener); cadence needs the
   // twitterapi key; the adverse/tooling sweep needs Grok or Claude. Each is
   // isolated so one failing never sinks the audit.
+  const trackedPass = (
+    id: string,
+    label: string,
+    pass: Promise<void>,
+    onError: (error: unknown) => void,
+  ) => pass.then(() => {
+    checkTracker.provider(id, label, "executed");
+  }).catch((error) => {
+    checkTracker.provider(id, label, "failed", String(error));
+    onError(error);
+  });
   const signalPasses: Promise<void>[] = [
-    tokenLifecycle(ctx).catch((e) => { emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" }); }),
+    trackedPass("token-lifecycle", "Promoted-token lifecycle", tokenLifecycle(ctx), (e) => {
+      emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
+    }),
   ];
   if (env("TWITTERAPI_KEY")) {
-    signalPasses.push(postCadence(ctx).catch((e) => { emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" }); }));
+    signalPasses.push(trackedPass("post-cadence", "Posting cadence", postCadence(ctx), (e) => {
+      emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" });
+    }));
+  } else {
+    checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
   }
   if (analystAvailable() || env("XAI_API_KEY")) {
-    signalPasses.push(adverseSignalsAndTooling(ctx).catch((e) => { emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" }); }));
+    signalPasses.push(trackedPass("adverse-sweep", "Adverse-signal sweep", adverseSignalsAndTooling(ctx), (e) => {
+      emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
+    }));
+  } else {
+    checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
   }
   await Promise.all(signalPasses);
 
@@ -701,7 +838,9 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
   // Strip ARGUS's OWN analysis fields (identity_confidence/identity_note) from
   // what the LLMs see: the analyst writes identity_note fresh, and the
   // contradiction scanner must never "contradict" our metadata against itself.
-  const { identity_confidence: _ic, identity_note: _in, ...profileForLlm } = evidence.profile;
+  const profileForLlm: Record<string, unknown> = { ...evidence.profile };
+  delete profileForLlm.identity_confidence;
+  delete profileForLlm.identity_note;
   const baseEvidence = {
     profile: profileForLlm,
     ventures: evidence.ventures,
@@ -709,9 +848,20 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
     advised: evidence.advised,
     promotions: evidence.promotions,
     wallets: evidence.wallets,
+    clientEngagements: evidence.clientEngagements,
+    associates: evidence.associates,
     // The named people behind the project (from the site + LinkedIn + X content),
     // so identity/founder scoring reflects the team we actually found.
-    team: (evidence.webTeam ?? []).map((p) => ({ name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin, otherProjects: p.projects })),
+    team: (evidence.webTeam ?? []).map((p) => ({
+      name: p.name,
+      handle: p.handle,
+      role: p.role,
+      linkedin: p.linkedin,
+      source: p.source,
+      evidence: p.evidence,
+      otherProjects: p.projects,
+    })),
+    ventureTeams: evidence.ventureTeams,
     findings: evidence.findings,
     notableFollowers: evidence.notableFollowers,
     recentActivity: evidence.recentActivity.slice(0, 12),
@@ -722,7 +872,11 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
   if (analystAvailable()) {
     emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions…", tone: "neutral" });
     emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence…", tone: "neutral" });
-    const evidenceJson = JSON.stringify(baseEvidence, null, 0).slice(0, 12000);
+    const evidenceJson = buildAnalystEvidencePacket(baseEvidence);
+    // Never retain fixture/seed scores once a live analyst was requested. The
+    // validator below accepts all requested axes or none; a failed/partial call
+    // must therefore finalize as INCOMPLETE instead of publishing stale scores.
+    evidence.axes = [];
     const [found, verdict] = await Promise.all([
       scanContradictions(evidence.profile.handle, evidenceJson),
       analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson),
@@ -731,8 +885,10 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
       evidence.contradictions = found;
       const worst = found.some((c) => c.severity === "high") ? "bad" : "warn";
       emit({ phase: "Contradictions", label: `${found.length} contradiction${found.length === 1 ? "" : "s"}`, detail: found.slice(0, 3).map((c) => `${c.claim} vs ${c.conflict}`).join(" · "), source: "claude", tone: worst });
-    } else {
+    } else if (found) {
       emit({ phase: "Contradictions", label: "None found", detail: "No internal contradictions surfaced across the subject's claims and the evidence.", source: "claude", tone: "good" });
+    } else {
+      emit({ phase: "Contradictions", label: "Incomplete", detail: "Contradiction analysis did not return a complete result.", source: "claude", tone: "warn" });
     }
     if (verdict) {
       evidence.axes = verdict.axes;
@@ -740,19 +896,28 @@ export async function runAudit(rawHandle: string, emit: Emit): Promise<Dossier |
       if (verdict.identity_note) evidence.profile.identity_note = verdict.identity_note;
       emit({ phase: "Analyst", label: "Scored", detail: `${verdict.axes.length} axes scored.`, source: "claude", tone: "good" });
     } else {
-      emit({ phase: "Analyst", label: "Fell back", detail: "Analyst unavailable; using seeded axis scores.", tone: "warn" });
+      evidence.headline = "Investigation incomplete: the analyst did not return one valid score for every required axis.";
+      emit({ phase: "Analyst", label: "Incomplete", detail: "The analyst response was unavailable, partial, duplicated an axis, or contained an invalid score. No verdict score will be published.", tone: "warn" });
     }
+    checkTracker.provider("claude-analyst", "Claude analyst", "executed", verdict ? "complete axis set returned" : "axis result incomplete");
+  } else {
+    checkTracker.provider("claude-analyst", "Claude analyst", "unavailable", "analyst provider is not configured");
   }
 
-  // nothing to score on -> can't produce a verdict
-  if (!evidence.axes.length && !fixture) {
-    emit({ phase: "Finalize", label: "Incomplete", detail: "Not enough evidence to score this subject.", tone: "warn" });
-    return null;
+  // A report with no complete axis set is still a useful, honest artifact. The
+  // engine emits INCOMPLETE with null totals instead of turning missing data into
+  // an adverse score or dropping the investigation entirely.
+  if (!evidence.axes.length) {
+    if (!evidence.headline) evidence.headline = "Investigation incomplete: not enough validated evidence to score every required axis.";
+    emit({ phase: "Finalize", label: "Incomplete", detail: "Not enough validated evidence to score every required axis; publishing an incomplete report with no verdict score.", tone: "warn" });
   }
 
   emit({ phase: "Finalize", label: "Govern composite", detail: "Applying caps and selecting the governing role.", tone: "neutral" });
   await delay(300);
   const dossier = assembleDossier(evidence, true);
+  dossier.checkRuns = checkTracker.snapshot(evidence.roles);
+  dossier.completeness_state = checkTracker.completeness(evidence.roles);
+  dossier.providerSnapshot = checkTracker.providers();
   // Attach what this run actually spent, so the report library can show it.
   const cost = getCost();
   dossier.cost = cost;

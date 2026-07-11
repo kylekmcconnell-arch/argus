@@ -46,15 +46,33 @@ export const crunchbaseAdapter: Adapter = {
   async run(ctx: CollectContext) {
     if (!ctx.evidence.ventures.length) return;
     ctx.emit({ phase: "Founder", label: "Verify funding", detail: `Cross-referencing ${ctx.evidence.ventures.length} venture(s) against Crunchbase…`, tone: "neutral" });
+    let matched = 0;
     for (const v of ctx.evidence.ventures) {
       const org = await lookupOrganization(v.project_name);
       if (!org) {
         ctx.emit({ phase: "Founder", label: v.project_name, detail: "no Crunchbase record found for claimed venture", source: "crunchbase", tone: "warn" });
         continue;
       }
+      matched += 1;
       if (org.investors?.length) v.investors = Array.from(new Set([...(v.investors ?? []), ...org.investors]));
       if (org.acquirer && !v.acquirer) v.acquirer = org.acquirer;
       ctx.emit({ phase: "Founder", label: v.project_name, detail: `verified · ${org.rounds ?? 0} rounds, backers: ${(org.investors ?? []).slice(0, 3).join(", ") || "n/a"}`, source: "crunchbase", tone: "good" });
+    }
+    if (matched) {
+      ctx.recordCheck?.({
+        id: "vc-portfolio-track-record",
+        status: "confirmed",
+        note: `${matched} claimed venture${matched === 1 ? "" : "s"} matched to Crunchbase records`,
+        provider: "crunchbase",
+        sourceCount: matched,
+      });
+    } else {
+      ctx.recordCheck?.({
+        id: "vc-portfolio-track-record",
+        status: "checked-empty",
+        note: `Crunchbase lookup completed for ${ctx.evidence.ventures.length} claimed venture${ctx.evidence.ventures.length === 1 ? "" : "s"} without a matching record`,
+        provider: "crunchbase",
+      });
     }
   },
 };

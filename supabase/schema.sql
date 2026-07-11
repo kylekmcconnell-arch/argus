@@ -1,4 +1,8 @@
--- ARGUS shared trust graph — community-wide persistent store.
+-- LEGACY REFERENCE ONLY — do not run this file on a new or upgraded project.
+-- The authoritative, zero-downtime schema is in supabase/migrations/. Apply it
+-- with `supabase db push` after linking the intended project.
+--
+-- ARGUS shared trust graph — original community-wide persistent store.
 --
 -- Every audit contributes its Panoptes subgraph here, so the network compounds
 -- across ALL analysts (Kyle + Enigma), not just one browser's localStorage. A

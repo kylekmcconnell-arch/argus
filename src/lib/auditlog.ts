@@ -15,9 +15,34 @@ export interface LogEntry {
   verdict?: string;       // PASS/CAUTION/FAIL/AVOID, or site coverage status
   score?: number | null;
   summary: string;        // one-line takeaway (identity line / headline)
-  coverage?: string;      // 'rendered' | 'recovered' | 'gap' for site recon
+  coverage?: string;      // decision readiness, or rendered/recovered/gap for site recon
   flags?: string[];       // caps, coverage gaps, contradictions worth surfacing
   contributor?: string;   // analyst who ran it (shared-log rows only; local rows omit it)
+}
+
+const COMPLETE_COVERAGE = new Set(["ready", "complete", "rendered", "recovered"]);
+
+/**
+ * Positive scores stay available for auditability, but never present as final
+ * clearance when their evidence coverage is partial, unknown, or missing.
+ * Negative verdicts are preserved because incomplete coverage cannot erase a
+ * risk already found.
+ */
+export function presentedAuditVerdict(entry: Pick<LogEntry, "verdict" | "coverage">): string | undefined {
+  if (!entry.verdict || entry.verdict !== "PASS") return entry.verdict;
+  return COMPLETE_COVERAGE.has((entry.coverage ?? "").toLowerCase()) ? entry.verdict : "INCOMPLETE";
+}
+
+export function auditReadinessLabel(entry: Pick<LogEntry, "verdict" | "coverage">): string | undefined {
+  const presented = presentedAuditVerdict(entry);
+  if (presented !== "INCOMPLETE") return presented;
+  return entry.coverage?.toLowerCase() === "provisional" ? "PROVISIONAL" : "INCOMPLETE";
+}
+
+export function hasCoverageGap(entry: Pick<LogEntry, "kind" | "verdict" | "coverage" | "flags">): boolean {
+  if (entry.coverage?.toLowerCase() === "gap" || entry.flags?.some((flag) => /gap/i.test(flag))) return true;
+  if (entry.kind === "site" || !entry.verdict) return false;
+  return !COMPLETE_COVERAGE.has((entry.coverage ?? "").toLowerCase());
 }
 
 const KEY = "argus:auditlog";
@@ -174,7 +199,7 @@ export async function hydrateSharedLog(): Promise<void> {
   try {
     const r = await fetch(SYNC_URL, { signal: AbortSignal.timeout(9000) });
     if (!r.ok) return;
-    const d = await r.json();
+    const d = await r.json() as { available?: boolean; entries?: LogEntry[] };
     if (d?.available === false || !Array.isArray(d?.entries)) return;
     sharedCache = d.entries as LogEntry[];
     emitLogChange();
@@ -196,7 +221,7 @@ export async function refreshSharedLog(): Promise<void> {
   try {
     const r = await fetch(SYNC_URL, { signal: AbortSignal.timeout(9000) });
     if (!r.ok) return;
-    const d = await r.json();
+    const d = await r.json() as { available?: boolean; entries?: LogEntry[] };
     if (d?.available === false || !Array.isArray(d?.entries)) return;
     sharedCache = d.entries as LogEntry[];
     emitLogChange();
@@ -243,7 +268,7 @@ export function logStats(log: LogEntry[]): { total: number; gaps: number; byKind
   let gaps = 0;
   for (const e of log) {
     byKind[e.kind] = (byKind[e.kind] ?? 0) + 1;
-    if (e.coverage === "gap" || e.flags?.some((f) => /gap/i.test(f))) gaps += 1;
+    if (hasCoverageGap(e)) gaps += 1;
   }
   return { total: log.length, gaps, byKind };
 }

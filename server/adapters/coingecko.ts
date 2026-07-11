@@ -53,6 +53,13 @@ export const coingeckoAdapter: Adapter = {
       const t = await tokenByContract(p.chain!, p.contract_address!);
       if (!t) continue;
       const downBad = (t.ath_change_pct ?? 0) < -90;
+      ctx.recordCheck?.({
+        id: "promoted-token-performance",
+        status: downBad ? "finding" : "confirmed",
+        note: `$${t.symbol?.toUpperCase() ?? p.ticker} market record returned${t.ath_change_pct == null ? "" : ` · ${Math.round(t.ath_change_pct)}% from ATH`}`,
+        provider: "coingecko",
+        sourceCount: 1,
+      });
       ctx.emit({
         phase: "On-chain",
         label: `$${t.symbol?.toUpperCase() ?? p.ticker}`,

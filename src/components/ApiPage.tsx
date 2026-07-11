@@ -52,14 +52,14 @@ export function ApiPage() {
     <div className="mx-auto max-w-3xl px-6 py-12">
       <h1 className="text-[28px] font-medium tracking-[-0.02em] text-ink">API</h1>
       <p className="mt-2 max-w-2xl text-[14.5px] leading-relaxed text-ink-dim">
-        Programmatic access to ARGUS, for funds, launchpads, and bots. Token audits run live and keyless;
-        principal audits return curated dossiers until provider keys are configured. Every endpoint is JSON
-        and CORS-open, so you can call it straight from a browser, a backend, or a Telegram bot.
+        Programmatic access to ARGUS for funds, launchpads, and internal bots. Every investigation endpoint
+        requires an active analyst account and a Supabase access token. Send it as a Bearer token; workspace
+        membership and daily investigation limits are enforced server-side.
       </p>
       <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-ink-faint">
         <span>Base URL <span className="mono text-ink-dim">{BASE}</span></span>
-        <span>· no key required (token)</span>
-        <span>· responses cached 30s</span>
+        <span>· Bearer auth required</span>
+        <span>· private responses are not shared-cached</span>
       </div>
 
       <div className="mt-6 space-y-4">
@@ -68,7 +68,8 @@ export function ApiPage() {
           path="/api/v1/token"
           desc="Live forensic rug-audit of a token from its contract address or a DexScreener link. EVM and Solana."
           params={[["address", "contract address (or url= a DexScreener link)"]]}
-          curl={`curl "${BASE}/api/v1/token?address=0x6982508145454ce325ddbe47a25d4ec3d2311933"`}
+          curl={`curl -H "Authorization: Bearer $ARGUS_ACCESS_TOKEN" \\
+  "${BASE}/api/v1/token?address=0x6982508145454ce325ddbe47a25d4ec3d2311933"`}
           response={`{
   "api": "argus/v1",
   "kind": "token",
@@ -92,7 +93,8 @@ export function ApiPage() {
           path="/api/v1/person"
           desc="Multi-class principal audit (founder / fund / KOL / advisor / agency), governed by the most severe role."
           params={[["handle", "an X handle, e.g. @0xlumen"]]}
-          curl={`curl "${BASE}/api/v1/person?handle=0xlumen"`}
+          curl={`curl -H "Authorization: Bearer $ARGUS_ACCESS_TOKEN" \\
+  "${BASE}/api/v1/person?handle=0xlumen"`}
           response={`{
   "api": "argus/v1",
   "kind": "person",
@@ -114,7 +116,8 @@ export function ApiPage() {
           path="/api/audit"
           desc="Server-Sent Events stream of an audit's trace steps, then the final dossier. Use for a live progress UI."
           params={[["handle", "an X handle or token contract"]]}
-          curl={`curl -N "${BASE}/api/audit?handle=satoshi_builds"`}
+          curl={`curl -N -H "Authorization: Bearer $ARGUS_ACCESS_TOKEN" \\
+  "${BASE}/api/audit?handle=satoshi_builds"`}
           response={`event: step
 data: {"phase":"P0 · Intake","label":"Resolve handle",...}
 
@@ -137,21 +140,21 @@ data: { ...full dossier... }`}
       <div className="mt-2 space-y-4">
         <div>
           <div className="text-[12px] text-ink-dim">JavaScript — flag a token before you ape</div>
-          <Block code={`const a = await (await fetch(\n  "${BASE}/api/v1/token?address=" + addr\n)).json();\nif (a.verdict === "AVOID" || a.verdict === "FAIL")\n  alert(\`⚠ $\{a.symbol}: $\{a.headline}\`);`} />
+          <Block code={`const a = await (await fetch(\n  "${BASE}/api/v1/token?address=" + addr,\n  { headers: { Authorization: "Bearer " + ARGUS_ACCESS_TOKEN } }\n)).json();\nif (a.verdict === "AVOID" || a.verdict === "FAIL")\n  alert(\`⚠ $\{a.symbol}: $\{a.headline}\`);`} />
         </div>
         <div>
           <div className="text-[12px] text-ink-dim">Python</div>
-          <Block code={`import requests\na = requests.get("${BASE}/api/v1/token",\n  params={"address": addr}).json()\nprint(a["verdict"], a["score"], a["headline"])`} />
+          <Block code={`import os, requests\na = requests.get("${BASE}/api/v1/token",\n  params={"address": addr},\n  headers={"Authorization": "Bearer " + os.environ["ARGUS_ACCESS_TOKEN"]}).json()\nprint(a["verdict"], a["score"], a["headline"])`} />
         </div>
         <div>
           <div className="text-[12px] text-ink-dim">Telegram bot — reply with a verdict on any contract</div>
-          <Block code={`bot.onText(/^\\/audit (.+)/, async (msg, m) => {\n  const a = await (await fetch(\n    "${BASE}/api/v1/token?address=" + m[1]\n  )).json();\n  bot.sendMessage(msg.chat.id,\n    \`$\{a.symbol}: $\{a.verdict} $\{a.score}/100\\n$\{a.headline}\`);\n});`} />
+          <Block code={`bot.onText(/^\\/audit (.+)/, async (msg, m) => {\n  const a = await (await fetch(\n    "${BASE}/api/v1/token?address=" + m[1],\n    { headers: { Authorization: "Bearer " + process.env.ARGUS_ACCESS_TOKEN } }\n  )).json();\n  bot.sendMessage(msg.chat.id,\n    \`$\{a.symbol}: $\{a.verdict} $\{a.score}/100\\n$\{a.headline}\`);\n});`} />
         </div>
       </div>
 
       <div className="mt-6 rounded-xl border border-line bg-panel/40 p-4 text-[12.5px] leading-relaxed text-ink-faint">
-        <span className="text-ink-dim">Coming for production:</span> API keys, per-key rate limits, usage plans, and webhooks
-        for watchlist drift alerts. Token audits stay free; live people-collection and higher volume move behind a key.
+        <span className="text-ink-dim">Next API milestone:</span> revocable service-account keys, per-key scopes, usage plans,
+        signed webhooks, and watchlist drift events. Interactive session tokens are the secure access path today.
       </div>
     </div>
   );

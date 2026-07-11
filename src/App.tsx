@@ -1,33 +1,9 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { lazy, Suspense, useState, useCallback, useEffect, useRef } from "react";
 import { AppShell } from "./components/AppShell";
 import { Landing } from "./components/Landing";
-import { LiveRun } from "./components/LiveRun";
-import { Report } from "./components/Report";
-import { DossiersPage } from "./components/DossiersPage";
-import { GraphPage } from "./components/GraphPage";
-import { KolsPage } from "./components/KolsPage";
-import { FoundersPage } from "./components/FoundersPage";
-import { VcsPage } from "./components/VcsPage";
-import { ProjectsPage } from "./components/ProjectsPage";
-import { AlertsPage } from "./components/AlertsPage";
-import { WatchlistPage } from "./components/WatchlistPage";
-import { RadarPage } from "./components/RadarPage";
-import { TrendingPage } from "./components/TrendingPage";
-import { AboutPage } from "./components/AboutPage";
-import { ApiPage } from "./components/ApiPage";
-import { ProvidersPage } from "./components/ProvidersPage";
-import { ChangelogPage } from "./components/ChangelogPage";
-import { ReconPage } from "./components/ReconPage";
-import { FindWallet } from "./components/FindWallet";
-import { AdminPage } from "./components/AdminPage";
 import { logAudit, hydrateSharedLog } from "./lib/auditlog";
-import { syncReport, fetchReport } from "./lib/reports";
+import { syncReport, fetchReport, storedPersonDossier } from "./lib/reports";
 import { recordContribution, tokenContribution, personContribution, investigationContribution, hydrateCommunityGraph } from "./graph/store";
-import { TokenRun } from "./components/TokenRun";
-import { TokenReport } from "./components/TokenReport";
-import { InvestigationRun } from "./components/InvestigationRun";
-import { InvestigationReport } from "./components/InvestigationReport";
-import { ProjectView } from "./components/ProjectView";
 import type { Investigation } from "./lib/investigation";
 import { type Dossier } from "./data/dossier";
 import { probeBackend } from "./lib/live";
@@ -36,6 +12,47 @@ import { startTokenScan, startInvestigationScan, setScanOnComplete, getScanRun, 
 import { resolveInput, type ResolvedInput } from "./lib/resolveInput";
 import type { TokenDossier } from "./token/audit";
 import type { NavTarget } from "./components/Sidebar";
+import { personChecks, tokenChecks } from "./lib/scanChecklist";
+import { deriveDecisionReadiness } from "./lib/decisionReadiness";
+
+// Product areas load on demand. The home/search shell stays immediate while
+// heavyweight reports, graph views, recon, and admin tooling become cached
+// route chunks after the investigator first opens them.
+const AboutPage = lazy(() => import("./components/AboutPage").then((module) => ({ default: module.AboutPage })));
+const AdminPage = lazy(() => import("./components/AdminPage").then((module) => ({ default: module.AdminPage })));
+const AlertsPage = lazy(() => import("./components/AlertsPage").then((module) => ({ default: module.AlertsPage })));
+const ApiPage = lazy(() => import("./components/ApiPage").then((module) => ({ default: module.ApiPage })));
+const ChangelogPage = lazy(() => import("./components/ChangelogPage").then((module) => ({ default: module.ChangelogPage })));
+const DossiersPage = lazy(() => import("./components/DossiersPage").then((module) => ({ default: module.DossiersPage })));
+const FindWallet = lazy(() => import("./components/FindWallet").then((module) => ({ default: module.FindWallet })));
+const FoundersPage = lazy(() => import("./components/FoundersPage").then((module) => ({ default: module.FoundersPage })));
+const GraphPage = lazy(() => import("./components/GraphPage").then((module) => ({ default: module.GraphPage })));
+const InvestigationReport = lazy(() => import("./components/InvestigationReport").then((module) => ({ default: module.InvestigationReport })));
+const InvestigationRun = lazy(() => import("./components/InvestigationRun").then((module) => ({ default: module.InvestigationRun })));
+const KolsPage = lazy(() => import("./components/KolsPage").then((module) => ({ default: module.KolsPage })));
+const LiveRun = lazy(() => import("./components/LiveRun").then((module) => ({ default: module.LiveRun })));
+const ProjectView = lazy(() => import("./components/ProjectView").then((module) => ({ default: module.ProjectView })));
+const ProjectsPage = lazy(() => import("./components/ProjectsPage").then((module) => ({ default: module.ProjectsPage })));
+const ProvidersPage = lazy(() => import("./components/ProvidersPage").then((module) => ({ default: module.ProvidersPage })));
+const RadarPage = lazy(() => import("./components/RadarPage").then((module) => ({ default: module.RadarPage })));
+const ReconPage = lazy(() => import("./components/ReconPage").then((module) => ({ default: module.ReconPage })));
+const Report = lazy(() => import("./components/Report").then((module) => ({ default: module.Report })));
+const TokenReport = lazy(() => import("./components/TokenReport").then((module) => ({ default: module.TokenReport })));
+const TokenRun = lazy(() => import("./components/TokenRun").then((module) => ({ default: module.TokenRun })));
+const TrendingPage = lazy(() => import("./components/TrendingPage").then((module) => ({ default: module.TrendingPage })));
+const VcsPage = lazy(() => import("./components/VcsPage").then((module) => ({ default: module.VcsPage })));
+const WatchlistPage = lazy(() => import("./components/WatchlistPage").then((module) => ({ default: module.WatchlistPage })));
+
+function RouteLoading() {
+  return (
+    <div className="flex min-h-[55vh] items-center justify-center" role="status" aria-live="polite">
+      <span className="flex items-center gap-2 text-[12px] text-ink-faint">
+        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal" />
+        Loading investigation workspace…
+      </span>
+    </div>
+  );
+}
 
 type Phase =
   | "idle" | "radar" | "trending" | "recon" | "find" | "dossiers" | "graph" | "kols" | "founders" | "projects" | "vcs" | "watchlist" | "alerts" | "track" | "admin" | "about" | "api" | "providers" | "changelog"
@@ -67,7 +84,7 @@ function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: strin
 }
 
 export default function App() {
-  const boot = initialFromUrl();
+  const [boot] = useState(initialFromUrl);
   const [phase, setPhase] = useState<Phase>(boot.phase);
   const [dossier, setDossier] = useState<Dossier | null>(boot.dossier);
   const [query, setQuery] = useState(boot.query);
@@ -97,6 +114,7 @@ export default function App() {
   // A private audit runs and shows the result but is never persisted, logged,
   // graphed, or shown in the sidebar/tickers.
   const privRef = useRef(false);
+  const [privateMode, setPrivateMode] = useState(false);
 
   // Pull the shared community graph + audit log once on load, so this session
   // sees everyone's work (no-op when no backend is configured).
@@ -106,6 +124,7 @@ export default function App() {
 
   const onAudit = useCallback(async (raw: string, priv = false) => {
     privRef.current = priv;
+    setPrivateMode(priv);
     const resolved = resolveInput(raw);
     if (resolved.kind === "token") {
       setQuery(raw);
@@ -133,7 +152,7 @@ export default function App() {
     } else {
       setPhase("notfound");
     }
-  }, []);
+  }, [setLiveError, setPhase, setPrivateMode, setQuery, setReconUrl, setTokenInput]);
 
   // The main search bar runs the full autonomous investigation for a contract;
   // handles and sites fall through to the normal routing. Internal clicks
@@ -141,6 +160,7 @@ export default function App() {
   // single-surface audit and don't auto-spend.
   const onInvestigate = useCallback((raw: string, priv = false) => {
     privRef.current = priv;
+    setPrivateMode(priv);
     if (resolveInput(raw).kind === "token") {
       setQuery(raw);
       setInvestigationInput(raw);
@@ -149,15 +169,15 @@ export default function App() {
       return;
     }
     onAudit(raw, priv);
-  }, [onAudit]);
+  }, [onAudit, setInvestigationInput, setPhase, setPrivateMode, setQuery]);
 
-  const onInvestigationError = useCallback(() => setPhase("notfound"), []);
+  const onInvestigationError = useCallback(() => setPhase("notfound"), [setPhase]);
 
   // Open a project-centric view: dig who worked on it, all auditable.
   const onOpenProject = useCallback((name: string, domain?: string) => {
     setViewedProject({ name, domain });
     setPhase("project");
-  }, []);
+  }, [setPhase, setViewedProject]);
 
   // DATA-side completion (runs for every finished scan, backgrounded or not, so it
   // lands in the library even if navigated away). Never touches the view.
@@ -168,6 +188,7 @@ export default function App() {
     logAudit({
       kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
       summary: inv.founderNote,
+      coverage: deriveDecisionReadiness(tokenChecks(inv.token)).status,
       flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
     });
     const c = investigationContribution(inv);
@@ -180,6 +201,7 @@ export default function App() {
     logAudit({
       kind: "token", query: `$${d.symbol}`, ref: d.address, image: d.imageUrl, verdict: d.verdict, score: d.score,
       summary: d.headline,
+      coverage: deriveDecisionReadiness(tokenChecks(d)).status,
       flags: [d.capApplied ? `cap:${d.capApplied}` : "", d.bundleRisk !== "low" ? `bundle:${d.bundleRisk}` : ""].filter(Boolean),
     });
     recordContribution(tokenContribution(d.symbol, d.verdict, d.graph.nodes, d.graph.edges));
@@ -194,8 +216,8 @@ export default function App() {
 
   // VIEW-side completion (only when this view is mounted on the finished run) —
   // the runner already logged/persisted, so these just move the current view.
-  const onInvestigationDone = useCallback((inv: Investigation) => { setInvestigation(inv); setPhase("investigation-report"); }, []);
-  const onTokenDone = useCallback((d: TokenDossier) => { setTokenDossier(d); setPhase("token-report"); }, []);
+  const onInvestigationDone = useCallback((inv: Investigation) => { setInvestigation(inv); setPhase("investigation-report"); }, [setInvestigation, setPhase]);
+  const onTokenDone = useCallback((d: TokenDossier) => { setTokenDossier(d); setPhase("token-report"); }, [setPhase, setTokenDossier]);
 
   // Data-side completion for a person audit: cache + persist + log + graph. This
   // is view-independent — it's what makes a BACKGROUNDED audit still land in
@@ -209,6 +231,12 @@ export default function App() {
       kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
       image: d.avatar_url, // real X photo (falls back to unavatar in auditImage when absent)
       summary: d.headline,
+      coverage: deriveDecisionReadiness(d.checkRuns?.length ? d.checkRuns : personChecks({
+        identityConfidence: d.report.identity_confidence ?? undefined,
+        realName: (d.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
+        roles: d.report.roles ?? [],
+        hasAssociates: (d.evidence.associates ?? []).length > 0,
+      })).status,
       // Log EVERY held role (not just the governing one) so a founder-who-is-also-
       // a-KOL (e.g. blknoiz06) appears in all matching directories.
       flags: [
@@ -232,12 +260,12 @@ export default function App() {
     if (c.kind === "person") { setDossier(c.dossier); setPhase("report"); }
     else if (c.kind === "token") { setTokenDossier(c.dossier); setPhase("token-report"); }
     else { setInvestigation(c.inv); setPhase("investigation-report"); }
-  }, []);
+  }, [setDossier, setInvestigation, setPhase, setQuery, setTokenDossier]);
 
   const onLiveDone = useCallback((d: Dossier) => {
     setDossier(d);
     setPhase("report");
-  }, []);
+  }, [setDossier, setPhase]);
 
   // A live audit failing usually means our long SSE stream dropped (proxy / tab
   // throttle) — but the server persists finished audits, so recover the report
@@ -254,7 +282,7 @@ export default function App() {
           ? { kind: "investigation" as const, inv: rep.payload as Investigation }
           : rep.kind === "token"
             ? { kind: "token" as const, dossier: rep.payload as TokenDossier }
-            : { kind: "person" as const, dossier: rep.payload as Dossier };
+            : { kind: "person" as const, dossier: storedPersonDossier(rep) };
         resultCache.current.set(cacheKey(ref), c);
         showCached(ref, c);
         return;
@@ -294,7 +322,7 @@ export default function App() {
         ? { kind: "investigation" as const, inv: rep.payload as Investigation }
         : rep.kind === "token"
           ? { kind: "token" as const, dossier: rep.payload as TokenDossier }
-          : { kind: "person" as const, dossier: rep.payload as Dossier };
+          : { kind: "person" as const, dossier: storedPersonDossier(rep) };
       resultCache.current.set(cacheKey(ref), cached);
       showCached(ref, cached);
       return;
@@ -307,9 +335,10 @@ export default function App() {
 
   // Share links (?s=<handle>) resolve through the same stored-report path.
   useEffect(() => {
-    if (boot.openRef) void onOpenRecent(boot.openRef);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (!boot.openRef) return;
+    const timer = window.setTimeout(() => { void onOpenRecent(boot.openRef as string); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [boot.openRef, onOpenRecent]);
 
   const clearUrl = () => {
     if (typeof window !== "undefined" && window.location.search) {
@@ -327,7 +356,9 @@ export default function App() {
     setInvestigation(null);
     setQuery("");
     setLiveError(null);
-  }, []);
+    privRef.current = false;
+    setPrivateMode(false);
+  }, [setDossier, setInvestigation, setInvestigationInput, setLiveError, setPhase, setPrivateMode, setQuery, setTokenDossier, setTokenInput]);
 
   // from the investigation report: open the full on-chain token report
   const onOpenToken = useCallback(() => {
@@ -335,7 +366,7 @@ export default function App() {
       if (inv) { setTokenDossier(inv.token); setPhase("token-report"); }
       return inv;
     });
-  }, []);
+  }, [setInvestigation, setPhase, setTokenDossier]);
 
   // from the investigation report: open the full people report for the project
   // account (already collected — no re-spend), which shows the axis/cap reasoning.
@@ -344,7 +375,7 @@ export default function App() {
       if (inv?.projectAccount) { setDossier(inv.projectAccount); setQuery(inv.projectAccount.handle); setPhase("report"); }
       return inv;
     });
-  }, []);
+  }, [setDossier, setInvestigation, setPhase, setQuery]);
 
   const onNav = useCallback((t: NavTarget) => {
     clearUrl();
@@ -353,9 +384,9 @@ export default function App() {
       setQuery("");
     }
     // opening Site recon from the rail is a fresh, manual page (private off by default)
-    if (t === "recon") { setReconUrl(null); privRef.current = false; }
+    if (t === "recon") { setReconUrl(null); privRef.current = false; setPrivateMode(false); }
     setPhase(t);
-  }, []);
+  }, [setDossier, setPhase, setPrivateMode, setQuery, setReconUrl]);
 
   const personAudit = phase === "running" || phase === "live" || phase === "report";
   const inAudit = personAudit || phase === "token-run" || phase === "token-report" || phase === "investigation" || phase === "investigation-report";
@@ -368,6 +399,7 @@ export default function App() {
 
   return (
     <AppShell onNav={onNav} onAudit={onAudit} onOpenRecent={onOpenRecent} activeHandle={activeHandle} view={view}>
+      <Suspense fallback={<RouteLoading />}>
       {phase === "idle" && <Landing onAudit={onInvestigate} onAbout={() => setPhase("about")} onOpenRecent={onOpenRecent} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
@@ -398,7 +430,7 @@ export default function App() {
 
       {phase === "alerts" && <AlertsPage onOpen={onOpenRecent} />}
 
-      {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialPrivate={privRef.current} onAudit={onAudit} onInvestigate={onInvestigate} onOpenRecent={onOpenRecent} />}
+      {phase === "recon" && <ReconPage key={reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialPrivate={privateMode} onAudit={onAudit} onInvestigate={onInvestigate} onOpenRecent={onOpenRecent} />}
 
       {phase === "find" && <FindWallet onAudit={onAudit} onReset={reset} onOpenRecent={onOpenRecent} />}
 
@@ -483,6 +515,7 @@ export default function App() {
           )}
         </div>
       )}
+      </Suspense>
     </AppShell>
   );
 }

@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { getLog, clearLog, logStats, mergedLog, applyRoles, type LogEntry } from "../lib/auditlog";
+import { auditReadinessLabel, getLog, clearLog, hasCoverageGap, logStats, mergedLog, presentedAuditVerdict, applyRoles, type LogEntry } from "../lib/auditlog";
 import { purgeSubject } from "../lib/purge";
 import { verdictMeta } from "../lib/verdict";
 import { PendingEdits } from "./PendingEdits";
+import { TeamAccess } from "./TeamAccess";
 
 // Re-file every audited person under the CURRENT role taxonomy without
 // rerunning a single audit: batch the stored summaries through /api/reclassify
@@ -57,7 +58,7 @@ function ago(ts: number): string {
 
 function verdictColor(e: LogEntry): string {
   if (e.kind === "site" && (e.coverage === "gap" || !e.verdict)) return "var(--color-unverifiable)";
-  return verdictMeta(e.verdict ?? "INCOMPLETE").color;
+  return verdictMeta(presentedAuditVerdict(e) ?? "INCOMPLETE").color;
 }
 
 export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
@@ -74,7 +75,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
   };
 
   const shown = log.filter((e) =>
-    filter === "all" ? true : filter === "gaps" ? (e.coverage === "gap" || e.flags?.some((f) => /gap/i.test(f))) : e.kind === filter,
+    filter === "all" ? true : filter === "gaps" ? hasCoverageGap(e) : e.kind === filter,
   );
 
   return (
@@ -109,6 +110,8 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
           )}
         </div>
       </div>
+
+      <TeamAccess />
 
       {/* analyst edits awaiting approval */}
       <div className="mt-5"><PendingEdits /></div>
@@ -184,8 +187,9 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
               )}
               <span className="flex shrink-0 flex-col items-end gap-1">
                 <span className="mono text-[11px] font-semibold uppercase" style={{ color: verdictColor(e) }}>
-                  {e.verdict}{typeof e.score === "number" ? ` ${e.score}` : ""}
+                  {auditReadinessLabel(e)}{typeof e.score === "number" ? ` ${e.score}` : ""}
                 </span>
+                {hasCoverageGap(e) && <span className="mono text-[9px] uppercase tracking-wide text-caution">coverage gap</span>}
                 <span className="mono text-[10px] text-ink-faint">{ago(e.ts)}</span>
               </span>
               {/* span, not <button> — this whole row is already a button */}

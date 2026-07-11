@@ -1,13 +1,26 @@
-// Public API: GET /api/v1/token?address=<contract>  (or ?url=<dexscreener url>)
-// Live, keyless token rug-audit as clean JSON. CORS-open for bots/integrations.
+// Authenticated API: GET /api/v1/token?address=<contract> (or ?url=...).
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { auditToken, resolveInput } from "../_collector.js";
+import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
 
 export const config = { maxDuration: 30 };
 
+function cors(req: VercelRequest, res: VercelResponse): void {
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin : "";
+  const allowed = new Set((process.env.ARGUS_CORS_ORIGINS || "").split(",").map((item) => item.trim()).filter(Boolean));
+  if (origin && allowed.has(origin)) res.setHeader("access-control-allow-origin", origin);
+  res.setHeader("vary", "Origin");
+  res.setHeader("access-control-allow-headers", "Authorization, Content-Type");
+  res.setHeader("access-control-allow-methods", "GET, OPTIONS");
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  res.setHeader("access-control-allow-origin", "*");
-  res.setHeader("cache-control", "public, max-age=30");
+  cors(req, res);
+  if (req.method === "OPTIONS") { res.status(204).end(); return; }
+  if (req.method !== "GET") { res.status(405).setHeader("Allow", "GET, OPTIONS").json({ error: "method_not_allowed" }); return; }
+  res.setHeader("cache-control", "private, no-store");
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
   const ref = (req.query.address || req.query.url || req.query.t) as string | undefined;
   if (!ref) {
     res.status(400).json({ error: "pass ?address=<contract> or ?url=<dexscreener url>" });
@@ -18,6 +31,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: "input is not a token contract or DexScreener url" });
     return;
   }
+  const quota = await consumeInvestigationQuota(auth, "/api/v1/token", { kind: "token_api" });
+  if (quota.error) { res.status(503).json({ error: quota.error }); return; }
+  if (!quota.allowed) { res.status(429).json({ error: "daily_investigation_limit_reached", remaining: 0 }); return; }
   try {
     const d = await auditToken(input);
     if (!d) {

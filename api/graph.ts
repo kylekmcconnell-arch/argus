@@ -1,100 +1,150 @@
-// Shared trust graph — the community-wide persistent store behind src/graph.
-//   GET  /api/graph        -> { available, contributions: GraphContribution[] }
-//   POST /api/graph  body=GraphContribution  -> { ok } (upsert, latest-wins per subject)
-//
-// Talks to Supabase over PostgREST with the SERVICE ROLE key (server-side only),
-// so no client dependency and no exposed credentials. Gated on SUPABASE_URL +
-// SUPABASE_SERVICE_ROLE_KEY — with those unset it returns available:false and the
-// client silently stays local-only (nothing breaks). See supabase/schema.sql.
+// Authenticated, organization-scoped shared trust graph.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { requireArgusAuth, serviceCredentials, serviceHeaders } from "./_auth.js";
 
 export const config = { maxDuration: 15 };
 
 const TABLE = "graph_contributions";
-const READ_LIMIT = 500; // most-recent subjects returned to the client
-const MAX_NODES = 4000; // per-contribution sanity caps (abuse / runaway payloads)
-const MAX_EDGES = 4000;
-const MAX_BODY = 1_500_000; // ~1.5MB
+const READ_LIMIT = 500;
+const MAX_NODES = 4_000;
+const MAX_EDGES = 4_000;
+const MAX_BODY = 1_500_000;
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+type JsonRecord = Record<string, unknown>;
 
-function creds(): { url: string; key: string } | null {
-  const url = process.env.SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-  return url && key ? { url: url.replace(/\/$/, ""), key } : null;
+interface GraphRow {
+  handle?: unknown;
+  aliases?: unknown;
+  verdict?: unknown;
+  nodes?: unknown;
+  edges?: unknown;
 }
-function headers(key: string): Record<string, string> {
-  return { apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json" };
-}
-// Mirror of src/graph/network.ts canonical(): collapse @x / $X / "X" to one id.
-const ALIAS: Record<string, string> = { zenith: "zenithdao", $zenith: "zenithdao" };
+
 function canonical(raw: string): string {
-  const k = String(raw).trim().toLowerCase().replace(/^[@$]/, "").replace(/\s+/g, "");
-  return ALIAS[k] ?? k;
+  const value = String(raw).trim();
+  const typed = value.match(/^(token|wallet):([^:]+):(.+)$/i);
+  if (typed) {
+    const type = typed[1].toLowerCase();
+    const chain = typed[2].trim().toLowerCase();
+    const address = typed[3].trim();
+    return `${type}:${chain}:${chain === "solana" ? address : address.toLowerCase()}`;
+  }
+  if (SOLANA_ADDRESS.test(value)) return value;
+  const lower = value.toLowerCase().replace(/\s+/g, "");
+  if (lower.startsWith("$")) return lower;
+  return lower.replace(/^@/, "");
+}
+
+function subjectKey(raw: JsonRecord, nodes: unknown[]): string {
+  const subject = nodes.find((node) => {
+    const record = node && typeof node === "object" ? node as JsonRecord : null;
+    return record?.subject === true && typeof record.key === "string";
+  });
+  const record = subject && typeof subject === "object" ? subject as JsonRecord : null;
+  return canonical((typeof record?.key === "string" ? record.key : null) || (typeof raw.handle === "string" ? raw.handle : ""));
+}
+
+function safeParse(value: string): unknown {
+  try { return JSON.parse(value); } catch { return {}; }
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const c = creds();
-  if (!c) { res.status(200).json({ available: false, contributions: [], note: "Shared graph not configured (no SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY)." }); return; }
+  const minimumRole = req.method === "DELETE" ? "owner" : req.method === "POST" ? "analyst" : "viewer";
+  const auth = await requireArgusAuth(req, res, minimumRole);
+  if (!auth) return;
+  const credentials = serviceCredentials();
+  if (!credentials) {
+    res.status(503).json({ error: "storage_not_configured" });
+    return;
+  }
+  const orgFilter = `organization_id=eq.${encodeURIComponent(auth.organizationId)}`;
 
   try {
     if (req.method === "GET") {
-      const r = await fetch(
-        `${c.url}/rest/v1/${TABLE}?select=handle,verdict,nodes,edges&order=updated_at.desc&limit=${READ_LIMIT}`,
-        { headers: headers(c.key), signal: AbortSignal.timeout(10000) },
+      const response = await fetch(
+        `${credentials.url}/rest/v1/${TABLE}?select=handle,aliases,verdict,nodes,edges&${orgFilter}&order=updated_at.desc&limit=${READ_LIMIT}`,
+        { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
       );
-      if (!r.ok) { res.status(200).json({ available: true, contributions: [], error: `read ${r.status}` }); return; }
-      const rows = (await r.json()) as any[];
-      const contributions = (Array.isArray(rows) ? rows : []).map((x) => ({
-        handle: x.handle, verdict: x.verdict ?? undefined, nodes: x.nodes ?? [], edges: x.edges ?? [],
+      if (!response.ok) throw new Error(`graph read failed (${response.status})`);
+      const rows = (await response.json()) as GraphRow[];
+      const contributions = (Array.isArray(rows) ? rows : []).map((row) => ({
+        handle: row.handle,
+        aliases: Array.isArray(row.aliases) ? row.aliases : [],
+        verdict: row.verdict ?? undefined,
+        nodes: Array.isArray(row.nodes) ? row.nodes : [],
+        edges: Array.isArray(row.edges) ? row.edges : [],
       }));
       res.status(200).json({ available: true, contributions });
       return;
     }
 
     if (req.method === "POST") {
-      const raw = typeof req.body === "string" ? safeParse(req.body) : req.body;
-      if (raw && JSON.stringify(raw).length > MAX_BODY) { res.status(413).json({ error: "contribution too large" }); return; }
-      const handle = typeof raw?.handle === "string" ? raw.handle.trim().slice(0, 200) : "";
-      const nodes = Array.isArray(raw?.nodes) ? raw.nodes.slice(0, MAX_NODES) : [];
-      const edges = Array.isArray(raw?.edges) ? raw.edges.slice(0, MAX_EDGES) : [];
-      if (!handle || !nodes.length) { res.status(400).json({ error: "handle and nodes required" }); return; }
+      const parsed = typeof req.body === "string" ? safeParse(req.body) : req.body;
+      const raw: JsonRecord = parsed && typeof parsed === "object" ? parsed as JsonRecord : {};
+      if (JSON.stringify(raw).length > MAX_BODY) {
+        res.status(413).json({ error: "contribution_too_large" });
+        return;
+      }
+      const handle = typeof raw.handle === "string" ? raw.handle.trim().slice(0, 500) : "";
+      const nodes = Array.isArray(raw.nodes) ? raw.nodes.slice(0, MAX_NODES) : [];
+      const edges = Array.isArray(raw.edges) ? raw.edges.slice(0, MAX_EDGES) : [];
+      const aliases = Array.isArray(raw.aliases)
+        ? raw.aliases.filter((item: unknown) => typeof item === "string").map((item: string) => item.slice(0, 300)).slice(0, 30)
+        : [];
+      const canonicalKey = subjectKey(raw, nodes);
+      if (!handle || !canonicalKey || !nodes.length) {
+        res.status(400).json({ error: "handle_and_subject_nodes_required" });
+        return;
+      }
       const row = {
-        canonical_key: canonical(handle),
+        organization_id: auth.organizationId,
+        canonical_key: canonicalKey,
         handle,
-        verdict: typeof raw?.verdict === "string" ? raw.verdict : null,
+        aliases,
+        verdict: typeof raw.verdict === "string" ? raw.verdict.slice(0, 40) : null,
         nodes,
         edges,
-        contributor: typeof raw?.contributor === "string" ? raw.contributor.slice(0, 80) : null,
+        contributor: auth.displayName.slice(0, 80),
+        contributor_user_id: auth.userId,
       };
-      const r = await fetch(`${c.url}/rest/v1/${TABLE}?on_conflict=canonical_key`, {
-        method: "POST",
-        headers: { ...headers(c.key), prefer: "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify(row),
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!r.ok) { res.status(200).json({ ok: false, error: `write ${r.status}: ${(await r.text()).slice(0, 200)}` }); return; }
-      res.status(200).json({ ok: true });
+      const response = await fetch(
+        `${credentials.url}/rest/v1/${TABLE}?on_conflict=organization_id,canonical_key`,
+        {
+          method: "POST",
+          headers: serviceHeaders(credentials.key, { prefer: "resolution=merge-duplicates,return=minimal" }),
+          body: JSON.stringify(row),
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (!response.ok) {
+        throw new Error(`graph write failed (${response.status}): ${(await response.text()).slice(0, 240)}`);
+      }
+      res.status(200).json({ ok: true, canonicalKey });
       return;
     }
 
-    // Remove a subject's contribution from the shared graph — part of the
-    // start-from-scratch purge for a wrongly-audited subject.
     if (req.method === "DELETE") {
-      const handle = typeof req.query.handle === "string" ? req.query.handle.trim().slice(0, 200) : "";
-      if (!handle) { res.status(400).json({ error: "handle required" }); return; }
-      const r = await fetch(`${c.url}/rest/v1/${TABLE}?canonical_key=eq.${encodeURIComponent(canonical(handle))}`, {
-        method: "DELETE",
-        headers: { ...headers(c.key), prefer: "return=minimal" },
-        signal: AbortSignal.timeout(10000),
-      });
-      if (!r.ok) { res.status(200).json({ ok: false, error: `delete ${r.status}` }); return; }
+      const handle = typeof req.query.handle === "string" ? req.query.handle.trim().slice(0, 500) : "";
+      if (!handle) {
+        res.status(400).json({ error: "handle_required" });
+        return;
+      }
+      const response = await fetch(
+        `${credentials.url}/rest/v1/${TABLE}?${orgFilter}&canonical_key=eq.${encodeURIComponent(canonical(handle))}`,
+        {
+          method: "DELETE",
+          headers: serviceHeaders(credentials.key, { prefer: "return=minimal" }),
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
+      if (!response.ok) throw new Error(`graph delete failed (${response.status})`);
       res.status(200).json({ ok: true });
       return;
     }
 
-    res.status(405).json({ error: "GET, POST or DELETE" });
-  } catch (e) {
-    res.status(200).json({ available: true, contributions: [], error: String(e) });
+    res.status(405).setHeader("Allow", "GET, POST, DELETE").json({ error: "method_not_allowed" });
+  } catch (error) {
+    console.error("[graph] failed", error);
+    res.status(502).json({ error: "graph_store_failed", message: String(error) });
   }
 }
-
-function safeParse(s: string): any { try { return JSON.parse(s); } catch { return {}; } }

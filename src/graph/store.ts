@@ -7,7 +7,15 @@
 // configured (/api/graph, gated on Supabase env), every contribution also syncs
 // up and the COMMUNITY graph hydrates down on load — so Kyle's and Enigma's
 // audits compound into one network. With no backend it stays local-only.
-import type { GraphContribution } from "./network";
+import {
+  buildAliasResolver,
+  canonical,
+  normalizeAddress,
+  normalizeChain,
+  tokenEntityKey,
+  walletEntityKey,
+  type GraphContribution,
+} from "./network";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import type { Dossier } from "../data/dossier";
 import type { Investigation, WebPerson } from "../lib/investigation";
@@ -46,10 +54,10 @@ export function clearContributions(): void {
 // Remove ONE subject's contribution (local cache + the shared graph) — the
 // per-subject counterpart to clearContributions, used by the report purge.
 export function removeContribution(handle: string): void {
-  const key = handle.trim().toLowerCase().replace(/^[@$]/, "");
   try {
-    const all = getContributions().filter((x) => canonicalKey(x) !== key);
-    localStorage.setItem(KEY, JSON.stringify(all));
+    const all = getContributions();
+    const key = buildAliasResolver(all)(handle);
+    localStorage.setItem(KEY, JSON.stringify(all.filter((x) => canonicalKey(x) !== key)));
   } catch { /* noop */ }
   void fetch(`/api/graph?handle=${encodeURIComponent(handle)}`, { method: "DELETE" }).catch(() => { /* offline */ });
   emitGraphChange();
@@ -62,16 +70,47 @@ export function removeContribution(handle: string): void {
 function mergeContribution(handle: string, addNodes: PanoptesNode[], addEdges: PanoptesEdge[]): void {
   try {
     const all = getContributions();
-    const hk = handle.trim().toLowerCase().replace(/^[@$]/, "");
+    const resolve = buildAliasResolver(all);
+    const hk = resolve(handle);
     const existing = all.find((c) => canonicalKey(c) === hk);
     if (!existing) {
-      recordContribution({ handle, nodes: [{ type: "Person", key: handle, subject: true } as PanoptesNode, ...addNodes], edges: addEdges });
+      // A ticker is never sufficient to create a token identity. This can occur
+      // when two address-backed tokens share a symbol and an older panel only
+      // supplies `$SYMBOL`; dropping that ambiguous graph attachment is safer
+      // than joining the two investigations.
+      if (handle.trim().startsWith("$")) return;
+      const typedSubject = /^(?:token|wallet):[^:]+:.+/.test(hk) ? hk : handle;
+      const edges = addEdges.map((e) => ({
+        ...e,
+        src: canonical(e.src) === hk ? typedSubject : e.src,
+        dst: canonical(e.dst) === hk ? typedSubject : e.dst,
+      }));
+      const subjectNode: PanoptesNode = typedSubject.startsWith("wallet:")
+        ? { type: "Identity", subtype: "Wallet", key: typedSubject, subject: true }
+        : typedSubject.startsWith("token:")
+          ? { type: "Token", key: typedSubject, subject: true }
+          : { type: "Person", key: typedSubject, subject: true };
+      recordContribution({ handle: typedSubject, nodes: [subjectNode, ...addNodes], edges });
       return;
     }
-    const haveN = new Set(existing.nodes.map((n) => String(n.key).toLowerCase()));
-    for (const n of addNodes) { const k = String(n.key).toLowerCase(); if (!haveN.has(k)) { haveN.add(k); existing.nodes.push(n); } }
-    const haveE = new Set(existing.edges.map((e) => `${e.src}|${e.dst}|${e.type}`.toLowerCase()));
-    for (const e of addEdges) { const k = `${e.src}|${e.dst}|${e.type}`.toLowerCase(); if (!haveE.has(k)) { haveE.add(k); existing.edges.push(e); } }
+    const subjectKey = String(existing.nodes.find((n) => n.subject)?.key ?? existing.handle);
+    const haveN = new Set(existing.nodes.map((n) => canonical(String(n.key))));
+    for (const n of addNodes) {
+      const k = canonical(String(n.key));
+      if (!haveN.has(k)) { haveN.add(k); existing.nodes.push(n); }
+    }
+    const normalizeEdge = (e: PanoptesEdge): PanoptesEdge => ({
+      ...e,
+      src: resolve(e.src) === hk ? subjectKey : e.src,
+      dst: resolve(e.dst) === hk ? subjectKey : e.dst,
+    });
+    const edgeKey = (e: PanoptesEdge) => `${canonical(e.src)}|${canonical(e.dst)}|${String(e.type).toLowerCase()}`;
+    const haveE = new Set(existing.edges.map(edgeKey));
+    for (const raw of addEdges) {
+      const e = normalizeEdge(raw);
+      const k = edgeKey(e);
+      if (!haveE.has(k)) { haveE.add(k); existing.edges.push(e); }
+    }
     localStorage.setItem(KEY, JSON.stringify(all.slice(0, CAP)));
     void syncContribution(existing);
     emitGraphChange();
@@ -82,7 +121,7 @@ function mergeContribution(handle: string, addNodes: PanoptesNode[], addEdges: P
 
 // Attach forensic entities a panel discovered (leaked dev emails, prior handles,
 // cross-platform accounts, seeded deployers) to the subject in the graph. Uses
-// consistent keys (email:… / platform:username / wallet:…) so the SAME entity
+// consistent keys (email:… / platform:username / wallet:chain:full-address) so the SAME entity
 // collapses across audits — two projects sharing a dev email or a funder bridge
 // automatically. This is what turns the panels' findings into the compounding web.
 export interface ForensicEntity { key: string; type: string; subtype?: string; edgeType: string; label?: string }
@@ -92,10 +131,18 @@ export function recordForensicEntities(subjectKey: string, entities: ForensicEnt
   const nodes: PanoptesNode[] = [];
   const edges: PanoptesEdge[] = [];
   for (const e of clean) {
-    nodes.push({ type: e.type, key: e.key, ...(e.subtype ? { subtype: e.subtype } : {}), ...(e.label ? { label: e.label } : {}) } as PanoptesNode);
-    edges.push({ src: subjectKey, dst: e.key, type: e.edgeType });
+    const walletLike = /wallet/i.test(e.subtype ?? "") || /^(?:wallet|holder|funder):/i.test(e.key);
+    const tokenLike = e.type === "Token" || /^(?:token|mint):/i.test(e.key);
+    const resolved = walletLike || tokenLike ? canonical(e.key) : e.key;
+    // A prefix such as wallet:7Xa91c2f cannot be made globally unique. Keep it
+    // out of the graph unless the producer supplied a complete address that can
+    // be upgraded to a typed wallet id.
+    if (walletLike && !/^wallet:[^:]+:.+/.test(resolved)) continue;
+    if (tokenLike && !/^token:[^:]+:.+/.test(resolved)) continue;
+    nodes.push({ type: e.type, key: resolved, ...(e.subtype ? { subtype: e.subtype } : {}), ...(e.label ? { label: e.label } : {}) } as PanoptesNode);
+    edges.push({ src: subjectKey, dst: resolved, type: e.edgeType });
   }
-  mergeContribution(subjectKey, nodes, edges);
+  if (nodes.length) mergeContribution(subjectKey, nodes, edges);
 }
 
 // ── shared backend: sync up, hydrate down ──────────────────────────────────
@@ -120,7 +167,7 @@ async function syncContribution(c: GraphContribution): Promise<boolean> {
       body: JSON.stringify(c),
     });
     if (!r.ok) return false;
-    const d = await r.json().catch(() => ({}));
+    const d = await r.json().catch(() => ({})) as { ok?: boolean };
     return d?.ok === true;
   } catch {
     return false; // offline or no backend — the local cache still holds it
@@ -138,7 +185,7 @@ export async function hydrateCommunityGraph(): Promise<void> {
   try {
     const r = await fetch(SYNC_URL, { signal: AbortSignal.timeout(9000) });
     if (!r.ok) return;
-    const d = await r.json();
+    const d = await r.json() as { available?: boolean; contributions?: GraphContribution[] };
     if (d?.available === false) return; // backend not configured — stay local-only
     const remote: GraphContribution[] = Array.isArray(d?.contributions) ? d.contributions : [];
     const local = getContributions();
@@ -158,13 +205,16 @@ export async function hydrateCommunityGraph(): Promise<void> {
 }
 
 function canonicalKey(c: GraphContribution): string {
-  return c.handle.trim().toLowerCase().replace(/^[@$]/, "");
+  const subject = c.nodes.find((n) => n.subject)?.key;
+  return canonical(String(subject ?? c.handle));
 }
 
 // Convenience: build a contribution from a token audit's graph, tagging the
 // subject node with its verdict so the network colors it correctly.
 export function tokenContribution(symbol: string, verdict: string, nodes: PanoptesNode[], edges: PanoptesEdge[]): GraphContribution {
-  return { handle: "$" + symbol, verdict, nodes, edges };
+  const subject = nodes.find((n) => n.subject);
+  const subjectKey = subject ? String(subject.key) : "$" + symbol;
+  return { handle: subjectKey, aliases: ["$" + symbol.replace(/^\$/, "")], verdict, nodes, edges };
 }
 
 // Convenience: build a contribution from a person audit. This is what lets the
@@ -195,7 +245,7 @@ export function projectPeopleContribution(projectName: string, people: WebPerson
 // wallet it resolved, so the result compounds: a handle resolved to a wallet here
 // bridges to any token audit whose deployer/holder graph touches that same wallet,
 // and to a later people-audit of the same handle. Wallet keys match the audit
-// engine's `${chain}:${address}` so the nodes collapse to one.
+// engine through canonical `wallet:${chain}:${address}` ids.
 export function walletContribution(
   clue: string,
   wallets: { address: string; chain: string }[],
@@ -206,8 +256,8 @@ export function walletContribution(
   const nodes: PanoptesNode[] = [{ type: handleLike ? "Person" : "Identity", key: subjectKey, subject: true }];
   const edges: PanoptesEdge[] = [];
   for (const w of wallets) {
-    const key = `${w.chain}:${w.address}`;
-    nodes.push({ type: "Identity", subtype: "Wallet", key, address: w.address });
+    const key = walletEntityKey(w.chain, w.address);
+    nodes.push({ type: "Identity", subtype: "Wallet", key, chain: normalizeChain(w.chain), address: w.address });
     edges.push({ src: subjectKey, dst: key, type: "CONTROLS_WALLET" });
   }
   return { handle: subjectKey, nodes, edges };
@@ -222,7 +272,9 @@ export function knownAddresses(): { address: string; chain: "evm" | "solana"; ti
   const SOL = /\b[1-9A-HJ-NP-Za-km-z]{32,44}\b/;
   const byAddr = new Map<string, { address: string; chain: "evm" | "solana"; tiedTo: Set<string> }>();
   const tie = (addr: string, chain: "evm" | "solana", label: string) => {
-    const k = addr.toLowerCase();
+    // EVM identity ignores checksum case; Solana identity must retain base58
+    // case. Lower-casing Solana here previously merged distinct addresses.
+    const k = normalizeAddress(chain === "evm" ? "ethereum" : "solana", addr);
     let e = byAddr.get(k);
     if (!e) { e = { address: addr, chain, tiedTo: new Set() }; byAddr.set(k, e); }
     if (label) e.tiedTo.add(label);
@@ -236,7 +288,7 @@ export function knownAddresses(): { address: string; chain: "evm" | "solana"; ti
       for (const src of [fromAddr, fromKey]) {
         const evm = src.match(EVM);
         if (evm) { tie(evm[0], "evm", label); continue; }
-        const sol = src.replace(/^\w+:/, "").match(SOL);
+        const sol = src.match(SOL);
         if (sol && !src.startsWith("0x")) tie(sol[0], "solana", label);
       }
     }
@@ -253,25 +305,55 @@ export function knownAddresses(): { address: string; chain: "evm" | "solana"; ti
 export function investigationContribution(inv: Investigation): GraphContribution | null {
   const g = inv.token?.graph;
   if (!g) return null;
-  const nodes: PanoptesNode[] = [...g.nodes];
-  const edges: PanoptesEdge[] = [...g.edges];
+  const chain = inv.token.chain;
+  const subjectKey = tokenEntityKey(chain, inv.token.address);
+
+  // Upgrade safely recoverable keys in stored pre-address-ID reports. The token
+  // contract, deployer and top-holder full addresses all live on the dossier,
+  // even when their old graph labels were only `$SYMBOL` / eight-char prefixes.
+  const replacements = new Map<string, Set<string>>();
+  const replace = (oldKey: string, newKey: string) => {
+    const set = replacements.get(oldKey) ?? new Set<string>();
+    set.add(newKey);
+    replacements.set(oldKey, set);
+  };
+  for (const n of g.nodes) if (n.subject) replace(String(n.key), subjectKey);
+  replace("$" + inv.token.symbol, subjectKey);
+  if (inv.token.deployer) replace("wallet:" + inv.token.deployer.slice(0, 8), walletEntityKey(chain, inv.token.deployer));
+  for (const h of inv.token.topHolders ?? []) {
+    replace((h.tag || "holder") + ":" + h.address.slice(0, 8), walletEntityKey(chain, h.address));
+  }
+  for (const n of g.nodes) {
+    const address = typeof n.address === "string" ? n.address : "";
+    if (address && (n.type === "Identity" || String(n.subtype ?? "").toLowerCase().includes("wallet"))) {
+      replace(String(n.key), walletEntityKey(typeof n.chain === "string" ? n.chain : chain, address));
+    }
+  }
+  const upgraded = (key: string) => {
+    const candidates = replacements.get(key);
+    return candidates?.size === 1 ? [...candidates][0] : key;
+  };
+  const nodes: PanoptesNode[] = g.nodes.map((n) => {
+    const key = n.subject ? subjectKey : upgraded(String(n.key));
+    if (n.subject) return { ...n, type: "Token", key, label: "$" + inv.token.symbol, symbol: inv.token.symbol, chain, address: inv.token.address };
+    return key === n.key ? n : { ...n, key };
+  });
+  const edges: PanoptesEdge[] = g.edges.map((e) => ({ ...e, src: upgraded(e.src), dst: upgraded(e.dst) }));
   const trail = inv.deployerTrail;
   const dep = inv.token.deployer;
-  // Match the deployer's existing token-graph node key; chain wallets get a
-  // stable funder key so the same wallet collapses to one node across audits.
-  const keyOf = (addr: string) => (dep && addr === dep ? "wallet:" + addr.slice(0, 8) : "funder:" + addr.slice(0, 8));
+  const keyOf = (addr: string) => walletEntityKey(chain, addr);
   if (dep && trail?.chain?.length) {
     for (const hop of trail.chain) {
       if (hop.kind === "cex") continue; // exchange, not a bridging node
       const fromKey = keyOf(hop.from);
       const toKey = keyOf(hop.to);
-      nodes.push({ type: "Identity", subtype: "FunderWallet", key: toKey, address: hop.to });
+      nodes.push({ type: "Identity", subtype: "FunderWallet", key: toKey, label: "funder:" + hop.to.slice(0, 8), chain, address: hop.to });
       edges.push({ src: toKey, dst: fromKey, type: "FUNDED" }); // funder -> recipient
     }
   } else if (dep && trail?.funder && trail.funder.kind === "wallet") {
-    const funderKey = "funder:" + trail.funder.address.slice(0, 8);
-    nodes.push({ type: "Identity", subtype: "FunderWallet", key: funderKey, address: trail.funder.address });
-    edges.push({ src: funderKey, dst: "wallet:" + dep.slice(0, 8), type: "FUNDED" });
+    const funderKey = keyOf(trail.funder.address);
+    nodes.push({ type: "Identity", subtype: "FunderWallet", key: funderKey, label: "funder:" + trail.funder.address.slice(0, 8), chain, address: trail.funder.address });
+    edges.push({ src: funderKey, dst: keyOf(dep), type: "FUNDED" });
   }
-  return { handle: "$" + inv.token.symbol, verdict: inv.token.verdict, nodes, edges };
+  return { handle: subjectKey, aliases: ["$" + inv.token.symbol], verdict: inv.token.verdict, nodes, edges };
 }

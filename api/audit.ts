@@ -1,58 +1,154 @@
-// Vercel serverless function: GET /api/audit?handle=...
-// Streams the collector's trace steps over SSE, then the final dossier. Mirrors
-// the standalone server (server/index.ts) so local dev and prod share orchestrate.
+// Authenticated person investigation stream.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { runAudit } from "./_collector.js";
 import type { TraceStep } from "../src/data/evidence";
+import type { Dossier } from "../src/data/dossier";
+import {
+  consumeInvestigationQuota,
+  requireArgusAuth,
+  serviceCredentials,
+  serviceHeaders,
+  type AuthContext,
+} from "./_auth.js";
+import { persistProvenance } from "./_provenance.js";
 
-// Live collection fans out to several agentic providers (Grok web+X search,
-// Claude analyst, on-chain), each multi-second. Give the streaming function real
-// headroom so even a heavy (VC-portfolio) audit finalizes and emits `done`.
 export const config = { maxDuration: 180 };
 
-// Server-side safety-net persistence. An audit is ~80s and costs real money; if
-// the client's long-lived SSE connection is cut before `done` arrives (proxy,
-// extension, tab-throttle), the result would otherwise be lost and nothing saved.
-// So the SERVER upserts the finished dossier to the same reports store the client
-// uses — the client then recovers it via /api/report even when its stream drops.
-// Mirrors api/report.ts's POST upsert (kept inline: api functions can't import
-// sibling .ts modules on Vercel).
-const normRef = (s: string) => s.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
-async function persistDossier(handle: string, dossier: any): Promise<void> {
-  const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SERVICE_KEY;
-  if (!url || !key || !dossier) return;
+interface ServerDossier extends Dossier {
+  completeness_state?: "complete" | "partial" | "failed";
+  providers?: unknown;
+}
+
+const normRef = (value: string) =>
+  value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
+
+export async function persistServerDossier(
+  handle: string,
+  dossier: ServerDossier,
+  auth: AuthContext,
+): Promise<string | null> {
+  const credentials = serviceCredentials();
+  if (!credentials || !dossier) return null;
   const ref = normRef(dossier.handle || handle);
-  if (!ref) return;
+  if (!ref) return null;
+  const query = typeof dossier.handle === "string" ? dossier.handle.slice(0, 200) : ref;
+  const verdict = typeof dossier?.report?.composite_verdict === "string"
+    ? dossier.report.composite_verdict.slice(0, 40)
+    : null;
+  const score = typeof dossier?.report?.governing_score === "number"
+    ? dossier.report.governing_score
+    : null;
+  const runId = typeof dossier?.report?.audit_id === "string"
+    ? dossier.report.audit_id.slice(0, 200)
+    : null;
+  // A curated fallback may be assembled server-side, but it was not collected
+  // from live providers. Keep that distinction in every immutable surface.
+  const attestationState = dossier.live ? "server_collected" : "analyst_submitted";
+
+  const versionResponse = await fetch(`${credentials.url}/rest/v1/rpc/persist_report_version`, {
+    method: "POST",
+    headers: serviceHeaders(credentials.key),
+    body: JSON.stringify({
+      p_organization_id: auth.organizationId,
+      p_kind: "person",
+      p_canonical_ref: ref,
+      p_query: query,
+      p_created_by: auth.userId,
+      p_payload: dossier,
+      p_run_id: runId,
+      p_attestation_state: attestationState,
+      p_verdict: verdict,
+      p_score: score,
+      p_completeness_state: dossier?.completeness_state || "partial",
+      p_methodology_version: process.env.ARGUS_METHODOLOGY_VERSION || null,
+      p_provider_snapshot: dossier?.providerSnapshot ?? dossier?.providers ?? {},
+      p_cost: dossier?.cost ?? {},
+    }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!versionResponse.ok) {
+    throw new Error(`immutable report write failed (${versionResponse.status}): ${(await versionResponse.text()).slice(0, 240)}`);
+  }
+  const versions = (await versionResponse.json()) as Array<{ report_version_id?: unknown }>;
+  const reportVersionId = Array.isArray(versions) && typeof versions[0]?.report_version_id === "string"
+    ? versions[0].report_version_id
+    : null;
+  if (!reportVersionId) throw new Error("immutable report write returned no id");
+  await persistProvenance(
+    credentials,
+    { organizationId: auth.organizationId, reportVersionId, attestationState },
+    dossier,
+    dossier.checkRuns,
+  );
+
   const row = {
+    organization_id: auth.organizationId,
     ref,
     kind: "person",
-    query: typeof dossier.handle === "string" ? dossier.handle.slice(0, 200) : ref,
-    contributor: "auto", // saved by the server; the client overwrites with the analyst name on its own done
+    query,
+    contributor: auth.displayName.slice(0, 80),
+    created_by: auth.userId,
+    report_version_id: reportVersionId,
+    attestation_state: attestationState,
     payload: dossier,
-    verdict: typeof dossier?.report?.composite_verdict === "string" ? dossier.report.composite_verdict.slice(0, 40) : null,
-    score: typeof dossier?.report?.governing_score === "number" ? dossier.report.governing_score : null,
+    verdict,
+    score,
     ts: new Date().toISOString(),
   };
-  await fetch(`${url}/rest/v1/reports?on_conflict=ref,kind`, {
-    method: "POST",
-    headers: { apikey: key, authorization: `Bearer ${key}`, "content-type": "application/json", prefer: "resolution=merge-duplicates,return=minimal" },
-    body: JSON.stringify(row),
-    signal: AbortSignal.timeout(10000),
-  }).catch(() => { /* best-effort */ });
+  const projectionResponse = await fetch(
+    `${credentials.url}/rest/v1/reports?on_conflict=organization_id,ref,kind`,
+    {
+      method: "POST",
+      headers: serviceHeaders(credentials.key, { prefer: "resolution=merge-duplicates,return=minimal" }),
+      body: JSON.stringify(row),
+      signal: AbortSignal.timeout(10_000),
+    },
+  );
+  if (!projectionResponse.ok) {
+    throw new Error(`report projection write failed (${projectionResponse.status}): ${(await projectionResponse.text()).slice(0, 240)}`);
+  }
+  return reportVersionId;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  const handle = typeof req.query.handle === "string" ? req.query.handle : "";
-  if (!handle) {
-    res.status(400).json({ error: "handle required" });
+  if (req.method !== "GET") {
+    res.status(405).setHeader("Allow", "GET").json({ error: "method_not_allowed" });
+    return;
+  }
+
+  const auth = await requireArgusAuth(req, res, "analyst");
+  if (!auth) return;
+
+  const handle = typeof req.query.handle === "string" ? req.query.handle.trim() : "";
+  if (!handle || handle.length > 200) {
+    res.status(400).json({ error: "valid_handle_required" });
+    return;
+  }
+
+  const quota = await consumeInvestigationQuota(auth, "/api/audit", {
+    private: req.query.private === "1",
+  });
+  if (quota.error) {
+    res.status(503).json({ error: quota.error, message: "Usage controls are temporarily unavailable." });
+    return;
+  }
+  if (!quota.allowed) {
+    const tomorrow = new Date();
+    tomorrow.setUTCHours(24, 0, 0, 0);
+    res.setHeader("Retry-After", Math.max(1, Math.ceil((tomorrow.getTime() - Date.now()) / 1_000)));
+    res.status(429).json({
+      error: "daily_investigation_limit_reached",
+      used: quota.used,
+      remaining: 0,
+    });
     return;
   }
 
   res.writeHead(200, {
     "content-type": "text/event-stream; charset=utf-8",
-    "cache-control": "no-cache, no-transform",
-    "x-accel-buffering": "no", // ask any proxy in front not to buffer the stream
+    "cache-control": "no-cache, no-store, no-transform",
+    "x-accel-buffering": "no",
+    "x-argus-quota-remaining": String(quota.remaining),
     connection: "keep-alive",
   });
   res.flushHeaders?.();
@@ -61,24 +157,34 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       res.write(`event: ${event}\n`);
       res.write(`data: ${JSON.stringify(data)}\n\n`);
-    } catch { /* client gone — the server-side persist below is the safety net */ }
+    } catch {
+      // The investigation continues and persists even if the client disconnects.
+    }
   };
   const emit = (step: TraceStep) => send("step", step);
+  send("quota", { remaining: quota.remaining });
 
   try {
-    const dossier = await runAudit(handle, emit);
+    const dossier = await runAudit(handle, emit) as ServerDossier | null;
     if (!dossier) {
       send("error", { error: "not_found" });
     } else {
-      // Persist BEFORE signalling done, so a completed audit is saved even if the
-      // client already disconnected and never receives (or acts on) `done`.
-      // A private/incognito audit is NEVER persisted server-side.
-      if (req.query.private !== "1") await persistDossier(handle, dossier);
-      send("done", dossier);
+      let reportVersionId: string | null = null;
+      let persistence: "private" | "persisted" | "failed" = req.query.private === "1" ? "private" : "persisted";
+      if (req.query.private !== "1") {
+        try {
+          reportVersionId = await persistServerDossier(handle, dossier, auth);
+        } catch (persistenceError) {
+          persistence = "failed";
+          console.error("[api/audit] persistence failed", persistenceError);
+          send("persistence", { state: "failed" });
+        }
+      }
+      send("done", { ...dossier, persistence: { state: persistence, reportVersionId } });
     }
-  } catch (e) {
-    console.error("[api/audit] failed", e);
-    send("error", { error: String(e) });
+  } catch (error) {
+    console.error("[api/audit] failed", error);
+    send("error", { error: "investigation_failed", message: String(error) });
   }
   res.end();
 }

@@ -97,22 +97,54 @@ export const githubAdapter: Adapter = {
     ctx.emit({ phase: "P1 · Identity", label: "GitHub resolution", detail: `Matching ${ctx.handle} to a GitHub account by linked X handle…`, source: "github", tone: "neutral" });
     const match = await resolveGithub(ctx.handle, name, key);
     if (!match) {
+      ctx.recordCheck?.({
+        id: "code-footprint-github",
+        status: "checked-empty",
+        note: "GitHub resolution completed without an account that links back to this X handle",
+        provider: "github",
+      });
       ctx.emit({ phase: "P1 · Identity", label: "No GitHub match", detail: "No GitHub account links back to this X handle.", source: "github", tone: "neutral" });
       return;
     }
     if (match.confidence === "weak") {
       // login coincidence without a twitter_username confirmation — surface as a
       // lead only, never an attributed fact.
+      ctx.recordCheck?.({
+        id: "code-footprint-github",
+        status: "unknown",
+        note: `github.com/${match.login} shares the username but does not link back to the X account`,
+        provider: "github",
+      });
       ctx.emit({ phase: "P1 · Identity", label: "Possible GitHub", detail: `github.com/${match.login} shares the handle but does not link back to X. Unconfirmed, not attributed.`, source: "github", tone: "warn" });
       return;
     }
     // gold: twitter_username == subject handle
     ctx.evidence.profile.identity_confidence = "Probable";
     ctx.evidence.profile.identity_note = `GitHub github.com/${match.login}${match.name ? ` (${match.name})` : ""} links back to this X handle.`;
+    ctx.recordCheck?.({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: `GitHub account ${match.login} links back to ${ctx.handle}`,
+      provider: "github",
+      sourceCount: 1,
+    });
+    ctx.recordCheck?.({
+      id: "code-footprint-github",
+      status: "confirmed",
+      note: `github.com/${match.login} resolved through its X handle field`,
+      provider: "github",
+      sourceCount: 1,
+    });
     ctx.emit({ phase: "P1 · Identity", label: "GitHub confirmed", detail: `github.com/${match.login} links back to ${ctx.handle} (twitter_username match).`, source: "github", tone: "good" });
 
     const affs = await githubAffiliations(match.login, key);
     if (!affs.length) {
+      ctx.recordCheck?.({
+        id: "affiliations-associates",
+        status: "checked-empty",
+        note: "resolved GitHub account has no public organization memberships or organization-repo contributions",
+        provider: "github",
+      });
       ctx.emit({ phase: "P1 · Identity", label: "No public orgs", detail: "GitHub account has no public org memberships or org-repo contributions.", source: "github", tone: "neutral" });
       return;
     }
@@ -132,6 +164,13 @@ export const githubAdapter: Adapter = {
       ctx.evidence.associates.push({ associate_handle: a.org, relation: "github org", evidence_url: `https://github.com/${a.org}` });
       added.push(a.org);
     }
+    ctx.recordCheck?.({
+      id: "affiliations-associates",
+      status: "confirmed",
+      note: `${affs.length} public GitHub organization affiliation${affs.length === 1 ? "" : "s"} returned`,
+      provider: "github",
+      sourceCount: affs.length,
+    });
     ctx.emit({ phase: "P1 · Identity", label: "GitHub affiliations", detail: `${added.length} org(s) this account builds with (near-permanent, hard to scrub): ${added.slice(0, 5).join(", ")}.`, source: "github", tone: "good" });
   },
 };

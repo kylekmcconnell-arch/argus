@@ -7,7 +7,8 @@ import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
-import { tokenChecks } from "../lib/scanChecklist";
+import { personChecks, tokenChecks } from "../lib/scanChecklist";
+import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { ArkhamName } from "./ArkhamName";
 import { useArkhamLabels } from "../lib/useArkhamLabels";
 import { AddInfo } from "./AddInfo";
@@ -74,9 +75,34 @@ export function InvestigationReport({
   const [spent, setSpent] = useState(0);
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
+  const diligenceChecks = tokenChecks(token);
+  const readiness = deriveDecisionReadiness(diligenceChecks);
+  const positiveVerdictNeedsQualification = token.verdict === "PASS" && readiness.status !== "ready";
+  const presentedTokenVerdict = positiveVerdictNeedsQualification ? "INCOMPLETE" : token.verdict;
+  const preliminaryTokenMeta = verdictMeta(token.verdict);
+  const readinessColor = readiness.status === "ready" ? "var(--color-pass)" : "var(--color-caution)";
+  const projectChecks = projectAccount
+    ? projectAccount.versionContext?.checks.length
+      ? projectAccount.versionContext.checks
+      : projectAccount.checkRuns?.length
+        ? projectAccount.checkRuns
+        : personChecks({
+            identityConfidence: projectAccount.report.identity_confidence ?? undefined,
+            realName: (projectAccount.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
+            roles: projectAccount.report.roles ?? [],
+            hasAssociates: (projectAccount.evidence.associates ?? []).length > 0,
+          })
+    : [];
+  const projectReadiness = projectAccount ? deriveDecisionReadiness(projectChecks) : null;
+  const projectPositiveNeedsQualification = Boolean(
+    projectAccount?.report.composite_verdict === "PASS" && projectReadiness?.status !== "ready",
+  );
+  const presentedProjectVerdict = projectPositiveNeedsQualification
+    ? "INCOMPLETE"
+    : projectAccount?.report.composite_verdict;
   // Arkham entity labels for the deployer + funder wallets.
   const arkham = useArkhamLabels([token.deployer, deployerTrail?.funder?.address]);
-  const tm = verdictMeta(token.verdict);
+  const tm = verdictMeta(presentedTokenVerdict);
   // The project's GitHub org (from its site links), for commit forensics.
   // The project's own website (first non-social link) → domain intelligence.
   const projectDomain = [...(recon?.socials ?? []), ...(token.socials ?? [])]
@@ -168,14 +194,40 @@ export function InvestigationReport({
           <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-2">
             <span className="flex items-center gap-1.5">
               <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Token risk</span>
-              <VerdictPill verdict={token.verdict} score={token.score} />
+              <VerdictPill verdict={presentedTokenVerdict} score={positiveVerdictNeedsQualification ? null : token.score} />
             </span>
             {projectAccount && (
               <span className="flex items-center gap-1.5">
                 <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Project account</span>
-                <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} />
+                <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
               </span>
             )}
+          </div>
+          <div
+            className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border bg-panel/70 px-3 py-2.5"
+            style={{ borderColor: `${readinessColor}55` }}
+          >
+            <span className="mono rounded border px-1.5 py-0.5 text-[9.5px] uppercase tracking-wider" style={{ borderColor: `${readinessColor}66`, color: readinessColor }}>
+              {readiness.status}
+            </span>
+            <span className="text-[12px] font-medium text-ink">{readiness.title}</span>
+            <span className="mono text-[10.5px] text-ink-faint">
+              {readiness.successful}/{readiness.applicable} outcomes · {readiness.coveragePercent}% coverage
+            </span>
+            {positiveVerdictNeedsQualification && (
+              <span className="mono text-[10.5px]" style={{ color: preliminaryTokenMeta.color }}>
+                preliminary model signal · {preliminaryTokenMeta.label} {token.score ?? "—"}
+              </span>
+            )}
+            {projectAccount && projectReadiness && (
+              <span className="mono text-[10.5px] text-ink-faint">
+                project account · {projectReadiness.status} · {projectReadiness.successful}/{projectReadiness.applicable} outcomes
+              </span>
+            )}
+            <a href="#investigation-methodology" className="mono ml-auto text-[10.5px] text-signal-dim underline-offset-2 hover:text-signal hover:underline">
+              Review checks
+            </a>
+            <p className="w-full text-[11px] leading-snug text-ink-faint">{readiness.guidance}</p>
           </div>
           {/* Lead with the TEAM when we know it — don't declare "no team" when it's named below. */}
           {teamPeople.length > 0 ? (
@@ -205,7 +257,7 @@ export function InvestigationReport({
           <Card title="On-chain" accent={tm.color}>
             <div className="flex items-center justify-between">
               <span className="mono text-[14px] text-ink">{`$${token.symbol}`}</span>
-              <VerdictPill verdict={token.verdict} score={token.score} />
+              <VerdictPill verdict={presentedTokenVerdict} score={positiveVerdictNeedsQualification ? null : token.score} />
             </div>
             <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">{token.headline}</p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11.5px] text-ink-faint">
@@ -254,7 +306,7 @@ export function InvestigationReport({
                 <div className="mt-1 flex items-center justify-between gap-2">
                   <span className="mono text-[12.5px] text-ink">{projectX}</span>
                   {projectAccount ? (
-                    <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} />
+                    <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
                   ) : (
                     <button onClick={() => auditFounder(projectX)} disabled={spent >= MAX_FOUNDER_AUDITS} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
                       {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "audit →"}
@@ -420,7 +472,7 @@ export function InvestigationReport({
               <div className="flex flex-wrap items-center gap-2">
                 <Avatar src={projectAccount.avatar_url || token.imageUrl || xAvatar(projectAccount.handle)} letter={initial(projectAccount.handle)} size={28} rounded="rounded-lg" letterClass="text-[12px]" />
                 <span className="text-[13.5px] font-medium text-ink">{projectAccount.display_name || projectAccount.handle}</span>
-                <VerdictPill verdict={projectAccount.report.composite_verdict} score={projectAccount.report.governing_score} />
+                <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
                 <span className="ml-auto text-[11px] text-ink-faint">{projectAccount.followers} followers · joined {projectAccount.joined}</span>
               </div>
               {/* why the score landed where it did */}
@@ -447,15 +499,22 @@ export function InvestigationReport({
 
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="mt-4">
-          <MethodologyChecklist checks={tokenChecks(token)} />
+          <MethodologyChecklist id="investigation-methodology" checks={diligenceChecks} />
         </div>
+        {projectAccount && projectChecks.length > 0 && (
+          <div className="mt-3">
+            <div className="mb-1.5 text-[10.5px] uppercase tracking-wider text-ink-faint">Project-account evidence coverage</div>
+            <MethodologyChecklist id="investigation-project-methodology" checks={projectChecks} />
+          </div>
+        )}
 
         {/* ask-the-report chat — grounded in this investigation's own evidence */}
         <div className="mt-3">
           <AskReport subject={`$${token.symbol}`} context={[
             inv.founderNote,
             token.headline,
-            `verdict ${token.verdict} ${token.score ?? ""}`,
+            `scored token verdict ${token.verdict} ${token.score ?? ""}; decision readiness ${readiness.status}; ${readiness.successful}/${readiness.applicable} evidence outcomes recorded`,
+            projectAccount && projectReadiness ? `project account scored verdict ${projectAccount.report.composite_verdict} ${projectAccount.report.governing_score ?? ""}; decision readiness ${projectReadiness.status}; ${projectReadiness.successful}/${projectReadiness.applicable} evidence outcomes recorded` : "",
             teamPeople.length ? `team: ${teamPeople.map((p) => p.name + (p.handle ? ` ${p.handle}` : "")).join(", ")}` : "",
             projectX ? `project X account ${projectX}` : "",
             token.deployer ? `deployer wallet ${token.deployer}` : "",

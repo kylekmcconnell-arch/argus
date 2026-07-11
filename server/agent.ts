@@ -210,12 +210,155 @@ export interface AnalystVerdict {
   identity_note: string;
 }
 
+export interface AnalystAxis {
+  axis: string;
+  weight: number;
+  role: string;
+}
+
+// Tool schemas constrain the shape Claude is asked to return, but provider
+// responses are still untrusted input. An analyst result is usable only when it
+// contains one (and only one) finite, in-range score for every requested axis.
+// Returning null is deliberate: callers must publish INCOMPLETE rather than
+// silently treating a missing axis as zero or retaining stale seeded scores.
+export function validateAnalystVerdict(
+  value: unknown,
+  axisCatalog: AnalystAxis[],
+): AnalystVerdict | null {
+  if (!value || typeof value !== "object" || !axisCatalog.length) return null;
+  const raw = value as Partial<AnalystVerdict>;
+  if (!Array.isArray(raw.axes) || raw.axes.length !== axisCatalog.length) return null;
+  if (typeof raw.headline !== "string" || typeof raw.identity_note !== "string") return null;
+
+  const expected = new Map<string, AnalystAxis>();
+  for (const spec of axisCatalog) {
+    if (!spec.axis || expected.has(spec.axis) || !Number.isFinite(spec.weight) || spec.weight < 0) return null;
+    expected.set(spec.axis, spec);
+  }
+
+  const seen = new Map<string, { axis: string; score: number; rationale: string }>();
+  for (const candidate of raw.axes as unknown[]) {
+    if (!candidate || typeof candidate !== "object") return null;
+    const row = candidate as { axis?: unknown; score?: unknown; rationale?: unknown };
+    if (typeof row.axis !== "string" || typeof row.score !== "number" || typeof row.rationale !== "string") return null;
+    const spec = expected.get(row.axis);
+    if (!spec || seen.has(row.axis) || !Number.isFinite(row.score) || row.score < 0 || row.score > spec.weight) return null;
+    seen.set(row.axis, { axis: row.axis, score: row.score, rationale: row.rationale.trim() });
+  }
+  if (seen.size !== expected.size) return null;
+
+  return {
+    // Canonical order makes downstream completeness checks and snapshots stable.
+    axes: axisCatalog.map((spec) => seen.get(spec.axis)!),
+    headline: raw.headline.trim(),
+    identity_note: raw.identity_note.trim(),
+  };
+}
+
+export const ANALYST_EVIDENCE_MAX_CHARS = 24_000;
+
+const clip = (value: unknown, max: number): string | undefined => {
+  if (typeof value !== "string") return undefined;
+  return value.length <= max ? value : value.slice(0, max) + "…";
+};
+
+const compactObject = (value: unknown, depth = 0): unknown => {
+  if (value == null || typeof value === "boolean") return value;
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value === "string") return clip(value, 320);
+  if (depth >= 3) return undefined;
+  if (Array.isArray(value)) return value.slice(0, 8).map((item) => compactObject(item, depth + 1)).filter((item) => item !== undefined);
+  if (typeof value !== "object") return undefined;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .slice(0, 24)
+      .map(([key, item]) => [key, compactObject(item, depth + 1)])
+      .filter(([, item]) => item !== undefined),
+  );
+};
+
+const compactFinding = (value: unknown): Record<string, unknown> | null => {
+  if (!value || typeof value !== "object") return null;
+  const f = value as Record<string, unknown>;
+  return {
+    finding_type: clip(f.finding_type, 80),
+    claim: clip(f.claim, 420),
+    source_url: clip(f.source_url, 420),
+    source_date: clip(f.source_date, 40),
+    source_author: clip(f.source_author, 100),
+    verification_status: clip(f.verification_status, 32),
+    independent_source_count: typeof f.independent_source_count === "number" && Number.isFinite(f.independent_source_count)
+      ? f.independent_source_count : undefined,
+    polarity: typeof f.polarity === "number" && Number.isFinite(f.polarity) ? f.polarity : undefined,
+    evidence_origin: clip(f.evidence_origin, 32),
+    artifact_verified: typeof f.artifact_verified === "boolean" ? f.artifact_verified : undefined,
+  };
+};
+
+/**
+ * Serialize evidence without ever truncating JSON text. Each section is capped
+ * structurally and the packet records coverage, with findings receiving first
+ * priority. If the packet is still large, low-priority items are removed whole;
+ * the returned string therefore always parses and never cuts a finding in half.
+ */
+export function buildAnalystEvidencePacket(input: Record<string, unknown>): string {
+  const sectionLimits: Record<string, number> = {
+    ventures: 12,
+    testimonials: 12,
+    advised: 12,
+    promotions: 16,
+    wallets: 12,
+    team: 16,
+    notableFollowers: 16,
+    recentActivity: 12,
+  };
+  const findingsRaw = Array.isArray(input.findings) ? input.findings : [];
+  const findings = findingsRaw.slice(0, 24).map(compactFinding).filter((f): f is Record<string, unknown> => !!f);
+  const coverage: Record<string, { available: number; included: number }> = {
+    findings: { available: findingsRaw.length, included: findings.length },
+  };
+  const packet: Record<string, unknown> = {
+    schema_version: 1,
+    coverage,
+    profile: compactObject(input.profile),
+    // Findings stay ahead of descriptive context in the budget. This prevents a
+    // long social corpus from hiding the material facts that govern a verdict.
+    findings,
+  };
+
+  for (const [section, limit] of Object.entries(sectionLimits)) {
+    const source = Array.isArray(input[section]) ? input[section] as unknown[] : [];
+    const included = source.slice(0, limit).map((item) => compactObject(item)).filter((item) => item !== undefined);
+    packet[section] = included;
+    coverage[section] = { available: source.length, included: included.length };
+  }
+
+  const pruneOrder = ["recentActivity", "notableFollowers", "wallets", "promotions", "advised", "testimonials", "ventures", "team"];
+  let json = JSON.stringify(packet);
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
+    const section = pruneOrder.find((key) => Array.isArray(packet[key]) && (packet[key] as unknown[]).length > 0);
+    if (!section) break;
+    (packet[section] as unknown[]).pop();
+    coverage[section].included = (packet[section] as unknown[]).length;
+    json = JSON.stringify(packet);
+  }
+  // Pathological inputs can fill the entire budget with findings alone. Remove
+  // complete lowest-priority rows, never bytes, and disclose the omitted count.
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS && findings.length > 1) {
+    findings.pop();
+    coverage.findings.included = findings.length;
+    json = JSON.stringify(packet);
+  }
+  return json;
+}
+
 export async function analyzeSubject(
   handle: string,
   roles: string[],
-  axisCatalog: { axis: string; weight: number; role: string }[],
+  axisCatalog: AnalystAxis[],
   evidenceJson: string,
 ): Promise<AnalystVerdict | null> {
+  if (!axisCatalog.length) return null;
   const system =
     "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject " +
     "on a fixed set of axes from collected evidence only. Be skeptical: a strong " +
@@ -250,11 +393,13 @@ export async function analyzeSubject(
       properties: {
         axes: {
           type: "array",
+          minItems: axisCatalog.length,
+          maxItems: axisCatalog.length,
           items: {
             type: "object",
             properties: {
-              axis: { type: "string" },
-              score: { type: "number" },
+              axis: { type: "string", enum: axisCatalog.map((a) => a.axis) },
+              score: { type: "number", minimum: 0, maximum: Math.max(...axisCatalog.map((a) => a.weight)) },
               rationale: { type: "string" },
             },
             required: ["axis", "score", "rationale"],
@@ -266,5 +411,8 @@ export async function analyzeSubject(
       required: ["axes", "headline", "identity_note"],
     },
   };
-  return structured<AnalystVerdict>(system, user, tool, 3000);
+  const raw = await structured<unknown>(system, user, tool, 3000);
+  const validated = validateAnalystVerdict(raw, axisCatalog);
+  if (raw && !validated) console.warn("[agent] rejected incomplete or invalid analyst axis set");
+  return validated;
 }
