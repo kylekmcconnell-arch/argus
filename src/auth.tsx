@@ -6,6 +6,7 @@ import {
   type AuthValue,
 } from "./auth-context";
 import { ArgusMark } from "./components/ArgusMark";
+import { createAuthenticatedFetch } from "./lib/authenticatedFetch";
 import { setAnalyst } from "./lib/analyst";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, "") || "";
@@ -24,34 +25,22 @@ const supabase: SupabaseClient | null = authConfigured
   : null;
 
 let fetchInstalled = false;
+let currentAccessToken: string | null = null;
+let currentValidationId = 0;
 
 /** Add the current Supabase bearer token to same-origin API requests only. */
-function installAuthenticatedFetch(client: SupabaseClient): void {
+function installAuthenticatedFetch(): void {
   if (fetchInstalled || typeof window === "undefined") return;
   fetchInstalled = true;
   const nativeFetch = window.fetch.bind(window);
-  window.fetch = async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
-    const rawUrl =
-      typeof input === "string" || input instanceof URL
-        ? String(input)
-        : input.url;
-    const url = new URL(rawUrl, window.location.origin);
-    if (url.origin !== window.location.origin || !url.pathname.startsWith("/api/")) {
-      return nativeFetch(input, init);
-    }
-
-    const { data } = await client.auth.getSession();
-    const token = data.session?.access_token;
-    if (!token) return nativeFetch(input, init);
-
-    const headers = new Headers(input instanceof Request ? input.headers : undefined);
-    new Headers(init?.headers).forEach((value, key) => headers.set(key, value));
-    if (!headers.has("authorization")) headers.set("authorization", `Bearer ${token}`);
-    return nativeFetch(input, { ...init, headers });
-  };
+  window.fetch = createAuthenticatedFetch(
+    nativeFetch,
+    window.location.origin,
+    () => currentAccessToken,
+  );
 }
 
-if (supabase) installAuthenticatedFetch(supabase);
+if (supabase) installAuthenticatedFetch();
 
 async function loadProfile(session: Session): Promise<ArgusSessionProfile> {
   const response = await fetch("/api/session", {
@@ -90,7 +79,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const [sending, setSending] = useState(false);
   const [authenticatedButDenied, setAuthenticatedButDenied] = useState(false);
 
-  const validate = useCallback(async (session: Session | null) => {
+  const validate = useCallback(async (session: Session | null, validationId: number) => {
     setProfile(null);
     setAuthenticatedButDenied(false);
     if (!session) {
@@ -100,29 +89,36 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setLoading(true);
     try {
       const next = await loadProfile(session);
+      if (validationId !== currentValidationId) return;
       setProfile(next);
       setAnalyst(next.user.displayName);
       setError("");
     } catch (validationError) {
+      if (validationId !== currentValidationId) return;
       setAuthenticatedButDenied(true);
       setError(validationError instanceof Error ? validationError.message : "Access could not be verified.");
     } finally {
-      setLoading(false);
+      if (validationId === currentValidationId) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
     if (!supabase) return;
     let active = true;
-    void supabase.auth.getSession().then(({ data }) => {
-      if (active) void validate(data.session);
-    });
     const { data } = supabase.auth.onAuthStateChange((_event, session) => {
       // Leave Supabase's auth callback before making another network request.
-      setTimeout(() => { if (active) void validate(session); }, 0);
+      currentAccessToken = session?.access_token ?? null;
+      const validationId = ++currentValidationId;
+      setTimeout(() => {
+        if (active && validationId === currentValidationId) {
+          void validate(session, validationId);
+        }
+      }, 0);
     });
     return () => {
       active = false;
+      currentAccessToken = null;
+      currentValidationId += 1;
       data.subscription.unsubscribe();
     };
   }, [validate]);
@@ -130,6 +126,8 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   const signOut = useCallback(async () => {
     setError("");
     setMessage("");
+    currentAccessToken = null;
+    currentValidationId += 1;
     await supabase?.auth.signOut();
     setProfile(null);
     setAuthenticatedButDenied(false);
