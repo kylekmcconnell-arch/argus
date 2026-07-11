@@ -77,8 +77,19 @@ function collectEvidence(payload: unknown, context: ProvenanceContext): JsonReco
       const title = textValue(record, ["title", "name", "label", "project", "claim", "headline"], 500);
       const excerpt = textValue(record, ["excerpt", "text", "summary", "description", "rationale", "evidence", "quote"], 2_000);
       const provider = textValue(record, ["provider", "source_provider", "origin"], 100);
-      const sourceType = textValue(record, ["source_type", "sourceType", "type"], 100) || "web";
-      const evidenceKey = hash(`${sourceUrl}\n${title || ""}\n${excerpt || ""}`);
+      const sourceType = textValue(record, ["source_type", "sourceType", "kind", "type"], 100) || "web";
+      const suppliedHash = textValue(record, ["contentHash", "content_hash"], 64);
+      const artifactContentHash = suppliedHash && /^[a-f0-9]{64}$/i.test(suppliedHash)
+        ? suppliedHash.toLowerCase()
+        : null;
+      const suppliedSourceHash = textValue(record, ["sourceContentHash", "source_content_hash"], 64);
+      const sourceContentHash = suppliedSourceHash && /^[a-f0-9]{64}$/i.test(suppliedSourceHash)
+        ? suppliedSourceHash.toLowerCase()
+        : null;
+      const capturedAt = timestampValue(record.capturedAt ?? record.captured_at);
+      const publishedAt = timestampValue(record.publishedAt ?? record.published_at);
+      const match = textValue(record, ["match"], 40);
+      const evidenceKey = artifactContentHash ?? hash(`${sourceUrl}\n${title || ""}\n${excerpt || ""}`);
       evidence.set(evidenceKey, {
         organization_id: context.organizationId,
         report_version_id: context.reportVersionId,
@@ -88,9 +99,15 @@ function collectEvidence(payload: unknown, context: ProvenanceContext): JsonReco
         source_url: sourceUrl,
         title,
         excerpt,
-        content_hash: excerpt ? hash(excerpt) : null,
+        content_hash: artifactContentHash ?? (excerpt ? hash(excerpt) : null),
         attestation_state: context.attestationState,
-        metadata: { payloadPath: item.path },
+        metadata: {
+          payloadPath: item.path,
+          ...(capturedAt ? { capturedAt } : {}),
+          ...(publishedAt ? { publishedAt } : {}),
+          ...(match ? { match } : {}),
+          ...(sourceContentHash ? { sourceContentHash } : {}),
+        },
       });
     }
 

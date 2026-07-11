@@ -21,7 +21,10 @@ const headers = (key: string) => ({
 });
 const hash = (s: string) => "gt:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
 
-export async function cacheGet(key: string): Promise<string | null> {
+export async function cacheGet(
+  key: string,
+  usage: { operation?: string; meta?: string } = {},
+): Promise<string | null> {
   const c = creds();
   if (!c) return null;
   try {
@@ -34,7 +37,7 @@ export async function cacheGet(key: string): Promise<string | null> {
     const p = rows?.[0]?.payload;
     const expiresAt = rows?.[0]?.expires_at ? Date.parse(rows[0].expires_at) : Number.NaN;
     if (!p?.text || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
-    recordCall("cache", "grok-hit", 0, "24h search cache", "cached");
+    recordCall("cache", usage.operation ?? "grok-hit", 0, usage.meta ?? "24h search cache", "cached");
     return p.text;
   } catch {
     return null;

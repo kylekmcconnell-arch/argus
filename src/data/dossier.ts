@@ -9,13 +9,14 @@ import {
   type PanoptesNode,
   type PanoptesEdge,
 } from "../engine";
-import type { CollectedEvidence, NotableFollower, Contradiction, WebTeamMember } from "./evidence";
+import type { CollectedEvidence, NotableFollower, Contradiction, WebTeamMember, SourceArtifact } from "./evidence";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
 import type { ScanCheck } from "../lib/scanChecklist";
 
 export interface Dossier {
   handle: string;
   display_name: string;
+  resolved_name?: string;
   avatar: string;
   avatar_url?: string;
   bio: string;
@@ -35,7 +36,7 @@ export interface Dossier {
     runs: Array<{
       id: string;
       label: string;
-      state: "executed" | "failed" | "unavailable";
+      state: "executed" | "partial" | "failed" | "unavailable";
       observedAt: string;
       detail?: string;
     }>;
@@ -54,6 +55,7 @@ export interface Dossier {
   notableFollowers: NotableFollower[];
   contradictions: Contradiction[];
   webTeam: WebTeamMember[];
+  sourceArtifacts?: SourceArtifact[];
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
@@ -143,6 +145,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   return {
     handle: ev.profile.handle,
     display_name: ev.profile.display_name,
+    resolved_name: ev.profile.resolved_name,
     avatar: ev.profile.avatar,
     avatar_url: ev.profile.avatar_url,
     bio: ev.profile.bio,
@@ -156,6 +159,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
     webTeam: ev.webTeam ?? [],
+    sourceArtifacts: ev.sourceArtifacts,
     report,
     graph,
     founderSummary: ev.roles.includes(SubjectClass.FOUNDER) ? a.founderSummary() : undefined,

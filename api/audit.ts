@@ -12,6 +12,7 @@ import {
 } from "./_auth.js";
 import { activateReportVersion, persistProvenance } from "./_provenance.js";
 import { issuePanelCostToken, recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
+import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
 
 export const config = { maxDuration: 180 };
 
@@ -45,6 +46,11 @@ export async function persistServerDossier(
   // A curated fallback may be assembled server-side, but it was not collected
   // from live providers. Keep that distinction in every immutable surface.
   const attestationState = dossier.live ? "server_collected" : "analyst_submitted";
+  const qualifiedCompleteness = coverageQualifiedCompleteness({
+    completeness: dossier?.completeness_state || "partial",
+    attestation: attestationState,
+    checks: dossier.checkRuns ?? [],
+  });
 
   const versionResponse = await fetch(`${credentials.url}/rest/v1/rpc/persist_report_version`, {
     method: "POST",
@@ -60,7 +66,7 @@ export async function persistServerDossier(
       p_attestation_state: attestationState,
       p_verdict: verdict,
       p_score: score,
-      p_completeness_state: dossier?.completeness_state || "partial",
+      p_completeness_state: qualifiedCompleteness,
       p_methodology_version: process.env.ARGUS_METHODOLOGY_VERSION || null,
       p_provider_snapshot: dossier?.providerSnapshot ?? dossier?.providers ?? {},
       p_cost: dossier?.cost ?? {},

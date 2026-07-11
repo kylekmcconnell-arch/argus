@@ -3,6 +3,13 @@
 import { createHash } from "node:crypto";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { serviceCredentials, serviceHeaders, type ServiceCredentials } from "./_auth.js";
+import {
+  exactReportPath,
+  presentPublicReport,
+  publicReportDescription,
+  publicReportTitle,
+  type PublicReportPresentation,
+} from "../src/lib/reportPresentation.js";
 
 interface ShareRow {
   organization_id?: unknown;
@@ -27,14 +34,18 @@ interface CaseRow {
   display_query?: unknown;
 }
 
+interface CheckRow {
+  state?: unknown;
+  stale_at?: unknown;
+  metadata?: unknown;
+}
+
 interface SharedSnapshot {
+  reportVersionId: string;
   kind: string;
-  canonicalRef: string;
   title: string;
   headline: string;
-  verdict: string;
-  score: string;
-  completeness: string;
+  presentation: PublicReportPresentation;
   attestation: string;
   createdAt: string;
 }
@@ -62,18 +73,6 @@ function attestationLabel(value: unknown): string {
   if (value === "server_collected") return "SERVER-COLLECTED REPORT";
   if (value === "analyst_submitted") return "ANALYST-SUBMITTED REPORT";
   return "LEGACY · UNATTESTED";
-}
-
-function completenessLabel(value: unknown): string {
-  if (value === "complete") return "COMPLETE";
-  if (value === "failed") return "FAILED";
-  return "PARTIAL";
-}
-
-function scoreLabel(value: unknown): string {
-  const score = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(score) || score < 0 || score > 100) return "";
-  return Number.isInteger(score) ? String(score) : score.toFixed(1);
 }
 
 function kindLabel(kind: string): string {
@@ -114,11 +113,20 @@ async function resolveSnapshot(
   const caseId = typeof version?.case_id === "string" ? version.case_id : "";
   if (version?.id !== reportVersionId || !caseId) return null;
 
-  const caseResponse = await fetch(
-    `${credentials.url}/rest/v1/cases?select=kind,canonical_ref,display_query&id=eq.${encodeURIComponent(caseId)}&organization_id=eq.${encodeURIComponent(organizationId)}&limit=1`,
-    { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
-  );
-  const cases = await jsonRows<CaseRow>(caseResponse);
+  const [caseResponse, checkResponse] = await Promise.all([
+    fetch(
+      `${credentials.url}/rest/v1/cases?select=kind,canonical_ref,display_query&id=eq.${encodeURIComponent(caseId)}&organization_id=eq.${encodeURIComponent(organizationId)}&limit=1`,
+      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
+    ),
+    fetch(
+      `${credentials.url}/rest/v1/check_runs?select=state,stale_at,metadata&organization_id=eq.${encodeURIComponent(organizationId)}&report_version_id=eq.${encodeURIComponent(reportVersionId)}`,
+      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(8_000) },
+    ),
+  ]);
+  const [cases, checks] = await Promise.all([
+    jsonRows<CaseRow>(caseResponse),
+    jsonRows<CheckRow>(checkResponse),
+  ]);
   const reportCase = cases[0];
   const kind = cleanText(reportCase?.kind, 30);
   const canonicalRef = cleanText(reportCase?.canonical_ref, 500);
@@ -145,13 +153,17 @@ async function resolveSnapshot(
     || "INCOMPLETE";
 
   return {
+    reportVersionId,
     kind,
-    canonicalRef,
     title: title || cleanText(reportCase?.display_query, 120) || canonicalRef,
     headline,
-    verdict: verdict.toUpperCase(),
-    score: scoreLabel(version?.score),
-    completeness: completenessLabel(version?.completeness_state),
+    presentation: presentPublicReport({
+      verdict,
+      score: version?.score,
+      completeness: version?.completeness_state,
+      attestation: version?.attestation_state,
+      checks,
+    }),
     attestation: attestationLabel(version?.attestation_state),
     createdAt: cleanText(version?.created_at, 40),
   };
@@ -208,17 +220,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const subject = snapshot.kind === "token" || snapshot.kind === "investigation"
     ? `$${snapshot.title.replace(/^\$/, "")}`
     : snapshot.title;
-  const appUrl = snapshot.kind === "person"
-    ? `/?s=${encodeURIComponent(snapshot.canonicalRef.replace(/^@/, ""))}`
-    : snapshot.kind === "token" || snapshot.kind === "investigation"
-      ? `/?t=${encodeURIComponent(snapshot.canonicalRef)}`
-      : "/";
-  const pageTitle = `${subject} — ${snapshot.verdict}${snapshot.score ? ` · ${snapshot.score}/100` : ""} · ARGUS`;
-  const description = `${snapshot.headline} · ${snapshot.attestation}`;
+  const appUrl = exactReportPath(snapshot.reportVersionId);
+  const pageTitle = publicReportTitle(subject, snapshot.presentation);
+  const description = publicReportDescription(snapshot.headline, snapshot.attestation, snapshot.presentation);
   const dateLabel = snapshot.createdAt
     ? new Date(snapshot.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" })
     : "";
   const safeAppUrl = esc(appUrl);
+  const versionLabel = snapshot.reportVersionId.slice(0, 8).toUpperCase();
+  const presentation = snapshot.presentation;
 
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
@@ -238,13 +248,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 <meta name="twitter:description" content="${esc(description)}"/>
 <meta name="twitter:image" content="${esc(ogImage)}"/>
 <style>
-*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#09090b;color:#fafafa;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center;padding:24px}.card{width:min(760px,100%);border:1px solid #27272a;border-radius:22px;background:linear-gradient(145deg,#18181b,#0f0f11);padding:34px;box-shadow:0 30px 90px #0008}.brand{display:flex;align-items:center;gap:12px;color:#a1a1aa;font-size:12px;letter-spacing:.16em}.mark{width:29px;height:29px;border-radius:8px;background:#fafafa;display:grid;place-items:center}.dot{width:10px;height:10px;border-radius:50%;background:#d64a9e}.chip{margin-left:auto;border:1px solid #3f3f46;border-radius:999px;padding:6px 10px;font-size:10px;color:#d4d4d8}.subject{margin:54px 0 0;font-size:clamp(40px,8vw,72px);line-height:1;letter-spacing:-.045em;overflow-wrap:anywhere}.headline{margin:18px 0 0;max-width:650px;color:#a1a1aa;font-size:18px;line-height:1.55}.result{display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap;margin-top:52px}.label{font-size:10px;letter-spacing:.2em;color:#71717a}.verdict{margin-top:7px;font-size:clamp(34px,7vw,58px);font-weight:750;color:#38e1c4;overflow-wrap:anywhere}.score{border:2px solid #38e1c4;border-radius:999px;padding:10px 18px;color:#38e1c4;font-size:30px;font-weight:750}.score small{font-size:13px;color:#71717a}.meta{display:flex;gap:9px;flex-wrap:wrap;margin-top:34px}.meta span{border:1px solid #27272a;border-radius:7px;padding:7px 9px;color:#a1a1aa;font:10px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em}.actions{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-top:26px;padding-top:24px;border-top:1px solid #27272a;color:#71717a;font-size:12px}.actions a{color:#09090b;background:#fafafa;border-radius:9px;padding:10px 14px;text-decoration:none;font-weight:650}
-</style></head><body><main class="card">
+*{box-sizing:border-box}body{margin:0;min-height:100vh;background:#09090b;color:#fafafa;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;display:grid;place-items:center;padding:24px}.card{width:min(760px,100%);border:1px solid #27272a;border-radius:22px;background:linear-gradient(145deg,#18181b,#0f0f11);padding:34px;box-shadow:0 30px 90px #0008}.brand{display:flex;align-items:center;gap:12px;color:#a1a1aa;font-size:12px;letter-spacing:.16em}.mark{width:29px;height:29px;border-radius:8px;background:#fafafa;display:grid;place-items:center}.dot{width:10px;height:10px;border-radius:50%;background:#d64a9e}.chip{margin-left:auto;border:1px solid #3f3f46;border-radius:999px;padding:6px 10px;font-size:10px;color:#d4d4d8}.subject{margin:44px 0 0;font-size:clamp(40px,8vw,72px);line-height:1;letter-spacing:-.045em;overflow-wrap:anywhere}.headline{margin:18px 0 0;max-width:650px;color:#a1a1aa;font-size:18px;line-height:1.55}.readiness{display:inline-flex;margin-top:30px;border:1px solid var(--result);border-radius:7px;padding:7px 10px;color:var(--result);font:10px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.12em}.result{display:flex;align-items:flex-end;gap:22px;flex-wrap:wrap;margin-top:22px}.label{font-size:10px;letter-spacing:.2em;color:#a1a1aa}.verdict{margin-top:7px;font-size:clamp(34px,7vw,58px);font-weight:750;color:var(--result);overflow-wrap:anywhere}.score{display:flex;align-items:baseline;gap:5px;border:2px solid var(--result);border-radius:999px;padding:10px 18px;color:var(--result);font-size:30px;font-weight:750}.score small{font-size:13px;color:#a1a1aa}.score-kind{font:9px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em;color:#a1a1aa}.signal{margin-top:16px;color:var(--result);font:11px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.08em}.note{margin:12px 0 0;color:#a1a1aa;font-size:13px;line-height:1.5}.meta{display:flex;gap:9px;flex-wrap:wrap;margin-top:28px}.meta span{border:1px solid #27272a;border-radius:7px;padding:7px 9px;color:#a1a1aa;font:10px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em}.actions{display:flex;justify-content:space-between;align-items:center;gap:20px;margin-top:26px;padding-top:24px;border-top:1px solid #27272a;color:#a1a1aa;font-size:12px}.actions a{color:#09090b;background:#fafafa;border-radius:9px;padding:10px 14px;text-decoration:none;font-weight:650}
+</style></head><body><main class="card" style="--result:${esc(presentation.color)}">
 <div class="brand"><span class="mark"><span class="dot"></span></span><strong>ARGUS</strong><span>${esc(kindLabel(snapshot.kind))}</span><span class="chip">IMMUTABLE SNAPSHOT</span></div>
-<h1 class="subject">${esc(subject)}</h1><p class="headline">${esc(snapshot.headline)}</p>
-<section class="result"><div><div class="label">VERDICT</div><div class="verdict">${esc(snapshot.verdict.replace("_IDENTITY", ""))}</div></div>${snapshot.score ? `<div class="score">${esc(snapshot.score)}<small>/100</small></div>` : ""}</section>
-<div class="meta"><span>${esc(snapshot.attestation)}</span><span>${esc(snapshot.completeness)} COVERAGE</span>${dateLabel ? `<span>CAPTURED ${esc(dateLabel.toUpperCase())}</span>` : ""}</div>
-<div class="actions"><span>Verify the evidence before making an investment decision.</span><a href="${safeAppUrl}" rel="noreferrer">Open ARGUS</a></div>
+<h1 class="subject">${esc(subject)}</h1>
+<div class="readiness">${esc(presentation.readinessLabel)}</div>
+<p class="headline">${esc(snapshot.headline)}</p>
+<section class="result"><div><div class="label">${esc(presentation.resultLabel)}</div><div class="verdict">${esc(presentation.displayVerdict)}</div></div>${presentation.primaryScore ? `<div class="score">${esc(presentation.primaryScore)}<small>/100</small>${presentation.scoreLabel ? `<span class="score-kind">${esc(presentation.scoreLabel)}</span>` : ""}</div>` : ""}</section>
+${presentation.secondarySignal ? `<div class="signal">${esc(presentation.secondarySignal)}</div>` : ""}
+<p class="note">${esc(presentation.note)}</p>
+<div class="meta"><span>${esc(snapshot.attestation)}</span><span>${esc(presentation.coverageLabel)}</span><span>VERSION ${esc(versionLabel)}</span>${dateLabel ? `<span>CAPTURED ${esc(dateLabel.toUpperCase())}</span>` : ""}</div>
+<div class="actions"><span>Bound to this exact immutable report version.</span><a href="${safeAppUrl}" rel="noreferrer">Open exact snapshot</a></div>
 </main></body></html>`;
 
   res.setHeader("content-type", "text/html; charset=utf-8");

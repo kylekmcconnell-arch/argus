@@ -2,6 +2,10 @@
 // This route deliberately accepts no caller-authored title/verdict/score fields.
 import React from "react";
 import { ImageResponse } from "@vercel/og";
+import {
+  presentPublicReport,
+  type PublicReportPresentation,
+} from "../src/lib/reportPresentation.js";
 
 export const config = { runtime: "edge" };
 
@@ -11,25 +15,16 @@ interface ServiceCredentials {
 }
 
 interface Snapshot {
+  reportVersionId: string;
   kind: string;
   title: string;
   headline: string;
-  verdict: string;
-  score: string;
+  presentation: PublicReportPresentation;
   attestation: string;
-  completeness: string;
   createdAt: string;
 }
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
-const VCOLOR: Record<string, string> = {
-  PASS: "#16a34a",
-  CAUTION: "#d97706",
-  FAIL: "#ea580c",
-  AVOID: "#dc2626",
-  UNVERIFIABLE_IDENTITY: "#7c3aed",
-  INCOMPLETE: "#71717a",
-};
 
 function credentials(): ServiceCredentials | null {
   const url = process.env.SUPABASE_URL?.replace(/\/$/, "");
@@ -56,22 +51,10 @@ function objectValue(value: unknown): Record<string, unknown> {
     : {};
 }
 
-function scoreLabel(value: unknown): string {
-  const score = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(score) || score < 0 || score > 100) return "";
-  return Number.isInteger(score) ? String(score) : score.toFixed(1);
-}
-
 function attestationLabel(value: unknown): string {
   if (value === "server_collected") return "SERVER-COLLECTED REPORT";
   if (value === "analyst_submitted") return "ANALYST-SUBMITTED REPORT";
   return "LEGACY · UNATTESTED";
-}
-
-function completenessLabel(value: unknown): string {
-  if (value === "complete") return "COMPLETE COVERAGE";
-  if (value === "failed") return "FAILED COVERAGE";
-  return "PARTIAL COVERAGE";
 }
 
 function kindLabel(kind: string): string {
@@ -114,11 +97,20 @@ async function resolveSnapshot(service: ServiceCredentials, token: string): Prom
   const caseId = cleanText(version?.case_id, 80);
   if (version?.id !== reportVersionId || !caseId) return null;
 
-  const caseResponse = await fetch(
-    `${service.url}/rest/v1/cases?select=kind,canonical_ref,display_query&id=eq.${encodeURIComponent(caseId)}&organization_id=eq.${encodeURIComponent(organizationId)}&limit=1`,
-    { headers: serviceHeaders(service.key) },
-  );
-  const cases = await jsonRows<Record<string, unknown>>(caseResponse);
+  const [caseResponse, checkResponse] = await Promise.all([
+    fetch(
+      `${service.url}/rest/v1/cases?select=kind,canonical_ref,display_query&id=eq.${encodeURIComponent(caseId)}&organization_id=eq.${encodeURIComponent(organizationId)}&limit=1`,
+      { headers: serviceHeaders(service.key) },
+    ),
+    fetch(
+      `${service.url}/rest/v1/check_runs?select=state,stale_at,metadata&organization_id=eq.${encodeURIComponent(organizationId)}&report_version_id=eq.${encodeURIComponent(reportVersionId)}`,
+      { headers: serviceHeaders(service.key) },
+    ),
+  ]);
+  const [cases, checks] = await Promise.all([
+    jsonRows<Record<string, unknown>>(caseResponse),
+    jsonRows<Record<string, unknown>>(checkResponse),
+  ]);
   const reportCase = cases[0];
   const kind = cleanText(reportCase?.kind, 30);
   const canonicalRef = cleanText(reportCase?.canonical_ref, 500);
@@ -145,13 +137,18 @@ async function resolveSnapshot(service: ServiceCredentials, token: string): Prom
     || "INCOMPLETE";
 
   return {
+    reportVersionId,
     kind,
     title: title || cleanText(reportCase?.display_query, 120) || canonicalRef,
     headline,
-    verdict: verdict.toUpperCase(),
-    score: scoreLabel(version?.score),
+    presentation: presentPublicReport({
+      verdict,
+      score: version?.score,
+      completeness: version?.completeness_state,
+      attestation: version?.attestation_state,
+      checks,
+    }),
     attestation: attestationLabel(version?.attestation_state),
-    completeness: completenessLabel(version?.completeness_state),
     createdAt: cleanText(version?.created_at, 40),
   };
 }
@@ -188,10 +185,12 @@ export default async function handler(req: Request) {
   const subject = snapshot.kind === "token" || snapshot.kind === "investigation"
     ? `$${snapshot.title.replace(/^\$/, "")}`
     : snapshot.title;
-  const color = VCOLOR[snapshot.verdict] || "#38e1c4";
+  const presentation = snapshot.presentation;
+  const color = presentation.color;
   const dateLabel = snapshot.createdAt
     ? new Date(snapshot.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }).toUpperCase()
     : "";
+  const versionLabel = snapshot.reportVersionId.slice(0, 8).toUpperCase();
 
   return new ImageResponse(
     (
@@ -224,21 +223,27 @@ export default async function handler(req: Request) {
           {snapshot.headline}
         </div>
 
-        <div style={{ display: "flex", alignItems: "flex-end", gap: "24px", position: "absolute", left: "64px", bottom: "94px" }}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: "24px", position: "absolute", left: "64px", bottom: "112px" }}>
           <div style={{ display: "flex", flexDirection: "column" }}>
-            <div style={{ fontSize: "17px", letterSpacing: "4px", color: "#71717a" }}>VERDICT</div>
-            <div style={{ display: "flex", marginTop: "5px", fontSize: "74px", fontWeight: 800, color, lineHeight: 1, letterSpacing: "-2px" }}>{snapshot.verdict.replace("_IDENTITY", "")}</div>
+            <div style={{ fontSize: "17px", letterSpacing: "4px", color: "#71717a" }}>{presentation.resultLabel}</div>
+            <div style={{ display: "flex", marginTop: "5px", fontSize: "74px", fontWeight: 800, color, lineHeight: 1, letterSpacing: "-2px" }}>{presentation.displayVerdict}</div>
           </div>
-          {snapshot.score && (
+          {presentation.primaryScore && (
             <div style={{ display: "flex", alignItems: "baseline", border: `3px solid ${color}`, borderRadius: "9999px", padding: "13px 24px", color, marginBottom: "3px" }}>
-              <div style={{ fontSize: "48px", fontWeight: 800 }}>{snapshot.score}</div>
+              <div style={{ fontSize: "48px", fontWeight: 800 }}>{presentation.primaryScore}</div>
               <div style={{ fontSize: "20px", marginLeft: "4px", color: "#71717a" }}>/100</div>
+              {presentation.scoreLabel && <div style={{ fontSize: "11px", marginLeft: "8px", color: "#71717a", letterSpacing: "1px" }}>{presentation.scoreLabel}</div>}
+            </div>
+          )}
+          {presentation.secondarySignal && (
+            <div style={{ display: "flex", border: `1px solid ${color}`, borderRadius: "8px", padding: "10px 13px", color, marginBottom: "7px", fontSize: "14px", letterSpacing: "1px" }}>
+              {presentation.secondarySignal}
             </div>
           )}
         </div>
 
         <div style={{ display: "flex", gap: "10px", position: "absolute", left: "64px", bottom: "42px" }}>
-          {[snapshot.attestation, snapshot.completeness, ...(dateLabel ? [`CAPTURED ${dateLabel}`] : [])].map((label) => (
+          {[presentation.readinessLabel, presentation.coverageLabel, snapshot.attestation, `VERSION ${versionLabel}`, ...(dateLabel ? [`CAPTURED ${dateLabel}`] : [])].map((label) => (
             <div key={label} style={{ display: "flex", border: "1px solid #27272a", borderRadius: "7px", padding: "7px 10px", fontSize: "12px", color: "#a1a1aa", letterSpacing: "1px" }}>{label}</div>
           ))}
         </div>

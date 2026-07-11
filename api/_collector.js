@@ -949,6 +949,7 @@ function assembleDossier(ev, live) {
   return {
     handle: ev.profile.handle,
     display_name: ev.profile.display_name,
+    resolved_name: ev.profile.resolved_name,
     avatar: ev.profile.avatar,
     avatar_url: ev.profile.avatar_url,
     bio: ev.profile.bio,
@@ -962,6 +963,7 @@ function assembleDossier(ev, live) {
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
     webTeam: ev.webTeam ?? [],
+    sourceArtifacts: ev.sourceArtifacts,
     report,
     graph,
     founderSummary: ev.roles.includes("FOUNDER" /* FOUNDER */) ? a.founderSummary() : void 0,
@@ -1011,7 +1013,8 @@ function toEvidence(f) {
     headline: f.headline,
     recentActivity: [],
     notableFollowers: [],
-    contradictions: []
+    contradictions: [],
+    sourceArtifacts: []
   };
 }
 var lumen = {
@@ -1241,7 +1244,8 @@ function emptyEvidence(handle) {
     headline: "",
     recentActivity: [],
     notableFollowers: [],
-    contradictions: []
+    contradictions: [],
+    sourceArtifacts: []
   };
 }
 
@@ -1587,7 +1591,10 @@ function buildAnalystEvidencePacket(input) {
     wallets: 12,
     team: 16,
     notableFollowers: 16,
-    recentActivity: 12
+    recentActivity: 12,
+    sourceArtifacts: 24,
+    checkOutcomes: 20,
+    providerRuns: 24
   };
   const findingsRaw = Array.isArray(input.findings) ? input.findings : [];
   const findings = findingsRaw.slice(0, 24).map(compactFinding).filter((f) => !!f);
@@ -1608,7 +1615,7 @@ function buildAnalystEvidencePacket(input) {
     packet[section] = included;
     coverage[section] = { available: source.length, included: included.length };
   }
-  const pruneOrder = ["recentActivity", "notableFollowers", "wallets", "promotions", "advised", "testimonials", "ventures", "team"];
+  const pruneOrder = ["recentActivity", "notableFollowers", "wallets", "promotions", "advised", "testimonials", "ventures", "team", "providerRuns", "checkOutcomes", "sourceArtifacts"];
   let json = JSON.stringify(packet);
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
     const section = pruneOrder.find((key) => Array.isArray(packet[key]) && packet[key].length > 0);
@@ -1723,8 +1730,8 @@ var CHECKS = [
   { id: "promoted-token-performance", label: "Promoted-token performance", defaultNote: "no completed promoted-token market result was recorded", role: "KOL" },
   { id: "vc-portfolio-track-record", label: "VC portfolio track record", defaultNote: "no completed portfolio-provider result was recorded", role: "INVESTOR" },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
-  { id: "us-legal-history", label: "US legal history", defaultNote: "server collector did not run a legal-history check" },
-  { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check" },
+  { id: "us-legal-history", label: "US legal history", defaultNote: "server collector did not run a legal-history check", requiresResolvedRealName: true },
+  { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check", requiresResolvedRealName: true },
   { id: "trust-graph-connections", label: "Trust-graph connections", defaultNote: "server collector did not run flagged-subject graph reconciliation" }
 ];
 var STATUS_PRIORITY = {
@@ -1777,7 +1784,7 @@ var PersonCheckTracker = class {
       ...detail?.trim() ? { detail: detail.trim().slice(0, 500) } : {}
     });
   }
-  snapshot(roles) {
+  snapshot(roles, scope = {}) {
     const heldRoles = new Set(roles);
     return CHECKS.map((definition) => {
       if (definition.role && !heldRoles.has(definition.role)) {
@@ -1786,6 +1793,14 @@ var PersonCheckTracker = class {
           label: definition.label,
           status: "not-applicable",
           note: definition.role === "KOL" ? "not a KOL" : "not a fund/investor"
+        });
+      }
+      if (definition.requiresResolvedRealName && scope.resolvedRealName === false) {
+        return Object.freeze({
+          checkId: definition.id,
+          label: definition.label,
+          status: "not-applicable",
+          note: "requires a resolved real-person name"
         });
       }
       const observations = this.observations.get(definition.id) ?? [];
@@ -1815,8 +1830,8 @@ var PersonCheckTracker = class {
       });
     });
   }
-  completeness(roles) {
-    const summary = summarizeChecks(this.snapshot(roles));
+  completeness(roles, scope = {}) {
+    const summary = summarizeChecks(this.snapshot(roles, scope));
     return summary.inScope > 0 && summary.successful === summary.inScope ? "complete" : "partial";
   }
   providers() {
@@ -1841,7 +1856,7 @@ var headers = (key) => ({
   "content-type": "application/json"
 });
 var hash = (s) => "gt:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
-async function cacheGet(key) {
+async function cacheGet(key, usage = {}) {
   const c = creds();
   if (!c) return null;
   try {
@@ -1854,7 +1869,7 @@ async function cacheGet(key) {
     const p = rows?.[0]?.payload;
     const expiresAt = rows?.[0]?.expires_at ? Date.parse(rows[0].expires_at) : Number.NaN;
     if (!p?.text || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null;
-    recordCall("cache", "grok-hit", 0, "24h search cache", "cached");
+    recordCall("cache", usage.operation ?? "grok-hit", 0, usage.meta ?? "24h search cache", "cached");
     return p.text;
   } catch {
     return null;
@@ -3454,6 +3469,7 @@ var peopledatalabsAdapter = {
       return;
     }
     ctx.evidence.profile.identity_confidence = person.linkedin ? "Probable" : ctx.evidence.profile.identity_confidence;
+    if (person.fullName) ctx.evidence.profile.resolved_name = person.fullName;
     if (person.emails.length) ctx.evidence.profile.identity_emails = person.emails;
     const emailNote = person.emails.length ? ` Email on record: ${person.emails[0]}.` : "";
     ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.${emailNote}`;
@@ -4063,6 +4079,612 @@ var onchainAdapter = {
   }
 };
 
+// server/adapters/offchain.ts
+import { createHash as createHash2 } from "node:crypto";
+
+// src/lib/offchainEvidence.ts
+var asRecord4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+var aggregateStatus2 = (attempts) => {
+  if (!attempts.length) return "succeeded";
+  if (attempts.every((attempt) => attempt.status === "succeeded")) return "succeeded";
+  if (attempts.every((attempt) => attempt.status === "failed")) return "failed";
+  return "partial";
+};
+var sha256 = async (value) => {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+};
+var decode = (value) => value.replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, '"').replace(/&#39;/g, "'").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(Number(n))).replace(/<[^>]+>/g, "").trim();
+var tag = (block, name) => {
+  const match = block.match(new RegExp(`<${name}[^>]*>([\\s\\S]*?)</${name}>`, "i"));
+  return match ? decode(match[1].replace(/<!\[CDATA\[|\]\]>/g, "")) : null;
+};
+async function searchNewsPhrase(phrase, fetcher) {
+  const scoped = `"${phrase}" (crypto OR token OR web3 OR blockchain OR NFT)`;
+  const url = `https://news.google.com/rss/search?q=${encodeURIComponent(scoped)}&hl=en-US&gl=US&ceid=US:en`;
+  let response;
+  try {
+    response = await fetcher(url, {
+      headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)" },
+      signal: AbortSignal.timeout(9e3)
+    });
+  } catch {
+    return {
+      articles: [],
+      attempt: { provider: "google-news", operation: "rss-search", status: "failed", detail: "transport_error" }
+    };
+  }
+  if (!response.ok) {
+    return {
+      articles: [],
+      attempt: { provider: "google-news", operation: "rss-search", status: "failed", detail: `http_${response.status}` }
+    };
+  }
+  let xml;
+  try {
+    xml = await response.text();
+  } catch {
+    return {
+      articles: [],
+      attempt: { provider: "google-news", operation: "rss-search", status: "failed", detail: "response_text_error" }
+    };
+  }
+  if (!/<(?:rss|feed)\b/i.test(xml) || !/<(?:channel|entry)\b/i.test(xml)) {
+    return {
+      articles: [],
+      attempt: { provider: "google-news", operation: "rss-search", status: "failed", detail: "response_xml_error" }
+    };
+  }
+  const items = xml.split(/<item>/).slice(1).map((block) => block.split("</item>")[0]);
+  const articles = items.map((block) => {
+    const rawTitle = tag(block, "title") ?? "";
+    const source = tag(block, "source") ?? (rawTitle.includes(" - ") ? rawTitle.split(" - ").pop() ?? "" : "");
+    const title = source && rawTitle.endsWith(` - ${source}`) ? rawTitle.slice(0, -(source.length + 3)) : rawTitle;
+    const link = tag(block, "link");
+    const published = tag(block, "pubDate");
+    const description = tag(block, "description") ?? "";
+    const parsedDate = published ? Date.parse(published) : Number.NaN;
+    return {
+      title,
+      source,
+      url: link,
+      publishedAt: Number.isFinite(parsedDate) ? parsedDate : null,
+      blob: `${title} ${description}`.toLowerCase()
+    };
+  }).filter((article) => Boolean(article.title && article.url));
+  const invalidItems = items.length - articles.length;
+  const status = invalidItems === 0 ? "succeeded" : articles.length ? "partial" : "failed";
+  return {
+    articles,
+    attempt: {
+      provider: "google-news",
+      operation: "rss-search",
+      status,
+      detail: invalidItems ? `dropped_${invalidItems}_invalid_items` : `${articles.length}_results`
+    }
+  };
+}
+function normalizeNewsSubject(rawName, rawHandle) {
+  const name = rawName.trim().replace(/[^\p{L}\p{N}\s.'-]/gu, " ").replace(/\s+/g, " ").trim();
+  const handleCandidate = rawHandle.trim().replace(/^@/, "");
+  const handle = /^[A-Za-z0-9_]{1,30}$/.test(handleCandidate) ? handleCandidate : "";
+  if (!name && !handle) return null;
+  const phrases = [];
+  if (name && name.split(/\s+/).length >= 2) phrases.push(name);
+  if (handle) phrases.push(handle);
+  if (!phrases.length && name) phrases.push(name);
+  return { name, handle, phrases: [...new Set(phrases)] };
+}
+function containsExactPhrase(value, phrase) {
+  const escaped = phrase.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^\\p{L}\\p{N}_])${escaped}($|[^\\p{L}\\p{N}_])`, "iu").test(value);
+}
+async function collectNews(rawName, rawHandle, fetcher = fetch) {
+  const subject = normalizeNewsSubject(rawName, rawHandle);
+  if (!subject) throw new Error("news subject required");
+  const seen = /* @__PURE__ */ new Set();
+  const articles = [];
+  const attempts = [];
+  const matches = {};
+  for (const phrase of subject.phrases) {
+    const result = await searchNewsPhrase(phrase, fetcher);
+    attempts.push(result.attempt);
+    const normalizedPhrase = phrase.toLowerCase();
+    for (const article of result.articles.filter((candidate) => containsExactPhrase(candidate.blob, normalizedPhrase))) {
+      const key = (article.url ?? article.title).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      matches[key] = subject.handle && normalizedPhrase === subject.handle.toLowerCase() ? "exact_handle" : "exact_name";
+      articles.push({
+        title: article.title,
+        source: article.source,
+        url: article.url,
+        publishedAt: article.publishedAt
+      });
+    }
+  }
+  articles.sort((left, right) => (right.publishedAt ?? 0) - (left.publishedAt ?? 0));
+  return {
+    value: {
+      available: true,
+      query: subject.phrases[0] ?? subject.name,
+      articles: articles.slice(0, 10)
+    },
+    attempts,
+    status: aggregateStatus2(attempts),
+    matches
+  };
+}
+function normalizeResolvedName(value) {
+  return value.trim().replace(/^@/, "").slice(0, 80);
+}
+function isPlausibleFullName(value) {
+  return normalizeResolvedName(value).split(/\s+/).filter(Boolean).length >= 2;
+}
+var normalizedWords = (value) => value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim().split(" ").filter(Boolean);
+function legalCaptionHasFullName(caseName, resolvedName) {
+  const nameWords = normalizedWords(resolvedName);
+  if (nameWords.length < 2) return false;
+  const caption = ` ${normalizedWords(caseName).join(" ")} `;
+  const forward = ` ${nameWords.join(" ")} `;
+  const reverse = ` ${[nameWords.at(-1), ...nameWords.slice(0, -1)].join(" ")} `;
+  return caption.includes(forward) || caption.includes(reverse);
+}
+var COURTLISTENER = "https://www.courtlistener.com/api/rest/v4/search/";
+async function collectLegalCases(rawName, fetcher = fetch) {
+  const name = normalizeResolvedName(rawName);
+  if (!isPlausibleFullName(name)) {
+    return {
+      value: { available: false, note: "Legal screen needs a resolved real name." },
+      attempts: [],
+      status: "succeeded"
+    };
+  }
+  const url = `${COURTLISTENER}?q=${encodeURIComponent(`"${name}"`)}&type=r&order_by=${encodeURIComponent("dateFiled desc")}`;
+  let response;
+  try {
+    response = await fetcher(url, {
+      headers: { "user-agent": "ARGUS due-diligence (contact via argus)" },
+      signal: AbortSignal.timeout(12e3)
+    });
+  } catch (error) {
+    return {
+      value: { available: false, error: String(error), note: "Legal screen failed." },
+      attempts: [{ provider: "courtlistener", operation: "case-search", status: "failed", detail: "transport_error" }],
+      status: "failed"
+    };
+  }
+  if (!response.ok) {
+    return {
+      value: { available: false, note: `CourtListener ${response.status}` },
+      attempts: [{ provider: "courtlistener", operation: "case-search", status: "failed", detail: `http_${response.status}` }],
+      status: "failed"
+    };
+  }
+  let parsed;
+  try {
+    parsed = asRecord4(await response.json()) ?? {};
+  } catch (error) {
+    return {
+      value: { available: false, error: String(error), note: "Legal screen failed." },
+      attempts: [{ provider: "courtlistener", operation: "case-search", status: "failed", detail: "response_json_error" }],
+      status: "failed"
+    };
+  }
+  const resultShapeValid = Array.isArray(parsed.results);
+  const rows = resultShapeValid ? parsed.results : [];
+  let malformedRows = 0;
+  const cases = rows.slice(0, 20).flatMap((candidate) => {
+    const row = asRecord4(candidate);
+    if (!row) {
+      malformedRows += 1;
+      return [];
+    }
+    const rawCaseName = typeof row.caseName === "string" ? row.caseName : typeof row.case_name_full === "string" ? row.case_name_full : "";
+    const caseName = rawCaseName.trim().slice(0, 90);
+    if (!caseName) {
+      malformedRows += 1;
+      return [];
+    }
+    const absoluteUrl = typeof row.docket_absolute_url === "string" && row.docket_absolute_url.startsWith("/") && !row.docket_absolute_url.startsWith("//") ? row.docket_absolute_url : null;
+    const court = typeof row.court === "string" ? row.court : typeof row.court_citation_string === "string" ? row.court_citation_string : "";
+    return [{
+      caseName,
+      court: court.slice(0, 60),
+      date: row.dateFiled ?? row.dateTerminated ?? null,
+      docket: row.docketNumber ?? null,
+      url: absoluteUrl ? `https://www.courtlistener.com${absoluteUrl}` : null,
+      nameInCase: legalCaptionHasFullName(caseName, name)
+    }];
+  });
+  const countValid = typeof parsed.count === "number" && Number.isFinite(parsed.count) && parsed.count >= 0;
+  const total = countValid ? Math.floor(parsed.count) : cases.length;
+  const resultCountMismatch = total > 0 && rows.length === 0;
+  const truncated = total > cases.length || rows.length > cases.length || typeof parsed.next === "string" && Boolean(parsed.next);
+  const value = {
+    available: true,
+    name,
+    total: parsed.count ?? cases.length,
+    cases,
+    asParty: cases.filter((item) => item.nameInCase).length
+  };
+  const attemptStatus = !resultShapeValid || resultCountMismatch || rows.length > 0 && cases.length === 0 ? "failed" : !countValid || malformedRows || truncated ? "partial" : "succeeded";
+  const attempt = {
+    provider: "courtlistener",
+    operation: "case-search",
+    status: attemptStatus,
+    detail: !resultShapeValid ? "result_shape_error" : resultCountMismatch ? "result_count_mismatch" : !countValid ? "invalid_result_count" : malformedRows ? `dropped_${malformedRows}_invalid_results` : truncated ? `${cases.length}_of_${total}_results` : `${cases.length}_results`
+  };
+  return { value, attempts: [attempt], status: attempt.status };
+}
+var OFAC_SOURCE = "https://data.opensanctions.org/datasets/latest/us_ofac_sdn/targets.simple.csv";
+var OFAC_MIN_PERSON_NAMES = 5e3;
+var OFAC_SOURCE_URL = OFAC_SOURCE;
+function normalizeSanctionsName(value) {
+  return value.normalize("NFKD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/[^a-z0-9\s]/g, " ").replace(/\b(mr|mrs|ms|dr|prof|sir|dame|the)\b/g, " ").replace(/\s+/g, " ").trim();
+}
+function firstCsvFields(line, count) {
+  const fields = [];
+  let index = 0;
+  while (fields.length < count && index <= line.length) {
+    let field = "";
+    if (line[index] === '"') {
+      index += 1;
+      while (index < line.length) {
+        if (line[index] === '"') {
+          if (line[index + 1] === '"') {
+            field += '"';
+            index += 2;
+            continue;
+          }
+          index += 1;
+          break;
+        }
+        field += line[index];
+        index += 1;
+      }
+      if (line[index] === ",") index += 1;
+    } else {
+      while (index < line.length && line[index] !== ",") {
+        field += line[index];
+        index += 1;
+      }
+      if (line[index] === ",") index += 1;
+    }
+    fields.push(field);
+  }
+  return fields;
+}
+function parseOfacPersonNames(csv) {
+  const names = /* @__PURE__ */ new Set();
+  const lines = csv.split("\n");
+  for (let index = 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (!line || !line.includes('"Person"')) continue;
+    const [, schema, name, aliases] = firstCsvFields(line, 4);
+    if (schema !== "Person") continue;
+    for (const raw of [name, ...aliases ? aliases.split(";") : []]) {
+      const normalized = normalizeSanctionsName(raw || "");
+      if (normalized && normalized.includes(" ")) names.add(normalized);
+    }
+  }
+  return names;
+}
+async function loadOfacNames(fetcher, cache) {
+  try {
+    const cached = await cache?.read();
+    if (cached) {
+      const names2 = new Set(cached.split("\n").filter(Boolean));
+      if (names2.size >= OFAC_MIN_PERSON_NAMES) {
+        return {
+          names: names2,
+          attempts: [],
+          indexHash: await sha256([...names2].sort().join("\n"))
+        };
+      }
+    }
+  } catch {
+  }
+  let response;
+  try {
+    response = await fetcher(OFAC_SOURCE, { signal: AbortSignal.timeout(2e4) });
+  } catch {
+    return {
+      names: /* @__PURE__ */ new Set(),
+      attempts: [{ provider: "opensanctions", operation: "ofac-name-index", status: "failed", detail: "transport_error" }]
+    };
+  }
+  if (!response.ok) {
+    return {
+      names: /* @__PURE__ */ new Set(),
+      attempts: [{ provider: "opensanctions", operation: "ofac-name-index", status: "failed", detail: `http_${response.status}` }]
+    };
+  }
+  let csv;
+  try {
+    csv = await response.text();
+  } catch {
+    return {
+      names: /* @__PURE__ */ new Set(),
+      attempts: [{ provider: "opensanctions", operation: "ofac-name-index", status: "failed", detail: "response_text_error" }]
+    };
+  }
+  const names = parseOfacPersonNames(csv);
+  const validIndex = names.size >= OFAC_MIN_PERSON_NAMES;
+  const attempt = {
+    provider: "opensanctions",
+    operation: "ofac-name-index",
+    status: validIndex ? "succeeded" : "partial",
+    detail: validIndex ? `${names.size}_names` : `undersized_index_${names.size}`
+  };
+  if (validIndex) {
+    try {
+      await cache?.write([...names].sort().join("\n"));
+    } catch {
+    }
+  }
+  return {
+    names: validIndex ? names : /* @__PURE__ */ new Set(),
+    attempts: [attempt],
+    ...validIndex ? { indexHash: await sha256([...names].sort().join("\n")) } : {}
+  };
+}
+async function collectOfacName(rawName, options = {}) {
+  const name = normalizeResolvedName(rawName);
+  const query = normalizeSanctionsName(name);
+  if (query.split(" ").filter(Boolean).length < 2) {
+    return {
+      value: { available: false, note: "Sanctions screen needs a resolved real name." },
+      attempts: [],
+      status: "succeeded"
+    };
+  }
+  const loaded = await loadOfacNames(options.fetcher ?? fetch, options.cache);
+  if (!loaded.names.size) {
+    return {
+      value: { available: false, note: "OFAC SDN list unavailable." },
+      attempts: loaded.attempts,
+      status: aggregateStatus2(loaded.attempts)
+    };
+  }
+  const tokens = query.split(" ");
+  const reversed = [tokens[tokens.length - 1], ...tokens.slice(0, -1)].join(" ");
+  return {
+    value: {
+      available: true,
+      name,
+      listSize: loaded.names.size,
+      sanctioned: loaded.names.has(query) || loaded.names.has(reversed),
+      list: "US Treasury OFAC SDN"
+    },
+    attempts: loaded.attempts,
+    status: aggregateStatus2(loaded.attempts),
+    indexHash: loaded.indexHash
+  };
+}
+
+// server/adapters/offchain.ts
+var asIso = (value) => {
+  if (typeof value === "number" || typeof value === "string") {
+    const date = new Date(value);
+    if (Number.isFinite(date.getTime())) return date.toISOString();
+  }
+  return void 0;
+};
+var hashArtifact = (artifact) => createHash2("sha256").update(JSON.stringify({
+  kind: artifact.kind,
+  provider: artifact.provider,
+  title: artifact.title,
+  sourceUrl: artifact.sourceUrl,
+  publishedAt: artifact.publishedAt ?? null,
+  excerpt: artifact.excerpt ?? null,
+  match: artifact.match,
+  sourceContentHash: artifact.sourceContentHash ?? null
+})).digest("hex");
+var addArtifact = (ctx, input) => {
+  const artifact = { ...input, contentHash: hashArtifact(input) };
+  const exists = ctx.evidence.sourceArtifacts.some(
+    (candidate) => candidate.provider === artifact.provider && candidate.kind === artifact.kind && candidate.sourceUrl === artifact.sourceUrl
+  );
+  if (!exists) ctx.evidence.sourceArtifacts.push(artifact);
+};
+var addFinding = (ctx, finding) => {
+  const exists = ctx.evidence.findings.some(
+    (candidate) => candidate.finding_type === finding.finding_type && candidate.source_url === finding.source_url && candidate.claim === finding.claim
+  );
+  if (!exists) ctx.evidence.findings.push(finding);
+};
+var recordAttempts = (attempts) => {
+  for (const attempt of attempts) {
+    recordCall(attempt.provider, attempt.operation, 0, attempt.detail, attempt.status);
+  }
+};
+var resolvedRealName = (ctx) => {
+  const confidence = ctx.evidence.profile.identity_confidence;
+  const explicitName = ctx.evidence.profile.resolved_name?.trim() ?? "";
+  const projectOnly = ctx.evidence.roles.length > 0 && ctx.evidence.roles.every((role) => role === "PROJECT");
+  const hasPersonRole = ctx.evidence.roles.some((role) => role !== "PROJECT");
+  const confirmedDisplayName = confidence === "Confirmed" && hasPersonRole ? ctx.evidence.profile.display_name.trim() : "";
+  const name = explicitName || confirmedDisplayName;
+  const resolved = explicitName ? confidence === "Confirmed" || confidence === "Probable" : confidence === "Confirmed";
+  return resolved && !projectOnly && isPlausibleFullName(name) ? name : null;
+};
+function hasResolvedRealName(ctx) {
+  return resolvedRealName(ctx) !== null;
+}
+var failedCheckNote = (label, status, attempts) => {
+  const details = attempts.filter((attempt) => attempt.status !== "succeeded").map((attempt) => attempt.detail).filter((detail) => Boolean(detail));
+  return `${label} ${status === "partial" ? "completed only partially" : "was unavailable"}${details.length ? ` (${[...new Set(details)].join(", ")})` : ""}`;
+};
+var offchainAdapter = {
+  id: "offchain-diligence",
+  label: "News, legal, and sanctions",
+  available: () => true,
+  async run(ctx) {
+    const capturedAt = (/* @__PURE__ */ new Date()).toISOString();
+    const name = resolvedRealName(ctx);
+    ctx.emit({
+      phase: "Off-chain",
+      label: "News / legal / sanctions",
+      detail: name ? `Freezing exact-name news, US court, and OFAC outcomes for ${name} before scoring\u2026` : "Freezing the subject's exact-name/handle news outcome before scoring; legal and OFAC require a resolved real person.",
+      tone: "neutral"
+    });
+    const newsPromise = collectNews(name ?? ctx.evidence.profile.display_name, ctx.handle);
+    const legalPromise = name ? collectLegalCases(name) : null;
+    const ofacPromise = name ? collectOfacName(name, {
+      cache: {
+        read: () => cacheGet("ofacname:v2", {
+          operation: "ofac-name-index-hit",
+          meta: "24h OFAC name-index cache"
+        }),
+        write: (names) => cacheSet("ofacname:v2", names)
+      }
+    }) : null;
+    const [news, legal, ofac] = await Promise.all([
+      newsPromise,
+      legalPromise ?? Promise.resolve(null),
+      ofacPromise ?? Promise.resolve(null)
+    ]);
+    recordAttempts(news.attempts);
+    if (legal) recordAttempts(legal.attempts);
+    if (ofac) recordAttempts(ofac.attempts);
+    if (news.status !== "succeeded") {
+      ctx.recordCheck?.({
+        id: "news-press",
+        status: "unavailable",
+        note: failedCheckNote("Google News search", news.status, news.attempts),
+        provider: "google-news"
+      });
+    } else {
+      ctx.recordCheck?.({
+        id: "news-press",
+        status: news.value.articles.length ? "confirmed" : "checked-empty",
+        note: news.value.articles.length ? `${news.value.articles.length} exact-name or exact-handle crypto press result${news.value.articles.length === 1 ? "" : "s"} frozen` : "exact-name and exact-handle crypto press searches returned no matching article",
+        provider: "google-news",
+        sourceCount: news.value.articles.length
+      });
+    }
+    for (const article of news.value.articles) {
+      if (!article.url) continue;
+      addArtifact(ctx, {
+        kind: "press",
+        provider: "google-news",
+        title: article.title,
+        sourceUrl: article.url,
+        capturedAt,
+        ...asIso(article.publishedAt) ? { publishedAt: asIso(article.publishedAt) } : {},
+        excerpt: article.source,
+        match: news.matches[(article.url ?? article.title).toLowerCase()] ?? "exact_name"
+      });
+    }
+    if (legal) {
+      const exactCases = legal.value.available ? legal.value.cases.filter((item) => legalCaptionHasFullName(item.caseName, name)) : [];
+      const inspectableCases = exactCases.filter(
+        (item) => Boolean(item.url)
+      );
+      const legalIncomplete = !legal.value.available || legal.status !== "succeeded" || inspectableCases.length !== exactCases.length;
+      if (legalIncomplete) {
+        ctx.recordCheck?.({
+          id: "us-legal-history",
+          status: "unavailable",
+          note: inspectableCases.length !== exactCases.length ? "CourtListener returned a matching caption without an inspectable docket URL" : failedCheckNote("CourtListener search", legal.status, legal.attempts),
+          provider: "courtlistener",
+          sourceCount: inspectableCases.length
+        });
+      } else {
+        ctx.recordCheck?.({
+          id: "us-legal-history",
+          status: exactCases.length ? "finding" : "checked-empty",
+          note: exactCases.length ? `${exactCases.length} CourtListener case caption${exactCases.length === 1 ? "" : "s"} contained the full resolved name; identity match requires review${legal.status === "partial" ? " (other returned rows were malformed)" : ""}` : "CourtListener returned no case caption containing the full resolved name",
+          provider: "courtlistener",
+          sourceCount: exactCases.length
+        });
+      }
+      for (const item of inspectableCases) {
+        addArtifact(ctx, {
+          kind: "legal_case",
+          provider: "courtlistener",
+          title: item.caseName || "CourtListener case",
+          sourceUrl: item.url,
+          capturedAt,
+          ...asIso(item.date) ? { publishedAt: asIso(item.date) } : {},
+          excerpt: [item.court, item.docket == null ? "" : String(item.docket)].filter(Boolean).join(" \xB7 "),
+          match: "candidate"
+        });
+        addFinding(ctx, {
+          finding_type: "LegalCaseNameLead",
+          claim: `${name} appears by full name in the caption of ${item.caseName || "a US court record"}; verify that the named party is the audited subject.`,
+          source_url: item.url,
+          source_date: asIso(item.date)?.slice(0, 10) ?? "",
+          source_author: "CourtListener / RECAP",
+          verification_status: "Reported",
+          independent_source_count: 1,
+          polarity: -1,
+          evidence_origin: "deterministic",
+          artifact_verified: true
+        });
+      }
+    }
+    if (ofac) {
+      if (ofac.status !== "succeeded" || !ofac.value.available) {
+        ctx.recordCheck?.({
+          id: "ofac-sanctions-name",
+          status: "unavailable",
+          note: failedCheckNote("OFAC name screen", ofac.status, ofac.attempts),
+          provider: "opensanctions"
+        });
+      } else {
+        ctx.recordCheck?.({
+          id: "ofac-sanctions-name",
+          status: ofac.value.sanctioned ? "finding" : "checked-empty",
+          note: ofac.value.sanctioned ? "exact full-name or alias match in the US Treasury OFAC SDN mirror; identity match requires review" : `exact full-name and reversed-name screen completed against ${ofac.value.listSize.toLocaleString()} OFAC SDN names with no match`,
+          provider: "opensanctions",
+          sourceCount: 1
+        });
+        addArtifact(ctx, {
+          kind: "sanctions_screen",
+          provider: "opensanctions",
+          title: "US Treasury OFAC SDN exact-name screen",
+          sourceUrl: OFAC_SOURCE_URL,
+          capturedAt,
+          excerpt: ofac.value.sanctioned ? `Exact name/alias match for ${name}; identity requires verification.` : `No exact full-name or reversed-name match for ${name} across ${ofac.value.listSize} indexed names.`,
+          match: ofac.value.sanctioned ? "exact_name" : "no_match",
+          ...ofac.indexHash ? { sourceContentHash: ofac.indexHash } : {}
+        });
+        if (ofac.value.sanctioned) {
+          addFinding(ctx, {
+            finding_type: "SanctionsNameLead",
+            claim: `${name} exactly matches a person name or alias in the US Treasury OFAC SDN mirror; verify the identity before drawing a conclusion.`,
+            source_url: OFAC_SOURCE_URL,
+            source_date: capturedAt.slice(0, 10),
+            source_author: "OpenSanctions mirror of US Treasury OFAC SDN",
+            verification_status: "Reported",
+            independent_source_count: 1,
+            polarity: -1,
+            evidence_origin: "deterministic",
+            artifact_verified: true
+          });
+        }
+      }
+    }
+    const statuses = [news.status, legal?.status, ofac?.status].filter(
+      (status) => Boolean(status)
+    );
+    const failed = statuses.filter((status) => status === "failed").length;
+    const partial = statuses.filter((status) => status === "partial").length;
+    const state = failed === statuses.length ? "failed" : failed || partial ? "partial" : "executed";
+    const artifactCount = ctx.evidence.sourceArtifacts.length;
+    ctx.emit({
+      phase: "Off-chain",
+      label: state === "failed" ? "Off-chain screens unavailable" : "Off-chain evidence frozen",
+      detail: `${artifactCount} source artifact${artifactCount === 1 ? "" : "s"} available before scoring${state === "partial" ? "; at least one provider path was incomplete" : ""}.`,
+      source: "google-news \xB7 courtlistener \xB7 opensanctions",
+      tone: state === "failed" ? "warn" : state === "partial" ? "warn" : "neutral"
+    });
+    return { state, detail: `${artifactCount} artifacts \xB7 ${failed} failed \xB7 ${partial} partial` };
+  }
+};
+
 // server/adapters/wayback.ts
 var CDX = "https://web.archive.org/cdx/search/cdx";
 async function newestSnapshot(urlPath) {
@@ -4271,6 +4893,7 @@ var ADAPTERS = [
   xAdapter,
   githubAdapter,
   peopledatalabsAdapter,
+  offchainAdapter,
   crunchbaseAdapter,
   dexscreenerAdapter,
   coingeckoAdapter,
@@ -4850,8 +5473,8 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       continue;
     }
     try {
-      await a.run(ctx);
-      checkTracker.provider(a.id, a.label, "executed");
+      const result = await a.run(ctx);
+      checkTracker.provider(a.id, a.label, result?.state ?? "executed", result?.detail);
     } catch (e) {
       checkTracker.provider(a.id, a.label, "failed", String(e));
       if (a.id === "github") {
@@ -4919,7 +5542,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     ventureTeams: evidence.ventureTeams,
     findings: evidence.findings,
     notableFollowers: evidence.notableFollowers,
-    recentActivity: evidence.recentActivity.slice(0, 12)
+    recentActivity: evidence.recentActivity.slice(0, 12),
+    sourceArtifacts: evidence.sourceArtifacts,
+    checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
+    providerRuns: checkTracker.providers().runs
   };
   if (analystAvailable()) {
     emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions\u2026", tone: "neutral" });
@@ -4959,8 +5585,9 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   emit({ phase: "Finalize", label: "Govern composite", detail: "Applying caps and selecting the governing role.", tone: "neutral" });
   await delay(300);
   const dossier = assembleDossier(evidence, true);
-  dossier.checkRuns = checkTracker.snapshot(evidence.roles);
-  dossier.completeness_state = checkTracker.completeness(evidence.roles);
+  const checkScope = { resolvedRealName: hasResolvedRealName(ctx) };
+  dossier.checkRuns = checkTracker.snapshot(evidence.roles, checkScope);
+  dossier.completeness_state = checkTracker.completeness(evidence.roles, checkScope);
   dossier.providerSnapshot = checkTracker.providers();
   const cost = getCost();
   dossier.cost = cost;

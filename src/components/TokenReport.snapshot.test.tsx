@@ -89,7 +89,7 @@ const versionContext: ReportVersionContext = {
   attestationState: "server_collected",
   methodologyVersion: "test-v1",
   createdAt: "2026-07-10T12:00:00.000Z",
-  checks: [],
+  checks: [{ label: "Contract safety", status: "confirmed" }],
 };
 
 function dossier(overrides: Partial<TokenDossier> = {}): TokenDossier {
@@ -259,5 +259,29 @@ describe("token report supplemental evidence boundary", () => {
     expect(copiedReport).toContain("private live ARGUS session");
     expect(copiedReport).not.toContain("?t=");
     expect(copiedReport).not.toContain("?version=");
+  });
+
+  it("labels an incomplete adverse token result as a risk signal in UI and copied text", () => {
+    render(dossier({
+      verdict: "FAIL",
+      score: 22,
+      versionContext: {
+        ...versionContext,
+        completenessState: "partial",
+        checks: [{ label: "Contract safety", status: "unknown" }],
+      },
+    }));
+
+    expect(container.textContent).toContain("RISK SIGNAL");
+    expect(container.textContent).toContain("FAIL");
+    expect(container.textContent).toContain("model score");
+    expect(container.textContent).toContain("missing coverage prevents a complete assessment");
+
+    const copy = [...container.querySelectorAll("button")]
+      .find((button) => button.textContent?.trim() === "Copy report");
+    act(() => copy?.click());
+    const copiedReport = String(harness.clipboard.mock.calls.at(-1)?.[0] ?? "");
+    expect(copiedReport).toContain("RISK SIGNAL: FAIL");
+    expect(copiedReport).toContain("INVESTIGATION INCOMPLETE");
   });
 });

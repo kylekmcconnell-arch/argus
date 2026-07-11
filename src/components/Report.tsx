@@ -16,6 +16,7 @@ import { PersonGithub } from "./PersonGithub";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { personChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
+import { coverageQualifiedCompleteness, presentPublicReport } from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
@@ -357,6 +358,112 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
   );
 }
 
+type FrozenSourceArtifact = NonNullable<Dossier["sourceArtifacts"]>[number];
+
+function safeSourceLink(value: string): { href: string; label: string } | null {
+  try {
+    const parsed = new URL(value.trim());
+    if (
+      (parsed.protocol === "https:" || parsed.protocol === "http:")
+      && parsed.hostname
+      && !parsed.username
+      && !parsed.password
+    ) {
+      return {
+        href: parsed.href,
+        label: `${parsed.hostname}${parsed.pathname === "/" ? "" : parsed.pathname}`,
+      };
+    }
+  } catch {
+    // Malformed or non-web sources remain visible as unavailable metadata.
+  }
+  return null;
+}
+
+function frozenSourceDate(value?: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+}
+
+const SOURCE_KIND_LABEL: Record<FrozenSourceArtifact["kind"], string> = {
+  press: "Press",
+  legal_case: "Court record lead",
+  sanctions_screen: "Sanctions screen",
+};
+
+const SOURCE_MATCH_LABEL: Record<FrozenSourceArtifact["match"], string> = {
+  exact_name: "exact name",
+  exact_handle: "exact handle",
+  candidate: "candidate match",
+  no_match: "no exact match",
+};
+
+function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }) {
+  if (!artifacts.length) return null;
+  return (
+    <Section
+      title="Frozen source ledger"
+      kicker="off-chain sources captured before scoring · tamper-evident artifact records"
+    >
+      <Card className="divide-y divide-line/60 overflow-hidden">
+        {artifacts.map((artifact, index) => {
+          const source = safeSourceLink(artifact.sourceUrl);
+          const capturedAt = frozenSourceDate(artifact.capturedAt);
+          const publishedAt = frozenSourceDate(artifact.publishedAt);
+          const hash = /^[a-f0-9]{64}$/i.test(artifact.contentHash)
+            ? artifact.contentHash.toLowerCase()
+            : null;
+          const sourceHash = artifact.sourceContentHash && /^[a-f0-9]{64}$/i.test(artifact.sourceContentHash)
+            ? artifact.sourceContentHash.toLowerCase()
+            : null;
+          const matchColor = artifact.match === "candidate"
+            ? "var(--color-caution)"
+            : artifact.match === "no_match"
+              ? "var(--color-ink-dim)"
+              : "var(--color-signal)";
+          return (
+            <article key={`${artifact.provider}:${artifact.contentHash}:${index}`} className="px-4 py-3.5">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide text-ink-dim">
+                  {SOURCE_KIND_LABEL[artifact.kind]}
+                </span>
+                <span className="mono text-[10px] uppercase tracking-wide text-ink-faint">{artifact.provider}</span>
+                <span className="mono rounded border px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide" style={{ borderColor: `${matchColor}66`, color: matchColor }}>
+                  {SOURCE_MATCH_LABEL[artifact.match]}
+                </span>
+              </div>
+              <h3 className="mt-2 text-[13px] font-medium leading-snug text-ink">{artifact.title}</h3>
+              {artifact.excerpt && <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">{artifact.excerpt}</p>}
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-ink-faint">
+                {publishedAt && <span>Published <time dateTime={artifact.publishedAt}>{publishedAt}</time></span>}
+                {capturedAt && <span>Captured <time dateTime={artifact.capturedAt}>{capturedAt}</time></span>}
+                <span className="mono" title={hash ?? undefined}>SHA-256 {hash ? `${hash.slice(0, 12)}…` : "unavailable"}</span>
+                {sourceHash && <span className="mono" title={sourceHash}>Source index {sourceHash.slice(0, 12)}…</span>}
+              </div>
+              {source ? (
+                <a
+                  href={source.href}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="mono mt-2 inline-flex max-w-full items-center gap-1.5 text-[11px] text-signal-dim underline-offset-2 hover:text-signal hover:underline"
+                  aria-label={`Open frozen ${SOURCE_KIND_LABEL[artifact.kind].toLowerCase()} source in a new tab: ${artifact.title}`}
+                >
+                  <span className="shrink-0 text-ink-faint">Open source</span>
+                  <span className="truncate">{source.label}</span>
+                </a>
+              ) : (
+                <p className="mt-2 text-[11px] text-ink-faint">Source link unavailable</p>
+              )}
+            </article>
+          );
+        })}
+      </Card>
+    </Section>
+  );
+}
+
 /* ── main report ──────────────────────────────────────────────────── */
 
 export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void }) {
@@ -370,18 +477,35 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     roles,
     hasAssociates: (evidence.associates?.length ?? 0) > 0,
   });
-  const diligenceChecks = f.versionContext
-    ? f.versionContext.checks
+  const versionContext = f.versionContext ?? f.viewVersionContext;
+  const diligenceChecks = versionContext
+    ? versionContext.checks
     : f.checkRuns?.length
       ? f.checkRuns
       : derivedDiligenceChecks;
+  const legacyCoverageNotCaptured = versionContext?.attestationState === "legacy_unattested"
+    && versionContext.checks.length === 0;
   const readiness = deriveDecisionReadiness(diligenceChecks);
-  const positiveVerdictNeedsQualification = report.composite_verdict === "PASS" && readiness.status !== "ready";
-  const presentedVerdict = positiveVerdictNeedsQualification ? "INCOMPLETE" : report.composite_verdict;
+  const recordedCompleteness = versionContext?.completenessState ?? f.completeness_state;
+  const presentationCompleteness = coverageQualifiedCompleteness({
+    completeness: recordedCompleteness ?? (readiness.status === "ready" ? "complete" : "partial"),
+    attestation: versionContext?.attestationState ?? (f.live ? "server_collected" : undefined),
+    checks: diligenceChecks,
+  });
+  const presentation = presentPublicReport({
+    verdict: report.composite_verdict,
+    score: report.governing_score,
+    completeness: presentationCompleteness,
+  });
+  const readinessTitle = legacyCoverageNotCaptured ? "Coverage not captured" : readiness.title;
+  const readinessGuidance = legacyCoverageNotCaptured
+    ? "This legacy snapshot predates frozen check-level coverage. Its saved score is preserved for historical auditability, not as proof that due diligence was completed."
+    : readiness.guidance;
+  const presentedVerdict = presentation.displayVerdict === "UNVERIFIABLE"
+    ? "UNVERIFIABLE_IDENTITY"
+    : presentation.displayVerdict;
   const m = verdictMeta(presentedVerdict);
-  const scoredVerdictMeta = verdictMeta(report.composite_verdict);
   const readinessColor = readiness.status === "ready" ? "var(--color-pass)" : "var(--color-caution)";
-  const versionContext = f.versionContext ?? f.viewVersionContext;
   const embeddedFacet = Boolean(f.viewVersionContext || f.viewPersistence);
   const livePersistence = f.viewPersistence ?? f.persistence;
   const panelCostToken = !versionContext && livePersistence?.state === "persisted"
@@ -400,6 +524,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const showCurrentIntelligence = versionContext
     ? currentIntelligenceEnabled
     : !privateSession && !persistencePending && !persistenceFailed && !persistenceMissingCapability;
+  const frozenOutcomeChecks = versionContext?.checks ?? f.checkRuns ?? [];
+  const hasFrozenOffchainOutcomes = ["news-press", "us-legal-history", "ofac-sanctions-name"].every(
+    (checkId) => frozenOutcomeChecks.some((check) =>
+      check.checkId === checkId && check.status !== "unknown" && check.status !== "stale",
+    ),
+  );
+  const showOffchainSupplemental = showCurrentIntelligence
+    && (Boolean(versionContext && currentIntelligenceEnabled) || !hasFrozenOffchainOutcomes);
   const canRecordCurrentIntelligence = !versionContext && livePersistence?.state !== "private";
   const canMutateWorkspace = !versionContext && livePersistence?.state !== "private";
   const canShare = !embeddedFacet && Boolean(
@@ -484,10 +616,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   };
   const watch = () => {
     if (!canMutateWorkspace) return;
+    const watchVerdict = presentation.displayVerdict === "UNVERIFIABLE"
+      ? "UNVERIFIABLE_IDENTITY"
+      : presentation.displayVerdict;
     setWatched(
       toggleWatch({
         id: report.handle, kind: "person", label: report.handle, addedAt: 0,
-        snapshot: { verdict: report.composite_verdict, score: report.governing_score },
+        snapshot: {
+          verdict: watchVerdict,
+          score: presentation.primaryScore ? report.governing_score : null,
+          completenessState: presentationCompleteness,
+        },
       }),
     );
   };
@@ -679,18 +818,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <div className="absolute right-0 top-0 h-full w-1/2" style={{ background: `radial-gradient(400px 200px at 100% 0%, ${m.glow}, transparent 70%)` }} />
           <div className="relative flex flex-wrap items-center gap-6">
             <div className="shrink-0 text-center">
-              <ScoreRing score={report.governing_score} verdict={presentedVerdict} size={96} />
-              <div className="mono mt-1 text-[9.5px] uppercase tracking-wider text-ink-faint">axis score</div>
+              <ScoreRing score={presentation.primaryScore ? report.governing_score : null} verdict={presentedVerdict} size={96} />
+              <div className="mono mt-1 text-[9.5px] uppercase tracking-wider text-ink-faint">
+                {presentation.scoreLabel?.toLowerCase() ?? "score withheld"}
+              </div>
             </div>
             <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] uppercase tracking-[0.2em] text-ink-faint">Scored evidence verdict</div>
+              <div className="mb-1 text-[11px] uppercase tracking-[0.2em] text-ink-faint">{presentation.resultLabel}</div>
               <div className="flex flex-wrap items-center gap-3">
                 <span className="text-[34px] font-bold leading-none tracking-tight" style={{ color: m.color }}>
                   {m.label}
                 </span>
-                {positiveVerdictNeedsQualification && (
-                  <span className="mono rounded border px-2 py-1 text-[10px] uppercase tracking-wide" style={{ borderColor: `${scoredVerdictMeta.color}66`, color: scoredVerdictMeta.color }}>
-                    preliminary model signal · {scoredVerdictMeta.label} {report.governing_score ?? "—"}
+                {presentation.secondarySignal && (
+                  <span className="mono rounded border px-2 py-1 text-[10px] uppercase tracking-wide" style={{ borderColor: "var(--color-caution)", color: "var(--color-caution)" }}>
+                    {presentation.secondarySignal}
                   </span>
                 )}
                 {report.governing_role && (
@@ -700,11 +841,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 )}
               </div>
               <p className="mt-2.5 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">
-                {positiveVerdictNeedsQualification ? readiness.guidance : f.headline}
+                {presentation.final ? f.headline : legacyCoverageNotCaptured ? readinessGuidance : presentation.note}
               </p>
-              {positiveVerdictNeedsQualification && (
+              {!presentation.final && f.headline && (
                 <p className="mt-2 max-w-xl text-[11.5px] leading-relaxed text-ink-faint">
-                  <span className="text-ink-dim">Preliminary scored-evidence summary — not clearance:</span> {f.headline}
+                  <span className="text-ink-dim">Stored scored-evidence summary — not clearance:</span> {f.headline}
                 </p>
               )}
               {report.cap_applied && (
@@ -717,12 +858,18 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <div className="relative mt-5 border-t border-line/70 pt-4" aria-label="Due-diligence readiness">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="mono text-[10.5px] uppercase tracking-[0.16em]" style={{ color: readinessColor }}>
-                {readiness.title}
+                {readinessTitle}
               </span>
-              <span className="text-[11px] text-ink-faint">observable outcomes stored in this report</span>
-              <a href="#scan-methodology" className="ml-auto text-[11px] text-signal-dim underline-offset-2 hover:underline">
-                Review coverage gaps
-              </a>
+              <span className="text-[11px] text-ink-faint">
+                {legacyCoverageNotCaptured
+                  ? "this snapshot contains no frozen check-level outcomes"
+                  : "observable outcomes stored in this report"}
+              </span>
+              {!legacyCoverageNotCaptured && diligenceChecks.length > 0 && (
+                <a href="#scan-methodology" className="ml-auto text-[11px] text-signal-dim underline-offset-2 hover:underline">
+                  Review coverage gaps
+                </a>
+              )}
             </div>
             {versionContext && (
               <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-ink-faint" aria-label="Immutable report version metadata">
@@ -732,36 +879,56 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 {versionContext.methodologyVersion && <span className="mono">methodology {versionContext.methodologyVersion}</span>}
               </div>
             )}
-            <dl className="mt-3 grid gap-2 sm:grid-cols-3">
-              <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
-                <dt className="text-[10px] uppercase tracking-wider text-ink-faint">Evidence coverage</dt>
-                <dd className="mono mt-0.5 text-[16px] font-semibold text-ink">{readiness.coveragePercent}%</dd>
+            {legacyCoverageNotCaptured ? (
+              <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-caution/35 bg-caution/5 px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <div className="text-[12px] font-medium text-ink">Frozen coverage unavailable</div>
+                  <p className="mt-1 max-w-2xl text-[11.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
+                </div>
+                {onRescan && (
+                  <button
+                    type="button"
+                    onClick={onRescan}
+                    className="mono shrink-0 rounded-lg border border-signal px-3 py-2 text-[11px] font-medium text-signal transition hover:bg-signal/10"
+                  >
+                    Rescan to capture coverage
+                  </button>
+                )}
               </div>
-              <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
-                <dt className="text-[10px] uppercase tracking-wider text-ink-faint">Recorded outcomes</dt>
-                <dd className="mono mt-0.5 text-[16px] font-semibold text-ink">{readiness.successful} / {readiness.applicable}</dd>
-              </div>
-              <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
-                <dt className="text-[10px] uppercase tracking-wider text-ink-faint">Unresolved checks</dt>
-                <dd className="mono mt-0.5 text-[16px] font-semibold" style={{ color: readiness.unresolved ? readinessColor : "var(--color-ink)" }}>{readiness.unresolved}</dd>
-              </div>
-            </dl>
-            <dl className="mt-3 grid gap-2 lg:grid-cols-3">
-              <div className="rounded-lg border border-line/70 px-3 py-2.5">
-                <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Strongest recorded support</dt>
-                <dd className="mt-1 text-[11px] leading-relaxed text-ink-dim">{strongestSupport}</dd>
-              </div>
-              <div className="rounded-lg border border-line/70 px-3 py-2.5">
-                <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Highest recorded concern</dt>
-                <dd className="mt-1 text-[11px] leading-relaxed text-ink-dim">{highestConcern}</dd>
-              </div>
-              <div className="rounded-lg border border-line/70 px-3 py-2.5">
-                <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Open questions</dt>
-                <dd className="mt-1 text-[11px] leading-relaxed text-ink-dim">{unresolvedSummary}</dd>
-              </div>
-            </dl>
-            {!positiveVerdictNeedsQualification && (
-              <p className="mt-3 text-[11.5px] leading-relaxed text-ink-dim">{readiness.guidance}</p>
+            ) : (
+              <>
+                <dl className="mt-3 grid gap-2 sm:grid-cols-3">
+                  <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
+                    <dt className="text-[10px] uppercase tracking-wider text-ink-faint">Evidence coverage</dt>
+                    <dd className="mono mt-0.5 text-[16px] font-semibold text-ink">{readiness.coveragePercent}%</dd>
+                  </div>
+                  <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
+                    <dt className="text-[10px] uppercase tracking-wider text-ink-faint">Recorded outcomes</dt>
+                    <dd className="mono mt-0.5 text-[16px] font-semibold text-ink">{readiness.successful} / {readiness.applicable}</dd>
+                  </div>
+                  <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
+                    <dt className="text-[10px] uppercase tracking-wider text-ink-faint">Unresolved checks</dt>
+                    <dd className="mono mt-0.5 text-[16px] font-semibold" style={{ color: readiness.unresolved ? readinessColor : "var(--color-ink)" }}>{readiness.unresolved}</dd>
+                  </div>
+                </dl>
+                <dl className="mt-3 grid gap-2 lg:grid-cols-3">
+                  <div className="rounded-lg border border-line/70 px-3 py-2.5">
+                    <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Strongest recorded support</dt>
+                    <dd className="mt-1 text-[11px] leading-relaxed text-ink-dim">{strongestSupport}</dd>
+                  </div>
+                  <div className="rounded-lg border border-line/70 px-3 py-2.5">
+                    <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Highest recorded concern</dt>
+                    <dd className="mt-1 text-[11px] leading-relaxed text-ink-dim">{highestConcern}</dd>
+                  </div>
+                  <div className="rounded-lg border border-line/70 px-3 py-2.5">
+                    <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Open questions</dt>
+                    <dd className="mt-1 text-[11px] leading-relaxed text-ink-dim">{unresolvedSummary}</dd>
+                  </div>
+                </dl>
+                {presentation.final && (
+                  <p className="mt-3 text-[11.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -769,7 +936,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {/* Supplemental live checks are deliberately separated from the frozen
             score. They self-gate on a resolved real name and never imply broad
             legal or sanctions clearance. */}
-        {showCurrentIntelligence && (
+        {showOffchainSupplemental && (
           <div className="mt-3 space-y-2">
             <SanctionsNameScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
             <LegalScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
@@ -871,6 +1038,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </Section>
         )}
 
+        <FrozenSourceLedger artifacts={f.sourceArtifacts ?? []} />
+
         {/* connections — the compounding web: other audited subjects tied to this one */}
         {showCurrentIntelligence && connections.length > 0 && (
           <Section title="Connections" kicker="the web · others you've audited who share projects, people or wallets with this subject">
@@ -918,11 +1087,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             const others = report.role_reports.filter((rr) => rr.role !== report.governing_role);
             return (
               <div className="space-y-3">
-                {gov && <RoleCard key={gov.role} rr={gov} governing coverageReady={readiness.status === "ready"} />}
+                {gov && <RoleCard key={gov.role} rr={gov} governing coverageReady={presentation.final} />}
                 {others.length > 0 && (
                   <div className="grid gap-3 sm:grid-cols-2">
                     {others.map((rr) => (
-                      <RoleCard key={rr.role} rr={rr} governing={false} coverageReady={readiness.status === "ready"} />
+                      <RoleCard key={rr.role} rr={rr} governing={false} coverageReady={presentation.final} />
                     ))}
                   </div>
                 )}
@@ -1139,7 +1308,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             ) : null;
           })()}
 
-          {showCurrentIntelligence && (
+          {showOffchainSupplemental && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="In the news" kicker="current supplemental search · not part of the stored score">
                 <NewsSection query={f.display_name || report.handle} handle={report.handle} />
@@ -1164,9 +1333,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
 
           {/* transparent scan methodology — what ARGUS checked on this person */}
-          <div className="min-w-0 lg:col-span-2">
-            <MethodologyChecklist id="scan-methodology" checks={diligenceChecks} />
-          </div>
+          {diligenceChecks.length > 0 && (
+            <div className="min-w-0 lg:col-span-2">
+              <MethodologyChecklist id="scan-methodology" checks={diligenceChecks} />
+            </div>
+          )}
 
           {/* ask-the-report chat — grounded in this person's own evidence */}
           <div className="min-w-0 lg:col-span-2">

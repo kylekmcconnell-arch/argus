@@ -33,6 +33,7 @@ import { dexscreenerAdapter } from "./adapters/dexscreener";
 import { coingeckoAdapter } from "./adapters/coingecko";
 import { redditAdapter } from "./adapters/reddit";
 import { onchainAdapter } from "./adapters/onchain";
+import { hasResolvedRealName, offchainAdapter } from "./adapters/offchain";
 import { archivedAffiliation } from "./adapters/wayback";
 import { resolveForHandle } from "./adapters/wallet";
 
@@ -40,6 +41,7 @@ const ADAPTERS: Adapter[] = [
   xAdapter,
   githubAdapter,
   peopledatalabsAdapter,
+  offchainAdapter,
   crunchbaseAdapter,
   dexscreenerAdapter,
   coingeckoAdapter,
@@ -779,8 +781,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
       continue;
     }
     try {
-      await a.run(ctx);
-      checkTracker.provider(a.id, a.label, "executed");
+      const result = await a.run(ctx);
+      checkTracker.provider(a.id, a.label, result?.state ?? "executed", result?.detail);
     } catch (e) {
       checkTracker.provider(a.id, a.label, "failed", String(e));
       if (a.id === "github") {
@@ -865,6 +867,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
     findings: evidence.findings,
     notableFollowers: evidence.notableFollowers,
     recentActivity: evidence.recentActivity.slice(0, 12),
+    sourceArtifacts: evidence.sourceArtifacts,
+    checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
+    providerRuns: checkTracker.providers().runs,
   };
 
   // ── Phase 4 contradiction scan + axis scoring, run CONCURRENTLY (both read the
@@ -915,8 +920,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
   emit({ phase: "Finalize", label: "Govern composite", detail: "Applying caps and selecting the governing role.", tone: "neutral" });
   await delay(300);
   const dossier = assembleDossier(evidence, true);
-  dossier.checkRuns = checkTracker.snapshot(evidence.roles);
-  dossier.completeness_state = checkTracker.completeness(evidence.roles);
+  const checkScope = { resolvedRealName: hasResolvedRealName(ctx) };
+  dossier.checkRuns = checkTracker.snapshot(evidence.roles, checkScope);
+  dossier.completeness_state = checkTracker.completeness(evidence.roles, checkScope);
   dossier.providerSnapshot = checkTracker.providers();
   // Attach what this run actually spent, so the report library can show it.
   const cost = getCost();

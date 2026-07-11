@@ -20,12 +20,19 @@ export function SanctionsNameScreen({ name, resolved }: { name?: string | null; 
       try {
         const r = await fetch(`/api/sanctions-name?name=${encodeURIComponent(realName)}`);
         setData(await r.json());
-      } catch { /* non-fatal */ }
+      } catch { setData({ available: false, note: "Current OFAC name screen is unavailable." }); }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!screenable || !data || data.available === false) return null;
+  if (!screenable || !data) return null;
+  if (data.available === false) {
+    return (
+      <div className="rounded-xl border border-caution/35 bg-caution/5 px-4 py-3 text-[11.5px] leading-relaxed text-ink-dim" role="status">
+        <span className="font-medium text-ink">Current sanctions screen unavailable.</span> {data.note ?? "No clean result was inferred."} The frozen report remains the source of truth.
+      </div>
+    );
+  }
 
   if (data.sanctioned) {
     const c = "var(--color-fail)";
