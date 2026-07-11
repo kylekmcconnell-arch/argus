@@ -9,14 +9,15 @@ const spec = {
   info: {
     title: "ARGUS API",
     version: "1.0.0",
-    description: "Forensic due-diligence for crypto. Audit tokens on-chain and people on their evidence. Token audits are live and keyless; CORS-open JSON.",
+    description: "Forensic due-diligence for crypto. Investigation endpoints require an active ARGUS workspace membership and a Bearer access token.",
   },
   servers: [{ url: "https://argus-one-flax.vercel.app" }],
   paths: {
     "/api/v1/token": {
       get: {
         summary: "Audit a token",
-        description: "Live forensic rug-audit from a contract address or DexScreener link. EVM and Solana. No key required.",
+        description: "Live forensic rug-audit from a contract address or DexScreener link. EVM and Solana.",
+        security: [{ bearerAuth: [] }],
         parameters: [
           { name: "address", in: "query", schema: { type: "string" }, description: "Token contract address" },
           { name: "url", in: "query", schema: { type: "string" }, description: "A DexScreener link (alternative to address)" },
@@ -25,6 +26,7 @@ const spec = {
           "200": { description: "Token audit", content: { "application/json": { schema: { $ref: "#/components/schemas/TokenAudit" } } } },
           "400": { description: "Missing or invalid input" },
           "404": { description: "No DEX pair found" },
+          "429": { description: "Daily investigation limit reached" },
         },
       },
     },
@@ -32,15 +34,20 @@ const spec = {
       get: {
         summary: "Audit a principal",
         description: "Multi-class audit of an X handle (founder / fund / KOL / advisor / agency), governed by the most severe role.",
+        security: [{ bearerAuth: [] }],
         parameters: [{ name: "handle", in: "query", required: true, schema: { type: "string" }, description: "X handle, e.g. @0xlumen" }],
         responses: {
           "200": { description: "Principal audit", content: { "application/json": { schema: { $ref: "#/components/schemas/PersonAudit" } } } },
           "404": { description: "Could not resolve subject" },
+          "429": { description: "Daily investigation limit reached" },
         },
       },
     },
   },
   components: {
+    securitySchemes: {
+      bearerAuth: { type: "http", scheme: "bearer", bearerFormat: "Supabase access token" },
+    },
     schemas: {
       Verdict: { type: "string", enum: VERDICTS },
       Axis: {

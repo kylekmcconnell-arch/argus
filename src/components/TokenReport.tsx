@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
-import { verdictMeta, tokenConfidence } from "../lib/verdict";
+import { verdictMeta } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { TokenDossier } from "../token/audit";
 import { TokenSparkline } from "./TokenSparkline";
@@ -10,6 +10,7 @@ import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
 import { tokenChecks } from "../lib/scanChecklist";
+import { deriveDecisionReadiness, type DecisionReadiness } from "../lib/decisionReadiness";
 import { AddInfo } from "./AddInfo";
 import { Counterparties } from "./Counterparties";
 import { RiskPaths } from "./RiskPaths";
@@ -31,8 +32,9 @@ function money(n?: number): string {
   return "$" + n.toFixed(2);
 }
 
-function Ring({ score, verdict, size = 96 }: { score: number | null; verdict: string; size?: number }) {
+function Ring({ score, verdict, color, size = 96 }: { score: number | null; verdict: string; color?: string; size?: number }) {
   const m = verdictMeta(verdict);
+  const ringColor = color ?? m.color;
   const r = size / 2 - 6;
   const c = 2 * Math.PI * r;
   const pct = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
@@ -40,10 +42,10 @@ function Ring({ score, verdict, size = 96 }: { score: number | null; verdict: st
     <div className="relative shrink-0" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-line)" strokeWidth="4" />
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={m.color} strokeWidth="4" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} style={{ transition: "stroke-dashoffset 0.8s ease-out" }} />
+        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={ringColor} strokeWidth="4" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} style={{ transition: "stroke-dashoffset 0.8s ease-out" }} />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="mono text-[24px] font-semibold leading-none tabular" style={{ color: m.color }}>{score ?? "—"}</span>
+        <span className="mono text-[24px] font-semibold leading-none tabular" style={{ color: ringColor }}>{score ?? "—"}</span>
         <span className="mono text-[9px] text-ink-faint">/ 100</span>
       </div>
     </div>
@@ -84,15 +86,19 @@ const TONE_RANK: Record<string, number> = { bad: 3, warn: 2, good: 1 };
 const TONE_GLYPH: Record<string, string> = { bad: "✗", warn: "⚠", good: "✓" };
 
 // A clean plain-text DD summary for pasting into a chat / channel.
-function tokenReportText(d: TokenDossier): string {
+function tokenReportText(d: TokenDossier, readiness: DecisionReadiness): string {
   const moneyShort = (n?: number) => (n == null ? "—" : n >= 1e9 ? "$" + (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(0) + "K" : "$" + Math.round(n));
   const age = d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : "?";
+  const qualifiesPass = d.verdict === "PASS" && readiness.status !== "ready";
+  const presentedVerdict = qualifiesPass ? readiness.status.toUpperCase() : d.verdict;
   const findings = [...d.findings]
     .sort((a, b) => (TONE_RANK[b.tone] ?? 0) - (TONE_RANK[a.tone] ?? 0))
     .slice(0, 6)
     .map((f) => `${TONE_GLYPH[f.tone] ?? "·"} ${f.claim}`);
   return [
-    `$${d.symbol} — ${d.verdict} ${d.score ?? "—"}/100 · ${d.chain}${d.capApplied ? ` (cap: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
+    `$${d.symbol} — ${presentedVerdict} · ${d.chain}${d.capApplied ? ` (cap: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
+    `${readiness.successful}/${readiness.applicable} evidence outcomes recorded · ${readiness.unresolved} unresolved · ${readiness.coveragePercent}% coverage`,
+    `Underlying model signal: ${d.verdict} ${d.score ?? "—"}/100`,
     d.headline,
     "",
     ...findings,
@@ -115,6 +121,19 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
 
 export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDossier; onReset: () => void; onAudit: (h: string) => void }) {
   const m = verdictMeta(d.verdict);
+  const checks = tokenChecks(d);
+  const readiness = deriveDecisionReadiness(checks);
+  const qualifiesPass = d.verdict === "PASS" && readiness.status !== "ready";
+  const presentedVerdict = qualifiesPass
+    ? readiness.status === "provisional" ? "PROVISIONAL" : "INCOMPLETE"
+    : m.label;
+  const presentationColor = qualifiesPass
+    ? readiness.status === "provisional" ? "var(--color-caution)" : "var(--color-ink-dim)"
+    : m.color;
+  const presentationGlow = qualifiesPass
+    ? readiness.status === "provisional" ? "rgba(217,119,6,0.08)" : "transparent"
+    : m.glow;
+  const negativeSignal = d.verdict === "CAUTION" || d.verdict === "FAIL" || d.verdict === "AVOID";
   const s = d.safety;
   const gp = d.safetyChecked;
   const isSol = d.chain === "solana";
@@ -128,18 +147,35 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
     .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
   const otherLinks = d.socials.filter((x) => x.label !== "site" && !/x\.com|twitter\.com/i.test(x.url));
   const [watched, setWatched] = useState(() => isWatched(d.address));
-  const [copied, setCopied] = useState(false);
+  const [shareState, setShareState] = useState<"idle" | "creating" | "copied" | "error">("idle");
   const [copiedTxt, setCopiedTxt] = useState(false);
   const copyReport = () => {
-    navigator.clipboard?.writeText(tokenReportText(d));
+    navigator.clipboard?.writeText(tokenReportText(d, readiness));
     setCopiedTxt(true);
     setTimeout(() => setCopiedTxt(false), 1500);
   };
-  const share = () => {
-    const p = new URLSearchParams({ k: "token", t: d.address, title: d.symbol, v: d.verdict, sc: String(d.score ?? ""), s: (d.headline || "").slice(0, 90) });
-    navigator.clipboard?.writeText(`${location.origin}/api/card?${p}`);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+  const share = async () => {
+    if (shareState === "creating") return;
+    setShareState("creating");
+    try {
+      const response = await fetch("/api/share", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ kind: "token", ref: d.address }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { url?: unknown; message?: unknown };
+      if (!response.ok || typeof body.url !== "string") {
+        throw new Error(typeof body.message === "string" ? body.message : "Secure share link creation failed.");
+      }
+      if (!navigator.clipboard) throw new Error("Clipboard access is unavailable.");
+      await navigator.clipboard.writeText(new URL(body.url, location.origin).toString());
+      setShareState("copied");
+      setTimeout(() => setShareState("idle"), 1800);
+    } catch (error) {
+      console.error("[share] token report failed", error);
+      setShareState("error");
+      setTimeout(() => setShareState("idle"), 3000);
+    }
   };
   const watch = () =>
     setWatched(
@@ -168,7 +204,15 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
               Rescan
             </button>
             <button onClick={copyReport} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copiedTxt ? "Copied ✓" : "Copy report"}</button>
-            <button onClick={share} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copied ? "Copied ✓" : "Share"}</button>
+            <button
+              onClick={() => void share()}
+              disabled={shareState === "creating"}
+              aria-live="polite"
+              title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"}
+              className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:cursor-wait disabled:opacity-60"
+            >
+              {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share"}
+            </button>
             <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
               {watched ? "★ Watching" : "☆ Watch"}
             </button>
@@ -211,6 +255,61 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           <p className="mt-3 max-w-3xl text-[13px] leading-relaxed text-ink-dim">{d.cg.description}</p>
         )}
 
+        {/* Decision layer: model output and evidence completeness are separate.
+            A thinly-supported PASS must never read like an investment-ready clearance. */}
+        <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow" style={{ borderColor: `${presentationColor}55` }}>
+          <div className="absolute right-0 top-0 h-full w-1/2" style={{ background: `radial-gradient(400px 200px at 100% 0%, ${presentationGlow}, transparent 70%)` }} />
+          <div className="relative flex flex-wrap items-start gap-6">
+            <Ring score={d.score} verdict={d.verdict} color={presentationColor} />
+            <div className="min-w-0 flex-1">
+              <div className="mb-1 flex flex-wrap items-center gap-2">
+                <span className="text-[11px] uppercase tracking-[0.2em] text-ink-faint">{qualifiesPass ? "Decision readiness" : "Token verdict"}</span>
+                <span
+                  className="mono rounded px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide"
+                  style={{
+                    background: readiness.status === "ready" ? "rgba(22,163,74,0.10)" : "rgba(217,119,6,0.10)",
+                    color: readiness.status === "ready" ? "var(--color-pass)" : "var(--color-caution)",
+                  }}
+                >
+                  {readiness.status === "ready" ? "Evidence complete" : `${readiness.status} coverage`}
+                </span>
+              </div>
+              <div className="text-[34px] font-bold leading-none tracking-tight" style={{ color: presentationColor }}>{presentedVerdict}</div>
+              {qualifiesPass && (
+                <div className="mono mt-2 text-[11px] text-ink-faint">
+                  Underlying model signal <span className="text-ink-dim">PASS · {d.score ?? "—"}/100</span>
+                </div>
+              )}
+              <p className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">{d.headline}</p>
+              <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-ink-faint">
+                {negativeSignal && readiness.status !== "ready" ? "Coverage gaps do not cancel recorded risk findings. " : ""}
+                {readiness.guidance}
+              </p>
+              {d.capApplied && (
+                <div className="mt-3 inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[12px]" style={{ borderColor: "var(--color-avoid)", color: "var(--color-avoid)" }}>
+                  <span>▲</span> Hard cap · {d.capApplied.replace(/_/g, " ")}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <dl className="relative mt-5 grid gap-2 border-t border-line/60 pt-4 sm:grid-cols-3" aria-label="Evidence readiness summary">
+            <div className="rounded-lg border border-line/60 bg-void/30 px-3 py-2">
+              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Coverage</dt>
+              <dd className="mono mt-0.5 text-[15px] text-ink">{readiness.coveragePercent}%</dd>
+            </div>
+            <div className="rounded-lg border border-line/60 bg-void/30 px-3 py-2">
+              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Outcomes</dt>
+              <dd className="mono mt-0.5 text-[15px] text-ink">{readiness.successful}<span className="text-[11px] text-ink-faint">/{readiness.applicable}</span></dd>
+            </div>
+            <div className="rounded-lg border border-line/60 bg-void/30 px-3 py-2">
+              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Unresolved</dt>
+              <dd className="mono mt-0.5 text-[15px]" style={{ color: readiness.unresolved ? "var(--color-caution)" : "var(--color-pass)" }}>{readiness.unresolved}</dd>
+            </div>
+          </dl>
+          <a href="#token-methodology" className="relative mt-3 inline-flex text-[11.5px] text-signal transition hover:text-signal-dim">Review check-by-check methodology</a>
+        </div>
+
         {/* price momentum */}
         {d.priceChange && (
           <div className="mt-4 grid grid-cols-4 gap-2">
@@ -251,31 +350,6 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
         {/* negative space — what the scan couldn't confirm (unknowns are signal) */}
         <div className="mt-4">
           <Unknowns dossier={d} />
-        </div>
-
-        {/* verdict hero */}
-        <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow" style={{ borderColor: `${m.color}55` }}>
-          <div className="absolute right-0 top-0 h-full w-1/2" style={{ background: `radial-gradient(400px 200px at 100% 0%, ${m.glow}, transparent 70%)` }} />
-          <div className="relative flex flex-wrap items-center gap-6">
-            <Ring score={d.score} verdict={d.verdict} />
-            <div className="min-w-0 flex-1">
-              <div className="mb-1 flex items-center gap-2">
-                <span className="text-[11px] uppercase tracking-[0.2em] text-ink-faint">Token verdict</span>
-                {(() => {
-                  const c = tokenConfidence({ chain: d.chain, safetyAvailable: d.safety.available, openSource: d.safety.openSource, simChecked: d.safety.simChecked, hasDeployer: !!d.deployer, hasCg: !!d.cg, hasHolders: d.topHolders.length > 0 });
-                  const cc = c.level === "high" ? "var(--color-pass)" : c.level === "low" ? "var(--color-caution)" : "var(--color-ink-faint)";
-                  return <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: `${cc}1a`, color: cc }} title={`${c.ran}/${c.total} verification checks completed — how much of this verdict rests on verified data`}>{c.level} confidence</span>;
-                })()}
-              </div>
-              <div className="text-[34px] font-bold leading-none tracking-tight" style={{ color: m.color }}>{m.label}</div>
-              <p className="mt-2.5 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">{d.headline}</p>
-              {d.capApplied && (
-                <div className="mt-3 inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[12px]" style={{ borderColor: "var(--color-avoid)", color: "var(--color-avoid)" }}>
-                  <span>▲</span> Hard cap · {d.capApplied.replace(/_/g, " ")}
-                </div>
-              )}
-            </div>
-          </div>
         </div>
 
         {/* adversarial review — auto-run second opinion that stress-tests the verdict */}
@@ -448,7 +522,7 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
 
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="mt-5">
-          <MethodologyChecklist checks={tokenChecks(d)} />
+          <MethodologyChecklist id="token-methodology" checks={checks} />
         </div>
 
         {/* ask-the-report chat — grounded in this token's own evidence */}
@@ -456,7 +530,8 @@ export function TokenReport({ dossier: d, onReset, onAudit }: { dossier: TokenDo
           <AskReport subject={`$${d.symbol}`} context={[
             `${d.name} ($${d.symbol}) on ${d.chain}`,
             d.headline,
-            `verdict ${d.verdict} ${d.score ?? ""}`,
+            `underlying model signal ${d.verdict} ${d.score ?? ""}`,
+            `decision readiness ${readiness.status}: ${readiness.successful}/${readiness.applicable} evidence outcomes recorded, ${readiness.unresolved} unresolved`,
             d.deployer ? `deployer ${d.deployer}` : "",
             d.cg ? `${d.cg.cexCount} CEX listings${d.cg.rank ? `, rank #${d.cg.rank}` : ""}` : "not on CoinGecko",
             projectSite ? `site ${projectSite}` : "",

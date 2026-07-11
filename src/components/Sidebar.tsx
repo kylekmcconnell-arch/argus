@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
+import { useArgusAuth } from "../auth-context";
 import { ArgusMark } from "./ArgusMark";
 import { verdictMeta } from "../lib/verdict";
 import { getWatchlist } from "../lib/watchlist";
-import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
+import { mergedLog, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { activeRuns, subscribeRuns } from "../lib/runner";
 import { activeScans, subscribeScans } from "../lib/activescans";
 import { activeScanRuns, subscribeScanRuns } from "../lib/scanrunner";
-import { getAnalyst, setAnalyst } from "../lib/analyst";
+import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
 
 // Subject thumbnail: the real logo/photo, falling back to a letter if it is
@@ -120,38 +121,30 @@ function ThemeToggle() {
   );
 }
 
-// Who's signing audits — sets the contributor tag on shared-log rows so Kyle and
-// Enigma can tell their scans apart. Click to edit; stored locally.
+// Verified account identity replaces the old client-editable contributor label.
+// The backend independently derives this value from the authenticated member.
 function AnalystBadge() {
-  const [name, setName] = useState(getAnalyst);
-  const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(name);
-  const save = () => {
-    const v = draft.trim();
-    setAnalyst(v);
-    setName(getAnalyst());
-    setEditing(false);
-  };
-  const initial = (name === "anonymous" ? "?" : name[0] || "?").toUpperCase();
+  const auth = useArgusAuth();
+  const name = auth.user.displayName || auth.user.email;
+  const initial = (name[0] || "?").toUpperCase();
   return (
     <div className="mt-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5">
       <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-signal text-[12px] font-semibold text-white">{initial}</span>
-      {editing ? (
-        <input
-          autoFocus
-          value={draft}
-          onChange={(e) => setDraft(e.target.value)}
-          onBlur={save}
-          onKeyDown={(e) => { if (e.key === "Enter") save(); if (e.key === "Escape") setEditing(false); }}
-          placeholder="your name (e.g. Kyle)"
-          className="mono min-w-0 flex-1 rounded border border-line bg-panel px-1.5 py-1 text-[12px] text-ink outline-none focus:border-signal"
-        />
-      ) : (
-        <button onClick={() => { setDraft(name === "anonymous" ? "" : name); setEditing(true); }} className="min-w-0 flex-1 text-left">
-          <div className="truncate text-[13px] text-ink">{name === "anonymous" ? "Set your name" : name}</div>
-          <div className="text-[11px] text-ink-faint">Signing audits as · edit</div>
-        </button>
-      )}
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-[13px] text-ink">{name}</div>
+        <div className="truncate text-[11px] text-ink-faint">{auth.role} · verified</div>
+      </div>
+      <button
+        type="button"
+        onClick={() => void auth.signOut()}
+        title="Sign out"
+        aria-label="Sign out"
+        className="rounded p-1 text-ink-faint transition hover:bg-panel hover:text-ink"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
+        </svg>
+      </button>
     </div>
   );
 }
@@ -175,6 +168,7 @@ export function Sidebar({
   open?: boolean;
   onClose?: () => void;
 }) {
+  const auth = useArgusAuth();
   const nav = (t: NavTarget) => { onNav(t); onClose?.(); };
   // Recent-audit clicks SHOW the cached result (with Rescan) rather than re-run.
   const openRecent = (h: string) => { (onOpenRecent ?? onAudit)(h); onClose?.(); };
@@ -231,7 +225,7 @@ export function Sidebar({
         <NavItem icon="graph" label="Trust graph" active={view === "graph"} onClick={() => nav("graph")} />
         <NavItem icon="watch" label="Watchlist" active={view === "watchlist"} onClick={() => nav("watchlist")} badge={getWatchlist().length || undefined} />
         <NavItem icon="bell" label="Alerts" active={view === "alerts"} onClick={() => nav("alerts")} />
-        <NavItem icon="admin" label="Audit log" active={view === "admin"} onClick={() => nav("admin")} />
+        <NavItem icon="admin" label={auth.role === "owner" ? "Audit & access" : "Audit log"} active={view === "admin"} onClick={() => nav("admin")} />
       </nav>
 
       {/* recent audits */}
@@ -298,7 +292,8 @@ export function Sidebar({
         ) : (
           recent.map((e) => {
             const ref = e.ref ?? e.query;
-            const vm = e.verdict ? verdictMeta(e.verdict) : null;
+            const displayedVerdict = presentedAuditVerdict(e);
+            const vm = displayedVerdict ? verdictMeta(displayedVerdict) : null;
             const active = activeHandle === ref || activeHandle === e.query;
             const avatar = (e.query.replace(/^[@$]/, "").replace(/^https?:\/\//, "")[0] ?? "?").toUpperCase();
             return (
@@ -313,7 +308,7 @@ export function Sidebar({
                 <span className="min-w-0 flex-1">
                   <span className="mono block truncate text-[12.5px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
                   <span className="block truncate text-[10px] text-ink-faint">
-                    {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}
+                    {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}{displayedVerdict === "INCOMPLETE" ? " · incomplete" : ""}
                     {e.contributor && e.contributor !== me && e.contributor !== "anonymous" && (
                       <span className="text-signal-dim"> · {e.contributor}</span>
                     )}

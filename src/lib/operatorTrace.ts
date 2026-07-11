@@ -55,6 +55,34 @@ export interface TraceOpts {
 }
 export type TraceStep = (s: { label: string; detail?: string; tone?: "neutral" | "good" | "warn" | "bad" }) => void;
 
+interface FundingOrigin {
+  address: string;
+  label?: string | null;
+  kind: "cex" | "wallet";
+}
+
+interface DeployerTraceResponse {
+  available?: boolean;
+  tokensCreated?: number;
+  deployments?: number;
+  walletAgeDays?: number;
+  chain?: Array<{ from: string; to: string; label: string | null; kind: "cex" | "wallet" }>;
+  funder?: FundingOrigin;
+  origin?: FundingOrigin;
+}
+
+interface FunderSweepResponse {
+  available?: boolean;
+  seededCount?: number;
+  ownTokens?: Array<{ mint: string; name?: string }>;
+  ownLaunches?: number;
+  seededDeployers?: Array<{
+    wallet: string;
+    tokensCreated: number;
+    sampleTokens?: Array<{ mint: string; name?: string }>;
+  }>;
+}
+
 const short = (a: string) => a.slice(0, 4) + "…" + a.slice(-4);
 
 // ── the trace ───────────────────────────────────────────────────────────────
@@ -111,10 +139,10 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
     if (tracedFunder.has(addr) || traces >= maxTraces || overBudget()) return;
     tracedFunder.add(addr);
     traces++;
-    let d: any;
+    let d: DeployerTraceResponse;
     try {
       const r = await fetch(`${deployerEP}?wallet=${encodeURIComponent(addr)}${cp}`);
-      d = await r.json();
+      d = await r.json() as DeployerTraceResponse;
     } catch { return; }
     if (!d || d.available === false) return;
     const w = wallets.get(addr);
@@ -151,10 +179,10 @@ export async function traceOperator(rootDeployer: string, opts: TraceOpts, onSte
     sweptForward.add(addr);
     sweeps++;
     onStep({ label: `Sweeping forward from ${short(addr)}`, detail: "every wallet this hub seeded, and which of them minted tokens…", tone: "neutral" });
-    let d: any;
+    let d: FunderSweepResponse;
     try {
       const r = await fetch(`${funderEP}?wallet=${encodeURIComponent(addr)}${cp}`);
-      d = await r.json();
+      d = await r.json() as FunderSweepResponse;
     } catch { return; }
     if (!d || d.available === false) return;
     const hub = addWallet(addr, "funder", depth, { seededCount: d.seededCount ?? 0 });
@@ -250,12 +278,14 @@ async function markLiveness(toks: OperatorToken[], cap: number, chain: string, m
     const batch = mints.slice(i, i + 30);
     try {
       const r = await fetch(`https://api.dexscreener.com/tokens/v1/${encodeURIComponent(chain)}/${batch.join(",")}`);
-      const pairs: any[] = await r.json();
+      const pairs = await r.json() as Array<Record<string, unknown>>;
       const alive = new Set<string>();
       for (const p of Array.isArray(pairs) ? pairs : []) {
-        const mc = Number(p?.marketCap ?? p?.fdv ?? 0);
-        const liq = Number(p?.liquidity?.usd ?? 0);
-        const base = String(p?.baseToken?.address ?? "");
+        const liquidity = p.liquidity && typeof p.liquidity === "object" ? p.liquidity as Record<string, unknown> : {};
+        const baseToken = p.baseToken && typeof p.baseToken === "object" ? p.baseToken as Record<string, unknown> : {};
+        const mc = Number(p.marketCap ?? p.fdv ?? 0);
+        const liq = Number(liquidity.usd ?? 0);
+        const base = String(baseToken.address ?? "");
         if (base && (mc >= 50_000 || liq >= 5_000)) alive.add(base);
       }
       for (const m of batch) mark(m, !alive.has(m));

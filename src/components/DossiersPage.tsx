@@ -13,7 +13,7 @@ const normRef = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^https?:
 
 // The report library: every persisted audit (yours + Enigma's) from the shared
 // backend, searchable, newest first. Click opens the stored report (no re-run);
-// x purges the subject everywhere for a from-scratch redo.
+// Delete purges the subject everywhere for a from-scratch redo.
 // The badge shows the ROLE (Founder / Project / KOL / VC …) — more useful than
 // the raw audit kind. Falls back to the kind when no role is known.
 const ROLE_LABEL: Record<string, { label: string; color: string }> = {
@@ -41,6 +41,20 @@ function ago(ts?: string): string {
   if (d === 1) return "yesterday";
   if (d < 30) return `${d}d ago`;
   return `${Math.floor(d / 30)}mo ago`;
+}
+
+function reportReadout(report: ReportListing) {
+  const positiveNeedsQualification = report.verdict === "PASS" && report.completenessState !== "complete";
+  const displayedVerdict = positiveNeedsQualification ? "INCOMPLETE" : report.verdict;
+  const label = positiveNeedsQualification
+    ? report.completenessState === "partial" ? "PARTIAL" : "INCOMPLETE"
+    : displayedVerdict ?? "";
+  return {
+    displayedVerdict,
+    label,
+    positiveNeedsQualification,
+    color: displayedVerdict ? verdictMeta(displayedVerdict).color : "var(--color-ink-faint)",
+  };
 }
 
 export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
@@ -90,14 +104,14 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
   const groups = useMemo(
     () => groupReportsByEntity(shown, buildAliasResolver(getContributions())),
     [shown],
-  ); // eslint-disable-line react-hooks/exhaustive-deps
+  );
 
   const openBtn = (ev: { stopPropagation: () => void }) => ev.stopPropagation();
 
   // A single report card (the default — unchanged behaviour for a lone audit).
   const renderSingle = (r: ReportListing) => {
-          const m = r.verdict ? verdictMeta(r.verdict) : null;
-          const color = m?.color ?? "var(--color-ink-faint)";
+          const readout = reportReadout(r);
+          const color = readout.color;
           // Show the ROLE for person audits (Founder/Project/KOL/VC …); fall back
           // to the audit kind (token / project deep-dive) otherwise.
           const role = r.kind === "person" ? roleByRef.get(r.ref.toLowerCase().replace(/^[@$]/, "")) : undefined;
@@ -108,15 +122,11 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
           const stat = statByKey.get(`${r.kind}:${normRef(r.ref)}`);
           const ledger = r.cost?.calls ?? [];
           const open = costOpen === cardKey;
+          const ledgerId = `cost-ledger-${encodeURIComponent(cardKey)}`;
           return (
             <div
               key={cardKey}
-              role="button"
-              tabIndex={0}
-              onClick={() => onOpen(r.ref)}
-              onKeyDown={(e) => { if (e.key === "Enter") onOpen(r.ref); }}
-              title="Open the stored report"
-              className="group flex cursor-pointer flex-col rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:bg-panel/80 soft-shadow"
+              className="group relative flex flex-col rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:bg-panel/80 focus-within:border-line-2 soft-shadow"
             >
               <div className="flex items-center gap-3">
                 {img ? (
@@ -126,8 +136,19 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
                 )}
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
-                    <span className="mono truncate text-[13px] text-ink">{r.query ?? r.ref}</span>
+                    <button
+                      type="button"
+                      onClick={() => onOpen(r.ref)}
+                      aria-label={`Open stored report for ${r.query ?? r.ref}`}
+                      title="Open the stored report"
+                      className="mono min-w-0 cursor-pointer truncate text-left text-[13px] text-ink after:absolute after:inset-0 after:cursor-pointer after:content-[''] focus-visible:outline-none"
+                    >
+                      {r.query ?? r.ref}
+                    </button>
                     <span className="mono shrink-0 rounded px-1 py-0.5 text-[8.5px] uppercase" style={{ color: km.color, background: `${km.color}14` }}>{km.label}</span>
+                    {readout.positiveNeedsQualification && (
+                      <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[8.5px] uppercase text-ink-faint">partial evidence</span>
+                    )}
                   </span>
                   <span className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-ink-faint">
                     <span className="truncate">{ago(r.ts)}{r.contributor && r.contributor !== me && r.contributor !== "anonymous" ? ` · by ${r.contributor}` : ""}</span>
@@ -142,27 +163,41 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
                         audits run keyless -> "free"; a near-zero or missing person-audit
                         cost shows nothing (not "~$0.00"). */}
                     {typeof r.cost?.usd === "number" && r.cost.usd >= 0.01 ? (
-                      <span
-                        role={ledger.length ? "button" : undefined}
-                        tabIndex={ledger.length ? 0 : undefined}
-                        title={ledger.length ? "Show the full call-by-call cost breakdown" : "estimated provider spend for this audit run"}
-                        onClick={ledger.length ? (ev) => { ev.stopPropagation(); setCostOpen(open ? null : cardKey); } : undefined}
-                        className={`mono shrink-0 inline-flex items-center gap-0.5 rounded-md border border-line/70 bg-void/60 px-1.5 py-[1px] text-[10.5px] text-ink-dim transition ${ledger.length ? "cursor-pointer hover:border-line-2 hover:text-ink" : ""}`}
-                      >
-                        ~${r.cost.usd.toFixed(2)}{ledger.length ? (open ? " ▾" : " ▸") : ""}
-                      </span>
+                      ledger.length ? (
+                        <button
+                          type="button"
+                          aria-expanded={open}
+                          aria-controls={ledgerId}
+                          title="Show the full call-by-call cost breakdown"
+                          onClick={() => setCostOpen(open ? null : cardKey)}
+                          className="mono relative z-10 inline-flex shrink-0 items-center gap-0.5 rounded-md border border-line/70 bg-void/60 px-1.5 py-[1px] text-[10.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                        >
+                          ~${r.cost.usd.toFixed(2)}{open ? " ▾" : " ▸"}
+                        </button>
+                      ) : (
+                        <span
+                          title="estimated provider spend for this audit run"
+                          className="mono shrink-0 inline-flex items-center gap-0.5 rounded-md border border-line/70 bg-void/60 px-1.5 py-[1px] text-[10.5px] text-ink-dim"
+                        >
+                          ~${r.cost.usd.toFixed(2)}
+                        </span>
+                      )
                     ) : r.kind === "token" && (r.cost?.usd ?? 0) < 0.01 ? (
                       <span className="mono shrink-0 rounded-md border border-line/70 px-1.5 py-[1px] text-[10.5px] text-ink-faint">free</span>
                     ) : null}
                   </span>
                 </span>
-                <span className="mono shrink-0 text-right leading-none" style={{ color }}>
-                  <span className="block text-[18px] font-semibold tabular">{r.score ?? "—"}</span>
-                  <span className="block text-[8px] tracking-wider">{r.verdict ?? ""}</span>
-                </span>
                 <span
-                  role="button"
-                  tabIndex={0}
+                  className="mono shrink-0 text-right leading-none"
+                  style={{ color }}
+                  title={readout.positiveNeedsQualification ? `Underlying model signal: ${r.verdict} ${r.score ?? "—"}. Stored evidence is not complete.` : undefined}
+                >
+                  <span className="block text-[18px] font-semibold tabular">{r.score ?? "—"}</span>
+                  <span className="block text-[8px] tracking-wider">{readout.label}</span>
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Delete ${r.query ?? r.ref}`}
                   title="Remove this subject everywhere (log, stored report, graph)"
                   onClick={(ev) => {
                     ev.stopPropagation();
@@ -170,15 +205,15 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
                     purgeSubject(r.ref);
                     setReports((prev) => (prev ?? []).filter((x) => !(x.kind === r.kind && x.ref === r.ref)));
                   }}
-                  className="mono shrink-0 cursor-pointer rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-faint transition hover:border-avoid hover:text-avoid"
+                  className="mono relative z-10 shrink-0 rounded-md border border-line px-2 py-1 text-[10px] text-ink-faint transition hover:border-avoid hover:text-avoid"
                 >
-                  ×
-                </span>
+                  Delete
+                </button>
               </div>
 
               {/* full A-to-Z ledger: every provider call this audit made */}
               {open && ledger.length > 0 && (
-                <div className="mt-2.5 border-t border-line/60 pt-2" onClick={(ev) => ev.stopPropagation()}>
+                <div id={ledgerId} className="relative z-10 mt-2.5 border-t border-line/60 pt-2">
                   <div className="mb-1 text-[9.5px] uppercase tracking-wider text-ink-faint">cost breakdown · estimated, priciest first</div>
                   <div className="space-y-0.5">
                     {ledger.map((l, i) => (
@@ -206,9 +241,9 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
   // A unified entity card: one project shown once, with a facet chip per audit
   // (project / person / site). The facets are the SAME entity resolved across
   // audit kinds — clicking a chip opens that specific stored report.
-  const KIND_ORDER = ["investigation", "token", "site", "person"] as const;
+  const KIND_ORDER: ReportListing["kind"][] = ["investigation", "token", "site", "person"];
   const renderEntity = (group: ReportListing[]) => {
-    const sorted = [...group].sort((a, b) => KIND_ORDER.indexOf(a.kind as any) - KIND_ORDER.indexOf(b.kind as any));
+    const sorted = [...group].sort((a, b) => KIND_ORDER.indexOf(a.kind) - KIND_ORDER.indexOf(b.kind));
     const primary = sorted[0];
     // Display name: prefer the project token ($SYMBOL) / site / handle.
     const proj = sorted.find((r) => r.kind === "token" || r.kind === "investigation");
@@ -216,8 +251,8 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
     const title = proj?.query ?? site?.ref ?? primary.query ?? primary.ref;
     // Headline verdict from the most authoritative facet that has one.
     const scored = sorted.find((r) => r.verdict) ?? primary;
-    const m = scored.verdict ? verdictMeta(scored.verdict) : null;
-    const color = m?.color ?? "var(--color-ink-faint)";
+    const readout = reportReadout(scored);
+    const color = readout.color;
     const img = sorted.map((r) => imageByRef.get(r.ref.toLowerCase().replace(/^[@$]/, ""))).find(Boolean);
     const letter = (title.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
     const groupKey = sorted.map((r) => `${r.kind}:${r.ref}`).join("|");
@@ -238,18 +273,25 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
               <span className="mono truncate text-[13px] text-ink">{title}</span>
               <span className="mono shrink-0 rounded px-1 py-0.5 text-[8.5px] uppercase" style={{ color: "var(--color-unverifiable)", background: "var(--color-unverifiable)14" }}>project</span>
               <span className="mono shrink-0 text-[9px] text-ink-faint">{sorted.length} facets</span>
+              {readout.positiveNeedsQualification && (
+                <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[8.5px] uppercase text-ink-faint">partial evidence</span>
+              )}
             </span>
             <span className="mt-0.5 block truncate text-[10.5px] text-ink-faint">
               {ago(primary.ts)}{contributors.length ? ` · with ${contributors.join(", ")}` : ""}
             </span>
           </span>
-          <span className="mono shrink-0 text-right leading-none" style={{ color }}>
-            <span className="block text-[18px] font-semibold tabular">{scored.score ?? "—"}</span>
-            <span className="block text-[8px] tracking-wider">{scored.verdict ?? ""}</span>
-          </span>
           <span
-            role="button"
-            tabIndex={0}
+            className="mono shrink-0 text-right leading-none"
+            style={{ color }}
+            title={readout.positiveNeedsQualification ? `Underlying model signal: ${scored.verdict} ${scored.score ?? "—"}. Stored evidence is not complete.` : undefined}
+          >
+            <span className="block text-[18px] font-semibold tabular">{scored.score ?? "—"}</span>
+            <span className="block text-[8px] tracking-wider">{readout.label}</span>
+          </span>
+          <button
+            type="button"
+            aria-label={`Delete ${title} and all associated reports`}
             title="Remove this whole entity everywhere (all facets: log, stored reports, graph)"
             onClick={(ev) => {
               ev.stopPropagation();
@@ -258,10 +300,10 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
               const gone = new Set(sorted.map((r) => `${r.kind}:${r.ref}`));
               setReports((prev) => (prev ?? []).filter((x) => !gone.has(`${x.kind}:${x.ref}`)));
             }}
-            className="mono shrink-0 cursor-pointer rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-faint transition hover:border-avoid hover:text-avoid"
+            className="mono shrink-0 rounded-md border border-line px-2 py-1 text-[10px] text-ink-faint transition hover:border-avoid hover:text-avoid"
           >
-            ×
-          </span>
+            Delete
+          </button>
         </div>
         {/* facet chips — each opens its own stored report */}
         <div className="mt-2 flex flex-wrap gap-1.5 border-t border-line/60 pt-2">
@@ -295,7 +337,10 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
         Remove one to start that subject from scratch.
       </p>
 
+      <label htmlFor="dossier-search" className="sr-only">Search reports</label>
       <input
+        id="dossier-search"
+        type="search"
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="search by handle, token, site, or analyst…"
@@ -313,7 +358,7 @@ export function DossiersPage({ onOpen }: { onOpen: (ref: string) => void }) {
         </p>
       )}
 
-      <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+      <div className={`grid grid-cols-1 gap-2.5 ${groups.length > 1 ? "sm:grid-cols-2" : ""}`}>
         {groups.map((g) => (g.length === 1 ? renderSingle(g[0]) : renderEntity(g)))}
       </div>
     </div>

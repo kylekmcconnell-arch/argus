@@ -42,15 +42,65 @@ export interface Network {
   cabals: { subjects: string[]; via: NetNode[]; score?: number; holderOnly?: boolean }[];
 }
 
-// Entity resolution: normalize a raw node key to a canonical id so that
-// "@zenithdao", "ZenithDAO" and "$ZENITH" collapse to one node across audits.
-const ALIAS: Record<string, string> = {
-  zenith: "zenithdao",
-  $zenith: "zenithdao",
-};
+// Contract and wallet identities are typed and address-backed. Display aliases
+// (notably $SYMBOL) are intentionally kept out of these keys: tickers are not
+// unique, and lower-casing a Solana address changes its identity.
+const EVM_ADDRESS = /^0x[0-9a-f]+$/i;
+const SOLANA_ADDRESS = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+
+export function normalizeChain(chain: string): string {
+  return String(chain).trim().toLowerCase();
+}
+
+export function normalizeAddress(chain: string, address: string): string {
+  const value = String(address).trim();
+  // EVM addresses are case-insensitive for identity purposes (checksum casing is
+  // display metadata). Solana/base58 addresses are case-sensitive.
+  return normalizeChain(chain) !== "solana" && EVM_ADDRESS.test(value) ? value.toLowerCase() : value;
+}
+
+export function tokenEntityKey(chain: string, address: string): string {
+  return `token:${normalizeChain(chain)}:${normalizeAddress(chain, address)}`;
+}
+
+export function walletEntityKey(chain: string, address: string): string {
+  return `wallet:${normalizeChain(chain)}:${normalizeAddress(chain, address)}`;
+}
+
+// Entity resolution for untyped legacy keys remains conservative. In
+// particular, "$ABC" stays distinct from a person/company named "ABC". New
+// token and wallet records always take the typed paths above.
 export function canonical(raw: string): string {
-  let k = String(raw).trim().toLowerCase().replace(/^[@$]/, "").replace(/\s+/g, "");
-  return ALIAS[k] ?? k;
+  const value = String(raw).trim();
+  let m = value.match(/^token:([^:]+):(.+)$/i);
+  if (m) return tokenEntityKey(m[1], m[2]);
+
+  m = value.match(/^(?:wallet|holder|funder):([^:]+):(.+)$/i);
+  if (m) return walletEntityKey(m[1], m[2]);
+
+  // Safely recover chainless legacy keys only when the address format itself is
+  // decisive. This keeps old full-address forensic contributions useful without
+  // carrying their role prefix into identity.
+  m = value.match(/^(?:token|mint):(.+)$/i);
+  if (m && EVM_ADDRESS.test(m[1])) return tokenEntityKey("evm", m[1]);
+  if (m && SOLANA_ADDRESS.test(m[1])) return tokenEntityKey("solana", m[1]);
+  m = value.match(/^(?:wallet|holder|funder):(.+)$/i);
+  if (m && EVM_ADDRESS.test(m[1])) return walletEntityKey("evm", m[1]);
+  if (m && SOLANA_ADDRESS.test(m[1])) return walletEntityKey("solana", m[1]);
+
+  // Wallets produced by the people-audit engine historically use
+  // `${chain}:${address}`. Safely upgrade only recognizable full addresses;
+  // arbitrary namespaced keys (email:, risk:, code:, …) must not be recast.
+  m = value.match(/^([^:]+):(.+)$/);
+  if (m && (EVM_ADDRESS.test(m[2]) || (normalizeChain(m[1]) === "solana" && SOLANA_ADDRESS.test(m[2])))) {
+    return walletEntityKey(m[1], m[2]);
+  }
+
+  // A bare Solana address can occur in old evidence. Preserve its exact case.
+  if (SOLANA_ADDRESS.test(value)) return value;
+  const lower = value.toLowerCase().replace(/\s+/g, "");
+  if (lower.startsWith("$")) return lower; // legacy display alias, never a name id
+  return lower.replace(/^@/, "");
 }
 
 const isRuggy = (n?: NetNode) => !!n && (n.wasRug || n.outcome === "Rug" || n.deception);
@@ -60,7 +110,15 @@ const isBad = (n?: NetNode) => isRuggy(n) || (!!n && n.subject && (n.verdict ===
 
 // A raw audit subgraph (token audits, recorded site recons) — the same
 // {nodes, edges} shape Panoptes uses, with an optional verdict on the subject.
-export interface GraphContribution { handle: string; nodes: PanoptesNode[]; edges: PanoptesEdge[]; verdict?: string }
+export interface GraphContribution {
+  handle: string;
+  nodes: PanoptesNode[];
+  edges: PanoptesEdge[];
+  verdict?: string;
+  // Search/display aliases only. They resolve to a subject solely when exactly
+  // one address-backed token claims them.
+  aliases?: string[];
+}
 
 // Generic labels that older audits recorded as literal node keys ("site",
 // "twitter", …). They collapse to one node via canonical() and fake-bridge
@@ -74,41 +132,52 @@ const GENERIC_KEYS = new Set([
 ]);
 const isGenericKey = (raw: string) => GENERIC_KEYS.has(canonical(raw));
 
-// ── Entity resolution: one project, one node ─────────────────────────────
-// $RECC (the token), @reccfinance (its X account), and recc.finance (its site)
-// are the same entity wearing three names. The proof of sameness comes from the
-// audits themselves — a token audit explicitly links its subject to the
-// project's X handle (TEAM edge) and its domain (LINKS edge) — never from name
-// similarity, which false-merges. Returns a resolver mapping any form to one id.
+// ── Safe alias resolution ─────────────────────────────────────────────────
+// A token's address-backed id is authoritative. Its $ticker, observed project X
+// account and observed domain may resolve to that id for backwards-compatible
+// lookups, but only when exactly ONE token claims the alias. Two same-ticker
+// contracts (or two contracts sharing a project account) remain distinct and the
+// shared account/domain remains an ordinary bridge node.
 export type AliasResolver = (key: string) => string;
 export function buildAliasResolver(contributions: GraphContribution[]): AliasResolver {
-  const parent = new Map<string, string>();
-  const find = (x: string): string => {
-    if (!parent.has(x)) return x;
-    let r = x;
-    while (parent.get(r) !== r) r = parent.get(r)!;
-    parent.set(x, r);
-    return r;
-  };
-  const union = (a: string, b: string) => {
-    if (!parent.has(a)) parent.set(a, a);
-    if (!parent.has(b)) parent.set(b, b);
-    const ra = find(a), rb = find(b);
-    // Prefer the $token id as the root (it's the anchor the audits key on).
-    if (ra !== rb) parent.set(rb, ra);
+  const targets = new Map<string, Set<string>>();
+  const add = (alias: string, subject: string) => {
+    const a = canonical(alias);
+    if (!a) return;
+    const set = targets.get(a) ?? new Set<string>();
+    set.add(subject);
+    targets.set(a, set);
   };
   const DOMAIN = /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i;
   for (const c of contributions) {
-    if (!String(c.handle).startsWith("$")) continue; // token/investigation audits carry the linkage
-    const subj = canonical(c.handle);
+    const rawSubject = c.nodes.find((n) => n.subject)?.key ?? c.handle;
+    const subj = canonical(String(rawSubject));
+    const addressBacked = subj.startsWith("token:");
+
+    // Register legacy $token subjects as competing claims. This prevents a new
+    // address-backed token with the same ticker from absorbing an old record.
+    if (String(c.handle).startsWith("$")) add(c.handle, subj);
+    if (!addressBacked) continue;
+
+    for (const alias of c.aliases ?? []) add(alias, subj);
+    const subjectNode = c.nodes.find((n) => n.subject);
+    if (subjectNode) {
+      if (typeof subjectNode.label === "string") add(subjectNode.label, subj);
+      if (typeof subjectNode.symbol === "string") add("$" + subjectNode.symbol.replace(/^\$/, ""), subj);
+    }
     for (const e of c.edges) {
       if (canonical(e.src) !== subj) continue;
       const dst = String(e.dst);
-      if (e.type === "TEAM" && dst.startsWith("@")) union(subj, canonical(dst));
-      else if (e.type === "LINKS" && DOMAIN.test(dst)) union(subj, canonical(dst));
+      if (e.type === "TEAM" && dst.startsWith("@")) add(dst, subj);
+      else if (e.type === "LINKS" && DOMAIN.test(dst)) add(dst, subj);
     }
   }
-  return (key: string) => find(canonical(key));
+  const unique = new Map<string, string>();
+  for (const [alias, ids] of targets) if (ids.size === 1) unique.set(alias, [...ids][0]);
+  return (key: string) => {
+    const id = canonical(key);
+    return unique.get(id) ?? id;
+  };
 }
 
 export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: GraphContribution[] = []): Network {
@@ -119,17 +188,18 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   const upsert = (raw: PanoptesNode, surfacedBy: string): NetNode | null => {
     if (!raw.subject && isGenericKey(String(raw.key))) return null;
     const id = resolve(raw.key);
+    const display = typeof raw.label === "string" && raw.label.trim() ? raw.label.trim() : String(raw.key);
     let n = map.get(id);
     if (!n) {
       n = {
-        id, key: String(raw.key), type: String(raw.type), subject: false,
+        id, key: display, type: String(raw.type), subject: false,
         wasRug: false, deception: false, inCabal: false, subjects: [],
         degree: 0, rugLinks: 0, flags: [],
       };
       map.set(id, n);
     }
     // merge attributes (truthy wins)
-    if (raw.subject) { n.subject = true; n.key = String(raw.key); }
+    if (raw.subject) { n.subject = true; n.key = display; }
     if (raw.verdict) n.verdict = String(raw.verdict);
     if (raw.was_rug) n.wasRug = true;
     if (raw.outcome) n.outcome = String(raw.outcome);
@@ -137,7 +207,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
     if (raw.type === "DeceptionFinding") n.deception = true;
     if (raw.in_cabal_kb) n.inCabal = true;
     // a real entity label (with @ / $) beats a bare one
-    if (/^[@$]/.test(String(raw.key)) && !/^[@$]/.test(n.key)) n.key = String(raw.key);
+    if (/^[@$]/.test(display) && !/^[@$]/.test(n.key)) n.key = display;
     if (!n.subject && surfacedBy && !n.subjects.includes(surfacedBy)) n.subjects.push(surfacedBy);
     return n;
   };
@@ -277,7 +347,7 @@ export interface SubjectConnection { other: string; otherVerdict?: string; ties:
 // strong-but-not-proof (people work on many projects); holder overlap is weak.
 export function tieStrength(rawKey: string): "hard" | "medium" | "weak" {
   const k = String(rawKey).toLowerCase();
-  if (/^(code:|email:|wallet:|funder:|mint:)/.test(k)) return "hard";
+  if (/^(code:|email:|wallet:|funder:|mint:|token:)/.test(k)) return "hard";
   // Shared analytics / monetization property: you control that account, so an
   // unrelated project can't legitimately carry your GA/GTM/AdSense/Pixel ID.
   if (/^(ga:|gtm:|adsense:|fbpixel:)/.test(k)) return "hard";
@@ -329,7 +399,7 @@ export function reconcileVerdict(handle: string, contributions: GraphContributio
   const strongestOf = (c: SubjectConnection): "hard" | "medium" | "weak" => {
     if (c.direct) return "hard"; // the flagged subject IS an entity this audit surfaced
     let best: "hard" | "medium" | "weak" = "weak";
-    for (const t of c.ties) { const s = tieStrength(t.label); if (s === "hard") return "hard"; if (s === "medium") best = "medium"; }
+    for (const t of c.ties) { const s = tieStrength(t.key); if (s === "hard") return "hard"; if (s === "medium") best = "medium"; }
     return best;
   };
   const hard = bad.filter((c) => strongestOf(c) === "hard");
@@ -340,7 +410,7 @@ export function reconcileVerdict(handle: string, contributions: GraphContributio
   // subject and a hacker/mixer/sanctioned exposure are both AVOID; a shared
   // team/domain and a lower-tier risk flag are both CAUTION. Return the strongest.
   const connHard: Reconciliation | null = hard.length
-    ? (() => { const c = hard[0]; const how = c.direct ? "was surfaced directly in this audit" : `shares ${c.ties.map((t) => tieLabel(t.label)).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join(" + ")}`; return { severity: "avoid", line: `Byte/infra-identical link to ${c.other} (${c.otherVerdict}): it ${how}. A shared deployer, funder, contract fingerprint, or dev email with a failed subject is the same operation.`, via: hard }; })()
+    ? (() => { const c = hard[0]; const how = c.direct ? "was surfaced directly in this audit" : `shares ${c.ties.map((t) => tieLabel(t.key)).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join(" + ")}`; return { severity: "avoid", line: `Byte/infra-identical link to ${c.other} (${c.otherVerdict}): it ${how}. A shared deployer, funder, contract fingerprint, or dev email with a failed subject is the same operation.`, via: hard }; })()
     : null;
   const names = risk ? risk.entities.map((e) => e.label.split(" · ")[0]).filter((v, i, a) => a.indexOf(v) === i).slice(0, 3).join(", ") : "";
   const riskAvoid: Reconciliation | null = risk?.severity === "avoid" ? { severity: "avoid", line: `On-chain exposure to a flagged bad actor: ${names}. Arkham ties this subject's wallets to a hacker, mixer, or sanctioned entity — a hard AVOID regardless of how the contract itself scans.`, via: [], riskEntities: risk.entities } : null;
@@ -355,7 +425,7 @@ function tieLabel(rawKey: string): string {
   if (k.startsWith("email:")) return "a dev email";
   if (k.startsWith("wallet:")) return "a deployer wallet";
   if (k.startsWith("funder:")) return "a funding wallet";
-  if (k.startsWith("mint:")) return "a token";
+  if (k.startsWith("mint:") || k.startsWith("token:")) return "a token";
   if (k.startsWith("ga:") || k.startsWith("gtm:")) return "an analytics ID";
   if (k.startsWith("adsense:")) return "an AdSense account";
   if (k.startsWith("fbpixel:")) return "a Meta Pixel";
@@ -374,33 +444,36 @@ export function subjectConnections(handle: string, contributions: GraphContribut
     for (const n of c.nodes) {
       if (isGenericKey(String(n.key))) continue; // "site"/"twitter" junk can't be a tie
       const k = resolve(n.key);
-      if (k !== me) mine.set(k, { label: String(n.key), type: String(n.type) });
+      const label = typeof n.label === "string" && n.label.trim() ? n.label : String(n.key);
+      if (k !== me) mine.set(k, { label, type: String(n.type) });
     }
   }
   if (!mine.size) return [];
 
-  const byOther = new Map<string, { verdict?: string; ties: Map<string, SharedTie>; direct: boolean }>();
-  const ensure = (h: string, verdict?: string) => {
-    if (!byOther.has(h)) byOther.set(h, { verdict, ties: new Map(), direct: false });
-    return byOther.get(h)!;
+  const byOther = new Map<string, { label: string; verdict?: string; ties: Map<string, SharedTie>; direct: boolean }>();
+  const ensure = (id: string, label: string, verdict?: string) => {
+    if (!byOther.has(id)) byOther.set(id, { label, verdict, ties: new Map(), direct: false });
+    return byOther.get(id)!;
   };
   for (const c of contributions) {
     const other = resolve(c.handle);
     if (other === me) continue;
+    const otherLabel = c.aliases?.[0]
+      ?? (typeof c.nodes.find((n) => n.subject)?.label === "string" ? String(c.nodes.find((n) => n.subject)!.label) : c.handle);
     // direct tie: the other subject is itself one of the entities I surfaced
-    if (mine.has(other)) { const e = ensure(c.handle, c.verdict); e.direct = true; }
+    if (mine.has(other)) { const e = ensure(other, otherLabel, c.verdict); e.direct = true; }
     // shared tie: a third entity both of us touch
     for (const n of c.nodes) {
       if (isGenericKey(String(n.key))) continue;
       const k = resolve(n.key);
       if (k !== me && k !== other && mine.has(k)) {
-        const e = ensure(c.handle, c.verdict);
+        const e = ensure(other, otherLabel, c.verdict);
         e.ties.set(k, { key: k, label: mine.get(k)!.label, type: mine.get(k)!.type });
       }
     }
   }
   return [...byOther.entries()]
-    .map(([other, v]) => ({ other, otherVerdict: v.verdict, ties: [...v.ties.values()], direct: v.direct }))
+    .map(([, v]) => ({ other: v.label, otherVerdict: v.verdict, ties: [...v.ties.values()], direct: v.direct }))
     .filter((x) => x.ties.length > 0 || x.direct)
     .sort((a, b) => Number(b.direct) - Number(a.direct) || b.ties.length - a.ties.length)
     .slice(0, max);

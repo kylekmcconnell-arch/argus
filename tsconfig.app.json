@@ -23,5 +23,9 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
-  "exclude": ["src/calibration/calibrate.ts"]
+  "exclude": [
+    "src/calibration/calibrate.ts",
+    "src/**/* 2.ts",
+    "src/**/* 2.tsx"
+  ]
 }

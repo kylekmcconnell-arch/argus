@@ -20,6 +20,7 @@ export interface SubjectProfile {
   display_name: string;
   avatar: string;
   avatar_url?: string; // real X profile photo URL, when resolved (else derive from handle)
+  website?: string;    // independently resolved first-party site, when available
   bio: string;
   followers: string;
   joined: string;

@@ -44,11 +44,16 @@ export function SanctionsNameScreen({ name, resolved }: { name?: string | null; 
   }
 
   return (
-    <div className="rounded-xl border border-line bg-panel px-4 py-2.5">
-      <div className="flex items-center gap-2 text-[11.5px] text-ink-faint">
+    <div className="rounded-xl border border-line bg-panel px-4 py-3">
+      <div className="flex items-center gap-2 text-[10.5px] uppercase tracking-wider text-ink-faint">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-pass)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>
-        <span>Screened against the US Treasury OFAC SDN list ({data.listSize?.toLocaleString()} sanctioned individuals) — <span className="text-ink-dim">no match</span>.</span>
+        <span>Supplemental sanctions screen</span>
+        <span className="mono ml-auto text-[9.5px] normal-case tracking-normal">not scored</span>
       </div>
+      <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
+        No exact name match returned from the checked US Treasury OFAC SDN list
+        {data.listSize ? ` (${data.listSize.toLocaleString()} listed individuals)` : ""} at query time. This does not establish identity or clear every sanctions regime.
+      </p>
     </div>
   );
 }

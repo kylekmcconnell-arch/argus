@@ -81,6 +81,12 @@ export const peopledatalabsAdapter: Adapter = {
     }
     if (!person) person = await enrichPerson({ profile: `twitter.com/${handle}` });
     if (!person) {
+      ctx.recordCheck?.({
+        id: "identity-resolution",
+        status: "checked-empty",
+        note: "licensed identity provider completed without a matching real-world record",
+        provider: "peopledatalabs",
+      });
       ctx.emit({ phase: "P1 · Identity", label: "No match", detail: "No real-world identity record matched; scored as pseudonymous (no penalty).", source: "peopledatalabs", tone: "neutral" });
       return;
     }
@@ -90,6 +96,22 @@ export const peopledatalabsAdapter: Adapter = {
     if (person.emails.length) ctx.evidence.profile.identity_emails = person.emails;
     const emailNote = person.emails.length ? ` Email on record: ${person.emails[0]}.` : "";
     ctx.evidence.profile.identity_note = `Resolved to ${person.fullName}, ${person.jobTitle ?? "role unknown"} @ ${person.jobCompany ?? "n/a"}. ${person.experience.length} roles on record${person.linkedin ? ` (${person.linkedin})` : ""}.${emailNote}`;
+    ctx.recordCheck?.({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: `licensed identity record resolved to ${person.fullName}`,
+      provider: "peopledatalabs",
+      sourceCount: 1,
+    });
+    ctx.recordCheck?.({
+      id: "affiliations-associates",
+      status: person.experience.length ? "confirmed" : "checked-empty",
+      note: person.experience.length
+        ? `${person.experience.length} employment record${person.experience.length === 1 ? "" : "s"} returned`
+        : "resolved identity record returned no employment history",
+      provider: "peopledatalabs",
+      sourceCount: person.experience.length,
+    });
     ctx.emit({ phase: "P1 · Identity", label: "Identity resolved", detail: `${person.fullName} · ${person.experience.length} employment records${person.emails.length ? ` · ${person.emails[0]}` : ""}${person.linkedin ? ` · ${person.linkedin}` : ""}`, source: "peopledatalabs", tone: "good" });
 
     // Integrate the career history. Two outcomes per company:

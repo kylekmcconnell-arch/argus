@@ -10,6 +10,8 @@ import {
   type PanoptesEdge,
 } from "../engine";
 import type { CollectedEvidence, NotableFollower, Contradiction, WebTeamMember } from "./evidence";
+import type { ReportVersionContext } from "../lib/reportVersion";
+import type { ScanCheck } from "../lib/scanChecklist";
 
 export interface Dossier {
   handle: string;
@@ -24,6 +26,24 @@ export interface Dossier {
   prior_handles?: string[];
   headline: string;
   live: boolean;
+  // Live collector runs freeze the checks the server actually completed into
+  // the immutable payload. Older curated fixtures may omit these fields.
+  checkRuns?: ScanCheck[];
+  completeness_state?: "complete" | "partial" | "failed";
+  providerSnapshot?: {
+    capturedAt: string;
+    runs: Array<{
+      id: string;
+      label: string;
+      state: "executed" | "failed" | "unavailable";
+      observedAt: string;
+      detail?: string;
+    }>;
+  };
+  // Present only when this payload was reopened from an immutable stored
+  // version. Kept outside the immutable payload itself so loading metadata
+  // never mutates (or silently rewrites) the evidence snapshot.
+  versionContext?: ReportVersionContext;
   notableFollowers: NotableFollower[];
   contradictions: Contradiction[];
   webTeam: WebTeamMember[];

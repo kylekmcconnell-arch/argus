@@ -1,0 +1,29 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+
+      - name: Typecheck (server)
+        run: npx tsc -p server/tsconfig.json
+
+      - name: Tests (engine port fidelity + golden-set calibration)
+        run: npm test
+
+      - name: Calibration (verdict drift table)
+        run: npm run calibrate
+
+      - name: Build (client typecheck + bundle)
+        run: npm run build

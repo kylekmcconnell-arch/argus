@@ -524,6 +524,7 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
 export interface AckResult {
   ack: "none" | "mention" | "thanks" | "endorsement";
   sentiment: "positive" | "neutral" | "negative" | "none";
+  source_url?: string;
 }
 export async function acknowledgments(endorsers: string[], subject: string): Promise<Map<string, AckResult>> {
   const out = new Map<string, AckResult>();
@@ -532,9 +533,9 @@ export async function acknowledgments(endorsers: string[], subject: string): Pro
   if (!key || !list.length) return out;
   const s = subject.replace(/^@/, "");
   const system =
-    "You verify endorsements for a due-diligence engine, with live web and X search. For EACH listed account, decide the strongest public acknowledgment that account has ever made of @" + s + " on X, and its overall sentiment. " +
-    "ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. " +
-    'Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none"}]} — one entry per listed account, never invent posts.';
+    "You generate endorsement-verification leads for a due-diligence collector, with live web and X search. For EACH listed account, surface the strongest candidate public acknowledgment that account may have made of @" + s + " on X, its sentiment, and the exact post URL. " +
+    "This is discovery only: do not call a relationship corroborated or contradicted. Without a direct post URL, return ack=none and sentiment=none. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. " +
+    'Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none","source_url":"https://x.com/.../status/..."}]} — one entry per listed account, never invent posts.';
   const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
   if (!text) return out;
   const m = text.match(/\{[\s\S]*\}/);
@@ -544,7 +545,14 @@ export async function acknowledgments(endorsers: string[], subject: string): Pro
     for (const r of arr) {
       const h = typeof r?.handle === "string" ? r.handle.replace(/^@/, "").toLowerCase() : "";
       if (!h) continue;
-      out.set(h, { ack: r.ack ?? "none", sentiment: r.sentiment ?? "none" });
+      const sourceUrl = typeof r?.source_url === "string" && /^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[A-Za-z0-9_]+\/status\/\d+/i.test(r.source_url)
+        ? r.source_url
+        : undefined;
+      out.set(h, {
+        ack: sourceUrl && ["mention", "thanks", "endorsement"].includes(r.ack) ? r.ack : "none",
+        sentiment: sourceUrl && ["positive", "neutral", "negative"].includes(r.sentiment) ? r.sentiment : "none",
+        source_url: sourceUrl,
+      });
     }
   } catch { /* malformed -> treat as unknown */ }
   return out;
@@ -795,11 +803,9 @@ function parseTeamJSON(text: string | null, selfHandle: string | undefined, sour
 export type AdverseCategory = "rug" | "slow_rug" | "liquidity_pull" | "drain" | "scam_accusation" | "fud";
 export interface AdverseSignal {
   category: AdverseCategory;
-  claim: string;        // one-line summary of the complaint / accusation
-  source: string;       // who said it / where (e.g. "Trustpilot", "@handle", "Discord")
+  claim: string;        // model-discovered lead, never a verified fact
+  source: string;       // the single source the model says should be checked
   source_url?: string;
-  independent_source_count: number; // distinct sources making the claim
-  credibility: "evidenced" | "reported" | "rumor"; // evidenced = on-chain/receipts; rumor = unbacked FUD
 }
 
 export async function searchAdverseSignals(handle: string, kind: "person" | "project", ticker?: string): Promise<AdverseSignal[]> {
@@ -810,10 +816,9 @@ export async function searchAdverseSignals(handle: string, kind: "person" | "pro
   const system =
     "You are a forensic due-diligence researcher with live web and X search. Search for ADVERSE signals about the named subject: accusations of a rug pull, slow rug, liquidity pull/removal, wallet draining, exit scam, or general community complaints/FUD. " +
     "Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. " +
-    "Be STRICT and grounded: report ONLY complaints that actually exist with a real source. For EACH, grade credibility: 'evidenced' = backed by on-chain proof, receipts, or many consistent first-hand reports; 'reported' = a real named complaint but unverified; 'rumor' = vague unbacked FUD. Count distinct independent sources. " +
-    "Do NOT invent, do NOT infer guilt, do NOT repeat the subject's own marketing. If there are no real complaints, return an empty list. " +
-    "Reply with ONLY compact JSON: {\"signals\":[{\"category\":\"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud\",\"claim\":\"\",\"source\":\"\",\"source_url\":\"\",\"independent_source_count\":1,\"credibility\":\"evidenced|reported|rumor\"}]}. Never use em dashes.";
-  const text = await grokSearch(system, `Subject: ${subject}. Find real, sourced complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. Grade each by credibility and count independent sources.`);
+    "Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. " +
+    "Reply with ONLY compact JSON: {\"signals\":[{\"category\":\"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud\",\"claim\":\"\",\"source\":\"\",\"source_url\":\"\"}]}. Never use em dashes.";
+  const text = await grokSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`);
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -828,8 +833,6 @@ export async function searchAdverseSignals(handle: string, kind: "person" | "pro
         claim: s.claim.trim(),
         source: (s.source || "unattributed").toString().trim(),
         source_url: typeof s.source_url === "string" && /^https?:\/\//.test(s.source_url) ? s.source_url : undefined,
-        independent_source_count: Math.max(1, Math.min(50, Number(s.independent_source_count) || 1)),
-        credibility: s.credibility === "evidenced" ? "evidenced" : s.credibility === "rumor" ? "rumor" : "reported",
       }))
       .slice(0, 12);
   } catch {
@@ -845,15 +848,15 @@ export async function searchAdverseSignals(handle: string, kind: "person" | "pro
 // Mixoor mixer), not rumor.
 export type ToolingKind = "bundler" | "mixer" | "volume_faker" | "snipe_bot" | "multi_wallet" | "other";
 export interface ManipulationTool { name: string; kind: ToolingKind; url?: string; evidence: string }
-export interface ToolingFlag { operates: boolean; role: string; tools: ManipulationTool[] }
+export interface ToolingFlag { role_claim: string; tools: ManipulationTool[] }
 
 export async function detectManipulationTooling(handle: string, name?: string): Promise<ToolingFlag | null> {
   const h = handle.replace(/^@/, "");
   const system =
-    "You are a forensic researcher with live web and X search. Determine whether the given person BUILDS, OWNS, or OPERATES any tool whose primary use is undetectable market manipulation of crypto tokens: token BUNDLERS (buy/sell a token across many wallets to disguise concentration), wallet MIXERS / privacy 'cash' tools (move funds without a public trace), VOLUME FAKERS / wash-trading generators, or multi-wallet SNIPE bots. " +
-    "Ground the finding in the operator's OWN public product pages, docs, or posts, not rumor. Report their role (founder|ceo|operator|builder|affiliate) and each qualifying tool with a short evidence phrase and URL if found. Legitimate general token-creation or analytics tools do NOT count; only tools built to hide manipulation. " +
-    "Reply with ONLY compact JSON: {\"operates\":true|false,\"role\":\"\",\"tools\":[{\"name\":\"\",\"kind\":\"bundler|mixer|volume_faker|snipe_bot|multi_wallet|other\",\"url\":\"\",\"evidence\":\"\"}]}. If none, return {\"operates\":false,\"role\":\"\",\"tools\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Do they build, own, or operate any token bundler, wallet mixer, volume faker, or multi-wallet snipe tool? Cite their own product pages.`);
+    "You are a forensic research lead generator with live web and X search. Surface candidate first-party pages that may connect the given person to a token bundler, wallet mixer, volume faker, wash-trading generator, or multi-wallet snipe bot. " +
+    "Return leads for an independent collector to verify; do not decide that the person operates the tool and do not call the connection verified. Prefer the product's own page, docs, or post and include the role claimed on that page. Legitimate general token-creation or analytics tools do not count. " +
+    "Reply with ONLY compact JSON: {\"role_claim\":\"\",\"tools\":[{\"name\":\"\",\"kind\":\"bundler|mixer|volume_faker|snipe_bot|multi_wallet|other\",\"url\":\"\",\"evidence\":\"\"}]}. If none, return {\"role_claim\":\"\",\"tools\":[]}. NEVER invent. Never use em dashes.";
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Find candidate first-party pages that may link them to manipulation tooling. Return URLs for later independent verification only.`);
   if (!text) return null;
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
@@ -869,10 +872,9 @@ export async function detectManipulationTooling(handle: string, name?: string): 
         evidence: (t.evidence || "").toString().trim(),
       }))
       .slice(0, 8);
-    // Only a positive when there is at least one concrete tool; a bare
-    // operates:true with no tool is treated as no finding.
-    if (!tools.length) return { operates: false, role: "", tools: [] };
-    return { operates: true, role: (parsed.role || "operator").toString().trim(), tools };
+    // A lead set is useful only when it names at least one concrete tool.
+    if (!tools.length) return { role_claim: "", tools: [] };
+    return { role_claim: (parsed.role_claim || "claimed operator").toString().trim(), tools };
   } catch {
     return null;
   }
@@ -952,6 +954,8 @@ export const xAdapter: Adapter = {
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised]
       .filter((t) => (t as any).claimed_endorser_handle || (t as any).project_handle)
       .slice(0, 6);
+    let observedRelationships = 0;
+    let adverseRelationships = 0;
     // ONE batched Grok call verifies every endorser; follow-graph checks
     // (twitterapi, cheap) stay per-claim and run alongside.
     const ackMap = await acknowledgments(claims.map((t) => (t as any).claimed_endorser_handle || (t as any).project_handle), ctx.handle);
@@ -960,17 +964,32 @@ export const xAdapter: Adapter = {
         const endorser = (t as any).claimed_endorser_handle || (t as any).project_handle;
         const follows = await followsSubject(endorser, ctx.handle);
         const ack = ackMap.get(String(endorser).replace(/^@/, "").toLowerCase()) ?? null;
-        if (follows !== null) t.follows_subject = follows;
-        if (ack) {
-          t.public_acknowledgment = ack.ack;
-          t.sentiment = ack.sentiment;
-          t.relationship_corroborated = ack.ack === "endorsement" || ack.ack === "thanks";
-          t.fud_present = ack.sentiment === "negative";
+        if (follows !== null) {
+          t.follows_subject = follows;
+          observedRelationships += 1;
+          if (!follows) adverseRelationships += 1;
+        }
+        if (ack?.source_url) {
+          // Grok supplied the URL, so this is still a model lead: it has not
+          // been independently fetched and checked for author/text/relationship.
+          // Keep it visible for follow-up without letting it self-corroborate or
+          // self-contradict the claim that generated the search.
+          const lead = `Model-search acknowledgment lead: ${ack.ack}, ${ack.sentiment} (${ack.source_url}); independent artifact verification required`;
+          t.notes = [t.notes, lead].filter(Boolean).join(" · ");
         }
         t.corroboration_verdict = classifyTestimonial(t);
         const tone = t.corroboration_verdict === TestimonialVerdict.CONTRADICTED ? "bad" : t.corroboration_verdict === TestimonialVerdict.CORROBORATED ? "good" : "warn";
         ctx.emit({ phase: "Corroborate", label: `${endorser}`, detail: `${(t as any).claimed_relationship ?? "endorser"}: ${t.corroboration_verdict}${follows === false ? " · does not follow subject" : ""}`, source: "X", tone });
       }),
     );
+    if (observedRelationships) {
+      ctx.recordCheck?.({
+        id: "affiliations-associates",
+        status: adverseRelationships ? "finding" : "confirmed",
+        note: `${observedRelationships} claimed relationship${observedRelationships === 1 ? "" : "s"} checked in the X follow graph${adverseRelationships ? ` · ${adverseRelationships} did not follow the subject` : ""}`,
+        provider: "twitterapi.io",
+        sourceCount: observedRelationships,
+      });
+    }
   },
 };

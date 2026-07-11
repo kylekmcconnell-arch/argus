@@ -67,8 +67,8 @@ async function fetchDeployerTrail(wallet: string): Promise<DeployerTrail | null>
   try {
     const res = await fetch(`/api/deployer?wallet=${encodeURIComponent(wallet)}`);
     if (!res.ok) return null;
-    const d = await res.json();
-    if (!d || d.available === false || d.error) return null;
+    const d = await res.json() as Partial<DeployerTrail> & { available?: boolean; error?: unknown };
+    if (d.available === false || d.error) return null;
     return d as DeployerTrail;
   } catch {
     return null;
@@ -93,8 +93,8 @@ export async function fetchWebTeam(siteUrl: string, projectName: string, recon: 
     if (ghOrg) qs.set("gh", ghOrg);
     const res = await fetch(`/api/recon-team?${qs}`);
     if (!res.ok) return [];
-    const d = await res.json();
-    return Array.isArray(d.people) ? (d.people as WebPerson[]) : [];
+    const d = await res.json() as { people?: WebPerson[] };
+    return Array.isArray(d.people) ? d.people : [];
   } catch {
     return [];
   }
@@ -181,8 +181,8 @@ async function fetchTokenIdentity(symbol: string, name: string, contract: string
     const p = new URLSearchParams({ symbol, name: name || "", contract: contract || "", chain: chain || "" });
     const r = await fetch(`/api/token-identity?${p.toString()}`, { signal: AbortSignal.timeout(40000) });
     if (!r.ok) return null;
-    const d = await r.json();
-    if (!d || d.available === false) return null;
+    const d = await r.json() as Partial<TokenIdentity> & { available?: boolean };
+    if (d.available === false) return null;
     return { website: d.website ?? null, x_handle: d.x_handle ?? null, founder: d.founder ?? null, founder_handle: d.founder_handle ?? null, confidence: d.confidence ?? "low" };
   } catch { return null; }
 }

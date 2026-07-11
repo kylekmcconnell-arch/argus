@@ -7,6 +7,7 @@
 import type { ResolvedInput } from "../lib/resolveInput";
 import type { TraceStep } from "../data/evidence";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
+import { tokenEntityKey, walletEntityKey } from "../graph/network";
 import {
   dexByToken, dexByPair, pickPair, goplus, goplusSolana, honeypotIs, coingeckoToken, GOPLUS_CHAIN,
   type DexPair, type GoPlusSecurity, type SolanaSecurity, type HoneypotSim, type CgInfo,
@@ -547,7 +548,7 @@ async function runTokenAudit(
     isContract: h.is_contract === 1 || h.is_contract === "1",
   })).filter((h) => h.address);
 
-  const graph = buildGraph(pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
+  const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
 
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} · ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
@@ -561,24 +562,34 @@ async function runTokenAudit(
   };
 }
 
-function buildGraph(symbol: string, verdict: string, projectX: string | null, deployer: string | null, holders: Holder[], socials: { label: string; url: string }[]): { nodes: PanoptesNode[]; edges: PanoptesEdge[] } {
-  const center = "$" + symbol;
-  const nodes: PanoptesNode[] = [{ type: "Company", key: center, subject: true, was_rug: verdict === "AVOID" }];
+function buildGraph(chain: string, address: string, symbol: string, verdict: string, projectX: string | null, deployer: string | null, holders: Holder[], socials: { label: string; url: string }[]): { nodes: PanoptesNode[]; edges: PanoptesEdge[] } {
+  const center = tokenEntityKey(chain, address);
+  const nodes: PanoptesNode[] = [{
+    type: "Token",
+    key: center,
+    label: "$" + symbol,
+    symbol,
+    chain,
+    address,
+    subject: true,
+    was_rug: verdict === "AVOID",
+  }];
   const edges: PanoptesEdge[] = [];
   if (projectX) {
     nodes.push({ type: "Person", key: projectX });
     edges.push({ src: center, dst: projectX, type: "TEAM" });
   }
   if (deployer) {
-    const k = "wallet:" + deployer.slice(0, 8);
-    nodes.push({ type: "Identity", subtype: "Wallet", key: k });
+    const k = walletEntityKey(chain, deployer);
+    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: "wallet:" + deployer.slice(0, 8), chain, address: deployer });
     edges.push({ src: center, dst: k, type: "DEPLOYED_BY" });
   }
   holders.slice(0, 4).forEach((h) => {
-    // Key by the ADDRESS only (no positional index): the same holder wallet in
-    // two audits must land on the same node to bridge them.
-    const k = (h.tag || "holder") + ":" + h.address.slice(0, 8);
-    nodes.push({ type: "Identity", subtype: "Wallet", key: k, concentration: h.percent });
+    // Roles and short labels are display metadata; the identity is always the
+    // chain plus the complete address. The same wallet therefore stays the same
+    // node whether it later appears as a holder, deployer or funder.
+    const k = walletEntityKey(chain, h.address);
+    nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: (h.tag || "holder") + ":" + h.address.slice(0, 8), chain, address: h.address, concentration: h.percent });
     edges.push({ src: center, dst: k, type: "HELD_BY", verdict: h.percent > 25 ? "Contradicted" : undefined });
   });
   socials.slice(0, 3).forEach((x) => {

@@ -50,7 +50,16 @@ export interface RoleReport {
   axes: Record<string, AxisScore>;
 }
 
-export interface Finding {
+export type EvidenceOrigin = "deterministic" | "model_lead" | "human_verified";
+
+interface EvidenceProvenance {
+  // `model_lead` is discovery output only. It may be useful to an analyst, but
+  // it can never establish the predicate for a hard cap by itself.
+  evidence_origin?: EvidenceOrigin;
+  artifact_verified?: boolean;
+}
+
+export interface Finding extends EvidenceProvenance {
   finding_type: string;
   claim: string;
   source_url: string;
@@ -59,9 +68,11 @@ export interface Finding {
   verification_status: string; // Verified | Reported | Rumor
   independent_source_count: number;
   polarity: number;
+  // Model output may surface a lead, but only a deterministically fetched (or
+  // human-verified) artifact is eligible to govern a hard cap.
 }
 
-export interface Venture {
+export interface Venture extends EvidenceProvenance {
   project_name: string;
   x_handle?: string;   // the venture's own X account (canonical bridge key)
   domain?: string;     // the venture's website host (secondary bridge key)
@@ -77,7 +88,7 @@ export interface Venture {
   notes?: string | null;
 }
 
-export interface Testimonial {
+export interface Testimonial extends EvidenceProvenance {
   claimed_endorser_handle?: string;
   claimed_endorser_name?: string;
   claimed_project?: string;
@@ -101,7 +112,7 @@ export interface AdvisedProject extends Testimonial {
   project_outcome?: VentureOutcome | string | null;
 }
 
-export interface ClientEngagement {
+export interface ClientEngagement extends EvidenceProvenance {
   client_name: string;
   service_type: string;
   period?: string;
@@ -123,7 +134,7 @@ export interface Wallet {
   notes?: string;
 }
 
-export interface Promotion {
+export interface Promotion extends EvidenceProvenance {
   ticker: string;
   contract_address?: string;
   chain?: string;
@@ -170,8 +181,14 @@ export interface AuditReport {
 let _counter = 0;
 function makeAuditId(handle: string): string {
   _counter += 1;
-  const h = (handle + _counter).split("").reduce((a, c) => (a * 33 + c.charCodeAt(0)) >>> 0, 5381);
-  return "PA-" + h.toString(16).toUpperCase().padStart(8, "0").slice(0, 12);
+  // Immutable report idempotency keys must survive serverless cold starts. The
+  // previous handle+process-counter hash repeated whenever a fresh instance
+  // audited the same first handle, causing unrelated runs to share an ID.
+  const uuid = globalThis.crypto?.randomUUID?.();
+  if (uuid) return `PA-${uuid.replace(/-/g, "").slice(0, 20).toUpperCase()}`;
+  const seed = `${handle}:${Date.now()}:${_counter}:${Math.random()}`;
+  const h = seed.split("").reduce((value, char) => (value * 33 + char.charCodeAt(0)) >>> 0, 5381);
+  return `PA-${Date.now().toString(36).toUpperCase()}-${h.toString(16).toUpperCase().padStart(8, "0")}`;
 }
 
 function asClass(x: SubjectClass | string): SubjectClass {
@@ -302,6 +319,7 @@ export class Audit {
       throw new Error(`axis ${axis} belongs to ${role}, not a held role`);
     }
     const w = getProfile(role).axes[axis];
+    if (!Number.isFinite(score)) throw new Error(`axis ${axis} score must be finite`);
     this.axisScores[axis] = {
       score: Math.max(0, Math.min(score, w)),
       weight: w,
@@ -330,21 +348,45 @@ export class Audit {
     const keys: string[] = [];
     const has = (ftype: string, status: string, n = 1) =>
       this.findings.some(
-        (f) => f.finding_type === ftype && f.verification_status === status && f.independent_source_count >= n,
+        (f) => f.finding_type === ftype && f.verification_status === status && f.independent_source_count >= n && this.findingHasVerifiedArtifact(f),
       );
     if (has("DeceptionFinding", "Verified")) keys.push("deception_confirmed");
     if (has("InvestigatorCallout", "Verified", 2)) keys.push("investigator_verified_fraud");
     return keys;
   }
 
+  private artifactIsEligible(
+    url: string | undefined,
+    origin: EvidenceOrigin | undefined,
+    artifactVerified: boolean | undefined,
+  ): boolean {
+    if (origin === "model_lead" || artifactVerified === false) return false;
+    // Existing deterministic fixtures predate the provenance fields, so a real
+    // source URL remains the backwards-compatible artifact requirement. New
+    // model-derived rows are tagged model_lead and fail closed above.
+    return !!url && /^https?:\/\/[^\s]+$/i.test(url);
+  }
+
+  private findingHasVerifiedArtifact(f: Finding): boolean {
+    return this.artifactIsEligible(f.source_url, f.evidence_origin, f.artifact_verified);
+  }
+
   private roleCapsTriggered(role: SubjectClass): string[] {
     const keys: string[] = [];
     if (role === SubjectClass.FOUNDER) {
-      if (this.ventures.some((v) => v.outcome === VentureOutcome.RUG)) keys.push("prior_rug_as_principal");
+      // Cold-intake outcomes are model-extracted claims. Even if the model calls
+      // one a rug, it stays a lead until a separate collector (or a human) has
+      // verified the underlying artifact. Legacy curated fixtures have no
+      // provenance marker and remain trusted for calibration compatibility.
+      if (this.ventures.some((v) =>
+        v.outcome === VentureOutcome.RUG &&
+        v.evidence_origin !== "model_lead" &&
+        v.artifact_verified !== false,
+      )) keys.push("prior_rug_as_principal");
       // A founder who builds the means to rug/wash-trade undetectably (bundlers,
       // mixers, volume fakers): the tooling flag, verified from their own product
       // surfaces, is disqualifying on its own.
-      if (this.findings.some((f) => f.finding_type === "ManipulationTooling" && f.verification_status === "Verified"))
+      if (this.findings.some((f) => f.finding_type === "ManipulationTooling" && f.verification_status === "Verified" && this.findingHasVerifiedArtifact(f)))
         keys.push("operates_manipulation_tooling");
     } else if (role === SubjectClass.KOL) {
       if (
@@ -355,20 +397,36 @@ export class Audit {
         )
       )
         keys.push("wallet_sold_into_promo");
-      if (this.promotions.some((p) => p.paid_promo && p.outcome_was_rug))
+      if (this.promotions.some((p) =>
+        p.paid_promo && p.outcome_was_rug &&
+        p.evidence_origin !== "model_lead" &&
+        p.artifact_verified !== false,
+      ))
         keys.push("paid_to_shill_confirmed_rug");
     } else if (role === SubjectClass.INVESTOR) {
-      if (this.testimonials.some((t) => t.corroboration_verdict === TestimonialVerdict.CONTRADICTED))
+      if (this.testimonials.some((t) =>
+        t.corroboration_verdict === TestimonialVerdict.CONTRADICTED &&
+        t.evidence_origin !== "model_lead" &&
+        t.artifact_verified !== false,
+      ))
         keys.push("contradicted_testimonial");
-      if (this.findings.some((f) => f.finding_type === "PredatoryTerms" && f.verification_status === "Verified"))
+      if (this.findings.some((f) => f.finding_type === "PredatoryTerms" && f.verification_status === "Verified" && this.findingHasVerifiedArtifact(f)))
         keys.push("predatory_terms_verified");
     } else if (role === SubjectClass.ADVISOR) {
-      if (this.advisedProjects.some((p) => p.corroboration_verdict === TestimonialVerdict.CONTRADICTED))
+      if (this.advisedProjects.some((p) =>
+        p.corroboration_verdict === TestimonialVerdict.CONTRADICTED &&
+        p.evidence_origin !== "model_lead" &&
+        p.artifact_verified !== false,
+      ))
         keys.push("claimed_advisory_contradicted");
-      if (this.advisedProjects.some((p) => p.project_outcome === "Rug" && p.paid_or_allocated))
+      if (this.advisedProjects.some((p) =>
+        p.project_outcome === "Rug" && p.paid_or_allocated &&
+        p.evidence_origin !== "model_lead" &&
+        p.artifact_verified !== false,
+      ))
         keys.push("advised_rug_with_allocation");
     } else if (role === SubjectClass.AGENCY) {
-      if (this.clientEngagements.some((c) => c.manipulation_service_flag))
+      if (this.clientEngagements.some((c) => c.manipulation_service_flag && this.artifactIsEligible(c.evidence_url, c.evidence_origin, c.artifact_verified)))
         keys.push("market_manipulation_services");
     }
     return keys;
@@ -389,7 +447,9 @@ export class Audit {
       for (const [ax, a] of Object.entries(this.axisScores)) {
         if (classForAxis(ax) === role) axes[ax] = a;
       }
-      if (Object.keys(axes).length === 0) {
+      const expectedAxes = Object.keys(getProfile(role).axes);
+      const complete = expectedAxes.every((axis) => axes[axis] && Number.isFinite(axes[axis].score));
+      if (!complete || Object.keys(axes).length !== expectedAxes.length) {
         roleReports.push({
           role,
           verdict: "INCOMPLETE",
@@ -397,7 +457,7 @@ export class Audit {
           score_total: null,
           cap_applied: null,
           dox_bonus: doxBonus,
-          axes: {},
+          axes,
         });
         continue;
       }
@@ -447,7 +507,7 @@ export class Audit {
     let govRole: string | null = null;
     let govScore: number | null = null;
     let govCap: string | null = null;
-    if (scored.length) {
+    if (scored.length === roleReports.length && roleReports.length > 0) {
       const governing = scored.reduce((m, r) => (SEVERITY[r.verdict] > SEVERITY[m.verdict] ? r : m));
       composite = governing.verdict;
       govRole = governing.role;

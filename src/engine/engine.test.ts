@@ -14,6 +14,13 @@ import {
 } from "./index";
 
 describe("ARGUS-P v2 engine (port fidelity)", () => {
+  it("mints a distinct immutable audit id for repeated subjects", () => {
+    const first = new Audit("@same_subject", { subject_class: SubjectClass.FOUNDER });
+    const second = new Audit("@same_subject", { subject_class: SubjectClass.FOUNDER });
+    expect(first.audit_id).not.toBe(second.audit_id);
+    expect(first.audit_id).toMatch(/^PA-/);
+  });
+
   it("all axis weights sum to 100", () => {
     expect(validateAxes()).toEqual({});
   });
@@ -72,6 +79,83 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(r.score_total!).toBeGreaterThan(10);
   });
 
+  it("model-discovered adverse claims cannot self-verify into a hard cap", () => {
+    const a = new Audit("@model_lead", { subject_class: SubjectClass.FOUNDER });
+    a.setIdentity("Confirmed");
+    a.addFinding({
+      finding_type: "InvestigatorCallout",
+      claim: "a model says many investigators documented a rug",
+      source_url: "https://example.com/model-suggested-page",
+      source_date: "",
+      verification_status: "Verified",
+      independent_source_count: 99,
+      polarity: -1,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    });
+    for (const ax of ["F1_identity_verifiability", "F2_track_record", "F3_repeat_backing", "F4_build_substance", "F5_reputation_integrity", "F6_network_quality"]) {
+      a.setAxis(ax, 10);
+    }
+    const r = a.finalize();
+    expect(r.cap_applied).not.toBe("investigator_verified_fraud");
+    expect(r.verdict).not.toBe("AVOID");
+  });
+
+  it("model-discovered manipulation tooling cannot fire founder or agency caps", () => {
+    const founder = new Audit("@model_tool_lead", { subject_class: SubjectClass.FOUNDER });
+    founder.setIdentity("Confirmed");
+    founder.addFinding({
+      finding_type: "ManipulationTooling",
+      claim: "possible bundler connection",
+      source_url: "https://example.com/model-suggested-tool",
+      source_date: "",
+      verification_status: "Verified",
+      independent_source_count: 5,
+      polarity: -1,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    });
+    for (const ax of ["F1_identity_verifiability", "F2_track_record", "F3_repeat_backing", "F4_build_substance", "F5_reputation_integrity", "F6_network_quality"]) founder.setAxis(ax, 10);
+    expect(founder.finalize().cap_applied).not.toBe("operates_manipulation_tooling");
+
+    const agency = new Audit("@model_agency_lead", { subject_class: SubjectClass.AGENCY });
+    agency.setIdentity("Confirmed");
+    agency.addClientEngagement({
+      client_name: "Candidate Tool",
+      service_type: "possible_manipulation_tooling:bundler",
+      manipulation_service_flag: true,
+      evidence_url: "https://example.com/model-suggested-tool",
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    });
+    for (const ax of ["AG1_identity_legitimacy", "AG2_client_outcomes", "AG3_service_integrity", "AG4_reputation_fud"]) agency.setAxis(ax, 18);
+    expect(agency.finalize().cap_applied).not.toBe("market_manipulation_services");
+  });
+
+  it("a partial axis set finalizes INCOMPLETE with no score", () => {
+    const a = new Audit("@partial", { subject_class: SubjectClass.FOUNDER });
+    a.setIdentity("Confirmed");
+    a.setAxis("F1_identity_verifiability", 0, "only one axis returned");
+    const r = a.finalize();
+    expect(r.role_reports[0].verdict).toBe("INCOMPLETE");
+    expect(r.role_reports[0].score_total).toBeNull();
+    expect(r.role_reports[0].axes).toHaveProperty("F1_identity_verifiability");
+    expect(r.composite_verdict).toBe("INCOMPLETE");
+    expect(r.governing_score).toBeNull();
+  });
+
+  it("one incomplete requested role makes the composite incomplete", () => {
+    const a = new Audit("@mixed_completeness", { roles: [SubjectClass.FOUNDER, SubjectClass.MEMBER] });
+    a.setIdentity("Confirmed");
+    for (const ax of ["F1_identity_verifiability", "F2_track_record", "F3_repeat_backing", "F4_build_substance", "F5_reputation_integrity", "F6_network_quality"]) a.setAxis(ax, 10);
+    a.setAxis("ME1_identity", 5);
+    const r = a.finalize();
+    expect(r.role_reports.find((role) => role.role === SubjectClass.FOUNDER)?.verdict).not.toBe("INCOMPLETE");
+    expect(r.role_reports.find((role) => role.role === SubjectClass.MEMBER)?.verdict).toBe("INCOMPLETE");
+    expect(r.composite_verdict).toBe("INCOMPLETE");
+    expect(r.governing_role).toBeNull();
+  });
+
   it("KOL pseudonymous wallet sold into promo -> cap 35 (not gated)", () => {
     const a = new Audit("@anon_caller", { subject_class: SubjectClass.KOL });
     a.setIdentity("Unverified");
@@ -99,7 +183,7 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
   it("impersonation blocks publication", () => {
     const a = new Audit("@imposter_fund", { subject_class: SubjectClass.INVESTOR });
     a.setIdentity("SuspectedImpersonation");
-    a.setAxis("I1_identity_legitimacy", 0);
+    for (const ax of ["I1_identity_legitimacy", "I2_portfolio_quality", "I3_fund_scale_tier", "I4_testimonial_corroboration", "I5_reputation_fud"]) a.setAxis(ax, 0);
     expect(a.finalize().verdict).toBe("UNVERIFIABLE_IDENTITY");
   });
 
@@ -141,7 +225,7 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
   it("agency manipulation services -> AVOID", () => {
     const a = new Audit("@bot_agency", { subject_class: SubjectClass.AGENCY });
     a.setIdentity("Confirmed");
-    a.addClientEngagement({ client_name: "SomeProject", service_type: "market_making", manipulation_service_flag: true });
+    a.addClientEngagement({ client_name: "SomeProject", service_type: "market_making", manipulation_service_flag: true, evidence_url: "https://example.com/verified-service-page", evidence_origin: "deterministic", artifact_verified: true });
     for (const [ax, s] of [["AG1_identity_legitimacy", 10], ["AG2_client_outcomes", 15], ["AG3_service_integrity", 5], ["AG4_reputation_fud", 15]] as [string, number][]) {
       a.setAxis(ax, s);
     }

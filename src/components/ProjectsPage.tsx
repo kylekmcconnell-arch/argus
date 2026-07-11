@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { ScoreTicker } from "./ScoreTicker";
 import { PrivateToggle } from "./PrivateToggle";
 import { ScanChip } from "./ScanChip";
-import { mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
+import { auditReadinessLabel, mergedLog, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
@@ -25,7 +25,8 @@ function projectAudits(): LogEntry[] {
 }
 
 function ProjectCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void }) {
-  const m = e.verdict ? verdictMeta(e.verdict) : null;
+  const displayedVerdict = presentedAuditVerdict(e);
+  const m = displayedVerdict ? verdictMeta(displayedVerdict) : null;
   const color = m?.color ?? "var(--color-ink-faint)";
   const img = auditImage(e);
   const me = getAnalyst();
@@ -50,7 +51,7 @@ function ProjectCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void
       <ScanChip kind={e.kind} refId={e.ref ?? e.query} className="mr-1" />
       <span className="mono shrink-0 text-right leading-none" style={{ color }}>
         <span className="block text-[18px] font-semibold tabular">{e.score ?? "—"}</span>
-        <span className="block text-[8px] tracking-wider">{e.verdict ?? ""}</span>
+        <span className="block text-[8px] tracking-wider">{auditReadinessLabel(e) ?? ""}</span>
       </span>
     </button>
   );
