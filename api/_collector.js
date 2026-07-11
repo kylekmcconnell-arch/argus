@@ -645,7 +645,7 @@ var Audit = class {
       successes: rows.filter((r) => r.project_outcome === "IPO" || r.project_outcome === "Acquisition").length
     };
   }
-  setAxis(axis, score, rationale = "") {
+  setAxis(axis, score, rationale = "", lineage = {}) {
     const role = classForAxis(axis);
     if (!this.roles.includes(role)) {
       throw new Error(`axis ${axis} belongs to ${role}, not a held role`);
@@ -656,7 +656,10 @@ var Audit = class {
       score: Math.max(0, Math.min(score, w)),
       weight: w,
       rationale,
-      role
+      role,
+      ...lineage.evidenceRefs ? { evidenceRefs: [...lineage.evidenceRefs] } : {},
+      ...lineage.counterEvidenceRefs ? { counterEvidenceRefs: [...lineage.counterEvidenceRefs] } : {},
+      ...lineage.gaps ? { gaps: [...lineage.gaps] } : {}
     };
   }
   corroborationAxis(axis = "I4_testimonial_corroboration") {
@@ -940,32 +943,83 @@ function canonicalEntityKey(opts) {
 // src/data/dossier.ts
 function assembleDossier(ev, live) {
   const a = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
+  const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
   a.setIdentity(ev.profile.identity_confidence);
-  ev.ventures.forEach((v) => a.addVenture(v));
-  ev.testimonials.forEach((t) => a.addTestimonial(t));
-  ev.advised.forEach((p) => a.addAdvisedProject(p));
-  ev.wallets.forEach((w) => a.addWallet(w));
-  ev.promotions.forEach((p) => a.addPromotion(p));
-  ev.clientEngagements.forEach((c) => a.addClientEngagement(c));
-  ev.associates.forEach((as) => a.addAssociate(as));
-  ev.findings.forEach((f) => a.addFinding(f));
+  graphAudit.setIdentity(ev.profile.identity_confidence);
+  const governingEligible = (row) => row.evidence_origin !== "model_lead" && row.artifact_verified !== false;
+  const identityGrounded = (row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true;
+  const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
+    ...member,
+    ...member.identity_link_evidence_origin === "model_lead" ? { handle: void 0, linkedin: void 0 } : {},
+    ...member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}
+  }));
+  const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
+    if (!identityGrounded(member)) return [{ ...member }];
+    if (member.identity_link_evidence_origin !== "model_lead" && member.projects_evidence_origin !== "model_lead") return [];
+    return [{
+      ...member,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      provider: "grok",
+      source: `${member.source} \xB7 unverified model-enriched links`
+    }];
+  });
+  ev.ventures.forEach((v) => {
+    a.addVenture(v);
+    if (governingEligible(v)) graphAudit.addVenture(v);
+  });
+  ev.testimonials.forEach((t) => {
+    a.addTestimonial(t);
+    if (governingEligible(t)) graphAudit.addTestimonial(t);
+  });
+  ev.advised.forEach((p) => {
+    a.addAdvisedProject(p);
+    if (governingEligible(p)) graphAudit.addAdvisedProject(p);
+  });
+  ev.wallets.forEach((w) => {
+    a.addWallet(w);
+    if (governingEligible(w)) graphAudit.addWallet(w);
+  });
+  ev.promotions.forEach((p) => {
+    a.addPromotion(p);
+    if (governingEligible(p)) graphAudit.addPromotion(p);
+  });
+  ev.clientEngagements.forEach((c) => {
+    a.addClientEngagement(c);
+    if (governingEligible(c)) graphAudit.addClientEngagement(c);
+  });
+  ev.associates.forEach((as) => {
+    a.addAssociate(as);
+    if (governingEligible(as)) graphAudit.addAssociate(as);
+  });
+  ev.findings.forEach((f) => {
+    a.addFinding(f);
+    if (governingEligible(f)) graphAudit.addFinding(f);
+  });
   ev.axes.forEach((ax) => {
     try {
-      a.setAxis(ax.axis, ax.score, ax.rationale);
+      a.setAxis(ax.axis, ax.score, ax.rationale, {
+        evidenceRefs: ax.evidenceRefs,
+        counterEvidenceRefs: ax.counterEvidenceRefs,
+        gaps: ax.gaps
+      });
     } catch {
     }
   });
   const report = a.finalize();
-  const graph = a.toPanoptes();
+  const graph = graphAudit.toPanoptes();
   const subjectKey = graph.nodes.find((n) => n.subject)?.key ?? ev.profile.handle;
   const hasNode = (key) => graph.nodes.some((n) => String(n.key).toLowerCase() === key.toLowerCase());
   for (const p of ev.webTeam ?? []) {
-    if (!p.handle && !p.name) continue;
-    const pkey = canonicalEntityKey({ handle: p.handle, name: p.name });
+    if (!governingEligible(p)) continue;
+    const verifiedHandle = p.identity_link_evidence_origin === "model_lead" ? void 0 : p.handle;
+    const verifiedProjects = p.projects_evidence_origin === "model_lead" ? [] : p.projects ?? [];
+    if (!verifiedHandle && !p.name) continue;
+    const pkey = canonicalEntityKey({ handle: verifiedHandle, name: p.name });
     if (!pkey) continue;
     if (!hasNode(pkey)) graph.nodes.push({ type: "Person", key: pkey, label: p.name, role: p.role });
     graph.edges.push({ src: subjectKey, dst: pkey, type: "TEAM", role: p.role });
-    for (const pr of p.projects ?? []) {
+    for (const pr of verifiedProjects) {
       if (!pr.name) continue;
       const prKey = canonicalEntityKey({ name: pr.name });
       if (!prKey) continue;
@@ -974,6 +1028,7 @@ function assembleDossier(ev, live) {
     }
   }
   for (const vt of ev.ventureTeams ?? []) {
+    if (!governingEligible(vt)) continue;
     if (!vt.key) continue;
     if (!hasNode(vt.key)) graph.nodes.push({ type: "Company", key: vt.key, label: vt.name });
     for (const person of vt.people) {
@@ -1002,9 +1057,18 @@ function assembleDossier(ev, live) {
     prior_handles: ev.profile.prior_handles,
     headline: ev.headline,
     live,
+    ...ev.axisCitationVersion === 1 && ev.axisEvidenceCatalog ? {
+      axisCitationVersion: 1,
+      axisEvidenceCatalog: ev.axisEvidenceCatalog.map((artifact) => ({
+        ...artifact,
+        eligibleAxes: [...artifact.eligibleAxes]
+      }))
+    } : {},
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
-    webTeam: ev.webTeam ?? [],
+    webTeam: groundedWebTeam,
+    ...webTeamLeads.length ? { webTeamLeads } : {},
+    ventureTeams: ev.ventureTeams ?? [],
     sourceArtifacts: ev.sourceArtifacts,
     profileAuthenticity: ev.profileAuthenticity,
     trustGraphScreen: ev.trustGraphScreen,
@@ -1272,7 +1336,8 @@ function emptyEvidence(handle) {
       followers: "\u2014",
       joined: "\u2014",
       identity_confidence: "Unverified",
-      identity_note: "No identity resolution available."
+      identity_note: "No identity resolution available.",
+      profile_collection_state: "unavailable"
     },
     roles: [],
     ventures: [],
@@ -1292,6 +1357,9 @@ function emptyEvidence(handle) {
     sourceArtifacts: []
   };
 }
+
+// server/agent.ts
+import { createHash } from "node:crypto";
 
 // server/cost.ts
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -1567,24 +1635,64 @@ ${evidenceJson}`;
   if (!r) return null;
   return (r.contradictions ?? []).filter((c) => c && c.claim?.trim() && c.conflict?.trim()).map((c) => ({ claim: c.claim.trim(), conflict: c.conflict.trim(), severity: lvl(c.severity), confidence: lvl(c.confidence) })).slice(0, 10);
 }
-function validateAnalystVerdict(value, axisCatalog2) {
-  if (!value || typeof value !== "object" || !axisCatalog2.length) return null;
+var ARTIFACT_ID = /^art_v1_[a-f0-9]{64}$/;
+var COVERAGE_ONLY_VERIFICATIONS = /* @__PURE__ */ new Set(["checked_empty", "unavailable"]);
+var isSubstantiveArtifact = (artifact) => !!artifact && !COVERAGE_ONLY_VERIFICATIONS.has(artifact.verification);
+function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = []) {
+  if (!value || typeof value !== "object" || !axisCatalog2.length || !evidenceCatalog.length) return null;
   const raw = value;
   if (!Array.isArray(raw.axes) || raw.axes.length !== axisCatalog2.length) return null;
-  if (typeof raw.headline !== "string" || typeof raw.identity_note !== "string") return null;
+  if (typeof raw.headline !== "string" || !raw.headline.trim() || typeof raw.identity_note !== "string" || !raw.identity_note.trim()) return null;
   const expected = /* @__PURE__ */ new Map();
   for (const spec of axisCatalog2) {
     if (!spec.axis || expected.has(spec.axis) || !Number.isFinite(spec.weight) || spec.weight < 0) return null;
     expected.set(spec.axis, spec);
   }
+  const artifacts = /* @__PURE__ */ new Map();
+  for (const artifact of evidenceCatalog) {
+    if (!ARTIFACT_ID.test(artifact.artifactId) || artifacts.has(artifact.artifactId) || artifact.contentHash !== artifact.artifactId.slice("art_v1_".length) || !Array.isArray(artifact.eligibleAxes)) return null;
+    artifacts.set(artifact.artifactId, artifact);
+  }
+  const validRefs = (value2, min, max) => {
+    if (!Array.isArray(value2) || value2.length < min || value2.length > max) return null;
+    if (!value2.every((item) => typeof item === "string" && ARTIFACT_ID.test(item))) return null;
+    const refs = value2;
+    return new Set(refs).size === refs.length ? [...refs] : null;
+  };
+  const validGaps = (value2) => {
+    if (!Array.isArray(value2) || value2.length > 6) return null;
+    const gaps = value2.map((item) => typeof item === "string" ? item.trim() : "");
+    if (gaps.some((gap) => !gap || gap.length > 400) || new Set(gaps).size !== gaps.length) return null;
+    return gaps;
+  };
   const seen = /* @__PURE__ */ new Map();
   for (const candidate of raw.axes) {
     if (!candidate || typeof candidate !== "object") return null;
     const row = candidate;
-    if (typeof row.axis !== "string" || typeof row.score !== "number" || typeof row.rationale !== "string") return null;
+    if (typeof row.axis !== "string" || typeof row.score !== "number" || typeof row.rationale !== "string" || !row.rationale.trim()) return null;
     const spec = expected.get(row.axis);
     if (!spec || seen.has(row.axis) || !Number.isFinite(row.score) || row.score < 0 || row.score > spec.weight) return null;
-    seen.set(row.axis, { axis: row.axis, score: row.score, rationale: row.rationale.trim() });
+    const evidenceRefs = validRefs(row.evidenceRefs, 1, 12);
+    const counterEvidenceRefs = validRefs(row.counterEvidenceRefs, 0, 12);
+    const gaps = validGaps(row.gaps);
+    if (!evidenceRefs || !counterEvidenceRefs || !gaps) return null;
+    if (counterEvidenceRefs.some((ref) => evidenceRefs.includes(ref))) return null;
+    const everyRefEligible = [...evidenceRefs, ...counterEvidenceRefs].every((ref) => {
+      const artifact = artifacts.get(ref);
+      return artifact?.eligibleAxes.includes(row.axis);
+    });
+    if (!everyRefEligible) return null;
+    if (!evidenceRefs.some((ref) => isSubstantiveArtifact(artifacts.get(ref)))) return null;
+    if (evidenceRefs.some((ref) => !isSubstantiveArtifact(artifacts.get(ref))) && gaps.length === 0) return null;
+    if (!counterEvidenceRefs.every((ref) => isSubstantiveArtifact(artifacts.get(ref)))) return null;
+    seen.set(row.axis, {
+      axis: row.axis,
+      score: row.score,
+      rationale: row.rationale.trim(),
+      evidenceRefs,
+      counterEvidenceRefs,
+      gaps
+    });
   }
   if (seen.size !== expected.size) return null;
   return {
@@ -1715,6 +1823,548 @@ var compactFinding = (value) => {
     finding_scope: compactFindingScope(f.finding_scope)
   };
 };
+var SECTION_AXIS_ELIGIBILITY = {
+  profile: [
+    "F1_identity_verifiability",
+    "F5_reputation_integrity",
+    "P1_team_and_identity",
+    "P5_traction_and_liveness",
+    "P6_transparency_integrity",
+    "K1_identity_roster",
+    "K3_disclosure_deletion",
+    "I1_identity_legitimacy",
+    "AG1_identity_legitimacy",
+    "AD1_identity_verifiability",
+    "ME1_identity",
+    "ME2_role_authenticity",
+    "ME3_conduct_reputation"
+  ],
+  // Visual profile-photo triage is a review lead, never identity proof and
+  // therefore never eligible to move a score.
+  profileAuthenticity: [],
+  trustGraphScreen: [
+    "F5_reputation_integrity",
+    "F6_network_quality",
+    "P1_team_and_identity",
+    "P4_backing_and_partners",
+    "P6_transparency_integrity",
+    "K1_identity_roster",
+    "K4_onchain_conduct",
+    "K5_cabal_fud",
+    "I1_identity_legitimacy",
+    "I4_testimonial_corroboration",
+    "I5_reputation_fud",
+    "AG1_identity_legitimacy",
+    "AG3_service_integrity",
+    "AG4_reputation_fud",
+    "AD1_identity_verifiability",
+    "AD3_relationship_corroboration",
+    "AD4_advisory_conduct",
+    "AD5_reputation_fud",
+    "ME1_identity",
+    "ME3_conduct_reputation"
+  ],
+  // Findings are routed by exact finding_type below. A section-wide allowlist
+  // made unrelated facts (for example, token collapse) eligible for identity.
+  findings: [],
+  ventures: [
+    "F2_track_record",
+    "F3_repeat_backing",
+    "F4_build_substance",
+    "F5_reputation_integrity",
+    "F6_network_quality",
+    "P2_product_substance",
+    "P4_backing_and_partners",
+    "P5_traction_and_liveness",
+    "I2_portfolio_quality",
+    "I3_fund_scale_tier",
+    "AG2_client_outcomes",
+    "AD2_advised_outcomes"
+  ],
+  testimonials: ["F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "I4_testimonial_corroboration", "AD3_relationship_corroboration"],
+  advised: ["F2_track_record", "F5_reputation_integrity", "AD2_advised_outcomes", "AD3_relationship_corroboration", "AD4_advisory_conduct", "AD5_reputation_fud"],
+  promotions: ["F5_reputation_integrity", "P3_token_conduct", "P6_transparency_integrity", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud", "AG3_service_integrity", "AD4_advisory_conduct"],
+  wallets: ["F5_reputation_integrity", "P3_token_conduct", "P6_transparency_integrity", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "AD4_advisory_conduct"],
+  team: [
+    "F1_identity_verifiability",
+    "F2_track_record",
+    "F4_build_substance",
+    "F6_network_quality",
+    "P1_team_and_identity",
+    "P2_product_substance",
+    "P4_backing_and_partners",
+    "I1_identity_legitimacy",
+    "AG1_identity_legitimacy",
+    "AD1_identity_verifiability",
+    "ME1_identity",
+    "ME2_role_authenticity"
+  ],
+  notableFollowers: ["F6_network_quality", "P4_backing_and_partners", "P5_traction_and_liveness", "K5_cabal_fud", "I2_portfolio_quality", "I4_testimonial_corroboration", "I5_reputation_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
+  recentActivity: [
+    "F2_track_record",
+    "F4_build_substance",
+    "F5_reputation_integrity",
+    "P2_product_substance",
+    "P3_token_conduct",
+    "P5_traction_and_liveness",
+    "P6_transparency_integrity",
+    "K2_call_performance",
+    "K3_disclosure_deletion",
+    "K5_cabal_fud",
+    "I2_portfolio_quality",
+    "I4_testimonial_corroboration",
+    "I5_reputation_fud",
+    "AG2_client_outcomes",
+    "AG3_service_integrity",
+    "AG4_reputation_fud",
+    "AD2_advised_outcomes",
+    "AD3_relationship_corroboration",
+    "AD4_advisory_conduct",
+    "AD5_reputation_fud",
+    "ME2_role_authenticity",
+    "ME3_conduct_reputation"
+  ],
+  // Source artifacts are routed by kind/provider below. An unknown artifact is
+  // intentionally ineligible; a gap is safer than a citation with no semantic
+  // relationship to the axis.
+  sourceArtifacts: [],
+  clientEngagements: ["F5_reputation_integrity", "AG2_client_outcomes", "AG3_service_integrity", "AG4_reputation_fud"],
+  associates: ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I5_reputation_fud", "AG4_reputation_fud", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  ventureTeams: ["F1_identity_verifiability", "F2_track_record", "F4_build_substance", "F6_network_quality", "P1_team_and_identity", "P2_product_substance", "P4_backing_and_partners", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability"]
+};
+var REPUTATION_FINDING_AXES = [
+  "F5_reputation_integrity",
+  "P6_transparency_integrity",
+  "K5_cabal_fud",
+  "I5_reputation_fud",
+  "AG4_reputation_fud",
+  "AD5_reputation_fud",
+  "ME3_conduct_reputation"
+];
+var IDENTITY_LEAD_FINDING_AXES = [
+  "F1_identity_verifiability",
+  "F5_reputation_integrity",
+  "P1_team_and_identity",
+  "P6_transparency_integrity",
+  "K1_identity_roster",
+  "K5_cabal_fud",
+  "I1_identity_legitimacy",
+  "I5_reputation_fud",
+  "AG1_identity_legitimacy",
+  "AG4_reputation_fud",
+  "AD1_identity_verifiability",
+  "AD5_reputation_fud",
+  "ME1_identity",
+  "ME3_conduct_reputation"
+];
+var FINDING_AXIS_ELIGIBILITY = {
+  CommunityFUD: REPUTATION_FINDING_AXES,
+  LegalCaseNameLead: IDENTITY_LEAD_FINDING_AXES,
+  SanctionsNameLead: IDENTITY_LEAD_FINDING_AXES,
+  SiteNotLive: ["F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
+  TokenCollapse: ["F5_reputation_integrity", "P3_token_conduct", "K2_call_performance", "K4_onchain_conduct"],
+  CadenceDecay: ["F4_build_substance", "P5_traction_and_liveness", "ME3_conduct_reputation"],
+  TrustGraphConnection: SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
+  AdvisoryRug: ["F5_reputation_integrity", "AD2_advised_outcomes", "AD4_advisory_conduct", "AD5_reputation_fud"],
+  DeceptionFinding: [
+    "F5_reputation_integrity",
+    "P6_transparency_integrity",
+    "K3_disclosure_deletion",
+    "K5_cabal_fud",
+    "I4_testimonial_corroboration",
+    "I5_reputation_fud",
+    "AG3_service_integrity",
+    "AG4_reputation_fud",
+    "AD3_relationship_corroboration",
+    "AD4_advisory_conduct",
+    "AD5_reputation_fud",
+    "ME3_conduct_reputation"
+  ],
+  Exit: ["F2_track_record", "F3_repeat_backing", "F4_build_substance", "I2_portfolio_quality"],
+  IPO: ["F2_track_record", "F3_repeat_backing", "F4_build_substance", "I2_portfolio_quality"],
+  MeridianExit: ["F2_track_record", "F3_repeat_backing", "F4_build_substance", "I2_portfolio_quality"],
+  InvestigatorCallout: [
+    ...REPUTATION_FINDING_AXES,
+    "P3_token_conduct",
+    "K3_disclosure_deletion",
+    "K4_onchain_conduct",
+    "AG3_service_integrity",
+    "AD4_advisory_conduct"
+  ]
+};
+var CHECK_AXIS_ELIGIBILITY = {
+  "identity-resolution": ["F1_identity_verifiability", "P1_team_and_identity", "K1_identity_roster", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
+  "profile-photo-authenticity": [],
+  "code-footprint-github": ["F2_track_record", "F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
+  "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
+  "affiliations-associates": ["F2_track_record", "F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I2_portfolio_quality", "I4_testimonial_corroboration", "AD3_relationship_corroboration", "ME2_role_authenticity"],
+  "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
+  "vc-portfolio-track-record": ["F2_track_record", "F3_repeat_backing", "I2_portfolio_quality", "I3_fund_scale_tier"],
+  "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "I2_portfolio_quality", "I3_fund_scale_tier", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  "ofac-sanctions-name": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation"],
+  "trust-graph-connections": SECTION_AXIS_ELIGIBILITY.trustGraphScreen
+};
+var SOURCE_ARTIFACT_AXIS_ELIGIBILITY = {
+  profile_photo: SECTION_AXIS_ELIGIBILITY.profileAuthenticity,
+  trust_graph: SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
+  legal_case: [
+    "F1_identity_verifiability",
+    "F5_reputation_integrity",
+    "P1_team_and_identity",
+    "P6_transparency_integrity",
+    "K1_identity_roster",
+    "K5_cabal_fud",
+    "I1_identity_legitimacy",
+    "I5_reputation_fud",
+    "AG1_identity_legitimacy",
+    "AG4_reputation_fud",
+    "AD1_identity_verifiability",
+    "AD5_reputation_fud",
+    "ME1_identity",
+    "ME3_conduct_reputation"
+  ],
+  sanctions_screen: [
+    "F1_identity_verifiability",
+    "F5_reputation_integrity",
+    "P1_team_and_identity",
+    "P6_transparency_integrity",
+    "K1_identity_roster",
+    "K5_cabal_fud",
+    "I1_identity_legitimacy",
+    "I5_reputation_fud",
+    "AG1_identity_legitimacy",
+    "AG4_reputation_fud",
+    "AD1_identity_verifiability",
+    "AD5_reputation_fud",
+    "ME1_identity",
+    "ME3_conduct_reputation"
+  ],
+  press: [
+    "F2_track_record",
+    "F3_repeat_backing",
+    "F4_build_substance",
+    "F5_reputation_integrity",
+    "F6_network_quality",
+    "P2_product_substance",
+    "P4_backing_and_partners",
+    "P5_traction_and_liveness",
+    "P6_transparency_integrity",
+    "K5_cabal_fud",
+    "I2_portfolio_quality",
+    "I3_fund_scale_tier",
+    "I5_reputation_fud",
+    "AG2_client_outcomes",
+    "AG4_reputation_fud",
+    "AD2_advised_outcomes",
+    "AD5_reputation_fud",
+    "ME3_conduct_reputation"
+  ]
+};
+var sourceArtifactKind = (value) => {
+  const kind = typeof value.kind === "string" ? value.kind : "";
+  if (SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind]) return kind;
+  const provider = typeof value.provider === "string" ? value.provider : "";
+  if (provider === "claude-vision" || provider === "twitterapi") return "profile_photo";
+  if (provider === "argus-graph") return "trust_graph";
+  if (provider === "courtlistener") return "legal_case";
+  if (provider === "opensanctions") return "sanctions_screen";
+  if (provider === "google-news") return "press";
+  return "";
+};
+var stableJson = (value) => {
+  const normalize = (candidate) => {
+    if (candidate == null || typeof candidate === "string" || typeof candidate === "boolean") return candidate;
+    if (typeof candidate === "number") return Number.isFinite(candidate) ? candidate : null;
+    if (Array.isArray(candidate)) return candidate.map(normalize);
+    if (typeof candidate !== "object") return null;
+    return Object.fromEntries(
+      Object.keys(candidate).sort().filter((key) => candidate[key] !== void 0).map((key) => [key, normalize(candidate[key])])
+    );
+  };
+  return JSON.stringify(normalize(value));
+};
+var evidencePayload = (value) => {
+  const base = value && typeof value === "object" && !Array.isArray(value) ? { ...value } : { value };
+  delete base.artifactId;
+  return base;
+};
+var eligibleAxesFor = (section, value, axisCatalog2) => {
+  const checkId = typeof value.checkId === "string" ? value.checkId : typeof value.check_id === "string" ? value.check_id : "";
+  const findingType = typeof value.finding_type === "string" ? value.finding_type : "";
+  const eligible = section === "profile" && value.profile_collection_state !== "resolved" ? [] : section === "findings" ? FINDING_AXIS_ELIGIBILITY[findingType] ?? [] : section === "checkOutcomes" && checkId ? CHECK_AXIS_ELIGIBILITY[checkId] ?? [] : section === "sourceArtifacts" ? SOURCE_ARTIFACT_AXIS_ELIGIBILITY[sourceArtifactKind(value)] ?? [] : SECTION_AXIS_ELIGIBILITY[section] ?? [];
+  const allowed = new Set(eligible);
+  return [...new Set(axisCatalog2.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
+};
+var recordText = (record2, keys, max) => {
+  for (const key of keys) {
+    const value = record2[key];
+    if (typeof value === "string" && value.trim()) return clip(value.trim(), max);
+  }
+  return void 0;
+};
+var safeArtifactSourceUrl = (value) => {
+  if (!value) return void 0;
+  try {
+    const url = new URL(value);
+    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !url.hostname) {
+      return void 0;
+    }
+    url.hash = "";
+    for (const key of [...url.searchParams.keys()]) {
+      if (/^(?:access[_-]?token|api[_-]?key|key|token|signature|sig|auth)$/i.test(key)) {
+        url.searchParams.delete(key);
+      }
+    }
+    return url.toString();
+  } catch {
+    return void 0;
+  }
+};
+var ARTIFACT_URL_FIELDS = /* @__PURE__ */ new Set([
+  "sourceUrl",
+  "source_url",
+  "evidence_url",
+  "url",
+  "linkedin",
+  "link",
+  "href",
+  "citation",
+  "link_evidence_url"
+]);
+var sanitizeArtifactUrls = (value, depth = 0) => {
+  if (value == null || typeof value !== "object" || depth > 4) return value;
+  if (Array.isArray(value)) return value.map((item) => sanitizeArtifactUrls(item, depth + 1));
+  const sanitized = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (ARTIFACT_URL_FIELDS.has(key) && typeof item === "string") {
+      const safe = safeArtifactSourceUrl(item);
+      if (safe) sanitized[key] = safe;
+      continue;
+    }
+    sanitized[key] = sanitizeArtifactUrls(item, depth + 1);
+  }
+  return sanitized;
+};
+var verificationFor = (section, record2) => {
+  if (section === "axisGaps") return "unavailable";
+  if (section === "checkOutcomes") {
+    const status = recordText(record2, ["status"], 40)?.toLowerCase();
+    if (status === "confirmed" || status === "finding") return "verified";
+    if (status === "checked-empty") return "checked_empty";
+    if (status === "unavailable" || status === "unknown" || status === "stale" || status === "not-applicable") return "unavailable";
+  }
+  if (section === "findings") {
+    const status = recordText(record2, ["verification_status"], 40)?.toLowerCase();
+    if (status === "verified" && record2.artifact_verified === true) return "verified";
+    if (status === "reported") return "reported";
+  }
+  if (section === "sourceArtifacts") {
+    const match = recordText(record2, ["match"], 40);
+    const kind = recordText(record2, ["kind"], 80);
+    if (kind === "trust_graph") {
+      if (record2.coverageState === "unavailable" || match === "observed") return "unavailable";
+      if (match === "screened_clear" || match === "no_match") return "checked_empty";
+      const contentHash = recordText(record2, ["contentHash"], 64);
+      const sourceContentHash = recordText(record2, ["sourceContentHash"], 64);
+      if (match === "risk_signal" && /^[a-f0-9]{64}$/i.test(contentHash ?? "") && /^[a-f0-9]{64}$/i.test(sourceContentHash ?? "")) {
+        return "verified";
+      }
+      return "unavailable";
+    }
+    if (match === "no_match" || match === "screened_clear") return "checked_empty";
+    if (match === "candidate") return "reported";
+  }
+  if (section === "trustGraphScreen") {
+    if (record2.status === "incomplete") return "unavailable";
+    const connections = Array.isArray(record2.connections) ? record2.connections : [];
+    const qualifiedConnections = connections.filter((candidate) => {
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return false;
+      const connection = candidate;
+      return connection.qualified === true && Array.isArray(connection.ties) && connection.ties.length > 0;
+    });
+    if (record2.status === "clear" && qualifiedConnections.length === 0) return "checked_empty";
+    if (qualifiedConnections.length > 0) return "verified";
+    return "unavailable";
+  }
+  return "observed";
+};
+var DIRECT_SECTIONS = /* @__PURE__ */ new Set(["profile", "profileAuthenticity", "findings", "wallets", "promotions", "recentActivity"]);
+var providerFor = (section, payload) => {
+  const declared = recordText(payload, ["provider"], 100);
+  if (declared) return declared;
+  if (section === "profile") {
+    const profileProvider = recordText(payload, ["profile_provider"], 100);
+    if (profileProvider) return profileProvider;
+  }
+  const attributed = recordText(payload, ["source_author", "source"], 100);
+  if (attributed) return attributed;
+  const sourceUrl = safeArtifactSourceUrl(
+    recordText(payload, ["sourceUrl", "source_url", "evidence_url", "link_evidence_url", "url"], 420)
+  );
+  if (sourceUrl) {
+    try {
+      return new URL(sourceUrl).hostname.replace(/^www\./i, "");
+    } catch {
+    }
+  }
+  return section === "axisGaps" ? "argus" : "source-unspecified";
+};
+var makeAxisArtifact = (section, value, axisCatalog2, eligibleOverride) => {
+  const payload = sanitizeArtifactUrls(evidencePayload(value));
+  const contentHash = createHash("sha256").update(stableJson({ section, payload })).digest("hex");
+  const artifactId = `art_v1_${contentHash}`;
+  const eligibleAxes = eligibleOverride ?? eligibleAxesFor(section, payload, axisCatalog2);
+  const provider = providerFor(section, payload);
+  const operationKey = recordText(payload, ["checkId", "check_id", "finding_type", "kind", "type"], 100);
+  const title = recordText(payload, ["title", "label", "claim", "name", "project_name", "handle", "axis"], 180) ?? `${section} evidence`;
+  const excerpt = recordText(payload, ["excerpt", "note", "rationale", "evidence", "bio", "detail", "text", "value"], 320);
+  const sourceUrl = safeArtifactSourceUrl(
+    recordText(payload, ["sourceUrl", "source_url", "evidence_url", "url", "linkedin"], 420)
+  );
+  const capturedAt = recordText(payload, ["capturedAt", "captured_at", "profile_captured_at", "completedAt", "source_date"], 40);
+  return {
+    decorated: { ...payload, artifactId },
+    catalog: {
+      artifactId,
+      kind: "axis_evidence",
+      provider,
+      operation: section === "axisGaps" ? `coverage_gap:${eligibleAxes[0] ?? "unknown"}` : `${section}:${operationKey ?? "collect"}`,
+      section,
+      title,
+      ...excerpt ? { excerpt } : {},
+      ...sourceUrl ? { sourceUrl } : {},
+      ...capturedAt ? { capturedAt } : {},
+      contentHash,
+      eligibleAxes,
+      verification: verificationFor(section, payload),
+      scope: DIRECT_SECTIONS.has(section) ? "direct_subject" : "subject_context"
+    }
+  };
+};
+var SCORING_SINGLE_SECTIONS = ["profile", "profileAuthenticity", "trustGraphScreen"];
+var SCORING_ARRAY_SECTIONS = [
+  "findings",
+  "ventures",
+  "testimonials",
+  "advised",
+  "promotions",
+  "wallets",
+  "team",
+  "notableFollowers",
+  "recentActivity",
+  "sourceArtifacts",
+  "checkOutcomes",
+  "clientEngagements",
+  "associates",
+  "ventureTeams"
+];
+function renderScoringPacket(packet, axisCatalog2) {
+  const rendered = { ...packet, schema_version: 4 };
+  const packetCoverage = packet.coverage && typeof packet.coverage === "object" && !Array.isArray(packet.coverage) ? packet.coverage : {};
+  const renderedCoverage = Object.fromEntries(
+    Object.entries(packetCoverage).map(([section, value]) => [section, { ...value }])
+  );
+  delete rendered.coverage;
+  delete rendered.providerRuns;
+  const artifacts = [];
+  for (const section of SCORING_SINGLE_SECTIONS) {
+    if (packet[section] == null) continue;
+    const artifact = makeAxisArtifact(section, packet[section], axisCatalog2);
+    if (artifact.catalog.eligibleAxes.length === 0) {
+      delete rendered[section];
+      continue;
+    }
+    rendered[section] = artifact.decorated;
+    artifacts.push(artifact.catalog);
+  }
+  for (const section of SCORING_ARRAY_SECTIONS) {
+    const values = Array.isArray(packet[section]) ? packet[section] : [];
+    const eligibleValues = values.flatMap((value) => {
+      const artifact = makeAxisArtifact(section, value, axisCatalog2);
+      if (artifact.catalog.eligibleAxes.length === 0) return [];
+      artifacts.push(artifact.catalog);
+      return [artifact.decorated];
+    });
+    rendered[section] = eligibleValues;
+    if (renderedCoverage[section]) renderedCoverage[section].included = eligibleValues.length;
+  }
+  const axisGaps = axisCatalog2.flatMap((axis) => {
+    const hasEligibleEvidence = artifacts.some((artifact2) => artifact2.eligibleAxes.includes(axis.axis));
+    if (hasEligibleEvidence) return [];
+    const artifact = makeAxisArtifact("axisGaps", {
+      axis: axis.axis,
+      status: "unavailable",
+      note: `No retained scoring artifact is eligible for ${axis.axis}.`
+    }, axisCatalog2, [axis.axis]);
+    artifacts.push(artifact.catalog);
+    return [artifact.decorated];
+  });
+  rendered.axisGaps = axisGaps;
+  rendered.evidenceCatalog = [...new Map(artifacts.map((artifact) => [artifact.artifactId, artifact])).values()];
+  return rendered;
+}
+var isAxisEvidenceRecord = (value) => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const row = value;
+  return typeof row.artifactId === "string" && ARTIFACT_ID.test(row.artifactId) && row.kind === "axis_evidence" && typeof row.provider === "string" && !!row.provider && typeof row.operation === "string" && !!row.operation && typeof row.section === "string" && !!row.section && typeof row.title === "string" && !!row.title && (row.excerpt === void 0 || typeof row.excerpt === "string") && (row.sourceUrl === void 0 || typeof row.sourceUrl === "string") && (row.capturedAt === void 0 || typeof row.capturedAt === "string") && typeof row.contentHash === "string" && row.contentHash === row.artifactId.slice("art_v1_".length) && Array.isArray(row.eligibleAxes) && row.eligibleAxes.length > 0 && row.eligibleAxes.every((axis) => typeof axis === "string" && !!axis) && new Set(row.eligibleAxes).size === row.eligibleAxes.length && ["verified", "reported", "observed", "checked_empty", "unavailable"].includes(String(row.verification)) && (row.scope === "direct_subject" || row.scope === "subject_context");
+};
+function extractScoringEvidenceCatalog(json) {
+  let packet;
+  try {
+    const value = JSON.parse(json);
+    if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+    packet = value;
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(packet.evidenceCatalog) || !packet.evidenceCatalog.every(isAxisEvidenceRecord)) return [];
+  const catalog = packet.evidenceCatalog;
+  const byId = new Map(catalog.map((record2) => [record2.artifactId, record2]));
+  if (byId.size !== catalog.length) return [];
+  const represented = /* @__PURE__ */ new Set();
+  const inspect = (section, value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return;
+    const decorated = value;
+    if (typeof decorated.artifactId !== "string") return;
+    const artifactId = decorated.artifactId;
+    const payload = evidencePayload(decorated);
+    const contentHash = createHash("sha256").update(stableJson({ section, payload })).digest("hex");
+    const catalogRecord = byId.get(artifactId);
+    if (artifactId !== `art_v1_${contentHash}` || catalogRecord?.section !== section || catalogRecord.contentHash !== contentHash) return;
+    represented.add(artifactId);
+  };
+  for (const section of SCORING_SINGLE_SECTIONS) inspect(section, packet[section]);
+  for (const section of [...SCORING_ARRAY_SECTIONS, "axisGaps"]) {
+    if (Array.isArray(packet[section])) packet[section].forEach((value) => inspect(section, value));
+  }
+  return represented.size === catalog.length ? catalog.map((record2) => ({ ...record2, eligibleAxes: [...record2.eligibleAxes] })) : [];
+}
+var pruneTrustGraphPacket = (packet) => {
+  const screen = packet.trustGraphScreen;
+  if (!screen || typeof screen !== "object" || Array.isArray(screen)) return false;
+  const graph = screen;
+  const connections = Array.isArray(graph.connections) ? graph.connections : [];
+  for (let index = connections.length - 1; index >= 0; index--) {
+    const connection = connections[index];
+    if (!connection || typeof connection !== "object" || Array.isArray(connection)) continue;
+    const ties = connection.ties;
+    if (Array.isArray(ties) && ties.length > 1) {
+      ties.pop();
+      return true;
+    }
+  }
+  if (connections.length > 1) {
+    connections.pop();
+    return true;
+  }
+  if (connections.length === 1) {
+    connections.pop();
+    return true;
+  }
+  delete packet.trustGraphScreen;
+  return true;
+};
 function serializeAnalystEvidencePacket(input, options) {
   const sectionLimits = {
     ventures: 12,
@@ -1727,7 +2377,10 @@ function serializeAnalystEvidencePacket(input, options) {
     recentActivity: 12,
     sourceArtifacts: 24,
     checkOutcomes: 20,
-    providerRuns: 24
+    providerRuns: 24,
+    clientEngagements: 16,
+    associates: 16,
+    ventureTeams: 12
   };
   const findingsRaw = Array.isArray(input.findings) ? input.findings : [];
   const profile = input.profile && typeof input.profile === "object" && !Array.isArray(input.profile) ? input.profile : void 0;
@@ -1741,11 +2394,16 @@ function serializeAnalystEvidencePacket(input, options) {
     if (!value || typeof value !== "object" || Array.isArray(value)) return false;
     const row = value;
     const scope = row.finding_scope && typeof row.finding_scope === "object" && !Array.isArray(row.finding_scope) ? row.finding_scope : void 0;
-    if (row.evidence_origin === "model_lead") return true;
+    if (row.evidence_origin === "model_lead" || row.artifact_verified === false) return true;
     if (!scope) return false;
     if (scope.scope !== "direct_subject" || scope.relationship_to_subject !== "self") return true;
     const targetEntityKey = normalizeEntityKey(scope.target_entity_key);
     return !!subjectEntityKey && targetEntityKey !== subjectEntityKey;
+  };
+  const hasTrustedFindingProvenance = (value) => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const row = value;
+    return (row.evidence_origin === "deterministic" || row.evidence_origin === "human_verified") && row.artifact_verified === true;
   };
   const findingPriority = (value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return 4;
@@ -1755,7 +2413,7 @@ function serializeAnalystEvidencePacket(input, options) {
     if (typeof row.polarity === "number" && row.polarity < 0) return 2;
     return 3;
   };
-  const scoringFindingsRaw = findingsRaw.filter((value) => !isInvestigativeLead(value));
+  const scoringFindingsRaw = findingsRaw.filter((value) => !isInvestigativeLead(value) && (!options.axisCatalog || hasTrustedFindingProvenance(value)));
   const investigativeLeadsRaw = findingsRaw.filter(isInvestigativeLead);
   const findings = scoringFindingsRaw.map((value, index) => ({ value, index })).sort((a, b) => findingPriority(a.value) - findingPriority(b.value) || a.index - b.index).slice(0, 24).map(({ value }) => compactFinding(value)).filter((f) => !!f);
   const coverage = {
@@ -1785,6 +2443,10 @@ function serializeAnalystEvidencePacket(input, options) {
   }
   for (const [section, limit] of Object.entries(sectionLimits)) {
     const rawSource = Array.isArray(input[section]) ? input[section] : [];
+    if (options.axisCatalog && section === "providerRuns") {
+      coverage.providerRuns = { available: rawSource.length, included: 0 };
+      continue;
+    }
     const source = options.includeInvestigativeLeads ? rawSource : rawSource.filter((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return true;
       const record2 = item;
@@ -1805,29 +2467,61 @@ function serializeAnalystEvidencePacket(input, options) {
     "ventures",
     "team",
     "providerRuns",
+    "associates",
+    "clientEngagements",
+    "ventureTeams",
     "checkOutcomes",
     "sourceArtifacts"
   ];
-  let json = JSON.stringify(packet);
+  const render = () => options.axisCatalog ? renderScoringPacket(packet, options.axisCatalog) : packet;
+  let json = JSON.stringify(render());
+  const protectedEvidenceSections = /* @__PURE__ */ new Set(["checkOutcomes", "sourceArtifacts"]);
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
-    const section = pruneOrder.find((key) => Array.isArray(packet[key]) && packet[key].length > 0);
+    const section = pruneOrder.find((key) => !protectedEvidenceSections.has(key) && Array.isArray(packet[key]) && packet[key].length > 0);
     if (!section) break;
     packet[section].pop();
     coverage[section].included = packet[section].length;
-    json = JSON.stringify(packet);
+    json = JSON.stringify(render());
   }
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS && findings.length > 1) {
     findings.pop();
     coverage.findings.included = findings.length;
-    json = JSON.stringify(packet);
+    json = JSON.stringify(render());
+  }
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS && pruneTrustGraphPacket(packet)) {
+    json = JSON.stringify(render());
+  }
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
+    const section = pruneOrder.find((key) => protectedEvidenceSections.has(key) && Array.isArray(packet[key]) && packet[key].length > 0);
+    if (!section) break;
+    packet[section].pop();
+    coverage[section].included = packet[section].length;
+    json = JSON.stringify(render());
+  }
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS && findings.length > 0) {
+    findings.pop();
+    coverage.findings.included = findings.length;
+    json = JSON.stringify(render());
+  }
+  if (json.length > ANALYST_EVIDENCE_MAX_CHARS && packet.profile != null) {
+    delete packet.profile;
+    json = JSON.stringify(render());
+  }
+  if (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
+    throw new Error(`analyst evidence packet exceeds ${ANALYST_EVIDENCE_MAX_CHARS} characters after structural pruning`);
   }
   return json;
 }
-function buildScoringEvidencePacket(input) {
-  return serializeAnalystEvidencePacket(input, { includeInvestigativeLeads: false });
+function buildScoringEvidencePacket(input, axisCatalog2) {
+  return serializeAnalystEvidencePacket(input, { includeInvestigativeLeads: false, axisCatalog: axisCatalog2 });
 }
 async function analyzeSubject(handle, roles, axisCatalog2, evidenceJson) {
   if (!axisCatalog2.length) return null;
+  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
+  if (!evidenceCatalog.length || axisCatalog2.some((axis) => !evidenceCatalog.some((artifact) => isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis)))) return null;
+  const requestedAxisNames = new Set(axisCatalog2.map((axis) => axis.axis));
+  const allowedRefs = evidenceCatalog.filter((artifact) => artifact.eligibleAxes.some((axis) => requestedAxisNames.has(axis))).map((artifact) => artifact.artifactId);
+  const substantiveRefs = evidenceCatalog.filter((artifact) => isSubstantiveArtifact(artifact) && artifact.eligibleAxes.some((axis) => requestedAxisNames.has(axis))).map((artifact) => artifact.artifactId);
   const system = "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject on a fixed set of axes from collected evidence only. Be skeptical: a strong story never papers over a disqualifying fact. Score conservatively when evidence is thin. Each axis score must be between 0 and its weight. Write one tight rationale per axis citing the evidence. Never use em dashes.";
   const user = `Subject: ${handle}
 Held roles: ${roles.join(", ")}
@@ -1850,6 +2544,8 @@ INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this scoring
 
 FINDING ATTRIBUTION RULE: when comparing or interpreting finding collections, only direct-subject findings may be attributed to the audited subject. A relationship alone is not evidence of participation or responsibility. This restriction applies to finding collections, not to legitimate non-finding evidence: profile, team, wallet, check-outcome, source, and provider evidence may affect scoring when relevant and reliable.
 
+CITATION RULE: every axis must return evidenceRefs, counterEvidenceRefs, and gaps. evidenceRefs must contain 1 to 12 exact artifactId values from evidenceCatalog whose eligibleAxes includes that axis. counterEvidenceRefs must contain 0 to 12 eligible artifact IDs that credibly pull against the score. Never put the same artifact in both arrays. gaps must contain 0 to 6 short descriptions of material unresolved evidence. Artifacts whose verification is "unavailable" or "checked_empty" are coverage gaps only. They may appear in evidenceRefs only alongside at least one substantive support artifact and a matching description in gaps; they may never appear in counterEvidenceRefs. providerRuns operational telemetry is excluded from the scoring packet and must never be inferred or cited.
+
 TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection findings bound to an exact complete server-collected report may influence scoring. Weak or unqualified ties are context only. ARGUS applies any graph cap deterministically after your axis scoring; do not invent or strengthen one.`;
   const tool = {
     name: "record_verdict",
@@ -1866,19 +2562,42 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
             properties: {
               axis: { type: "string", enum: axisCatalog2.map((a) => a.axis) },
               score: { type: "number", minimum: 0, maximum: Math.max(...axisCatalog2.map((a) => a.weight)) },
-              rationale: { type: "string" }
+              rationale: { type: "string", minLength: 1 },
+              evidenceRefs: {
+                type: "array",
+                minItems: 1,
+                maxItems: 12,
+                uniqueItems: true,
+                items: { type: "string", enum: allowedRefs }
+              },
+              counterEvidenceRefs: {
+                type: "array",
+                minItems: 0,
+                maxItems: 12,
+                uniqueItems: true,
+                items: { type: "string", enum: substantiveRefs }
+              },
+              gaps: {
+                type: "array",
+                minItems: 0,
+                maxItems: 6,
+                uniqueItems: true,
+                items: { type: "string", minLength: 1, maxLength: 400 }
+              }
             },
-            required: ["axis", "score", "rationale"]
+            required: ["axis", "score", "rationale", "evidenceRefs", "counterEvidenceRefs", "gaps"],
+            additionalProperties: false
           }
         },
-        headline: { type: "string" },
-        identity_note: { type: "string", description: "Identity resolution. Distinguish the ACCOUNT OPERATOR from the project's TEAM: if named team members are present in the evidence (especially with a LinkedIn), acknowledge them by name and do NOT claim 'no linked real-world identity' or 'zero credentials' \u2014 instead say the account/operator is pseudonymous while N named people are publicly tied to the project (list a few). Only say no one is identified if the evidence truly has no named people." }
+        headline: { type: "string", minLength: 1 },
+        identity_note: { type: "string", minLength: 1, description: "Identity resolution. Distinguish the ACCOUNT OPERATOR from the project's TEAM: if named team members are present in the evidence (especially with a LinkedIn), acknowledge them by name and do NOT claim 'no linked real-world identity' or 'zero credentials' \u2014 instead say the account/operator is pseudonymous while N named people are publicly tied to the project (list a few). Only say no one is identified if the evidence truly has no named people." }
       },
-      required: ["axes", "headline", "identity_note"]
+      required: ["axes", "headline", "identity_note"],
+      additionalProperties: false
     }
   };
-  const raw = await structured(system, user, tool, 3e3);
-  const validated = validateAnalystVerdict(raw, axisCatalog2);
+  const raw = await structured(system, user, tool, 6e3);
+  const validated = validateAnalystVerdict(raw, axisCatalog2, evidenceCatalog);
   if (raw && !validated) console.warn("[agent] rejected incomplete or invalid analyst axis set");
   return validated;
 }
@@ -2047,7 +2766,7 @@ var PersonCheckTracker = class {
 };
 
 // server/cache.ts
-import { createHash } from "node:crypto";
+import { createHash as createHash2 } from "node:crypto";
 var TTL_MS = 24 * 3600 * 1e3;
 function creds() {
   const url = env("SUPABASE_URL");
@@ -2059,7 +2778,7 @@ var headers = (key) => ({
   ...!key.startsWith("sb_secret_") ? { authorization: `Bearer ${key}` } : {},
   "content-type": "application/json"
 });
-var hash = (s) => "gt:" + createHash("sha256").update(s).digest("hex").slice(0, 40);
+var hash = (s) => "gt:" + createHash2("sha256").update(s).digest("hex").slice(0, 40);
 async function cacheGet(key, usage = {}) {
   const c = creds();
   if (!c) return null;
@@ -3120,6 +3839,9 @@ var xAdapter = {
     const haveOfficialAvatar = ctx.evidence.profile.avatar_source_state != null;
     const prof = haveProfile && haveOfficialAvatar ? null : await getProfile2(ctx.handle);
     if (prof) {
+      ctx.evidence.profile.profile_collection_state = "resolved";
+      ctx.evidence.profile.profile_provider = "twitterapi";
+      ctx.evidence.profile.profile_captured_at = (/* @__PURE__ */ new Date()).toISOString();
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
       ctx.evidence.profile.followers = fmtFollowers(prof.followers);
@@ -3721,6 +4443,9 @@ var peopledatalabsAdapter = {
         }
         if (!ex.period && period) ex.period = period;
         if (!ex.evidence_url && x.url) ex.evidence_url = httpify(x.url);
+        ex.provider = "peopledatalabs";
+        ex.evidence_origin = "deterministic";
+        ex.artifact_verified = true;
         confirmed.push(company);
       } else {
         const rec = {
@@ -3729,7 +4454,10 @@ var peopledatalabsAdapter = {
           period,
           outcome: "Unknown" /* UNKNOWN */,
           evidence_url: httpify(x.url),
-          notes: "People Data Labs employment record"
+          notes: "People Data Labs employment record",
+          provider: "peopledatalabs",
+          evidence_origin: "deterministic",
+          artifact_verified: true
         };
         ctx.evidence.ventures.push(rec);
         byName.set(key, rec);
@@ -3893,9 +4621,19 @@ var githubAdapter = {
         period: "",
         outcome: "Active" /* ACTIVE */,
         evidence_url: `https://github.com/${a.org}`,
-        notes: `GitHub: ${a.via}`
+        notes: `GitHub: ${a.via}`,
+        provider: "github",
+        evidence_origin: "deterministic",
+        artifact_verified: true
       });
-      ctx.evidence.associates.push({ associate_handle: a.org, relation: "github org", evidence_url: `https://github.com/${a.org}` });
+      ctx.evidence.associates.push({
+        associate_handle: a.org,
+        relation: "github org",
+        evidence_url: `https://github.com/${a.org}`,
+        provider: "github",
+        evidence_origin: "deterministic",
+        artifact_verified: true
+      });
       added.push(a.org);
     }
     ctx.recordCheck?.({
@@ -4227,9 +4965,20 @@ var redditAdapter = {
         claim: h.title,
         source_url: h.url,
         source_date: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
+        source_author: "reddit",
         verification_status: "Reported",
         independent_source_count: 1,
-        polarity: -1
+        polarity: -1,
+        provider: "reddit",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        finding_scope: {
+          scope: "direct_subject",
+          target_entity_key: ctx.evidence.profile.handle,
+          target_entity_type: "person",
+          relationship_to_subject: "self",
+          relationship_label: "Reddit search result naming the audited handle"
+        }
       });
     }
     ctx.emit({ phase: "Reputation", label: `${hits.length} threads`, detail: `Top: "${hits[0].title.slice(0, 70)}" (${hits[0].sub})`, source: "reddit", tone: hits.length > 3 ? "warn" : "neutral" });
@@ -4336,7 +5085,7 @@ var onchainAdapter = {
 };
 
 // server/adapters/offchain.ts
-import { createHash as createHash3 } from "node:crypto";
+import { createHash as createHash4 } from "node:crypto";
 
 // src/lib/offchainEvidence.ts
 var asRecord4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -4720,7 +5469,7 @@ async function collectOfacName(rawName, options = {}) {
 }
 
 // server/adapters/profilePhoto.ts
-import { createHash as createHash2 } from "node:crypto";
+import { createHash as createHash3 } from "node:crypto";
 var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
 var MAX_IMAGE_BYTES = 75e4;
 var MIN_IMAGE_BYTES = 256;
@@ -4741,7 +5490,7 @@ var REVIEW_LEADS = /* @__PURE__ */ new Set([
   "ai_generated",
   "celebrity_or_public_figure"
 ]);
-var sha2562 = (value) => createHash2("sha256").update(value).digest("hex");
+var sha2562 = (value) => createHash3("sha256").update(value).digest("hex");
 function safeOfficialAvatarUrl(raw) {
   try {
     const url = new URL(raw);
@@ -5063,7 +5812,7 @@ var asIso = (value) => {
   }
   return void 0;
 };
-var hashArtifact = (artifact) => createHash3("sha256").update(JSON.stringify({
+var hashArtifact = (artifact) => createHash4("sha256").update(JSON.stringify({
   kind: artifact.kind,
   provider: artifact.provider,
   title: artifact.title,
@@ -5483,7 +6232,7 @@ async function resolveForHandle(handle, text2, opts = {}) {
 }
 
 // server/adapters/trustgraph.ts
-import { createHash as createHash4 } from "node:crypto";
+import { createHash as createHash5 } from "node:crypto";
 
 // src/lib/reportPresentation.ts
 var VERDICT_COLORS = Object.freeze({
@@ -5940,28 +6689,28 @@ function stableValue(value) {
   );
 }
 function semanticHash(value) {
-  return createHash4("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
+  return createHash5("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
 }
 function semanticContribution(contribution) {
-  const stableJson = (value) => JSON.stringify(stableValue(value));
+  const stableJson2 = (value) => JSON.stringify(stableValue(value));
   const nodes = [...contribution.nodes].sort((a, b) => {
     const aKey = `${canonical(a.key)}
 ${text(a.type, 100) ?? ""}
-${stableJson(a)}`;
+${stableJson2(a)}`;
     const bKey = `${canonical(b.key)}
 ${text(b.type, 100) ?? ""}
-${stableJson(b)}`;
+${stableJson2(b)}`;
     return aKey.localeCompare(bKey);
   });
   const edges = [...contribution.edges].sort((a, b) => {
     const aKey = `${canonical(a.src)}
 ${canonical(a.dst)}
 ${text(a.type, 100) ?? ""}
-${stableJson(a)}`;
+${stableJson2(a)}`;
     const bKey = `${canonical(b.src)}
 ${canonical(b.dst)}
 ${text(b.type, 100) ?? ""}
-${stableJson(b)}`;
+${stableJson2(b)}`;
     return aKey.localeCompare(bKey);
   });
   return {
@@ -6186,7 +6935,8 @@ async function collectTrustGraph(ctx, current) {
       contentHash: artifactHash,
       sourceContentHash: artifactHash,
       excerpt: line,
-      match: status === "risk" ? "risk_signal" : status === "clear" ? "screened_clear" : "observed"
+      match: status === "risk" ? "risk_signal" : status === "clear" ? "screened_clear" : "observed",
+      ...status === "incomplete" ? { coverageState: "unavailable" } : {}
     });
     for (const connection of adverse) {
       const tie = strongestTie(connection.ties);
@@ -6310,6 +7060,9 @@ async function coldIntake(ctx) {
   let siteUrl;
   const prof = await getProfile2(ctx.handle);
   if (prof) {
+    ctx.evidence.profile.profile_collection_state = "resolved";
+    ctx.evidence.profile.profile_provider = "twitterapi";
+    ctx.evidence.profile.profile_captured_at = (/* @__PURE__ */ new Date()).toISOString();
     ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
     if (prof.image) {
       ctx.evidence.profile.avatar_url = prof.image;
@@ -6326,6 +7079,9 @@ async function coldIntake(ctx) {
     }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Resolve profile", detail: `${prof.name ?? ctx.handle} \xB7 ${ctx.evidence.profile.followers} followers \xB7 joined ${ctx.evidence.profile.joined}`, source: "twitterapi.io", tone: "neutral" });
   } else {
+    ctx.evidence.profile.profile_collection_state = "unavailable";
+    ctx.evidence.profile.profile_provider = "twitterapi";
+    ctx.evidence.profile.profile_captured_at = void 0;
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Profile unavailable", detail: "twitterapi.io has no record of this handle (not in their index). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
   }
   const hist = await handleHistory(ctx.handle);
@@ -6365,7 +7121,28 @@ async function coldIntake(ctx) {
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify\u2026", tone: "neutral" });
   const claims = await extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
   if (claims) {
-    ctx.evidence.roles = asRoles(claims.roles);
+    const candidateRoles = [...new Set(asRoles(claims.roles))];
+    for (const role of candidateRoles) {
+      ctx.evidence.findings.push({
+        finding_type: "RoleCandidate",
+        claim: `Model-extracted self-claim suggests ${role}; provider corroboration is required before routing.`,
+        source_url: "",
+        source_date: "",
+        source_author: "claude-intake",
+        verification_status: "Rumor",
+        independent_source_count: 0,
+        polarity: 0,
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        finding_scope: {
+          scope: "direct_subject",
+          target_entity_key: ctx.evidence.profile.handle,
+          target_entity_type: "person",
+          relationship_to_subject: "self",
+          relationship_label: "audited subject role claim"
+        }
+      });
+    }
     ctx.evidence.ventures = claims.ventures.map((v) => ({
       project_name: v.project_name,
       role: v.role ?? "founder",
@@ -6397,7 +7174,7 @@ async function coldIntake(ctx) {
       artifact_verified: false
     }));
     const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${ctx.evidence.roles.join(", ") || "no roles"} \u2014 now verifying each.`, source: "claude", tone: "neutral" });
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"} \u2014 role candidates remain non-governing until independently verified.`, source: "claude", tone: "neutral" });
   }
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts\u2026", source: "grok", tone: "neutral" });
   const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
@@ -6418,7 +7195,41 @@ async function coldIntake(ctx) {
   const norm2 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
   const byHandle = /* @__PURE__ */ new Map();
   const byName = /* @__PURE__ */ new Map();
-  for (const t of [...pageTeam, ...siteTeam, ...people, ...postRoleTeam]) {
+  const teamCandidates = [
+    ...pageTeam.map((member) => ({
+      ...member,
+      evidence_origin: domain ? "deterministic" : "model_lead",
+      artifact_verified: !!domain,
+      provider: domain ? "team-page" : "team-page-candidate",
+      identity_link_evidence_origin: domain ? "deterministic" : "model_lead",
+      projects_evidence_origin: domain ? "deterministic" : "model_lead"
+    })),
+    ...siteTeam.map((member) => ({
+      ...member,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      provider: "grok",
+      identity_link_evidence_origin: "model_lead",
+      projects_evidence_origin: "model_lead"
+    })),
+    ...people.map((member) => ({
+      ...member,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      provider: "grok",
+      identity_link_evidence_origin: "model_lead",
+      projects_evidence_origin: "model_lead"
+    })),
+    ...postRoleTeam.map((member) => ({
+      ...member,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "twitterapi",
+      identity_link_evidence_origin: "deterministic",
+      projects_evidence_origin: "deterministic"
+    }))
+  ];
+  for (const t of teamCandidates) {
     const h = t.handle ? norm2(t.handle) : "";
     const n = norm2(t.name);
     if (!h && !n) continue;
@@ -6426,22 +7237,54 @@ async function coldIntake(ctx) {
     if (existing) {
       if (!existing.handle && t.handle) {
         existing.handle = t.handle;
+        existing.identity_link_evidence_origin = t.identity_link_evidence_origin;
         byHandle.set(norm2(t.handle), existing);
       }
-      if (!existing.linkedin && t.linkedin) existing.linkedin = t.linkedin;
-      if ((!existing.projects || !existing.projects.length) && t.projects?.length) existing.projects = t.projects;
+      if (!existing.linkedin && t.linkedin) {
+        existing.linkedin = t.linkedin;
+        existing.identity_link_evidence_origin = t.identity_link_evidence_origin;
+      }
+      if ((!existing.projects || !existing.projects.length) && t.projects?.length) {
+        existing.projects = t.projects;
+        existing.projects_evidence_origin = t.projects_evidence_origin;
+      }
+      if (t.artifact_verified === true && existing.artifact_verified !== true) {
+        existing.evidence_origin = "deterministic";
+        existing.artifact_verified = true;
+        existing.provider = t.provider;
+        existing.source = t.source ?? existing.source;
+        existing.evidence = t.evidence ?? existing.evidence;
+      }
       continue;
     }
-    const rec = { name: t.name, handle: t.handle, role: t.role, linkedin: t.linkedin, evidence: t.evidence, source: t.source ?? "X content", projects: t.projects };
+    const rec = {
+      name: t.name,
+      handle: t.handle,
+      role: t.role,
+      linkedin: t.linkedin,
+      evidence: t.evidence,
+      source: t.source ?? "X content",
+      projects: t.projects,
+      evidence_origin: t.evidence_origin,
+      artifact_verified: t.artifact_verified,
+      provider: t.provider,
+      identity_link_evidence_origin: t.identity_link_evidence_origin,
+      projects_evidence_origin: t.projects_evidence_origin
+    };
     webTeam.push(rec);
     if (h) byHandle.set(h, rec);
     if (n) byName.set(n, rec);
   }
   const subj = norm2(ctx.handle);
-  const accountVouchesTeam = !!domain || people.length > 0 || postRoleTeam.length > 0 || webTeam.some((t) => norm2(t.handle) === subj);
+  const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || webTeam.some((t) => t.artifact_verified === true && norm2(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
-    ctx.emit({ phase: "P1 \xB7 Team", label: "Same-name project (not this account)", detail: `Found a team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it \u2014 its handle isn't among them, it links no site, and its own posts name no team. Treated as a name collision, not the account's identity.`, source: "team-search", tone: "warn" });
-    webTeam.length = 0;
+    ctx.emit({ phase: "P1 \xB7 Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it \u2014 its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
+    for (const member of webTeam) {
+      member.evidence_origin = "model_lead";
+      member.artifact_verified = false;
+      member.identity_link_evidence_origin = "model_lead";
+      member.projects_evidence_origin = "model_lead";
+    }
   }
   const nameOnly = webTeam.filter((m) => !m.handle && !m.linkedin).slice(0, 15);
   if (nameOnly.length >= 1) {
@@ -6452,10 +7295,12 @@ async function coldIntake(ctx) {
       if (!m) continue;
       if (!m.handle && f.handle) {
         m.handle = f.handle;
+        m.identity_link_evidence_origin = "model_lead";
         linked++;
       }
       if (!m.linkedin && f.linkedin) {
         m.linkedin = f.linkedin;
+        m.identity_link_evidence_origin = "model_lead";
         if (!f.handle) linked++;
       }
     }
@@ -6464,7 +7309,7 @@ async function coldIntake(ctx) {
   if (webTeam.length) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
     const isLeader = (r) => /founder|cofounder|co-founder|ceo|cto|coo|president|chief/i.test(r ?? "");
-    const backedTeam = [...pageTeam, ...postRoleTeam].filter(
+    const backedTeam = [...domain ? pageTeam : [], ...postRoleTeam].filter(
       (candidate) => webTeam.some(
         (member) => !!candidate.handle && norm2(candidate.handle) === norm2(member.handle) || !!candidate.name && norm2(candidate.name) === norm2(member.name)
       )
@@ -6515,7 +7360,9 @@ async function coldIntake(ctx) {
           source_author: "site-fetch",
           verification_status: "Verified",
           independent_source_count: 1,
-          polarity: -1
+          polarity: -1,
+          evidence_origin: "deterministic",
+          artifact_verified: true
         });
         ctx.emit({ phase: "P2 \xB7 Substance", label: "Website not live", detail: `${domain} ${notLive} \u2014 ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
       } else if (site.status === "client_rendered") {
@@ -6536,7 +7383,14 @@ async function coldIntake(ctx) {
       const key = t.handle.replace(/^@/, "").toLowerCase();
       if (haveAssoc.has(key)) continue;
       haveAssoc.add(key);
-      ctx.evidence.associates.push({ associate_handle: t.handle, relation: `team: ${t.role}`, notes: t.evidence });
+      ctx.evidence.associates.push({
+        associate_handle: t.handle,
+        relation: `team: ${t.role}`,
+        notes: t.evidence,
+        provider: "grok",
+        evidence_origin: "model_lead",
+        artifact_verified: false
+      });
       addedTeam.push(`${t.name} (${t.handle})`);
     }
     const addedAdv = [];
@@ -6593,10 +7447,6 @@ async function coldIntake(ctx) {
       ctx.evidence.ventures.push(rec);
       return { v, rec };
     });
-    const founderish = discovered.some((v) => /founder|cofounder/i.test(v.role));
-    if (founderish && (!ctx.evidence.roles.length || ctx.evidence.roles.every((r) => r === "MEMBER" /* MEMBER */))) {
-      ctx.evidence.roles = ["FOUNDER" /* FOUNDER */];
-    }
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Affiliations discovered", detail: `${discovered.length} public affiliation${discovered.length === 1 ? "" : "s"} tied to the subject: ${discovered.slice(0, 5).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
     let corroboratedAffiliations = 0;
     await Promise.all(
@@ -6648,6 +7498,24 @@ function axisCatalog(roles) {
     }
   }
   return out;
+}
+function providerBackedRoles(evidence) {
+  const roles = /* @__PURE__ */ new Set();
+  if (evidence.profile.profile_collection_state === "resolved" && evidence.profile.bio.trim()) {
+    classifySubject(evidence.profile.bio).applicable_classes.forEach((role) => roles.add(role));
+  }
+  for (const venture of evidence.ventures) {
+    if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;
+    const role = (venture.role ?? "").toLowerCase();
+    if (/founder|co-?founder|\bceo\b|\bcto\b|creator|owner/.test(role)) roles.add("FOUNDER" /* FOUNDER */);
+    else if (/advisor|adviser|board/.test(role)) roles.add("ADVISOR" /* ADVISOR */);
+    else if (/investor|partner|principal|venture|capital|\bgp\b/.test(role)) roles.add("INVESTOR" /* INVESTOR */);
+    else if (/contributor|engineer|developer|employee|manager|director|lead|role on record/.test(role)) roles.add("MEMBER" /* MEMBER */);
+  }
+  if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
+    roles.add("AGENCY" /* AGENCY */);
+  }
+  return [...roles];
 }
 var handleFrom = (s) => s?.match(/@([A-Za-z0-9_]{2,30})/)?.[1];
 function adverseSignalToFinding(sig) {
@@ -6761,7 +7629,10 @@ async function adverseSignalsAndTooling(ctx) {
     ctx.evidence.ventureTeams = projectTargets.map((p, i) => ({
       key: canonicalEntityKey({ handle: p.handle, name: p.name }),
       name: p.name,
-      people: (teams[i] ?? []).filter((m) => (m.handle || m.name) && m.handle?.replace(/^@/, "").toLowerCase() !== self).slice(0, 8).map((m) => ({ name: m.name, handle: m.handle, role: m.role }))
+      people: (teams[i] ?? []).filter((m) => (m.handle || m.name) && m.handle?.replace(/^@/, "").toLowerCase() !== self).slice(0, 8).map((m) => ({ name: m.name, handle: m.handle, role: m.role })),
+      provider: "grok",
+      evidence_origin: "model_lead",
+      artifact_verified: false
     })).filter((vt) => vt.people.length > 0);
     if (ctx.evidence.ventureTeams.length) {
       const total = ctx.evidence.ventureTeams.reduce((n, vt) => n + vt.people.length, 0);
@@ -6785,9 +7656,27 @@ async function adverseSignalsAndTooling(ctx) {
         const projList = [...r.projects].join(", ");
         if (haveAssoc.has(key)) {
           const existing = evidence.associates.find((a) => a.associate_handle.replace(/^@/, "").toLowerCase() === key);
-          if (existing) existing.notes = [existing.notes, `also on: ${projList}`].filter(Boolean).join(" \xB7 ");
+          if (existing?.evidence_origin === "model_lead") {
+            existing.notes = [existing.notes, `also on: ${projList}`].filter(Boolean).join(" \xB7 ");
+          } else {
+            evidence.associates.push({
+              associate_handle: "@" + key,
+              relation: "cross-project overlap",
+              notes: `appears across ${projList}`,
+              provider: "grok",
+              evidence_origin: "model_lead",
+              artifact_verified: false
+            });
+          }
         } else {
-          evidence.associates.push({ associate_handle: "@" + key, relation: "cross-project overlap", notes: `appears across ${projList}` });
+          evidence.associates.push({
+            associate_handle: "@" + key,
+            relation: "cross-project overlap",
+            notes: `appears across ${projList}`,
+            provider: "grok",
+            evidence_origin: "model_lead",
+            artifact_verified: false
+          });
         }
       }
       ctx.emit({ phase: "Adverse", label: `${overlaps.length} cross-project overlap${overlaps.length === 1 ? "" : "s"}`, detail: overlaps.slice(0, 5).map(([k, r]) => `@${k} (${[...r.projects].join(", ")})`).join(" \xB7 "), source: "grok", tone: "warn" });
@@ -6818,7 +7707,9 @@ async function tokenLifecycle(ctx) {
         source_author: "dexscreener",
         verification_status: "Verified",
         independent_source_count: 1,
-        polarity: -1
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true
       });
       ctx.emit({ phase: "Token", label: `$${sig.ticker} collapse`, detail: `${sig.dive.detail}. The dive-after-launch pattern.`, source: "dexscreener", tone: "bad" });
     })
@@ -6837,7 +7728,9 @@ async function postCadence(ctx) {
       source_author: "twitterapi.io",
       verification_status: "Verified",
       independent_source_count: 1,
-      polarity: -1
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true
     });
     ctx.emit({ phase: "Cadence", label: report.silent ? "Went quiet" : "Cadence thinning", detail: report.summary, source: "twitterapi.io", tone: report.silent ? "bad" : "warn" });
   } else {
@@ -6852,6 +7745,7 @@ function downgradeFixtureEvidenceForLive(seed) {
   const handleLabel = seed.profile.handle.replace(/^@/, "") || "unknown";
   return {
     ...seed,
+    roles: [],
     profile: {
       // A fixture profile is also a claim seed. Mutable public metadata and
       // resolved identity fields must be recollected; otherwise an unrelated
@@ -6863,7 +7757,9 @@ function downgradeFixtureEvidenceForLive(seed) {
       followers: "\u2014",
       joined: "\u2014",
       identity_confidence: "Unverified",
-      identity_note: "Fixture discovery seed only; identity requires a fresh provider re-check."
+      identity_note: "Fixture discovery seed only; identity requires a fresh provider re-check.",
+      profile_collection_state: "unavailable",
+      profile_provider: "twitterapi"
     },
     axes: [],
     headline: "",
@@ -6958,15 +7854,36 @@ function downgradeFixtureEvidenceForLive(seed) {
         engagement.manipulation_service_flag ? "claimed manipulation service" : ""
       ].filter(Boolean))
     })),
-    findings: seed.findings.map((finding) => ({
-      ...finding,
-      verification_status: "Rumor",
-      independent_source_count: 0,
-      evidence_origin: "model_lead",
-      artifact_verified: false,
-      content_hash: void 0,
-      trust_graph: void 0
-    })),
+    findings: [
+      ...seed.findings.map((finding) => ({
+        ...finding,
+        verification_status: "Rumor",
+        independent_source_count: 0,
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        content_hash: void 0,
+        trust_graph: void 0
+      })),
+      ...seed.roles.map((role) => ({
+        finding_type: "RoleCandidate",
+        claim: `Fixture discovery suggests ${role}; provider corroboration is required before routing.`,
+        source_url: "",
+        source_date: "",
+        source_author: "fixture-discovery",
+        verification_status: "Rumor",
+        independent_source_count: 0,
+        polarity: 0,
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        finding_scope: {
+          scope: "direct_subject",
+          target_entity_key: seed.profile.handle,
+          target_entity_type: "person",
+          relationship_to_subject: "self",
+          relationship_label: "fixture role candidate"
+        }
+      }))
+    ],
     // Fixture relationship and frozen-artifact collections are not wired to a
     // live re-verifier. Drop them instead of materializing stale graph edges or
     // letting old source snapshots enter a new analyst context.
@@ -7090,10 +8007,11 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
   }
   await Promise.all(signalPasses);
-  if (!evidence.roles.length) {
-    const route = classifySubject(evidence.profile.bio);
-    evidence.roles = route.applicable_classes.length ? route.applicable_classes : ["MEMBER" /* MEMBER */];
-    emit({ phase: "P0 \xB7 Routing", label: "Classify roles", detail: `Routed to ${evidence.roles.join(", ")} (${route.confidence} confidence).`, tone: "neutral" });
+  evidence.roles = providerBackedRoles(evidence);
+  if (evidence.roles.length) {
+    emit({ phase: "P0 \xB7 Routing", label: "Classify roles", detail: `Provider-backed evidence routed to ${evidence.roles.join(", ")}.`, tone: "neutral" });
+  } else {
+    emit({ phase: "P0 \xB7 Routing", label: "Role unresolved", detail: "No deterministic or provider-corroborated role evidence was collected. Model role candidates remain leads; the report will publish INCOMPLETE.", tone: "warn" });
   }
   try {
     const provisional = assembleDossier(evidence, true);
@@ -7128,25 +8046,28 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     ventures: evidence.ventures,
     testimonials: evidence.testimonials,
     advised: evidence.advised,
-    promotions: evidence.promotions,
-    wallets: evidence.wallets,
+    promotions: evidence.promotions.map((promotion) => ({ ...promotion, provider: "twitterapi" })),
+    wallets: evidence.wallets.map((wallet) => ({ ...wallet, provider: "find-wallet/onchain" })),
     clientEngagements: evidence.clientEngagements,
     associates: evidence.associates,
     // The named people behind the project (from the site + LinkedIn + X content),
     // so identity/founder scoring reflects the team we actually found.
     team: (evidence.webTeam ?? []).map((p) => ({
       name: p.name,
-      handle: p.handle,
+      handle: p.identity_link_evidence_origin === "model_lead" ? void 0 : p.handle,
       role: p.role,
-      linkedin: p.linkedin,
+      linkedin: p.identity_link_evidence_origin === "model_lead" ? void 0 : p.linkedin,
       source: p.source,
       evidence: p.evidence,
-      otherProjects: p.projects
+      otherProjects: p.projects_evidence_origin === "model_lead" ? void 0 : p.projects,
+      provider: p.provider,
+      evidence_origin: p.evidence_origin,
+      artifact_verified: p.artifact_verified
     })),
     ventureTeams: evidence.ventureTeams,
     findings: evidence.findings,
-    notableFollowers: evidence.notableFollowers,
-    recentActivity: evidence.recentActivity.slice(0, 12),
+    notableFollowers: evidence.notableFollowers.map((follower) => ({ ...follower, provider: "twitterapi" })),
+    recentActivity: evidence.recentActivity.slice(0, 12).map((text2) => ({ text: text2, provider: "twitterapi" })),
     sourceArtifacts: evidence.sourceArtifacts,
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
@@ -7156,12 +8077,18 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   if (analystAvailable()) {
     emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions\u2026", tone: "neutral" });
     emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence\u2026", tone: "neutral" });
-    const evidenceJson = buildScoringEvidencePacket(baseEvidence);
+    const requestedAxes = axisCatalog(evidence.roles);
+    const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
+    const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson);
+    if (frozenAxisEvidence.length > 0) {
+      evidence.axisCitationVersion = 1;
+      evidence.axisEvidenceCatalog = frozenAxisEvidence;
+    }
     evidence.axes = [];
     const analystBefore = attemptTotals(["claude"]);
     const [found, verdict] = await Promise.all([
       scanContradictions(evidence.profile.handle, evidenceJson),
-      analyzeSubject(evidence.profile.handle, evidence.roles, axisCatalog(evidence.roles), evidenceJson)
+      analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson)
     ]);
     const analystAttempts = attemptDelta(analystBefore, attemptTotals(["claude"]));
     const analystObserved = analystAttempts.total > 0;

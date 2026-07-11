@@ -674,6 +674,7 @@ export async function collectTrustGraph(
       sourceContentHash: artifactHash,
       excerpt: line,
       match: status === "risk" ? "risk_signal" : status === "clear" ? "screened_clear" : "observed",
+      ...(status === "incomplete" ? { coverageState: "unavailable" as const } : {}),
     });
 
     for (const connection of adverse) {

@@ -33,7 +33,7 @@
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",
-    "@vercel/node": "^5.8.17",
+    "@vercel/node": "^5.8.23",
     "@vitejs/plugin-react": "^6.0.1",
     "concurrently": "^10.0.3",
     "eslint": "^10.3.0",
@@ -46,5 +46,19 @@
     "typescript-eslint": "^8.59.2",
     "vite": "^8.0.12",
     "vitest": "^4.1.8"
+  },
+  "overrides": {
+    "@vercel/node": {
+      "path-to-regexp": "6.3.0",
+      "undici": "6.27.0"
+    },
+    "@vercel/python-analysis": {
+      "js-yaml": "4.3.0",
+      "minimatch": "10.2.5",
+      "smol-toml": "1.7.0"
+    },
+    "@vercel/static-config": {
+      "ajv": "8.20.0"
+    }
   }
 }

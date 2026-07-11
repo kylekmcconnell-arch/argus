@@ -22,6 +22,8 @@ interface ServerDossier extends Dossier {
   providers?: unknown;
 }
 
+const LINEAGE_METHODOLOGY_VERSION = "argus-person-v3-lineage";
+
 const normRef = (value: string) =>
   value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
 
@@ -68,7 +70,8 @@ export async function persistServerDossier(
       p_verdict: verdict,
       p_score: score,
       p_completeness_state: qualifiedCompleteness,
-      p_methodology_version: process.env.ARGUS_METHODOLOGY_VERSION || null,
+      p_methodology_version: process.env.ARGUS_METHODOLOGY_VERSION
+        || (dossier.axisCitationVersion === 1 ? LINEAGE_METHODOLOGY_VERSION : null),
       p_provider_snapshot: dossier?.providerSnapshot ?? dossier?.providers ?? {},
       p_cost: dossier?.cost ?? {},
     }),

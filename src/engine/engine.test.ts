@@ -335,6 +335,31 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(r.governing_score).toBeNull();
   });
 
+  it("preserves immutable axis lineage while legacy axis calls remain valid", () => {
+    const a = new Audit("@lineage", { subject_class: SubjectClass.FOUNDER });
+    const evidenceRefs = [`art_v1_${"a".repeat(64)}`];
+    const counterEvidenceRefs = [`art_v1_${"b".repeat(64)}`];
+    const gaps = ["One prior venture outcome remains unresolved."];
+
+    a.setAxis("F1_identity_verifiability", 10, "Resolved identity.", {
+      evidenceRefs,
+      counterEvidenceRefs,
+      gaps,
+    });
+    a.setAxis("F2_track_record", 12, "Legacy-compatible call.");
+    evidenceRefs.length = 0;
+    counterEvidenceRefs.length = 0;
+    gaps[0] = "mutated";
+
+    const axes = a.finalize().role_reports[0].axes;
+    expect(axes.F1_identity_verifiability).toMatchObject({
+      evidenceRefs: [`art_v1_${"a".repeat(64)}`],
+      counterEvidenceRefs: [`art_v1_${"b".repeat(64)}`],
+      gaps: ["One prior venture outcome remains unresolved."],
+    });
+    expect(axes.F2_track_record).not.toHaveProperty("evidenceRefs");
+  });
+
   it("one incomplete requested role makes the composite incomplete", () => {
     const a = new Audit("@mixed_completeness", { roles: [SubjectClass.FOUNDER, SubjectClass.MEMBER] });
     a.setIdentity("Confirmed");

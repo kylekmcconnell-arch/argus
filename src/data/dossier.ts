@@ -15,6 +15,7 @@ import type {
   Contradiction,
   WebTeamMember,
   SourceArtifact,
+  AxisEvidenceRecord,
   ProfileAuthenticityResult,
   TrustGraphScreen,
 } from "./evidence";
@@ -35,6 +36,10 @@ export interface Dossier {
   prior_handles?: string[];
   headline: string;
   live: boolean;
+  /** Strict evidence-to-axis lineage for newly scored live reports. */
+  axisCitationVersion?: 1;
+  /** Content-addressed artifacts from the exact post-pruning scorer packet. */
+  axisEvidenceCatalog?: AxisEvidenceRecord[];
   // Live collector runs freeze the checks the server actually completed into
   // the immutable payload. Older curated fixtures may omit these fields.
   checkRuns?: ScanCheck[];
@@ -62,7 +67,12 @@ export interface Dossier {
   persistence?: ReportPersistenceContext;
   notableFollowers: NotableFollower[];
   contradictions: Contradiction[];
+  /** Independently collected team records that may ground identity context. */
   webTeam: WebTeamMember[];
+  /** Model-only or otherwise unverified team candidates; never grounded evidence. */
+  webTeamLeads?: WebTeamMember[];
+  /** Second-hop discovery stays inspectable even when excluded from the graph. */
+  ventureTeams?: CollectedEvidence["ventureTeams"];
   sourceArtifacts?: SourceArtifact[];
   profileAuthenticity?: ProfileAuthenticityResult;
   trustGraphScreen?: TrustGraphScreen;
@@ -86,19 +96,50 @@ export interface Dossier {
 // real engine, and packages the rendered dossier.
 export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   const a = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
+  const graphAudit = new Audit(ev.profile.handle, { roles: ev.roles, display_name: ev.profile.display_name });
   a.setIdentity(ev.profile.identity_confidence);
+  graphAudit.setIdentity(ev.profile.identity_confidence);
 
-  ev.ventures.forEach((v) => a.addVenture(v));
-  ev.testimonials.forEach((t) => a.addTestimonial(t));
-  ev.advised.forEach((p) => a.addAdvisedProject(p));
-  ev.wallets.forEach((w) => a.addWallet(w));
-  ev.promotions.forEach((p) => a.addPromotion(p));
-  ev.clientEngagements.forEach((c) => a.addClientEngagement(c));
-  ev.associates.forEach((as) => a.addAssociate(as));
-  ev.findings.forEach((f) => a.addFinding(f));
+  const governingEligible = (row: { evidence_origin?: string; artifact_verified?: boolean }) =>
+    row.evidence_origin !== "model_lead" && row.artifact_verified !== false;
+  const identityGrounded = (row: WebTeamMember) =>
+    row.evidence_origin !== "model_lead" && row.artifact_verified === true;
+  const groundedWebTeam = (ev.webTeam ?? [])
+    .filter(identityGrounded)
+    .map((member) => ({
+      ...member,
+      ...(member.identity_link_evidence_origin === "model_lead"
+        ? { handle: undefined, linkedin: undefined }
+        : {}),
+      ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
+    }));
+  const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
+    if (!identityGrounded(member)) return [{ ...member }];
+    if (member.identity_link_evidence_origin !== "model_lead" && member.projects_evidence_origin !== "model_lead") return [];
+    return [{
+      ...member,
+      evidence_origin: "model_lead" as const,
+      artifact_verified: false,
+      provider: "grok",
+      source: `${member.source} · unverified model-enriched links`,
+    }];
+  });
+
+  ev.ventures.forEach((v) => { a.addVenture(v); if (governingEligible(v)) graphAudit.addVenture(v); });
+  ev.testimonials.forEach((t) => { a.addTestimonial(t); if (governingEligible(t)) graphAudit.addTestimonial(t); });
+  ev.advised.forEach((p) => { a.addAdvisedProject(p); if (governingEligible(p)) graphAudit.addAdvisedProject(p); });
+  ev.wallets.forEach((w) => { a.addWallet(w); if (governingEligible(w)) graphAudit.addWallet(w); });
+  ev.promotions.forEach((p) => { a.addPromotion(p); if (governingEligible(p)) graphAudit.addPromotion(p); });
+  ev.clientEngagements.forEach((c) => { a.addClientEngagement(c); if (governingEligible(c)) graphAudit.addClientEngagement(c); });
+  ev.associates.forEach((as) => { a.addAssociate(as); if (governingEligible(as)) graphAudit.addAssociate(as); });
+  ev.findings.forEach((f) => { a.addFinding(f); if (governingEligible(f)) graphAudit.addFinding(f); });
   ev.axes.forEach((ax) => {
     try {
-      a.setAxis(ax.axis, ax.score, ax.rationale);
+      a.setAxis(ax.axis, ax.score, ax.rationale, {
+        evidenceRefs: ax.evidenceRefs,
+        counterEvidenceRefs: ax.counterEvidenceRefs,
+        gaps: ax.gaps,
+      });
     } catch {
       // axis belongs to a role not held; skip defensively
     }
@@ -109,18 +150,21 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   // Enrich the graph with the web team + each member's OTHER projects, so the
   // connection web shows the people and cross-project ties behind the subject
   // (and they compound into the shared graph for future bridges).
-  const graph = a.toPanoptes();
+  const graph = graphAudit.toPanoptes();
   const subjectKey = (graph.nodes.find((n) => (n as { subject?: boolean }).subject)?.key as string) ?? ev.profile.handle;
   const hasNode = (key: string) => graph.nodes.some((n) => String(n.key).toLowerCase() === key.toLowerCase());
   for (const p of ev.webTeam ?? []) {
-    if (!p.handle && !p.name) continue;
+    if (!governingEligible(p)) continue;
+    const verifiedHandle = p.identity_link_evidence_origin === "model_lead" ? undefined : p.handle;
+    const verifiedProjects = p.projects_evidence_origin === "model_lead" ? [] : p.projects ?? [];
+    if (!verifiedHandle && !p.name) continue;
     // Canonical key (@handle when known) so a team member bridges to their own
     // audit, and their other projects merge onto those projects' nodes.
-    const pkey = canonicalEntityKey({ handle: p.handle, name: p.name });
+    const pkey = canonicalEntityKey({ handle: verifiedHandle, name: p.name });
     if (!pkey) continue;
     if (!hasNode(pkey)) graph.nodes.push({ type: "Person", key: pkey, label: p.name, role: p.role } as PanoptesNode);
     graph.edges.push({ src: subjectKey, dst: pkey, type: "TEAM", role: p.role });
-    for (const pr of p.projects ?? []) {
+    for (const pr of verifiedProjects) {
       if (!pr.name) continue;
       const prKey = canonicalEntityKey({ name: pr.name });
       if (!prKey) continue;
@@ -133,6 +177,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   // audit, and merges onto the subject's associate node when they're the same
   // person — turning the star into a web.
   for (const vt of ev.ventureTeams ?? []) {
+    if (!governingEligible(vt)) continue;
     if (!vt.key) continue;
     if (!hasNode(vt.key)) graph.nodes.push({ type: "Company", key: vt.key, label: vt.name } as PanoptesNode);
     for (const person of vt.people) {
@@ -166,9 +211,18 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     prior_handles: ev.profile.prior_handles,
     headline: ev.headline,
     live,
+    ...(ev.axisCitationVersion === 1 && ev.axisEvidenceCatalog ? {
+      axisCitationVersion: 1 as const,
+      axisEvidenceCatalog: ev.axisEvidenceCatalog.map((artifact) => ({
+        ...artifact,
+        eligibleAxes: [...artifact.eligibleAxes],
+      })),
+    } : {}),
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
-    webTeam: ev.webTeam ?? [],
+    webTeam: groundedWebTeam,
+    ...(webTeamLeads.length ? { webTeamLeads } : {}),
+    ventureTeams: ev.ventureTeams ?? [],
     sourceArtifacts: ev.sourceArtifacts,
     profileAuthenticity: ev.profileAuthenticity,
     trustGraphScreen: ev.trustGraphScreen,

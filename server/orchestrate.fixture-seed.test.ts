@@ -38,6 +38,7 @@ describe("live fixture discovery-claim downgrade", () => {
 
     // Supply a complete fresh analyst score so this assertion isolates the
     // deterministic cap gate rather than relying on INCOMPLETE to hide it.
+    discovery.roles = curated.roles;
     discovery.axes = curated.axes;
     const report = assembleDossier(discovery, true).report;
     expect(report.cap_applied).toBeNull();
@@ -143,6 +144,8 @@ describe("live fixture discovery-claim downgrade", () => {
       joined: "—",
       identity_confidence: "Unverified",
       identity_note: "Fixture discovery seed only; identity requires a fresh provider re-check.",
+      profile_collection_state: "unavailable",
+      profile_provider: "twitterapi",
     });
     expect(discovery.associates).toEqual([]);
     expect(discovery.clientEngagements[0]).toMatchObject({
