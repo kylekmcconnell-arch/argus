@@ -1205,7 +1205,23 @@ describe("analyst verdict integrity", () => {
     expect(scoringPrompt).toContain("profile, team, wallet, check-outcome");
     expect(scoringPrompt).not.toContain("only rows in the findings array may influence");
     expect(scoringPrompt).toContain("Citation aliases");
+    expect(scoringPrompt).toContain("Axis citation allowlists");
     expect(scoringPrompt).toContain("primaryEvidenceRef must be one substantive alias");
+    const expectedF1SubstantiveAliases = scorerCatalog.flatMap((artifact, index) =>
+      artifact.verification !== "unavailable"
+      && artifact.verification !== "checked_empty"
+      && artifact.eligibleAxes.includes("F1_identity_verifiability")
+        ? [`e${String(index + 1).padStart(3, "0")}`]
+        : []);
+    const expectedF1CoverageAliases = scorerCatalog.flatMap((artifact, index) =>
+      (artifact.verification === "unavailable" || artifact.verification === "checked_empty")
+      && artifact.eligibleAxes.includes("F1_identity_verifiability")
+        ? [`e${String(index + 1).padStart(3, "0")}`]
+        : []);
+    expect(scoringPrompt).toContain(
+      `F1_identity_verifiability | substantive: ${expectedF1SubstantiveAliases.join(", ") || "(none)"}` +
+      ` | coverage-only: ${expectedF1CoverageAliases.join(", ") || "(none)"}`,
+    );
     const verdictRequest = requests.find((request) => request.tool_choice.name === "record_verdict")!;
     const verdictTool = verdictRequest.tools[0];
     const axesSchema = verdictTool.input_schema.properties.axes;
@@ -1602,6 +1618,113 @@ describe("analyst verdict integrity", () => {
     const verdict = await analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
+  });
+
+  it("repairs a coverage-only primary citation using the authoritative per-axis allowlist", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{
+        project_name: "Verified Venture",
+        role: "founder",
+        outcome: "Active",
+        artifact_verified: true,
+      }],
+      checkOutcomes: [{
+        checkId: "identity-resolution",
+        status: "unavailable",
+        provider: "peopledatalabs",
+        note: "One identity provider was unavailable.",
+      }],
+    }, catalog);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const aliasFor = (
+      axis: string,
+      predicate: (artifact: AxisEvidenceRecord) => boolean,
+    ) => {
+      const index = scorerCatalog.findIndex((artifact) =>
+        predicate(artifact) && artifact.eligibleAxes.includes(axis));
+      expect(index).toBeGreaterThanOrEqual(0);
+      return `e${String(index + 1).padStart(3, "0")}`;
+    };
+    const substantive = (artifact: AxisEvidenceRecord) =>
+      artifact.verification !== "unavailable" && artifact.verification !== "checked_empty";
+    const coverageOnly = (artifact: AxisEvidenceRecord) =>
+      artifact.verification === "unavailable" || artifact.verification === "checked_empty";
+    const f1Support = aliasFor("F1_identity_verifiability", substantive);
+    const f1Coverage = aliasFor("F1_identity_verifiability", coverageOnly);
+    const f2Support = aliasFor("F2_track_record", substantive);
+    const axisRow = (axis: string, score: number, primaryEvidenceRef: string) => ({
+      axis,
+      score,
+      rationale: "Evidence-backed rationale",
+      primaryEvidenceRef,
+      additionalEvidenceRefs: [],
+      counterEvidenceRefs: [],
+      coverageRefs: [],
+      gaps: [],
+    });
+    let attempt = 0;
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      attempt += 1;
+      const request = JSON.parse(String(init?.body)) as {
+        messages: Array<{ content: string }>;
+        tool_choice: { name: string };
+      };
+      if (attempt === 2) {
+        expect(request.messages[0].content).toContain(
+          "non-substantive-support:F1_identity_verifiability",
+        );
+        expect(request.messages[0].content).toContain(
+          `For F1_identity_verifiability, the authoritative substantive aliases are ${f1Support}`,
+        );
+        expect(request.messages[0].content).toContain(
+          `the coverage-only aliases are ${f1Coverage}`,
+        );
+      }
+      const f1 = attempt === 1
+        ? {
+            ...axisRow("F1_identity_verifiability", 10, f1Coverage),
+            additionalEvidenceRefs: [f1Support],
+          }
+        : {
+            ...axisRow("F1_identity_verifiability", 10, f1Support),
+            coverageRefs: [f1Coverage],
+            gaps: ["One identity provider was unavailable."],
+          };
+      return new Response(JSON.stringify({
+        content: [{
+          type: "tool_use",
+          name: request.tool_choice.name,
+          input: {
+            axes: [f1, axisRow("F2_track_record", 20, f2Support)],
+            headline: "Evidence-backed result",
+            identity_note: "Identity resolved",
+          },
+        }],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 100, output_tokens: 20 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const verdict = await analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const artifactIdForAlias = (alias: string) =>
+      scorerCatalog[Number.parseInt(alias.slice(1), 10) - 1].artifactId;
+    expect(verdict?.axes[0].evidenceRefs).toEqual([
+      artifactIdForAlias(f1Support),
+      artifactIdForAlias(f1Coverage),
+    ]);
     expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
   });
 
