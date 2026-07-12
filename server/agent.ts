@@ -554,10 +554,13 @@ export function validateAnalystVerdict(
       return reject(`coverage-field-shape:${row.axis}`);
     }
     const rawCoverage = row.coverageRefs === undefined ? [] : row.coverageRefs;
-    const coverage = validRefs(rawCoverage, 0, 4);
-    if (!ARTIFACT_ID.test(primary) || !additional || !coverage) {
-      return reject(`axis-reference-shape:${row.axis}`);
+    if (Array.isArray(rawCoverage) && rawCoverage.length > 4) {
+      return reject(`coverage-reference-limit-observed-${rawCoverage.length}-max-4:${row.axis}`);
     }
+    const coverage = validRefs(rawCoverage, 0, 4);
+    if (!ARTIFACT_ID.test(primary)) return reject(`primary-reference-shape:${row.axis}`);
+    if (!additional) return reject(`additional-reference-shape:${row.axis}`);
+    if (!coverage) return reject(`coverage-reference-shape:${row.axis}`);
     const supportRefs = [primary, ...additional];
     const coverageRefs = coverage;
     const evidenceRefs = [...supportRefs, ...coverageRefs];
@@ -1480,9 +1483,19 @@ export async function analyzeSubject(
     alias: `e${String(index + 1).padStart(3, "0")}`,
     artifact,
   }));
-  const aliasesForAxis = (axis: string, coverageOnly: boolean): string[] => citationAliases
+  const substantiveAliasesForAxis = (axis: string): string[] => citationAliases
     .filter(({ artifact }) => artifact.eligibleAxes.includes(axis)
-      && (coverageOnly ? !isSubstantiveArtifact(artifact) : isSubstantiveArtifact(artifact)))
+      && isSubstantiveArtifact(artifact))
+    .map(({ alias }) => alias);
+  const preferredCoverageAliasesForAxis = (axis: string): string[] => citationAliases
+    .filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && !isSubstantiveArtifact(artifact))
+    // Unavailable checks disclose a stronger coverage limitation than a
+    // successful checked-empty result. Array.prototype.sort is stable, so the
+    // frozen catalog order remains the tie-breaker.
+    .sort((a, b) =>
+      Number(b.artifact.verification === "unavailable")
+      - Number(a.artifact.verification === "unavailable"))
+    .slice(0, 4)
     .map(({ alias }) => alias);
   const formatAliases = (aliases: string[]): string => aliases.length > 0
     ? aliases.join(", ")
@@ -1491,8 +1504,10 @@ export async function analyzeSubject(
     .map(({ alias, artifact }) => `${alias} = ${artifact.artifactId}`)
     .join("\n");
   const citationEligibilityTable = axisCatalog
-    .map(({ axis }) => `${axis} | substantive: ${formatAliases(aliasesForAxis(axis, false))}` +
-      ` | coverage-only: ${formatAliases(aliasesForAxis(axis, true))}`)
+    .map(({ axis }) => `${axis} | substantive aliases (choose 1 primary; do not ` +
+      `exhaustively copy): ${formatAliases(substantiveAliasesForAxis(axis))}` +
+      ` | coverageRefs preferred return set (optional; return 0-4 total, never ` +
+      `the whole coverage catalog): ${formatAliases(preferredCoverageAliasesForAxis(axis))}`)
     .join("\n");
   const system =
     "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject " +
@@ -1507,10 +1522,13 @@ export async function analyzeSubject(
     `\n\nCollected evidence (JSON):\n${evidenceJson}\n\n` +
     `Citation aliases (return these short aliases in the tool call; ARGUS maps ` +
     `them back to the exact immutable artifact IDs):\n${citationAliasTable}\n\n` +
-    `Axis citation allowlists (authoritative; an alias not listed for that axis is ` +
-    `forbidden. primaryEvidenceRef and additionalEvidenceRefs may use only the ` +
-    `substantive list. coverageRefs may use only the coverage-only list. ` +
-    `counterEvidenceRefs may use only the substantive list):\n` +
+    `Axis citation guidance (the substantive aliases are authoritative, while each ` +
+    `coverageRefs preferred return set is intentionally bounded. These are candidate ` +
+    `sets, not checklists: never copy every available artifact. Other eligible ` +
+    `coverage artifacts remain frozen in the evidence packet and need not be cited. ` +
+    `primaryEvidenceRef and additionalEvidenceRefs may use only the substantive ` +
+    `aliases. For this call, coverageRefs may use only the preferred return set. ` +
+    `counterEvidenceRefs may use only unused substantive aliases):\n` +
     `${citationEligibilityTable}\n\n` +
     `Score every listed axis, write the composite headline (one sentence on what ` +
     `governs the verdict), and an identity note.\n\n` +
@@ -1604,10 +1622,19 @@ export async function analyzeSubject(
       return null;
     }
     const rejectedAxis = axisNames.find((axis) => rejectionReason.endsWith(`:${axis}`));
+    const coverageLimitMatch = rejectionReason.match(/^coverage-reference-limit-observed-(\d+)-max-4:/);
     const rejectedAxisHint = rejectedAxis
-      ? ` For ${rejectedAxis}, the authoritative substantive aliases are ` +
-        `${formatAliases(aliasesForAxis(rejectedAxis, false))}; the coverage-only aliases are ` +
-        `${formatAliases(aliasesForAxis(rejectedAxis, true))}.`
+      ? coverageLimitMatch
+        ? ` The prior ${rejectedAxis} coverageRefs contained ${coverageLimitMatch[1]} aliases; ` +
+          `the maximum is 4. Return no more than these four preferred aliases: ` +
+          `${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}. Do not append ` +
+          `or move omitted coverage aliases into support or counter fields.`
+        : ` For ${rejectedAxis}, choose exactly one primary from the substantive aliases ` +
+          `${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. Assign each other ` +
+          `substantive alias to at most one array. Return coverageRefs as zero to four ` +
+          `distinct values chosen only from ` +
+          `${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}; [] is valid ` +
+          `and you must not exhaustively copy coverage artifacts.`
       : "";
     const repairUser = `${user}\n\nREPAIR REQUIRED: the prior record_verdict tool payload was rejected by ` +
       `deterministic validation with reason "${rejectionReason}". Make one fresh ` +
