@@ -34,7 +34,7 @@ import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance } from "./adapters/sitecheck";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
-import { canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
+import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
 import { personChecks } from "../src/lib/scanChecklist";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
@@ -667,7 +667,7 @@ async function coldIntake(ctx: CollectContext) {
   }
 }
 
-function axisCatalog(roles: SubjectClass[]) {
+export function axisCatalog(roles: SubjectClass[]) {
   const out: { axis: string; weight: number; role: string }[] = [];
   for (const role of roles) {
     const prof = getProfile(role);
@@ -678,10 +678,25 @@ function axisCatalog(roles: SubjectClass[]) {
   return out;
 }
 
-function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[] {
+/**
+ * Select methodologies only from collector-owned evidence. A PROJECT label is
+ * intentionally stricter than a generic bio keyword: the current X profile
+ * must come from twitterapi and bind the account to a credible first-party
+ * website. This makes brand accounts such as @world_xyz deterministic without
+ * allowing a model-discovered role or an arbitrary shared-host URL to govern.
+ */
+export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[] {
   const roles = new Set<SubjectClass>();
   if (evidence.profile.profile_collection_state === "resolved" && evidence.profile.bio.trim()) {
-    classifySubject(evidence.profile.bio).applicable_classes.forEach((role) => roles.add(role));
+    const profileRoles = classifySubject(evidence.profile.bio).applicable_classes;
+    const providerCapturedAt = Date.parse(evidence.profile.profile_captured_at ?? "");
+    const officialSite = canonicalOfficialWebsite(evidence.profile.website);
+    const projectProfileVerified = evidence.profile.profile_provider === "twitterapi"
+      && Number.isFinite(providerCapturedAt)
+      && officialSite !== null;
+    profileRoles.forEach((role) => {
+      if (role !== SubjectClass.PROJECT || projectProfileVerified) roles.add(role);
+    });
   }
   for (const venture of evidence.ventures) {
     if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;

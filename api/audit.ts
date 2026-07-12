@@ -33,6 +33,29 @@ const FINAL_GRAPH_VERDICTS = new Set(["PASS", "CAUTION", "FAIL", "AVOID", "UNVER
 const normRef = (value: string) =>
   value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
 
+/**
+ * A strict scan can legitimately finish without a score, but zero resolved
+ * roles and zero axes means routing failed rather than a new decision being
+ * reached. Persist that attempt for auditability without publishing it over a
+ * prior decision-bearing report.
+ */
+export function isRoutingFailedIncomplete(dossier: ServerDossier): boolean {
+  const report = dossier.report;
+  if (
+    report?.composite_verdict !== "INCOMPLETE"
+    || report?.governing_score !== null
+    || !Array.isArray(report?.roles)
+    || report.roles.length !== 0
+    || !Array.isArray(report?.role_reports)
+  ) return false;
+
+  return report.role_reports.every((roleReport) =>
+    !roleReport?.axes
+    || typeof roleReport.axes !== "object"
+    || Object.keys(roleReport.axes).length === 0,
+  );
+}
+
 export async function persistServerDossier(
   handle: string,
   dossier: ServerDossier,
@@ -114,18 +137,26 @@ export async function persistServerDossier(
     dossier,
     dossier.checkRuns,
   );
-  const activatedWithGraph = await activateReportVersionWithAuthoritativeGraph(
-    credentials,
-    {
+  if (isRoutingFailedIncomplete(dossier)) {
+    console.warn("[api/audit] routing-failed report version saved without activation", JSON.stringify({
       organizationId: auth.organizationId,
       reportVersionId,
-      userId: auth.userId,
-      attestationState,
-      completeness: qualifiedCompleteness,
-    },
-  );
-  if (!activatedWithGraph) {
-    await activateReportVersion(credentials, auth.organizationId, reportVersionId);
+      ref,
+    }));
+  } else {
+    const activatedWithGraph = await activateReportVersionWithAuthoritativeGraph(
+      credentials,
+      {
+        organizationId: auth.organizationId,
+        reportVersionId,
+        userId: auth.userId,
+        attestationState,
+        completeness: qualifiedCompleteness,
+      },
+    );
+    if (!activatedWithGraph) {
+      await activateReportVersion(credentials, auth.organizationId, reportVersionId);
+    }
   }
   return reportVersionId;
 }

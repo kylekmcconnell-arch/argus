@@ -146,4 +146,40 @@ describe("deriveDecisionReadiness", () => {
       providerUnavailable: 0,
     });
   });
+
+  it("never calls a zero-role, zero-axis report decision-ready", () => {
+    const result = deriveDecisionReadiness(
+      checks(["confirmed", "finding", "checked-empty"]),
+      { roleCount: 0, decisionAxisTotal: 0, evidenceBackedAxes: 0 },
+    );
+
+    expect(result).toMatchObject({
+      status: "incomplete",
+      coveragePercent: 0,
+      successful: 3,
+      applicable: 3,
+      unresolved: 1,
+      decisionBlockers: 1,
+      title: "Decision framework unresolved",
+    });
+    expect(result.guidance).toContain("collected intelligence only");
+  });
+
+  it("requires qualifying support for every governing axis before becoming ready", () => {
+    const result = deriveDecisionReadiness(
+      checks(["confirmed", "finding"]),
+      { roleCount: 1, decisionAxisTotal: 4, evidenceBackedAxes: 3 },
+    );
+
+    expect(result).toMatchObject({
+      status: "provisional",
+      coveragePercent: 75,
+      unresolved: 1,
+      decisionAxisTotal: 4,
+      evidenceBackedAxes: 3,
+      decisionBlockers: 1,
+      title: "Assessment is provisional",
+    });
+    expect(result.guidance).toContain("1 governing axis has no qualifying frozen support");
+  });
 });

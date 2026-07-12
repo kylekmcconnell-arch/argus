@@ -331,6 +331,72 @@ describe("person audit input guard", () => {
     expect(done.persistence).toMatchObject({ state: "persisted", reportVersionId });
   });
 
+  it("saves a no-role/no-axis routing failure without activating it", async () => {
+    const reportVersionId = "00000000-0000-4000-8000-000000000307";
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@world_xyz",
+      completeness_state: "partial",
+      report: {
+        audit_id: "audit-run-routing-failed",
+        roles: [],
+        role_reports: [],
+        composite_verdict: "INCOMPLETE",
+        governing_score: null,
+      },
+      cost: { schemaVersion: 1, calls: [] },
+    } as never);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify([{ report_version_id: reportVersionId }]),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+    const { res, captured } = response();
+
+    await handler(request("world_xyz"), res);
+
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(persistProvenance).toHaveBeenCalledOnce();
+    expect(activateReportVersionWithAuthoritativeGraph).not.toHaveBeenCalled();
+    expect(activateReportVersion).not.toHaveBeenCalled();
+    expect(issuePanelCostToken).toHaveBeenCalledWith(AUTH_ORGANIZATION_ID, reportVersionId);
+    const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    expect(done.persistence).toMatchObject({ state: "persisted", reportVersionId });
+  });
+
+  it("still activates an incomplete report that has a resolved role and axes", async () => {
+    const reportVersionId = "00000000-0000-4000-8000-000000000308";
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@partial_founder",
+      completeness_state: "partial",
+      report: {
+        audit_id: "audit-run-incomplete-with-methodology",
+        roles: ["FOUNDER"],
+        role_reports: [{
+          role: "FOUNDER",
+          axes: { F1_identity_verifiability: { score: null } },
+        }],
+        composite_verdict: "INCOMPLETE",
+        governing_score: null,
+      },
+      cost: { schemaVersion: 1, calls: [] },
+    } as never);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
+      JSON.stringify([{ report_version_id: reportVersionId }]),
+      { status: 200, headers: { "content-type": "application/json" } },
+    )));
+    const { res } = response();
+
+    await handler(request("partial_founder"), res);
+
+    expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledOnce();
+    expect(activateReportVersion).toHaveBeenCalledWith(expect.anything(), AUTH_ORGANIZATION_ID, reportVersionId);
+  });
+
   it("atomically activates a coverage-qualified live report with its graph", async () => {
     const reportVersionId = "00000000-0000-4000-8000-000000000305";
     vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });

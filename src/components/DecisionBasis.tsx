@@ -8,6 +8,7 @@ export interface DecisionBasisProps {
   roleReport?: RoleReport;
   catalog?: AxisEvidenceRecord[];
   lineageVersion?: number;
+  routingUnresolved?: boolean;
   onRescan?: () => void;
 }
 
@@ -93,7 +94,7 @@ function EvidenceRecord({ record, relation }: { record: AxisEvidenceRecord; rela
   );
 }
 
-export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }: DecisionBasisProps) {
+export function DecisionBasis({ roleReport, catalog, lineageVersion, routingUnresolved = false, onRescan }: DecisionBasisProps) {
   const model = useMemo(
     () => buildDecisionBasis(roleReport, catalog, lineageVersion),
     [catalog, lineageVersion, roleReport],
@@ -118,11 +119,13 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }:
       <section aria-label="Decision basis" className="panel px-4 py-3.5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Decision basis</h3>
-          <span className="chip">Lineage unavailable</span>
+          <span className="chip">{routingUnresolved ? "Methodology unavailable" : "Lineage unavailable"}</span>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <p className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-ink-dim">
-            This snapshot predates strict evidence-to-axis citations. ARGUS will not infer them from analyst prose or nearby sources.
+            {routingUnresolved
+              ? "No evidence-backed role selected a scoring methodology, so this report contains no evidence-to-axis lineage. Collected intelligence remains visible without being converted into a score."
+              : "This snapshot does not contain strict evidence-to-axis citations. ARGUS will not infer them from analyst prose or nearby sources."}
           </p>
           {onRescan && (
             <button
@@ -130,7 +133,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }:
               onClick={onRescan}
               className="btn-chip tint-signal min-h-11 shrink-0 font-medium"
             >
-              Rescan to capture lineage
+              {routingUnresolved ? "Run corrected investigation" : "Rescan to capture lineage"}
             </button>
           )}
         </div>

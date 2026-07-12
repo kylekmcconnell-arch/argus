@@ -21,8 +21,20 @@ export interface DecisionReadiness {
   notApplicable: number;
   findings: number;
   checkedEmpty: number;
+  decisionAxisTotal: number | null;
+  evidenceBackedAxes: number | null;
+  decisionBlockers: number;
   title: string;
   guidance: string;
+}
+
+export interface DecisionReadinessContext {
+  /** Governing methodology axes stored for this report. */
+  decisionAxisTotal?: number;
+  /** Governing axes with qualifying frozen support. */
+  evidenceBackedAxes?: number;
+  /** Evidence-backed subject roles selected before scoring. */
+  roleCount?: number;
 }
 
 const plural = (count: number, singular: string, pluralForm = `${singular}s`) =>
@@ -45,20 +57,48 @@ function gapDescription(readiness: Pick<DecisionReadiness, "unknown" | "provider
  * measures whether evidence was collected, not whether the evidence was clean:
  * a finding is a successful check execution and still requires human review.
  */
-export function deriveDecisionReadiness(checks: readonly ScanCheck[]): DecisionReadiness {
+export function deriveDecisionReadiness(
+  checks: readonly ScanCheck[],
+  context: DecisionReadinessContext = {},
+): DecisionReadiness {
   const coverage = summarizeChecks(checks);
   const applicable = coverage.inScope;
   const successful = coverage.successful;
-  const unresolved = coverage.unknownOrFailed;
+  const decisionAxisTotal = typeof context.decisionAxisTotal === "number"
+    ? Math.max(0, Math.floor(context.decisionAxisTotal))
+    : null;
+  const evidenceBackedAxes = typeof context.evidenceBackedAxes === "number"
+    ? Math.max(0, Math.floor(context.evidenceBackedAxes))
+    : null;
+  const roleCount = typeof context.roleCount === "number"
+    ? Math.max(0, Math.floor(context.roleCount))
+    : null;
+  const routingUnresolved = roleCount === 0 || decisionAxisTotal === 0;
+  const missingAxisSupport = decisionAxisTotal !== null && evidenceBackedAxes !== null
+    ? Math.max(0, decisionAxisTotal - evidenceBackedAxes)
+    : 0;
+  const decisionBlockers = routingUnresolved ? 1 : missingAxisSupport;
+  const unresolved = coverage.unknownOrFailed + decisionBlockers;
 
   // Floor rather than round so an unresolved check can never display as 100%.
-  const coveragePercent = applicable > 0
+  const checkCoveragePercent = applicable > 0
     ? Math.floor((successful / applicable) * 100)
     : 0;
+  const axisCoveragePercent = decisionAxisTotal !== null && evidenceBackedAxes !== null
+    ? decisionAxisTotal > 0
+      ? Math.floor((Math.min(evidenceBackedAxes, decisionAxisTotal) / decisionAxisTotal) * 100)
+      : 0
+    : 100;
+  const coveragePercent = routingUnresolved
+    ? 0
+    : Math.min(checkCoveragePercent, axisCoveragePercent);
 
-  const status: DecisionReadinessStatus = applicable > 0 && successful === applicable
+  const status: DecisionReadinessStatus = !routingUnresolved
+    && decisionBlockers === 0
+    && applicable > 0
+    && successful === applicable
     ? "ready"
-    : coveragePercent >= PROVISIONAL_COVERAGE_FLOOR_PERCENT
+    : !routingUnresolved && coveragePercent >= PROVISIONAL_COVERAGE_FLOOR_PERCENT
       ? "provisional"
       : "incomplete";
 
@@ -75,7 +115,26 @@ export function deriveDecisionReadiness(checks: readonly ScanCheck[]): DecisionR
     notApplicable: coverage.notApplicable,
     findings: coverage.findings,
     checkedEmpty: coverage.checkedEmpty,
+    decisionAxisTotal,
+    evidenceBackedAxes,
+    decisionBlockers,
   };
+
+  if (routingUnresolved) {
+    return {
+      ...base,
+      title: "Decision framework unresolved",
+      guidance: "Provider checks recorded intelligence, but ARGUS did not resolve an evidence-backed role and scoring methodology. Treat this as collected intelligence only, not a decision-ready assessment.",
+    };
+  }
+
+  if (missingAxisSupport > 0) {
+    return {
+      ...base,
+      title: evidenceBackedAxes === 0 ? "Decision evidence missing" : "Assessment is provisional",
+      guidance: `${plural(missingAxisSupport, "governing axis", "governing axes")} ${missingAxisSupport === 1 ? "has" : "have"} no qualifying frozen support. Treat the score and verdict as provisional until the decision evidence is complete.`,
+    };
+  }
 
   if (status === "ready") {
     return {

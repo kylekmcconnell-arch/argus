@@ -402,6 +402,13 @@ var PATTERNS = {
     /\bdApp\b/i,
     /\becosystem\b/i,
     /\bDAO\b/i,
+    /\b(?:prediction|betting|forecasting) market\b/i,
+    /\b(?:decentralized )?exchange\b/i,
+    /\bmarketplace\b/i,
+    // "Product" is a useful brand-account signal, but not when it is plainly a
+    // person's job title. Server routing additionally requires the resolved X
+    // profile to link a credible official site before PROJECT can govern.
+    /\bproduct\b(?!\s+(?:manager|management|lead|leader|designer|design|engineer|engineering|marketing|marketer|growth|strategy|strategist|ops|operations|at)\b)/i,
     /\bplatform\b/i,
     /\bthe official\b/i,
     /\bofficial account\b/i,
@@ -10251,7 +10258,13 @@ function axisCatalog(roles) {
 function providerBackedRoles(evidence) {
   const roles = /* @__PURE__ */ new Set();
   if (evidence.profile.profile_collection_state === "resolved" && evidence.profile.bio.trim()) {
-    classifySubject(evidence.profile.bio).applicable_classes.forEach((role) => roles.add(role));
+    const profileRoles = classifySubject(evidence.profile.bio).applicable_classes;
+    const providerCapturedAt = Date.parse(evidence.profile.profile_captured_at ?? "");
+    const officialSite = canonicalOfficialWebsite(evidence.profile.website);
+    const projectProfileVerified = evidence.profile.profile_provider === "twitterapi" && Number.isFinite(providerCapturedAt) && officialSite !== null;
+    profileRoles.forEach((role) => {
+      if (role !== "PROJECT" /* PROJECT */ || projectProfileVerified) roles.add(role);
+    });
   }
   for (const venture of evidence.ventures) {
     if (venture.evidence_origin === "model_lead" || venture.artifact_verified !== true) continue;

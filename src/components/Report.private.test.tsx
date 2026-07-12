@@ -3,6 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { Dossier } from "../data/dossier";
 import { buildReport, SUBJECTS } from "../data/subjects";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -235,6 +236,60 @@ describe("private person report evidence boundary", () => {
 });
 
 describe("decision-safe person report presentation", () => {
+  it("presents a zero-axis project attempt as collected intelligence, never decision-ready", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      bio: "the solana prediction market",
+      completeness_state: "partial" as const,
+      checkRuns: [
+        { checkId: "profile", label: "X profile", status: "confirmed" as const, provider: "twitterapi" },
+        { checkId: "news", label: "News and press", status: "finding" as const, provider: "google-news" },
+        { checkId: "photo", label: "Profile photo", status: "checked-empty" as const, provider: "claude-vision" },
+      ],
+      providerSnapshot: {
+        capturedAt: "2026-07-12T20:24:00.000Z",
+        runs: [{
+          id: "pdl",
+          label: "Identity resolution",
+          state: "failed" as const,
+          observedAt: "2026-07-12T20:24:00.000Z",
+          detail: "Provider returned no identity match.",
+        }],
+      },
+      webTeam: [{
+        name: "<UNKNOWN>",
+        role: "<UNKNOWN>",
+        source: "project team page",
+        provider: "team-page",
+        evidence_origin: "deterministic" as const,
+        artifact_verified: true,
+      }],
+      report: {
+        ...base.report,
+        roles: [],
+        role_reports: [],
+        governing_role: null,
+        governing_score: null,
+        composite_verdict: "INCOMPLETE" as const,
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onRescan={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Project routing unresolved");
+    expect(container.textContent).toContain("ARGUS collected intelligence, but did not select a scoring methodology");
+    expect(container.textContent).toContain("Decision coverage0%");
+    expect(container.textContent).toContain("Resolve whether this account represents a project, organization, token, or person");
+    expect(container.textContent).toContain("Identity resolution collection failed");
+    expect([...container.querySelectorAll("span")].some((node) => node.textContent?.trim() === "decision-ready")).toBe(false);
+    expect(container.textContent).not.toContain("<UNKNOWN>");
+    expect(decisionBasisText()).toContain("No evidence-backed role selected a scoring methodology");
+    expect(decisionBasisText()).not.toContain("predates strict evidence-to-axis citations");
+  });
+
   it("explains an adverse verdict with adverse drivers and labels positive evidence as counterweight", () => {
     const dossier = buildReport(SUBJECTS[0]);
 

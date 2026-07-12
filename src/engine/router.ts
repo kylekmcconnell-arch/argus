@@ -23,6 +23,12 @@ const PATTERNS: Record<SubjectClass, RegExp[]> = {
   // promotes OTHERS' tokens) and a founder (an individual).
   [SubjectClass.PROJECT]: [
     /\bprotocol\b/i, /\bnetwork\b/i, /\bdApp\b/i, /\becosystem\b/i, /\bDAO\b/i,
+    /\b(?:prediction|betting|forecasting) market\b/i, /\b(?:decentralized )?exchange\b/i,
+    /\bmarketplace\b/i,
+    // "Product" is a useful brand-account signal, but not when it is plainly a
+    // person's job title. Server routing additionally requires the resolved X
+    // profile to link a credible official site before PROJECT can govern.
+    /\bproduct\b(?!\s+(?:manager|management|lead|leader|designer|design|engineer|engineering|marketing|marketer|growth|strategy|strategist|ops|operations|at)\b)/i,
     /\bplatform\b/i, /\bthe official\b/i, /\bofficial account\b/i, /\bwe'?re building\b/i,
     /\bour (?:token|protocol|platform|app|mission|community)\b/i, /\b\$[A-Z]{2,6} token\b/i,
     /\bpowered by\b/i, /\bmainnet\b/i, /\btestnet\b/i,

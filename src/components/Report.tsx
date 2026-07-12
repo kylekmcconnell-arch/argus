@@ -1046,8 +1046,18 @@ function FrozenSourceLedger({
 
 type ReportTeamMember = Dossier["webTeam"][number];
 
+function meaningfulTeamMember(member: ReportTeamMember): boolean {
+  const name = member.name.trim();
+  const role = member.role.trim();
+  return Boolean(name)
+    && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(name)
+    && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(role);
+}
+
 function groundedTeamMember(member: ReportTeamMember): boolean {
-  return member.evidence_origin !== "model_lead" && member.artifact_verified === true;
+  return meaningfulTeamMember(member)
+    && member.evidence_origin !== "model_lead"
+    && member.artifact_verified === true;
 }
 
 function sanitizedGroundedTeamMember(member: ReportTeamMember): ReportTeamMember {
@@ -1073,6 +1083,7 @@ function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
   });
   const seen = new Set<string>();
   return [...(dossier.webTeamLeads ?? []), ...inferred].filter((member) => {
+    if (!meaningfulTeamMember(member)) return false;
     const key = [member.name, member.handle ?? "", member.linkedin ?? "", member.role, member.source].join("|").toLowerCase();
     if (seen.has(key)) return false;
     seen.add(key);
@@ -1189,6 +1200,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const unmatchedPortfolioLeadCount = portfolioLeads.filter((lead) =>
     !verifiedPortfolioProjectKeys.has(lead.projectName.trim().toLowerCase())).length;
   const roles = report.roles as SubjectClass[];
+  const governingRoleReport = report.role_reports.find((rr) => rr.role === report.governing_role)
+    ?? report.role_reports[0];
+  const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
+  const decisionBasisSummary = buildDecisionBasis(governingRoleReport, f.axisEvidenceCatalog, f.axisCitationVersion);
+  const evidenceBackedAxisCount = decisionBasisSummary.evidenceBacked;
+  const routingUnresolved = roles.length === 0 || governingAxes.length === 0;
   const derivedDiligenceChecks = personChecks({
     identityConfidence: report.identity_confidence ?? undefined,
     realName: (f.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
@@ -1203,7 +1220,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       : derivedDiligenceChecks;
   const legacyCoverageNotCaptured = versionContext?.attestationState === "legacy_unattested"
     && versionContext.checks.length === 0;
-  const readiness = deriveDecisionReadiness(diligenceChecks);
+  const readiness = deriveDecisionReadiness(
+    diligenceChecks,
+    versionContext?.attestationState === "legacy_unattested"
+      ? {}
+      : {
+          roleCount: roles.length,
+          decisionAxisTotal: governingAxes.length,
+          evidenceBackedAxes: evidenceBackedAxisCount,
+        },
+  );
   const recordedCompleteness = versionContext?.completenessState ?? f.completeness_state;
   const presentationCompleteness = coverageQualifiedCompleteness({
     completeness: recordedCompleteness ?? (readiness.status === "ready" ? "complete" : "partial"),
@@ -1302,8 +1328,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const capturedLabel = versionContext?.createdAt
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : null;
-  const governingRoleReport = report.role_reports.find((rr) => rr.role === report.governing_role)
-    ?? report.role_reports[0];
   const publishableSubjectFindings = report.publishable_findings.filter((finding) =>
     isPublishableSubjectFinding(finding, report.handle),
   );
@@ -1401,9 +1425,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
   const advisedRows = evidence.advised;
 
-  const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
-  const decisionBasisSummary = buildDecisionBasis(governingRoleReport, f.axisEvidenceCatalog, f.axisCitationVersion);
-  const evidenceBackedAxisCount = decisionBasisSummary.evidenceBacked;
   const decisionNarrativeTone = presentedVerdict === "PASS"
     ? "pass"
     : presentedVerdict === "CAUTION" || presentedVerdict === "INCOMPLETE" || presentedVerdict === "UNVERIFIABLE_IDENTITY"
@@ -1413,6 +1434,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         : "signal";
   const unresolvedChecks = diligenceChecks.filter((check) =>
     check.status === "unknown" || check.status === "unavailable" || check.status === "stale",
+  );
+  const providerGaps = (f.providerSnapshot?.runs ?? []).filter((run) =>
+    run.state === "partial" || run.state === "failed" || run.state === "unavailable",
   );
   const axisHref = (axis: string): `#${string}` =>
     `#decision-basis-${axis.replace(/[^a-z0-9_-]/gi, "-")}`;
@@ -1485,13 +1509,56 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const verdictNarrative = favorableVerdict ? supportNarrative : adverseVerdictNarrative;
   const countervailingNarrative = favorableVerdict ? confidenceLimits : supportNarrative;
 
-  const verificationNext: ReportCanvasNarrativeItem[] = unresolvedChecks.slice(0, 6).map((check, index) => ({
-    id: `verify-${check.checkId ?? index}`,
-    title: check.label,
-    detail: check.note,
-    provenance: [check.provider, check.status.replace(/-/g, " ")].filter(Boolean).join(" · "),
-    href: "#scan-methodology",
-  }));
+  const verificationNext: ReportCanvasNarrativeItem[] = [
+    ...(routingUnresolved ? [{
+      id: "verify-subject-routing",
+      title: "Resolve whether this account represents a project, organization, token, or person",
+      detail: "No evidence-backed role selected a scoring methodology. Confirm the official site relationship, then run the matching project and on-chain investigation paths.",
+      provenance: "Required before scoring",
+      href: "#identity-evidence" as `#${string}`,
+    }] : []),
+    ...unresolvedChecks.map((check, index) => ({
+      id: `verify-${check.checkId ?? index}`,
+      title: check.label,
+      detail: check.note,
+      provenance: [check.provider, check.status.replace(/-/g, " ")].filter(Boolean).join(" · "),
+      href: "#scan-methodology" as `#${string}`,
+    })),
+    ...providerGaps.map((run) => ({
+      id: `verify-provider-${run.id}`,
+      title: `${run.label} collection ${run.state}`,
+      detail: run.detail || "This provider path did not return a complete result.",
+      provenance: `Provider run · ${run.state}`,
+      href: "#scan-methodology" as `#${string}`,
+    })),
+  ].filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index).slice(0, 8);
+
+  const unscoredIntelNarrative: ReportCanvasNarrativeItem[] = [
+    ...publishableSubjectFindings.map((finding, index) => ({
+      id: `intel-finding-${index}`,
+      title: finding.claim,
+      detail: `${finding.verification_status} finding with ${finding.independent_source_count} recorded source${finding.independent_source_count === 1 ? "" : "s"}.`,
+      provenance: "Verified finding · excluded from scoring until routing resolves",
+      href: "#publishable-findings" as `#${string}`,
+    })),
+    ...investigativeLeads.map((lead, index) => ({
+      id: `intel-lead-${index}`,
+      title: lead.claim,
+      detail: "Investigative lead requiring target and source verification.",
+      provenance: `${lead.verification_status} lead · outside the score`,
+      href: "#investigative-leads" as `#${string}`,
+    })),
+    ...(f.sourceArtifacts ?? []).map((artifact, index) => ({
+      id: `intel-artifact-${artifact.contentHash || index}`,
+      title: artifact.title,
+      detail: artifact.excerpt,
+      provenance: `${artifact.provider} · ${artifact.match.replace(/_/g, " ")}`,
+      href: "#evidence-ledger" as `#${string}`,
+    })),
+  ].filter((item, index, items) => items.findIndex((candidate) => candidate.title === item.title) === index).slice(0, 8);
+  const visibleIntelligenceCount = (f.sourceArtifacts?.length ?? 0)
+    + publishableSubjectFindings.length
+    + investigativeLeads.length;
 
   const decisionEvidenceRail: ReportCanvasRailItem[] = decisionBasisSummary.rows
     .filter((axis) => axis.support.length > 0)
@@ -1515,11 +1582,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     }));
   const decisionRailItems = favorableVerdict ? decisionEvidenceRail : adverseDecisionEvidenceRail;
 
-  const openQuestionRail: ReportCanvasRailItem[] = unresolvedChecks.slice(0, 5).map((check, index) => ({
-    id: `rail-question-${check.checkId ?? index}`,
-    label: check.label,
-    meta: [check.provider, check.status.replace(/-/g, " ")].filter(Boolean).join(" · "),
-    href: "#scan-methodology",
+  const openQuestionRail: ReportCanvasRailItem[] = verificationNext.slice(0, 5).map((item, index) => ({
+    id: `rail-question-${item.id ?? index}`,
+    label: item.title,
+    meta: item.provenance,
+    href: item.href,
   }));
 
   const artifactProviderCounts = [...(f.sourceArtifacts ?? []).reduce((counts, artifact) => {
@@ -1803,7 +1870,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <>
                 <dl className="mt-3 grid gap-2 sm:grid-cols-4">
                   <div className="stat-tile">
-                    <dt className="stat-label">Evidence coverage</dt>
+                    <dt className="stat-label">
+                      {versionContext?.attestationState === "legacy_unattested" ? "Evidence coverage" : "Decision coverage"}
+                    </dt>
                     <dd className="stat-value mt-0.5 font-semibold">{readiness.coveragePercent}%</dd>
                   </div>
                   <div className="stat-tile">
@@ -1832,7 +1901,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               { href: "#decision-summary", label: "Summary", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
               { href: "#decision-basis", label: "Claims", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
               { href: "#identity-evidence", label: "Identity", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
-              ...((f.sourceArtifacts?.length ?? 0) > 0 ? [{ href: "#evidence-ledger" as const, label: "Evidence", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: f.sourceArtifacts!.length }] : []),
+              ...(visibleIntelligenceCount > 0 ? [{ href: "#evidence-ledger" as const, label: "Evidence", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount }] : []),
               { href: "#relationships", label: "Relationships", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
               ...(diligenceChecks.length > 0 ? [{ href: "#scan-methodology" as const, label: "Methodology", icon: <UserFocus aria-hidden="true" size={15} weight="bold" />, count: diligenceChecks.length }] : []),
             ]}
@@ -1840,30 +1909,65 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         </div>
 
         <div id="decision-summary" className="grid scroll-mt-28 gap-4 py-5 lg:grid-cols-[minmax(0,1fr)_19rem]">
+          {routingUnresolved && (
+            <section className="finding tint-caution px-5 py-4 lg:col-span-2" aria-label="Project routing unresolved">
+              <div className="flex flex-wrap items-start gap-3">
+                <div className="min-w-0 flex-1">
+                  <div className="eyebrow text-caution">Project routing unresolved</div>
+                  <h2 className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
+                    ARGUS collected intelligence, but did not select a scoring methodology
+                  </h2>
+                  <p className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">
+                    This account was not resolved to an evidence-backed project, organization, token, or person role. The material below remains useful for investigation, but there is no decision-ready score or verdict in this snapshot.
+                  </p>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <span className="chip tint-caution">0 governing axes</span>
+                    <span className="chip">{readiness.successful} provider checks recorded</span>
+                    <span className="chip">{visibleIntelligenceCount} evidence items and leads</span>
+                    {providerGaps.length > 0 && <span className="chip tint-caution">{providerGaps.length} provider gaps</span>}
+                  </div>
+                </div>
+                {onRescan && (
+                  <button type="button" onClick={onRescan} className="btn-chip tint-signal min-h-11 shrink-0 gap-1.5 font-medium">
+                    <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
+                    Run corrected investigation
+                  </button>
+                )}
+              </div>
+            </section>
+          )}
           <div className="panel px-5">
             <ReportCanvasNarrativeSection
               id="verdict-rationale"
-              title="Why ARGUS reaches this verdict"
-              description={favorableVerdict
-                ? "Only governing-axis rationales with frozen supporting citations appear here."
-                : "Hard caps, contradictions, low-scoring axes, and unresolved evidence that drive this stored result appear here."}
+              title={routingUnresolved ? "Collected intelligence that did not enter a score" : "Why ARGUS reaches this verdict"}
+              description={routingUnresolved
+                ? "Verified artifacts and investigative leads stay visible while subject routing is unresolved. Leads remain explicitly unscored."
+                : favorableVerdict
+                  ? "Only governing-axis rationales with frozen supporting citations appear here."
+                  : "Hard caps, contradictions, low-scoring axes, and unresolved evidence that drive this stored result appear here."}
               tone={decisionNarrativeTone}
-              items={verdictNarrative}
-              emptyCopy={favorableVerdict
-                ? "No evidence-backed governing-axis rationale is available in this snapshot. Inspect the decision basis before relying on the stored score."
-                : "No adverse evidence driver is recorded for this result. Inspect the decision basis before relying on the stored verdict."}
+              items={routingUnresolved ? unscoredIntelNarrative : verdictNarrative}
+              emptyCopy={routingUnresolved
+                ? "No verified artifact or investigative lead was stored. Review provider failures and rerun after resolving the subject type."
+                : favorableVerdict
+                  ? "No evidence-backed governing-axis rationale is available in this snapshot. Inspect the decision basis before relying on the stored score."
+                  : "No adverse evidence driver is recorded for this result. Inspect the decision basis before relying on the stored verdict."}
             />
             <ReportCanvasNarrativeSection
               id="confidence-limits"
-              title={favorableVerdict ? "What limits confidence" : "What evidence pulls the other way"}
-              description={favorableVerdict
-                ? "Coverage gaps, contradictions, counter-evidence, and policy caps remain visible even when the score is favorable."
-                : "Evidence-backed positive findings stay visible so an adverse verdict is presented with its counterweight."}
-              tone={favorableVerdict ? (report.cap_applied ? "avoid" : "caution") : "pass"}
-              items={countervailingNarrative}
-              emptyCopy={favorableVerdict
-                ? "No unresolved coverage gaps, contradictions, governing-axis counter-evidence, or hard cap are recorded in this report."
-                : "No evidence-backed positive counterweight is recorded in this report."}
+              title={routingUnresolved ? "Why ARGUS withheld a verdict" : favorableVerdict ? "What limits confidence" : "What evidence pulls the other way"}
+              description={routingUnresolved
+                ? "A scored conclusion is blocked until ARGUS resolves a provider-backed role and governing methodology."
+                : favorableVerdict
+                  ? "Coverage gaps, contradictions, counter-evidence, and policy caps remain visible even when the score is favorable."
+                  : "Evidence-backed positive findings stay visible so an adverse verdict is presented with its counterweight."}
+              tone={routingUnresolved ? "caution" : favorableVerdict ? (report.cap_applied ? "avoid" : "caution") : "pass"}
+              items={routingUnresolved ? confidenceLimits : countervailingNarrative}
+              emptyCopy={routingUnresolved
+                ? "No decision methodology was selected, so ARGUS correctly withheld the score."
+                : favorableVerdict
+                  ? "No unresolved coverage gaps, contradictions, governing-axis counter-evidence, or hard cap are recorded in this report."
+                  : "No evidence-backed positive counterweight is recorded in this report."}
             />
             <ReportCanvasNarrativeSection
               id="verification-next"
@@ -1873,7 +1977,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               items={verificationNext}
               emptyCopy={legacyCoverageNotCaptured
                 ? "This snapshot has no frozen check-level outcomes. Rescan to establish a current verification plan."
-                : "All applicable checks have recorded outcomes. Review the underlying evidence and any findings before making an investment decision."}
+                : "No additional verification question was recorded. Review the underlying evidence and any findings before making an investment decision."}
             />
           </div>
 
@@ -1888,14 +1992,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <ReportCanvasRailCard
               title="Open questions"
               tone="caution"
-              count={`${readiness.unresolved}`}
+              count={`${verificationNext.length}`}
               items={openQuestionRail}
-              footer={diligenceChecks.length > 0 ? <a href="#scan-methodology" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">Review every check outcome</a> : undefined}
+              footer={verificationNext.length > 0 ? <a href="#verification-next" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">Review the verification plan</a> : undefined}
             />
             <ReportCanvasRailCard
-              title="Evidence provenance"
+              title="Evidence and leads"
               tone="signal"
-              count={`${f.sourceArtifacts?.length ?? 0} artifacts`}
+              count={`${visibleIntelligenceCount} items`}
               items={provenanceRail}
               footer={(f.sourceArtifacts?.length ?? 0) > 0 ? <a href="#frozen-source-ledger" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">Open frozen source ledger</a> : undefined}
             />
@@ -1908,6 +2012,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             roleReport={governingRoleReport}
             catalog={f.axisEvidenceCatalog}
             lineageVersion={f.axisCitationVersion}
+            routingUnresolved={routingUnresolved}
             onRescan={onRescan}
           />
         </div>
@@ -2536,15 +2641,19 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
         {/* findings ledger */}
         {publishableSubjectFindings.length > 0 && (
-          <Section title="Publishable findings" kicker="sourced · dated · independently corroborated">
-            <FindingsLedger findings={publishableSubjectFindings} />
-          </Section>
+          <div id="publishable-findings" className="scroll-mt-28">
+            <Section title="Publishable findings" kicker="sourced · dated · independently corroborated">
+              <FindingsLedger findings={publishableSubjectFindings} />
+            </Section>
+          </div>
         )}
 
         {investigativeLeads.length > 0 && (
-          <Section title="Investigative leads" kicker="entity-scoped follow-up · target verification shown separately · never scored as subject evidence">
-            <InvestigativeLeadsLedger leads={investigativeLeads} subject={report.handle} />
-          </Section>
+          <div id="investigative-leads" className="scroll-mt-28">
+            <Section title="Investigative leads" kicker="entity-scoped follow-up · target verification shown separately · never scored as subject evidence">
+              <InvestigativeLeadsLedger leads={investigativeLeads} subject={report.handle} />
+            </Section>
+          </div>
         )}
 
         {/* methodology footer */}
