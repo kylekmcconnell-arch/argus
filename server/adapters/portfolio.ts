@@ -1,10 +1,18 @@
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 import type { PortfolioLead, SourceArtifact } from "../../src/data/evidence";
+import {
+  canonicalOfficialWebsite,
+  isCredibleOfficialDomain,
+  sourceMatchesOfficialWebsiteScope,
+} from "../../src/lib/fundScaleEvidence";
 import { env } from "../config";
 import { recordCall } from "../cost";
 import { fetchPublicText, type PublicTextDocument, type PublicTextResult } from "../publicWeb";
-import { discoverInvestorEvidenceText } from "./investorDiscovery";
+import {
+  discoverFocusedPortfolioEvidenceText,
+  discoverInvestorEvidenceText,
+} from "./investorDiscovery";
 import { getProfile } from "./x";
 import type { AdapterRunResult, CollectContext } from "./types";
 
@@ -34,40 +42,6 @@ const PRESS_HOSTS = [
   "venturebeat.com",
 ] as const;
 
-// A path or subdomain on one of these services is controlled by an account,
-// not by ownership of the parent domain. Treating it as an official investor
-// domain would let a model-supplied Medium, Linktree, or free-hosting URL turn
-// arbitrary copy into first-party evidence.
-const SHARED_WEBSITE_HOSTS = [
-  "amazonaws.com",
-  "beacons.ai",
-  "bio.link",
-  "bio.site",
-  "bit.ly",
-  "blogspot.com",
-  "blob.core.windows.net",
-  "carrd.co",
-  "github.io",
-  "gitbook.io",
-  "linktr.ee",
-  "medium.com",
-  "netlify.app",
-  "notion.site",
-  "notion.so",
-  "pages.dev",
-  "sites.google.com",
-  "storage.googleapis.com",
-  "substack.com",
-  "t.co",
-  "tinyurl.com",
-  "twitter.com",
-  "vercel.app",
-  "webflow.io",
-  "wixsite.com",
-  "wordpress.com",
-  "x.com",
-] as const;
-
 const PROFILE_AFFILIATION_MAX_AGE_MS = 24 * 60 * 60 * 1_000;
 const PROFILE_AFFILIATION_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 
@@ -81,10 +55,22 @@ export interface PortfolioCollectorDependencies {
   discover?: (ctx: CollectContext) => Promise<PortfolioLead[] | null>;
   fetchSource?: (url: string) => Promise<PublicTextResult>;
   resolveProjectDomain?: (lead: PortfolioLead) => Promise<string | undefined>;
-  resolveInvestorDomain?: (lead: PortfolioLead, entity: PortfolioInvestorEntity) => Promise<string | undefined>;
+  resolveInvestorDomain?: (lead: PortfolioLead, entity: PortfolioInvestorEntity) => Promise<PortfolioInvestorDomainResolution | undefined>;
   lookupProfile?: typeof getProfile;
   now?: () => Date;
 }
+
+export interface PortfolioInvestorDomainProof {
+  domain: string;
+  sourceUrl: string;
+  sourceContentHash: string;
+  capturedAt: string;
+  sourceKind: "provider_profile";
+  profileName: string;
+  profileWebsite: string;
+}
+
+export type PortfolioInvestorDomainResolution = string | PortfolioInvestorDomainProof;
 
 export interface PortfolioInvestorEntity {
   name: string;
@@ -92,6 +78,8 @@ export interface PortfolioInvestorEntity {
   handle?: string;
   handleTrusted: boolean;
   domain?: string;
+  domainScope?: string;
+  domainProof?: PortfolioInvestorDomainProof;
   attribution: "direct_subject" | "affiliated_fund";
   entityType: "person" | "organization";
   subjectHandle?: string;
@@ -117,25 +105,8 @@ const listedHost = (host: string, list: readonly string[]): boolean =>
   list.some((candidate) => hostMatches(host, candidate));
 
 export function domainFromWebsite(value?: string): string | undefined {
-  if (!value) return undefined;
-  try {
-    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
-    const host = url.hostname.replace(/^www\./i, "").replace(/\.$/, "").toLowerCase();
-    if (
-      (url.protocol !== "https:" && url.protocol !== "http:")
-      || url.username
-      || url.password
-      || !host
-      || isIP(host)
-      || host === "localhost"
-      || host.endsWith(".local")
-      || host.endsWith(".internal")
-      || listedHost(host, SHARED_WEBSITE_HOSTS)
-    ) return undefined;
-    return host;
-  } catch {
-    return undefined;
-  }
+  const scope = canonicalOfficialWebsite(value);
+  return scope && isCredibleOfficialDomain(scope.domain) ? scope.domain : undefined;
 }
 
 function safeCandidateUrl(value: unknown): string | null {
@@ -242,7 +213,13 @@ export function parsePortfolioCandidates(text: string): PortfolioLead[] | null {
 export async function discoverPortfolioCandidates(ctx: CollectContext): Promise<PortfolioLead[] | null> {
   if (!env("XAI_API_KEY")) return null;
   const text = await discoverInvestorEvidenceText(ctx);
-  return text ? parsePortfolioCandidates(text) : null;
+  if (!text) return null;
+  const shared = parsePortfolioCandidates(text);
+  if (!shared) return null;
+  const sourceLinked = shared.filter((lead) => lead.sources.length > 0);
+  if (sourceLinked.length > 0) return shared;
+  const focusedText = await discoverFocusedPortfolioEvidenceText(ctx);
+  return focusedText ? parsePortfolioCandidates(focusedText) : null;
 }
 
 const defaultProjectDomainResolver = async (lead: PortfolioLead, lookupProfile = getProfile): Promise<string | undefined> => {
@@ -403,6 +380,9 @@ export function portfolioEntityForLead(
   });
 
   if (!requested || matches(directAliases) || requestedHandle === ctx.handle.replace(/^@/, "").toLowerCase()) {
+    const directDomainScope = likelyIndividualSubject(ctx)
+      ? null
+      : canonicalOfficialWebsite(ctx.evidence.profile.website);
     return {
       name: directName,
       aliases: directAliases,
@@ -413,7 +393,8 @@ export function portfolioEntityForLead(
       // personal investments. Personal attribution therefore requires the
       // person's name in the fetched source unless an explicit personal-domain
       // verifier is added later.
-      domain: likelyIndividualSubject(ctx) ? undefined : domainFromWebsite(ctx.evidence.profile.website),
+      domain: directDomainScope?.domain,
+      domainScope: directDomainScope?.canonicalUrl,
       attribution: "direct_subject",
       entityType: likelyIndividualSubject(ctx) ? "person" : "organization",
       subjectHandle,
@@ -425,11 +406,12 @@ export function portfolioEntityForLead(
   const bio = normalized(ctx.evidence.profile.bio);
   const profileProof = providerProfileAffiliationProof(ctx, now);
   if (lead.attribution === "affiliated_fund" && profileProof && bioHasCurrentAffiliation(bio, requested, requestedHandle)) {
+    const handleTrusted = Boolean(requestedHandle && bioHasCurrentHandleAffiliation(bio, requestedHandle));
     return {
       name: requested,
       aliases: [requested],
       handle: lead.investorEntityHandle,
-      handleTrusted: false,
+      handleTrusted,
       attribution: "affiliated_fund",
       entityType: "organization",
       ...profileProof,
@@ -462,9 +444,16 @@ export function portfolioEntityForLead(
   return null;
 }
 
-export const defaultInvestorDomainResolver = async (lead: PortfolioLead, entity: PortfolioInvestorEntity, lookupProfile = getProfile): Promise<string | undefined> => {
+export const defaultInvestorDomainResolver = async (
+  lead: PortfolioLead,
+  entity: PortfolioInvestorEntity,
+  lookupProfile = getProfile,
+  now: Date = new Date(),
+): Promise<PortfolioInvestorDomainResolution | undefined> => {
+  if (entity.domainProof) return entity.domainProof;
   if (entity.domain) return entity.domain;
   if (entity.entityType === "person") return undefined;
+  if (entity.attribution === "affiliated_fund" && !entity.handleTrusted) return undefined;
   const handle = entity.handle || lead.investorEntityHandle;
   if (!handle || (lookupProfile === getProfile && !env("TWITTERAPI_KEY"))) return undefined;
   const profile = await lookupProfile(handle);
@@ -472,18 +461,57 @@ export const defaultInvestorDomainResolver = async (lead: PortfolioLead, entity:
   // after calling getProfile(handle) is tautological. The provider-returned
   // display name must independently match the attributed entity.
   if (!profile?.name || !entityNamesMatch(profile.name, entity.name)) return undefined;
-  return domainFromWebsite(profile.website);
+  const websiteScope = canonicalOfficialWebsite(profile.website);
+  const domain = websiteScope?.domain;
+  const profileHandle = canonicalSubjectHandle(profile.handle);
+  // Persist only the verified site's canonical origin. Provider profile URLs
+  // may contain attribution or credential query parameters that do not belong
+  // in an immutable evidence packet.
+  const profileWebsite = websiteScope?.canonicalUrl;
+  if (!domain || !profileHandle || !profileWebsite || !Number.isFinite(now.getTime())) return undefined;
+  const capturedAt = now.toISOString();
+  const sourceUrl = `https://x.com/${profileHandle.slice(1)}`;
+  return {
+    domain,
+    sourceUrl,
+    sourceContentHash: attributionProofHash({
+      kind: "provider_profile_domain",
+      provider: "twitterapi",
+      handle: profileHandle,
+      name: profile.name,
+      website: profileWebsite,
+      domain,
+      capturedAt,
+    }),
+    capturedAt,
+    sourceKind: "provider_profile",
+    profileName: profile.name,
+    profileWebsite,
+  };
 };
 
 function sourceClass(
-  host: string,
+  sourceUrl: string,
   investorDomain?: string,
+  investorDomainScope?: string,
   projectDomain?: string,
   attribution: PortfolioInvestorEntity["attribution"] = "direct_subject",
 ): PortfolioSourceClass {
+  let host: string;
+  try {
+    const url = new URL(sourceUrl);
+    if (url.protocol !== "https:" || url.username || url.password) return "other_public";
+    host = url.hostname;
+  } catch {
+    return "other_public";
+  }
   if (listedHost(host, PRIMARY_HOSTS)) return "public_primary";
   if (listedHost(host, PRESS_HOSTS)) return "independent_press";
-  if (investorDomain && hostMatches(host, investorDomain)) {
+  if (
+    investorDomain
+    && hostMatches(host, investorDomain)
+    && (!investorDomainScope || sourceMatchesOfficialWebsiteScope(sourceUrl, investorDomainScope))
+  ) {
     return attribution === "direct_subject" ? "first_party_subject" : "first_party_investor";
   }
   if (projectDomain && hostMatches(host, projectDomain)) return "first_party_project";
@@ -518,6 +546,7 @@ const normalized = (value: string): string => value
 const compact = (value: string): string => normalized(value).replace(/[^a-z0-9]+/g, "");
 
 const regexEscape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const AFFILIATION_ROLE = "(?:founding |general |managing |research )?(?:partner|principal|investor|researcher|research|engineer|developer|employee|advisor|adviser|cto|chief technology officer|team member|team|lead|director|gp)|(?:co founder|cofounder|founder|ceo|chief executive officer|cio|chief investment officer|portfolio manager|managing director)";
 
 function entityWords(entity: string): string[] {
   return normalized(entity.replace(/^@/, ""))
@@ -588,7 +617,7 @@ function entityNamesMatch(leftRaw: string, rightRaw: string): boolean {
 
 function bioHasCurrentAffiliation(bio: string, entity: string, handle?: string): boolean {
   const aliases = [entity, handle?.replace(/^@/, "")].filter((value): value is string => Boolean(value));
-  const role = "(?:founding |general |managing |research )?(?:partner|principal|investor|researcher|research|engineer|developer|employee|advisor|adviser|cto|chief technology officer|team member|team|lead|director|gp)";
+  const role = `(?:${AFFILIATION_ROLE})`;
   for (const alias of aliases) {
     for (const span of entitySpans(bio, alias)) {
       const before = bio.slice(Math.max(0, span.start - 100), span.start);
@@ -603,11 +632,42 @@ function bioHasCurrentAffiliation(bio: string, entity: string, handle?: string):
       // Y" must remain ended.
       const endedBefore = lastEnded >= 0 && lastCurrent < lastEnded;
       const endedAfter = /^[^.;|]{0,55}\b(?:no longer|left|departed|retired|until|through)\b/i.test(after);
-      if (endedBefore || endedAfter) continue;
+      const negated = new RegExp(`\\b(?:not|never)\\s+(?:currently\\s+)?(?:an?\\s+)?(?:${AFFILIATION_ROLE})\\b[^.;|]{0,35}$`, "i").test(before)
+        || /\b(?:no\s+(?:current\s+)?affiliation|not\s+affiliated|never\s+(?:worked|working))\b[^.;|]{0,35}$/i.test(before)
+        || (/\b(?:not|never)(?:\s+an?)?\s*@?\s*$/i.test(before)
+          && new RegExp(`^\\s*(?:${role})\\b`, "i").test(after));
+      if (endedBefore || endedAfter || negated) continue;
       if (new RegExp(`${role}\\s+(?:at|with|@)\\s*(?:the\\s+)?$`, "i").test(before)) return true;
       if (/\b(?:work(?:ing|s)?|build(?:ing|s)?|research(?:ing|es)?)\s+(?:at|with|@)\s*(?:the\s+)?$/i.test(before)) return true;
       if (new RegExp(`^\\s*(?:${role})\\b`, "i").test(after)) return true;
     }
+  }
+  return false;
+}
+
+function bioHasCurrentHandleAffiliation(bio: string, handle: string): boolean {
+  const bare = handle.replace(/^@/, "").toLowerCase();
+  if (!/^[a-z0-9_]{2,30}$/.test(bare)) return false;
+  const role = `(?:${AFFILIATION_ROLE})`;
+  const pattern = new RegExp(`@${regexEscape(bare)}(?=$|[^a-z0-9_])`, "gi");
+  for (const match of bio.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const before = bio.slice(Math.max(0, start - 100), start);
+    const after = bio.slice(end, Math.min(bio.length, end + 70));
+    const endedMarkers = [...before.matchAll(/\b(?:former|formerly|previously|ex|no longer|left|departed|retired)\b/gi)];
+    const currentMarkers = [...before.matchAll(/\b(?:now|currently)\b/gi)];
+    const lastEnded = endedMarkers.at(-1)?.index ?? -1;
+    const lastCurrent = currentMarkers.at(-1)?.index ?? -1;
+    if (lastEnded >= 0 && lastCurrent < lastEnded) continue;
+    if (/^[^.;|]{0,55}\b(?:no longer|left|departed|retired|until|through)\b/i.test(after)) continue;
+    if (new RegExp(`\\b(?:not|never)\\s+(?:currently\\s+)?(?:an?\\s+)?(?:${AFFILIATION_ROLE})\\b[^.;|]{0,35}$`, "i").test(before)
+      || /\b(?:no\s+(?:current\s+)?affiliation|not\s+affiliated|never\s+(?:worked|working))\b[^.;|]{0,35}$/i.test(before)) continue;
+    if (/\b(?:not|never)(?:\s+an?)?\s*$/i.test(before)
+      && new RegExp(`^\\s*(?:${role})\\b`, "i").test(after)) continue;
+    if (new RegExp(`${role}\\s*(?:(?:at|with)\\s*)?$`, "i").test(before)) return true;
+    if (/\b(?:work(?:ing|s)?|build(?:ing|s)?|research(?:ing|es)?)\s*(?:(?:at|with)\s*)?$/i.test(before)) return true;
+    if (new RegExp(`^\\s*(?:${role})\\b`, "i").test(after)) return true;
   }
   return false;
 }
@@ -681,6 +741,7 @@ interface InspectedSource {
   sourceClass?: PortfolioSourceClass;
   officialProjectDomain?: string;
   officialInvestorDomain?: string;
+  investorDomainProof?: PortfolioInvestorDomainProof;
   match?: RelationshipMatch;
   failed: boolean;
 }
@@ -696,7 +757,34 @@ export async function collectPortfolioRelationships(
   const resolveProjectDomain = dependencies.resolveProjectDomain
     ?? ((lead: PortfolioLead) => defaultProjectDomainResolver(lead, lookupProfile));
   const resolveInvestorDomain = dependencies.resolveInvestorDomain
-    ?? ((lead: PortfolioLead, entity: PortfolioInvestorEntity) => defaultInvestorDomainResolver(lead, entity, lookupProfile));
+    ?? ((lead: PortfolioLead, entity: PortfolioInvestorEntity) => defaultInvestorDomainResolver(lead, entity, lookupProfile, now));
+  const investorDomainByEntity = new Map<string, Promise<PortfolioInvestorDomainResolution | undefined>>();
+  const sourceByUrl = new Map<string, Promise<PublicTextResult>>();
+  const fetchSourceOnce = (url: string) => {
+    const key = new URL(url).toString();
+    const existing = sourceByUrl.get(key);
+    if (existing) return existing;
+    const pending = fetchSource(url).then((result) => {
+      recordCall(
+        "portfolio-web",
+        "source-fetch",
+        0,
+        result.status === "ok" ? "source_fetched" : result.reason,
+        result.status === "ok" ? "succeeded" : "failed",
+      );
+      return result;
+    });
+    sourceByUrl.set(key, pending);
+    return pending;
+  };
+  const resolveInvestorDomainOnce = (lead: PortfolioLead, entity: PortfolioInvestorEntity) => {
+    const key = `${entity.attribution}::${compact(entity.name)}::${entity.handle ? canonicalSubjectHandle(entity.handle) ?? "" : ""}`;
+    const existing = investorDomainByEntity.get(key);
+    if (existing) return existing;
+    const pending = resolveInvestorDomain(lead, entity).catch(() => entity.domain);
+    investorDomainByEntity.set(key, pending);
+    return pending;
+  };
 
   if (!dependencies.discover && !env("XAI_API_KEY")) {
     ctx.recordCheck?.({
@@ -747,7 +835,16 @@ export async function collectPortfolioRelationships(
   const inspections: InspectedSource[] = (await Promise.all(leads.slice(0, MAX_CANDIDATES).map(async (lead) => {
     const entity = entityByLead.get(lead) ?? null;
     if (!entity) return [];
-    const officialInvestorDomain = await resolveInvestorDomain(lead, entity).catch(() => entity.domain);
+    const resolvedInvestorDomain = await resolveInvestorDomainOnce(lead, entity);
+    const resolvedDomain = typeof resolvedInvestorDomain === "string"
+      ? resolvedInvestorDomain
+      : resolvedInvestorDomain?.domain;
+    const officialInvestorDomain = domainFromWebsite(resolvedDomain);
+    const investorDomainProof = typeof resolvedInvestorDomain === "object"
+      && officialInvestorDomain === resolvedInvestorDomain.domain
+      ? { ...resolvedInvestorDomain, domain: officialInvestorDomain }
+      : undefined;
+    const officialInvestorDomainScope = investorDomainProof?.profileWebsite ?? entity.domainScope;
     const investorAliases = [
       ...entity.aliases,
       entity.handle && (entity.handleTrusted || officialInvestorDomain)
@@ -765,20 +862,24 @@ export async function collectPortfolioRelationships(
     );
     const officialProjectDomain = needsProjectDomain ? await resolveProjectDomain(lead).catch(() => undefined) : undefined;
     return Promise.all(lead.sources.slice(0, MAX_SOURCES_PER_CANDIDATE).map(async (source): Promise<InspectedSource> => {
-      const result = await fetchSource(source.url);
+      const result = await fetchSourceOnce(source.url);
       if (result.status !== "ok") {
-        recordCall("portfolio-web", "source-fetch", 0, result.reason, "failed");
-        return { lead, entity, source, officialProjectDomain, officialInvestorDomain, failed: true };
+        return { lead, entity, source, officialProjectDomain, officialInvestorDomain, investorDomainProof, failed: true };
       }
-      const classification = sourceClass(result.host, officialInvestorDomain, officialProjectDomain, entity.attribution);
+      const classification = sourceClass(
+        result.url,
+        officialInvestorDomain,
+        officialInvestorDomainScope,
+        officialProjectDomain,
+        entity.attribution,
+      );
       const match = supportsPortfolioRelationship({
         document: result,
         sourceClass: classification,
         subjectAliases: investorAliases,
         projectName: lead.projectName,
       });
-      recordCall("portfolio-web", "source-fetch", 0, `${classification} · ${match.supported ? "relationship_supported" : "no_relationship_match"}`, "succeeded");
-      return { lead, entity, source, document: result, sourceClass: classification, officialProjectDomain, officialInvestorDomain, match, failed: false };
+      return { lead, entity, source, document: result, sourceClass: classification, officialProjectDomain, officialInvestorDomain, investorDomainProof, match, failed: false };
     }));
   }))).flat();
 
@@ -802,7 +903,6 @@ export async function collectPortfolioRelationships(
   for (const [project, rows] of byProject) {
     const authoritative = rows.some((row) => row.sourceClass === "first_party_subject"
       || row.sourceClass === "first_party_investor"
-      || row.sourceClass === "first_party_project"
       || row.sourceClass === "public_primary");
     const pressDomains = new Set(rows
       .filter((row) => row.sourceClass === "independent_press")
@@ -822,7 +922,6 @@ export async function collectPortfolioRelationships(
     const sourceConfirmed = Boolean(confirmation?.confirmed && (
       row.sourceClass === "first_party_subject"
       || row.sourceClass === "first_party_investor"
-      || row.sourceClass === "first_party_project"
       || row.sourceClass === "public_primary"
       || (row.sourceClass === "independent_press" && confirmation.pressConfirmed)
     ));
@@ -843,6 +942,14 @@ export async function collectPortfolioRelationships(
         ? { investorEntityHandle: row.entity.handle }
         : {}),
       ...(row.officialInvestorDomain ? { investorEntityDomain: row.officialInvestorDomain } : {}),
+      ...(row.investorDomainProof ? {
+        investorDomainSourceUrl: row.investorDomainProof.sourceUrl,
+        investorDomainSourceContentHash: row.investorDomainProof.sourceContentHash,
+        investorDomainCapturedAt: row.investorDomainProof.capturedAt,
+        investorDomainSourceKind: row.investorDomainProof.sourceKind,
+        investorDomainProfileName: row.investorDomainProof.profileName,
+        investorDomainProfileWebsite: row.investorDomainProof.profileWebsite,
+      } : {}),
       attribution: row.entity.attribution,
       ...(row.entity.attributionSourceUrl ? { attributionSourceUrl: row.entity.attributionSourceUrl } : {}),
       ...(row.entity.attributionSourceContentHash

@@ -140,6 +140,9 @@ vi.mock("./components/ReconPage", () => ({
         {typeof props.onOpenRecent === "function" && (
           <button data-testid="reopen-site" onClick={() => { void (props.onOpenRecent as (ref: string, kind: string) => Promise<void>)("example.com", "site"); }}>Reopen site</button>
         )}
+        {typeof props.onInvestigate === "function" && (
+          <button data-testid="recon-investigate" onClick={() => { void (props.onInvestigate as (ref: string, priv?: boolean) => Promise<void>)("0x7878787878787878787878787878787878787878", false); }}>Investigate matched token</button>
+        )}
       </div>
     );
   },
@@ -244,6 +247,16 @@ async function renderApp(path = "/"): Promise<HTMLDivElement> {
 
 async function submitLanding(): Promise<void> {
   const button = container?.querySelector<HTMLButtonElement>("[data-testid='landing-run']");
+  expect(button).not.toBeNull();
+  await act(async () => {
+    button?.click();
+    await Promise.resolve();
+  });
+  await settle();
+}
+
+async function submitShell(): Promise<void> {
+  const button = container?.querySelector<HTMLButtonElement>("[data-testid='shell-run']");
   expect(button).not.toBeNull();
   await act(async () => {
     button?.click();
@@ -357,6 +370,29 @@ afterEach(async () => {
 });
 
 describe("App routing safety", () => {
+  it("starts a fresh person audit from Home even when a stored snapshot exists", async () => {
+    harness.landingInput = "@existingfounder";
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-existing",
+        kind: "person",
+        ref: "existingfounder",
+        query: "@existingfounder",
+        status: "open",
+      }],
+    });
+
+    const view = await renderApp();
+    await submitLanding();
+
+    expect(view.querySelector("[data-testid='finish-person-run']")).not.toBeNull();
+    expect(harness.resolveStoredCases).not.toHaveBeenCalled();
+    expect(harness.fetchReportState).not.toHaveBeenCalled();
+    expect(harness.startPersonAudit).toHaveBeenCalledTimes(1);
+    expect(harness.startPersonAudit).toHaveBeenCalledWith("existingfounder", false);
+  });
+
   it("keeps a failed person save session-only and out of shared audit surfaces", async () => {
     await renderApp();
     expect(harness.personOnComplete).not.toBeNull();
@@ -388,7 +424,7 @@ describe("App routing safety", () => {
   });
 
   it("does not attach to or launch any runner when the durable case is archived", async () => {
-    harness.landingInput = "@archivedfounder";
+    harness.shellInput = "@archivedfounder";
     harness.resolveStoredCases.mockResolvedValue({
       status: "ok",
       subjects: [{
@@ -403,7 +439,7 @@ describe("App routing safety", () => {
     harness.getRun.mockReturnValue({ handle: "archivedfounder", status: "running" });
 
     const view = await renderApp();
-    await submitLanding();
+    await submitShell();
 
     expect(view.textContent).toContain("This case is archived");
     expect(harness.getRun).not.toHaveBeenCalled();
@@ -411,7 +447,7 @@ describe("App routing safety", () => {
   });
 
   it("fails closed before runners or cached runs when case status is unavailable", async () => {
-    harness.landingInput = "@statusunknown";
+    harness.shellInput = "@statusunknown";
     harness.resolveStoredCases.mockResolvedValue({
       status: "ok",
       subjects: [{
@@ -426,7 +462,7 @@ describe("App routing safety", () => {
     harness.getRun.mockReturnValue({ handle: "statusunknown", status: "running" });
 
     const view = await renderApp();
-    await submitLanding();
+    await submitShell();
 
     expect(view.textContent).toContain("Stored case status is unavailable");
     expect(harness.getRun).not.toHaveBeenCalled();
@@ -437,11 +473,11 @@ describe("App routing safety", () => {
     ["X profile URL", "https://x.com/Alice/status/123", "Alice"],
     ["site URL", "HTTPS://Example.COM/Path/", "example.com"],
   ])("uses the canonical durable-case lookup for a %s", async (_label, input, canonical) => {
-    harness.landingInput = input;
+    harness.shellInput = input;
     harness.resolveStoredCases.mockResolvedValue({ status: "unavailable", subjects: [] });
 
     await renderApp();
-    await submitLanding();
+    await submitShell();
 
     expect(harness.resolveStoredCases).toHaveBeenCalledWith(canonical);
     expectNoRunnerStarted();
@@ -470,7 +506,137 @@ describe("App routing safety", () => {
       via: "ticker",
     });
     expect(harness.fetchReportState).not.toHaveBeenCalled();
+    expect(harness.resolveStoredCases).not.toHaveBeenCalled();
     expectNoRunnerStarted();
+  });
+
+  it("starts a fresh full token investigation from Home instead of opening its stored snapshot", async () => {
+    const address = "0x1212121212121212121212121212121212121212";
+    const candidate = {
+      input: { kind: "token" as const, ref: address, via: "evm" as const },
+      canonicalRef: address,
+      chain: "ethereum",
+      symbol: "FRESH",
+      name: "Fresh Token",
+      pairAddress: "pair-fresh",
+      liquidityUsd: 100,
+    };
+    harness.landingInput = address;
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-existing-token",
+        kind: "investigation",
+        ref: address,
+        query: address,
+        status: "open",
+      }],
+    });
+    harness.resolveTokenSubject.mockResolvedValue({ state: "resolved", candidate });
+
+    await renderApp();
+    await submitLanding();
+
+    expect(harness.resolveStoredCases).not.toHaveBeenCalled();
+    expect(harness.fetchReportState).not.toHaveBeenCalled();
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { force: true });
+    expect(harness.startTokenScan).not.toHaveBeenCalled();
+  });
+
+  it("keeps Recon's automatic token bridge storage-first", async () => {
+    const address = "0x7878787878787878787878787878787878787878";
+    harness.landingInput = "example.com";
+    harness.resolveStoredCases.mockResolvedValue({
+      status: "ok",
+      subjects: [{
+        caseId: "case-recon-investigation",
+        kind: "investigation",
+        ref: address,
+        query: address,
+        status: "open",
+      }],
+    });
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "investigation",
+        payload: { token: { address } },
+        versionContext: { caseId: "case-recon-investigation", reportVersionId: "version-recon-investigation" },
+      },
+    });
+
+    const view = await renderApp();
+    await submitLanding();
+    expect(view.querySelector("[data-testid='recon-page']")).not.toBeNull();
+
+    await act(async () => {
+      view.querySelector<HTMLButtonElement>("[data-testid='recon-investigate']")?.click();
+    });
+    await settle();
+
+    expect(harness.resolveStoredCases).toHaveBeenCalledWith(address);
+    expect(harness.fetchReportState).toHaveBeenCalledWith(address, "investigation");
+    expect(view.querySelector("[data-testid='stored-investigation-report']")).not.toBeNull();
+    expectNoRunnerStarted();
+  });
+
+  it("exits resolving with a retryable error and preserves fresh intent when token resolution rejects", async () => {
+    const address = "0x8989898989898989898989898989898989898989";
+    const candidate = {
+      input: { kind: "token" as const, ref: address, via: "evm" as const },
+      canonicalRef: address,
+      chain: "ethereum",
+      symbol: "RETRY",
+      name: "Retry Token",
+      pairAddress: "pair-retry",
+      liquidityUsd: 50,
+    };
+    harness.landingInput = "$RETRY";
+    harness.resolveTokenSubject.mockRejectedValueOnce(new Error("resolver exploded"));
+
+    const view = await renderApp();
+    await submitLanding();
+
+    expect(view.textContent).toContain("Couldn't start the audit");
+    expect(view.textContent).toContain("resolver exploded");
+    expectNoRunnerStarted();
+
+    harness.resolveTokenSubject.mockResolvedValueOnce({ state: "resolved", candidate });
+    const retry = [...view.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("Retry audit"));
+    expect(retry).toBeDefined();
+    await act(async () => { retry?.click(); });
+    await settle();
+
+    expect(harness.resolveStoredCases).not.toHaveBeenCalled();
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { force: true });
+  });
+
+  it("preserves fresh-run intent through an ambiguous ticker choice", async () => {
+    const candidate = {
+      input: { kind: "token" as const, ref: "0x3434343434343434343434343434343434343434", via: "evm" as const },
+      canonicalRef: "0x3434343434343434343434343434343434343434",
+      chain: "ethereum",
+      symbol: "DUPE",
+      name: "Duplicate Ticker",
+      pairAddress: "pair-dupe",
+      liquidityUsd: 200,
+    };
+    harness.landingInput = "$DUPE";
+    harness.resolveTokenSubject.mockResolvedValue({ state: "ambiguous", candidates: [candidate] });
+
+    const view = await renderApp();
+    await submitLanding();
+
+    expect(view.textContent).toContain("This is still a fresh-audit request");
+    const choice = view.querySelector<HTMLButtonElement>("button[aria-label^='Start fresh audit of']");
+    expect(choice).not.toBeNull();
+    await act(async () => { choice?.click(); });
+    await settle();
+
+    expect(harness.resolveStoredCases).not.toHaveBeenCalled();
+    expect(harness.fetchReportState).not.toHaveBeenCalled();
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, false, { force: true });
   });
 
   it("never reinterprets an invalid cashtag as a person audit", async () => {
@@ -1009,7 +1175,7 @@ describe("App routing safety", () => {
     expect(harness.resolveTokenSubject).toHaveBeenCalled();
     expect(harness.resolveStoredCases).not.toHaveBeenCalled();
     expect(harness.fetchReportState).not.toHaveBeenCalled();
-    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, true);
+    expect(harness.startInvestigationScan).toHaveBeenCalledWith(candidate.input, true, { force: true });
   });
 
   it("does not navigate away when an unsaved case brief close is declined", async () => {

@@ -13,6 +13,7 @@ import { addGrokUsage, recordCall, recordTwitterapi } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower } from "../../src/data/evidence";
+import { canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
 import { NOTABLE_ACCOUNTS } from "./notableAccounts";
 
 const TWITTERAPI = "https://api.twitterapi.io";
@@ -1000,6 +1001,8 @@ export const xAdapter: Adapter = {
       ctx.evidence.profile.profile_captured_at = new Date().toISOString();
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
+      ctx.evidence.profile.website = canonicalPublicProfileWebsite(prof.website)
+        ?? ctx.evidence.profile.website;
       ctx.evidence.profile.followers = fmtFollowers(prof.followers);
       if (prof.image) {
         ctx.evidence.profile.avatar_url = prof.image;

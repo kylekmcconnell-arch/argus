@@ -1,13 +1,20 @@
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
 import type { PortfolioLead, SourceArtifact } from "../../src/data/evidence";
+import { sourceMatchesOfficialWebsiteScope } from "../../src/lib/fundScaleEvidence";
 import { env } from "../config";
 import { recordCall } from "../cost";
 import { fetchPublicText, type PublicTextDocument, type PublicTextResult } from "../publicWeb";
-import { discoverInvestorEvidenceText } from "./investorDiscovery";
+import {
+  discoverFocusedFundScaleEvidenceText,
+  discoverInvestorEvidenceText,
+} from "./investorDiscovery";
 import {
   defaultInvestorDomainResolver,
+  domainFromWebsite,
   portfolioEntityForLead,
+  type PortfolioInvestorDomainProof,
+  type PortfolioInvestorDomainResolution,
   type PortfolioInvestorEntity,
 } from "./portfolio";
 import type { AdapterRunResult, CollectContext } from "./types";
@@ -90,7 +97,7 @@ export interface FundScaleCollectorDependencies {
   discover?: (ctx: CollectContext) => Promise<FundScaleLead[] | null>;
   fetchSource?: (url: string) => Promise<PublicTextResult>;
   resolveEntity?: (ctx: CollectContext, lead: FundScaleLead, now: Date) => PortfolioInvestorEntity | null;
-  resolveInvestorDomain?: (lead: FundScaleLead, entity: PortfolioInvestorEntity) => Promise<string | undefined>;
+  resolveInvestorDomain?: (lead: FundScaleLead, entity: PortfolioInvestorEntity) => Promise<PortfolioInvestorDomainResolution | undefined>;
   lookupProfile?: typeof getProfile;
   now?: () => Date;
 }
@@ -230,7 +237,13 @@ export function parseFundScaleCandidates(text: string): FundScaleLead[] | null {
 export async function discoverFundScaleCandidates(ctx: CollectContext): Promise<FundScaleLead[] | null> {
   if (!env("XAI_API_KEY")) return null;
   const text = await discoverInvestorEvidenceText(ctx);
-  return text ? parseFundScaleCandidates(text) : null;
+  if (!text) return null;
+  const shared = parseFundScaleCandidates(text);
+  if (!shared) return null;
+  const sourceLinked = shared.filter((lead) => lead.sources.length > 0);
+  if (sourceLinked.length > 0) return shared;
+  const focusedText = await discoverFocusedFundScaleEvidenceText(ctx);
+  return focusedText ? parseFundScaleCandidates(focusedText) : null;
 }
 
 const USD_AMOUNT = /(?<![A-Za-z])(?:US\s*\$|USD\s*|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)\s*(trillion|tn|billion|bn|million|mm|mn|thousand|[tbmk])?\b/gi;
@@ -520,18 +533,27 @@ export function isRegulatoryRecordUrl(raw: string): boolean {
   return false;
 }
 
-function sourceClass(document: PublicTextDocument, investorDomain: string | undefined, attribution: PortfolioInvestorEntity["attribution"]): FundSourceClass {
-  let host = document.host;
+function sourceClass(
+  document: PublicTextDocument,
+  investorDomain: string | undefined,
+  investorDomainScope: string | undefined,
+  attribution: PortfolioInvestorEntity["attribution"],
+): FundSourceClass {
+  let url: URL;
   try {
-    const url = new URL(document.url);
+    url = new URL(document.url);
     if (url.protocol !== "https:") return "other_public";
-    host = url.hostname;
   } catch {
     return "other_public";
   }
+  const host = url.hostname;
   if (listedHost(host, PRIMARY_HOSTS) && isRegulatoryRecordUrl(document.url)) return "public_primary";
   if (listedHost(host, PRESS_HOSTS)) return "independent_press";
-  if (investorDomain && hostMatches(host, investorDomain)) {
+  if (
+    investorDomain
+    && hostMatches(host, investorDomain)
+    && (!investorDomainScope || sourceMatchesOfficialWebsiteScope(document.url, investorDomainScope))
+  ) {
     return attribution === "direct_subject" ? "first_party_subject" : "first_party_investor";
   }
   return "other_public";
@@ -567,6 +589,27 @@ function syntheticPortfolioLead(lead: FundScaleLead): PortfolioLead {
   };
 }
 
+function frozenInvestorDomainProof(artifact: SourceArtifact): PortfolioInvestorDomainProof | undefined {
+  if (
+    !artifact.investorEntityDomain
+    || !artifact.investorDomainSourceUrl
+    || !artifact.investorDomainSourceContentHash
+    || !artifact.investorDomainCapturedAt
+    || artifact.investorDomainSourceKind !== "provider_profile"
+    || !artifact.investorDomainProfileName
+    || !artifact.investorDomainProfileWebsite
+  ) return undefined;
+  return {
+    domain: artifact.investorEntityDomain,
+    sourceUrl: artifact.investorDomainSourceUrl,
+    sourceContentHash: artifact.investorDomainSourceContentHash,
+    capturedAt: artifact.investorDomainCapturedAt,
+    sourceKind: artifact.investorDomainSourceKind,
+    profileName: artifact.investorDomainProfileName,
+    profileWebsite: artifact.investorDomainProfileWebsite,
+  };
+}
+
 function resolveFundEntity(ctx: CollectContext, lead: FundScaleLead, now: Date): PortfolioInvestorEntity | null {
   const existing = ctx.evidence.sourceArtifacts.find((artifact) =>
     artifact.kind === "portfolio_relationship"
@@ -575,12 +618,15 @@ function resolveFundEntity(ctx: CollectContext, lead: FundScaleLead, now: Date):
     && entityNamesMatch(artifact.investorEntityName, lead.fundName),
   );
   if (existing?.investorEntityName && existing.attribution) {
+    const domainProof = frozenInvestorDomainProof(existing);
     return {
       name: existing.investorEntityName,
       aliases: [existing.investorEntityName, lead.fundName],
       ...(existing.investorEntityHandle ? { handle: existing.investorEntityHandle } : {}),
       handleTrusted: Boolean(existing.investorEntityHandle),
       ...(existing.investorEntityDomain ? { domain: existing.investorEntityDomain } : {}),
+      ...(domainProof ? { domainScope: domainProof.profileWebsite } : {}),
+      ...(domainProof ? { domainProof } : {}),
       attribution: existing.attribution,
       entityType: "organization",
       ...(existing.subjectHandle ? { subjectHandle: existing.subjectHandle } : {}),
@@ -617,6 +663,7 @@ interface InspectedSource {
   document?: PublicTextDocument;
   sourceClass?: FundSourceClass;
   officialInvestorDomain?: string;
+  investorDomainProof?: PortfolioInvestorDomainProof;
   matches: FundScaleMatch[];
   failed: boolean;
 }
@@ -695,10 +742,37 @@ export async function collectFundScale(
   const fetchSource = dependencies.fetchSource ?? fetchPublicText;
   const lookupProfile = dependencies.lookupProfile ?? getProfile;
   const resolveEntity = dependencies.resolveEntity ?? resolveFundEntity;
+  const now = dependencies.now?.() ?? new Date();
   const resolveInvestorDomain = dependencies.resolveInvestorDomain
     ?? ((lead: FundScaleLead, entity: PortfolioInvestorEntity) =>
-      defaultInvestorDomainResolver(syntheticPortfolioLead(lead), entity, lookupProfile));
-  const now = dependencies.now?.() ?? new Date();
+      defaultInvestorDomainResolver(syntheticPortfolioLead(lead), entity, lookupProfile, now));
+  const investorDomainByEntity = new Map<string, Promise<PortfolioInvestorDomainResolution | undefined>>();
+  const sourceByUrl = new Map<string, Promise<PublicTextResult>>();
+  const fetchSourceOnce = (url: string) => {
+    const key = new URL(url).toString();
+    const existing = sourceByUrl.get(key);
+    if (existing) return existing;
+    const pending = fetchSource(url).then((result) => {
+      recordCall(
+        "fund-scale-web",
+        "source-fetch",
+        0,
+        result.status === "ok" ? "source_fetched" : result.reason,
+        result.status === "ok" ? "succeeded" : "failed",
+      );
+      return result;
+    });
+    sourceByUrl.set(key, pending);
+    return pending;
+  };
+  const resolveInvestorDomainOnce = (lead: FundScaleLead, entity: PortfolioInvestorEntity) => {
+    const key = `${entity.attribution}::${compact(entity.name)}::${entity.handle?.replace(/^@/, "").toLowerCase() ?? ""}`;
+    const existing = investorDomainByEntity.get(key);
+    if (existing) return existing;
+    const pending = resolveInvestorDomain(lead, entity).catch(() => entity.domain);
+    investorDomainByEntity.set(key, pending);
+    return pending;
+  };
 
   if (!dependencies.discover && !env("XAI_API_KEY")) {
     return { state: "skipped", detail: "source-linked fund-scale discovery is not configured" };
@@ -733,21 +807,28 @@ export async function collectFundScale(
   const inspections: InspectedSource[] = (await Promise.all(leads.slice(0, MAX_CANDIDATES).map(async (lead) => {
     const entity = entityByLead.get(lead) ?? null;
     if (!entity) return [];
-    const officialInvestorDomain = await resolveInvestorDomain(lead, entity).catch(() => entity.domain);
+    const resolvedInvestorDomain = await resolveInvestorDomainOnce(lead, entity);
+    const resolvedDomain = typeof resolvedInvestorDomain === "string"
+      ? resolvedInvestorDomain
+      : resolvedInvestorDomain?.domain;
+    const officialInvestorDomain = domainFromWebsite(resolvedDomain);
+    const investorDomainProof = typeof resolvedInvestorDomain === "object"
+      && officialInvestorDomain === resolvedInvestorDomain.domain
+      ? { ...resolvedInvestorDomain, domain: officialInvestorDomain }
+      : undefined;
+    const officialInvestorDomainScope = investorDomainProof?.profileWebsite ?? entity.domainScope;
     const aliases = [
       ...entity.aliases,
       entity.handle && (entity.handleTrusted || officialInvestorDomain) ? entity.handle.replace(/^@/, "") : undefined,
     ].filter((value): value is string => Boolean(value?.trim()));
     return Promise.all(lead.sources.slice(0, MAX_SOURCES_PER_CANDIDATE).map(async (source): Promise<InspectedSource> => {
-      const result = await fetchSource(source.url);
+      const result = await fetchSourceOnce(source.url);
       if (result.status !== "ok") {
-        recordCall("fund-scale-web", "source-fetch", 0, result.reason, "failed");
-        return { lead, entity, source, officialInvestorDomain, matches: [], failed: true };
+        return { lead, entity, source, officialInvestorDomain, investorDomainProof, matches: [], failed: true };
       }
-      const classification = sourceClass(result, officialInvestorDomain, entity.attribution);
+      const classification = sourceClass(result, officialInvestorDomain, officialInvestorDomainScope, entity.attribution);
       const matches = supportsFundScaleClaim({ document: result, sourceClass: classification, subjectAliases: aliases, now });
-      recordCall("fund-scale-web", "source-fetch", 0, `${classification} · ${matches.length ? "scale_match" : "no_scale_match"}`, "succeeded");
-      return { lead, entity, source, document: result, sourceClass: classification, officialInvestorDomain, matches, failed: false };
+      return { lead, entity, source, document: result, sourceClass: classification, officialInvestorDomain, investorDomainProof, matches, failed: false };
     }));
   }))).flat();
 
@@ -769,12 +850,15 @@ export async function collectFundScale(
 
   const baseRowEligibleForConfirmation = (row: SupportedRow): boolean => {
     if (!row.match.eligibleForConfirmation) return false;
-    // The audited subject profile can prove a current person→fund affiliation,
-    // but it does not prove that a model-resolved website is controlled by that
-    // fund. Until a separately frozen fund-domain proof exists, affiliated
-    // first-party pages remain visible as leads; regulatory records or two
-    // allowlisted press sources may still verify the same scale claim.
-    if (row.entity.attribution === "affiliated_fund" && row.sourceClass === "first_party_investor") return false;
+    // The audited subject profile proves the person→fund affiliation, while a
+    // separate frozen provider-profile proof must bind the fund's exact handle,
+    // name, and website before an affiliated first-party page can confirm scale.
+    // A caller-supplied domain string alone remains lead-only.
+    if (
+      row.entity.attribution === "affiliated_fund"
+      && row.sourceClass === "first_party_investor"
+      && !row.investorDomainProof
+    ) return false;
     if (row.entity.attribution === "affiliated_fund" && row.entity.attributionSourceKind !== "provider_profile") return false;
     return true;
   };
@@ -811,6 +895,7 @@ export async function collectFundScale(
     && baseRowEligibleForConfirmation(candidate)
     && (
       candidate.sourceClass === "first_party_subject"
+      || candidate.sourceClass === "first_party_investor"
       || candidate.sourceClass === "public_primary"
       || (candidate.sourceClass === "independent_press" && preliminaryPressConfirmation.get(candidate.claimKey) === true)
     ));
@@ -890,6 +975,14 @@ export async function collectFundScale(
         ? { investorEntityHandle: row.entity.handle }
         : {}),
       ...(row.officialInvestorDomain ? { investorEntityDomain: row.officialInvestorDomain } : {}),
+      ...(row.investorDomainProof ? {
+        investorDomainSourceUrl: row.investorDomainProof.sourceUrl,
+        investorDomainSourceContentHash: row.investorDomainProof.sourceContentHash,
+        investorDomainCapturedAt: row.investorDomainProof.capturedAt,
+        investorDomainSourceKind: row.investorDomainProof.sourceKind,
+        investorDomainProfileName: row.investorDomainProof.profileName,
+        investorDomainProfileWebsite: row.investorDomainProof.profileWebsite,
+      } : {}),
       attribution: row.entity.attribution,
       ...(row.entity.attributionSourceUrl ? { attributionSourceUrl: row.entity.attributionSourceUrl } : {}),
       ...(row.entity.attributionSourceContentHash

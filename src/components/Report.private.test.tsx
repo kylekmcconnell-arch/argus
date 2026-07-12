@@ -373,6 +373,7 @@ describe("decision-safe person report presentation", () => {
 
   it("shows the complete person-to-affiliated-fund chain with separate affiliation, scale, and deal sources", () => {
     const affiliationUrl = "https://x.com/satoshi_builds";
+    const domainSourceUrl = "https://x.com/paradigm";
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
       ...base,
@@ -400,6 +401,12 @@ describe("decision-safe person report presentation", () => {
         attributionSourceContentHash: "1".repeat(64),
         attributionCapturedAt: "2026-07-10T14:00:00.000Z",
         attributionSourceKind: "provider_profile" as const,
+        investorDomainSourceUrl: domainSourceUrl,
+        investorDomainSourceContentHash: "8".repeat(64),
+        investorDomainCapturedAt: "2026-07-10T14:01:00.000Z",
+        investorDomainSourceKind: "provider_profile" as const,
+        investorDomainProfileName: "Paradigm",
+        investorDomainProfileWebsite: "https://paradigm.xyz",
         sourceClass: "independent_press" as const,
         fundName: "Paradigm",
         fundSizeUsd: 850_000_000,
@@ -462,6 +469,12 @@ describe("decision-safe person report presentation", () => {
         attributionSourceContentHash: "1".repeat(64),
         attributionCapturedAt: "2026-07-10T14:00:00.000Z",
         attributionSourceKind: "provider_profile" as const,
+        investorDomainSourceUrl: domainSourceUrl,
+        investorDomainSourceContentHash: "8".repeat(64),
+        investorDomainCapturedAt: "2026-07-10T14:01:00.000Z",
+        investorDomainSourceKind: "provider_profile" as const,
+        investorDomainProfileName: "Paradigm",
+        investorDomainProfileWebsite: "https://paradigm.xyz",
         projectName: "Acme Protocol",
         sourceClass: "first_party_investor" as const,
       }],
@@ -483,6 +496,8 @@ describe("decision-safe person report presentation", () => {
 
     const affiliationLinks = container.querySelectorAll(`a[href="${affiliationUrl}"][aria-label*="Open affiliation source"][aria-label*="captured Jul 10, 2026"]`);
     expect(affiliationLinks.length).toBeGreaterThanOrEqual(2);
+    const domainLinks = container.querySelectorAll(`a[href="${domainSourceUrl}"][aria-label*="Open fund domain source"][aria-label*="Paradigm official domain paradigm.xyz"]`);
+    expect(domainLinks.length).toBeGreaterThanOrEqual(2);
     expect(container.querySelector('a[href="https://reuters.com/markets/paradigm-fund-iii"][aria-label*="Open scale source"][aria-label*="reuters.com/markets/paradigm-fund-iii"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://ft.com/content/paradigm-fund-iii"][aria-label*="Open scale source"][aria-label*="ft.com/content/paradigm-fund-iii"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://paradigm.xyz/portfolio/acme"][aria-label*="Open deal source"][aria-label*="paradigm.xyz/portfolio/acme"]')).not.toBeNull();

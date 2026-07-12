@@ -139,6 +139,13 @@ export interface SourceArtifact {
   investorEntityName?: string;
   investorEntityHandle?: string;
   investorEntityDomain?: string;
+  /** Frozen provider-profile proof that binds the fund handle to its official domain. */
+  investorDomainSourceUrl?: string;
+  investorDomainSourceContentHash?: string;
+  investorDomainCapturedAt?: string;
+  investorDomainSourceKind?: "provider_profile";
+  investorDomainProfileName?: string;
+  investorDomainProfileWebsite?: string;
   attribution?: "direct_subject" | "affiliated_fund";
   /** Source that grounds person→fund affiliation separately from the deal page. */
   attributionSourceUrl?: string;

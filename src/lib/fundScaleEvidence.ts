@@ -15,25 +15,58 @@ const SHARED_PUBLICATION_HOSTS = new Set([
   "blogspot.com",
   "blob.core.windows.net",
   "carrd.co",
+  "discord.com",
+  "discord.gg",
+  "facebook.com",
+  "github.com",
+  "githubusercontent.com",
   "github.io",
+  "gitlab.com",
   "gitbook.io",
+  "hackmd.io",
+  "instagram.com",
+  "ipfs.io",
   "linktr.ee",
+  "linkedin.com",
   "medium.com",
+  "mirror.xyz",
+  "arweave.net",
+  "cloudflare-ipfs.com",
+  "dweb.link",
   "netlify.app",
   "notion.site",
   "notion.so",
   "pages.dev",
+  "paragraph.xyz",
+  "pinata.cloud",
+  "raw.githubusercontent.com",
+  "docs.google.com",
+  "drive.google.com",
+  "dropbox.com",
+  "box.com",
+  "firebaseapp.com",
+  "framer.app",
+  "framer.website",
+  "railway.app",
+  "render.com",
   "sites.google.com",
   "storage.googleapis.com",
   "substack.com",
   "t.co",
+  "t.me",
+  "telegram.me",
+  "threads.net",
+  "tiktok.com",
   "tinyurl.com",
+  "twitch.tv",
   "twitter.com",
   "vercel.app",
   "webflow.io",
   "wixsite.com",
   "wordpress.com",
   "x.com",
+  "youtu.be",
+  "youtube.com",
 ]);
 
 const INDEPENDENT_PRESS_HOSTS = [
@@ -94,7 +127,19 @@ const normalizedWords = (value: unknown): string => typeof value === "string"
   ? value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9@_]+/g, " ").trim()
   : "";
 
+const providerEntityNamesMatch = (left: unknown, right: unknown): boolean => {
+  const a = normalizedWords(left);
+  const b = normalizedWords(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length > b.length ? a : b;
+  return shorter.length >= 5
+    && (longer.startsWith(`${shorter} `) || longer.endsWith(` ${shorter}`));
+};
+
 const regexEscape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+const AFFILIATION_ROLE = "(?:founding |general |managing |research )?(?:partner|principal|investor|researcher|research|engineer|developer|employee|advisor|adviser|cto|chief technology officer|team member|team|lead|director|gp)|(?:co founder|cofounder|founder|ceo|chief executive officer|cio|chief investment officer|portfolio manager|managing director)";
 
 const profileBioHasCurrentAffiliation = (profile: EvidenceRecord, value: EvidenceRecord): boolean => {
   const bio = normalizedWords(profile.bio);
@@ -102,7 +147,7 @@ const profileBioHasCurrentAffiliation = (profile: EvidenceRecord, value: Evidenc
   const entity = normalizedWords(value.investorEntityName ?? value.fundName);
   const handle = canonicalHandle(value.investorEntityHandle);
   const aliases = [entity, handle].filter((alias, index, all) => Boolean(alias) && all.indexOf(alias) === index);
-  const role = "(?:founding |general |managing |research )?(?:partner|principal|investor|researcher|research|engineer|developer|employee|advisor|adviser|cto|chief technology officer|team member|team|lead|director|gp)";
+  const role = `(?:${AFFILIATION_ROLE})`;
   const affiliationLink = "(?:(?:at|with)\\s+|@\\s*)";
   return aliases.some((alias) => {
     const escaped = normalizedWords(alias).split(/\s+/).filter(Boolean).map(regexEscape).join("[^a-z0-9@_]+");
@@ -122,9 +167,42 @@ const profileBioHasCurrentAffiliation = (profile: EvidenceRecord, value: Evidenc
       const lastEnded = endedMarkers.at(-1)?.index ?? -1;
       const lastCurrent = currentMarkers.at(-1)?.index ?? -1;
       if (lastEnded >= 0 && lastCurrent < lastEnded) return false;
+      const matchedContext = `${before.slice(-40)} ${match[0]}`;
+      if (new RegExp(`\\b(?:not|never)\\s+(?:currently\\s+)?(?:an?\\s+)?(?:${AFFILIATION_ROLE})\\b`, "i").test(matchedContext)
+        || /\b(?:no\s+(?:current\s+)?affiliation|not\s+affiliated|never\s+(?:worked|working))\b/i.test(matchedContext)
+        || (/\b(?:not|never)(?:\s+an?)?\s*$/i.test(before)
+          && new RegExp(`(?:${role})\\b`, "i").test(match[0]))) return false;
       return !/^.{0,45}\b(?:former|formerly|no longer|left|departed|retired|until|through)\b/i.test(after);
     }));
   });
+};
+
+const profileBioHasCurrentHandleAffiliation = (profile: EvidenceRecord, value: unknown): boolean => {
+  const bio = normalizedWords(profile.bio);
+  const handle = canonicalHandle(value);
+  if (!bio || !HANDLE.test(handle)) return false;
+  const role = `(?:${AFFILIATION_ROLE})`;
+  const pattern = new RegExp(`@${regexEscape(handle)}(?=$|[^a-z0-9_])`, "gi");
+  for (const match of bio.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const before = bio.slice(Math.max(0, start - 100), start);
+    const after = bio.slice(end, Math.min(bio.length, end + 70));
+    const endedMarkers = [...before.matchAll(/\b(?:former|formerly|previously|ex|no longer|left|departed|retired)\b/gi)];
+    const currentMarkers = [...before.matchAll(/\b(?:now|currently)\b/gi)];
+    const lastEnded = endedMarkers.at(-1)?.index ?? -1;
+    const lastCurrent = currentMarkers.at(-1)?.index ?? -1;
+    if (lastEnded >= 0 && lastCurrent < lastEnded) continue;
+    if (/^[^.;|]{0,55}\b(?:no longer|left|departed|retired|until|through)\b/i.test(after)) continue;
+    if (new RegExp(`\\b(?:not|never)\\s+(?:currently\\s+)?(?:an?\\s+)?(?:${AFFILIATION_ROLE})\\b[^.;|]{0,35}$`, "i").test(before)
+      || /\b(?:no\s+(?:current\s+)?affiliation|not\s+affiliated|never\s+(?:worked|working))\b[^.;|]{0,35}$/i.test(before)) continue;
+    if (/\b(?:not|never)(?:\s+an?)?\s*$/i.test(before)
+      && new RegExp(`^\\s*(?:${role})\\b`, "i").test(after)) continue;
+    if (new RegExp(`${role}\\s*(?:(?:at|with)\\s*)?$`, "i").test(before)) return true;
+    if (/\b(?:work(?:ing|s)?|build(?:ing|s)?|research(?:ing|es)?)\s*(?:(?:at|with)\s*)?$/i.test(before)) return true;
+    if (new RegExp(`^\\s*(?:${role})\\b`, "i").test(after)) return true;
+  }
+  return false;
 };
 
 const cleanHost = (value: string): string => value.replace(/^www\./i, "").toLowerCase();
@@ -153,7 +231,7 @@ const isPublicHostname = (value: string): boolean => {
     && /^(?:[a-z]{2,63}|xn--[a-z0-9-]{2,59})$/i.test(labels.at(-1) ?? "");
 };
 
-const isCredibleOfficialDomain = (value: string): boolean => {
+export const isCredibleOfficialDomain = (value: string): boolean => {
   const host = cleanHost(value).replace(/\.$/, "");
   if (
     !isPublicHostname(host)
@@ -189,14 +267,66 @@ const boundedWebUrl = (value: unknown): URL | null => {
 };
 
 const profileWebsiteHost = (value: unknown): string | null => {
+  return canonicalOfficialWebsite(value)?.domain ?? null;
+};
+
+export interface OfficialWebsiteScope {
+  domain: string;
+  canonicalUrl: string;
+}
+
+export const canonicalPublicProfileWebsite = (value: unknown): string | null => {
   if (typeof value !== "string" || !value.trim() || value.length > 2_000) return null;
   try {
     const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
-    const host = cleanHost(url.hostname);
-    return (url.protocol === "https:" || url.protocol === "http:") && isCredibleOfficialDomain(host) ? host : null;
+    const host = cleanHost(url.hostname).replace(/\.$/, "");
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:")
+      || url.username
+      || url.password
+      || url.port
+      || !isPublicHostname(host)
+      || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM.test(key))
+    ) return null;
+    const pathname = url.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/";
+    return `https://${host}${pathname === "/" ? "/" : pathname}`;
   } catch {
     return null;
   }
+};
+
+/**
+ * Canonicalize a provider-returned official website without retaining URL
+ * credentials, fragments, or query material. A non-root path is retained as a
+ * conservative ownership scope: on an otherwise unknown hosted publisher it
+ * is the only boundary separating one account from another.
+ */
+export const canonicalOfficialWebsite = (value: unknown): OfficialWebsiteScope | null => {
+  const canonical = canonicalPublicProfileWebsite(value);
+  if (!canonical) return null;
+  try {
+    const url = new URL(canonical);
+    const domain = cleanHost(url.hostname).replace(/\.$/, "");
+    if (!isCredibleOfficialDomain(domain)) return null;
+    return {
+      domain,
+      canonicalUrl: canonical,
+    };
+  } catch {
+    return null;
+  }
+};
+
+export const sourceMatchesOfficialWebsiteScope = (sourceValue: unknown, profileWebsite: unknown): boolean => {
+  const source = sourceValue instanceof URL ? sourceValue : boundedWebUrl(sourceValue);
+  const scope = canonicalOfficialWebsite(profileWebsite);
+  if (!source || !scope || !hostMatches(source.hostname, scope.domain)) return false;
+  const scopeUrl = new URL(scope.canonicalUrl);
+  if (scopeUrl.pathname === "/") return true;
+  const sourcePath = source.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/";
+  const scopePath = scopeUrl.pathname.replace(/\/$/, "");
+  return cleanHost(source.hostname) === scope.domain
+    && (sourcePath === scopePath || sourcePath.startsWith(`${scopePath}/`));
 };
 
 const validatedPacketProfile = (
@@ -305,6 +435,60 @@ const hasCurrentAffiliationProof = (
   );
 };
 
+const hasOfficialInvestorDomainProof = (
+  value: EvidenceRecord,
+  capturedAt: Date,
+  now: Date,
+  profile: EvidenceRecord | null,
+): boolean => {
+  const officialDomain = typeof value.investorEntityDomain === "string"
+    ? cleanHost(value.investorEntityDomain)
+    : "";
+  const source = boundedWebUrl(value.investorDomainSourceUrl);
+  const sourceHash = typeof value.investorDomainSourceContentHash === "string"
+    ? value.investorDomainSourceContentHash
+    : "";
+  const domainCapturedAt = validDate(value.investorDomainCapturedAt);
+  const fundHandle = canonicalHandle(value.investorEntityHandle);
+  const profileName = typeof value.investorDomainProfileName === "string"
+    ? value.investorDomainProfileName.trim()
+    : "";
+  const profileWebsite = typeof value.investorDomainProfileWebsite === "string"
+    ? value.investorDomainProfileWebsite.trim()
+    : "";
+  const profileWebsiteUrl = boundedWebUrl(profileWebsite);
+  if (
+    value.investorDomainSourceKind !== "provider_profile"
+    || !isCredibleOfficialDomain(officialDomain)
+    || !source
+    || !SHA256_HEX.test(sourceHash)
+    || !domainCapturedAt
+    || !fundHandle
+    || !profileName
+    || !profileWebsite
+    || !profileWebsiteUrl
+    || profileWebsiteUrl.search
+    || profileWebsiteUrl.hash
+    || !providerEntityNamesMatch(profileName, value.investorEntityName)
+    || profileWebsiteHost(profileWebsite) !== officialDomain
+    || !sourceMatchesOfficialWebsiteScope(value.sourceUrl, profileWebsite)
+    || !profile
+    || !profileBioHasCurrentHandleAffiliation(profile, fundHandle)
+  ) return false;
+  if (
+    domainCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS
+    || domainCapturedAt.getTime() > capturedAt.getTime() + CLOCK_SKEW_MS
+    || capturedAt.getTime() - domainCapturedAt.getTime() > 7 * DAY_MS
+  ) return false;
+  const host = cleanHost(source.hostname);
+  const path = source.pathname.split("/").filter(Boolean);
+  return (host === "x.com" || host === "twitter.com")
+    && path.length === 1
+    && path[0].toLowerCase() === fundHandle
+    && !source.search
+    && !source.hash;
+};
+
 const structurallyStrictFundScaleArtifact = (
   value: EvidenceRecord,
   now: Date,
@@ -366,8 +550,12 @@ const structurallyStrictFundScaleArtifact = (
       || metric === "regulatory_aum"
       || (sourceClass === "first_party_subject") !== (attribution === "direct_subject")
     ) return false;
-    if (sourceClass === "first_party_investor") return false;
-    if (profile && profileWebsiteHost(profile.website) !== officialDomain) return false;
+    if (sourceClass === "first_party_investor") {
+      if (!hasOfficialInvestorDomainProof(value, capturedAt, now, profile)) return false;
+    } else if (profile && (
+      profileWebsiteHost(profile.website) !== officialDomain
+      || !sourceMatchesOfficialWebsiteScope(sourceUrl, profile.website)
+    )) return false;
   } else if (sourceClass === "public_primary") {
     if (basis !== "regulatory" || metric !== "regulatory_aum" || !isRecordSpecificRegulatoryUrl(sourceUrl)) return false;
   } else if (

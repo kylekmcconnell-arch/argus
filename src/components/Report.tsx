@@ -543,7 +543,7 @@ const FUND_SCALE_BASIS_LABEL: Record<NonNullable<SourceArtifact["fundScaleBasis"
   press_corroborated: "press corroborated",
 };
 
-type InvestorSourceRole = "Affiliation source" | "Scale source" | "Deal source";
+type InvestorSourceRole = "Affiliation source" | "Fund domain source" | "Scale source" | "Deal source";
 
 function InvestorEvidenceLinks({
   sources,
@@ -556,16 +556,24 @@ function InvestorEvidenceLinks({
 }) {
   const seen = new Set<string>();
   const references = sources.flatMap((source) => {
-    const rawUrl = role === "Affiliation source" ? source.attributionSourceUrl : source.sourceUrl;
+    const rawUrl = role === "Affiliation source"
+      ? source.attributionSourceUrl
+      : role === "Fund domain source"
+        ? source.investorDomainSourceUrl
+        : source.sourceUrl;
     const link = safeSourceLink(rawUrl);
     if (!link || seen.has(link.href)) return [];
     seen.add(link.href);
     const capturedValue = role === "Affiliation source"
       ? source.attributionCapturedAt ?? source.capturedAt
+      : role === "Fund domain source"
+        ? source.investorDomainCapturedAt ?? source.capturedAt
       : source.capturedAt;
     const capturedLabel = compactSourceDate(capturedValue);
     const descriptor = role === "Affiliation source"
       ? `${source.subjectName || "subject"} affiliation with ${source.investorEntityName || source.fundName || "fund"}`
+      : role === "Fund domain source"
+        ? `${source.investorDomainProfileName || source.investorEntityName || source.fundName || "fund"} official domain ${source.investorEntityDomain || "unavailable"}`
       : source.title || (source.sourceClass ? PORTFOLIO_SOURCE_LABEL[source.sourceClass] : "public evidence");
     return [{
       href: link.href,
@@ -1906,11 +1914,18 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       </div>
                       <div className="mt-2 flex flex-col items-start gap-1">
                         {group.attribution === "affiliated_fund" && (
-                          <InvestorEvidenceLinks
-                            sources={group.sources}
-                            role="Affiliation source"
-                            context={`${group.subject} affiliation with ${group.fundName}`}
-                          />
+                          <>
+                            <InvestorEvidenceLinks
+                              sources={group.sources}
+                              role="Affiliation source"
+                              context={`${group.subject} affiliation with ${group.fundName}`}
+                            />
+                            <InvestorEvidenceLinks
+                              sources={group.sources}
+                              role="Fund domain source"
+                              context={`${group.fundName} official domain`}
+                            />
+                          </>
                         )}
                         <InvestorEvidenceLinks
                           sources={group.sources}
@@ -1948,11 +1963,18 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       </div>
                       <div className="mt-2 flex flex-col items-start gap-1">
                         {group.attribution === "affiliated_fund" && (
-                          <InvestorEvidenceLinks
-                            sources={group.sources}
-                            role="Affiliation source"
-                            context={`${group.subject} affiliation with ${group.investor}`}
-                          />
+                          <>
+                            <InvestorEvidenceLinks
+                              sources={group.sources}
+                              role="Affiliation source"
+                              context={`${group.subject} affiliation with ${group.investor}`}
+                            />
+                            <InvestorEvidenceLinks
+                              sources={group.sources}
+                              role="Fund domain source"
+                              context={`${group.investor} official domain`}
+                            />
+                          </>
                         )}
                         <InvestorEvidenceLinks
                           sources={group.sources}
