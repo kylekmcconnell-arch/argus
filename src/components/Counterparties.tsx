@@ -86,7 +86,7 @@ export function Counterparties({ address, subject, panelCostToken, record = true
           );
         })}
       </div>
-      <p className="mt-2 text-[11px] leading-snug text-ink-faint">Named non-exchange counterparties are wired into the trust graph as verified relationship edges — a shared fund or mixer bridges two operators automatically.</p>
+      <p className="mt-2 text-[11px] leading-snug text-ink-faint">Named non-exchange counterparties are wired into the trust graph as verified relationship edges. A shared fund or mixer bridges two operators automatically.</p>
     </div>
   );
 }

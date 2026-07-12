@@ -207,7 +207,7 @@ function frozenPacket(stored: JsonRecord, requestedVersionId: string) {
   const axisSummary = Object.entries(axes).map(([axis, value]) => {
     const score = record(value);
     const gaps = (Array.isArray(score.gaps) ? score.gaps : []).map((gap) => text(gap, 240)).filter(Boolean).slice(0, 6);
-    return `${text(axis, 100)} ${String(score.score ?? "—")}/${String(score.weight ?? "—")}: ${text(score.rationale, 500)}${gaps.length ? `; gaps: ${gaps.join(", ")}` : ""}`;
+    return `${text(axis, 100)} ${String(score.score ?? "N/A")}/${String(score.weight ?? "N/A")}: ${text(score.rationale, 500)}${gaps.length ? `; gaps: ${gaps.join(", ")}` : ""}`;
   }).filter(Boolean).join("; ");
   const roles = (Array.isArray(report.roles) ? report.roles : []).map((role) => text(role, 80)).filter(Boolean);
   const evidence = record(payload.evidence);
@@ -228,7 +228,7 @@ function frozenPacket(stored: JsonRecord, requestedVersionId: string) {
     text(payload.headline, 1000),
     roles.length ? `roles: ${roles.join(", ")}` : "",
     Object.keys(governing).length
-      ? `${final ? "final" : "preliminary"} governing ${text(governing.role, 80) || "role"} model signal ${text(governing.verdict, 30) || "unavailable"} ${String(governing.score_total ?? "—")}/100; raw axes ${String(governing.raw_total ?? "—")}${Number(governing.dox_bonus) > 0 ? ` + ${String(governing.dox_bonus)} disclosure bonus` : ""}`
+      ? `${final ? "final" : "preliminary"} governing ${text(governing.role, 80) || "role"} model signal ${text(governing.verdict, 30) || "unavailable"} ${String(governing.score_total ?? "N/A")}/100; raw axes ${String(governing.raw_total ?? "N/A")}${Number(governing.dox_bonus) > 0 ? ` + ${String(governing.dox_bonus)} disclosure bonus` : ""}`
       : "",
     axisSummary ? `governing axis breakdown: ${axisSummary}` : "",
     verifiedVentures.length ? `source-backed ventures: ${verifiedVentures.join(", ")}` : "",

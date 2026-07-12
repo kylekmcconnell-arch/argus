@@ -188,7 +188,7 @@ async function coldIntake(ctx: CollectContext) {
       provider: "memory.lol",
       sourceCount: hist.priorHandles.length,
     });
-    ctx.emit({ phase: "P0 · Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")} — a rebrand. Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
+    ctx.emit({ phase: "P0 · Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")}, indicating a rebrand. Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
   } else if (hist) {
     ctx.recordCheck?.({
       id: "identity-continuity",
@@ -300,7 +300,7 @@ async function coldIntake(ctx: CollectContext) {
       artifact_verified: false,
     }));
     const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
-    ctx.emit({ phase: "P0 · Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"} — role candidates remain non-governing until independently verified.`, source: "claude", tone: "neutral" });
+    ctx.emit({ phase: "P0 · Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"}. Role candidates remain non-governing until independently verified.`, source: "claude", tone: "neutral" });
   }
 
   // ── Affiliation discovery: every venture the subject is publicly tied to in
@@ -427,7 +427,7 @@ async function coldIntake(ctx: CollectContext) {
     || postRoleTeam.length > 0
     || webTeam.some((t) => t.artifact_verified === true && norm(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
-    ctx.emit({ phase: "P1 · Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it — its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
+    ctx.emit({ phase: "P1 · Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
     for (const member of webTeam) {
       member.evidence_origin = "model_lead";
       member.artifact_verified = false;
@@ -532,11 +532,11 @@ async function coldIntake(ctx: CollectContext) {
           evidence_origin: "deterministic",
           artifact_verified: true,
         });
-        ctx.emit({ phase: "P2 · Substance", label: "Website not live", detail: `${domain} ${notLive} — ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
+        ctx.emit({ phase: "P2 · Substance", label: "Website not live", detail: `${domain} ${notLive}: ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
       } else if (site.status === "client_rendered") {
         ctx.emit({ phase: "P2 · Substance", label: "Website live (app)", detail: `${domain} serves a client-rendered app; ${site.detail}.`, source: "site-fetch", tone: "neutral" });
       } else {
-        ctx.emit({ phase: "P2 · Substance", label: "Website live", detail: `${domain} is a live site — ${site.detail}.`, source: "site-fetch", tone: "good" });
+        ctx.emit({ phase: "P2 · Substance", label: "Website live", detail: `${domain} is a live site: ${site.detail}.`, source: "site-fetch", tone: "good" });
       }
     }
   }
@@ -649,7 +649,7 @@ async function coldIntake(ctx: CollectContext) {
         if (corrob.length) {
           corroboratedAffiliations += 1;
           rec.notes = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" · ");
-          ctx.emit({ phase: "P0 · Intake", label: `Affiliation corroborated · ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""} — ${corrob.join("; ")}.`, source: "argus", tone: "good" });
+          ctx.emit({ phase: "P0 · Intake", label: `Affiliation corroborated · ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""}: ${corrob.join("; ")}.`, source: "argus", tone: "good" });
         }
       }),
     );
@@ -863,7 +863,7 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
     })).filter((vt) => vt.people.length > 0);
     if (ctx.evidence.ventureTeams.length) {
       const total = ctx.evidence.ventureTeams.reduce((n, vt) => n + vt.people.length, 0);
-      ctx.emit({ phase: "Network", label: "Venture teams mapped", detail: `${total} people across ${ctx.evidence.ventureTeams.length} venture${ctx.evidence.ventureTeams.length === 1 ? "" : "s"} wired into the graph — subject → venture → the people behind it.`, source: "grok", tone: "good" });
+      ctx.emit({ phase: "Network", label: "Venture teams mapped", detail: `${total} people across ${ctx.evidence.ventureTeams.length} venture${ctx.evidence.ventureTeams.length === 1 ? "" : "s"} wired into the graph: subject → venture → the people behind it.`, source: "grok", tone: "good" });
     }
     const appearances = new Map<string, { name: string; projects: Set<string> }>();
     ventureTeams.forEach((team, i) => {
@@ -1010,8 +1010,8 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
       display_name: handleLabel,
       avatar: handleLabel.slice(0, 1).toUpperCase(),
       bio: "",
-      followers: "—",
-      joined: "—",
+      followers: "N/A",
+      joined: "N/A",
       identity_confidence: "Unverified",
       identity_note: "Fixture discovery seed only; identity requires a fresh provider re-check.",
       profile_collection_state: "unavailable",

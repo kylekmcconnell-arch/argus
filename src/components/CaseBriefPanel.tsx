@@ -70,14 +70,14 @@ function lines(value: string): string[] {
 }
 
 function shortId(value: string | null | undefined): string {
-  if (!value) return "—";
+  if (!value) return "N/A";
   return value.length > 16 ? `${value.slice(0, 8)}…${value.slice(-6)}` : value;
 }
 
 function readableDate(value: string | null | undefined): string {
-  if (!value) return "—";
+  if (!value) return "N/A";
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "—";
+  if (Number.isNaN(parsed.getTime())) return "N/A";
   return parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
@@ -636,7 +636,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                   </div>
                   <div>
                     <dt className="uppercase tracking-wider text-ink-dim">Coverage</dt>
-                    <dd className="mono mt-1 text-ink-dim">{currentVersion ? `${currentVersion.completenessState} · ${currentVersion.attestationState.replaceAll("_", " ")}` : "—"}</dd>
+                    <dd className="mono mt-1 text-ink-dim">{currentVersion ? `${currentVersion.completenessState} · ${currentVersion.attestationState.replaceAll("_", " ")}` : "N/A"}</dd>
                   </div>
                 </dl>
                 <div className="mt-3 flex flex-wrap gap-2 border-t border-line/70 pt-3">
@@ -670,11 +670,11 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     </div>
                     <div>
                       <dt className="uppercase tracking-wider">Brief anchor report version</dt>
-                      <dd className="mt-0.5 break-all text-ink-dim">{draft.anchorReportVersionId || "—"}</dd>
+                      <dd className="mt-0.5 break-all text-ink-dim">{draft.anchorReportVersionId || "N/A"}</dd>
                     </div>
                     <div>
                       <dt className="uppercase tracking-wider">Current report version</dt>
-                      <dd className="mt-0.5 break-all text-ink-dim">{currentVersion?.reportVersionId ?? "—"}</dd>
+                      <dd className="mt-0.5 break-all text-ink-dim">{currentVersion?.reportVersionId ?? "N/A"}</dd>
                     </div>
                   </dl>
                 </details>

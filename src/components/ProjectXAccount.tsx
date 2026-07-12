@@ -23,7 +23,7 @@ type Found = {
   note?: string;
 };
 
-const fmt = (n?: number | null) => (n == null ? "—" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(n));
+const fmt = (n?: number | null) => (n == null ? "N/A" : n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? (n / 1e3).toFixed(1) + "K" : String(n));
 const joined = (s?: string | null) => { if (!s) return ""; const d = new Date(s); return isNaN(+d) ? "" : d.toLocaleDateString(undefined, { month: "short", year: "numeric" }); };
 const CONF: Record<string, string> = { high: "var(--color-pass)", medium: "var(--color-caution)", low: "var(--color-ink-faint)" };
 const HANDLE = /^@?[A-Za-z0-9_]{2,30}$/;
@@ -116,7 +116,7 @@ export function ProjectXAccount({ name, domain, seedHandle, panelCostToken, onAu
         )}
       </div>
 
-      {conf === "low" && <p className="mt-2 text-[11px] text-ink-faint">{d.matchReason} — confirm this is the right account before relying on it.</p>}
+      {conf === "low" && <p className="mt-2 text-[11px] text-ink-faint">{d.matchReason}. Confirm this is the right account before relying on it.</p>}
     </div>
   );
 }

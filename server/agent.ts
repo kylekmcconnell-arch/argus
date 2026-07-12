@@ -176,7 +176,7 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
     "claims they make about themselves so they can be verified later. Capture CLAIMS " +
     "ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, " +
     "ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: " +
-    "PROJECT = the account IS an organization — a token, protocol, product, company, " +
+    "PROJECT = the account IS an organization: a token, protocol, product, company, " +
     "or DAO's own brand/official handle (usually named after the project, speaks as " +
     "'we/our', ships and promotes its OWN single token/product). " +
     "FOUNDER = an individual PERSON who founded or leads a project (a personal account, " +
@@ -187,7 +187,7 @@ export async function extractClaims(handle: string, bio: string, posts: string[]
     "official brand account), a GP/partner/principal at one, or an angel with NAMED, " +
     "verifiable investments (led or joined specific rounds). Buying/trading tokens, " +
     "'investing in gems', or calling oneself an investor with no documented deals is NOT " +
-    "INVESTOR — a caller who trades is a KOL, nothing more. " +
+    "INVESTOR. A caller who trades is a KOL, nothing more. " +
     "Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an " +
     "investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts " +
     "shipping a product/token, not allocating capital); an individual builder is FOUNDER; " +
@@ -265,7 +265,7 @@ export async function scanContradictions(
     "You are ARGUS contradiction analysis. From everything collected about a subject, find INTERNAL CONTRADICTIONS: where the subject's own stated claims conflict with each other or with the collected evidence. " +
     "Examples: claims a team of N but only one builder is found; claims an audit but no auditor or verification exists; claims a named backer who never acknowledges them; a stated launch/founding date that conflicts with the account age, domain age, or on-chain history; claims 'doxxed' but no real identity resolves; claims locked liquidity that on-chain shows unlocked; a partnership the partner never confirmed; a venture in the bio that discovery found no evidence for. " +
     "Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes. " +
-    "SCOPE RULES — these are NOT contradictions: (1) ARGUS's OWN analysis metadata (fields like identity_confidence, identity_note, verdicts, evidence notes such as 'single-source lead, unverified') disagreeing with other ARGUS fields — only the SUBJECT's outward claims vs external facts count; a low-confidence evidence note is a gap, not a conflict. (2) Normal vertical integration: a project's token running on its own chain, its dApp on its own platform, or its products naming each other is how ecosystems work, not circularity. (3) Marketing self-description ('#1', 'leading') vs modest traction is puffery to note in scoring, not a contradiction, unless it conflicts with a specific verifiable fact. " +
+    "SCOPE RULES: these are NOT contradictions: (1) ARGUS's OWN analysis metadata (fields like identity_confidence, identity_note, verdicts, evidence notes such as 'single-source lead, unverified') disagreeing with other ARGUS fields. Only the SUBJECT's outward claims vs external facts count; a low-confidence evidence note is a gap, not a conflict. (2) Normal vertical integration: a project's token running on its own chain, its dApp on its own platform, or its products naming each other is how ecosystems work, not circularity. (3) Marketing self-description ('#1', 'leading') vs modest traction is puffery to note in scoring, not a contradiction, unless it conflicts with a specific verifiable fact. " +
     "INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this evidence packet. Do not infer anything about the subject from their absence. " +
     "FINDING ATTRIBUTION RULE: when comparing or interpreting finding collections, attribute only direct-subject findings to the audited subject. A claim targeting an associate or venture cannot contradict the subject's claims unless separate direct-subject evidence explicitly connects the conduct to the subject. Never rewrite an associate's allegation as the subject's allegation. This attribution rule is specific to finding collections; profile, team, wallet, check-outcome, and other non-finding evidence in the packet remain legitimate evidence for testing the subject's claims.";
   const user = `Subject: ${handle}\n\nCollected evidence (JSON):\n${evidenceJson}`;

@@ -1,5 +1,7 @@
 # ARGUS visual system — the canon
 
+UI copy does not use em dashes. Choose a period, colon, comma, or middle dot by context.
+
 This is the binding style contract for every component in `src/`. It exists because a
 visual audit (2026-07-11) found 5 verdict-badge idioms, 5 external-link styles, 3 avatar
 implementations, 25+ font sizes, three parallel status→color maps, and a broken

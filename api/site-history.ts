@@ -178,7 +178,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const bits: string[] = [];
     if (removedSections.length) bits.push(`removed section${removedSections.length === 1 ? "" : "s"}: ${removedSections.join(", ")}`);
     if (removedProfiles.length) bits.push(`${removedProfiles.length} team/social profile link${removedProfiles.length === 1 ? "" : "s"} deleted`);
-    if (titleChanged) bits.push(`title changed ("${earliest.title}" → "${current.title}") — possible pivot / prior product`);
+    if (titleChanged) bits.push(`changed title from "${earliest.title}" to "${current.title}", suggesting a possible pivot or prior product`);
     const note = bits.length
       ? `Since ${firstYear}, this site ${bits.join("; ")}. Removed content is the highest-signal content.`
       : `No significant content removals detected between the ${firstYear} snapshot and ${lastYear || "now"}.`;

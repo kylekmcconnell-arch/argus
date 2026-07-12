@@ -119,7 +119,7 @@ export function TrendingPage({ onOpen }: { onOpen: (ref: string) => void }) {
                   <span className="text-[11px] text-ink-faint">{s.count === 1 ? "scan" : "scans"}</span>
                 </span>
                 <span className="flex shrink-0 flex-col items-end gap-1 leading-none">
-                  <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{s.score ?? "—"}</span>
+                  <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{s.score ?? "N/A"}</span>
                   {s.verdict && <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}>{s.verdict}</span>}
                 </span>
               </button>

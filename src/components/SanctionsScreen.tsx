@@ -38,7 +38,7 @@ export function SanctionsScreen({ addresses, chain }: { addresses: { address: st
       <div className="finding tint-avoid p-4">
         <div className="flex items-center gap-2 text-[13.5px] font-semibold text-avoid">
           <span className="text-[15px]">⛔</span>
-          OFAC-sanctioned wallet{hits.length === 1 ? "" : "s"} — do not interact
+          OFAC-sanctioned wallet{hits.length === 1 ? "" : "s"}: do not interact
         </div>
         <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
           {hits.length} of this token's key wallets {hits.length === 1 ? "is" : "are"} on the US Treasury OFAC sanctions list. Transacting with a sanctioned address is a legal violation, not just a risk.
@@ -61,7 +61,7 @@ export function SanctionsScreen({ addresses, chain }: { addresses: { address: st
     <div className="panel px-4 py-2.5">
       <div className="flex items-center gap-2 text-[12.5px] text-ink-faint">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-pass)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>
-        <span><span className="text-ink-dim">{data.checked}</span> key wallet{data.checked === 1 ? "" : "s"} screened against the OFAC sanctions list — none sanctioned.</span>
+        <span><span className="text-ink-dim">{data.checked}</span> key wallet{data.checked === 1 ? "" : "s"} screened against the OFAC sanctions list; none sanctioned.</span>
       </div>
     </div>
   );

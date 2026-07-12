@@ -124,7 +124,7 @@ export function KolReport({ handle, promotions, associates, panelCostToken, reco
 
   const resolved = (tokens ?? []).filter((t) => !t.unresolved);
   const unresolved = (tokens ?? []).filter((t) => t.unresolved);
-  const money = (n?: number) => (n == null ? "—" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
+  const money = (n?: number) => (n == null ? "N/A" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
   const assoc = associates.filter((a) => a.associate_key).slice(0, 12);
 
   return (
@@ -143,7 +143,7 @@ export function KolReport({ handle, promotions, associates, panelCostToken, reco
             <span className="mono text-[11px] text-ink-faint">{resolved.length + unresolved.length} call{resolved.length + unresolved.length === 1 ? "" : "s"} priced</span>
           )}
         </div>
-        <p className="mt-0.5 text-[11px] leading-snug text-ink-faint">Graded on how far each call ran <span className="text-ink-dim">after it was called</span> (the peak), not whether the token is alive now — most memecoins fade regardless of who called them.</p>
+        <p className="mt-0.5 text-[11px] leading-snug text-ink-faint">Graded on how far each call ran <span className="text-ink-dim">after it was called</span> (the peak), not whether the token is alive now. Most memecoins fade regardless of who called them.</p>
         {resolved.length > 0 ? (
           <div className="panel-inset mt-1.5 divide-y divide-line/60">
             {resolved.map((t, i) => {
@@ -170,7 +170,7 @@ export function KolReport({ handle, promotions, associates, panelCostToken, reco
             just vanish from the list. Ticker-only, no DEX pair under that symbol. */}
         {!loading && unresolved.length > 0 && (
           <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-faint">
-            Also promoted, couldn't price on-chain (ticker-only — no DEX pair found under that symbol): {unresolved.map((t) => t.label).join(", ")}.
+            Also promoted, couldn't price on-chain (ticker-only; no DEX pair found under that symbol): {unresolved.map((t) => t.label).join(", ")}.
           </p>
         )}
       </div>

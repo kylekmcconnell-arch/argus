@@ -39,6 +39,8 @@ describe("Landing fresh audit launch", () => {
     expect(form).not.toBeNull();
     expect(container.textContent).toContain("Starts a fresh provider run and may use paid API quota");
     expect(container.textContent).toContain("Open previous snapshots from Recent cases");
+    expect(container.textContent).not.toContain("Try a live token");
+    expect(container.textContent).not.toMatch(/\$(PEPE|SHIB|UNI)\b/);
 
     await act(async () => {
       const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;

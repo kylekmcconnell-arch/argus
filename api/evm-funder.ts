@@ -119,7 +119,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const totalTokens = seededDeployers.reduce((s, d) => s + d.tokensCreated, 0);
 
     const parts: string[] = [];
-    if (own.length > 1) parts.push(`This wallet itself deployed ${own.length} contracts — a serial launcher.`);
+    if (own.length > 1) parts.push(`This wallet itself deployed ${own.length} contracts, indicating a serial launcher.`);
     if (seededDeployers.length) parts.push(`It seeded ${seededDeployers.length} other deployer${seededDeployers.length === 1 ? "" : "s"} that launched ${totalTokens} contract${totalTokens === 1 ? "" : "s"}. A shared funder across launches is the signature of a serial operator.`);
     if (!parts.length) parts.push(recipients.length ? `Sent ETH to ${recipients.length} wallet${recipients.length === 1 ? "" : "s"}, none of which deployed contracts. No serial-launch pattern.` : "No launches or ETH-seeding found for this wallet.");
 

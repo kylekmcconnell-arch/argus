@@ -57,7 +57,7 @@ function Ring({ score, color }: { score: number | null; color: string }) {
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} style={{ transition: "stroke-dashoffset 0.7s ease-out" }} />
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="mono text-[15px] font-semibold tabular" style={{ color }}>{score ?? "—"}</span>
+        <span className="mono text-[15px] font-semibold tabular" style={{ color }}>{score ?? "N/A"}</span>
       </div>
     </div>
   );
@@ -367,7 +367,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
         <div className="panel tint-signal mt-6 p-5">
           <div className="flex items-center gap-2 text-[13.5px] font-medium text-signal-lift">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
-            This is {redirecting.name}'s site — opening the full ${redirecting.symbol} report…
+            This is {redirecting.name}'s site. Opening the full ${redirecting.symbol} report…
           </div>
           <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A site recon only reads the website; ${redirecting.symbol} is a live token ({redirecting.chain}) whose official homepage is this domain, so ARGUS is running the full on-chain investigation instead.</p>
         </div>
@@ -415,7 +415,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                       </button>
                     </div>
                     {recon.title && <div className="mt-1 truncate text-[13.5px] text-ink-dim">{recon.title}</div>}
-                    <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">{teamKnown && TEAM_ABSENCE.test(recon.identityLine) ? "Team identified off the rendered page — see the Team section below." : recon.identityLine}</p>
+                    <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">{teamKnown && TEAM_ABSENCE.test(recon.identityLine) ? "Team identified off the rendered page. See the Team section below." : recon.identityLine}</p>
                   </div>
                 </div>
                 <div className="mt-3 space-y-1.5 border-t border-line/60 pt-3">
@@ -439,7 +439,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
             >
               <div className="flex flex-wrap items-center gap-2">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
-                <span className="text-[12.5px] font-medium text-signal-lift">This project has a live token — ${projToken.symbol}{projToken.rank ? ` · CoinGecko #${projToken.rank}` : ""} · {projToken.chain}</span>
+                <span className="text-[12.5px] font-medium text-signal-lift">This project has a live token: ${projToken.symbol}{projToken.rank ? ` · CoinGecko #${projToken.rank}` : ""} · {projToken.chain}</span>
                 <span className="mono ml-auto text-[11px] text-signal-lift">open full on-chain report →</span>
               </div>
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
@@ -611,7 +611,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
 
           {/* unified project research: news & press, documents & resources, domain
               intelligence, and GitHub forensics — the same cluster every report uses */}
-          {showCurrentIntelligence && reconHost && <ProjectResearch name={(recon.title || reconHost).split(/[:|–—·]/)[0].trim() || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} record={resultPolicy.canRecord} panelCostToken={resultPolicy.panelCostToken} />}
+          {showCurrentIntelligence && reconHost && <ProjectResearch name={(recon.title || reconHost).split(/[:|–\u2014·]/)[0].trim() || reconHost} domain={reconHost} githubOrg={ghOrg} subjectKey={reconHost || ghOrg || undefined} record={resultPolicy.canRecord} panelCostToken={resultPolicy.panelCostToken} />}
 
           {/* off-chain operator linking: shared analytics IDs / co-registered domains / hosting */}
           {showCurrentIntelligence && reconHost && <SiteInfra key={`${reconHost}:${resultPolicy.canRecord ? "record" : "read-only"}`} domain={reconHost} record={resultPolicy.canRecord} onAudit={onAudit ? (ref) => onAudit(ref, resultPolicy.displayedPrivate) : undefined} />}

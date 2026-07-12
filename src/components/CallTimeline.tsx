@@ -20,7 +20,7 @@ function Chip({ label, pct, elapsed, strong }: { label: string; pct: number | nu
   return (
     <div className={`flex min-w-[42px] flex-col items-center rounded-md border px-1.5 py-1 ${strong ? "border-line-2 bg-panel-2" : "border-line"}`}>
       <span className="text-[10px] uppercase tracking-wide text-ink-faint">{label}</span>
-      <span className="mono text-[11px] tabular" style={{ color }}>{pct == null ? (elapsed ? "—" : "·") : fmtPct(pct)}</span>
+      <span className="mono text-[11px] tabular" style={{ color }}>{pct == null ? (elapsed ? "N/A" : "·") : fmtPct(pct)}</span>
     </div>
   );
 }

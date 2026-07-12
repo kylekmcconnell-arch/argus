@@ -47,9 +47,9 @@ export function Holdings({ address, symbol, panelCostToken }: { address?: string
 
   // The read: what the shape of the bag says about the operator.
   let bite: { text: string; tone: "avoid" | "caution" | "dim" } | null = null;
-  if (d.selfToken && d.selfToken.pct >= 60) bite = { text: `${d.selfToken.pct.toFixed(0)}% of net worth is its own $${d.selfToken.symbol} — nothing realized, every reason to defend the price`, tone: "avoid" };
+  if (d.selfToken && d.selfToken.pct >= 60) bite = { text: `${d.selfToken.pct.toFixed(0)}% of net worth is its own $${d.selfToken.symbol}. Nothing is realized, creating every reason to defend the price`, tone: "avoid" };
   else if (d.selfToken && d.selfToken.pct >= 25) bite = { text: `${d.selfToken.pct.toFixed(0)}% held in its own $${d.selfToken.symbol}`, tone: "caution" };
-  else if (d.stablePct >= 60) bite = { text: `${d.stablePct.toFixed(0)}% parked in stablecoins — money already off the table`, tone: "dim" };
+  else if (d.stablePct >= 60) bite = { text: `${d.stablePct.toFixed(0)}% parked in stablecoins. Money is already off the table`, tone: "dim" };
   else if (d.concentrationPct >= 80) bite = { text: `${d.concentrationPct.toFixed(0)}% concentrated in a single token`, tone: "caution" };
 
   const toneColor = bite?.tone === "avoid" ? "var(--color-avoid)" : bite?.tone === "caution" ? "var(--color-caution)" : "var(--color-ink-faint)";

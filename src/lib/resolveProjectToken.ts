@@ -26,7 +26,7 @@ const CHAIN_PREF = ["solana", "ethereum", "base", "binance-smart-chain", "arbitr
 
 // Strip a marketing tagline: "Jupiter: The Home of Onchain Finance" → "Jupiter".
 function cleanName(raw: string): string {
-  return (raw || "").split(/[:|–—·・\-–]/)[0].replace(/\s+/g, " ").trim();
+  return (raw || "").split(/[:|–\u2014·・\-–]/)[0].replace(/\s+/g, " ").trim();
 }
 
 export async function resolveProjectToken(rawName: string): Promise<ResolvedProjectToken | null> {

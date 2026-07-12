@@ -276,7 +276,7 @@ export function Sidebar({
         <button type="button" onClick={() => nav("idle")} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left">
           <ArgusMark size={26} />
           <span className="display text-[15px] tracking-[0.02em] text-ink">ARGUS</span>
-          <span className="chip ml-auto">v2.2</span>
+          <span className="chip ml-auto">v3.0</span>
         </button>
         <button
           ref={closeButtonRef}
@@ -344,7 +344,7 @@ export function Sidebar({
               type="button"
               key={`run:${r.key}`}
               onClick={() => openRecent(r.handle, "person")}
-              title="Generating — click to watch. Keeps running if you navigate away."
+              title="Generating. Click to watch. Keeps running if you navigate away."
               className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${active ? "bg-panel soft-shadow" : "hover:bg-panel/70"}`}
             >
               <span className="mono relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal-lift">

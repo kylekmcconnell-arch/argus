@@ -29,7 +29,7 @@ type Intel = {
   note?: string;
 };
 
-const money = (n?: number | null) => (n == null ? "—" : n >= 1e9 ? "$" + (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
+const money = (n?: number | null) => (n == null ? "N/A" : n >= 1e9 ? "$" + (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
 const monthYear = (ms?: number) => (ms ? new Date(ms).toLocaleDateString(undefined, { month: "short", year: "numeric" }) : "");
 const shortAddr = (a?: string | null) => (a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a ?? "");
 const px = (v?: number | null) => (v == null ? "" : v < 1 ? v.toPrecision(3) : v.toLocaleString());
@@ -96,7 +96,7 @@ export function MarketIntel({ symbol, contract, chain, panelCostToken }: { symbo
           <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
             The real <span className="text-ink">${symbol}</span> is <span className="text-ink">{imp.realName}</span>
             {imp.realRank ? ` (rank #${imp.realRank})` : ""}, deployed at <span className="mono">{shortAddr(imp.realContract)}</span>
-            {imp.realChain ? ` on ${imp.realChain}` : ""}. This token uses that ticker at a different contract — a classic name-squat.
+            {imp.realChain ? ` on ${imp.realChain}` : ""}. This token uses that ticker at a different contract, a classic name-squat.
           </p>
         </div>
       )}
@@ -125,8 +125,8 @@ export function MarketIntel({ symbol, contract, chain, panelCostToken }: { symbo
           {/* cap-table + cross-chain chips */}
           {(f || (d.contracts?.length ?? 0) > 1) && (
             <div className="mt-3 flex flex-wrap gap-1.5 border-t border-line/60 pt-2.5">
-              {f?.hasNextUnlock && <span className="chip tint-avoid" title="A scheduled token unlock is coming — new supply hitting the market is a dump-risk signal">⚠ upcoming unlock</span>}
-              {f?.hasFundingRounds && <span className="chip tint-pass" title="Has disclosed funding rounds — VC-backed">VC-backed</span>}
+              {f?.hasNextUnlock && <span className="chip tint-avoid" title="A scheduled token unlock is coming. New supply hitting the market is a dump-risk signal.">⚠ upcoming unlock</span>}
+              {f?.hasFundingRounds && <span className="chip tint-pass" title="Has disclosed funding rounds; VC-backed">VC-backed</span>}
               {f?.hasVesting && <span className="chip">vesting</span>}
               {f?.hasCrowdsales && <span className="chip">public sale</span>}
               {f?.hasTeam && <span className="chip">team listed</span>}
@@ -136,7 +136,7 @@ export function MarketIntel({ symbol, contract, chain, panelCostToken }: { symbo
 
           {(fdvGap || lowCirc) && (
             <p className="mt-2.5 text-[12.5px] leading-relaxed text-caution">
-              {lowCirc ? `Only ${d.dilutionPct}% of max supply circulates` : "FDV far above market cap"} — significant locked supply still to hit the market{f?.hasNextUnlock ? ", with an unlock scheduled" : ""}.
+              {lowCirc ? `Only ${d.dilutionPct}% of max supply circulates` : "FDV far above market cap"}. Significant locked supply remains to hit the market{f?.hasNextUnlock ? ", with an unlock scheduled" : ""}.
             </p>
           )}
 

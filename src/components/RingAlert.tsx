@@ -103,7 +103,7 @@ export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) 
             )}
           </div>
         ))}
-        {conns.length > 4 && <div className="text-[11px] text-ink-faint">+{conns.length - 4} more — see the Trust graph.</div>}
+        {conns.length > 4 && <div className="text-[11px] text-ink-faint">+{conns.length - 4} more. See the Trust graph.</div>}
       </div>
       )}
       <p className="mt-1.5 text-[12.5px] text-ink-faint">

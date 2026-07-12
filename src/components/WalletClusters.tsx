@@ -197,7 +197,7 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
               </div>
             </div>
           ))}
-          <p className="text-[11px] text-ink-faint">Linked by a shared funder or a direct SOL transfer — the two signals that mean one hand controls wallets a holder chart shows as separate.</p>
+          <p className="text-[11px] text-ink-faint">Linked by a shared funder or a direct SOL transfer. These two signals indicate one hand controls wallets a holder chart shows as separate.</p>
         </div>
       )}
     </div>

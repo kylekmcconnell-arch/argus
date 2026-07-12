@@ -141,7 +141,7 @@ const lumen: SubjectFixture = {
     // FOUNDER
     { axis: "F1_identity_verifiability", score: 7, rationale: "Pseudonymous but a stable on-chain identity since 2021; no impersonation." },
     { axis: "F2_track_record", score: 22, rationale: "One verified strategic exit (Meridian → Chainforge, $28M). Current build is active and real." },
-    { axis: "F3_repeat_backing", score: 11, rationale: "Dragonfly backed both Meridian and Lumen — a returning backer from a successful exit (strong signal)." },
+    { axis: "F3_repeat_backing", score: 11, rationale: "Dragonfly backed both Meridian and Lumen, a returning backer from a successful exit (strong signal)." },
     { axis: "F4_build_substance", score: 12, rationale: "Active GitHub org with original commits; shipped product." },
     { axis: "F5_reputation_integrity", score: 11, rationale: "Clean as a builder; the advisory-rug finding is scored under the advisor role." },
     { axis: "F6_network_quality", score: 8, rationale: "Credible co-investors; one cabal-adjacent associate (ZenithDAO)." },
@@ -154,13 +154,13 @@ const lumen: SubjectFixture = {
     // ADVISOR
     { axis: "AD1_identity_verifiability", score: 7, rationale: "Same stable pseudonym." },
     { axis: "AD2_advised_outcomes", score: 9, rationale: "Advisory graveyard: one active (Helix), one confirmed rug (ZenithDAO)." },
-    { axis: "AD3_relationship_corroboration", score: 18, rationale: "Both advised projects publicly acknowledge the relationship — the claims are real." },
+    { axis: "AD3_relationship_corroboration", score: 18, rationale: "Both advised projects publicly acknowledge the relationship, confirming that the claims are real." },
     { axis: "AD4_advisory_conduct", score: 8, rationale: "Held a vested allocation in ZenithDAO; allocation conduct around the rug is the concern." },
     { axis: "AD5_reputation_fud", score: 9, rationale: "Named in post-rug community threads about ZenithDAO advisors." },
   ],
   trace: [
     { phase: "P0 · Intake", label: "Resolve handle", detail: "@0xlumen → canonical key. Cross-referencing roster KB across 1,204 entries.", tone: "neutral" },
-    { phase: "P0 · Routing", label: "Classify roles", detail: "Bio signals: founder, GP, advisor. Routed to 3 tracks — FOUNDER, INVESTOR, ADVISOR.", tone: "neutral" },
+    { phase: "P0 · Routing", label: "Classify roles", detail: "Bio signals: founder, GP, advisor. Routed to 3 tracks: FOUNDER, INVESTOR, ADVISOR.", tone: "neutral" },
     { phase: "P1 · Identity", label: "Identity check", detail: "Persistent pseudonym since 2021, consistent on-chain footprint. No impersonation. Scored on merits.", tone: "good" },
     { phase: "Founder", label: "Enumerate ventures", detail: "Meridian Labs → acquired by Chainforge ($28M strategic). Verified against acquirer press.", source: "chainforge.xyz", tone: "good" },
     { phase: "Founder", label: "Repeat-backing", detail: "Dragonfly backed Meridian (exit) and re-backed Lumen. Strongest positive signal in venture.", tone: "good" },
@@ -205,7 +205,7 @@ const satoshi: SubjectFixture = {
   ],
   trace: [
     { phase: "P0 · Intake", label: "Resolve handle", detail: "@satoshi_builds → canonical key. No roster KB hit (not a paid promoter).", tone: "neutral" },
-    { phase: "P0 · Routing", label: "Classify roles", detail: "Bio signals founder/CEO. Single track — FOUNDER.", tone: "neutral" },
+    { phase: "P0 · Routing", label: "Classify roles", detail: "Bio signals founder/CEO. Single track: FOUNDER.", tone: "neutral" },
     { phase: "P1 · Identity", label: "Identity check", detail: "Doxxed, decade of consistent press + LinkedIn. Confirmed → +5 disclosure bonus.", tone: "good" },
     { phase: "Founder", label: "Enumerate ventures", detail: "Northwind → Stripe (acq.). Loom Data → IPO. Both verified against primary sources.", source: "sec.gov · stripe.com", tone: "good" },
     { phase: "Founder", label: "Repeat-backing", detail: "Sequoia + Index backed both wins and re-backed the current company. Strong.", tone: "good" },
@@ -247,8 +247,8 @@ const nova: SubjectFixture = {
     { axis: "I5_reputation_fud", score: 11, rationale: "Emerging founder complaints about misrepresented relationships." },
   ],
   trace: [
-    { phase: "P0 · Intake", label: "Resolve handle", detail: "@nova_capital → canonical key. Account created Sep 2023 vs. '40+ winners' claim — flag the mismatch.", tone: "warn" },
-    { phase: "P0 · Routing", label: "Classify roles", detail: "Fund / investor signals. Single track — INVESTOR.", tone: "neutral" },
+    { phase: "P0 · Intake", label: "Resolve handle", detail: "@nova_capital → canonical key. Account created Sep 2023 vs. '40+ winners' claim. Flag the mismatch.", tone: "warn" },
+    { phase: "P0 · Routing", label: "Classify roles", detail: "Fund / investor signals. Single track: INVESTOR.", tone: "neutral" },
     { phase: "P1 · Identity", label: "Identity check", detail: "Named partner, thin footprint. Probable → +3 bonus. Not gated.", tone: "neutral" },
     { phase: "Investor", label: "Portfolio reality", detail: "Claimed 40+ winners. Cross-referencing Pitchbook / Crunchbase / AngelList… most entries absent.", source: "pitchbook", tone: "warn" },
     { phase: "Investor", label: "Corroborate endorsements", detail: "4 marquee testimonials on novacap.io/founders. Locating each endorser's account…", tone: "neutral" },
@@ -275,7 +275,7 @@ const delta: SubjectFixture = {
   build: (a) => {
     a.addClientEngagement({ client_name: "Pulsechain memecoins (12)", service_type: "market_making", manipulation_service_flag: true, notes: "Wash-trading packages sold as 'volume' tiers.", evidence_url: "https://x.com/zachxbt/delta-volume" });
     a.addClientEngagement({ client_name: "Various", service_type: "raids", manipulation_service_flag: true, notes: "Coordinated bot raids + fake engagement marketed openly.", client_outcome: VentureOutcome.SILENT_SHUTDOWN });
-    a.addClientEngagement({ client_name: "ZenithDAO", service_type: "market_making", manipulation_service_flag: true, notes: "Sold 'volume' for ZenithDAO in the weeks before its LP was drained — the same project @0xlumen advised.", evidence_url: "https://x.com/zachxbt/delta-volume" });
+    a.addClientEngagement({ client_name: "ZenithDAO", service_type: "market_making", manipulation_service_flag: true, notes: "Sold 'volume' for ZenithDAO in the weeks before its LP was drained. This is the same project @0xlumen advised.", evidence_url: "https://x.com/zachxbt/delta-volume" });
     a.addFinding({ finding_type: "InvestigatorCallout", claim: "Sells wash trading and bot engagement as productized 'volume' and 'trending' tiers.", source_url: "https://x.com/zachxbt/delta-volume", source_date: "2024-12-03", verification_status: "Verified", independent_source_count: 2, source_author: "@zachxbt", polarity: -1 });
     a.addAssociate({ associate_handle: "@vexnode", relation: "repeat-client", in_cabal_kb: true });
   },
@@ -287,8 +287,8 @@ const delta: SubjectFixture = {
   ],
   trace: [
     { phase: "P0 · Intake", label: "Resolve handle", detail: "@deltagrowth → canonical key. Treated as a contractor, not a principal.", tone: "neutral" },
-    { phase: "P0 · Routing", label: "Classify roles", detail: "Agency / growth / market-making signals. Single track — AGENCY.", tone: "neutral" },
-    { phase: "Agency", label: "Service integrity", detail: "Site openly sells 'volume' and 'trending' tiers — parsing for manipulation services…", tone: "warn" },
+    { phase: "P0 · Routing", label: "Classify roles", detail: "Agency / growth / market-making signals. Single track: AGENCY.", tone: "neutral" },
+    { phase: "Agency", label: "Service integrity", detail: "Site openly sells 'volume' and 'trending' tiers. Parsing for manipulation services…", tone: "warn" },
     { phase: "Agency", label: "Manipulation confirmed", detail: "Wash trading + bot raids productized. Investigator-verified (@zachxbt, 2 sources). Cap fires (10).", source: "x.com/zachxbt", tone: "bad" },
     { phase: "Finalize", label: "Score & band", detail: "Manipulation-as-a-service is a hard cap at 10. A clean brand cannot lift it. AVOID.", tone: "bad" },
   ],

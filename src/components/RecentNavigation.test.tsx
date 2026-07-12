@@ -97,6 +97,9 @@ describe("Recent report controls", () => {
       );
     });
 
+    expect(container.textContent).toContain("v3.0");
+    expect(container.textContent).not.toContain("v2.2");
+
     const sidebarLink = [...container.querySelectorAll<HTMLAnchorElement>("aside a")]
       .find((link) => link.textContent?.includes("@gakonst") && link.textContent.includes("handle"));
     expect(sidebarLink).toBeDefined();

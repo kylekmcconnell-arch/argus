@@ -94,7 +94,7 @@ describe("deriveDecisionReadiness", () => {
       unresolved: 0,
       findings: 1,
       checkedEmpty: 1,
-      title: "Evidence coverage complete — findings require review",
+      title: "Evidence coverage complete: findings require review",
     });
     expect(result.guidance).toContain("including 1 finding");
     expect(result.guidance).toContain("not an investment recommendation");

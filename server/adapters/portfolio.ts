@@ -323,7 +323,7 @@ function ventureAffiliationEnded(venture: CollectContext["evidence"]["ventures"]
     venture.notes ?? "",
   ].join(" "));
   if (/\b(?:former|formerly|previously|ex|no longer|left|departed|retired|until)\b/.test(description)) return true;
-  return /(?:19|20)\d{2}\s*(?:[-–—]|to)\s*(?:19|20)\d{2}/i.test(venture.period)
+  return /(?:19|20)\d{2}\s*(?:[-–\u2014]|to)\s*(?:19|20)\d{2}/i.test(venture.period)
     && !/\b(?:present|current|ongoing|now)\b/i.test(venture.period);
 }
 
@@ -610,7 +610,7 @@ function explicitAmbiguousRelationship(text: string, project: string): boolean {
     const before = text.slice(Math.max(0, start - 100), start).toLowerCase();
     const after = text.slice(start + phrase.length, start + phrase.length + 100).toLowerCase();
     if (/(?:invested in|investment in|backed|portfolio includes|portfolio company[: -]|led (?:the )?round in)\s*$/.test(before)) return true;
-    if (/^\s*(?:is|was|—|-|:)\s*(?:an? )?(?:investment|portfolio company|backed company)\b/.test(after)) return true;
+    if (/^\s*(?:is|was|\u2014|-|:)\s*(?:an? )?(?:investment|portfolio company|backed company)\b/.test(after)) return true;
   }
   return false;
 }

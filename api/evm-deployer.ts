@@ -134,7 +134,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const note = !funderAddr
       ? "No clear funding source found for the deployer in its earliest transactions."
       : cexLabel
-        ? `The deployer's gas was funded from a KYC'd ${cexLabel} withdrawal — a traceable, real-world origin.`
+        ? `The deployer's gas was funded from a KYC'd ${cexLabel} withdrawal, providing a traceable, real-world origin.`
         : `The deployer was funded by an anonymous wallet (${funderAddr.slice(0, 8)}…), no CEX terminus. Shared funders across launches expose a serial operator.`;
 
     res.status(200).json({

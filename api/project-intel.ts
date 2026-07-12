@@ -106,13 +106,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     : audits.length === 0
       ? "No named security auditor found on the site."
       : claimedNoProof > 0
-        ? `Claims ${audits.map((a) => a.auditor).join(", ")}, but ${claimedNoProof} with no linkable report — an unverifiable audit badge is a common fake-legitimacy move.`
+        ? `Claims ${audits.map((a) => a.auditor).join(", ")}, but ${claimedNoProof} ${claimedNoProof === 1 ? "claim has" : "claims have"} no linkable report. An unverifiable audit badge is a common fake-legitimacy move.`
         : `Claims ${audits.map((a) => a.auditor).join(", ")}, each with a proof link.`;
 
   const domainNote = !domain?.registered
     ? "Domain registration date unavailable (RDAP has no record for this TLD)."
     : (domain.ageMonths ?? 99) < 3
-      ? `Domain registered ${domain.registered} — only ${domain.ageMonths} month(s) old. A project presenting as established on a brand-new domain is a contradiction.`
+      ? `Domain registered ${domain.registered}, making it only ${domain.ageMonths} month(s) old. A project presenting as established on a brand-new domain is a contradiction.`
       : `Domain registered ${domain.registered} (${domain.ageMonths} months old)${domain.registrar ? `, via ${domain.registrar}` : ""}.`;
 
   res.status(200).json({ available: true, host, domain: domain ?? null, domainNote, audits, auditNote, pagesRead: pages.length });

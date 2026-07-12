@@ -1230,7 +1230,7 @@ export default function App() {
           <span>Opened in a separate tab so the Case Brief draft remains intact.</span>
         </div>
       )}
-      {phase === "idle" && <Landing onAudit={onHomeAudit} onAbout={() => setPhase("about")} onOpenRecent={onOpenRecent} />}
+      {phase === "idle" && <Landing onAudit={onHomeAudit} onAbout={() => setPhase("about")} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
 
@@ -1461,7 +1461,7 @@ export default function App() {
               <h2 className="mt-3 display-sm text-[24px] text-ink">Couldn't resolve that token</h2>
               <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
                 No DEX pair was found for this contract. It may be brand-new, unlisted, illiquid, or on a chain
-                ARGUS doesn't index yet. Double-check the address, or try one of the live samples on the home screen.
+                ARGUS doesn't index yet. Double-check the address or try a different verified contract.
               </p>
             </>
           ) : liveError ? (
@@ -1469,8 +1469,8 @@ export default function App() {
               <div className="mono text-[13.5px] text-signal-lift">@{query.replace(/^@/, "")}</div>
               <h2 className="mt-3 display-sm text-[24px] text-ink">The live audit didn't finish</h2>
               <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
-                ARGUS collected against this handle but the run ended before a report was assembled — usually a
-                timeout on a very large account, or a dropped connection. Nothing was saved. Retrying often
+                ARGUS collected against this handle but the run ended before a report was assembled. This usually
+                happens because a very large account timed out or the connection dropped. Nothing was saved. Retrying often
                 clears it, since slow providers are cached on the second pass.
               </p>
               <div className="mono panel-inset mt-3 max-w-md break-words px-3 py-2 text-[12.5px] text-ink-dim">

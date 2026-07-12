@@ -140,15 +140,15 @@ function deriveFounders(recon: Recon | null, projectX: string | null, projectAcc
 
 function founderNote(siteUrl: string | null, recon: Recon | null, founders: FounderCandidate[]): string {
   let base: string;
-  if (!siteUrl) base = "No project website surfaced from the token's sources — the team is not stated on-site.";
-  else if (!recon || recon.retrieval.status === "gap") base = "Could not render the project site — the team could not be assessed there (a coverage gap, not an absence claim).";
+  if (!siteUrl) base = "No project website surfaced from the token's sources, so the team is not stated on-site.";
+  else if (!recon || recon.retrieval.status === "gap") base = "Could not render the project site. The team could not be assessed there (a coverage gap, not an absence claim).";
   else if (recon.team.state === "named") base = `Named on the project site: ${recon.team.names.slice(0, 5).join(", ")}.`;
-  else if (recon.team.state === "unnamed-section") base = "The project site has a team section but names no individuals — stated-but-unnamed.";
+  else if (recon.team.state === "unnamed-section") base = "The project site has a team section but names no individuals. The team is stated but unnamed.";
   else base = "The project site rendered, but no team section was found.";
 
   // Surface accounts the project account itself links to (e.g. a backing VC).
   const linked = founders.filter((f) => f.handle && f.source === "project").map((f) => f.handle!);
-  if (linked.length) base += ` The project account links to ${linked.slice(0, 4).join(", ")} — background ${linked.length === 1 ? "it" : "them"} below.`;
+  if (linked.length) base += ` The project account links to ${linked.slice(0, 4).join(", ")}. Background ${linked.length === 1 ? "it" : "them"} below.`;
   else if (!linked.length && recon?.team.state !== "named") base += " No personal accounts are surfaced to background.";
   return base;
 }
@@ -191,7 +191,7 @@ export function streamInvestigation(
 
       let projectX = token.projectX;
       let siteUrl = token.socials.find((s) => /^https?:\/\//i.test(s.url) && !/x\.com|twitter\.com|t\.me|discord|github\.com/i.test(s.url))?.url ?? null;
-      h.onStep(milestone("Token audited", `$${token.symbol}: ${token.verdict} ${token.score ?? "—"}/100.${projectX ? ` Project X ${projectX}.` : " No project X linked."}${siteUrl ? ` Site ${shorten(siteUrl)}.` : " No site linked."}`, token.verdict === "PASS" ? "good" : "warn"));
+      h.onStep(milestone("Token audited", `$${token.symbol}: ${token.verdict} ${token.score ?? "N/A"}/100.${projectX ? ` Project X ${projectX}.` : " No project X linked."}${siteUrl ? ` Site ${shorten(siteUrl)}.` : " No site linked."}`, token.verdict === "PASS" ? "good" : "warn"));
 
       // If the token's own sources (DexScreener + CoinGecko) yielded no site OR no
       // X account, resolve the OFFICIAL identity from knowledge (Grok) so an
@@ -200,7 +200,7 @@ export function streamInvestigation(
       let resolvedFounder: FounderCandidate | null = null;
       if (!siteUrl || !projectX) {
         h.onHop("resolving the project's official identity");
-        h.onStep(milestone("Step 1c · Resolve identity", `On-chain sources are thin — resolving $${token.symbol}'s official site, X account, and founder from knowledge…`, "neutral"));
+        h.onStep(milestone("Step 1c · Resolve identity", `On-chain sources are thin. Resolving $${token.symbol}'s official site, X account, and founder from knowledge…`, "neutral"));
         const id = await fetchTokenIdentity(token.symbol, token.name, token.address, token.chain);
         if (!aborted && id) {
           if (!siteUrl && id.website) siteUrl = id.website;
@@ -238,7 +238,7 @@ export function streamInvestigation(
         );
         if (!aborted && recon) h.onStep(milestone("Site read", recon.identityLine, recon.team.state === "named" ? "good" : "warn"));
       } else {
-        h.onStep(milestone("Step 2 · Project site", "No project website surfaced from the token's sources — skipping site recon.", "warn"));
+        h.onStep(milestone("Step 2 · Project site", "No project website surfaced from the token's sources, so site recon was skipped.", "warn"));
       }
       if (aborted) return;
 

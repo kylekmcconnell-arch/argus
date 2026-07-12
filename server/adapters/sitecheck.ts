@@ -94,7 +94,7 @@ export async function checkSiteSubstance(domain: string): Promise<SiteSubstance 
   if (COMING.test(body) || COMING.test(meta)) return { url: page.url, status: "coming_soon", detail: `the homepage is a coming-soon / waitlist page${meta ? ` ("${meta.slice(0, 80)}")` : ""}` };
 
   // Real, server-rendered content with product surface → live.
-  if (body.length >= 400 && PRODUCT.test(body)) return { url: page.url, status: "live", detail: `live site${meta ? ` — "${meta.slice(0, 80)}"` : ""}` };
+  if (body.length >= 400 && PRODUCT.test(body)) return { url: page.url, status: "live", detail: `live site${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
 
   // Client-rendered shell: near-empty body but a JS app. Read the bundle for the
   // coming-soon / waitlist markers the served HTML doesn't show.
@@ -115,5 +115,5 @@ export async function checkSiteSubstance(domain: string): Promise<SiteSubstance 
   }
 
   // Some content, no clear product surface — call it live but thin, no false alarm.
-  return { url: page.url, status: "live", detail: `site is up${meta ? ` — "${meta.slice(0, 80)}"` : ""}` };
+  return { url: page.url, status: "live", detail: `site is up${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
 }

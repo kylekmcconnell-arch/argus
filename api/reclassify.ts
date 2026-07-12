@@ -29,7 +29,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     "PROJECT = the account IS an organization: a token, protocol, product, company, or DAO's own brand/official handle (ships and promotes its OWN product/token, speaks as we/our). " +
     "FOUNDER = an individual PERSON who founded or leads a project. " +
     "KOL = an influencer/caller promoting OTHER people's tokens across many projects (calls, alpha, gems, shills). " +
-    "INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official account), a GP/partner at one, or an angel with named verifiable investments. Buying/trading tokens or 'investing in gems' talk is NOT INVESTOR — a caller who trades is KOL. " +
+    "INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official account), a GP/partner at one, or an angel with named verifiable investments. Buying/trading tokens or 'investing in gems' talk is NOT INVESTOR. A caller who trades is KOL. " +
     "ADVISOR = formally advises named projects. AGENCY = a services shop (marketing/PR/market-making). MEMBER = none of the above. " +
     "Decisive rules: a brand account promoting its own token is PROJECT, never KOL; an investment firm's brand account is INVESTOR, never PROJECT; do not tag KOL for hype words about the subject's own token; do not tag INVESTOR for trading talk. " +
     "A subject can hold several roles. Use the summary text as ground truth; the prior roles are shown only as context and are often WRONG under these rules. " +

@@ -21,7 +21,7 @@ if (process.argv.includes("--json")) {
 
 const pad = (s: string, n: number) => (s + " ".repeat(n)).slice(0, n);
 
-console.log("\n  ARGUS calibration — golden set\n");
+console.log("\n  ARGUS calibration: golden set\n");
 console.log("  " + pad("CASE", 29) + pad("TRUTH", 23) + pad("EXPECTED", 22) + pad("ACTUAL", 22) + pad("ACTUAL CAP", 34) + "OK");
 console.log("  " + "-".repeat(132));
 for (const r of results) {
@@ -31,7 +31,7 @@ for (const r of results) {
     pad(r.groundTruth, 23) +
     pad(r.expected.verdict, 22) +
     pad(r.actual.verdict, 22) +
-    pad(r.actual.cap ?? "—", 34) +
+    pad(r.actual.cap ?? "N/A", 34) +
     (r.pass ? "✓" : "✗"),
   );
   if (!r.pass) for (const m of r.mismatches) console.log("      ! " + m);

@@ -40,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const system =
     "You resolve the OFFICIAL identity of one specific crypto token using live web + X search plus your own knowledge. " +
     "Given the token's symbol, name, and contract, find: (1) its official project website, (2) its official X (Twitter) account, and (3) the founder/creator (a real person) with their X handle if public. " +
-    "Be precise about THIS token — match the contract address when given, because many tokens share a ticker. Do NOT return a fan account, an impersonator, a same-ticker DIFFERENT project, or a guessed name. " +
+    "Be precise about THIS token. Match the contract address when given, because many tokens share a ticker. Do NOT return a fan account, an impersonator, a same-ticker DIFFERENT project, or a guessed name. " +
     "Reply with ONLY compact JSON: {\"website\":\"https://...\",\"x_handle\":\"@...\",\"founder\":\"Full Name\",\"founder_handle\":\"@...\",\"confidence\":\"high|medium|low\",\"note\":\"one line\"}. Use null for any field you cannot confidently determine. NEVER invent a handle or a name. Never use em dashes.";
   const user = `Token: $${symbol}${name && name.toLowerCase() !== symbol.toLowerCase() ? ` (${name})` : ""}${contract ? `, contract ${contract}` : ""}${chain ? ` on ${chain}` : ""}. What is its official website, official X account, and founder (with X handle)?`;
 

@@ -176,7 +176,7 @@ export async function detectTokenLifecycle(ticker: string, knownAddress?: string
       if (nearZeroLiq || crashed) {
         dive = {
           address: canon.address,
-          detail: `liquidity $${Math.round(canon.liquidityUsd).toLocaleString()}${canon.h24 != null ? `, ${Math.round(canon.h24)}% 24h` : ""}${nearZeroLiq ? " — effectively dead" : ""}`,
+          detail: `liquidity $${Math.round(canon.liquidityUsd).toLocaleString()}${canon.h24 != null ? `, ${Math.round(canon.h24)}% 24h` : ""}${nearZeroLiq ? " (effectively dead)" : ""}`,
         };
       }
     }
@@ -212,7 +212,7 @@ export const dexscreenerAdapter: Adapter = {
       ctx.emit({
         phase: "On-chain",
         label: `$${snap.symbol ?? p.ticker}`,
-        detail: `liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}, 24h vol $${Math.round(snap.volume24h ?? 0).toLocaleString()}${thin ? " — thin liquidity, rug-risk flag" : ""}`,
+        detail: `liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}, 24h vol $${Math.round(snap.volume24h ?? 0).toLocaleString()}${thin ? " (thin liquidity, rug-risk flag)" : ""}`,
         source: "dexscreener",
         tone: thin ? "warn" : "neutral",
       });

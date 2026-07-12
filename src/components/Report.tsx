@@ -119,7 +119,7 @@ function ScoreRing({ score, verdict, size = 86 }: { score: number | null; verdic
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="mono text-[22px] font-semibold leading-none tabular" style={{ color: m.color }}>
-          {score == null ? "—" : score}
+          {score == null ? "N/A" : score}
         </span>
         <span className="mono text-[10px] text-ink-faint">/ 100</span>
       </div>
@@ -292,7 +292,7 @@ function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing:
             <span>
               {coverageReady ? "raw" : "preliminary raw axis total"} {rr.raw_total} {rr.dox_bonus ? `+ ${rr.dox_bonus} bonus` : ""}
             </span>
-            <span className="mono">= {coverageReady ? "" : "preliminary "}{rr.score_total ?? "—"}{rr.cap_applied ? " (capped)" : ""}</span>
+            <span className="mono">= {coverageReady ? "" : "preliminary "}{rr.score_total ?? "N/A"}{rr.cap_applied ? " (capped)" : ""}</span>
           </div>
         </div>
       )}
@@ -1390,7 +1390,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
   const corroborationRows = [
     ...evidence.testimonials.map((t) => ({
-      who: t.claimed_endorser_handle ?? t.claimed_endorser_name ?? "—",
+      who: t.claimed_endorser_handle ?? t.claimed_endorser_name ?? "N/A",
       rel: t.claimed_relationship,
       follows: t.follows_subject,
       ack: t.public_acknowledgment,
@@ -1755,7 +1755,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               </p>
               {!presentation.final && f.headline && (
                 <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-                  <span className="text-ink-dim">Stored scored-evidence summary — not clearance:</span> {f.headline}
+                  <span className="text-ink-dim">Stored scored-evidence summary, not clearance:</span> {f.headline}
                 </p>
               )}
               {report.cap_applied && (
@@ -2038,8 +2038,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     <div key={i} className="flex items-start gap-2.5 px-4 py-3">
                       <span className="chip tint-var mt-0.5 shrink-0" style={{ "--tint": sc } as React.CSSProperties}>{c.severity}</span>
                       <div className="min-w-0 text-[12.5px] leading-snug">
-                        <span className="text-ink">{c.claim}</span>
-                        <span className="text-ink-faint"> — but </span>
+                        <span className="text-ink">{c.claim.replace(/[.!?]\s*$/, "")}</span>
+                        <span className="text-ink-faint">. Conflicting evidence: </span>
                         <span className="text-ink-dim">{c.conflict}</span>
                         {c.confidence === "low" && <span className="ml-1.5 text-[11px] text-ink-faint">(low confidence)</span>}
                       </div>
@@ -2473,7 +2473,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             const dom = (f.bio.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1] ?? "").toLowerCase();
             return showCurrentIntelligence && roles.some((r) => r === "PROJECT") && dom ? (
               <div className="min-w-0 lg:col-span-2">
-                <Section title="Project intelligence" kicker="domain age + claimed security audits — an established brand on a fresh domain is a contradiction">
+                <Section title="Project intelligence" kicker="domain age + claimed security audits; an established brand on a fresh domain is a contradiction">
                   <ProjectIntel domain={dom} />
                 </Section>
               </div>

@@ -116,7 +116,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
             {steps.slice(-5).map((s, i) => (
               <div key={i} className="flex gap-2 text-[11px]">
                 <span className="mt-1 h-1 w-1 shrink-0 rounded-full" style={{ background: TONE[s.tone ?? "neutral"] }} />
-                <span className="min-w-0"><span className="text-ink-dim">{s.label}</span>{s.detail && <span className="text-ink-faint"> — {s.detail}</span>}</span>
+                <span className="min-w-0"><span className="text-ink-dim">{s.label}</span>{s.detail && <span className="text-ink-faint">: {s.detail}</span>}</span>
               </div>
             ))}
           </div>
@@ -193,7 +193,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
       )}
 
       {cluster.budgetExhausted && (
-        <p className="mt-2 text-[11px] text-ink-faint">Trace hit its depth budget — more of the network may extend beyond what was walked here.</p>
+        <p className="mt-2 text-[11px] text-ink-faint">Trace hit its depth budget. More of the network may extend beyond what was walked here.</p>
       )}
     </div>
   );

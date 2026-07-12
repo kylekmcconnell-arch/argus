@@ -6,7 +6,7 @@ import { summarizeChecks, type ScanCheck, type CheckStatus } from "../lib/scanCh
 const META: Record<CheckStatus, { color: string; glyph: string; label: string }> = {
   confirmed: { color: "var(--color-pass)", glyph: "✓", label: "confirmed" },
   finding: { color: "var(--color-caution)", glyph: "▲", label: "finding" },
-  "checked-empty": { color: "var(--color-ink-faint)", glyph: "○", label: "checked — empty" },
+  "checked-empty": { color: "var(--color-ink-faint)", glyph: "○", label: "checked: empty" },
   "not-applicable": { color: "var(--color-ink-faint)", glyph: "⊘", label: "not applicable" },
   unknown: { color: "var(--color-ink-faint)", glyph: "?", label: "not run / unknown" },
   unavailable: { color: "var(--color-caution)", glyph: "⚠", label: "provider unavailable" },

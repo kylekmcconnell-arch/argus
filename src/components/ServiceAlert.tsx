@@ -39,7 +39,7 @@ export function ServiceAlert() {
     <div className="finding tint-avoid mb-4 px-4 py-3">
       <div className="flex items-center gap-2 text-[13.5px] font-semibold text-avoid">
         <span className="text-[15px]">⚠</span>
-        {down.length === 1 ? `${down[0].label} is unavailable — this report has reduced coverage` : `${down.length} providers are unavailable — this report has reduced coverage`}
+        {down.length === 1 ? `${down[0].label} is unavailable. This report has reduced coverage.` : `${down.length} providers are unavailable. This report has reduced coverage.`}
       </div>
       <div className="mt-1.5 space-y-1">
         {down.map((s) => (
@@ -51,7 +51,7 @@ export function ServiceAlert() {
         ))}
       </div>
       <p className="mt-1.5 text-[12.5px] text-ink-faint">
-        Deep digs (team search, portfolios, namesake, identity) depend on these — rescan after configuration is restored.
+        Deep digs (team search, portfolios, namesake, identity) depend on these. Rescan after configuration is restored.
       </p>
     </div>
   );

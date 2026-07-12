@@ -85,7 +85,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
           <h1 className="display-sm text-[24px] text-ink">Audit log</h1>
           <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
             Every query that runs through ARGUS, with the verdict it returned and where coverage fell short. Your
-            own record to check the engine against — and the seed of the data asset: a growing, queryable history
+            own record to check the engine against. It is also the seed of the data asset: a growing, queryable history
             of who and what has been audited.
           </p>
         </div>
@@ -93,7 +93,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
           <button
             onClick={onRecategorize}
             disabled={recat === "running"}
-            title="Re-file every audited person under the current role taxonomy (Founder / Project / KOL / VC) from their stored summaries — no audits are rerun, scores stay"
+            title="Re-file every audited person under the current role taxonomy (Founder / Project / KOL / VC) from their stored summaries. No audits are rerun and scores stay the same."
             className="btn-chip tint-signal shrink-0 disabled:opacity-60"
           >
             {recat === "running" ? "recategorizing…" : "recategorize roles"}

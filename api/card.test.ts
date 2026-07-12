@@ -106,9 +106,9 @@ describe("public immutable report card", () => {
     expect(captured.body).toContain("PRELIMINARY MODEL SIGNAL · PASS 94/100");
     expect(captured.body).toContain("PARTIAL COVERAGE");
     expect(captured.body).not.toContain('<div class="label">VERDICT</div><div class="verdict">PASS</div>');
-    expect(captured.body).toContain("<title>@alice — INCOMPLETE · investigation incomplete · ARGUS</title>");
+    expect(captured.body).toContain("<title>@alice · INCOMPLETE · investigation incomplete · ARGUS</title>");
     expect(captured.body).toContain(
-      '<meta property="og:title" content="@alice — INCOMPLETE · investigation incomplete · ARGUS"/>',
+      '<meta property="og:title" content="@alice · INCOMPLETE · investigation incomplete · ARGUS"/>',
     );
     expect(captured.body).toContain(
       '<meta name="description" content="Evidence coverage is incomplete. Do not treat the preliminary score as investment clearance.',

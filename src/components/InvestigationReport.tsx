@@ -46,7 +46,7 @@ const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 const MAX_FOUNDER_AUDITS = 5;
 
 function money(n?: number): string {
-  if (n == null) return "—";
+  if (n == null) return "N/A";
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
   if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
   if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
@@ -374,7 +374,7 @@ export function InvestigationReport({
             </span>
             {positiveVerdictNeedsQualification && (
               <span className="mono text-[11px]" style={{ color: preliminaryTokenMeta.color }}>
-                preliminary model signal · {preliminaryTokenMeta.label} {token.score ?? "—"}
+                preliminary model signal · {preliminaryTokenMeta.label} {token.score ?? "N/A"}
               </span>
             )}
             {projectAccount && projectReadiness && (
@@ -390,7 +390,7 @@ export function InvestigationReport({
           {/* Lead with the TEAM when we know it — don't declare "no team" when it's named below. */}
           {teamPeople.length > 0 ? (
             <p className="mt-3 max-w-3xl text-[13.5px] font-medium leading-relaxed text-ink">
-              Built by {teamPeople.slice(0, 3).map((p) => p.name).filter(Boolean).join(", ")}{teamPeople.length > 3 ? ` +${teamPeople.length - 3} more` : ""}{projectX ? ` · project account ${projectX}` : ""} — full team below.
+              Built by {teamPeople.slice(0, 3).map((p) => p.name).filter(Boolean).join(", ")}{teamPeople.length > 3 ? ` +${teamPeople.length - 3} more` : ""}{projectX ? ` · project account ${projectX}` : ""}. Full team below.
             </p>
           ) : (
             <p className="mt-3 max-w-3xl text-[13.5px] font-medium leading-relaxed text-ink">{inv.founderNote}</p>

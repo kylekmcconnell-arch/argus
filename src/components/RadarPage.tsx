@@ -7,7 +7,7 @@ const RANK: Record<string, number> = { AVOID: 4, FAIL: 3, CAUTION: 2, PASS: 1 };
 const SCAN_LIMIT = 16;
 
 function money(n?: number): string {
-  if (n == null) return "—";
+  if (n == null) return "N/A";
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(1) + "B";
   if (n >= 1e6) return "$" + (n / 1e6).toFixed(1) + "M";
   if (n >= 1e3) return "$" + (n / 1e3).toFixed(0) + "K";

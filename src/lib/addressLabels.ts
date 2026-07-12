@@ -6,7 +6,7 @@
 // "wallet"). Curated addresses are high-confidence only (famous, stable); anything
 // unknown falls through to the address, never a wrong label.
 const lc = (a: string) => a.toLowerCase();
-export const shortAddr = (a: string) => (a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || "—");
+export const shortAddr = (a: string) => (a && a.length > 12 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a || "N/A");
 
 // Burn / null sinks — supply here is effectively destroyed, a GOOD sign, not a whale.
 const BURN = new Set<string>([

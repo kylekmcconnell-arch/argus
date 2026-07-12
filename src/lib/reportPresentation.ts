@@ -281,7 +281,7 @@ export function exactReportPath(reportVersionId: string): string {
 export function publicReportTitle(subject: string, presentation: PublicReportPresentation): string {
   const score = presentation.primaryScore ? ` · ${presentation.primaryScore}/100` : "";
   const readiness = presentation.final ? "" : ` · ${presentation.readinessLabel.toLowerCase()}`;
-  return `${subject} — ${presentation.displayVerdict}${score}${readiness} · ARGUS`;
+  return `${subject} · ${presentation.displayVerdict}${score}${readiness} · ARGUS`;
 }
 
 export function publicReportDescription(

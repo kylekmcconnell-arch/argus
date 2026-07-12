@@ -150,7 +150,7 @@ data: { ...full dossier... }`}
       <h2 className="mt-7 text-[13.5px] font-semibold tracking-tight text-ink">Recipes</h2>
       <div className="mt-2 space-y-4">
         <div>
-          <div className="text-[12.5px] text-ink-dim">JavaScript — flag a token before you ape</div>
+          <div className="text-[12.5px] text-ink-dim">JavaScript · flag a token before you ape</div>
           <Block code={`const a = await (await fetch(\n  "${BASE}/api/v1/token?address=" + addr,\n  { headers: { Authorization: "Bearer " + ARGUS_ACCESS_TOKEN } }\n)).json();\nif (a.verdict === "AVOID" || a.verdict === "FAIL")\n  alert(\`⚠ $\{a.symbol}: $\{a.headline}\`);`} />
         </div>
         <div>
@@ -158,7 +158,7 @@ data: { ...full dossier... }`}
           <Block code={`import os, requests\na = requests.get("${BASE}/api/v1/token",\n  params={"address": addr},\n  headers={"Authorization": "Bearer " + os.environ["ARGUS_ACCESS_TOKEN"]}).json()\nprint(a["verdict"], a["score"], a["headline"])`} />
         </div>
         <div>
-          <div className="text-[12.5px] text-ink-dim">Telegram bot — reply with a verdict on any contract</div>
+          <div className="text-[12.5px] text-ink-dim">Telegram bot · reply with a verdict on any contract</div>
           <Block code={`bot.onText(/^\\/audit (.+)/, async (msg, m) => {\n  const a = await (await fetch(\n    "${BASE}/api/v1/token?address=" + m[1],\n    { headers: { Authorization: "Bearer " + process.env.ARGUS_ACCESS_TOKEN } }\n  )).json();\n  bot.sendMessage(msg.chat.id,\n    \`$\{a.symbol}: $\{a.verdict} $\{a.score}/100\\n$\{a.headline}\`);\n});`} />
         </div>
       </div>

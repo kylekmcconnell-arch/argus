@@ -170,7 +170,7 @@ describe("public report presentation policy", () => {
     expect(publicScoreLabel("")).toBe("");
     expect(exactReportPath("version/id with spaces")).toBe("/?version=version%2Fid%20with%20spaces");
     expect(publicReportTitle("@alice", presentation)).toBe(
-      "@alice — INCOMPLETE · investigation incomplete · ARGUS",
+      "@alice · INCOMPLETE · investigation incomplete · ARGUS",
     );
     expect(publicReportDescription("Strong operator.", "SERVER-COLLECTED REPORT", presentation)).toMatch(
       /^Evidence coverage is incomplete\. Do not treat the preliminary score as investment clearance\./,

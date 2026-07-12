@@ -150,9 +150,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const tone: "good" | "warn" | "bad" = danger.length ? "bad" : warn.length ? "warn" : "good";
     const line = danger.length
-      ? `The deployed code exposes ${danger.map((c) => c.name.split("(")[0]).join(", ")} — a callable ${danger.length === 1 ? "path" : "set of paths"} that can ${danger.some((c) => c.name.startsWith("mint")) ? "dilute holders" : "freeze or seize holdings"} after launch.`
+      ? `The deployed code exposes ${danger.map((c) => c.name.split("(")[0]).join(", ")}. This provides a callable ${danger.length === 1 ? "path" : "set of paths"} that can ${danger.some((c) => c.name.startsWith("mint")) ? "dilute holders" : "freeze or seize holdings"} after launch.`
       : warn.length
-        ? `The code can ${warn.map((c) => c.name.split("(")[0]).join("/")} — a trading-control switch worth confirming is renounced.`
+        ? `The code can ${warn.map((c) => c.name.split("(")[0]).join("/")}. Confirm that this trading-control switch is renounced.`
         : isToken
           ? `Standard token surface${implementation ? " (implementation behind a proxy)" : ""}: no callable mint, blacklist, or pause found in the deployed code.`
           : "Contract code fingerprinted; no standard ERC-20 transfer selector found (non-standard token or an unrecognised proxy).";

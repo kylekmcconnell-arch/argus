@@ -91,7 +91,7 @@ export function ProjectDocs({
 
       {nothing ? (
         <p className="mt-2 text-[12.5px] leading-relaxed text-caution">
-          {data.note ?? "No whitepaper, documentation, or security audit found — for a project raising money, that absence is itself a flag."}
+          {data.note ?? "No whitepaper, documentation, or security audit found. For a project raising money, that absence is itself a flag."}
         </p>
       ) : (
         <div className="mt-2.5 space-y-2.5">
@@ -132,7 +132,7 @@ export function ProjectDocs({
             </div>
           )}
           {wp && !audits.length && (
-            <p className="text-[11px] leading-snug text-caution">Whitepaper found, but no security audit surfaced — worth confirming before trusting the contract.</p>
+            <p className="text-[11px] leading-snug text-caution">Whitepaper found, but no security audit surfaced. Confirm this before trusting the contract.</p>
           )}
         </div>
       )}

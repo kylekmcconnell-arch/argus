@@ -45,7 +45,7 @@ export function ChangelogPage() {
       <div className="mt-3 flex flex-wrap items-center gap-2 text-[12.5px]">
         <span className="chip tint-signal">{kyleCount} Kyle</span>
         <span className="chip">{otherCount} Enigma / others</span>
-        {otherCount === 0 && <span className="text-ink-faint">— once Enigma commits under his own git name, his pushes split out here.</span>}
+        {otherCount === 0 && <span className="text-ink-faint">Once Enigma commits under his own git name, his pushes split out here.</span>}
       </div>
 
       <div className="mt-6 space-y-6">

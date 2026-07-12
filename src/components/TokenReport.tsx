@@ -45,7 +45,7 @@ import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
 function money(n?: number): string {
-  if (n == null) return "—";
+  if (n == null) return "N/A";
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
   if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
   if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
@@ -65,7 +65,7 @@ function Ring({ score, verdict, color, size = 96 }: { score: number | null; verd
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={ringColor} strokeWidth="4" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} style={{ transition: "stroke-dashoffset 0.8s ease-out" }} />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="mono text-[24px] font-semibold leading-none tabular" style={{ color: ringColor }}>{score ?? "—"}</span>
+        <span className="mono text-[24px] font-semibold leading-none tabular" style={{ color: ringColor }}>{score ?? "N/A"}</span>
         <span className="mono text-[10px] text-ink-faint">/ 100</span>
       </div>
     </div>
@@ -112,7 +112,7 @@ function tokenReportText(
   presentation: PublicReportPresentation,
   evidence?: { reportVersionId?: string; version?: number; privateSession?: boolean },
 ): string {
-  const moneyShort = (n?: number) => (n == null ? "—" : n >= 1e9 ? "$" + (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(0) + "K" : "$" + Math.round(n));
+  const moneyShort = (n?: number) => (n == null ? "N/A" : n >= 1e9 ? "$" + (n / 1e9).toFixed(1) + "B" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + (n / 1e3).toFixed(0) + "K" : "$" + Math.round(n));
   const age = d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : "?";
   const findings = [...d.findings]
     .sort((a, b) => (TONE_RANK[b.tone] ?? 0) - (TONE_RANK[a.tone] ?? 0))
@@ -122,17 +122,17 @@ function tokenReportText(
     ? `${location.origin}/?version=${encodeURIComponent(evidence.reportVersionId)}`
     : null;
   const provenance = evidence?.version
-    ? `— ARGUS immutable snapshot v${evidence.version}`
+    ? `· ARGUS immutable snapshot v${evidence.version}`
     : evidence?.reportVersionId
-      ? "— ARGUS immutable scan"
+      ? "· ARGUS immutable scan"
       : evidence?.privateSession
-        ? "— private live ARGUS session"
-        : "— live ARGUS analysis";
+        ? "· private live ARGUS session"
+        : "· live ARGUS analysis";
   return [
-    `$${d.symbol} — ${presentation.resultLabel}: ${presentation.displayVerdict} · ${d.chain}${d.capApplied ? ` (cap: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
+    `$${d.symbol} · ${presentation.resultLabel}: ${presentation.displayVerdict} · ${d.chain}${d.capApplied ? ` (cap: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
     presentation.readinessLabel,
     `${readiness.successful}/${readiness.applicable} evidence outcomes recorded · ${readiness.unresolved} unresolved · ${readiness.coveragePercent}% coverage`,
-    `Stored model output: ${d.verdict} ${d.score ?? "—"}/100`,
+    `Stored model output: ${d.verdict} ${d.score ?? "N/A"}/100`,
     presentation.note,
     d.headline,
     "",
@@ -426,7 +426,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 {presentation.final ? d.headline : presentation.note}
               </p>
               <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-                {presentation.final ? readiness.guidance : <>Stored scored-evidence summary — not clearance: {d.headline}</>}
+                {presentation.final ? readiness.guidance : <>Stored scored-evidence summary, not clearance: {d.headline}</>}
               </p>
               {d.capApplied && (
                 <div className="chip tint-avoid mt-3 font-medium">
@@ -502,7 +502,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               <div key={l} className="stat-tile text-center">
                 <div className="stat-label">{l}</div>
                 <div className="mono mt-0.5 text-[13.5px]" style={{ color: v == null ? "var(--color-ink-faint)" : v >= 0 ? "var(--color-pass)" : "var(--color-avoid)" }}>
-                  {v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1) + "%"}
+                  {v == null ? "N/A" : (v > 0 ? "+" : "") + v.toFixed(1) + "%"}
                 </div>
               </div>
             ))}
@@ -635,7 +635,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         {/* team & provenance + unified graph */}
         <div id="token-relationships" className="scroll-mt-28 mt-3 grid gap-3 lg:grid-cols-2">
           <Card title="Team & provenance">
-            <div className="mb-1 text-[11px] leading-snug text-ink-faint">Vet the people behind it — these run a full audit of the project's account and site.</div>
+            <div className="mb-1 text-[11px] leading-snug text-ink-faint">Vet the people behind it. These run a full audit of the project's account and site.</div>
             {d.projectX ? (
               <div className="flex items-center justify-between gap-2 py-1.5">
                 <span className="text-[12.5px] text-ink-dim">Project X account</span>

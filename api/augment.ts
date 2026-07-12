@@ -406,7 +406,7 @@ async function corroborate(effectiveType: string, subject: string, graphKey?: st
 // Discord / Zapier→email) and/or a Resend email; if neither is set it just queues,
 // visible in the AdminOps approval view.
 async function notifyPending(subject: string, item: Augmentation): Promise<void> {
-  const summary = `${item.rel ? `link (${item.rel}) → ` : ""}${item.label}${item.detail ? ` — ${item.detail}` : ""}`;
+  const summary = `${item.rel ? `link (${item.rel}) → ` : ""}${item.label}${item.detail ? `: ${item.detail}` : ""}`;
   const line = `ARGUS pending edit on ${subject}: ${summary} (by ${item.by}). ${item.why ?? ""} Approve or deny in AdminOps.`;
   const hook = process.env.ARGUS_EDIT_WEBHOOK;
   if (hook) { try { await fetch(hook, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ text: line, subject, item }), signal: AbortSignal.timeout(6000) }); } catch { /* */ } }
@@ -428,7 +428,7 @@ async function diagnose(subject: string, item: Augmentation): Promise<{ reason: 
       body: JSON.stringify({
         model: process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6",
         max_tokens: 400,
-        system: "You are ARGUS, an automated crypto due-diligence engine, improving your OWN pipeline. An analyst just approved a true fact that your automated scan of a subject FAILED to surface. Diagnose it. Reply with ONLY compact JSON {\"reason\":\"...\",\"fix\":\"...\"}: reason = the single most likely reason an automated scan missed this, one sentence; fix = ONE concrete, specific, implementable change to the scan pipeline that would catch this class of thing next time — name the data source, search, or check to add or adjust, one actionable sentence. No text outside the JSON.",
+        system: "You are ARGUS, an automated crypto due-diligence engine, improving your OWN pipeline. An analyst just approved a true fact that your automated scan of a subject FAILED to surface. Diagnose it. Reply with ONLY compact JSON {\"reason\":\"...\",\"fix\":\"...\"}: reason = the single most likely reason an automated scan missed this, one sentence; fix = ONE concrete, specific, implementable change to the scan pipeline that would catch this class of thing next time. Name the data source, search, or check to add or adjust in one actionable sentence. No text outside the JSON.",
         messages: [{ role: "user", content: `Subject: ${subject}\nMissed fact (analyst-verified): ${fact}` }],
       }),
       signal: AbortSignal.timeout(22000),

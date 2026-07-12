@@ -59,7 +59,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // clusters + top-10 are the story. On a mega-holder token the transfer graph
     // balloons and the top-10 is exchanges, so we don't alarm on either.
     if (!large) {
-      if (insidersDetected >= 15 && insiderClusteredPct >= 30) { bump("bad"); bits.push(`${insidersDetected.toLocaleString()} wallets funded from a common source hold ${insiderClusteredPct.toFixed(0)}% of supply — one hidden hand`); }
+      if (insidersDetected >= 15 && insiderClusteredPct >= 30) { bump("bad"); bits.push(`${insidersDetected.toLocaleString()} wallets funded from a common source hold ${insiderClusteredPct.toFixed(0)}% of supply. This suggests one hidden hand`); }
       else if (insidersDetected >= 15 && insiderClusteredPct >= 12) { bump("warn"); bits.push(`${insidersDetected.toLocaleString()} connected wallets cluster ${insiderClusteredPct.toFixed(0)}% of supply`); }
       if (top10 >= 60) { bump("bad"); bits.push(`top 10 wallets hold ${top10.toFixed(0)}% of a thin base of ${totalHolders.toLocaleString()} holders`); }
       else if (top10 >= 40) { bump("warn"); bits.push(`top 10 hold ${top10.toFixed(0)}% (only ${totalHolders.toLocaleString()} holders)`); }

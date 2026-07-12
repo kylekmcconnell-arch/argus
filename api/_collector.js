@@ -1235,7 +1235,7 @@ var lumen = {
     // FOUNDER
     { axis: "F1_identity_verifiability", score: 7, rationale: "Pseudonymous but a stable on-chain identity since 2021; no impersonation." },
     { axis: "F2_track_record", score: 22, rationale: "One verified strategic exit (Meridian \u2192 Chainforge, $28M). Current build is active and real." },
-    { axis: "F3_repeat_backing", score: 11, rationale: "Dragonfly backed both Meridian and Lumen \u2014 a returning backer from a successful exit (strong signal)." },
+    { axis: "F3_repeat_backing", score: 11, rationale: "Dragonfly backed both Meridian and Lumen, a returning backer from a successful exit (strong signal)." },
     { axis: "F4_build_substance", score: 12, rationale: "Active GitHub org with original commits; shipped product." },
     { axis: "F5_reputation_integrity", score: 11, rationale: "Clean as a builder; the advisory-rug finding is scored under the advisor role." },
     { axis: "F6_network_quality", score: 8, rationale: "Credible co-investors; one cabal-adjacent associate (ZenithDAO)." },
@@ -1248,13 +1248,13 @@ var lumen = {
     // ADVISOR
     { axis: "AD1_identity_verifiability", score: 7, rationale: "Same stable pseudonym." },
     { axis: "AD2_advised_outcomes", score: 9, rationale: "Advisory graveyard: one active (Helix), one confirmed rug (ZenithDAO)." },
-    { axis: "AD3_relationship_corroboration", score: 18, rationale: "Both advised projects publicly acknowledge the relationship \u2014 the claims are real." },
+    { axis: "AD3_relationship_corroboration", score: 18, rationale: "Both advised projects publicly acknowledge the relationship, confirming that the claims are real." },
     { axis: "AD4_advisory_conduct", score: 8, rationale: "Held a vested allocation in ZenithDAO; allocation conduct around the rug is the concern." },
     { axis: "AD5_reputation_fud", score: 9, rationale: "Named in post-rug community threads about ZenithDAO advisors." }
   ],
   trace: [
     { phase: "P0 \xB7 Intake", label: "Resolve handle", detail: "@0xlumen \u2192 canonical key. Cross-referencing roster KB across 1,204 entries.", tone: "neutral" },
-    { phase: "P0 \xB7 Routing", label: "Classify roles", detail: "Bio signals: founder, GP, advisor. Routed to 3 tracks \u2014 FOUNDER, INVESTOR, ADVISOR.", tone: "neutral" },
+    { phase: "P0 \xB7 Routing", label: "Classify roles", detail: "Bio signals: founder, GP, advisor. Routed to 3 tracks: FOUNDER, INVESTOR, ADVISOR.", tone: "neutral" },
     { phase: "P1 \xB7 Identity", label: "Identity check", detail: "Persistent pseudonym since 2021, consistent on-chain footprint. No impersonation. Scored on merits.", tone: "good" },
     { phase: "Founder", label: "Enumerate ventures", detail: "Meridian Labs \u2192 acquired by Chainforge ($28M strategic). Verified against acquirer press.", source: "chainforge.xyz", tone: "good" },
     { phase: "Founder", label: "Repeat-backing", detail: "Dragonfly backed Meridian (exit) and re-backed Lumen. Strongest positive signal in venture.", tone: "good" },
@@ -1293,7 +1293,7 @@ var satoshi = {
   ],
   trace: [
     { phase: "P0 \xB7 Intake", label: "Resolve handle", detail: "@satoshi_builds \u2192 canonical key. No roster KB hit (not a paid promoter).", tone: "neutral" },
-    { phase: "P0 \xB7 Routing", label: "Classify roles", detail: "Bio signals founder/CEO. Single track \u2014 FOUNDER.", tone: "neutral" },
+    { phase: "P0 \xB7 Routing", label: "Classify roles", detail: "Bio signals founder/CEO. Single track: FOUNDER.", tone: "neutral" },
     { phase: "P1 \xB7 Identity", label: "Identity check", detail: "Doxxed, decade of consistent press + LinkedIn. Confirmed \u2192 +5 disclosure bonus.", tone: "good" },
     { phase: "Founder", label: "Enumerate ventures", detail: "Northwind \u2192 Stripe (acq.). Loom Data \u2192 IPO. Both verified against primary sources.", source: "sec.gov \xB7 stripe.com", tone: "good" },
     { phase: "Founder", label: "Repeat-backing", detail: "Sequoia + Index backed both wins and re-backed the current company. Strong.", tone: "good" },
@@ -1329,8 +1329,8 @@ var nova = {
     { axis: "I5_reputation_fud", score: 11, rationale: "Emerging founder complaints about misrepresented relationships." }
   ],
   trace: [
-    { phase: "P0 \xB7 Intake", label: "Resolve handle", detail: "@nova_capital \u2192 canonical key. Account created Sep 2023 vs. '40+ winners' claim \u2014 flag the mismatch.", tone: "warn" },
-    { phase: "P0 \xB7 Routing", label: "Classify roles", detail: "Fund / investor signals. Single track \u2014 INVESTOR.", tone: "neutral" },
+    { phase: "P0 \xB7 Intake", label: "Resolve handle", detail: "@nova_capital \u2192 canonical key. Account created Sep 2023 vs. '40+ winners' claim. Flag the mismatch.", tone: "warn" },
+    { phase: "P0 \xB7 Routing", label: "Classify roles", detail: "Fund / investor signals. Single track: INVESTOR.", tone: "neutral" },
     { phase: "P1 \xB7 Identity", label: "Identity check", detail: "Named partner, thin footprint. Probable \u2192 +3 bonus. Not gated.", tone: "neutral" },
     { phase: "Investor", label: "Portfolio reality", detail: "Claimed 40+ winners. Cross-referencing Pitchbook / Crunchbase / AngelList\u2026 most entries absent.", source: "pitchbook", tone: "warn" },
     { phase: "Investor", label: "Corroborate endorsements", detail: "4 marquee testimonials on novacap.io/founders. Locating each endorser's account\u2026", tone: "neutral" },
@@ -1352,7 +1352,7 @@ var delta = {
   build: (a) => {
     a.addClientEngagement({ client_name: "Pulsechain memecoins (12)", service_type: "market_making", manipulation_service_flag: true, notes: "Wash-trading packages sold as 'volume' tiers.", evidence_url: "https://x.com/zachxbt/delta-volume" });
     a.addClientEngagement({ client_name: "Various", service_type: "raids", manipulation_service_flag: true, notes: "Coordinated bot raids + fake engagement marketed openly.", client_outcome: "SilentShutdown" /* SILENT_SHUTDOWN */ });
-    a.addClientEngagement({ client_name: "ZenithDAO", service_type: "market_making", manipulation_service_flag: true, notes: "Sold 'volume' for ZenithDAO in the weeks before its LP was drained \u2014 the same project @0xlumen advised.", evidence_url: "https://x.com/zachxbt/delta-volume" });
+    a.addClientEngagement({ client_name: "ZenithDAO", service_type: "market_making", manipulation_service_flag: true, notes: "Sold 'volume' for ZenithDAO in the weeks before its LP was drained. This is the same project @0xlumen advised.", evidence_url: "https://x.com/zachxbt/delta-volume" });
     a.addFinding({ finding_type: "InvestigatorCallout", claim: "Sells wash trading and bot engagement as productized 'volume' and 'trending' tiers.", source_url: "https://x.com/zachxbt/delta-volume", source_date: "2024-12-03", verification_status: "Verified", independent_source_count: 2, source_author: "@zachxbt", polarity: -1 });
     a.addAssociate({ associate_handle: "@vexnode", relation: "repeat-client", in_cabal_kb: true });
   },
@@ -1364,8 +1364,8 @@ var delta = {
   ],
   trace: [
     { phase: "P0 \xB7 Intake", label: "Resolve handle", detail: "@deltagrowth \u2192 canonical key. Treated as a contractor, not a principal.", tone: "neutral" },
-    { phase: "P0 \xB7 Routing", label: "Classify roles", detail: "Agency / growth / market-making signals. Single track \u2014 AGENCY.", tone: "neutral" },
-    { phase: "Agency", label: "Service integrity", detail: "Site openly sells 'volume' and 'trending' tiers \u2014 parsing for manipulation services\u2026", tone: "warn" },
+    { phase: "P0 \xB7 Routing", label: "Classify roles", detail: "Agency / growth / market-making signals. Single track: AGENCY.", tone: "neutral" },
+    { phase: "Agency", label: "Service integrity", detail: "Site openly sells 'volume' and 'trending' tiers. Parsing for manipulation services\u2026", tone: "warn" },
     { phase: "Agency", label: "Manipulation confirmed", detail: "Wash trading + bot raids productized. Investigator-verified (@zachxbt, 2 sources). Cap fires (10).", source: "x.com/zachxbt", tone: "bad" },
     { phase: "Finalize", label: "Score & band", detail: "Manipulation-as-a-service is a hard cap at 10. A clean brand cannot lift it. AVOID.", tone: "bad" }
   ]
@@ -1385,8 +1385,8 @@ function emptyEvidence(handle) {
       display_name: u,
       avatar: u.slice(0, 1).toUpperCase(),
       bio: "",
-      followers: "\u2014",
-      joined: "\u2014",
+      followers: "N/A",
+      joined: "N/A",
       identity_confidence: "Unverified",
       identity_note: "No identity resolution available.",
       profile_collection_state: "unavailable"
@@ -2086,7 +2086,7 @@ async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4)
   return block?.input ?? null;
 }
 async function extractClaims(handle, bio, posts) {
-  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization \u2014 a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official brand account), a GP/partner/principal at one, or an angel with NAMED, verifiable investments (led or joined specific rounds). Buying/trading tokens, 'investing in gems', or calling oneself an investor with no documented deals is NOT INVESTOR \u2014 a caller who trades is a KOL, nothing more. Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts shipping a product/token, not allocating capital); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token, and do not tag INVESTOR merely for trading talk. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, listing each ticker once with its contract address and chain when a chart link or CA is present. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
+  const system = "You are ARGUS intake. From a subject's own bio and recent posts, extract the claims they make about themselves so they can be verified later. Capture CLAIMS ONLY, never judge truth. Roles drawn from: FOUNDER, PROJECT, KOL, INVESTOR, ADVISOR, AGENCY, MEMBER. Classify the ACCOUNT TYPE precisely: PROJECT = the account IS an organization: a token, protocol, product, company, or DAO's own brand/official handle (usually named after the project, speaks as 'we/our', ships and promotes its OWN single token/product). FOUNDER = an individual PERSON who founded or leads a project (a personal account, speaks as 'I'). KOL = an influencer/caller whose activity is promoting OTHER people's tokens across MANY different projects (calls, alpha, gems, paid shills for others), NOT their own. INVESTOR = PROFESSIONAL capital allocation ONLY: an actual fund/VC/syndicate (or its official brand account), a GP/partner/principal at one, or an angel with NAMED, verifiable investments (led or joined specific rounds). Buying/trading tokens, 'investing in gems', or calling oneself an investor with no documented deals is NOT INVESTOR. A caller who trades is a KOL, nothing more. Decisive rules: a brand account promoting its own token is PROJECT (never KOL); an investment firm's brand account is INVESTOR, NOT PROJECT (PROJECT is for accounts shipping a product/token, not allocating capital); an individual builder is FOUNDER; only tag KOL when they shill multiple external tokens they did not build. A subject can hold several roles, but do not tag KOL merely for hype words or for promoting the project's own token, and do not tag INVESTOR merely for trading talk. Ventures = companies/projects they say they founded or led. Testimonials = named people/accounts they cite as backers or endorsers. Advised = projects they claim to advise. Promotions = tokens/tickers they shill; for a prolific caller capture EVERY distinct token they promoted (each cashtag / chart-link post is a call), not just a few, listing each ticker once with its contract address and chain when a chart link or CA is present. Use the @handle form for accounts. Omit anything not actually claimed. Never use em dashes.";
   const user = `Subject: ${handle}
 Bio: ${bio || "(none)"}
 
@@ -2142,7 +2142,7 @@ var lvl = (s) => {
   return v === "high" ? "high" : v === "low" ? "low" : "medium";
 };
 async function scanContradictions(handle, evidenceJson, options = {}) {
-  const system = "You are ARGUS contradiction analysis. From everything collected about a subject, find INTERNAL CONTRADICTIONS: where the subject's own stated claims conflict with each other or with the collected evidence. Examples: claims a team of N but only one builder is found; claims an audit but no auditor or verification exists; claims a named backer who never acknowledges them; a stated launch/founding date that conflicts with the account age, domain age, or on-chain history; claims 'doxxed' but no real identity resolves; claims locked liquidity that on-chain shows unlocked; a partnership the partner never confirmed; a venture in the bio that discovery found no evidence for. Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes. SCOPE RULES \u2014 these are NOT contradictions: (1) ARGUS's OWN analysis metadata (fields like identity_confidence, identity_note, verdicts, evidence notes such as 'single-source lead, unverified') disagreeing with other ARGUS fields \u2014 only the SUBJECT's outward claims vs external facts count; a low-confidence evidence note is a gap, not a conflict. (2) Normal vertical integration: a project's token running on its own chain, its dApp on its own platform, or its products naming each other is how ecosystems work, not circularity. (3) Marketing self-description ('#1', 'leading') vs modest traction is puffery to note in scoring, not a contradiction, unless it conflicts with a specific verifiable fact. INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this evidence packet. Do not infer anything about the subject from their absence. FINDING ATTRIBUTION RULE: when comparing or interpreting finding collections, attribute only direct-subject findings to the audited subject. A claim targeting an associate or venture cannot contradict the subject's claims unless separate direct-subject evidence explicitly connects the conduct to the subject. Never rewrite an associate's allegation as the subject's allegation. This attribution rule is specific to finding collections; profile, team, wallet, check-outcome, and other non-finding evidence in the packet remain legitimate evidence for testing the subject's claims.";
+  const system = "You are ARGUS contradiction analysis. From everything collected about a subject, find INTERNAL CONTRADICTIONS: where the subject's own stated claims conflict with each other or with the collected evidence. Examples: claims a team of N but only one builder is found; claims an audit but no auditor or verification exists; claims a named backer who never acknowledges them; a stated launch/founding date that conflicts with the account age, domain age, or on-chain history; claims 'doxxed' but no real identity resolves; claims locked liquidity that on-chain shows unlocked; a partnership the partner never confirmed; a venture in the bio that discovery found no evidence for. Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes. SCOPE RULES: these are NOT contradictions: (1) ARGUS's OWN analysis metadata (fields like identity_confidence, identity_note, verdicts, evidence notes such as 'single-source lead, unverified') disagreeing with other ARGUS fields. Only the SUBJECT's outward claims vs external facts count; a low-confidence evidence note is a gap, not a conflict. (2) Normal vertical integration: a project's token running on its own chain, its dApp on its own platform, or its products naming each other is how ecosystems work, not circularity. (3) Marketing self-description ('#1', 'leading') vs modest traction is puffery to note in scoring, not a contradiction, unless it conflicts with a specific verifiable fact. INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this evidence packet. Do not infer anything about the subject from their absence. FINDING ATTRIBUTION RULE: when comparing or interpreting finding collections, attribute only direct-subject findings to the audited subject. A claim targeting an associate or venture cannot contradict the subject's claims unless separate direct-subject evidence explicitly connects the conduct to the subject. Never rewrite an associate's allegation as the subject's allegation. This attribution rule is specific to finding collections; profile, team, wallet, check-outcome, and other non-finding evidence in the packet remain legitimate evidence for testing the subject's claims.";
   const user = `Subject: ${handle}
 
 Collected evidence (JSON):
@@ -4664,7 +4664,7 @@ async function acknowledgments(endorsers, subject) {
   const list = [...new Set(endorsers.map((e) => e.replace(/^@/, "")).filter(Boolean))];
   if (!key || !list.length) return out;
   const s = subject.replace(/^@/, "");
-  const system = "You generate endorsement-verification leads for a due-diligence collector, with live web and X search. For EACH listed account, surface the strongest candidate public acknowledgment that account may have made of @" + s + ' on X, its sentiment, and the exact post URL. This is discovery only: do not call a relationship corroborated or contradicted. Without a direct post URL, return ack=none and sentiment=none. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none","source_url":"https://x.com/.../status/..."}]} \u2014 one entry per listed account, never invent posts.';
+  const system = "You generate endorsement-verification leads for a due-diligence collector, with live web and X search. For EACH listed account, surface the strongest candidate public acknowledgment that account may have made of @" + s + ' on X, its sentiment, and the exact post URL. This is discovery only: do not call a relationship corroborated or contradicted. Without a direct post URL, return ack=none and sentiment=none. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none","source_url":"https://x.com/.../status/..."}]}. Provide one entry per listed account and never invent posts.';
   const text2 = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
   if (!text2) return out;
   const m = text2.match(/\{[\s\S]*\}/);
@@ -4687,9 +4687,9 @@ async function acknowledgments(endorsers, subject) {
 }
 async function discoverAffiliations(handle, name, oldHandles = []) {
   const h = handle.replace(/^@/, "");
-  const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")} \u2014 search posts mentioning those old handles too.` : "";
-  const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Work BOTH angles: (1) what the person's own footprint shows \u2014 accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, Crunchbase, beyond their bio and LinkedIn; (2) reverse mentions \u2014 project/company accounts that ever NAMED, TAGGED, or ANNOUNCED this person as a founder/team member (co-founder announcements and 'meet the team' posts are often YEARS old, on the project's timeline, search historical posts). There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
-  const text2 = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Every company or project they have founded, led, worked at, contributed to, or advised, however small the role \u2014 from their own footprint AND from project accounts announcing them. Be exhaustive: a serial operator often has 5-15 ventures across years; keep searching until you have run down every lead. Search the web and X including historical posts.`, { maxToolCalls: 10, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
+  const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")}. Search posts mentioning those old handles too.` : "";
+  const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Work BOTH angles: (1) what the person's own footprint shows, including accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, and Crunchbase beyond their bio and LinkedIn; (2) reverse mentions from project/company accounts that ever NAMED, TAGGED, or ANNOUNCED this person as a founder/team member (co-founder announcements and 'meet the team' posts are often YEARS old, on the project's timeline, so search historical posts). There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
+  const text2 = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Find every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Use their own footprint AND project accounts announcing them. Be exhaustive: a serial operator often has 5-15 ventures across years; keep searching until you have run down every lead. Search the web and X including historical posts.`, { maxToolCalls: 10, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
   if (!text2) return [];
   const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -4714,7 +4714,7 @@ async function findTeam(handle, name, posts = []) {
 
 The account's recent posts (mine these for team intros / role + advisor announcements):
 ${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "";
-  const system = `You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account: founders, cofounders, core team, engineers, AND advisors/backers. Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. Be PRECISE about each person's role AT THIS project: only call someone an advisor if they are actually named as one; if they are a founder/cofounder, say so \u2014 do NOT downgrade a founder to advisor. For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that live web/X search reveals \u2014 this exposes serial founders and cross-project ties. Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"founder|cofounder|ceo|cto|engineer|advisor|backer","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If none, return {"people":[]}. NEVER invent. Never use em dashes.`;
+  const system = `You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account: founders, cofounders, core team, engineers, AND advisors/backers. Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. Be PRECISE about each person's role AT THIS project: only call someone an advisor if they are actually named as one; if they are a founder/cofounder, say so. Do NOT downgrade a founder to advisor. For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that live web/X search reveals. This exposes serial founders and cross-project ties. Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"founder|cofounder|ceo|cto|engineer|advisor|backer","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If none, return {"people":[]}. NEVER invent. Never use em dashes.`;
   const text2 = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects. Search the account's own posts and posts mentioning it.${postContext}`, { cacheKey: `team-x:${h}` });
   return parseTeamJSON(text2, h, "X content");
 }
@@ -4722,13 +4722,13 @@ async function findTeamOnSite(domain, projectName) {
   const clean3 = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
   if (!clean3 && !projectName) return [];
   const anchor = clean3 ? `website ${clean3}${projectName ? ` (${projectName})` : ""}` : `project "${projectName}"`;
-  const system = `You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project: founders, cofounders, the WHOLE leadership team (CEO/CTO/COO/CFO/CMO), engineering and product leads, AND advisors/backers. DIG hard and be COMPLETE: Google the project + 'team'/'leadership'/'about', open the project's LinkedIn company page and read its 'People' tab (list the employees it shows), check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people \u2014 do NOT stop at one or two; keep going until you have the full public roster you can verify. Connect each name to their X handle and LinkedIn where possible. Include ONLY real people genuinely tied to THIS specific project (match the domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT \u2014 do NOT downgrade a founder to advisor. For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal \u2014 this exposes serial founders and cross-project ties. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
+  const system = `You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project: founders, cofounders, the WHOLE leadership team (CEO/CTO/COO/CFO/CMO), engineering and product leads, AND advisors/backers. DIG hard and be COMPLETE: Google the project + 'team'/'leadership'/'about', open the project's LinkedIn company page and read its 'People' tab (list the employees it shows), check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people. Do NOT stop at one or two; keep going until you have the full public roster you can verify. Connect each name to their X handle and LinkedIn where possible. Include ONLY real people genuinely tied to THIS specific project (match the domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT. Do NOT downgrade a founder to advisor. For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal. This exposes serial founders and cross-project ties. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
   const text2 = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean3 || projectName}` });
   return parseTeamJSON(text2, void 0, clean3 ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 async function enrichTeamIdentities(project, people) {
   if (!people.length) return [];
-  const system = `You are an OSINT researcher with live web and X search. For each named team member of the given project, find their X (Twitter) handle and LinkedIn profile. Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/..."}]} \u2014 one entry per input name, fields omitted when unknown. NEVER invent. Never use em dashes.`;
+  const system = `You are an OSINT researcher with live web and X search. For each named team member of the given project, find their X (Twitter) handle and LinkedIn profile. Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/..."}]}. Provide one entry per input name, with fields omitted when unknown. NEVER invent. Never use em dashes.`;
   const list = people.map((p) => `${p.name}${p.role ? ` (${p.role})` : ""}`).join("; ");
   const text2 = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich:${project}:${people.map((p) => p.name).sort().join("|")}` });
   if (!text2) return [];
@@ -4851,7 +4851,7 @@ async function detectManipulationTooling(handle, name) {
   }
 }
 function fmtFollowers(n) {
-  if (n == null) return "\u2014";
+  if (n == null) return "N/A";
   if (n >= 1e6) return (n / 1e6).toFixed(1) + "M";
   if (n >= 1e3) return (n / 1e3).toFixed(1) + "K";
   return String(n);
@@ -4861,7 +4861,7 @@ var xAdapter = {
   label: "X (Grok + twitterapi.io)",
   available: () => !!env("TWITTERAPI_KEY") || !!env("XAI_API_KEY"),
   async run(ctx) {
-    const haveProfile = ctx.evidence.profile.followers && ctx.evidence.profile.followers !== "\u2014";
+    const haveProfile = ctx.evidence.profile.followers && ctx.evidence.profile.followers !== "N/A";
     const haveOfficialAvatar = ctx.evidence.profile.avatar_source_state != null;
     const prof = haveProfile && haveOfficialAvatar ? null : await getProfile2(ctx.handle);
     if (prof) {
@@ -4899,7 +4899,7 @@ var xAdapter = {
       ctx.evidence.profile.last_post_at = lastPostAt;
       ctx.evidence.profile.days_since_post = days;
       const dormant = days >= 21;
-      ctx.emit({ phase: "P0 \xB7 Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days \u2014 a project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
+      ctx.emit({ phase: "P0 \xB7 Intake", label: dormant ? "Dormant account" : "Active", detail: dormant ? `No posts in ${days} days. A project or account gone quiet is a liveness flag.` : `Last posted ${days === 0 ? "today" : days === 1 ? "yesterday" : days + " days ago"}.`, source: "twitterapi.io", tone: dormant ? "warn" : "good" });
     }
     if (!ctx.evidence.notableFollowers.length) {
       ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: "Checking which top funds, founders, and KOLs follow the subject\u2026", source: "twitterapi.io", tone: "neutral" });
@@ -5114,7 +5114,7 @@ async function checkSiteSubstance(domain) {
   const body = stripText(page.html);
   if (PARKED.test(page.html)) return { url: page.url, status: "coming_soon", detail: "the domain is parked / for sale, not a live project site" };
   if (COMING.test(body) || COMING.test(meta)) return { url: page.url, status: "coming_soon", detail: `the homepage is a coming-soon / waitlist page${meta ? ` ("${meta.slice(0, 80)}")` : ""}` };
-  if (body.length >= 400 && PRODUCT.test(body)) return { url: page.url, status: "live", detail: `live site${meta ? ` \u2014 "${meta.slice(0, 80)}"` : ""}` };
+  if (body.length >= 400 && PRODUCT.test(body)) return { url: page.url, status: "live", detail: `live site${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
   const isShell = /id=["'](root|__next|app|__nuxt)["']/i.test(page.html) || /<script[^>]+type=["']module["']/i.test(page.html);
   if (isShell && body.length < 300) {
     for (const b of bundleUrls(page.html, page.url)) {
@@ -5127,7 +5127,7 @@ async function checkSiteSubstance(domain) {
     }
     return { url: page.url, status: "client_rendered", detail: `client-rendered app; static read couldn't confirm a live product surface${meta ? ` ("${meta.slice(0, 80)}")` : ""}` };
   }
-  return { url: page.url, status: "live", detail: `site is up${meta ? ` \u2014 "${meta.slice(0, 80)}"` : ""}` };
+  return { url: page.url, status: "live", detail: `site is up${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
 }
 
 // server/adapters/dexscreener.ts
@@ -5254,7 +5254,7 @@ async function detectTokenLifecycle(ticker, knownAddress) {
       if (nearZeroLiq || crashed) {
         dive = {
           address: canon.address,
-          detail: `liquidity $${Math.round(canon.liquidityUsd).toLocaleString()}${canon.h24 != null ? `, ${Math.round(canon.h24)}% 24h` : ""}${nearZeroLiq ? " \u2014 effectively dead" : ""}`
+          detail: `liquidity $${Math.round(canon.liquidityUsd).toLocaleString()}${canon.h24 != null ? `, ${Math.round(canon.h24)}% 24h` : ""}${nearZeroLiq ? " (effectively dead)" : ""}`
         };
       }
     }
@@ -5290,7 +5290,7 @@ var dexscreenerAdapter = {
       ctx.emit({
         phase: "On-chain",
         label: `$${snap.symbol ?? p.ticker}`,
-        detail: `liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}, 24h vol $${Math.round(snap.volume24h ?? 0).toLocaleString()}${thin ? " \u2014 thin liquidity, rug-risk flag" : ""}`,
+        detail: `liquidity $${Math.round(snap.liquidityUsd ?? 0).toLocaleString()}, 24h vol $${Math.round(snap.volume24h ?? 0).toLocaleString()}${thin ? " (thin liquidity, rug-risk flag)" : ""}`,
         source: "dexscreener",
         tone: thin ? "warn" : "neutral"
       });
@@ -5868,7 +5868,7 @@ var coingeckoAdapter = {
       ctx.emit({
         phase: "On-chain",
         label: `$${t.symbol?.toUpperCase() ?? p.ticker}`,
-        detail: `mcap $${Math.round(t.mcapUsd ?? 0).toLocaleString()}${downBad ? `, ${Math.round(t.ath_change_pct)}% from ATH \u2014 collapsed` : ""}`,
+        detail: `mcap $${Math.round(t.mcapUsd ?? 0).toLocaleString()}${downBad ? `, ${Math.round(t.ath_change_pct)}% from ATH (collapsed)` : ""}`,
         source: "coingecko",
         tone: downBad ? "warn" : "neutral"
       });
@@ -8512,7 +8512,7 @@ function ventureAffiliationEnded(venture) {
     venture.notes ?? ""
   ].join(" "));
   if (/\b(?:former|formerly|previously|ex|no longer|left|departed|retired|until)\b/.test(description)) return true;
-  return /(?:19|20)\d{2}\s*(?:[-–—]|to)\s*(?:19|20)\d{2}/i.test(venture.period) && !/\b(?:present|current|ongoing|now)\b/i.test(venture.period);
+  return /(?:19|20)\d{2}\s*(?:[-–\u2014]|to)\s*(?:19|20)\d{2}/i.test(venture.period) && !/\b(?:present|current|ongoing|now)\b/i.test(venture.period);
 }
 function verifiedVentureAffiliationProof(ctx, venture, now) {
   const subjectHandle = canonicalSubjectHandle(ctx.handle);
@@ -8701,7 +8701,7 @@ function explicitAmbiguousRelationship(text2, project) {
     const before = text2.slice(Math.max(0, start - 100), start).toLowerCase();
     const after = text2.slice(start + phrase.length, start + phrase.length + 100).toLowerCase();
     if (/(?:invested in|investment in|backed|portfolio includes|portfolio company[: -]|led (?:the )?round in)\s*$/.test(before)) return true;
-    if (/^\s*(?:is|was|—|-|:)\s*(?:an? )?(?:investment|portfolio company|backed company)\b/.test(after)) return true;
+    if (/^\s*(?:is|was|\u2014|-|:)\s*(?:an? )?(?:investment|portfolio company|backed company)\b/.test(after)) return true;
   }
   return false;
 }
@@ -9841,7 +9841,7 @@ async function coldIntake(ctx) {
       provider: "memory.lol",
       sourceCount: hist.priorHandles.length
     });
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")} \u2014 a rebrand. Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Handle history", detail: `This account previously went by ${hist.priorHandles.map((p) => "@" + p).join(", ")}, indicating a rebrand. Old posts and mentions are searched too.`, source: "memory.lol", tone: "warn" });
   } else if (hist) {
     ctx.recordCheck?.({
       id: "identity-continuity",
@@ -9935,7 +9935,7 @@ async function coldIntake(ctx) {
       artifact_verified: false
     }));
     const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
-    ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"} \u2014 role candidates remain non-governing until independently verified.`, source: "claude", tone: "neutral" });
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"}. Role candidates remain non-governing until independently verified.`, source: "claude", tone: "neutral" });
   }
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts\u2026", source: "grok", tone: "neutral" });
   const [bySubject, people, siteTeam, pageTeam] = await discoveryPromise;
@@ -10027,7 +10027,7 @@ async function coldIntake(ctx) {
   const subj = norm2(ctx.handle);
   const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || webTeam.some((t) => t.artifact_verified === true && norm2(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
-    ctx.emit({ phase: "P1 \xB7 Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it \u2014 its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
+    ctx.emit({ phase: "P1 \xB7 Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
     for (const member of webTeam) {
       member.evidence_origin = "model_lead";
       member.artifact_verified = false;
@@ -10113,11 +10113,11 @@ async function coldIntake(ctx) {
           evidence_origin: "deterministic",
           artifact_verified: true
         });
-        ctx.emit({ phase: "P2 \xB7 Substance", label: "Website not live", detail: `${domain} ${notLive} \u2014 ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
+        ctx.emit({ phase: "P2 \xB7 Substance", label: "Website not live", detail: `${domain} ${notLive}: ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
       } else if (site.status === "client_rendered") {
         ctx.emit({ phase: "P2 \xB7 Substance", label: "Website live (app)", detail: `${domain} serves a client-rendered app; ${site.detail}.`, source: "site-fetch", tone: "neutral" });
       } else {
-        ctx.emit({ phase: "P2 \xB7 Substance", label: "Website live", detail: `${domain} is a live site \u2014 ${site.detail}.`, source: "site-fetch", tone: "good" });
+        ctx.emit({ phase: "P2 \xB7 Substance", label: "Website live", detail: `${domain} is a live site: ${site.detail}.`, source: "site-fetch", tone: "good" });
       }
     }
   }
@@ -10221,7 +10221,7 @@ async function coldIntake(ctx) {
         if (corrob.length) {
           corroboratedAffiliations += 1;
           rec.notes = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" \xB7 ");
-          ctx.emit({ phase: "P0 \xB7 Intake", label: `Affiliation corroborated \xB7 ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""} \u2014 ${corrob.join("; ")}.`, source: "argus", tone: "good" });
+          ctx.emit({ phase: "P0 \xB7 Intake", label: `Affiliation corroborated \xB7 ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""}: ${corrob.join("; ")}.`, source: "argus", tone: "good" });
         }
       })
     );
@@ -10385,7 +10385,7 @@ async function adverseSignalsAndTooling(ctx) {
     })).filter((vt) => vt.people.length > 0);
     if (ctx.evidence.ventureTeams.length) {
       const total = ctx.evidence.ventureTeams.reduce((n, vt) => n + vt.people.length, 0);
-      ctx.emit({ phase: "Network", label: "Venture teams mapped", detail: `${total} people across ${ctx.evidence.ventureTeams.length} venture${ctx.evidence.ventureTeams.length === 1 ? "" : "s"} wired into the graph \u2014 subject \u2192 venture \u2192 the people behind it.`, source: "grok", tone: "good" });
+      ctx.emit({ phase: "Network", label: "Venture teams mapped", detail: `${total} people across ${ctx.evidence.ventureTeams.length} venture${ctx.evidence.ventureTeams.length === 1 ? "" : "s"} wired into the graph: subject \u2192 venture \u2192 the people behind it.`, source: "grok", tone: "good" });
     }
     const appearances = /* @__PURE__ */ new Map();
     ventureTeams.forEach((team, i) => {
@@ -10503,8 +10503,8 @@ function downgradeFixtureEvidenceForLive(seed) {
       display_name: handleLabel,
       avatar: handleLabel.slice(0, 1).toUpperCase(),
       bio: "",
-      followers: "\u2014",
-      joined: "\u2014",
+      followers: "N/A",
+      joined: "N/A",
       identity_confidence: "Unverified",
       identity_note: "Fixture discovery seed only; identity requires a fresh provider re-check.",
       profile_collection_state: "unavailable",
@@ -11403,7 +11403,7 @@ async function runTokenAudit(input, emit, opts) {
       const simOnly = !s.honeypotOnchain && !s.cannotSellAll;
       if (simOnly && broadlyTraded) {
         const why = (cg?.cexCount ?? 0) >= 5 ? `${cg.cexCount} centralized markets` : `${sells} on-chain sells against $${Math.round(liquidityUsd).toLocaleString()} liquidity in 24h`;
-        findings.push({ claim: `honeypot.is reported a failed sell simulation, but the GoPlus on-chain check and ${why} contradict it \u2014 treated as a simulation artifact, not a honeypot.`, tone: "warn", source: "argus" });
+        findings.push({ claim: `honeypot.is reported a failed sell simulation, but the GoPlus on-chain check and ${why} contradict it. ARGUS treats this as a simulation artifact, not a honeypot.`, tone: "warn", source: "argus" });
       } else {
         caps.push([10, "honeypot_confirmed"]);
         findings.push({ claim: s.nonTransferable ? "Non-transferable token: holders cannot move it." : "Honeypot: the contract blocks selling.", tone: "bad", source: s.honeypotOnchain ? "goplus" : "sim" });
@@ -11414,7 +11414,7 @@ async function runTokenAudit(input, emit, opts) {
     const mcap = fdv;
     const established = cexN >= 5 || cexN >= 3 && mcap >= 1e7 || cexN >= 1 && mcap >= 1e8;
     const authorityTone = established ? "warn" : "bad";
-    const govNote = established ? " On a token with real centralized-exchange listings this is typically a governed emissions/ops mechanism, not a rug setup \u2014 confirm the controller." : "";
+    const govNote = established ? " On a token with real centralized-exchange listings this is typically a governed emissions/ops mechanism, not a rug setup. Confirm the controller." : "";
     if (s.mintable) {
       if (!established) caps.push([35, "mint_authority_active"]);
       findings.push({ claim: `Mint authority is live: supply can be minted.${govNote}`, tone: authorityTone, source: chain === "solana" ? "goplus-sol" : "goplus" });
@@ -11435,7 +11435,7 @@ async function runTokenAudit(input, emit, opts) {
     if (s.selfdestruct) findings.push({ claim: "Contract can self-destruct / be closed.", tone: "bad", source: "goplus" });
     if (s.serialScammerCreator) {
       caps.push([25, "serial_scammer_creator"]);
-      findings.push({ claim: "The wallet that deployed this token has created honeypot tokens before \u2014 a serial scammer.", tone: "bad", source: "goplus" });
+      findings.push({ claim: "The wallet that deployed this token has created honeypot tokens before. This is a serial-scammer signal.", tone: "bad", source: "goplus" });
     }
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });
     if (s.simChecked && !s.honeypot) findings.push({ claim: `Sell simulation passed (buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%).`, tone: "good", source: "honeypot.is" });
@@ -11446,44 +11446,44 @@ async function runTokenAudit(input, emit, opts) {
         findings.push({ claim: "GoPlus flags an owner-modify-balance capability, but broad CEX listing and deep liquidity indicate it is a governance/upgrade artifact, not an active threat.", tone: "warn", source: "argus" });
       } else {
         caps.push([20, "owner_can_modify_balance"]);
-        findings.push({ claim: "Owner can modify holder balances directly \u2014 they can zero your wallet.", tone: "bad", source: "goplus" });
+        findings.push({ claim: "Owner can modify holder balances directly; they can zero your wallet.", tone: "bad", source: "goplus" });
       }
     }
     if (s.proxy) findings.push({ claim: ownerActive ? "Upgradeable proxy with an active owner: the contract logic can be swapped out from under holders." : "Upgradeable proxy contract (logic is replaceable), though ownership is renounced.", tone: ownerActive ? "bad" : "warn", source: "goplus" });
     if (s.slippageModifiable && ownerActive) findings.push({ claim: "Tax is modifiable: a low tax now can be raised toward 100% after you buy.", tone: "bad", source: "goplus" });
-    if (s.blacklist && ownerActive) findings.push({ claim: "Owner can blacklist addresses \u2014 your wallet can be blocked from selling.", tone: "warn", source: "goplus" });
-    if (s.tradingCooldown && ownerActive) findings.push({ claim: "Trading cooldown is enforceable \u2014 sells can be delayed.", tone: "warn", source: "goplus" });
-    if (s.externalCall) findings.push({ claim: "Contract makes external calls \u2014 behavior can change via an external dependency.", tone: "warn", source: "goplus" });
+    if (s.blacklist && ownerActive) findings.push({ claim: "Owner can blacklist addresses, so your wallet can be blocked from selling.", tone: "warn", source: "goplus" });
+    if (s.tradingCooldown && ownerActive) findings.push({ claim: "Trading cooldown is enforceable, so sells can be delayed.", tone: "warn", source: "goplus" });
+    if (s.externalCall) findings.push({ claim: "Contract makes external calls, so behavior can change via an external dependency.", tone: "warn", source: "goplus" });
     if (s.creatorPercent >= 5) findings.push({ claim: `Creator still holds ~${s.creatorPercent.toFixed(0)}% of supply.`, tone: s.creatorPercent >= 15 ? "bad" : "warn", source: "goplus" });
     if (chain === "solana") {
       if (s.balanceMutable) {
         if (broadlyTraded) findings.push({ claim: "A balance-mutable authority exists, but broad market presence indicates it is not an active threat.", tone: "warn", source: "argus" });
         else {
           caps.push([20, "balance_mutable_authority"]);
-          findings.push({ claim: "Balance-mutable authority is active \u2014 the controller can rewrite your token balance.", tone: "bad", source: "goplus-sol" });
+          findings.push({ claim: "Balance-mutable authority is active. The controller can rewrite your token balance.", tone: "bad", source: "goplus-sol" });
         }
       }
       if (s.transferHook) findings.push({ claim: "Transfer hook active: an external program runs on every transfer and can block sells.", tone: "bad", source: "goplus-sol" });
-      if (s.transferFee) findings.push({ claim: "A Token-2022 transfer fee is configured \u2014 a built-in tax on every transfer.", tone: "warn", source: "goplus-sol" });
+      if (s.transferFee) findings.push({ claim: "A Token-2022 transfer fee is configured: a built-in tax on every transfer.", tone: "warn", source: "goplus-sol" });
     }
-    if (s.lpBurnedPct >= 50) findings.push({ claim: `Liquidity is burned (~${s.lpBurnedPct.toFixed(0)}%) \u2014 permanently removed, it cannot be pulled.`, tone: "good", source: "goplus" });
+    if (s.lpBurnedPct >= 50) findings.push({ claim: `Liquidity is burned (~${s.lpBurnedPct.toFixed(0)}%) and permanently removed; it cannot be pulled.`, tone: "good", source: "goplus" });
     else if (s.lpLockedPct >= 50) findings.push({ claim: `Liquidity is locked (~${s.lpLockedPct.toFixed(0)}%).`, tone: "good", source: "goplus" });
-    else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet \u2014 it can be pulled at any time.`, tone: "bad", source: "goplus" });
-    else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet \u2014 removable at will.`, tone: "warn", source: "goplus" });
+    else if (s.lpTopUnlockedEoaPct >= 80) findings.push({ claim: `All liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) sits in a single unlocked wallet and can be pulled at any time.`, tone: "bad", source: "goplus" });
+    else if (s.lpTopUnlockedEoaPct >= 50) findings.push({ claim: `Most liquidity (~${s.lpTopUnlockedEoaPct.toFixed(0)}%) is in one unlocked wallet and removable at will.`, tone: "warn", source: "goplus" });
     else findings.push({ claim: "Liquidity does not appear locked or burned.", tone: "warn", source: "goplus" });
   }
   if (liquidityUsd < 15e3) findings.push({ claim: `Thin liquidity ($${Math.round(liquidityUsd).toLocaleString()}). Easy to drain or move.`, tone: "warn", source: "dexscreener" });
   if (ageDays != null && ageDays < 7) findings.push({ claim: `Pair is ${ageDays < 1 ? "under a day" : Math.round(ageDays) + " days"} old.`, tone: "warn", source: "dexscreener" });
-  if (washSignature) findings.push({ claim: `Volume is ${volLiq.toFixed(0)}x liquidity in 24h while the price moved only ${pc24.toFixed(1)}% \u2014 a wash-trading / fake-volume signature.`, tone: "bad", source: "dexscreener" });
-  if (pc24 <= -60) findings.push({ claim: `Down ${Math.abs(pc24).toFixed(0)}% in 24h \u2014 the token appears to have already dumped.`, tone: "bad", source: "dexscreener" });
-  else if (pc24 >= 300 && liquidityUsd < 1e5) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity \u2014 a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
+  if (washSignature) findings.push({ claim: `Volume is ${volLiq.toFixed(0)}x liquidity in 24h while the price moved only ${pc24.toFixed(1)}%: a wash-trading or fake-volume signature.`, tone: "bad", source: "dexscreener" });
+  if (pc24 <= -60) findings.push({ claim: `Down ${Math.abs(pc24).toFixed(0)}% in 24h. The token appears to have already dumped.`, tone: "bad", source: "dexscreener" });
+  else if (pc24 >= 300 && liquidityUsd < 1e5) findings.push({ claim: `Up ${pc24.toFixed(0)}% in 24h on thin liquidity. This is a vertical pump with high reversal risk.`, tone: "warn", source: "dexscreener" });
   if (!opts?.skipSim) {
     if (cg && !cg.listed) {
-      findings.push({ claim: "Not listed on CoinGecko \u2014 no independent market-data corroboration.", tone: "warn", source: "coingecko" });
+      findings.push({ claim: "Not listed on CoinGecko. No independent market-data corroboration is available.", tone: "warn", source: "coingecko" });
     } else if (cg) {
       findings.push({ claim: `Corroborated on CoinGecko${cg.rank ? ` (rank #${cg.rank})` : ""}, ${cg.cexCount} centralized market${cg.cexCount === 1 ? "" : "s"}.`, tone: "good", source: "coingecko" });
       if (cg.mcapUsd && fdv && fdv > cg.mcapUsd * 3) {
-        findings.push({ claim: `FDV is ${(fdv / cg.mcapUsd).toFixed(1)}x circulating market cap \u2014 large unlock / dilution overhang.`, tone: "warn", source: "coingecko" });
+        findings.push({ claim: `FDV is ${(fdv / cg.mcapUsd).toFixed(1)}x circulating market cap, creating a large unlock or dilution overhang.`, tone: "warn", source: "coingecko" });
       }
     }
   }
@@ -11498,7 +11498,7 @@ async function runTokenAudit(input, emit, opts) {
   const bundleRisk = !holdersReliable ? "low" : insiderPct >= 45 ? "high" : insiderPct >= 25 ? "elevated" : "low";
   if (s.available && bundleRisk !== "low") {
     findings.push({
-      claim: `Concentrated supply: ${bundleCount} non-contract wallets hold ~${insiderPct}% \u2014 possible bundled launch or coordinated snipe.`,
+      claim: `Concentrated supply: ${bundleCount} non-contract wallets hold ~${insiderPct}%. This may indicate a bundled launch or coordinated snipe.`,
       tone: bundleRisk === "high" ? "bad" : "warn",
       source: chain === "solana" ? "goplus-sol" : "goplus"
     });
@@ -11566,7 +11566,7 @@ async function runTokenAudit(input, emit, opts) {
   if (washSignature) aT5 = 2;
   else if (total > 20 && sells / total > 0.8) aT5 = clamp(aT5 - 2, 0, 12);
   if (pc24 <= -60) aT5 = clamp(aT5 - 3, 0, 12);
-  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%) \u2014 wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
+  axes.push({ key: "T5", label: "Trading authenticity", score: aT5, weight: 12, rationale: washSignature ? `vol/liquidity ${volLiq.toFixed(1)}x but price flat (${pc24.toFixed(1)}%): wash-trade signature.` : `24h vol/liquidity ${volLiq.toFixed(2)}x, ${buys} buys / ${sells} sells.` });
   const socials = [
     ...(pair.info?.websites ?? []).map((w) => ({ label: "site", url: w.url })),
     ...(pair.info?.socials ?? []).map((x) => ({ label: x.type, url: x.url }))

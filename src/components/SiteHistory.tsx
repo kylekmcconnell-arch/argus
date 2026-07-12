@@ -38,7 +38,7 @@ export function SiteHistory({ domain }: { domain: string }) {
           </button>
         </div>
         <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-faint">
-          Diff this site's earliest archive against the live version — scrubbed team pages, deleted advisor sections,
+          Diff this site's earliest archive against the live version. Look for scrubbed team pages, deleted advisor sections,
           removed LinkedIn links, and prior-product pivots. Removed content is the highest-signal content.
         </p>
       </div>

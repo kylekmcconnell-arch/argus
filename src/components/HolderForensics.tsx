@@ -83,7 +83,7 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
         )}
 
         <div className="mt-3 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Metric label="holders" value={d.totalHolders ? money(d.totalHolders) : "—"} />
+          <Metric label="holders" value={d.totalHolders ? money(d.totalHolders) : "N/A"} />
           <Metric label="top-10 hold" value={`${c.top10.toFixed(0)}%`} tone={c.top10NonMarket >= 40 ? TONE.bad : c.top10NonMarket >= 20 ? TONE.warn : undefined} />
           <Metric label="insider-clustered" value={`${d.insiders.clusteredPct.toFixed(0)}%`} tone={d.insiders.clusteredPct >= 15 ? TONE.warn : undefined} />
           <Metric label="creator holds" value={`${d.creatorPct.toFixed(d.creatorPct < 1 ? 1 : 0)}%`} tone={d.creatorPct >= 10 ? TONE.warn : undefined} />
@@ -138,9 +138,9 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
         <PanelRequestNotice failure={arkhamState} label="Holder identity labels" className="mt-3" />
       )}
       <div className="mt-3 grid grid-cols-3 gap-3">
-        <Metric label="holders" value={holderCount ? holderCount.toLocaleString() : "—"} />
-        <Metric label={`top ${top.length} hold`} value={top.length ? `${topSum.toFixed(0)}%` : "—"} tone={concentrated ? TONE.bad : undefined} />
-        <Metric label="insider est." value={insiderPct ? `${insiderPct}%` : "—"} tone={insiderPct >= 20 ? TONE.warn : undefined} />
+        <Metric label="holders" value={holderCount ? holderCount.toLocaleString() : "N/A"} />
+        <Metric label={`top ${top.length} hold`} value={top.length ? `${topSum.toFixed(0)}%` : "N/A"} tone={concentrated ? TONE.bad : undefined} />
+        <Metric label="insider est." value={insiderPct ? `${insiderPct}%` : "N/A"} tone={insiderPct >= 20 ? TONE.warn : undefined} />
       </div>
       {top.length > 0 && (
         <div className="mt-3 divide-y divide-line/60">

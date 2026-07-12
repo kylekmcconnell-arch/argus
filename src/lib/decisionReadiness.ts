@@ -81,7 +81,7 @@ export function deriveDecisionReadiness(checks: readonly ScanCheck[]): DecisionR
     return {
       ...base,
       title: coverage.findings > 0
-        ? "Evidence coverage complete — findings require review"
+        ? "Evidence coverage complete: findings require review"
         : "Evidence coverage complete",
       guidance: coverage.findings > 0
         ? `All ${plural(applicable, "applicable check")} have recorded outcomes, including ${plural(coverage.findings, "finding")}. Coverage is complete, but this is not an investment recommendation.`

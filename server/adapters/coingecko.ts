@@ -95,7 +95,7 @@ export const coingeckoAdapter: Adapter = {
       ctx.emit({
         phase: "On-chain",
         label: `$${t.symbol?.toUpperCase() ?? p.ticker}`,
-        detail: `mcap $${Math.round(t.mcapUsd ?? 0).toLocaleString()}${downBad ? `, ${Math.round(t.ath_change_pct!)}% from ATH — collapsed` : ""}`,
+        detail: `mcap $${Math.round(t.mcapUsd ?? 0).toLocaleString()}${downBad ? `, ${Math.round(t.ath_change_pct!)}% from ATH (collapsed)` : ""}`,
         source: "coingecko",
         tone: downBad ? "warn" : "neutral",
       });

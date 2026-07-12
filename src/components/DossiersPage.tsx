@@ -290,9 +290,9 @@ export function DossiersPage({
                 </span>
                 <span
                   className="flex shrink-0 flex-col items-end gap-1 leading-none"
-                  title={readout.positiveNeedsQualification ? `Underlying model signal: ${r.verdict} ${r.score ?? "—"}. Stored evidence is not complete.` : undefined}
+                  title={readout.positiveNeedsQualification ? `Underlying model signal: ${r.verdict} ${r.score ?? "N/A"}. Stored evidence is not complete.` : undefined}
                 >
-                  <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{r.score ?? "—"}</span>
+                  <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{r.score ?? "N/A"}</span>
                   {readout.label && <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}>{readout.label}</span>}
                 </span>
                 <button
@@ -401,9 +401,9 @@ export function DossiersPage({
           </span>
           <span
             className="flex shrink-0 flex-col items-end gap-1 leading-none"
-            title={readout.positiveNeedsQualification ? `Underlying model signal: ${scored.verdict} ${scored.score ?? "—"}. Stored evidence is not complete.` : undefined}
+            title={readout.positiveNeedsQualification ? `Underlying model signal: ${scored.verdict} ${scored.score ?? "N/A"}. Stored evidence is not complete.` : undefined}
           >
-            <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{scored.score ?? "—"}</span>
+            <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{scored.score ?? "N/A"}</span>
             {readout.label && <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}>{readout.label}</span>}
           </span>
           {role === "owner" && (
@@ -436,7 +436,7 @@ export function DossiersPage({
                   type="button"
                   disabled={isArchived}
                   onClick={(ev) => { openBtn(ev); if (!isArchived) onOpen(r.ref, r.kind); }}
-                  title={isArchived ? "Restore this case before opening its report" : `Open the ${km.label} report — ${r.query ?? r.ref}`}
+                  title={isArchived ? "Restore this case before opening its report" : `Open the ${km.label} report: ${r.query ?? r.ref}`}
                   className="mono inline-flex min-h-8 min-w-0 items-center gap-1 px-2 py-1 text-[11px] text-ink-dim transition hover:bg-signal/5 hover:text-signal-lift focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-ink-dim"
                 >
                   <span className="uppercase" style={{ color: km.color }}>{km.label}</span>
@@ -550,7 +550,7 @@ export function DossiersPage({
             ? "Nothing matches that search."
             : isArchived
               ? "No archived cases."
-              : "No persisted reports yet — run an audit and it lands here automatically."}
+              : "No persisted reports yet. Run an audit and it lands here automatically."}
         </p>
       )}
 

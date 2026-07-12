@@ -104,7 +104,7 @@ async function findViaGrok(name: string, domain: string, symbol: string, key: st
   const cats = "api, docs, about, team, press, blog, tokenomics, governance, roadmap, faq, legal";
   const system =
     "You find a crypto project's official DOCUMENTS and RESOURCES using live web + X search. " +
-    "Return ONLY real, working links that genuinely belong to THIS project — prefer the project's own domain, its GitBook/docs, IPFS, or an auditor's own site (certik.com, hacken.io, etc). Never invent a link. " +
+    "Return ONLY real, working links that genuinely belong to THIS project. Prefer the project's own domain, its GitBook/docs, IPFS, or an auditor's own site (certik.com, hacken.io, etc). Never invent a link. " +
     `Find: (1) the whitepaper or litepaper; (2) every security audit (auditor firm + DIRECT report link + date if visible); (3) key RESOURCES, each labeled with a category from this set: ${cats}. ` +
     "For 'press', include the project's own press/newsroom page AND notable independent media coverage (a real article URL). For 'team', the page that names the people. Only include a category you actually found a link for. " +
     "Reply with ONLY compact JSON, no prose: {\"whitepaper\":{\"url\":\"...\",\"kind\":\"whitepaper|litepaper|docs|gitbook\"}|null,\"resources\":[{\"category\":\"api|docs|about|team|press|blog|tokenomics|governance|roadmap|faq|legal\",\"title\":\"short\",\"url\":\"...\"}],\"audits\":[{\"auditor\":\"...\",\"url\":\"...\",\"date\":\"YYYY-MM\"|null}]}";

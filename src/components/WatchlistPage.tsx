@@ -90,7 +90,7 @@ async function check(item: WatchItem): Promise<{ current: WatchSnapshot | null; 
 }
 
 function money(n?: number): string {
-  if (n == null) return "—";
+  if (n == null) return "N/A";
   if (n >= 1e9) return "$" + (n / 1e9).toFixed(2) + "B";
   if (n >= 1e6) return "$" + (n / 1e6).toFixed(2) + "M";
   if (n >= 1e3) return "$" + (n / 1e3).toFixed(1) + "K";
@@ -167,7 +167,7 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
           <button
             onClick={onSweep}
             disabled={sweep === "running"}
-            title="Run a one-off server sweep of the shared watchlist: on-chain drift + ring check against the trust graph. Writes the Alerts feed. Manual only — nothing runs in the background."
+            title="Run a one-off server sweep of the shared watchlist: on-chain drift + ring check against the trust graph. Writes the Alerts feed. Manual only; nothing runs in the background."
             className="btn-chip tint-signal disabled:opacity-60"
           >
             {sweep === "running" ? "sweeping…" : "Sweep now"}

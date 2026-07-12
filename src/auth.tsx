@@ -223,7 +223,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">
         {authenticatedButDenied
           ? "Your identity is verified, but this account is not an active member of an ARGUS workspace."
-          : "Use your approved work email. ARGUS will send a one-time sign-in link—no shared password."}
+          : "Use your approved work email. ARGUS will send a one-time sign-in link. No shared password."}
       </p>
 
       {authenticatedButDenied ? (

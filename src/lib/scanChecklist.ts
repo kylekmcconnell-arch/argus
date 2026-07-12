@@ -123,7 +123,7 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
         }
       : evm
         ? { label: "Buy/sell simulation", status: "unknown", note: outcomeNotRecorded }
-        : { label: "Buy/sell simulation", status: "not-applicable", note: "Solana — static flags only" },
+        : { label: "Buy/sell simulation", status: "not-applicable", note: "Solana: static flags only" },
   );
 
   const holderCount = safety.holderCount || dossier.topHolders.length;

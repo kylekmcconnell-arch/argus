@@ -98,7 +98,7 @@ export function analyzeContent(retrieval: Retrieval): Recon {
       retrieval, title: retrieval.title,
       team: { state: "not-retrieved", names: [], note: "Site never rendered; team could not be assessed." },
       socials: [], funding: [], tokenSignals: [], findings,
-      identityLine: "Could not render the site — team not established from available evidence (coverage gap, not a finding).",
+      identityLine: "Could not render the site. The team could not be established from available evidence (coverage gap, not a finding).",
     };
   }
 
@@ -141,7 +141,7 @@ export function analyzeContent(retrieval: Retrieval): Recon {
     findings.push({ claim: `Team names ${names.length} individual${names.length === 1 ? "" : "s"}: ${names.slice(0, 5).join(", ")}.`, tone: "good" });
   } else if (hasTeamSection) {
     team = { state: "unnamed-section", names: [], note: "A team section exists but names no individuals." };
-    findings.push({ claim: "A team section is present but names no individuals — identity is unverifiable. This is an evidence-based caution, not an inferred one.", tone: "warn" });
+    findings.push({ claim: "A team section is present but names no individuals, so identity is unverifiable. This is an evidence-based caution, not an inferred one.", tone: "warn" });
   } else {
     team = { state: "absent", names: [], note: "No team or leadership section found on the rendered page." };
     findings.push({ claim: "Rendered fine, but no team or leadership section was found.", tone: "warn" });
@@ -152,7 +152,7 @@ export function analyzeContent(retrieval: Retrieval): Recon {
   }
   if (socials.length) findings.push({ claim: `${socials.length} social link${socials.length === 1 ? "" : "s"} found: ${socials.map((s) => s.label).join(", ")}.`, tone: "good" });
   else findings.push({ claim: "No social or community links found in the rendered content.", tone: "warn" });
-  if (funding.length) findings.push({ claim: `Funding/valuation claim in copy: ${funding[0]} (claim only — not independently verified here).`, tone: "warn" });
+  if (funding.length) findings.push({ claim: `Funding/valuation claim in copy: ${funding[0]} (claim only, not independently verified here).`, tone: "warn" });
   // Only call it a token project on FIRST-PARTY evidence (a launch/economics
   // claim or an on-page contract) AND when the site isn't a fund/VC/studio.
   // Two generic keywords ("token", "tokenomics") on an investor's site is not it.
@@ -165,8 +165,8 @@ export function analyzeContent(retrieval: Retrieval): Recon {
   // ---- the single honest sentence that replaces "anonymous team" ----
   let identityLine: string;
   if (team.state === "named") identityLine = `Team identified: ${names.slice(0, 4).join(", ")}${names.length > 4 ? ", …" : ""}.`;
-  else if (team.state === "unnamed-section") identityLine = "Team section present but names no principals — identity unverifiable. Distinct from anonymous: it is a stated-but-unnamed team.";
-  else identityLine = "No team section on the rendered site — team not established. Stated as observed absence, on content we actually rendered.";
+  else if (team.state === "unnamed-section") identityLine = "Team section present but names no principals, so identity is unverifiable. Distinct from anonymous: it is a stated-but-unnamed team.";
+  else identityLine = "No team section was found on the rendered site. The team could not be established. This records an observed absence in content ARGUS actually rendered.";
 
   return { retrieval, title: retrieval.title, team, socials, funding, tokenSignals, findings, identityLine, isFund };
 }

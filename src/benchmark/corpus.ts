@@ -39,7 +39,7 @@ export const CORPUS: CorpusToken[] = [
   // --- Mintable governance: blue chips whose contracts retain LIVE mint
   //     authority. A name-based checker waves these through; ARGUS reports that
   //     the supply can still be expanded by their controllers. FLAG. ---
-  { symbol: "MKR", name: "Maker", address: "0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2", chain: "ethereum", bucket: "mintable-governance", expect: "flag-authority", note: "MakerDAO governance can mint MKR — supply is not fixed." },
+  { symbol: "MKR", name: "Maker", address: "0x9f8f72aa9304c8b593d555f12ef6589cc3a579a2", chain: "ethereum", bucket: "mintable-governance", expect: "flag-authority", note: "MakerDAO governance can mint MKR, so supply is not fixed." },
   { symbol: "CRV", name: "Curve DAO", address: "0xd533a949740bb3306d119cc777fa900ba034cd52", chain: "ethereum", bucket: "mintable-governance", expect: "flag-authority", note: "CRV has a live inflation minter controlled by the DAO." },
-  { symbol: "ENS", name: "Ethereum Name Service", address: "0xc18360217d8f7ab5e7c516566761ea12ce7f9d72", chain: "ethereum", bucket: "mintable-governance", expect: "flag-authority", note: "ENS DAO can mint new ENS after a lockup — owner active." },
+  { symbol: "ENS", name: "Ethereum Name Service", address: "0xc18360217d8f7ab5e7c516566761ea12ce7f9d72", chain: "ethereum", bucket: "mintable-governance", expect: "flag-authority", note: "ENS DAO can mint new ENS after a lockup. The owner is active." },
 ];

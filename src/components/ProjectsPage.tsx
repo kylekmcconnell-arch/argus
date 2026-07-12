@@ -52,7 +52,7 @@ function ProjectCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void
       </span>
       <ScanChip kind={e.kind} refId={e.ref ?? e.query} className="mr-1" />
       <span className="flex shrink-0 flex-col items-end gap-1 leading-none">
-        <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{e.score ?? "—"}</span>
+        <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{e.score ?? "N/A"}</span>
         {readiness && <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}>{readiness}</span>}
       </span>
     </button>

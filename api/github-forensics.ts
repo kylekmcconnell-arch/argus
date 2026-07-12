@@ -122,7 +122,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const note = !people.length
       ? "No commit-author metadata recovered (repos empty, or authors use GitHub's email privacy)."
       : `${people.length} distinct commit author${people.length === 1 ? "" : "s"} across ${chosen.length} repo${chosen.length === 1 ? "" : "s"}. ` +
-        (leaks.length ? `${leaks.length} leaked a personal email — real-identity exposure. ` : "") +
+        (leaks.length ? `${leaks.length} leaked a personal email, creating real-identity exposure. ` : "") +
         (forks.length ? `${forks.length} repo(s) are forks of other projects (copied code).` : "");
 
     res.status(200).json({

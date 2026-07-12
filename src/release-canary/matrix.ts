@@ -305,7 +305,7 @@ function tokenResult(input: {
     kind: "token",
     scenario: input.scenario,
     expected: `${input.verdict}${input.cap ? ` capped by ${input.cap}` : " with no cap"}; partial coverage must stay non-final`,
-    actual: `${input.dossier.verdict} ${input.dossier.score ?? "—"}/100 · cap ${input.dossier.capApplied ?? "none"} · public ${presentation.resultLabel} ${presentation.displayVerdict}`,
+    actual: `${input.dossier.verdict} ${input.dossier.score ?? "N/A"}/100 · cap ${input.dossier.capApplied ?? "none"} · public ${presentation.resultLabel} ${presentation.displayVerdict}`,
     pass,
     detail: pass
       ? "The real token scorer consumed only intercepted fixture responses and preserved fail-closed presentation semantics."

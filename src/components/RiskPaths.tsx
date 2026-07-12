@@ -47,7 +47,7 @@ export function RiskPaths({ address, panelCostToken }: { address?: string | null
       <div className="flex flex-wrap items-center gap-2">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4M12 17h.01" /></svg>
         <span className="eyebrow">Risk paths</span>
-        <span className="text-[11.5px] text-ink-dim">why the deployer is flagged — traced to the source (Arkham)</span>
+        <span className="text-[11.5px] text-ink-dim">why the deployer is flagged · traced to the source (Arkham)</span>
       </div>
       <div className="mt-2.5 divide-y divide-line/60">
         {paths.map((p, i) => {

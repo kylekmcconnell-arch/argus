@@ -53,7 +53,7 @@ export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
       <h1 className="display-sm text-[24px] text-ink">Alerts</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         What sweeps have flagged: verdict flips and liquidity drains on watched tokens, and watched subjects newly
-        connecting to flagged actors in the shared graph. Sweeps run only when you press Sweep now on the Watchlist —
+        connecting to flagged actors in the shared graph. Sweeps run only when you press Sweep now on the Watchlist;
         nothing monitors in the background.
       </p>
 

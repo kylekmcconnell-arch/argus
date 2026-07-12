@@ -53,7 +53,7 @@ export function scoreProject(recon: Recon): ProjectVerdict {
   if (recon.retrieval.status === "gap") {
     return {
       verdict: "INCOMPLETE", score: null, hype, capApplied: "coverage_gap",
-      reasons: [{ tone: "gap", text: "Site could not be retrieved or rendered — no verdict can be issued on content never seen." }],
+      reasons: [{ tone: "gap", text: "Site could not be retrieved or rendered. No verdict can be issued on content never seen." }],
     };
   }
 
@@ -88,7 +88,7 @@ export function scoreProject(recon: Recon): ProjectVerdict {
   // ---- Team & transparency (0-20). Pseudonymity is neutral. ----
   let team: number;
   if (recon.team.state === "named") { team = 18; reasons.push({ tone: "good", text: recon.identityLine }); }
-  else if (recon.team.state === "unnamed-section") { team = 11; reasons.push({ tone: "warn", text: "Stated-but-unnamed team — no disclosure bonus, but not penalized for pseudonymity alone." }); }
+  else if (recon.team.state === "unnamed-section") { team = 11; reasons.push({ tone: "warn", text: "Stated-but-unnamed team: no disclosure bonus, but not penalized for pseudonymity alone." }); }
   else { team = 9; reasons.push({ tone: "warn", text: "No team section on the rendered site." }); }
   const hasDocs = recon.socials.some((s) => /github|gitbook|docs/i.test(s.label) || /docs|whitepaper/i.test(s.url));
   if (recon.socials.length) team += 1;

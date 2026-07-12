@@ -55,8 +55,8 @@ export function GithubForensics({ org, login, subjectKey, panelCostToken, record
           </button>
         </div>
         <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-faint">
-          Mine commit-author metadata for real names and personal emails the team left in git history — the identities
-          behind a pseudonymous project.
+          Mine commit-author metadata for real names and personal emails the team left in git history. These details can
+          reveal the identities behind a pseudonymous project.
         </p>
       </div>
     );

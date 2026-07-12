@@ -64,7 +64,7 @@ export function IdentitySweep({ handle, auto, panelCostToken, record = true }: {
           </button>
         </div>
         <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-faint">
-          Prior X handles (rebrands hide a past) and the same username across GitHub / Farcaster / Reddit / Telegram —
+          Check prior X handles (rebrands hide a past) and the same username across GitHub / Farcaster / Reddit / Telegram,
           tying this pseudonym to dated accounts elsewhere.
         </p>
       </div>

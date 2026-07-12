@@ -43,7 +43,7 @@ export function SanctionsNameScreen({ name, resolved }: { name?: string | null; 
           <span className="text-[13.5px] font-semibold text-avoid">⛔ Name matches the OFAC SDN sanctions list</span>
         </div>
         <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
-          "{realName}" exactly matches an individual on the US Treasury OFAC Specially Designated Nationals list. Transacting with a sanctioned person is a federal offense. Verify the identity match — a name is not a person — but treat this as a hard stop until cleared.
+          "{realName}" exactly matches an individual on the US Treasury OFAC Specially Designated Nationals list. Transacting with a sanctioned person is a federal offense. Verify the identity match because a name is not a person, but treat this as a hard stop until cleared.
           <a href={`https://sanctionssearch.ofac.treas.gov/`} target="_blank" rel="noreferrer" className="link-ext mono ml-1">OFAC search</a>
         </p>
       </div>

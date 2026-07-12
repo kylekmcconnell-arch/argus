@@ -148,7 +148,7 @@ export async function runSweep(organizationId: string): Promise<{ checked: numbe
   }
 
   if (fresh.length) {
-    await telegram(`ARGUS sweep: ${fresh.length} new alert${fresh.length === 1 ? "" : "s"}\n` + fresh.map((a) => `• ${a.label} — ${a.detail}`).join("\n"));
+    await telegram(`ARGUS sweep: ${fresh.length} new alert${fresh.length === 1 ? "" : "s"}\n` + fresh.map((a) => `• ${a.label}: ${a.detail}`).join("\n"));
   }
 
   return { checked: watches.length, alerts: fresh };

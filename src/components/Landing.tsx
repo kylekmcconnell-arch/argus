@@ -11,7 +11,6 @@ import {
   ShieldCheckIcon,
 } from "@phosphor-icons/react";
 import { HeroBackdrop } from "./ArgusMark";
-import type { ReportKind } from "../lib/reports";
 import { PrivateToggle } from "./PrivateToggle";
 
 const INVESTIGATION_OUTPUTS = [
@@ -27,15 +26,9 @@ const INVESTIGATION_LENSES = [
   { icon: ShieldCheckIcon, title: "Decision gaps", detail: "What keeps confidence below exceptional and what you should verify next." },
 ] as const;
 
-const TOKEN_SAMPLES = [
-  { sym: "$PEPE", addr: "0x6982508145454ce325ddbe47a25d4ec3d2311933" },
-  { sym: "$SHIB", addr: "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce" },
-  { sym: "$UNI", addr: "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984" },
-] as const;
-
 // The front door is a decision-oriented investigation canvas. Previous cases
 // remain in the persistent rail instead of competing with the primary task.
-export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?: boolean) => void | Promise<void>; onAbout: () => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
+export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?: boolean) => void | Promise<void>; onAbout: () => void }) {
   const [value, setValue] = useState("");
   const [priv, setPriv] = useState(false);
   const [launching, setLaunching] = useState(false);
@@ -122,27 +115,12 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
               Starts a fresh provider run and may use paid API quota. Open previous snapshots from Recent cases.
             </p>
 
-            {/* fast, live examples */}
-            <div className="mt-6 flex flex-wrap items-center gap-2.5">
-              <span className="eyebrow mr-1">Try a live token</span>
-              {TOKEN_SAMPLES.map((t) => (
-                <button
-                  type="button"
-                  key={t.sym}
-                  onClick={() => { void launchFreshAudit(t.addr); }}
-                  disabled={launching}
-                  className="btn-chip tint-signal min-h-8 px-3 disabled:cursor-wait disabled:opacity-60"
-                >
-                  {t.sym}
-                </button>
-              ))}
-            </div>
           </section>
 
           <aside aria-labelledby="investigation-output-title" className="panel rise-in overflow-hidden">
             <div className="border-b border-line px-4 py-3.5">
               <div id="investigation-output-title" className="eyebrow">Every investigation returns</div>
-              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A decision canvas—not just a score.</p>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A decision canvas, not just a score.</p>
             </div>
             <div className="divide-y divide-line/70">
               {INVESTIGATION_OUTPUTS.map(({ icon: Icon, label, detail }) => (

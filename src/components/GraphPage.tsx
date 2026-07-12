@@ -162,7 +162,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
                               className="group flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left transition hover:bg-panel-2"
                             >
                               <span className="mono truncate text-[11px] text-ink-dim group-hover:text-ink">{e.query}</span>
-                              <span className="mono shrink-0 text-[11px] tabular" style={{ color: m?.color ?? "var(--color-ink-faint)" }}>{e.score ?? "—"}</span>
+                              <span className="mono shrink-0 text-[11px] tabular" style={{ color: m?.color ?? "var(--color-ink-faint)" }}>{e.score ?? "N/A"}</span>
                             </button>
                           );
                         })}
@@ -205,7 +205,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
       ) : (
         <div className="mt-5 grid gap-3 lg:grid-cols-2">
           {mine.length === 0 && (
-            <p className="empty-state lg:col-span-2">No audited subjects yet — run an audit and its star map lands here.</p>
+            <p className="empty-state lg:col-span-2">No audited subjects yet. Run an audit and its star map lands here.</p>
           )}
           {mine.map((c) => {
             const m = verdictMeta(c.verdict ?? "INCOMPLETE");
@@ -254,7 +254,7 @@ function Cabals({ net }: { net: ReturnType<typeof buildNetwork> }) {
             <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
               <span className="text-ink">{cabal.subjects.join(", ")}</span> share{" "}
               {cabal.via.length} real connecting {cabal.via.length === 1 ? "entity" : "entities"}
-              {cabal.holderOnly ? " — all top-holder overlap, which can be exchanges or market makers rather than coordination" : " — shared people, companies, or wallets, which is hard to explain innocently"}.
+              {cabal.holderOnly ? ". All top-holder overlap can reflect exchanges or market makers rather than coordination" : ". Shared people, companies, or wallets are hard to explain innocently"}.
             </p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {cabal.via.slice(0, 10).map((v) => (
@@ -269,7 +269,7 @@ function Cabals({ net }: { net: ReturnType<typeof buildNetwork> }) {
       ) : (
         <p className="mt-2 text-[12.5px] text-ink-faint">
           No coordinated cluster across the audited subjects. A cabal call requires shared named people, companies, or
-          wallets — not just overlapping top-holders.
+          wallets, not just overlapping top-holders.
         </p>
       )}
     </div>

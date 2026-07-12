@@ -28,7 +28,7 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
         event.preventDefault();
         onOpen(ref, kind);
       }}
-      title={presentedVerdict === "INCOMPLETE" ? "Open the report — positive score is not cleared because evidence coverage is incomplete" : "Open the full report"}
+      title={presentedVerdict === "INCOMPLETE" ? "Open the report. A positive score is not cleared because evidence coverage is incomplete." : "Open the full report"}
       aria-label={`Open stored ${e.kind} case for ${e.query}${typeof e.score === "number" ? `, score ${e.score}` : ""}`}
       className="group panel flex w-[240px] shrink-0 items-center gap-2.5 p-2.5 text-left transition hover:border-line-2 hover:bg-panel/80"
     >
@@ -44,7 +44,7 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
         </span>
       </span>
       <span className="flex shrink-0 flex-col items-end gap-1 leading-none">
-        <span className="mono tint-var rounded px-1.5 py-1 text-[15px] font-semibold tabular" style={{ "--tint": color } as CSSProperties}>{e.score ?? "—"}</span>
+        <span className="mono tint-var rounded px-1.5 py-1 text-[15px] font-semibold tabular" style={{ "--tint": color } as CSSProperties}>{e.score ?? "N/A"}</span>
         {presentedLabel && <span className="chip tint-var" style={{ ["--tint" as string]: color }}>{presentedLabel}</span>}
       </span>
     </a>

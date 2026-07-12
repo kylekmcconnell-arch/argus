@@ -34,8 +34,8 @@ function judge(token: CorpusToken, d: TokenDossier): { correct: boolean; driver:
   return {
     correct: flagged && d.verdict !== "PASS",
     driver: flagged
-      ? `Live ${d.safety.freezable ? "freeze" : "mint"} authority detected — supply/transfer not locked.`
-      : "Passed — no live authority detected (unexpected).",
+      ? `Live ${d.safety.freezable ? "freeze" : "mint"} authority detected. Supply or transfer is not locked.`
+      : "Passed: no live authority detected (unexpected).",
   };
 }
 
@@ -83,7 +83,7 @@ export async function runBench(
       const input = resolveInput(token.address);
       const d = isRunnableTokenInput(input) ? await auditToken(input) : null;
       if (!d) {
-        r = { token, status: "error", verdict: "—", score: null, capApplied: null, mintable: false, freezable: false, headline: "", correct: false, driver: "No DEX pair resolved.", error: "unresolved" };
+        r = { token, status: "error", verdict: "N/A", score: null, capApplied: null, mintable: false, freezable: false, headline: "", correct: false, driver: "No DEX pair resolved.", error: "unresolved" };
       } else {
         const { correct, driver } = judge(token, d);
         r = {
@@ -93,7 +93,7 @@ export async function runBench(
         };
       }
     } catch (e) {
-      r = { token, status: "error", verdict: "—", score: null, capApplied: null, mintable: false, freezable: false, headline: "", correct: false, driver: "Audit error.", error: String(e) };
+      r = { token, status: "error", verdict: "N/A", score: null, capApplied: null, mintable: false, freezable: false, headline: "", correct: false, driver: "Audit error.", error: String(e) };
     }
     onResult?.(r, ++done);
     return r;

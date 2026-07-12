@@ -104,7 +104,7 @@ export function streamAudit(handle: string, priv: boolean, h: LiveHandlers): () 
       }
       // Stream closed. If we never saw a done/error event, the backend ended
       // early — surface it instead of leaving the UI spinning forever.
-      settle(() => h.onError("the audit stream closed before finishing — please retry"));
+      settle(() => h.onError("the audit stream closed before finishing. Please retry."));
     } catch (e) {
       if ((e as Error).name !== "AbortError") settle(() => h.onError(String(e)));
     } finally {

@@ -67,7 +67,7 @@ export function LegalScreen({ name, resolved }: { name?: string | null; resolved
         <a href={`https://www.courtlistener.com/?q=%22${encodeURIComponent(realName)}%22&type=r`} target="_blank" rel="noreferrer" className="link-ext mono ml-auto text-[11px]">CourtListener</a>
       </div>
       <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
-        {data.total} US court record{data.total === 1 ? "" : "s"} mention "{realName}"{flagged ? ` — ${asParty} name them as a party` : ""}. Verify the identity match before drawing conclusions; a name is not a person.
+        {data.total} US court record{data.total === 1 ? "" : "s"} mention "{realName}"{flagged ? `. ${asParty} record${asParty === 1 ? "" : "s"} name${asParty === 1 ? "s" : ""} them as a party` : ""}. Verify the identity match before drawing conclusions; a name is not a person.
       </p>
       <div className="mt-2 divide-y divide-line/60">
         {cases.slice(0, 6).map((c, i) => (

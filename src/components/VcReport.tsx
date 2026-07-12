@@ -238,7 +238,7 @@ export function VcReport({ handle, name, verifiedProjects = [], panelCostToken, 
   const priced = rows.filter((r) => r.resolved && r.verdict);
   const dead = priced.filter((r) => r.dead);
   const projectNameOverlapCount = rows.filter((r) => verifiedProjectKeys.has(r.project.trim().toLowerCase())).length;
-  const money = (n?: number) => (n == null ? "—" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
+  const money = (n?: number) => (n == null ? "N/A" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
 
   return (
     <div className="panel p-4">

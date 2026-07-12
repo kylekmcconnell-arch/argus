@@ -64,7 +64,7 @@ export function SiteInfra({ domain, record, onAudit }: { domain: string; record:
   if (!fps.length && !siblings.length && !neighbors.length) {
     return (
       <div className="mt-3 panel px-4 py-2.5 text-[12.5px] text-ink-faint">
-        No shared web infrastructure surfaced — no third-party analytics IDs, co-registered domains, or hosting neighbours to link this site to another operator.
+        No shared web infrastructure surfaced. No third-party analytics IDs, co-registered domains, or hosting neighbours link this site to another operator.
       </div>
     );
   }
@@ -114,7 +114,7 @@ export function SiteInfra({ domain, record, onAudit }: { domain: string; record:
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
             <span className="mono rounded-md border border-line px-1.5 py-0.5 text-ink-dim"><span className="text-ink-faint">IP</span> {h.ip}</span>
             {h.asn && <span className="mono rounded-md border border-line px-1.5 py-0.5 text-ink-dim">{h.asn}</span>}
-            {h.cdn && <span className="text-[11px] text-ink-faint">behind a shared CDN — neighbours not meaningful</span>}
+            {h.cdn && <span className="text-[11px] text-ink-faint">behind a shared CDN; neighbours are not meaningful</span>}
           </div>
           {neighbors.length > 0 && (
             <div className="mt-1.5">

@@ -14,10 +14,10 @@ type Namesake = {
 };
 
 const REL_META: Record<string, { label: string; color: string; blurb: string }> = {
-  created: { label: "created by namesake", color: "var(--color-caution)", blurb: "launched by the person it's named after — their track record IS the token's provenance" },
+  created: { label: "created by namesake", color: "var(--color-caution)", blurb: "launched by the person it's named after; their track record IS the token's provenance" },
   endorsed: { label: "endorsed", color: "var(--color-pass)", blurb: "the namesake publicly backed this specific token" },
   acknowledged: { label: "acknowledged only", color: "var(--color-caution)", blurb: "mentioned by the namesake, but not endorsed" },
-  denied: { label: "publicly denied", color: "var(--color-avoid)", blurb: "the namesake disavowed this token — any implied affiliation is fake" },
+  denied: { label: "publicly denied", color: "var(--color-avoid)", blurb: "the namesake disavowed this token. Any implied affiliation is fake" },
   unaffiliated: { label: "no affiliation", color: "var(--color-caution)", blurb: "a fan/namesake token: the person it's named after has no public connection to it" },
   not_a_person: { label: "not person-named", color: "var(--color-ink-faint)", blurb: "" },
   unclear: { label: "unclear", color: "var(--color-ink-faint)", blurb: "" },
@@ -57,7 +57,7 @@ export function NamesakeCheck({ symbol, name, contract, chain, panelCostToken, o
         <span className="chip tint-var" style={{ "--tint": rel.color } as React.CSSProperties}>{rel.label}</span>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-2">
-        <span className="text-[13.5px] font-medium text-ink">{d.named_after ?? "—"}</span>
+        <span className="text-[13.5px] font-medium text-ink">{d.named_after ?? "N/A"}</span>
         {d.x_handle && <span className="mono text-[11px] text-ink-faint">{d.x_handle}</span>}
         {d.x_handle && onAudit && (
           <button onClick={() => onAudit(d.x_handle!)} className="btn-chip tint-signal">

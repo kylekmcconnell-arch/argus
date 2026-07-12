@@ -92,7 +92,7 @@ export function BytecodeForensics({ address, chain, symbol, record = true }: { a
         </p>
       ) : twins.length > 0 ? (
         <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
-          Shares identical code with {twins.slice(0, 3).map((t) => t.handle).join(", ")} — deployed from the same template.
+          Shares identical code with {twins.slice(0, 3).map((t) => t.handle).join(", ")}. It was deployed from the same template.
         </p>
       ) : v ? (
         <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{v.line}</p>
@@ -100,7 +100,7 @@ export function BytecodeForensics({ address, chain, symbol, record = true }: { a
 
       {caps.length > 0 && (
         <div className="mt-2.5">
-          <div className="eyebrow">Callable capabilities in the code <span className="normal-case text-ink-faint/70">(neutral — confirm each is renounced/governed)</span></div>
+          <div className="eyebrow">Callable capabilities in the code <span className="normal-case text-ink-faint/70">(neutral; confirm each is renounced or governed)</span></div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {caps.map((c) => (
               <span key={c.selector} title={c.selector} className="chip">

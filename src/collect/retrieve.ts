@@ -93,7 +93,7 @@ export async function retrieveSite(
     chars: directHtml ? visibleText(directHtml).length : 0,
     note:
       directOutcome === "ok" ? "Server-rendered HTML retrieved." :
-      directOutcome === "spa-stub" ? "Only a JavaScript app shell returned — no rendered content. Escalating." :
+      directOutcome === "spa-stub" ? "Only a JavaScript app shell returned with no rendered content. Escalating." :
       directOutcome === "blocked" ? "Direct fetch blocked (cross-origin). Escalating to the rendering crawler." :
       "Host did not return a usable response. Escalating.",
   });
@@ -137,6 +137,6 @@ export async function retrieveSite(
   return {
     url: u, status: "gap", content: "", title: null, stages,
     coverageNote:
-      "Could not retrieve or render the site. This is recorded as a coverage gap — the audit cannot speak to content it never saw, and will not infer a team, or its absence, from a failed fetch.",
+      "Could not retrieve or render the site. This is recorded as a coverage gap. The audit cannot speak to content it never saw and will not infer a team, or its absence, from a failed fetch.",
   };
 }

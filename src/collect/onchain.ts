@@ -158,22 +158,22 @@ function reconcile(claim: TokenClaim, d: TokenDossier, viaSearch = false): OnCha
   if (viaSearch) {
     return {
       tone: "warn",
-      line: `A token trading as ${claim.ticker} exists on-chain (${d.symbol} on ${d.chain}, liquidity ${money(d.liquidityUsd)}). This is a ticker match only — the site links no contract to confirm it is this project's token, and many projects share a ticker. Open its audit to judge that token on its own.`,
+      line: `A token trading as ${claim.ticker} exists on-chain (${d.symbol} on ${d.chain}, liquidity ${money(d.liquidityUsd)}). This is a ticker match only. The site links no contract to confirm it is this project's token, and many projects share a ticker. Open its audit to judge that token on its own.`,
     };
   }
 
   const onChainFdv = d.mcap ?? undefined;
   const claimFdvNum = parseMoney(claim.fdv);
-  const lead = `On-chain: ${d.symbol} on ${d.chain}, ${d.verdict} (${d.score ?? "—"}), liquidity ${money(d.liquidityUsd)}, FDV ${money(onChainFdv)}.`;
+  const lead = `On-chain: ${d.symbol} on ${d.chain}, ${d.verdict} (${d.score ?? "N/A"}), liquidity ${money(d.liquidityUsd)}, FDV ${money(onChainFdv)}.`;
   const parts: string[] = [lead];
   let tone: OnChainPivot["reconcile"]["tone"] = d.verdict === "PASS" ? "good" : d.verdict === "CAUTION" ? "warn" : "bad";
 
   if (claimFdvNum && onChainFdv) {
     const ratio = claimFdvNum / onChainFdv;
-    if (ratio > 3 || ratio < 0.33) { parts.push(`Site claims ${claim.fdv}, ~${ratio >= 1 ? ratio.toFixed(0) + "x higher than" : (1 / ratio).toFixed(0) + "x below"} the on-chain figure — claim contradicted.`); tone = "bad"; }
+    if (ratio > 3 || ratio < 0.33) { parts.push(`Site claims ${claim.fdv}, ~${ratio >= 1 ? ratio.toFixed(0) + "x higher than" : (1 / ratio).toFixed(0) + "x below"} the on-chain figure. The claim is contradicted.`); tone = "bad"; }
     else parts.push(`Site's ${claim.fdv} is in line with on-chain.`);
   } else if (claim.fdv && (d.liquidityUsd ?? 0) < 25000) {
-    parts.push(`Site claims ${claim.fdv} but on-chain liquidity is only ${money(d.liquidityUsd)} — the valuation claim is not backed by real depth.`);
+    parts.push(`Site claims ${claim.fdv}, but on-chain liquidity is only ${money(d.liquidityUsd)}. The valuation claim is not backed by real depth.`);
     tone = "bad";
   }
   return { tone, line: parts.join(" ") };

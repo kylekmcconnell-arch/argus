@@ -32,7 +32,7 @@ async function findHandle(name: string, domain: string, key: string): Promise<Ha
   const system =
     "You identify the ONE official X (Twitter) account for a crypto/tech project, using live web + X search. " +
     "Return the account the project itself operates (matches its name + website), NOT a fan, a founder's personal account, or an impersonator. " +
-    "Reply with ONLY compact JSON: {\"handle\":\"@...\"} — or {\"handle\":null} if you cannot confidently identify it. Never invent.";
+    "Reply with ONLY compact JSON: {\"handle\":\"@...\"}, or {\"handle\":null} if you cannot confidently identify it. Never invent.";
   const user = `Project: "${name}"${domain ? ` (website ${domain})` : ""}. What is its official X account handle?`;
   let r: Response;
   try {

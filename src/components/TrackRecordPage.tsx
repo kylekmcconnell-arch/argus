@@ -82,19 +82,19 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
       <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-3">
         <Stat
           label="Specificity"
-          value={specPct == null ? "—" : `${sum.established.cleared}/${sum.established.total}`}
+          value={specPct == null ? "N/A" : `${sum.established.cleared}/${sum.established.total}`}
           sub="established, fixed-supply tokens cleared (no false alarms)"
           tone={pass}
         />
         <Stat
           label="Authority detection"
-          value={sum.governance.total ? `${sum.governance.flagged}/${sum.governance.total}` : "—"}
+          value={sum.governance.total ? `${sum.governance.flagged}/${sum.governance.total}` : "N/A"}
           sub="reputable governance tokens whose live mint authority was caught"
           tone={fail}
         />
         <Stat
           label="As labeled"
-          value={sum.total ? `${sum.asExpected}/${sum.total}` : "—"}
+          value={sum.total ? `${sum.asExpected}/${sum.total}` : "N/A"}
           sub="verdicts that matched the declared expectation"
           tone="var(--color-ink)"
         />
