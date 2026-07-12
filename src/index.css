@@ -94,6 +94,7 @@
   }
 }
 
+@layer components {
 /* ───────────────────────── typography ───────────────────────── */
 
 /* The brand voice: Archivo drawn wide. Only at display sizes — wordmark,
@@ -397,6 +398,7 @@
   text-align: center;
   font-size: 12.5px;
   color: var(--color-ink-faint);
+}
 }
 
 /* ───────────────────────── motion ───────────────────────── */
