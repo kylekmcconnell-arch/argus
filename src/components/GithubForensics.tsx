@@ -47,14 +47,14 @@ export function GithubForensics({ org, login, subjectKey, panelCostToken, record
   if (currentFailure) return <PanelRequestNotice failure={currentFailure} label="GitHub commit forensics" className="mt-3" />;
   if (!data) {
     return (
-      <div className="mt-3 rounded-xl border border-line bg-panel p-4">
+      <div className="mt-3 panel p-4">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Commit forensics · {label}</span>
-          <button onClick={run} disabled={loading || !panelCostToken} className="mono rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-dim transition hover:text-ink disabled:opacity-50">
+          <span className="eyebrow">Commit forensics · {label}</span>
+          <button onClick={run} disabled={loading || !panelCostToken} className="btn-chip tint-signal disabled:opacity-50">
             {loading ? "mining commits…" : panelCostToken ? "reveal the devs →" : "saved report required"}
           </button>
         </div>
-        <p className="mt-1.5 text-[12px] leading-relaxed text-ink-faint">
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-faint">
           Mine commit-author metadata for real names and personal emails the team left in git history — the identities
           behind a pseudonymous project.
         </p>
@@ -68,20 +68,20 @@ export function GithubForensics({ org, login, subjectKey, panelCostToken, record
   const others = idents.filter((i) => i.kind !== "personal");
 
   return (
-    <div className="mt-3 rounded-xl border border-line bg-panel p-4">
-      <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Commit forensics · {label}</div>
-      {data.note && <div className={`mt-1.5 text-[12px] leading-relaxed ${leaks.length ? "text-avoid" : "text-ink-dim"}`}>{data.note}</div>}
+    <div className="mt-3 panel p-4">
+      <div className="eyebrow">Commit forensics · {label}</div>
+      {data.note && <div className={`mt-1.5 text-[12.5px] leading-relaxed ${leaks.length ? "text-avoid" : "text-ink-dim"}`}>{data.note}</div>}
 
       {leaks.length > 0 && (
         <div className="mt-2.5">
-          <div className="text-[10.5px] uppercase tracking-wide text-ink-faint">Real-identity leaks ({leaks.length})</div>
+          <div className="eyebrow">Real-identity leaks ({leaks.length})</div>
           <div className="mt-1 space-y-1">
             {leaks.map((p) => (
               <div key={p.email} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="text-[12.5px] text-ink">{p.name}</span>
-                <a href={`mailto:${p.email}`} className="mono text-[11.5px] text-signal underline-offset-2 hover:underline">{p.email}</a>
-                {p.login && <a href={`https://github.com/${p.login}`} target="_blank" rel="noreferrer" className="mono text-[10.5px] text-ink-faint hover:text-ink">@{p.login}</a>}
-                <span className="mono text-[10px] text-ink-faint">{p.commits} commits</span>
+                <a href={`mailto:${p.email}`} className="mono text-[11px] text-signal underline-offset-2 hover:underline">{p.email}</a>
+                {p.login && <a href={`https://github.com/${p.login}`} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">@{p.login}</a>}
+                <span className="mono text-[11px] text-ink-faint">{p.commits} commits</span>
               </div>
             ))}
           </div>
@@ -90,10 +90,10 @@ export function GithubForensics({ org, login, subjectKey, panelCostToken, record
 
       {others.length > 0 && (
         <div className="mt-2.5">
-          <div className="text-[10.5px] uppercase tracking-wide text-ink-faint">Other committers ({others.length})</div>
+          <div className="eyebrow">Other committers ({others.length})</div>
           <div className="mt-1 flex flex-wrap gap-1.5">
             {others.slice(0, 16).map((p) => (
-              <span key={p.email || p.name} className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink-dim" title={`${p.email} · ${p.commits} commits`}>
+              <span key={p.email || p.name} className="mono rounded border border-line px-1.5 py-0.5 text-[11px] text-ink-dim" title={`${p.email} · ${p.commits} commits`}>
                 {p.name || p.email}
               </span>
             ))}
@@ -103,12 +103,12 @@ export function GithubForensics({ org, login, subjectKey, panelCostToken, record
 
       {forks.length > 0 && (
         <div className="mt-2.5">
-          <div className="text-[10.5px] uppercase tracking-wide text-ink-faint">Forked / copied code ({forks.length})</div>
+          <div className="eyebrow">Forked / copied code ({forks.length})</div>
           <div className="mt-1 space-y-0.5">
             {forks.slice(0, 6).map((f) => (
               <div key={f.repo} className="mono text-[11px] text-ink-dim">
                 {f.repo.split("/")[1]} <span className="text-ink-faint">← forked from</span>{" "}
-                <a href={`https://github.com/${f.parent}`} target="_blank" rel="noreferrer" className="text-signal hover:underline">{f.parent}</a>
+                <a href={`https://github.com/${f.parent}`} target="_blank" rel="noreferrer" className="link-ext">{f.parent}</a>
               </div>
             ))}
           </div>

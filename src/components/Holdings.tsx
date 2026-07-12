@@ -55,9 +55,9 @@ export function Holdings({ address, symbol, panelCostToken }: { address?: string
   const toneColor = bite?.tone === "avoid" ? "var(--color-avoid)" : bite?.tone === "caution" ? "var(--color-caution)" : "var(--color-ink-faint)";
 
   return (
-    <div className="rounded-xl border border-line p-4">
+    <div className="panel p-4">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Holdings</span>
+        <span className="eyebrow">Holdings</span>
         <span className="text-[11.5px] text-ink-dim">what the wallet holds now (Arkham)</span>
         <div className="ml-auto flex items-baseline gap-2">
           <span className="mono text-[15px] font-semibold text-ink tabular">{usd(d.totalUsd)}</span>
@@ -66,22 +66,22 @@ export function Holdings({ address, symbol, panelCostToken }: { address?: string
       </div>
 
       {bite && (
-        <div className="mt-2.5 rounded-lg px-3 py-2 text-[11.5px]" style={{ background: `${toneColor}12`, color: toneColor }}>
+        <div className="finding tint-var mt-2.5 px-3 py-2 text-[11.5px]" style={{ "--tint": toneColor } as React.CSSProperties}>
           {bite.text}
         </div>
       )}
 
-      <div className="mt-2.5 divide-y divide-line/60 rounded-lg border border-line/60">
+      <div className="mt-2.5 divide-y divide-line/60">
         {d.holdings.map((h, i) => {
           const share = d.totalUsd > 0 ? (h.usd / d.totalUsd) * 100 : 0;
           const self = d.selfToken && h.symbol === d.selfToken.symbol;
           return (
-            <div key={i} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-1.5 text-[11.5px]">
+            <div key={i} className="flex flex-wrap items-center gap-x-2 gap-y-0.5 py-1.5 text-[11.5px]">
               <span className="mono font-medium text-ink">{h.symbol}</span>
-              {self && <span className="mono shrink-0 rounded px-1 py-0.5 text-[9px]" style={{ background: "var(--color-caution)1a", color: "var(--color-caution)" }}>own token</span>}
+              {self && <span className="chip tint-caution shrink-0">own token</span>}
               <span className="truncate text-ink-faint">{h.name}</span>
               {h.change24h !== 0 && (
-                <span className="mono text-[10px] tabular" style={{ color: h.change24h >= 0 ? "var(--color-pass)" : "var(--color-avoid)" }}>{pct(h.change24h)}</span>
+                <span className="mono text-[11px] tabular" style={{ color: h.change24h >= 0 ? "var(--color-pass)" : "var(--color-avoid)" }}>{pct(h.change24h)}</span>
               )}
               <span className="mono ml-auto tabular text-ink-dim">{share.toFixed(0)}%</span>
               <span className="mono w-[68px] shrink-0 text-right tabular text-ink">{usd(h.usd)}</span>
@@ -89,7 +89,7 @@ export function Holdings({ address, symbol, panelCostToken }: { address?: string
           );
         })}
       </div>
-      <div className="mt-2 text-[10px] text-ink-faint">across {d.chains} chain{d.chains === 1 ? "" : "s"}</div>
+      <div className="mt-2 text-[11px] text-ink-faint">across {d.chains} chain{d.chains === 1 ? "" : "s"}</div>
     </div>
   );
 }

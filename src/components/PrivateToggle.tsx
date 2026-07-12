@@ -10,14 +10,10 @@ export function PrivateToggle({ on, onToggle, className = "" }: { on: boolean; o
         role="checkbox"
         aria-checked={on}
         onClick={() => onToggle(!on)}
-        className="flex items-center gap-1.5 text-[12.5px] transition"
-        style={{ color: on ? "var(--color-ink)" : "var(--color-ink-dim)" }}
+        className={`flex items-center gap-1.5 text-[12.5px] transition ${on ? "text-ink" : "text-ink-dim"}`}
       >
         <span
-          className="flex h-[15px] w-[15px] items-center justify-center rounded-[4px] border transition"
-          style={on
-            ? { background: "var(--color-signal)", borderColor: "var(--color-signal)" }
-            : { borderColor: "var(--color-line-2)" }}
+          className={`flex h-[15px] w-[15px] items-center justify-center rounded-[4px] border transition ${on ? "border-signal bg-signal" : "border-line-2"}`}
         >
           {on && (
             <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--color-void)" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -33,8 +29,7 @@ export function PrivateToggle({ on, onToggle, className = "" }: { on: boolean; o
           tabIndex={0}
           role="img"
           aria-label="What is a private search?"
-          className="flex cursor-help items-center justify-center rounded-full outline-none transition"
-          style={{ color: "var(--color-ink-faint)" }}
+          className="flex cursor-help items-center justify-center rounded-full text-ink-faint transition"
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="12" cy="12" r="9" />
@@ -44,10 +39,9 @@ export function PrivateToggle({ on, onToggle, className = "" }: { on: boolean; o
         </span>
         <span
           role="tooltip"
-          className="pointer-events-none absolute left-1/2 top-[calc(100%+8px)] z-50 w-[236px] -translate-x-1/2 rounded-lg border px-3 py-2 text-[11.5px] leading-relaxed opacity-0 transition-opacity duration-150 group-hover/info:opacity-100 group-focus-within/info:opacity-100"
-          style={{ borderColor: "var(--color-line-2)", background: "var(--color-panel)", color: "var(--color-ink-dim)", boxShadow: "0 8px 24px rgba(0,0,0,.35)" }}
+          className="pointer-events-none absolute left-1/2 top-[calc(100%+8px)] z-50 w-[236px] -translate-x-1/2 rounded-lg border border-line-2 bg-panel px-3 py-2 text-[12.5px] leading-relaxed text-ink-dim opacity-0 transition-opacity duration-150 soft-shadow group-hover/info:opacity-100 group-focus-within/info:opacity-100"
         >
-          A private search runs the same audit but <span style={{ color: "var(--color-ink)" }}>won't show in or add to the public trust graph</span> — no tickers, no recent audits, no shared record. <span style={{ color: "var(--color-ink-faint)" }}>A premium option.</span>
+          A private search runs the same audit but <span className="text-ink">won't show in or add to the public trust graph</span> — no tickers, no recent audits, no shared record. <span className="text-ink-faint">A premium option.</span>
         </span>
       </span>
     </div>

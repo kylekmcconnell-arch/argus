@@ -23,7 +23,7 @@ export function MethodologyChecklist({ checks, id }: { checks: ScanCheck[]; id?:
   const coverage = summarizeChecks(checks);
 
   return (
-    <section id={id} className="scroll-mt-20 rounded-xl border border-line bg-panel" aria-labelledby={buttonId}>
+    <section id={id} className="scroll-mt-20 panel" aria-labelledby={buttonId}>
       <button
         id={buttonId}
         type="button"
@@ -33,8 +33,8 @@ export function MethodologyChecklist({ checks, id }: { checks: ScanCheck[]; id?:
         className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
       >
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-faint)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Scan methodology</span>
-        <span className="text-[11.5px] text-ink-dim">
+        <span className="eyebrow">Scan methodology</span>
+        <span className="text-[12.5px] text-ink-dim">
           {coverage.successful}/{coverage.inScope} outcomes recorded
           {coverage.unknownOrFailed ? ` · ${coverage.unknownOrFailed} unresolved` : ""}
           {coverage.findings ? ` · ${coverage.findings} finding${coverage.findings === 1 ? "" : "s"}` : ""}
@@ -49,17 +49,17 @@ export function MethodologyChecklist({ checks, id }: { checks: ScanCheck[]; id?:
               const meta = META[check.status];
               return (
                 <li key={`${check.label}-${index}`} className="flex items-start gap-2.5 rounded-lg px-2 py-1.5">
-                  <span aria-hidden="true" className="mono mt-0.5 w-3.5 shrink-0 text-center text-[12px]" style={{ color: meta.color }}>{meta.glyph}</span>
+                  <span aria-hidden="true" className="mono mt-0.5 w-3.5 shrink-0 text-center text-[12.5px]" style={{ color: meta.color }}>{meta.glyph}</span>
                   <span className="min-w-0 flex-1">
                     <span className="text-[12.5px] text-ink">{check.label}</span>
                     {check.note && <span className="ml-2 text-[11px] text-ink-faint">{check.note}</span>}
                   </span>
-                  <span className="mono shrink-0 text-[9.5px] uppercase tracking-wide" style={{ color: meta.color }}>{meta.label}</span>
+                  <span className="chip tint-var shrink-0" style={{ ["--tint" as string]: meta.color }}>{meta.label}</span>
                 </li>
               );
             })}
           </ul>
-          <p className="px-2 py-1.5 text-[10.5px] leading-snug text-ink-faint">
+          <p className="px-2 py-1.5 text-[11px] leading-snug text-ink-faint">
             A recorded outcome means ARGUS stored an observable result, including findings and explicit empty responses. Unknown means no completion result is present; provider unavailable means a required data source or coverage path did not respond. Stale results are excluded from completed coverage.
           </p>
         </div>

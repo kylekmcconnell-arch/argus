@@ -28,36 +28,36 @@ export function SanctionsNameScreen({ name, resolved }: { name?: string | null; 
   if (!screenable || !data) return null;
   if (data.available === false) {
     return (
-      <div className="rounded-xl border border-caution/35 bg-caution/5 px-4 py-3 text-[11.5px] leading-relaxed text-ink-dim" role="status">
+      <div className="panel tint-caution px-4 py-3 text-[12.5px] leading-relaxed text-ink-dim" role="status">
         <span className="font-medium text-ink">Current sanctions screen unavailable.</span> {data.note ?? "No clean result was inferred."} The frozen report remains the source of truth.
       </div>
     );
   }
 
   if (data.sanctioned) {
-    const c = "var(--color-fail)";
+    const c = "var(--color-avoid)";
     return (
-      <div className="rounded-xl border p-4" style={{ borderColor: `${c}66`, background: `${c}12` }}>
+      <div className="finding tint-avoid p-4">
         <div className="flex items-center gap-2">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={c} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M4.9 4.9l14.2 14.2" /></svg>
-          <span className="text-[13px] font-semibold" style={{ color: c }}>⛔ Name matches the OFAC SDN sanctions list</span>
+          <span className="text-[13.5px] font-semibold text-avoid">⛔ Name matches the OFAC SDN sanctions list</span>
         </div>
-        <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
           "{realName}" exactly matches an individual on the US Treasury OFAC Specially Designated Nationals list. Transacting with a sanctioned person is a federal offense. Verify the identity match — a name is not a person — but treat this as a hard stop until cleared.
-          <a href={`https://sanctionssearch.ofac.treas.gov/`} target="_blank" rel="noreferrer" className="mono ml-1 text-signal-dim hover:underline">OFAC search ↗</a>
+          <a href={`https://sanctionssearch.ofac.treas.gov/`} target="_blank" rel="noreferrer" className="link-ext mono ml-1">OFAC search</a>
         </p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-line bg-panel px-4 py-3">
-      <div className="flex items-center gap-2 text-[10.5px] uppercase tracking-wider text-ink-faint">
+    <div className="panel px-4 py-3">
+      <div className="flex items-center gap-2">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-pass)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>
-        <span>Supplemental sanctions screen</span>
-        <span className="mono ml-auto text-[9.5px] normal-case tracking-normal">not scored</span>
+        <span className="eyebrow">Supplemental sanctions screen</span>
+        <span className="chip ml-auto">not scored</span>
       </div>
-      <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
+      <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
         No exact name match returned from the checked US Treasury OFAC SDN list
         {data.listSize ? ` (${data.listSize.toLocaleString()} listed individuals)` : ""} at query time. This does not establish identity or clear every sanctions regime.
       </p>

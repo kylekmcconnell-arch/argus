@@ -26,9 +26,9 @@ const money = (n: number) => (n >= 1e6 ? (n / 1e6).toFixed(1) + "M" : n >= 1e3 ?
 
 function Metric({ label, value, tone }: { label: string; value: string; tone?: string }) {
   return (
-    <div className="min-w-0">
-      <div className="mono text-[15px] font-semibold tabular" style={{ color: tone ?? "var(--color-ink)" }}>{value}</div>
-      <div className="text-[10px] uppercase tracking-wider text-ink-faint">{label}</div>
+    <div className="stat-tile min-w-0">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value mt-0.5 font-semibold tabular" style={tone ? { color: tone } : undefined}>{value}</div>
     </div>
   );
 }
@@ -60,7 +60,7 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
   }, [address, chain]);
 
   if (state === "loading") {
-    return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">reading the holder base + distribution…</div>;
+    return <div className="panel p-4 text-[12.5px] text-ink-faint">reading the holder base + distribution…</div>;
   }
 
   // ---- Solana: rich RugCheck view ----
@@ -69,14 +69,14 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
     const barMarket = Math.min(100, c.marketPct);
     const barRisk = Math.min(100 - barMarket, c.top10NonMarket);
     return (
-      <div className="rounded-xl border bg-panel p-4" style={{ borderColor: TONE[d.verdict.tone] + "55" }}>
+      <div className="panel tint-var p-4" style={{ "--tint": TONE[d.verdict.tone] } as React.CSSProperties}>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Holder forensics</span>
-          <span className="mono text-[10px] text-ink-faint">RugCheck</span>
-          {d.rugged && <span className="mono rounded border border-avoid/40 px-1.5 py-0.5 text-[9.5px] text-avoid">rugged</span>}
+          <span className="eyebrow">Holder forensics</span>
+          <span className="mono text-[11px] text-ink-faint">RugCheck</span>
+          {d.rugged && <span className="chip tint-avoid">rugged</span>}
         </div>
 
-        <p className="mt-2 text-[13px] font-medium leading-relaxed" style={{ color: TONE[d.verdict.tone] }}>{d.verdict.line}</p>
+        <p className="mt-2 text-[13.5px] font-medium leading-relaxed" style={{ color: TONE[d.verdict.tone] }}>{d.verdict.line}</p>
 
         {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
           <PanelRequestNotice failure={arkhamState} label="Holder identity labels" className="mt-3" />
@@ -91,7 +91,7 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
 
         {/* concentration bar: market/exchange liquidity vs private-wallet concentration */}
         <div className="mt-3">
-          <div className="mb-1 flex items-center justify-between text-[10px] text-ink-faint">
+          <div className="mb-1 flex items-center justify-between text-[11px] text-ink-faint">
             <span>top-10 distribution</span>
             <span className="mono">{c.marketPct > 1 ? `${c.marketPct.toFixed(0)}% DEX/CEX/LP · ` : ""}{c.top10NonMarket.toFixed(0)}% private wallets</span>
           </div>
@@ -103,20 +103,20 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
 
         {/* top holders, labeled */}
         {d.top.length > 0 && (
-          <div className="mt-3 divide-y divide-line/60 rounded-lg border border-line">
+          <div className="mt-3 divide-y divide-line/60">
             {d.top.slice(0, 8).map((h, i) => (
-              <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
+              <div key={i} className="flex items-center gap-2 py-1.5 text-[11.5px]">
                 <span className="mono w-4 shrink-0 text-ink-faint">{i + 1}</span>
                 <ArkhamName address={h.owner} chain="solana" labels={arkham} fallback={h.addr} className="text-ink-dim" />
-                {h.label && <span className="mono shrink-0 rounded px-1.5 py-0.5 text-[9px]" style={{ background: h.market ? "var(--color-pass)1a" : "var(--color-caution)1a", color: h.market ? "var(--color-pass)" : "var(--color-caution)" }}>{h.label}</span>}
-                {h.insider && !h.label && <span className="mono shrink-0 rounded px-1.5 py-0.5 text-[9px]" style={{ background: "var(--color-avoid)1a", color: "var(--color-avoid)" }}>insider</span>}
+                {h.label && <span className="chip tint-var shrink-0" style={{ "--tint": h.market ? "var(--color-pass)" : "var(--color-caution)" } as React.CSSProperties}>{h.label}</span>}
+                {h.insider && !h.label && <span className="chip tint-avoid shrink-0">insider</span>}
                 <span className="mono ml-auto shrink-0 tabular text-ink">{h.pct.toFixed(1)}%</span>
               </div>
             ))}
           </div>
         )}
 
-        <div className="mono mt-2.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-ink-faint">
+        <div className="mono mt-2.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-faint">
           {d.insiders.detected > 0 && <span>{d.insiders.detected.toLocaleString()} linked insider wallets across {d.insiders.networks} cluster{d.insiders.networks === 1 ? "" : "s"}</span>}
           {d.lpLockedPct > 0 && <span>LP {d.lpLockedPct.toFixed(0)}% locked</span>}
         </div>
@@ -129,10 +129,10 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
   const topSum = top.reduce((a, h) => a + h.pct, 0);
   const concentrated = topSum >= 50;
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="panel p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Holder forensics</span>
-        <span className="mono text-[10px] text-ink-faint">on-chain</span>
+        <span className="eyebrow">Holder forensics</span>
+        <span className="mono text-[11px] text-ink-faint">on-chain</span>
       </div>
       {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
         <PanelRequestNotice failure={arkhamState} label="Holder identity labels" className="mt-3" />
@@ -143,15 +143,15 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
         <Metric label="insider est." value={insiderPct ? `${insiderPct}%` : "—"} tone={insiderPct >= 20 ? TONE.warn : undefined} />
       </div>
       {top.length > 0 && (
-        <div className="mt-3 divide-y divide-line/60 rounded-lg border border-line">
+        <div className="mt-3 divide-y divide-line/60">
           {top.map((h, i) => {
             const lab = labelAddress(h.address, { tag: h.tag, isContract: h.isContract });
             const color = lab.kind === "burn" || lab.market ? "var(--color-pass)" : "var(--color-ink-dim)";
             return (
-              <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
+              <div key={i} className="flex items-center gap-2 py-1.5 text-[11.5px]">
                 <span className="mono w-4 shrink-0 text-ink-faint">{i + 1}</span>
                 <ArkhamName address={h.address} chain={chain} labels={arkham} fallback={lab.text} className={color === "var(--color-pass)" ? "" : "text-ink-dim"} />
-                {lab.market && <span className="mono shrink-0 rounded px-1.5 py-0.5 text-[9px]" style={{ background: "var(--color-pass)1a", color: "var(--color-pass)" }}>{lab.kind === "burn" ? "burned" : "market/custody"}</span>}
+                {lab.market && <span className="chip tint-pass shrink-0">{lab.kind === "burn" ? "burned" : "market/custody"}</span>}
                 <span className="mono ml-auto shrink-0 tabular text-ink">{h.pct.toFixed(1)}%</span>
               </div>
             );

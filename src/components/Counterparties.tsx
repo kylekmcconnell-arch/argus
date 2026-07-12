@@ -63,30 +63,30 @@ export function Counterparties({ address, subject, panelCostToken, record = true
   const rows = current?.rows;
   if (!rows || rows.length === 0) return null;
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="panel p-4">
       <div className="flex flex-wrap items-center gap-2">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.4" /><circle cx="18" cy="18" r="2.4" /><circle cx="18" cy="6" r="2.4" /><path d="M8.4 6H16M6 8.4V16M8 16l8-8" /></svg>
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Counterparties</span>
+        <span className="eyebrow">Counterparties</span>
         <span className="text-[11.5px] text-ink-dim">who the deployer moves money with, on-chain (Arkham)</span>
       </div>
-      <div className="mt-2.5 divide-y divide-line/60 rounded-lg border border-line">
+      <div className="mt-2.5 divide-y divide-line/60">
         {rows.map((c, i) => {
           const risky = RISKY.has((c.type ?? "").toLowerCase());
           const nc = risky ? "var(--color-avoid)" : c.isCex ? "var(--color-pass)" : "var(--color-ink)";
           const f = FLOW[c.flow];
           return (
-            <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
+            <div key={i} className="flex items-center gap-2 py-1.5 text-[11.5px]">
               <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="var(--color-ink-faint)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ flex: "none" }}><title>{f.t}</title><path d={f.g} /></svg>
               <span className="mono truncate" style={{ color: nc }}>{c.name}</span>
-              {c.type && <span className="mono shrink-0 rounded px-1 py-0.5 text-[9px]" style={{ background: (risky ? "var(--color-avoid)" : c.isCex ? "var(--color-pass)" : "var(--color-signal)") + "1a", color: risky ? "var(--color-avoid)" : c.isCex ? "var(--color-pass)" : "var(--color-signal)" }}>{c.type}</span>}
-              {c.twitter && <a href={c.twitter} target="_blank" rel="noreferrer" className="mono shrink-0 text-[9.5px] text-signal-dim hover:underline">𝕏↗</a>}
+              {c.type && <span className="chip tint-var shrink-0" style={{ "--tint": risky ? "var(--color-avoid)" : c.isCex ? "var(--color-pass)" : "var(--color-signal)" } as React.CSSProperties}>{c.type}</span>}
+              {c.twitter && <a href={c.twitter} target="_blank" rel="noreferrer" className="link-ext mono shrink-0 text-[11px]">𝕏</a>}
               <span className="mono ml-auto shrink-0 tabular text-ink-dim">{usd(c.usd)}</span>
-              <span className="mono shrink-0 text-[9.5px] text-ink-faint">{c.txCount.toLocaleString()} tx</span>
+              <span className="mono shrink-0 text-[11px] text-ink-faint">{c.txCount.toLocaleString()} tx</span>
             </div>
           );
         })}
       </div>
-      <p className="mt-2 text-[10.5px] leading-snug text-ink-faint">Named non-exchange counterparties are wired into the trust graph as verified relationship edges — a shared fund or mixer bridges two operators automatically.</p>
+      <p className="mt-2 text-[11px] leading-snug text-ink-faint">Named non-exchange counterparties are wired into the trust graph as verified relationship edges — a shared fund or mixer bridges two operators automatically.</p>
     </div>
   );
 }

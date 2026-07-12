@@ -25,13 +25,13 @@ export function Avatar({
         loading="lazy"
         referrerPolicy="no-referrer"
         onError={() => setFailed(true)}
-        className={`shrink-0 border border-line bg-panel object-cover ${rounded}`}
+        className={`shrink-0 border border-line bg-panel-2 object-cover ${rounded}`}
         style={dim}
       />
     );
   }
   return (
-    <span className={`flex shrink-0 items-center justify-center border border-line bg-panel text-signal ${rounded} ${letterClass}`} style={dim}>
+    <span className={`flex shrink-0 items-center justify-center border border-line bg-panel-2 text-signal ${rounded} ${letterClass}`} style={dim}>
       {letter}
     </span>
   );

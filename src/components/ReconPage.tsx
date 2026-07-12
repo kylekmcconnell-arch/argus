@@ -57,7 +57,7 @@ function Ring({ score, color }: { score: number | null; color: string }) {
         <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth="4" strokeLinecap="round" strokeDasharray={c} strokeDashoffset={c * (1 - pct)} style={{ transition: "stroke-dashoffset 0.7s ease-out" }} />
       </svg>
       <div className="absolute inset-0 flex items-center justify-center">
-        <span className="mono text-[16px] font-semibold tabular" style={{ color }}>{score ?? "—"}</span>
+        <span className="mono text-[15px] font-semibold tabular" style={{ color }}>{score ?? "—"}</span>
       </div>
     </div>
   );
@@ -293,8 +293,8 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
     <>
       {openRecent && <ScoreTicker onOpen={openRecent} label="Recent site recons · click to open the report" filter={(e) => e.kind === "site"} />}
     <div className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-[28px] font-medium tracking-[-0.02em] text-ink">Site recon</h1>
-      <p className="mt-2 max-w-2xl text-[14.5px] leading-relaxed text-ink-dim">
+      <h1 className="display-sm text-[24px] text-ink">Site recon</h1>
+      <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         Point ARGUS at a project's website. It fetches, and when a site is a JavaScript app that returns only a
         shell, it escalates to a rendering crawler instead of guessing. Crucially, when it cannot see something it
         says so: a failed fetch becomes a coverage gap, never a confident "anonymous team."
@@ -318,21 +318,21 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
 
       {/* input */}
       <div className="mt-5 flex items-center gap-2">
-        <div className="flex flex-1 items-center rounded-lg border border-line bg-panel px-3">
-          <span className="mono text-[12px] text-ink-faint">https://</span>
+        <div className="field flex flex-1 items-center px-3">
+          <span className="mono text-[12.5px] text-ink-faint">https://</span>
           <input
             value={url}
             onChange={(e) => setUrl(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter") run(url); }}
             placeholder="project-site.io"
-            className="mono w-full bg-transparent px-1.5 py-2.5 text-[13.5px] text-ink outline-none placeholder:text-ink-faint"
+            className="mono w-full bg-transparent px-1.5 py-2.5 text-[13.5px] text-ink placeholder:text-ink-faint"
           />
         </div>
         <PrivateToggle on={priv} onToggle={togglePriv} className="shrink-0 py-2.5" />
         <button
           onClick={() => run(url)}
           disabled={running}
-          className="btn-primary shrink-0 px-4 py-2.5 text-[13px] font-medium disabled:opacity-50"
+          className="btn-primary shrink-0 px-4 py-2.5 text-[13.5px] font-medium disabled:opacity-50"
         >
           {running ? "running…" : "Run recon"}
         </button>
@@ -340,23 +340,23 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
       <div className="mt-2 flex items-center gap-2 text-[12px] text-ink-faint">
         <span>try</span>
         {EXAMPLES.map((e) => (
-          <button key={e} onClick={() => run(e)} disabled={running} className="mono rounded border border-line bg-panel px-1.5 py-0.5 text-ink-dim transition hover:text-ink disabled:opacity-50">{e}</button>
+          <button key={e} onClick={() => run(e)} disabled={running} className="chip normal-case tracking-normal transition hover:text-ink disabled:opacity-50">{e}</button>
         ))}
       </div>
 
       {/* retrieval trace — the fail -> escalate routing, shown */}
       {stages.length > 0 && (
-        <div className="mt-6 overflow-hidden rounded-xl border border-line bg-panel">
-          <div className="border-b border-line px-4 py-2 text-[10.5px] uppercase tracking-wider text-ink-faint">Retrieval</div>
+        <div className="panel mt-6 overflow-hidden">
+          <div className="eyebrow border-b border-line px-4 py-2">Retrieval</div>
           {stages.map((s, i) => (
             <div key={i} className="flex items-start gap-3 border-b border-line px-4 py-2.5 last:border-0">
-              <span className="mono mt-0.5 shrink-0 text-[10px] text-ink-faint">{i + 1}</span>
-              <span className="mono shrink-0 text-[12px] text-ink">{s.method}</span>
-              <span className="mono shrink-0 rounded px-1.5 text-[10.5px] font-semibold" style={{ color: OUTCOME_TONE[s.outcome] ?? "var(--color-ink-faint)", background: (OUTCOME_TONE[s.outcome] ?? "#888") + "14" }}>
+              <span className="mono mt-0.5 shrink-0 text-[11px] text-ink-faint">{i + 1}</span>
+              <span className="mono shrink-0 text-[12.5px] text-ink">{s.method}</span>
+              <span className="chip tint-var shrink-0" style={{ "--tint": OUTCOME_TONE[s.outcome] ?? "var(--color-ink-faint)" } as React.CSSProperties}>
                 {s.outcome}
               </span>
-              <span className="flex-1 text-[12px] leading-snug text-ink-dim">{s.note}</span>
-              {s.chars > 0 && <span className="mono shrink-0 text-[10.5px] text-ink-faint">{s.chars.toLocaleString()} ch</span>}
+              <span className="flex-1 text-[12.5px] leading-snug text-ink-dim">{s.note}</span>
+              {s.chars > 0 && <span className="mono shrink-0 text-[11px] text-ink-faint">{s.chars.toLocaleString()} ch</span>}
             </div>
           ))}
         </div>
@@ -364,12 +364,12 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
 
       {/* auto-routing: this site IS a token's official homepage → full report */}
       {redirecting ? (
-        <div className="mt-6 rounded-xl border p-5" style={{ borderColor: "var(--color-signal)66", background: "var(--color-signal)0d" }}>
-          <div className="flex items-center gap-2 text-[13px] font-medium text-signal-lift">
+        <div className="panel tint-signal mt-6 p-5">
+          <div className="flex items-center gap-2 text-[13.5px] font-medium text-signal-lift">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
             This is {redirecting.name}'s site — opening the full ${redirecting.symbol} report…
           </div>
-          <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">A site recon only reads the website; ${redirecting.symbol} is a live token ({redirecting.chain}) whose official homepage is this domain, so ARGUS is running the full on-chain investigation instead.</p>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A site recon only reads the website; ${redirecting.symbol} is a live token ({redirecting.chain}) whose official homepage is this domain, so ARGUS is running the full on-chain investigation instead.</p>
         </div>
       ) : recon && (
         <>
@@ -383,17 +383,17 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                   <Ring score={v.score} color={m.color} />
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="mono text-[18px] font-semibold tracking-tight" style={{ color: m.color }}>{m.label}</span>
-                      <span className="mono rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ color: COVERAGE[recon.retrieval.status].color, background: COVERAGE[recon.retrieval.status].color + "14" }}>
+                      <span className="display text-[24px] uppercase leading-none" style={{ color: m.color }}>{m.label}</span>
+                      <span className="chip tint-var" style={{ "--tint": COVERAGE[recon.retrieval.status].color } as React.CSSProperties}>
                         {COVERAGE[recon.retrieval.status].label}
                       </span>
-                      {v.capApplied && <span className="mono rounded px-1.5 py-0.5 text-[10px] text-ink-faint" style={{ background: "var(--color-avoid)14", color: "var(--color-avoid)" }}>cap · {v.capApplied.replace(/_/g, " ")}</span>}
+                      {v.capApplied && <span className="chip tint-avoid">cap · {v.capApplied.replace(/_/g, " ")}</span>}
                       {briefBound && resultPolicy.canMutate && onOpenBrief && reconHost && (
                         <button
                           type="button"
                           onClick={() => onOpenBrief(reconHost)}
                           title="Open the analyst decision brief anchored to this exact site case"
-                          className="mono ml-auto rounded-md border border-line px-2 py-0.5 text-[10.5px] font-medium text-ink transition hover:border-signal hover:text-signal"
+                          className="btn-chip ml-auto"
                         >
                           case brief
                         </button>
@@ -409,20 +409,20 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                           setCopied(true);
                           setTimeout(() => setCopied(false), 1500);
                         }}
-                        className={`mono rounded-md border border-line px-2 py-0.5 text-[10.5px] text-ink-faint transition hover:text-ink ${briefBound && resultPolicy.canMutate && onOpenBrief && reconHost ? "" : "ml-auto"}`}
+                        className={`btn-chip ${briefBound && resultPolicy.canMutate && onOpenBrief && reconHost ? "" : "ml-auto"}`}
                       >
                         {copied ? "copied ✓" : "copy report"}
                       </button>
                     </div>
-                    {recon.title && <div className="mt-1 truncate text-[13px] text-ink-dim">{recon.title}</div>}
-                    <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">{teamKnown && TEAM_ABSENCE.test(recon.identityLine) ? "Team identified off the rendered page — see the Team section below." : recon.identityLine}</p>
+                    {recon.title && <div className="mt-1 truncate text-[13.5px] text-ink-dim">{recon.title}</div>}
+                    <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">{teamKnown && TEAM_ABSENCE.test(recon.identityLine) ? "Team identified off the rendered page — see the Team section below." : recon.identityLine}</p>
                   </div>
                 </div>
                 <div className="mt-3 space-y-1.5 border-t border-line/60 pt-3">
                   {v.reasons.filter((r) => !(teamKnown && TEAM_ABSENCE.test(r.text))).map((r, i) => (
                     <div key={i} className="flex items-start gap-2.5">
-                      <span className="mono mt-0.5 shrink-0 text-[12px]" style={{ color: TONE[r.tone] }}>{GLYPH[r.tone]}</span>
-                      <span className="text-[13px] leading-snug text-ink-dim">{r.text}</span>
+                      <span className="mono mt-0.5 shrink-0 text-[12.5px]" style={{ color: TONE[r.tone] }}>{GLYPH[r.tone]}</span>
+                      <span className="text-[13.5px] leading-snug text-ink-dim">{r.text}</span>
                     </div>
                   ))}
                 </div>
@@ -435,15 +435,14 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
           {projToken && (
             <button
               onClick={() => onAudit?.(projToken.contract, resultPolicy.displayedPrivate)}
-              className="mt-3 w-full rounded-xl border p-4 text-left transition hover:brightness-110"
-              style={{ borderColor: "var(--color-signal)66", background: "var(--color-signal)0d" }}
+              className="panel tint-signal mt-3 w-full p-4 text-left transition hover:brightness-110"
             >
               <div className="flex flex-wrap items-center gap-2">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
                 <span className="text-[12.5px] font-medium text-signal-lift">This project has a live token — ${projToken.symbol}{projToken.rank ? ` · CoinGecko #${projToken.rank}` : ""} · {projToken.chain}</span>
                 <span className="mono ml-auto text-[11px] text-signal">open full on-chain report →</span>
               </div>
-              <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
                 The site recon only reads the website. Open the ${projToken.symbol} report for market intelligence, holder distribution, wallet clustering, deployer &amp; bytecode forensics, and the sanctions screen.
               </p>
             </button>
@@ -467,13 +466,13 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
           )}
 
           {/* findings ledger */}
-          <div className="mt-3 rounded-xl border border-line bg-panel p-4">
-            <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Findings</div>
+          <div className="mt-3 panel p-4">
+            <div className="eyebrow">Findings</div>
             <div className="mt-2 space-y-2">
               {recon.findings.filter((f) => !(teamKnown && TEAM_ABSENCE.test(f.claim))).map((f, i) => (
                 <div key={i} className="flex items-start gap-2.5">
-                  <span className="mono mt-0.5 shrink-0 text-[12px]" style={{ color: TONE[f.tone] }}>{GLYPH[f.tone]}</span>
-                  <span className="text-[13px] leading-snug text-ink-dim">{f.claim}</span>
+                  <span className="mono mt-0.5 shrink-0 text-[12.5px]" style={{ color: TONE[f.tone] }}>{GLYPH[f.tone]}</span>
+                  <span className="text-[13.5px] leading-snug text-ink-dim">{f.claim}</span>
                 </div>
               ))}
             </div>
@@ -481,12 +480,12 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
 
           {/* on-chain reality check */}
           {recon.pivot && (
-            <div className="mt-3 rounded-xl border bg-panel p-4" style={{ borderColor: TONE[recon.pivot.reconcile.tone] + "66" }}>
+            <div className="panel tint-var mt-3 p-4" style={{ "--tint": TONE[recon.pivot.reconcile.tone] } as React.CSSProperties}>
               <div className="flex items-center gap-2">
-                <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">On-chain reality check</span>
-                <span className="mono shrink-0 text-[12px]" style={{ color: TONE[recon.pivot.reconcile.tone] }}>{GLYPH[recon.pivot.reconcile.tone]}</span>
+                <span className="eyebrow">On-chain reality check</span>
+                <span className="mono shrink-0 text-[12.5px]" style={{ color: TONE[recon.pivot.reconcile.tone] }}>{GLYPH[recon.pivot.reconcile.tone]}</span>
                 {recon.pivot.method === "name-search" && recon.pivot.found && (
-                  <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">ticker match · unconfirmed</span>
+                  <span className="chip">ticker match · unconfirmed</span>
                 )}
               </div>
 
@@ -500,7 +499,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
 
               {pivotNotes.length > 0 && (
                 <div className="mt-2 space-y-0.5">
-                  {pivotNotes.map((n, i) => <div key={i} className="mono text-[11.5px] text-ink-faint">→ {n}</div>)}
+                  {pivotNotes.map((n, i) => <div key={i} className="mono text-[11px] text-ink-faint">→ {n}</div>)}
                 </div>
               )}
 
@@ -512,7 +511,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
               {recon.pivot.found && onAudit && (
                 <button
                   onClick={() => onAudit(recon.pivot!.found!.address, resultPolicy.displayedPrivate)}
-                  className="mono mt-3 rounded-lg border border-line bg-panel-2/50 px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                  className="btn-chip tint-signal mt-3"
                 >
                   {recon.pivot.method === "name-search" ? `audit ${recon.pivot.found.symbol} independently →` : `open full token audit for ${recon.pivot.found.symbol} →`}
                 </button>
@@ -521,10 +520,10 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
               {/* name-search candidates, when nothing confidently matched */}
               {!recon.pivot.found && recon.pivot.candidates.length > 0 && (
                 <div className="mt-2.5">
-                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Closest by name (not a confirmed match)</div>
+                  <div className="eyebrow">Closest by name (not a confirmed match)</div>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {recon.pivot.candidates.map((c) => (
-                      <button key={c.address} onClick={() => onAudit?.(c.address, resultPolicy.displayedPrivate)} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim transition hover:text-ink">
+                      <button key={c.address} onClick={() => onAudit?.(c.address, resultPolicy.displayedPrivate)} className="chip normal-case tracking-normal transition hover:text-ink">
                         {c.symbol} · {c.chain} · ${Math.round(c.liqUsd).toLocaleString()}
                       </button>
                     ))}
@@ -541,7 +540,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                 <Card title="Socials">
                   <div className="flex flex-wrap gap-1.5">
                     {recon.socials.map((s) => (
-                      <a key={s.url} href={s.url} target="_blank" rel="noreferrer" className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim transition hover:text-ink">{s.label}</a>
+                      <a key={s.url} href={s.url} target="_blank" rel="noreferrer" className="chip normal-case tracking-normal transition hover:text-ink">{s.label}</a>
                     ))}
                   </div>
                 </Card>
@@ -549,14 +548,14 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
               {recon.funding.length > 0 && (
                 <Card title="Funding claims (unverified)">
                   <div className="flex flex-wrap gap-1.5">
-                    {recon.funding.map((f) => <span key={f} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim">{f}</span>)}
+                    {recon.funding.map((f) => <span key={f} className="chip normal-case tracking-normal">{f}</span>)}
                   </div>
                 </Card>
               )}
               {recon.tokenSignals.length > 0 && !recon.isFund && (
                 <Card title="Token signals">
                   <div className="flex flex-wrap gap-1.5">
-                    {recon.tokenSignals.map((t) => <span key={t} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim">{t}</span>)}
+                    {recon.tokenSignals.map((t) => <span key={t} className="chip normal-case tracking-normal">{t}</span>)}
                   </div>
                 </Card>
               )}
@@ -577,9 +576,9 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
             }
             const people = [...merged.values()];
             return (
-              <div className="mt-3 rounded-xl border border-line bg-panel p-4">
+              <div className="mt-3 panel p-4">
                 <div className="flex items-center gap-2">
-                  <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team · {people.length} {people.length === 1 ? "person" : "people"}</span>
+                  <span className="eyebrow">Team · {people.length} {people.length === 1 ? "person" : "people"}</span>
                   {teamSearching && <span className="text-[11px] text-ink-faint">digging Google / LinkedIn / Crunchbase / X…</span>}
                 </div>
                 {people.length > 0 ? (
@@ -589,22 +588,22 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                           <span className="text-[12.5px] text-ink">{p.name}</span>
                           {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
-                          {p.role && <span className="text-[10.5px] text-ink-faint">{p.role}</span>}
+                          {p.role && <span className="text-[11px] text-ink-faint">{p.role}</span>}
                           {p.linkedin && (
-                            <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                            <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                           )}
-                          <span className="text-[9.5px] text-ink-faint">({p.source})</span>
+                          <span className="text-[11px] text-ink-faint">({p.source})</span>
                         </span>
                         {p.handle && onAudit ? (
-                          <button onClick={() => onAudit(p.handle!, resultPolicy.displayedPrivate)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
+                          <button onClick={() => onAudit(p.handle!, resultPolicy.displayedPrivate)} className="btn-chip tint-signal shrink-0">audit →</button>
                         ) : (
-                          <span className="mono shrink-0 text-[10.5px] text-ink-faint">named only</span>
+                          <span className="mono shrink-0 text-[11px] text-ink-faint">named only</span>
                         )}
                       </div>
                     ))}
                   </div>
                 ) : (
-                  !teamSearching && <p className="mt-1.5 text-[12px] text-ink-faint">No team members named on the site or dug up via web / LinkedIn / X search.</p>
+                  !teamSearching && <p className="mt-1.5 text-[12.5px] text-ink-faint">No team members named on the site or dug up via web / LinkedIn / X search.</p>
                 )}
               </div>
             );
@@ -634,7 +633,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
 
 function Chip({ k, v }: { k: string; v: string }) {
   return (
-    <span className="mono rounded-md border border-line bg-panel-2/40 px-1.5 py-0.5 text-[11px] text-ink-dim">
+    <span className="chip normal-case tracking-normal">
       {k && <span className="text-ink-faint">{k} </span>}{v}
     </span>
   );
@@ -642,8 +641,8 @@ function Chip({ k, v }: { k: string; v: string }) {
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
-      <div className="mb-2 text-[10.5px] uppercase tracking-wider text-ink-faint">{title}</div>
+    <div className="panel p-4">
+      <div className="eyebrow mb-2">{title}</div>
       {children}
     </div>
   );

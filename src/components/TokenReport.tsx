@@ -52,7 +52,7 @@ function Ring({ score, verdict, color, size = 96 }: { score: number | null; verd
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className="mono text-[24px] font-semibold leading-none tabular" style={{ color: ringColor }}>{score ?? "—"}</span>
-        <span className="mono text-[9px] text-ink-faint">/ 100</span>
+        <span className="mono text-[10px] text-ink-faint">/ 100</span>
       </div>
     </div>
   );
@@ -70,7 +70,7 @@ function Bar({ a, color }: { a: TokenDossier["axes"][number]; color: string }) {
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-line">
         <div className="h-full rounded-full" style={{ background: weak ? "var(--color-caution)" : color, width: `${ratio * 100}%`, transition: "width 0.7s ease-out" }} />
       </div>
-      {a.rationale && <p className="mt-1.5 text-[12px] leading-snug text-ink-faint">{a.rationale}</p>}
+      {a.rationale && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-faint">{a.rationale}</p>}
     </div>
   );
 }
@@ -80,7 +80,7 @@ function Check({ label, ok, value, na }: { label: string; ok: boolean; value?: s
   return (
     <div className="flex items-center justify-between gap-2 py-1.5">
       <span className="text-[12.5px] text-ink-dim">{label}</span>
-      <span className="mono flex items-center gap-1.5 text-[11.5px]" style={{ color }}>
+      <span className="mono flex items-center gap-1.5 text-[11px]" style={{ color }}>
         {value ?? (na ? "unchecked" : ok ? "ok" : "risk")}
         <span>{na ? "•" : ok ? "✓" : "✗"}</span>
       </span>
@@ -133,8 +133,8 @@ function tokenReportText(
 
 function Card({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
-      <div className="mb-2 text-[12.5px] font-medium text-ink">{title}</div>
+    <div className="panel p-4">
+      <div className="eyebrow mb-2">{title}</div>
       {children}
     </div>
   );
@@ -171,6 +171,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     ? versionContext.checks
     : tokenChecks(d);
   const readiness = deriveDecisionReadiness(checks);
+  const readinessColor = readiness.status === "ready" ? "var(--color-pass)" : "var(--color-caution)";
   const presentationCompleteness = coverageQualifiedCompleteness({
     completeness: versionContext?.completenessState ?? (readiness.status === "ready" ? "complete" : "partial"),
     attestation: versionContext?.attestationState ?? (d.live ? "server_collected" : "analyst_submitted"),
@@ -331,12 +332,12 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
         )}
         {persistencePending && (
-          <div className="mt-4 rounded-xl border border-line bg-panel px-4 py-3 text-[11.5px] text-ink-dim" role="status">
+          <div className="mt-4 panel px-4 py-3 text-[12.5px] text-ink-dim" role="status">
             Saving the immutable scan before post-scan intelligence runs…
           </div>
         )}
         {(persistenceFailed || persistenceMissingCapability) && (
-          <div className="mt-4 rounded-xl border border-caution/40 bg-caution/5 px-4 py-3 text-[11.5px] text-caution" role="alert">
+          <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
             Post-scan intelligence is paused because this report could not be saved. Rescan before spending on supplemental providers.
           </div>
         )}
@@ -350,94 +351,97 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           )}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-[19px] font-semibold tracking-tight text-ink">{d.name}</h1>
-              <span className="mono text-[13px] text-ink-faint">${d.symbol}</span>
+              <h1 className="display-sm text-[24px] text-ink">{d.name}</h1>
+              <span className="mono text-[13.5px] text-ink-faint">${d.symbol}</span>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-ink-faint">
+            <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-faint">
               <span className="rounded border border-line px-1.5 py-0.5 text-ink-dim capitalize">{d.chain}</span>
               <span>{d.dexId}</span>
               <span className="mono">{d.address.slice(0, 6)}…{d.address.slice(-4)}</span>
             </div>
             <ProjectLinks className="mt-2" website={projectSite} xHandle={d.projectX ?? d.cg?.twitter} links={d.socials} />
           </div>
-          <div className="flex gap-5 text-right">
-            <div><div className="text-[10px] uppercase tracking-wider text-ink-faint">mcap</div><div className="mono text-[14px] text-ink">{money(d.mcap)}</div></div>
-            <div><div className="text-[10px] uppercase tracking-wider text-ink-faint">liquidity</div><div className="mono text-[14px] text-ink">{money(d.liquidityUsd)}</div></div>
-            <div><div className="text-[10px] uppercase tracking-wider text-ink-faint">24h vol</div><div className="mono text-[14px] text-ink">{money(d.vol24)}</div></div>
+          <div className="flex gap-2">
+            <div className="stat-tile"><div className="stat-label">mcap</div><div className="stat-value mt-0.5">{money(d.mcap)}</div></div>
+            <div className="stat-tile"><div className="stat-label">liquidity</div><div className="stat-value mt-0.5">{money(d.liquidityUsd)}</div></div>
+            <div className="stat-tile"><div className="stat-label">24h vol</div><div className="stat-value mt-0.5">{money(d.vol24)}</div></div>
           </div>
         </div>
 
         {/* what the project actually does — CoinGecko's own blurb */}
         {d.cg?.description && (
-          <p className="mt-3 max-w-3xl text-[13px] leading-relaxed text-ink-dim">{d.cg.description}</p>
+          <p className="mt-3 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim">{d.cg.description}</p>
         )}
 
         {/* Decision layer: model output and evidence completeness are separate.
             A thinly-supported PASS must never read like an investment-ready clearance. */}
-        <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow" style={{ borderColor: `${presentationColor}55` }}>
+        <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel soft-shadow" style={{ borderColor: `color-mix(in oklab, ${presentationColor} 42%, transparent)` }}>
           <div className="absolute right-0 top-0 h-full w-1/2" style={{ background: `radial-gradient(400px 200px at 100% 0%, ${presentationGlow}, transparent 70%)` }} />
-          <div className="relative flex flex-wrap items-start gap-6">
+          <div className="relative flex flex-wrap items-start gap-6 p-6 pb-5">
             <div className="shrink-0 text-center">
               <Ring score={presentation.primaryScore ? d.score : null} verdict={presentedVerdict} color={presentationColor} />
-              <div className="mono mt-1 text-[9.5px] uppercase tracking-wider text-ink-faint">
+              <div className="mono mt-1.5 text-[11px] uppercase tracking-wider text-ink-dim">
                 {presentation.scoreLabel?.toLowerCase() ?? "score withheld"}
               </div>
             </div>
             <div className="min-w-0 flex-1">
-              <div className="mb-1 flex flex-wrap items-center gap-2">
-                <span className="text-[11px] uppercase tracking-[0.2em] text-ink-faint">{presentation.resultLabel}</span>
-                <span
-                  className="mono rounded px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide"
-                  style={{
-                    background: readiness.status === "ready" ? "rgba(22,163,74,0.10)" : "rgba(217,119,6,0.10)",
-                    color: readiness.status === "ready" ? "var(--color-pass)" : "var(--color-caution)",
-                  }}
-                >
-                  {readiness.status === "ready" ? "Evidence complete" : `${readiness.status} coverage`}
-                </span>
+              <div className="eyebrow mb-1.5">{presentation.resultLabel}</div>
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="display text-[32px] uppercase leading-none" style={{ color: presentationColor }}>{presentationMeta.label}</span>
+                {presentation.secondarySignal && (
+                  <span className="chip tint-caution">{presentation.secondarySignal}</span>
+                )}
               </div>
-              <div className="text-[34px] font-bold leading-none tracking-tight" style={{ color: presentationColor }}>{presentationMeta.label}</div>
-              {presentation.secondarySignal && (
-                <div className="mono mt-2 text-[11px] text-caution">{presentation.secondarySignal}</div>
-              )}
               <p className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
                 {presentation.final ? d.headline : presentation.note}
               </p>
-              <p className="mt-2 max-w-2xl text-[12px] leading-relaxed text-ink-faint">
+              <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
                 {presentation.final ? readiness.guidance : <>Stored scored-evidence summary — not clearance: {d.headline}</>}
               </p>
               {d.capApplied && (
-                <div className="mt-3 inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[12px]" style={{ borderColor: "var(--color-avoid)", color: "var(--color-avoid)" }}>
-                  <span>▲</span> Hard cap · {d.capApplied.replace(/_/g, " ")}
+                <div className="chip tint-avoid mt-3 font-medium">
+                  ▲ Hard cap · {d.capApplied.replace(/_/g, " ")}
                 </div>
               )}
             </div>
           </div>
 
-          <dl className="relative mt-5 grid gap-2 border-t border-line/60 pt-4 sm:grid-cols-3" aria-label="Evidence readiness summary">
-            <div className="rounded-lg border border-line/60 bg-void/30 px-3 py-2">
-              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Coverage</dt>
-              <dd className="mono mt-0.5 text-[15px] text-ink">{readiness.coveragePercent}%</dd>
+          <div
+            className="finding tint-var relative px-6 py-4"
+            style={{ "--tint": readinessColor } as React.CSSProperties}
+            aria-label="Evidence readiness"
+          >
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">
+                {readiness.status === "ready" ? "Evidence complete" : `${readiness.status} coverage`}
+              </span>
+              <span className="text-[11px] text-ink-faint">observable outcomes stored in this report</span>
+              <a href="#token-methodology" className="ml-auto text-[11px] text-signal-dim underline-offset-2 hover:underline">Review check-by-check methodology</a>
             </div>
-            <div className="rounded-lg border border-line/60 bg-void/30 px-3 py-2">
-              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Outcomes</dt>
-              <dd className="mono mt-0.5 text-[15px] text-ink">{readiness.successful}<span className="text-[11px] text-ink-faint">/{readiness.applicable}</span></dd>
-            </div>
-            <div className="rounded-lg border border-line/60 bg-void/30 px-3 py-2">
-              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Unresolved</dt>
-              <dd className="mono mt-0.5 text-[15px]" style={{ color: readiness.unresolved ? "var(--color-caution)" : "var(--color-pass)" }}>{readiness.unresolved}</dd>
-            </div>
-          </dl>
-          <a href="#token-methodology" className="relative mt-3 inline-flex text-[11.5px] text-signal transition hover:text-signal-dim">Review check-by-check methodology</a>
+            <dl className="mt-3 grid gap-2 sm:grid-cols-3" aria-label="Evidence readiness summary">
+              <div className="stat-tile">
+                <dt className="stat-label">Coverage</dt>
+                <dd className="stat-value mt-0.5 font-semibold">{readiness.coveragePercent}%</dd>
+              </div>
+              <div className="stat-tile">
+                <dt className="stat-label">Outcomes</dt>
+                <dd className="stat-value mt-0.5 font-semibold">{readiness.successful}<span className="text-[11px] text-ink-faint">/{readiness.applicable}</span></dd>
+              </div>
+              <div className="stat-tile">
+                <dt className="stat-label">Unresolved</dt>
+                <dd className="stat-value mt-0.5 font-semibold" style={{ color: readiness.unresolved ? readinessColor : "var(--color-ink)" }}>{readiness.unresolved}</dd>
+              </div>
+            </dl>
+          </div>
         </div>
 
         {/* price momentum */}
         {d.priceChange && (
           <div className="mt-4 grid grid-cols-4 gap-2">
             {([["5m", d.priceChange.m5], ["1h", d.priceChange.h1], ["6h", d.priceChange.h6], ["24h", d.priceChange.h24]] as [string, number | undefined][]).map(([l, v]) => (
-              <div key={l} className="rounded-lg border border-line bg-panel px-3 py-2 text-center">
-                <div className="text-[10px] uppercase tracking-wider text-ink-faint">{l}</div>
-                <div className="mono text-[13px]" style={{ color: v == null ? "var(--color-ink-faint)" : v >= 0 ? "var(--color-pass)" : "var(--color-avoid)" }}>
+              <div key={l} className="stat-tile text-center">
+                <div className="stat-label">{l}</div>
+                <div className="mono mt-0.5 text-[13.5px]" style={{ color: v == null ? "var(--color-ink-faint)" : v >= 0 ? "var(--color-pass)" : "var(--color-avoid)" }}>
                   {v == null ? "—" : (v > 0 ? "+" : "") + v.toFixed(1) + "%"}
                 </div>
               </div>
@@ -447,10 +451,10 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         {/* price performance history */}
         {showCurrentIntelligence && (
-          <div className="mt-4 rounded-xl border border-line bg-panel p-4">
+          <div className="mt-4 panel p-4">
             <div className="mb-2 flex items-baseline justify-between">
-              <div className="text-[12.5px] font-medium text-ink">Current price performance</div>
-              <div className="text-[10px] uppercase tracking-wider text-ink-faint">live supplement · GeckoTerminal</div>
+              <div className="eyebrow">Current price performance</div>
+              <div className="text-[11px] uppercase tracking-wider text-ink-faint">live supplement · GeckoTerminal</div>
             </div>
             <TokenSparkline address={d.address} chain={d.chain} pairAddress={d.pairAddress} />
           </div>
@@ -487,17 +491,17 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
 
         {!gp && (
-          <div className="mt-3 rounded-xl border border-line bg-panel/40 px-4 py-3 text-[12.5px] text-ink-dim">
+          <div className="mt-3 panel px-4 py-3 text-[12.5px] text-ink-dim">
             Contract-internal safety (honeypot, mint authority, ownership, tax) could not be verified by a supported collector on <span className="capitalize">{d.chain}</span>. Those axes are scored conservatively; this report cannot claim that path is complete.
           </div>
         )}
 
         {/* axes */}
         <section className="mt-5">
-          <div className="mb-2.5 text-[13px] font-semibold tracking-tight text-ink">Forensic breakdown</div>
-          <div className="rounded-xl border border-line bg-panel px-4 py-1 divide-y divide-line/60">
+          <div className="mb-2.5 text-[13.5px] font-semibold tracking-tight text-ink">Forensic breakdown</div>
+          <div className="panel px-4 py-1 divide-y divide-line/60">
             {d.axes.map((a) => <Bar key={a.key} a={a} color={presentationColor} />)}
-            <div className="flex items-center justify-between py-2.5 text-[11.5px] text-ink-faint">
+            <div className="flex items-center justify-between py-2.5 text-[11px] text-ink-faint">
               <span>weighted total</span>
               <span className="mono">= {d.score}{d.capApplied ? " (capped)" : ""}</span>
             </div>
@@ -560,9 +564,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               <div className="mt-2.5 flex flex-wrap items-center gap-1 border-t border-line/60 pt-2.5">
                 <span className="text-[11px] text-ink-faint">listed on</span>
                 {d.cg.cexNames.slice(0, 10).map((n) => (
-                  <span key={n} className="mono rounded px-1.5 py-0.5 text-[10.5px]" style={{ background: "rgba(22,163,74,0.10)", color: "var(--color-pass)" }}>{n}</span>
+                  <span key={n} className="chip tint-pass normal-case tracking-normal">{n}</span>
                 ))}
-                {d.cg.cexCount > 10 && <span className="text-[10px] text-ink-faint">+{d.cg.cexCount - 10} more</span>}
+                {d.cg.cexCount > 10 && <span className="text-[11px] text-ink-faint">+{d.cg.cexCount - 10} more</span>}
               </div>
             )}
           </Card>
@@ -575,8 +579,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             {d.projectX ? (
               <div className="flex items-center justify-between gap-2 py-1.5">
                 <span className="text-[12.5px] text-ink-dim">Project X account</span>
-                <button onClick={() => onAudit(d.projectX!)} className="mono flex items-center gap-1 text-[12px] text-signal transition hover:text-signal-dim">
-                  {d.projectX} <span aria-hidden>↗ audit</span>
+                <button onClick={() => onAudit(d.projectX!)} className="btn-chip tint-signal">
+                  {d.projectX} <span aria-hidden>audit →</span>
                 </button>
               </div>
             ) : (
@@ -585,8 +589,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             {projectSite && (
               <div className="flex items-center justify-between gap-2 border-t border-line/60 py-1.5">
                 <span className="text-[12.5px] text-ink-dim">Project site</span>
-                <button onClick={() => onAudit(projectSite)} className="mono flex items-center gap-1 text-[12px] text-signal transition hover:text-signal-dim">
-                  recon for team <span aria-hidden>↗</span>
+                <button onClick={() => onAudit(projectSite)} className="btn-chip tint-signal">
+                  recon for team <span aria-hidden>→</span>
                 </button>
               </div>
             )}
@@ -595,7 +599,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 <span className="text-ink-dim">Other links</span>
                 <span className="ml-auto flex flex-wrap justify-end gap-x-2 gap-y-0.5">
                   {otherLinks.map((x) => (
-                    <a key={x.url} href={x.url} target="_blank" rel="noreferrer" className="mono text-[11.5px] text-ink-faint transition hover:text-ink">{x.label}</a>
+                    <a key={x.url} href={x.url} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">{x.label}</a>
                   ))}
                 </span>
               </div>
@@ -603,13 +607,13 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             {d.deployer && (
               <div className="flex items-center justify-between gap-2 border-t border-line/60 py-1.5">
                 <span className="text-[12.5px] text-ink-dim">Deployer</span>
-                <span className="mono text-[11.5px] text-ink-faint">{shortAddr(d.deployer)}</span>
+                <span className="mono text-[11px] text-ink-faint">{shortAddr(d.deployer)}</span>
               </div>
             )}
             {d.topHolders.length > 0 && (
               <div className="mt-1 border-t border-line/60 pt-2">
                 <div className="mb-1.5 flex items-center justify-between">
-                  <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Holder concentration</span>
+                  <span className="eyebrow">Holder concentration</span>
                   <span className="mono text-[11px]" style={{ color: topSum > 50 ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>top {d.topHolders.length} = {topSum.toFixed(0)}%</span>
                 </div>
                 <div className="flex h-2 overflow-hidden rounded-full bg-line">
@@ -619,7 +623,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 </div>
                 <div className="mt-1.5">
                   {d.topHolders.map((h, i) => (
-                    <div key={i} className="flex items-center justify-between py-0.5 text-[11.5px]">
+                    <div key={i} className="flex items-center justify-between py-0.5 text-[11px]">
                       <span className="mono text-ink-dim">{h.tag || shortAddr(h.address)}{h.isContract ? " ·c" : ""}</span>
                       <span className="mono" style={{ color: h.percent > 25 ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>{h.percent.toFixed(1)}%</span>
                     </div>
@@ -636,13 +640,13 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         {/* findings */}
         {d.findings.length > 0 && (
           <section className="mt-5">
-            <div className="mb-2.5 text-[13px] font-semibold tracking-tight text-ink">Signals</div>
+            <div className="mb-2.5 text-[13.5px] font-semibold tracking-tight text-ink">Signals</div>
             <div className="space-y-2">
               {d.findings.map((f, i) => (
-                <div key={i} className="flex items-start gap-3 rounded-xl border border-line bg-panel p-3.5">
+                <div key={i} className="panel flex items-start gap-3 p-3.5">
                   <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: f.tone === "good" ? "var(--color-pass)" : f.tone === "warn" ? "var(--color-caution)" : "var(--color-avoid)" }} />
-                  <p className="flex-1 text-[13px] leading-snug text-ink">{f.claim}</p>
-                  <span className="mono text-[10.5px] text-ink-faint">{f.source}</span>
+                  <p className="flex-1 text-[13.5px] leading-snug text-ink">{f.claim}</p>
+                  <span className="mono text-[11px] text-ink-faint">{f.source}</span>
                 </div>
               ))}
             </div>
@@ -682,8 +686,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
         )}
 
-        <div className="mt-8 rounded-xl border border-line bg-panel/40 p-5">
-          <div className="mb-2 flex items-center gap-2 text-[12px] text-ink-dim"><ArgusMark size={16} /> How this verdict was reached</div>
+        <div className="mt-8 panel p-5">
+          <div className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-dim"><ArgusMark size={16} /> How this verdict was reached</div>
           <p className="text-[12.5px] leading-relaxed text-ink-faint">
             Scored live from DexScreener (market, liquidity, trading) and GoPlus (contract safety, holders), with no keys.
             Disqualifying findings, a honeypot, mintable supply, or reclaimable ownership, act as hard caps that override the

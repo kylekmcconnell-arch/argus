@@ -88,8 +88,8 @@ export function ProjectView({
 
       <div className="mx-auto max-w-3xl px-5">
         <div className="mt-6">
-          <h1 className="text-[24px] font-medium tracking-[-0.02em] text-ink">{project.name}</h1>
-          <p className="mt-1.5 text-[13px] leading-relaxed text-ink-dim">
+          <h1 className="display-sm text-[24px] text-ink">{project.name}</h1>
+          <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">
             Everyone who worked on this project, dug from the web, LinkedIn, Crunchbase and X. Open anyone to run a
             full audit, then follow their other projects to keep pulling the thread.
           </p>
@@ -97,8 +97,8 @@ export function ProjectView({
         </div>
 
         {/* people who worked on it */}
-        <div className="mt-5 rounded-xl border border-line bg-panel p-4">
-          <div className="flex items-center gap-2 text-[10.5px] uppercase tracking-wider text-ink-faint">
+        <div className="mt-5 panel p-4">
+          <div className="eyebrow flex items-center gap-2">
             People who worked on this {people && <span className="normal-case tracking-normal text-ink-faint">({people.length})</span>}
             {panelCostToken && loading && <span className="normal-case tracking-normal text-ink-faint">· digging the web…</span>}
           </div>
@@ -114,16 +114,16 @@ export function ProjectView({
                     <Avatar src={p.handle ? xAvatar(p.handle) : null} letter={initial(p.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                     <span className="text-[12.5px] text-ink">{p.name}</span>
                     {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
-                    <span className="text-[10.5px] text-ink-faint">{p.role}</span>
+                    <span className="text-[11px] text-ink-faint">{p.role}</span>
                     {p.linkedin && (
-                      <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                      <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                     )}
-                    {p.evidence && <span className="text-[10.5px] text-ink-faint">· {p.evidence}</span>}
+                    {p.evidence && <span className="text-[11px] text-ink-faint">· {p.evidence}</span>}
                   </span>
                   {p.handle ? (
-                    <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
+                    <button onClick={() => onAudit(p.handle!)} className="btn-chip tint-signal shrink-0">audit →</button>
                   ) : (
-                    <span className="mono shrink-0 text-[10.5px] text-ink-faint">no handle</span>
+                    <span className="mono shrink-0 text-[11px] text-ink-faint">no handle</span>
                   )}
                 </div>
               ))}
@@ -135,8 +135,8 @@ export function ProjectView({
 
         {/* who else (from past audits) connects to this project */}
         {connections.length > 0 && (
-          <div className="mt-3 rounded-xl border border-line bg-panel p-4">
-            <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Already in your graph</div>
+          <div className="mt-3 panel p-4">
+            <div className="eyebrow">Already in your graph</div>
             <div className="mt-2 space-y-1.5">
               {connections.map((c) => (
                 <div key={c.other} className="flex items-center justify-between gap-3">
@@ -144,7 +144,7 @@ export function ProjectView({
                     <span className="mono text-[12.5px] text-ink">{c.other}</span>
                     {c.ties.length > 0 && <span className="ml-2 text-[11px] text-ink-faint">via {c.ties.map((t) => t.label).join(", ")}</span>}
                   </span>
-                  <button onClick={() => onAudit(c.other)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>open →</button>
+                  <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">open →</button>
                 </div>
               ))}
             </div>

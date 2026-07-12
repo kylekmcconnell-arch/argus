@@ -50,7 +50,7 @@ const LIST_FIELDS = [
   ["nextActions", "Next actions", "Concrete follow-ups, one per line."],
 ] as const satisfies ReadonlyArray<readonly [keyof Pick<BriefDraft, "strongestEvidence" | "highestRisks" | "unresolvedQuestions" | "changeConditions" | "nextActions">, string, string]>;
 
-const fieldClass = "mt-1.5 w-full rounded-lg border border-line-2 bg-void/70 px-3 py-2 text-[13px] leading-relaxed text-ink outline-none transition placeholder:text-ink-dim focus:border-signal disabled:cursor-not-allowed disabled:opacity-65";
+const fieldClass = "field mt-1.5 w-full px-3 py-2 text-[13.5px] leading-relaxed disabled:cursor-not-allowed disabled:opacity-65";
 
 function dateInputValue(value: string | null): string {
   if (!value) return "";
@@ -178,11 +178,11 @@ function BriefReadout({ content }: { content: CaseBriefContent }) {
     ["Next actions", content.nextActions],
   ] as const;
   return (
-    <div className="mt-3 space-y-3 text-[12px] text-ink-dim">
+    <div className="mt-3 space-y-3 text-[12.5px] text-ink-dim">
       {content.summary && <p className="whitespace-pre-wrap leading-relaxed">{content.summary}</p>}
       {fields.map(([label, items]) => items.length > 0 && (
         <div key={label}>
-          <div className="text-[9.5px] uppercase tracking-wider text-ink-dim">{label}</div>
+          <div className="text-[11px] uppercase tracking-wider text-ink-dim">{label}</div>
           <ul className="mt-1 list-disc space-y-1 pl-4">
             {items.map((item) => <li key={item}>{item}</li>)}
           </ul>
@@ -546,11 +546,11 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
         <header className="shrink-0 border-b border-line bg-panel/95 px-5 py-4 backdrop-blur">
           <div className="flex items-start gap-4">
             <div className="min-w-0 flex-1">
-              <div className="mono text-[10px] uppercase tracking-[0.18em] text-signal">Analyst workspace</div>
-              <h2 id="case-brief-title" className="mt-1 truncate text-[21px] font-medium tracking-tight text-ink">
+              <div className="eyebrow text-signal">Analyst workspace</div>
+              <h2 id="case-brief-title" className="mt-1 truncate display-sm text-[18px] text-ink">
                 Case brief{viewer ? ` · ${viewer.case.query || viewer.case.ref}` : ""}
               </h2>
-              <p id="case-brief-description" className="mt-1 text-[12px] leading-relaxed text-ink-dim">
+              <p id="case-brief-description" className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
                 A human decision record anchored to immutable ARGUS evidence. It never changes the model verdict.
               </p>
             </div>
@@ -569,7 +569,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
           {loading && (
             <div className="flex min-h-[45vh] items-center justify-center" role="status" aria-live="polite">
-              <span className="flex items-center gap-2 text-[12px] text-ink-dim">
+              <span className="flex items-center gap-2 text-[12.5px] text-ink-dim">
                 <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal" />
                 Loading exact case history…
               </span>
@@ -577,12 +577,12 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
           )}
 
           {!loading && !viewer && (
-            <div className="rounded-xl border border-avoid/35 bg-avoid/5 p-4">
-              <div ref={alertRef} tabIndex={-1} role="alert" className="text-[13px] leading-relaxed text-avoid">{error || "This case brief is unavailable."}</div>
+            <div className="tint-avoid rounded-xl border p-4">
+              <div ref={alertRef} tabIndex={-1} role="alert" className="text-[13.5px] leading-relaxed text-avoid">{error || "This case brief is unavailable."}</div>
               <button
                 type="button"
                 onClick={() => void load()}
-                className="mt-3 rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink transition hover:border-signal hover:text-signal"
+                className="mt-3 rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink transition hover:border-signal hover:text-signal"
               >
                 Retry
               </button>
@@ -591,26 +591,26 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
 
           {!loading && viewer && draft && (
             <div className="space-y-5">
-              <section aria-label="Case identity and evidence anchor" className="rounded-xl border border-line bg-panel p-4">
+              <section aria-label="Case identity and evidence anchor" className="panel p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] uppercase text-ink-dim">{viewer.case.kind}</span>
-                      <span className="mono break-all text-[12px] text-ink">{viewer.case.ref}</span>
-                      {viewer.case.status === "archived" && <span className="mono rounded border border-caution/40 bg-caution/5 px-1.5 py-0.5 text-[9.5px] uppercase text-caution">Archived · read only</span>}
+                      <span className="chip">{viewer.case.kind}</span>
+                      <span className="mono break-all text-[12.5px] text-ink">{viewer.case.ref}</span>
+                      {viewer.case.status === "archived" && <span className="chip tint-caution">Archived · read only</span>}
                     </div>
-                    <div className="mono mt-2 text-[10px] text-ink-dim">Case {shortId(viewer.case.caseId)}</div>
+                    <div className="mono mt-2 text-[11px] text-ink-dim">Case {shortId(viewer.case.caseId)}</div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[9.5px] uppercase tracking-wider text-ink-dim">
+                    <div className="text-[11px] uppercase tracking-wider text-ink-dim">
                       {basisIsProposed ? "Proposed decision basis · unsaved" : "Saved analyst decision basis"}
                     </div>
-                    <div className="mono mt-1 text-[14px] font-semibold text-ink">
+                    <div className="mono mt-1 text-[13.5px] font-semibold text-ink">
                       {anchorVersion
                         ? `v${anchorVersion.version} · ${anchorVersion.verdict ?? "No verdict"}${anchorVersion.score != null ? ` · ${anchorVersion.score}` : ""}`
                         : shortId(draft.anchorReportVersionId)}
                     </div>
-                    <div className="mt-0.5 text-[10px] text-ink-dim">
+                    <div className="mt-0.5 text-[11px] text-ink-dim">
                       {anchorVersion ? `Immutable evidence captured ${readableDate(anchorVersion.createdAt)}` : "Exact immutable anchor"}
                     </div>
                   </div>
@@ -645,9 +645,9 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                       href={`?version=${encodeURIComponent(anchorVersion.reportVersionId)}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex min-h-8 items-center rounded-lg border border-line-2 px-3 py-1.5 text-[11px] text-ink-dim transition hover:border-signal hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+                      className="link-ext text-[11px]"
                     >
-                      Review {basisIsProposed ? "proposed" : "saved"} basis v{anchorVersion.version} in new tab ↗
+                      Review {basisIsProposed ? "proposed" : "saved"} basis v{anchorVersion.version} in new tab
                     </a>
                   )}
                   {currentVersion && currentVersion.reportVersionId !== anchorVersion?.reportVersionId && (
@@ -655,15 +655,15 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                       href={`?version=${encodeURIComponent(currentVersion.reportVersionId)}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="inline-flex min-h-8 items-center rounded-lg border border-caution/50 px-3 py-1.5 text-[11px] text-caution transition hover:bg-caution/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-caution"
+                      className="link-ext text-caution text-[11px]"
                     >
-                      Review current evidence v{currentVersion.version} in new tab ↗
+                      Review current evidence v{currentVersion.version} in new tab
                     </a>
                   )}
                 </div>
                 <details className="mt-3 border-t border-line/70 pt-3">
-                  <summary className="cursor-pointer text-[10px] text-ink-dim">Exact immutable IDs</summary>
-                  <dl className="mono mt-2 space-y-2 text-[9.5px] leading-relaxed text-ink-dim">
+                  <summary className="cursor-pointer text-[11px] text-ink-dim">Exact immutable IDs</summary>
+                  <dl className="mono mt-2 space-y-2 text-[11px] leading-relaxed text-ink-dim">
                     <div>
                       <dt className="uppercase tracking-wider">Case ID</dt>
                       <dd className="mt-0.5 break-all text-ink-dim">{viewer.case.caseId}</dd>
@@ -681,11 +681,11 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
               </section>
 
               {savedBriefHasNewEvidence && currentVersion && (
-                <section role="alert" className="rounded-xl border border-caution/40 bg-caution/5 p-4">
+                <section role="alert" className="tint-caution rounded-xl border p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="max-w-[500px]">
                       <div className="text-[12.5px] font-medium text-caution">New evidence is available</div>
-                      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+                      <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
                         This brief remains anchored to its older immutable snapshot. Review report v{currentVersion.version}, then explicitly re-anchor before saving conclusions based on it.
                       </p>
                     </div>
@@ -715,34 +715,34 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
               )}
 
               {!editable && viewer.case.status !== "archived" && (
-                <div className="rounded-xl border border-line bg-panel/60 px-4 py-3 text-[12px] text-ink-dim">
+                <div className="panel px-4 py-3 text-[12.5px] text-ink-dim">
                   Your viewer role can read this brief, its revisions, and notes. Owners and analysts can edit it.
                 </div>
               )}
 
-              {error && <div ref={alertRef} tabIndex={-1} role="alert" className="rounded-lg border border-avoid/35 bg-avoid/5 px-3 py-2 text-[12px] leading-relaxed text-avoid">{error}</div>}
-              {notice && <div role="status" aria-live="polite" className="rounded-lg border border-pass/35 bg-pass/5 px-3 py-2 text-[12px] text-pass">{notice}</div>}
+              {error && <div ref={alertRef} tabIndex={-1} role="alert" className="tint-avoid rounded-lg border px-3 py-2 text-[12.5px] leading-relaxed">{error}</div>}
+              {notice && <div role="status" aria-live="polite" className="tint-pass rounded-lg border px-3 py-2 text-[12.5px]">{notice}</div>}
               {conflictBrief !== undefined && (
-                <div className="rounded-xl border border-caution/40 bg-caution/5 p-4">
-                  <div className="text-[12px] font-medium text-caution">Revision conflict · local draft preserved</div>
-                  <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+                <div className="tint-caution rounded-xl border p-4">
+                  <div className="text-[12.5px] font-medium text-caution">Revision conflict · local draft preserved</div>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
                     The server is now at revision {conflictBrief?.revision ?? 0}. Nothing you typed was replaced. Retry only when you are ready to write your draft as the next immutable revision.
                   </p>
                   {conflictBrief && (
-                    <details className="mt-3 rounded-lg border border-line/70 bg-void/40 px-3 py-2.5">
+                    <details className="panel-inset mt-3 px-3 py-2.5">
                       <summary className="cursor-pointer text-[11px] text-ink-dim">Compare with current server revision {conflictBrief.revision}</summary>
-                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[9.5px] text-ink-dim">
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-[11px] text-ink-dim">
                         <span className="mono">Server anchor {shortId(conflictBrief.anchorReportVersionId)}</span>
                         <a
                           href={`?version=${encodeURIComponent(conflictBrief.anchorReportVersionId)}`}
                           target="_blank"
                           rel="noreferrer"
-                          className="inline-flex min-h-6 items-center rounded border border-line-2 px-1.5 py-1 text-signal hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+                          className="link-ext"
                         >
-                          Review exact server evidence ↗
+                          Review exact server evidence
                         </a>
                       </div>
-                      <dl className="mt-2 grid grid-cols-1 gap-2 text-[10.5px] text-ink-dim sm:grid-cols-2">
+                      <dl className="mt-2 grid grid-cols-1 gap-2 text-[11px] text-ink-dim sm:grid-cols-2">
                         <div>
                           <dt className="uppercase tracking-wider text-ink-dim">Server recommendation</dt>
                           <dd className="mt-0.5 text-ink">{recommendationLabel(conflictBrief.recommendation)}</dd>
@@ -776,7 +776,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     </details>
                   )}
                   {conflictBasisNeedsChoice && conflictBrief && (
-                    <div role="alert" className="mt-3 rounded-lg border border-caution/40 bg-void/40 px-3 py-2.5 text-[11px] leading-relaxed text-ink-dim">
+                    <div role="alert" className="tint-caution mt-3 rounded-lg border px-3 py-2.5 text-[11px] leading-relaxed">
                       The other revision changed the evidence basis. ARGUS will not attach your analysis to that anchor silently.
                       <button
                         type="button"
@@ -789,7 +789,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                           } : current);
                           setNotice("The current server basis is now selected explicitly. Review that immutable report before retrying.");
                         }}
-                        className="ml-2 rounded-md border border-caution/50 px-2 py-1 font-medium text-caution transition hover:bg-caution/10 disabled:opacity-60"
+                        className="ml-2 rounded-lg border border-caution/50 px-2 py-1 font-medium text-caution transition hover:bg-caution/10 disabled:opacity-60"
                       >
                         Use server basis
                       </button>
@@ -816,13 +816,13 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                 </div>
               )}
 
-              <section aria-labelledby="analyst-decision-heading" className="rounded-xl border border-signal/30 bg-signal/5 p-4">
+              <section aria-labelledby="analyst-decision-heading" className="tint-signal rounded-xl border p-4">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
-                    <h3 id="analyst-decision-heading" className="text-[14px] font-medium text-ink">Analyst recommendation</h3>
+                    <h3 id="analyst-decision-heading" className="text-[13.5px] font-medium text-ink">Analyst recommendation</h3>
                     <p className="mt-1 text-[11px] leading-relaxed text-ink-dim">A human judgment recorded separately from the current ARGUS model verdict.</p>
                   </div>
-                  <span className="mono rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-wider" style={{ borderColor: `${currentRecommendation.tone}66`, color: currentRecommendation.tone }}>
+                  <span className="chip tint-var" style={{ ["--tint" as string]: currentRecommendation.tone }}>
                     {currentRecommendation.label}
                   </span>
                 </div>
@@ -848,11 +848,11 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     placeholder="State the recommendation, why it is justified, and the biggest uncertainty."
                     className={fieldClass}
                   />
-                  <span className="mt-1 block text-right text-[9.5px] text-ink-dim">{draft.summary.length.toLocaleString()} / 4,000</span>
+                  <span className="mt-1 block text-right text-[10px] text-ink-dim">{draft.summary.length.toLocaleString()} / 4,000</span>
                 </label>
               </section>
 
-              <section aria-label="Case brief evidence synthesis" className="space-y-4 rounded-xl border border-line bg-panel p-4">
+              <section aria-label="Case brief evidence synthesis" className="panel space-y-4 p-4">
                 {LIST_FIELDS.map(([key, label, hint]) => (
                   <label key={key} className="block text-[11px] font-medium text-ink-dim">
                     {label}
@@ -865,13 +865,13 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                       placeholder="One item per line"
                       className={fieldClass}
                     />
-                    <span className="mt-1 block text-right text-[9.5px] text-ink-dim">{lines(draft[key]).length} / 20 items</span>
+                    <span className="mt-1 block text-right text-[10px] text-ink-dim">{lines(draft[key]).length} / 20 items</span>
                   </label>
                 ))}
               </section>
 
-              <section aria-label="Case ownership" className="rounded-xl border border-line bg-panel p-4">
-                <h3 className="text-[13px] font-medium text-ink">Ownership and timing</h3>
+              <section aria-label="Case ownership" className="panel p-4">
+                <h3 className="text-[13.5px] font-medium text-ink">Ownership and timing</h3>
                 <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <label className="text-[11px] font-medium text-ink-dim">
                     Assignee
@@ -889,7 +889,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     {viewer.brief?.assigneeDisplayName
                       && (!viewer.brief.assigneeUserId
                         || !viewer.assignees.some((assignee) => assignee.userId === viewer.brief?.assigneeUserId)) && (
-                      <span className="mt-1.5 block text-[9.5px] text-ink-dim">
+                      <span className="mt-1.5 block text-[11px] text-ink-dim">
                         Historical assignee: {viewer.brief.assigneeDisplayName}. The account is no longer assignable.
                       </span>
                     )}
@@ -908,10 +908,10 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
               </section>
 
               {editable && (
-                <section aria-label="Save case brief revision" className="flex flex-wrap items-center gap-3 rounded-xl border border-signal/35 bg-signal/5 p-4">
+                <section aria-label="Save case brief revision" className="tint-signal flex flex-wrap items-center gap-3 rounded-xl border p-4">
                   <div className="min-w-0 flex-1">
-                    <div className="text-[12px] font-medium text-ink">Secure this decision record</div>
-                    <p className="mt-0.5 text-[10.5px] leading-relaxed text-ink-dim">
+                    <div className="text-[12.5px] font-medium text-ink">Secure this decision record</div>
+                    <p className="mt-0.5 text-[11px] leading-relaxed text-ink-dim">
                       {conflictBrief !== undefined
                         ? "Resolve the concurrent revision and evidence basis before saving."
                         : briefDirty
@@ -923,20 +923,20 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     type="button"
                     onClick={() => void runSave()}
                     disabled={busy || !briefDirty || conflictBrief !== undefined}
-                    className="btn-primary px-4 py-2 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                    className="btn-primary px-4 py-2 text-[12.5px] font-medium disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {saving ? "Saving revision…" : viewer.brief ? "Save new revision" : "Create case brief"}
                   </button>
                 </section>
               )}
 
-              <section aria-labelledby="case-notes-heading" className="rounded-xl border border-line bg-panel p-4">
+              <section aria-labelledby="case-notes-heading" className="panel p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h3 id="case-notes-heading" className="text-[13px] font-medium text-ink">Append-only case notes</h3>
-                    <p className="mt-0.5 text-[10.5px] text-ink-dim">Notes can be added, never edited or deleted.</p>
+                    <h3 id="case-notes-heading" className="text-[13.5px] font-medium text-ink">Append-only case notes</h3>
+                    <p className="mt-0.5 text-[11px] text-ink-dim">Notes can be added, never edited or deleted.</p>
                   </div>
-                  <span className="mono text-[10px] text-ink-dim">
+                  <span className="mono text-[11px] text-ink-dim">
                     {viewer.hasOlderNotes ? `Latest ${orderedNotes.length} notes` : `${orderedNotes.length} notes`}
                   </span>
                 </div>
@@ -954,7 +954,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                       className={fieldClass}
                     />
                     <div className="mt-2 flex items-center justify-between gap-3">
-                      <span className="text-[9.5px] text-ink-dim">{noteBody.length.toLocaleString()} / 10,000</span>
+                      <span className="text-[10px] text-ink-dim">{noteBody.length.toLocaleString()} / 10,000</span>
                       <button
                         type="button"
                         onClick={() => void saveNote()}
@@ -969,17 +969,17 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                 {orderedNotes.length > 0 ? (
                   <ol className="mt-4 space-y-2 border-t border-line/70 pt-3">
                     {orderedNotes.map((note) => (
-                      <li key={note.id} className="rounded-lg border border-line/70 bg-void/50 px-3 py-2.5">
-                        <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-ink-dim">
+                      <li key={note.id} className="panel-inset px-3 py-2.5">
+                        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-ink-dim">
                           <span className="font-medium text-ink-dim">{note.authorDisplayName}</span>
                           <time dateTime={note.createdAt}>{readableDate(note.createdAt)}</time>
                         </div>
-                        <p className="mt-1.5 whitespace-pre-wrap text-[12px] leading-relaxed text-ink-dim">{note.body}</p>
+                        <p className="mt-1.5 whitespace-pre-wrap text-[12.5px] leading-relaxed text-ink-dim">{note.body}</p>
                       </li>
                     ))}
                   </ol>
                 ) : (
-                  <p className="mt-4 border-t border-line/70 pt-3 text-[11.5px] text-ink-dim">No analyst notes yet.</p>
+                  <p className="mt-4 border-t border-line/70 pt-3 text-[12.5px] text-ink-dim">No analyst notes yet.</p>
                 )}
                 {viewer.hasOlderNotes && (
                   <button
@@ -993,13 +993,13 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                 )}
               </section>
 
-              <section aria-labelledby="revision-history-heading" className="rounded-xl border border-line bg-panel p-4">
+              <section aria-labelledby="revision-history-heading" className="panel p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h3 id="revision-history-heading" className="text-[13px] font-medium text-ink">Immutable revision timeline</h3>
-                    <p className="mt-0.5 text-[10.5px] text-ink-dim">Every material save creates a new snapshot. Loaded revisions remain inspectable below.</p>
+                    <h3 id="revision-history-heading" className="text-[13.5px] font-medium text-ink">Immutable revision timeline</h3>
+                    <p className="mt-0.5 text-[11px] text-ink-dim">Every material save creates a new snapshot. Loaded revisions remain inspectable below.</p>
                   </div>
-                  <span className="mono text-[10px] text-ink-dim">
+                  <span className="mono text-[11px] text-ink-dim">
                     {viewer.hasOlderRevisions ? `Latest ${orderedRevisions.length} revisions` : `${orderedRevisions.length} revisions`}
                   </span>
                 </div>
@@ -1007,19 +1007,19 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                   <ol className="mt-4 space-y-2 border-t border-line/70 pt-3">
                     {orderedRevisions.map((revision) => (
                       <li key={revision.id}>
-                        <details className="rounded-lg border border-line/70 bg-void/50 px-3 py-2.5">
+                        <details className="panel-inset px-3 py-2.5">
                           <summary className="cursor-pointer list-none [&::-webkit-details-marker]:hidden">
                             <span className="flex flex-wrap items-center gap-2">
                               <span className="mono text-[11px] font-semibold text-ink">Revision {revision.revision}</span>
-                              <span className="mono rounded border border-line px-1.5 py-0.5 text-[9px] uppercase text-ink-dim">{recommendationLabel(revision.recommendation)}</span>
-                              <span className="ml-auto text-[10px] text-ink-dim">{revision.authorDisplayName} · {readableDate(revision.createdAt)}</span>
+                              <span className="chip">{recommendationLabel(revision.recommendation)}</span>
+                              <span className="ml-auto text-[11px] text-ink-dim">{revision.authorDisplayName} · {readableDate(revision.createdAt)}</span>
                             </span>
                           </summary>
                           <div className="mt-2 border-t border-line/60 pt-2">
                             {(() => {
                               const basis = viewer.anchorVersions.find((version) => version.reportVersionId === revision.anchorReportVersionId);
                               return (
-                                <div className="flex flex-wrap items-center gap-2 text-[9.5px] text-ink-dim" title={revision.anchorReportVersionId}>
+                                <div className="flex flex-wrap items-center gap-2 text-[11px] text-ink-dim" title={revision.anchorReportVersionId}>
                                   <span className="mono">
                                     {basis
                                       ? `Decision basis v${basis.version} · ${basis.verdict ?? "No verdict"}${basis.score != null ? ` · ${basis.score}` : ""} · captured ${readableDate(basis.createdAt)}`
@@ -1030,15 +1030,15 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                                       href={`?version=${encodeURIComponent(basis.reportVersionId)}`}
                                       target="_blank"
                                       rel="noreferrer"
-                                      className="rounded border border-line-2 px-1.5 py-1 text-signal hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+                                      className="link-ext"
                                     >
-                                      Review exact evidence ↗
+                                      Review exact evidence
                                     </a>
                                   )}
                                 </div>
                               );
                             })()}
-                            <div className="mt-1 text-[9.5px] text-ink-dim">
+                            <div className="mt-1 text-[11px] text-ink-dim">
                               Assignee {revision.assigneeDisplayName
                                 ?? (revision.assigneeUserId
                                   ? viewer.assignees.find((assignee) => assignee.userId === revision.assigneeUserId)?.displayName ?? "Former analyst"
@@ -1052,7 +1052,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     ))}
                   </ol>
                 ) : (
-                  <p className="mt-4 border-t border-line/70 pt-3 text-[11.5px] text-ink-dim">No saved revisions yet. The first save creates revision 1.</p>
+                  <p className="mt-4 border-t border-line/70 pt-3 text-[12.5px] text-ink-dim">No saved revisions yet. The first save creates revision 1.</p>
                 )}
                 {viewer.hasOlderRevisions && (
                   <button
@@ -1072,7 +1072,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
         {!loading && viewer && draft && (
           <footer className="shrink-0 border-t border-line bg-panel/95 px-5 py-3 backdrop-blur">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="min-w-0 flex-1 text-[10.5px] text-ink-dim">
+              <div className="min-w-0 flex-1 text-[11px] text-ink-dim">
                 {busy
                   ? noteSaving ? "Appending note… navigation is protected" : "Saving revision… navigation is protected"
                   : editable
@@ -1083,7 +1083,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                 type="button"
                 onClick={requestClose}
                 disabled={busy}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
               >
                 Close
               </button>
@@ -1092,7 +1092,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                   type="button"
                   onClick={() => void runSave()}
                   disabled={busy || !briefDirty || conflictBrief !== undefined}
-                  className="btn-primary px-4 py-1.5 text-[12px] font-medium disabled:cursor-not-allowed disabled:opacity-50"
+                  className="btn-primary px-4 py-1.5 text-[12.5px] font-medium disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {saving ? "Saving revision…" : viewer.brief ? "Save new revision" : "Create case brief"}
                 </button>

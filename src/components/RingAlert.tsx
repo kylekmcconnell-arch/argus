@@ -36,27 +36,26 @@ export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) 
   const snapshotSuggestion = override?.severity === "avoid" ? "AVOID" : "CAUTION";
   const cautionTone = snapshotMode ? snapshotSuggestion === "CAUTION" : override?.severity === "caution";
   const color = cautionTone ? "var(--color-caution)" : "var(--color-avoid)";
-  const bg = cautionTone ? "rgba(232,177,42,0.08)" : "rgba(220,38,38,0.08)";
 
   return (
-    <div className="mb-4 rounded-xl border px-4 py-3" style={{ borderColor: color, background: bg }}>
+    <div className="finding tint-var mb-4 px-4 py-3" style={{ "--tint": color } as React.CSSProperties}>
       {snapshotMode ? (
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="mono rounded border border-line-2 bg-panel px-2 py-0.5 text-[10px] uppercase tracking-wider text-ink-dim">
+            <span className="chip">
               Current workspace network overlay
             </span>
-            <span className="mono rounded px-2 py-0.5 text-[11px] font-semibold" style={{ background: `${color}1a`, color }}>
+            <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}>
               suggests {snapshotSuggestion}
             </span>
           </div>
-          <p className="mt-1.5 text-[12.5px] leading-relaxed" style={{ color }}>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed">
             Current overlay suggests {snapshotSuggestion} while stored v{snapshotVersion} verdict remains unchanged.
           </p>
           {override?.riskEntities && override.riskEntities.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {override.riskEntities.slice(0, 6).map((entity) => (
-                <span key={entity.key} className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${color}1a`, color }}>{entity.label}</span>
+                <span key={entity.key} className="chip tint-var normal-case" style={{ "--tint": color } as React.CSSProperties}>{entity.label}</span>
               ))}
             </div>
           )}
@@ -64,20 +63,20 @@ export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) 
       ) : override ? (
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="mono rounded px-2 py-0.5 text-[12px] font-bold" style={{ background: color, color: "#fff" }}>REVISED: {override.severity === "caution" ? "CAUTION" : "AVOID"}</span>
-            <span className="text-[10px] uppercase tracking-wider" style={{ color }}>network reconciliation overrides the contract score</span>
+            <span className="verdict-pill tint-var" style={{ "--tint": color } as React.CSSProperties}>REVISED: {override.severity === "caution" ? "CAUTION" : "AVOID"}</span>
+            <span className="text-[11px] uppercase tracking-wider">network reconciliation overrides the contract score</span>
           </div>
-          <p className="mt-1.5 text-[12.5px] leading-relaxed" style={{ color }}>{override.line}</p>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed">{override.line}</p>
           {override.riskEntities && override.riskEntities.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
               {override.riskEntities.slice(0, 6).map((e) => (
-                <span key={e.key} className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${color}1a`, color }}>{e.label}</span>
+                <span key={e.key} className="chip tint-var normal-case" style={{ "--tint": color } as React.CSSProperties}>{e.label}</span>
               ))}
             </div>
           )}
         </div>
       ) : (
-        <div className="flex items-center gap-2 text-[13.5px] font-semibold" style={{ color: "var(--color-avoid)" }}>
+        <div className="flex items-center gap-2 text-[13.5px] font-semibold text-avoid">
           <span className="text-[15px]">⚠</span>
           Connected to {conns.length === 1 ? "a flagged subject" : `${conns.length} flagged subjects`} in the shared graph
         </div>
@@ -87,17 +86,17 @@ export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) 
         {conns.slice(0, 4).map((c) => (
           <div key={c.other} className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-ink-dim">
             {onAudit ? (
-              <button onClick={() => onAudit(c.other)} className="mono font-medium underline-offset-2 hover:underline" style={{ color: "var(--color-avoid)" }}>{c.other}</button>
+              <button onClick={() => onAudit(c.other)} className="mono font-medium text-avoid underline-offset-2 hover:underline">{c.other}</button>
             ) : (
-              <span className="mono font-medium" style={{ color: "var(--color-avoid)" }}>{c.other}</span>
+              <span className="mono font-medium text-avoid">{c.other}</span>
             )}
-            <span className="mono rounded px-1 py-0.5 text-[9.5px]" style={{ background: "rgba(220,38,38,.14)", color: "var(--color-avoid)" }}>{c.otherVerdict}</span>
+            <span className={`verdict-pill ${c.otherVerdict === "FAIL" ? "tint-fail" : "tint-avoid"}`}>{c.otherVerdict}</span>
             {c.direct && <span className="text-[11px]">directly surfaced in this subject's audit</span>}
             {c.ties.length > 0 && (
               <span className="flex flex-wrap items-center gap-1 text-[11px] text-ink-faint">
                 via
                 {c.ties.slice(0, 4).map((t) => (
-                  <span key={t.key} className="mono rounded border border-line bg-panel px-1 py-0.5 text-[10px] text-ink-dim" title={t.type}>{t.label}</span>
+                  <span key={t.key} className="chip normal-case" title={t.type}>{t.label}</span>
                 ))}
                 {c.ties.length > 4 && <span>+{c.ties.length - 4}</span>}
               </span>
@@ -107,7 +106,7 @@ export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) 
         {conns.length > 4 && <div className="text-[11px] text-ink-faint">+{conns.length - 4} more — see the Trust graph.</div>}
       </div>
       )}
-      <p className="mt-1.5 text-[11.5px] text-ink-faint">
+      <p className="mt-1.5 text-[12.5px] text-ink-faint">
         {snapshotMode
           ? `This overlay comes from the current shared graph and was not captured in snapshot v${snapshotVersion}. Review it as new intelligence; it does not revise the stored verdict.`
           : conns.length > 0

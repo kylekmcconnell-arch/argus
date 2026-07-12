@@ -40,9 +40,9 @@ export function PersonGithub({ handle, name, bio, className, panelCostToken, rec
   return (
     <div className={className}>
       <div className="mb-1.5 flex flex-wrap items-center gap-2">
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Code footprint · github.com/{data.login}</span>
-        {data.confidence && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: data.confidence === "high" ? "var(--color-pass)14" : "var(--color-caution)14", color: data.confidence === "high" ? "var(--color-pass)" : "var(--color-caution)" }}>{data.confidence}-confidence match</span>}
-        {data.why && data.why.length > 0 && <span className="text-[10px] text-ink-faint">· {data.why[0]}</span>}
+        <span className="eyebrow">Code footprint · github.com/{data.login}</span>
+        {data.confidence && <span className={`chip ${data.confidence === "high" ? "tint-pass" : "tint-caution"}`}>{data.confidence}-confidence match</span>}
+        {data.why && data.why.length > 0 && <span className="text-[11px] text-ink-faint">· {data.why[0]}</span>}
       </div>
       <GithubForensics login={data.login} subjectKey={handle} panelCostToken={panelCostToken} record={record} />
     </div>

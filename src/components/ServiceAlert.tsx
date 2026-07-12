@@ -36,8 +36,8 @@ export function ServiceAlert() {
   if (!down.length) return null;
 
   return (
-    <div className="mb-4 rounded-xl border px-4 py-3" style={{ borderColor: "var(--color-avoid)", background: "rgba(220,38,38,0.08)" }}>
-      <div className="flex items-center gap-2 text-[13.5px] font-semibold" style={{ color: "var(--color-avoid)" }}>
+    <div className="finding tint-avoid mb-4 px-4 py-3">
+      <div className="flex items-center gap-2 text-[13.5px] font-semibold text-avoid">
         <span className="text-[15px]">⚠</span>
         {down.length === 1 ? `${down[0].label} is unavailable — this report has reduced coverage` : `${down.length} providers are unavailable — this report has reduced coverage`}
       </div>
@@ -45,12 +45,12 @@ export function ServiceAlert() {
         {down.map((s) => (
           <div key={s.id} className="text-[12.5px] leading-relaxed text-ink-dim">
             <span className="font-medium text-ink">{s.label}</span>
-            {s.action && <span style={{ color: "var(--color-avoid)" }}> · {s.action}</span>}
+            {s.action && <span className="text-avoid"> · {s.action}</span>}
             {s.detail && <span className="mono block text-[11px] text-ink-faint">{s.detail}</span>}
           </div>
         ))}
       </div>
-      <p className="mt-1.5 text-[11.5px] text-ink-faint">
+      <p className="mt-1.5 text-[12.5px] text-ink-faint">
         Deep digs (team search, portfolios, namesake, identity) depend on these — rescan after configuration is restored.
       </p>
     </div>

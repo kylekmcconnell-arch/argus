@@ -38,23 +38,16 @@ export function AuditConsole({
         <div className="mb-6 flex items-center gap-3">
           <ArgusMark size={34} live />
           <div>
-            <div className="mono text-[13px] text-ink">
+            <div className="mono text-[13.5px] text-ink">
               Auditing <span className="text-signal">{handle}</span>
             </div>
-            <div className="text-[12px] text-ink-faint">{subtitle}</div>
+            <div className="text-[12.5px] text-ink-faint">{subtitle}</div>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            <span
-              className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider"
-              style={
-                mode === "live"
-                  ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" }
-                  : { borderColor: "var(--color-line-2)", color: "var(--color-ink-faint)" }
-              }
-            >
+            <span className={`chip ${mode === "live" ? "tint-signal" : ""}`}>
               {mode === "live" ? "● LIVE" : "CURATED"}
             </span>
-            <span className="mono text-[12px] text-ink-faint tabular">{pct}%</span>
+            <span className="mono text-[12.5px] text-ink-faint tabular">{pct}%</span>
           </div>
         </div>
 
@@ -64,7 +57,7 @@ export function AuditConsole({
 
         <div
           ref={scrollRef}
-          className="thin-scroll relative h-[340px] overflow-y-auto rounded-xl border border-line bg-panel/70 p-4 backdrop-blur"
+          className="thin-scroll panel relative h-[340px] overflow-y-auto p-4 backdrop-blur"
         >
           <div className="space-y-2.5">
             {steps.map((s, i) => {
@@ -77,9 +70,9 @@ export function AuditConsole({
                   </div>
                   <div className="pb-1">
                     <div className="flex items-center gap-2">
-                      <span className="mono text-[10px] uppercase tracking-wider text-ink-faint">{s.phase}</span>
+                      <span className="mono text-[11px] uppercase tracking-wider text-ink-faint">{s.phase}</span>
                       {s.source && (
-                        <span className="mono rounded border border-line px-1 py-0.5 text-[9px] text-ink-faint">{s.source}</span>
+                        <span className="chip">{s.source}</span>
                       )}
                     </div>
                     <div className={`text-[13.5px] font-medium ${tone.text}`}>{s.label}</div>
@@ -90,7 +83,7 @@ export function AuditConsole({
             })}
 
             {working && (
-              <div className="flex items-center gap-2 pl-[3px] pt-1 text-[12px] text-ink-faint">
+              <div className="flex items-center gap-2 pl-[3px] pt-1 text-[12.5px] text-ink-faint">
                 <span className="relative flex h-3 w-12 overflow-hidden rounded-full bg-line">
                   <span className="scan-line sweep absolute inset-y-0 w-1/2" />
                 </span>

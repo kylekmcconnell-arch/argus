@@ -56,10 +56,9 @@ export function ProjectLinks({
           href={l.url}
           target="_blank"
           rel="noreferrer"
-          className="inline-flex items-center gap-1 rounded-md border border-line bg-panel px-2 py-1 text-[11.5px] text-ink-dim transition hover:border-signal hover:text-signal"
+          className="chip normal-case tracking-normal transition hover:text-ink"
         >
           {l.label}
-          <span className="text-ink-faint">↗</span>
         </a>
       ))}
     </div>

@@ -109,20 +109,20 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
               <span className="absolute inset-0 rounded-full bg-signal" />
               <span className="pulse-ring absolute inset-0" />
             </span>
-            <h1 className="text-[26px] font-medium tracking-[-0.02em] text-ink">Radar</h1>
+            <h1 className="display-sm text-[24px] text-ink">Radar</h1>
           </div>
-          <p className="mt-1.5 text-[14px] text-ink-dim">
+          <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">
             Trending and freshly-listed tokens, audited live on-chain. Scams float to the top.
           </p>
         </div>
-        <div className="text-right text-[11.5px] text-ink-faint">
+        <div className="text-right text-[12.5px] text-ink-faint">
           {scanning ? (
             <span className="mono">scanning… {progress}%</span>
           ) : (
             <>
               <div>
                 <span className="mono text-ink-dim">{results.length}</span> scanned ·{" "}
-                <span className="mono" style={{ color: "var(--color-avoid)" }}>{flagged}</span> flagged
+                <span className="mono text-avoid">{flagged}</span> flagged
               </div>
               <div className="mt-0.5">updated {updatedAt} · auto every 60s</div>
             </>
@@ -137,15 +137,14 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
             <button
               key={c}
               onClick={() => setChain(c)}
-              className={`rounded-full border px-2.5 py-1 text-[11.5px] capitalize transition ${chain === c ? "border-ink bg-ink text-void" : "border-line text-ink-dim hover:border-line-2"}`}
+              className={`mono rounded-md border px-2.5 py-1 text-[11px] capitalize transition ${chain === c ? "tint-signal" : "border-line text-ink-dim hover:text-ink"}`}
             >
               {c}
             </button>
           ))}
           <button
             onClick={() => setFlaggedOnly((v) => !v)}
-            className="ml-auto rounded-full border px-2.5 py-1 text-[11.5px] transition"
-            style={flaggedOnly ? { borderColor: "var(--color-avoid)", color: "var(--color-avoid)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}
+            className={`mono ml-auto rounded-md border px-2.5 py-1 text-[11px] transition ${flaggedOnly ? "tint-avoid" : "border-line text-ink-dim hover:text-ink"}`}
           >
             {flaggedOnly ? "● flagged only" : "flagged only"}
           </button>
@@ -163,20 +162,20 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
                 <button
                   key={d.chain + d.address}
                   onClick={() => onAudit(d.address)}
-                  className="group rounded-xl border bg-panel p-3.5 text-left transition hover:shadow-sm"
-                  style={{ borderColor: d.verdict === "AVOID" || d.verdict === "FAIL" ? `${m.color}66` : "var(--color-line)" }}
+                  className={`panel group p-3.5 text-left transition soft-shadow ${d.verdict === "AVOID" || d.verdict === "FAIL" ? "tint-var" : "hover:border-line-2"}`}
+                  style={d.verdict === "AVOID" || d.verdict === "FAIL" ? ({ "--tint": m.color } as React.CSSProperties) : undefined}
                 >
                   <div className="flex items-center gap-2">
                     {d.imageUrl ? (
-                      <img src={d.imageUrl} alt="" className="h-7 w-7 rounded-lg border border-line object-cover" />
+                      <img src={d.imageUrl} alt="" className="h-7 w-7 rounded-md border border-line object-cover" />
                     ) : (
-                      <span className="flex h-7 w-7 items-center justify-center rounded-lg border border-line bg-panel-2 text-[11px] text-signal">{d.symbol.slice(0, 3)}</span>
+                      <span className="flex h-7 w-7 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal">{d.symbol.slice(0, 3)}</span>
                     )}
                     <div className="min-w-0 flex-1">
-                      <div className="mono truncate text-[13px] text-ink">${d.symbol}</div>
-                      <div className="text-[10.5px] capitalize text-ink-faint">{d.chain} · {d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : "?"}</div>
+                      <div className="mono truncate text-[13.5px] text-ink">${d.symbol}</div>
+                      <div className="text-[11px] capitalize text-ink-faint">{d.chain} · {d.ageDays != null ? (d.ageDays < 1 ? "<1d" : Math.round(d.ageDays) + "d") : "?"}</div>
                     </div>
-                    <span className="mono rounded-full border px-2 py-0.5 text-[10.5px] font-semibold tracking-wider" style={{ borderColor: m.color, color: m.color }}>
+                    <span className={`verdict-pill ${d.verdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={d.verdict === "FAIL" ? undefined : ({ "--tint": m.color } as React.CSSProperties)}>
                       {m.label}
                     </span>
                   </div>
@@ -184,7 +183,7 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
                     <span>liq <span className="mono text-ink-dim">{money(d.liquidityUsd)}</span></span>
                     <span>mc <span className="mono text-ink-dim">{money(d.mcap)}</span></span>
                     {d.capApplied ? (
-                      <span className="mono" style={{ color: "var(--color-avoid)" }}>▲ {d.capApplied.replace(/_.*/, "")}</span>
+                      <span className="mono text-avoid">▲ {d.capApplied.replace(/_.*/, "")}</span>
                     ) : (
                       <span className="mono">{d.score}/100</span>
                     )}
@@ -194,7 +193,7 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
                     return badges.length > 0 ? (
                       <div className="mt-2 flex flex-wrap gap-1">
                         {badges.map((bd) => (
-                          <span key={bd.label} className="mono rounded px-1.5 py-0.5 text-[9.5px] font-medium" style={{ color: BADGE_TONE[bd.tone], background: BADGE_TONE[bd.tone] + "14" }}>
+                          <span key={bd.label} className="chip tint-var" style={{ "--tint": BADGE_TONE[bd.tone] } as React.CSSProperties}>
                             {bd.label}
                           </span>
                         ))}

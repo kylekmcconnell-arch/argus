@@ -33,7 +33,7 @@ export function LegalScreen({ name, resolved }: { name?: string | null; resolved
   if (!screenable || state === "loading" || !data) return null;
   if (data.available === false) {
     return (
-      <div className="rounded-xl border border-caution/35 bg-caution/5 px-4 py-3 text-[11.5px] leading-relaxed text-ink-dim" role="status">
+      <div className="panel tint-caution px-4 py-3 text-[12.5px] leading-relaxed text-ink-dim" role="status">
         <span className="font-medium text-ink">Current US legal screen unavailable.</span> {data.note ?? "No clean result was inferred."} The frozen report remains the source of truth.
       </div>
     );
@@ -44,13 +44,13 @@ export function LegalScreen({ name, resolved }: { name?: string | null; resolved
 
   if (!cases.length) {
     return (
-      <div className="rounded-xl border border-line bg-panel px-4 py-3">
-        <div className="flex items-center gap-2 text-[10.5px] uppercase tracking-wider text-ink-faint">
+      <div className="panel px-4 py-3">
+        <div className="flex items-center gap-2">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-pass)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>
-          <span>Supplemental US legal screen</span>
-          <span className="mono ml-auto text-[9.5px] normal-case tracking-normal">not scored</span>
+          <span className="eyebrow">Supplemental US legal screen</span>
+          <span className="chip ml-auto">not scored</span>
         </div>
-        <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
           No matching record was returned for {realName} in the CourtListener / RECAP index at query time. Index coverage and name matching are not exhaustive.
         </p>
       </div>
@@ -59,25 +59,25 @@ export function LegalScreen({ name, resolved }: { name?: string | null; resolved
 
   const color = flagged ? "var(--color-caution)" : "var(--color-ink-faint)";
   return (
-    <div className="rounded-xl border p-4" style={{ borderColor: flagged ? `${color}55` : "var(--color-line)", background: flagged ? `${color}0d` : "var(--color-panel)" }}>
+    <div className={`panel p-4 ${flagged ? "tint-var" : ""}`} style={flagged ? ({ "--tint": color } as React.CSSProperties) : undefined}>
       <div className="flex flex-wrap items-center gap-2">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 3v18M5 7h14M7 7l-3 6h6zM17 7l3 6h-6z" /></svg>
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Legal history</span>
-        {flagged && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${color}1a`, color }}>{asParty} case{asParty === 1 ? "" : "s"} naming them as a party</span>}
-        <a href={`https://www.courtlistener.com/?q=%22${encodeURIComponent(realName)}%22&type=r`} target="_blank" rel="noreferrer" className="mono ml-auto text-[10px] text-signal-dim hover:underline">CourtListener ↗</a>
+        <span className="eyebrow">Legal history</span>
+        {flagged && <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}><span>{asParty} case{asParty === 1 ? "" : "s"} naming them as a party</span></span>}
+        <a href={`https://www.courtlistener.com/?q=%22${encodeURIComponent(realName)}%22&type=r`} target="_blank" rel="noreferrer" className="link-ext mono ml-auto text-[11px]">CourtListener</a>
       </div>
-      <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
+      <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
         {data.total} US court record{data.total === 1 ? "" : "s"} mention "{realName}"{flagged ? ` — ${asParty} name them as a party` : ""}. Verify the identity match before drawing conclusions; a name is not a person.
       </p>
-      <div className="mt-2 divide-y divide-line/60 rounded-lg border border-line">
+      <div className="mt-2 divide-y divide-line/60">
         {cases.slice(0, 6).map((c, i) => (
-          <div key={i} className="flex items-center gap-2 px-3 py-1.5 text-[11.5px]">
+          <div key={i} className="flex items-center gap-2 py-1.5 text-[11.5px]">
             {c.url ? (
               <a href={c.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate hover:underline" style={{ color: c.nameInCase ? color : "var(--color-ink-dim)" }}>{c.caseName}</a>
             ) : (
               <span className="min-w-0 flex-1 truncate" style={{ color: c.nameInCase ? color : "var(--color-ink-dim)" }}>{c.caseName}</span>
             )}
-            <span className="shrink-0 text-[10px] text-ink-faint">{c.court}{c.date ? ` · ${yearOf(c.date)}` : ""}</span>
+            <span className="shrink-0 text-[11px] text-ink-faint">{c.court}{c.date ? ` · ${yearOf(c.date)}` : ""}</span>
           </div>
         ))}
       </div>

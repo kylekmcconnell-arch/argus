@@ -159,11 +159,11 @@ export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: st
 
   if (state === "idle") {
     return (
-      <div className="rounded-xl border border-line bg-panel p-4">
+      <div className="panel p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="max-w-2xl">
-            <div className="text-[12px] font-medium text-ink">Portfolio outcome analysis</div>
-            <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+            <div className="text-[12.5px] font-medium text-ink">Portfolio outcome analysis</div>
+            <p className="mt-1 text-[12.5px] leading-relaxed text-ink-faint">
               Search for source-linked portfolio candidates, then price up to 16 named tokens. This can run up to two paid Grok searches plus live market lookups. Results stay unverified, outside the trust graph, and do not change the frozen verdict.
             </p>
           </div>
@@ -171,7 +171,7 @@ export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: st
             type="button"
             onClick={run}
             disabled={!panelCostToken}
-            className="mono shrink-0 rounded-md border border-signal/60 px-2.5 py-1 text-[11px] text-signal transition hover:border-signal hover:text-signal-dim disabled:cursor-not-allowed disabled:border-line disabled:text-ink-faint"
+            className="btn-chip tint-signal shrink-0 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {panelCostToken ? "Run portfolio analysis →" : "Saved report required"}
           </button>
@@ -180,10 +180,10 @@ export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: st
     );
   }
 
-  if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">assembling source-linked candidates + pricing named tokens…</div>;
+  if (state === "loading") return <div className="panel p-4 text-[12.5px] text-ink-faint">assembling source-linked candidates + pricing named tokens…</div>;
   if (state === "context-error") {
     return (
-      <div className="rounded-xl border border-caution/40 bg-caution/5 p-4 text-[12px] leading-relaxed text-ink-dim">
+      <div className="finding tint-caution p-4 text-[12.5px] leading-relaxed">
         <div className="font-medium text-caution">Fresh saved report required</div>
         <p className="mt-1">{message || "This paid supplemental check needs a fresh persisted report. Rescan before running it."}</p>
       </div>
@@ -191,31 +191,31 @@ export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: st
   }
   if (state === "auth-error") {
     return (
-      <div className="rounded-xl border border-caution/40 bg-caution/5 p-4 text-[12px] leading-relaxed text-ink-dim">
+      <div className="finding tint-caution p-4 text-[12.5px] leading-relaxed">
         <div className="font-medium text-caution">Session authorization required</div>
         <p className="mt-1">{message || "Sign in again before running this paid supplemental search."}</p>
       </div>
     );
   }
   if (state === "unavailable") {
-    return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-dim">{message}</div>;
+    return <div className="panel p-4 text-[12.5px] text-ink-dim">{message}</div>;
   }
   if (state === "error") {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-caution/40 bg-caution/5 p-4 text-[12px] text-ink-dim">
+      <div className="finding tint-caution flex flex-wrap items-center justify-between gap-3 p-4 text-[12.5px]">
         <span className="max-w-2xl">{message || "The paid search failed. No portfolio conclusion was recorded."}</span>
-        <button onClick={run} className="mono rounded-md border border-signal/60 px-2 py-0.5 text-[11px] text-signal transition hover:border-signal">Retry paid search (may incur cost) →</button>
+        <button onClick={run} className="btn-chip tint-signal">Retry paid search (may incur cost) →</button>
       </div>
     );
   }
   if (state === "empty" || !rows) {
     return (
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-dim">
+      <div className="panel flex flex-wrap items-center justify-between gap-3 p-4 text-[12.5px] text-ink-dim">
         <div className="max-w-2xl">
           <p>No source-linked portfolio candidates surfaced. This is not evidence that the investor has no portfolio.</p>
           {message && <p className="mt-1 text-[11px] text-ink-faint">{message}</p>}
         </div>
-        <button onClick={run} className="mono rounded-md border border-signal/60 px-2 py-0.5 text-[11px] text-signal transition hover:border-signal">Search again (may incur another paid Grok search) →</button>
+        <button onClick={run} className="btn-chip tint-signal">Search again (may incur another paid Grok search) →</button>
       </div>
     );
   }
@@ -225,9 +225,9 @@ export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: st
   const money = (n?: number) => (n == null ? "—" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
 
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="panel p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="text-[12px] font-medium text-ink">{rows.length} unverified portfolio {rows.length === 1 ? "candidate" : "candidates"}</span>
+        <span className="text-[12.5px] font-medium text-ink">{rows.length} unverified portfolio {rows.length === 1 ? "candidate" : "candidates"}</span>
         {priced.length > 0 && dead.length > 0 && (
           <span className="mono text-[11px] text-caution">{dead.length}/{priced.length} priced token candidates inactive</span>
         )}
@@ -237,30 +237,30 @@ export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: st
       </p>
       {message && <p className="mt-1 text-[11px] leading-relaxed text-caution">{message}</p>}
 
-      <div className="mt-2 divide-y divide-line/60 rounded-lg border border-line">
+      <div className="panel-inset mt-2 divide-y divide-line/60">
         {rows.map((r, i) => {
           const m = r.verdict ? verdictMeta(r.verdict) : null;
           const openTarget = r.address || r.x_handle;
           const source = safeCandidateSource(r.source_url);
           return (
-            <div key={i} className="px-3 py-2 text-[12px]">
+            <div key={i} className="px-3 py-2 text-[12.5px]">
               <div className="flex flex-wrap items-center gap-2">
                 {openTarget && onAudit ? (
                   <button onClick={() => onAudit(openTarget!)} className="font-medium text-ink underline-offset-2 hover:text-signal-dim hover:underline">{r.project}</button>
                 ) : (
                   <span className="font-medium text-ink">{r.project}</span>
                 )}
-                {r.ticker && <span className="mono text-[10.5px] text-ink-faint">{r.ticker}</span>}
-                {(r.stage || r.year) && <span className="text-[10.5px] text-ink-faint">{[r.stage, r.year].filter(Boolean).join(" · ")}</span>}
-                {m && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${m.color}1a`, color: m.color }}>{r.verdict}{r.score != null ? ` ${r.score}` : ""}</span>}
-                {r.resolved && <span className="text-[10.5px] text-ink-faint">{r.mcap ? `mcap ${money(r.mcap)}` : `liq ${money(r.liquidityUsd)}`}</span>}
-                {r.dead && <span className="mono rounded border border-caution/40 px-1.5 py-0.5 text-[9.5px] text-caution">inactive market</span>}
+                {r.ticker && <span className="mono text-[11px] text-ink-faint">{r.ticker}</span>}
+                {(r.stage || r.year) && <span className="text-[11px] text-ink-faint">{[r.stage, r.year].filter(Boolean).join(" · ")}</span>}
+                {m && <span className={`verdict-pill ${r.verdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={r.verdict === "FAIL" ? undefined : ({ "--tint": m.color } as React.CSSProperties)}>{r.verdict}{r.score != null ? ` ${r.score}` : ""}</span>}
+                {r.resolved && <span className="text-[11px] text-ink-faint">{r.mcap ? `mcap ${money(r.mcap)}` : `liq ${money(r.liquidityUsd)}`}</span>}
+                {r.dead && <span className="chip tint-caution">inactive market</span>}
                 {r.address && r.chainResolved && <span className="ml-auto"><TokenSparkline address={r.address} chain={r.chainResolved} compact /></span>}
               </div>
-              {r.outcome && !r.resolved && <div className="mt-0.5 text-[10.5px] text-ink-faint">Model-reported status: {r.outcome}</div>}
+              {r.outcome && !r.resolved && <div className="mt-0.5 text-[11px] text-ink-faint">Model-reported status: {r.outcome}</div>}
               {source && (
-                <a href={source} target="_blank" rel="noopener noreferrer" className="mono mt-1 inline-block text-[10.5px] text-signal-dim underline-offset-2 hover:text-signal hover:underline">
-                  Candidate source{r.source_title ? ` · ${r.source_title}` : ""} ↗
+                <a href={source} target="_blank" rel="noopener noreferrer" className="mono link-ext mt-1 inline-block text-[11px]">
+                  Candidate source{r.source_title ? ` · ${r.source_title}` : ""}
                 </a>
               )}
             </div>
@@ -268,7 +268,7 @@ export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: st
         })}
       </div>
       {dead.length > 0 && (
-        <p className="mt-2 text-[12px] leading-relaxed text-caution">
+        <p className="mt-2 text-[12.5px] leading-relaxed text-caution">
           {dead.length} of {priced.length} priceable token candidates {dead.length === 1 ? "appears" : "appear"} inactive based on current market cap and liquidity. This does not verify that the fund invested in them.
         </p>
       )}

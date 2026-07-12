@@ -43,24 +43,24 @@ export function NewsSection({ query, handle }: { query: string; handle?: string 
       });
   }, [handle, query]);
 
-  if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">searching news…</div>;
+  if (state === "loading") return <div className="panel p-4 text-[12.5px] text-ink-faint">searching news…</div>;
   if (state === "unavailable") {
     return (
-      <div className="rounded-xl border border-caution/35 bg-caution/5 p-4 text-[12px] text-ink-dim" role="status">
+      <div className="panel tint-caution p-4 text-[12.5px] text-ink-dim" role="status">
         <span className="font-medium text-ink">Current news search unavailable.</span> {note} The frozen report remains the source of truth.
       </div>
     );
   }
   if (state === "none" || !articles) {
     return (
-      <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-dim">
+      <div className="panel p-4 text-[12.5px] text-ink-dim">
         No press coverage found. For a project claiming traction, an empty news trail is itself a soft flag.
       </div>
     );
   }
 
   return (
-    <div className="rounded-xl border border-line bg-panel p-2 divide-y divide-line/60">
+    <div className="panel divide-y divide-line/60 p-2">
       {articles.map((a, i) => (
         <a
           key={i}
@@ -72,7 +72,7 @@ export function NewsSection({ query, handle }: { query: string; handle?: string 
           <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-signal/50 group-hover:bg-signal" />
           <span className="min-w-0 flex-1">
             <span className="block text-[12.5px] leading-snug text-ink group-hover:text-signal-dim">{a.title}</span>
-            <span className="mono mt-0.5 block text-[10px] text-ink-faint">
+            <span className="mono mt-0.5 block text-[11px] text-ink-faint">
               {a.source}{a.source && a.publishedAt ? " · " : ""}{ago(a.publishedAt)}
             </span>
           </span>

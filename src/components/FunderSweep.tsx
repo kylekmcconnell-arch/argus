@@ -19,7 +19,7 @@ function RadarIcon({ live }: { live?: boolean }) {
   return (
     <span className="relative flex h-5 w-5 shrink-0 items-center justify-center">
       {live && <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-signal/40" />}
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" className={live ? "argus-radar" : ""}>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round">
         <path d="M21 12a9 9 0 1 1-4.6-7.9" />
         <path d="M12 12l5.5-3.2" />
         <circle cx="12" cy="12" r="1.4" fill="var(--color-signal)" stroke="none" />
@@ -65,24 +65,15 @@ export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q:
   // ── loading state ──
   if (loading) {
     return (
-      <div className="mt-2 overflow-hidden rounded-lg border border-signal/35 bg-signal/[0.06] p-3">
-        <style>{`
-          @keyframes argus-scan { 0%{transform:translateX(-120%)} 100%{transform:translateX(360%)} }
-          @keyframes argus-spin { to { transform:rotate(360deg) } }
-          .argus-scan-bar{ animation: argus-scan 1.3s cubic-bezier(.4,0,.2,1) infinite }
-          .argus-radar{ transform-origin:center; animation: argus-spin 2.4s linear infinite }
-          @media (prefers-reduced-motion: reduce){ .argus-scan-bar,.argus-radar{ animation:none } }
-        `}</style>
+      <div className="mt-2 overflow-hidden rounded-xl border border-signal/35 bg-signal/[0.06] p-4">
         <div className="flex items-center gap-2.5">
           <RadarIcon live />
           <div className="min-w-0 flex-1">
-            <div className="text-[12px] font-medium text-signal-lift">{STAGES[stage]}</div>
-            <div className="mono mt-0.5 text-[10px] text-ink-faint">serial-launch sweep · reading the chain · up to ~45s</div>
+            <div className="text-[12.5px] font-medium text-signal-lift">{STAGES[stage]}</div>
+            <div className="mono mt-0.5 text-[11px] text-ink-faint">serial-launch sweep · reading the chain · up to ~45s</div>
           </div>
         </div>
-        <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-line/60">
-          <div className="argus-scan-bar h-full w-1/3 rounded-full" style={{ background: "linear-gradient(90deg, transparent, var(--color-signal), transparent)" }} />
-        </div>
+        <div className="scan-bar mt-2.5" />
       </div>
     );
   }
@@ -98,7 +89,7 @@ export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q:
           <RadarIcon />
           <span>
             <span className="block text-[13px] font-semibold text-signal-lift">Serial-launch sweep</span>
-            <span className="block text-[10.5px] text-ink-dim">what else has this wallet launched, and who else did it fund?</span>
+            <span className="block text-[11px] text-ink-dim">what else has this wallet launched, and who else did it fund?</span>
           </span>
         </span>
         <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal transition group-hover:bg-signal group-hover:text-white">run →</span>
@@ -117,10 +108,10 @@ export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q:
 
       {(data.ownLaunches ?? 0) > 0 && (
         <div className="mt-1.5">
-          <div className="text-[10.5px] uppercase tracking-wide text-ink-faint">Launched by this wallet ({data.ownLaunches})</div>
+          <div className="eyebrow">Launched by this wallet ({data.ownLaunches})</div>
           <div className="mt-1 flex flex-wrap gap-1">
             {own.map((t) => (
-              <button key={t.mint} onClick={() => onAudit?.(t.mint)} title={t.mint} className="mono rounded border border-line px-1.5 py-0.5 text-[10px] text-ink transition hover:border-signal hover:text-signal">
+              <button key={t.mint} onClick={() => onAudit?.(t.mint)} title={t.mint} className="btn-chip">
                 {t.name || shortAddr(t.mint)}
               </button>
             ))}
@@ -130,14 +121,14 @@ export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q:
 
       {seeded.length > 0 && (
         <div className="mt-2">
-          <div className="text-[10.5px] uppercase tracking-wide text-ink-faint">Other deployers it seeded ({data.seededCount})</div>
+          <div className="eyebrow">Other deployers it seeded ({data.seededCount})</div>
           <div className="mt-1 space-y-1">
             {seeded.map((s) => (
               <div key={s.wallet} className="flex flex-wrap items-center gap-1.5">
-                <a href={`https://solscan.io/account/${s.wallet}`} target="_blank" rel="noreferrer" className="mono text-[11px] text-signal hover:underline">{shortAddr(s.wallet)}</a>
-                <span className="text-[10.5px] text-ink-faint">{s.tokensCreated} token{s.tokensCreated === 1 ? "" : "s"}:</span>
+                <a href={`https://solscan.io/account/${s.wallet}`} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">{shortAddr(s.wallet)}</a>
+                <span className="text-[11px] text-ink-faint">{s.tokensCreated} token{s.tokensCreated === 1 ? "" : "s"}:</span>
                 {(s.sampleTokens ?? []).slice(0, 4).map((t) => (
-                  <button key={t.mint} onClick={() => onAudit?.(t.mint)} title={t.mint} className="mono rounded border border-line px-1 py-0.5 text-[9.5px] text-ink transition hover:border-signal hover:text-signal">
+                  <button key={t.mint} onClick={() => onAudit?.(t.mint)} title={t.mint} className="btn-chip">
                     {t.name || shortAddr(t.mint)}
                   </button>
                 ))}

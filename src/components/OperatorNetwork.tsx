@@ -81,7 +81,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
   // ── CTA (not run yet) ──
   if (!cluster && !loading) {
     return (
-      <div className="rounded-xl border border-line bg-panel p-4">
+      <div className="panel p-4">
         <button
           onClick={run}
           className="group flex w-full items-center justify-between gap-3 rounded-lg border border-signal/40 bg-signal/[0.08] px-3.5 py-2.5 text-left transition hover:border-signal hover:bg-signal/[0.14]"
@@ -90,7 +90,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
             <NetIcon />
             <span>
               <span className="block text-[13px] font-semibold text-signal-lift">Trace the operator</span>
-              <span className="block text-[10.5px] text-ink-dim">follow the money past the deployer to every launch behind the same hand</span>
+              <span className="block text-[11px] text-ink-dim">follow the money past the deployer to every launch behind the same hand</span>
             </span>
           </span>
           <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal transition group-hover:bg-signal group-hover:text-white">trace →</span>
@@ -103,21 +103,14 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
   if (loading) {
     return (
       <div className="overflow-hidden rounded-xl border border-signal/35 bg-signal/[0.06] p-4">
-        <style>{`
-          @keyframes op-scan { 0%{transform:translateX(-120%)} 100%{transform:translateX(360%)} }
-          .op-scan-bar{ animation: op-scan 1.3s cubic-bezier(.4,0,.2,1) infinite }
-          @media (prefers-reduced-motion: reduce){ .op-scan-bar{ animation:none } }
-        `}</style>
         <div className="flex items-center gap-2.5">
           <NetIcon live />
           <div className="min-w-0 flex-1">
             <div className="text-[12.5px] font-medium text-signal-lift">Tracing the operator network</div>
-            <div className="mono mt-0.5 text-[10px] text-ink-faint">chaining the funding graph · reading the chain · up to ~90s</div>
+            <div className="mono mt-0.5 text-[11px] text-ink-faint">chaining the funding graph · reading the chain · up to ~90s</div>
           </div>
         </div>
-        <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-line/60">
-          <div className="op-scan-bar h-full w-1/3 rounded-full" style={{ background: "linear-gradient(90deg, transparent, var(--color-signal), transparent)" }} />
-        </div>
+        <div className="scan-bar mt-2.5" />
         {steps.length > 0 && (
           <div className="mt-3 space-y-1.5 border-t border-signal/20 pt-2.5">
             {steps.slice(-5).map((s, i) => (
@@ -150,12 +143,12 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
   const noCluster = stats.deployers <= 1 && stats.tokens === 0;
 
   return (
-    <div className="rounded-xl border p-4" style={{ borderColor: verdict.tone === "good" ? "var(--color-line)" : `${tone}55`, background: verdict.tone === "good" ? "var(--color-panel)" : `${tone}0d` }}>
+    <div className={`panel p-4 ${verdict.tone === "good" ? "" : "tint-var"}`} style={verdict.tone === "good" ? undefined : ({ "--tint": tone } as React.CSSProperties)}>
       <div className="flex items-center gap-2">
         <NetIcon />
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Operator trace</span>
-        <span className="mono ml-auto rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${tone}1a`, color: tone }}>
-          {stats.deployers} deployer{stats.deployers === 1 ? "" : "s"} · {stats.tokens} token{stats.tokens === 1 ? "" : "s"}{stats.deadTokens ? ` · ${stats.deadTokens} dead` : ""}
+        <span className="eyebrow">Operator trace</span>
+        <span className="chip tint-var ml-auto" style={{ "--tint": tone } as React.CSSProperties}>
+          <span>{stats.deployers} deployer{stats.deployers === 1 ? "" : "s"} · {stats.tokens} token{stats.tokens === 1 ? "" : "s"}{stats.deadTokens ? ` · ${stats.deadTokens} dead` : ""}</span>
         </span>
       </div>
 
@@ -170,26 +163,25 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
       {/* Funding spine: where the root deployer's money ultimately came from. */}
       <div className="mono mt-2.5 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-dim">
         <span className="rounded border border-line px-1.5 py-0.5 text-ink">{label || "deployer"} {nameOf(cluster.rootDeployer)}</span>
-        {hub && hub !== cluster.rootDeployer && (<><span className="text-ink-faint">← funded via</span><a href={`${acct(hub)}`} target="_blank" rel="noreferrer" className="rounded border px-1.5 py-0.5 hover:underline" style={{ borderColor: `${tone}55`, color: tone }}>hub {nameOf(hub)}</a></>)}
+        {hub && hub !== cluster.rootDeployer && (<><span className="text-ink-faint">← funded via</span><a href={`${acct(hub)}`} target="_blank" rel="noreferrer" className="tint-var rounded border px-1.5 py-0.5 hover:underline" style={{ "--tint": tone } as React.CSSProperties}>hub {nameOf(hub)}</a></>)}
         {origin && (<><span className="text-ink-faint">←</span><span className="rounded border border-line px-1.5 py-0.5" style={{ color: origin.kind === "cex" ? "var(--color-pass)" : "var(--color-ink-dim)" }}>{origin.kind === "cex" ? origin.label ?? "CEX" : `anon ${shortAddr(origin.address)}`}</span></>)}
       </div>
 
       {noCluster ? null : (
         <div className="mt-3 space-y-2 border-t border-line pt-2.5">
-          <div className="text-[10.5px] uppercase tracking-wide text-ink-faint">Launch wallets in this cluster</div>
+          <div className="eyebrow">Launch wallets in this cluster</div>
           {deployers.map((w) => {
             const toks = (byDeployer.get(w.address) ?? []);
             return (
               <div key={w.address} className="flex flex-wrap items-center gap-1.5">
                 <ArkhamName address={w.address} chain={chain ?? "ethereum"} labels={arkham} fallback={`${shortAddr(w.address)}${w.isRoot ? " (this token)" : ""}`} className="text-[11px]" />
-                {typeof w.tokensCreated === "number" && w.tokensCreated > 0 && <span className="text-[10px] text-ink-faint">{w.tokensCreated} minted</span>}
+                {typeof w.tokensCreated === "number" && w.tokensCreated > 0 && <span className="text-[11px] text-ink-faint">{w.tokensCreated} minted</span>}
                 {toks.slice(0, 6).map((t) => (
                   <button
                     key={t.mint}
                     onClick={() => onAudit?.(t.mint)}
                     title={t.mint}
-                    className="mono rounded border px-1 py-0.5 text-[9.5px] transition hover:border-signal hover:text-signal"
-                    style={t.dead ? { borderColor: "var(--color-avoid)44", color: "var(--color-avoid)" } : { borderColor: "var(--color-line)", color: "var(--color-ink)" }}
+                    className={`btn-chip ${t.dead ? "tint-avoid" : ""}`}
                   >
                     {t.name || shortAddr(t.mint)}{t.dead ? " ✝" : ""}
                   </button>
@@ -201,7 +193,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
       )}
 
       {cluster.budgetExhausted && (
-        <p className="mt-2 text-[10px] text-ink-faint">Trace hit its depth budget — more of the network may extend beyond what was walked here.</p>
+        <p className="mt-2 text-[11px] text-ink-faint">Trace hit its depth budget — more of the network may extend beyond what was walked here.</p>
       )}
     </div>
   );

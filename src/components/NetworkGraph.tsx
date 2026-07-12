@@ -145,7 +145,7 @@ export function NetworkGraph({
   const dim = (id: string) => (focusSet ? !focusSet.has(id) : highlight ? !highlight.has(id) : false);
 
   return (
-    <div className="relative overflow-hidden rounded-xl border border-line bg-panel/30" style={{ height }}>
+    <div className="panel relative overflow-hidden" style={{ height }}>
       <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
@@ -235,7 +235,7 @@ export function NetworkGraph({
                     y={r + (n.subject ? 15 : 11)}
                     textAnchor="middle"
                     className="mono"
-                    fontSize={n.subject ? 11 : 8.5}
+                    fontSize={n.subject ? 11 : 9}
                     fontWeight={n.subject ? 600 : 400}
                     fill={n.subject ? "var(--color-ink)" : "var(--color-ink-dim)"}
                     style={{ pointerEvents: "none" }}
@@ -250,13 +250,13 @@ export function NetworkGraph({
       </svg>
 
       {/* controls hint + reset */}
-      <div className="pointer-events-none absolute bottom-2 left-3 text-[10.5px] text-ink-faint">
+      <div className="pointer-events-none absolute bottom-2 left-3 text-[11px] text-ink-faint">
         scroll to zoom · drag to pan · drag a node to pull it
       </div>
       {(view.k !== 1 || view.x !== 0 || view.y !== 0 || override.size > 0) && (
         <button
           onClick={() => { setView({ x: 0, y: 0, k: 1 }); setOverride(new Map()); }}
-          className="mono absolute bottom-2 right-3 rounded-md border border-line bg-panel/80 px-2 py-0.5 text-[10.5px] text-ink-dim backdrop-blur transition hover:text-ink"
+          className="btn-chip absolute bottom-2 right-3 bg-panel/80 backdrop-blur"
         >
           reset view
         </button>

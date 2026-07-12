@@ -70,18 +70,18 @@ export function ProjectXAccount({ name, domain, seedHandle, panelCostToken, onAu
 
   const paidResult = resolved && resolved.token === panelCostToken ? resolved.result : null;
   const d = paidResult ?? fallback;
-  if (panelCostToken && resolved?.token !== panelCostToken && !fallback) return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">searching X for the project's account…</div>;
+  if (panelCostToken && resolved?.token !== panelCostToken && !fallback) return <div className="panel p-4 text-[12.5px] text-ink-faint">searching X for the project's account…</div>;
   if (!d?.handle) return null;
 
   const conf = d.confidence ?? "low";
   const followRatio = d.followers && d.following ? d.followers / d.following : null;
 
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="panel p-4">
       <div className="flex items-center gap-2">
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Project X account</span>
+        <span className="eyebrow">Project X account</span>
         {d.confidence && (
-          <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: `${CONF[conf]}1a`, color: CONF[conf] }} title={d.matchReason}>{conf} confidence</span>
+          <span className="chip tint-var" style={{ "--tint": CONF[conf] } as React.CSSProperties} title={d.matchReason}>{conf} confidence</span>
         )}
       </div>
 
@@ -90,27 +90,27 @@ export function ProjectXAccount({ name, domain, seedHandle, panelCostToken, onAu
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[13.5px] font-medium text-ink">{d.name ?? d.handle}</span>
-            {d.verified && <span className="text-[11px]" style={{ color: "var(--color-signal)" }} title="Verified">✔</span>}
-            <a href={`https://x.com/${d.handle.replace(/^@/, "")}`} target="_blank" rel="noreferrer" className="mono text-[11.5px] text-ink-faint hover:text-signal-dim">{d.handle}</a>
+            {d.verified && <span className="text-[11px] text-signal" title="Verified">✔</span>}
+            <a href={`https://x.com/${d.handle.replace(/^@/, "")}`} target="_blank" rel="noreferrer" className="mono text-[11px] text-ink-faint hover:text-signal-dim">{d.handle}</a>
           </div>
-          {d.bio && <p className="mt-0.5 text-[12px] leading-relaxed text-ink-dim">{d.bio}</p>}
+          {d.bio && <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-dim">{d.bio}</p>}
           <div className="mono mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
             {d.followers != null && <span><span className="text-ink-dim">{fmt(d.followers)}</span> followers</span>}
             {d.following != null && <span>{fmt(d.following)} following</span>}
             {d.tweets != null && <span>{fmt(d.tweets)} posts</span>}
             {d.created && <span>joined {joined(d.created)}</span>}
-            {followRatio != null && followRatio < 0.3 && <span style={{ color: "var(--color-caution)" }}>follows {(1 / followRatio).toFixed(0)}× more than follow it</span>}
+            {followRatio != null && followRatio < 0.3 && <span className="text-caution">follows {(1 / followRatio).toFixed(0)}× more than follow it</span>}
           </div>
           {d.website && (
             <div className="mt-1 text-[11px]">
               <span className="text-ink-faint">links to </span>
-              <a href={d.website} target="_blank" rel="noreferrer" className="mono text-signal-dim hover:underline">{d.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}</a>
-              {d.siteMatches && <span className="ml-1" style={{ color: "var(--color-pass)" }}>✓ matches this site</span>}
+              <a href={d.website} target="_blank" rel="noreferrer" className="link-ext mono">{d.website.replace(/^https?:\/\//, "").replace(/\/$/, "")}</a>
+              {d.siteMatches && <span className="ml-1 text-pass">✓ matches this site</span>}
             </div>
           )}
         </div>
         {onAudit && (
-          <button onClick={() => onAudit(d.handle!)} className="mono shrink-0 rounded-md border px-2.5 py-1 text-[11.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
+          <button onClick={() => onAudit(d.handle!)} className="btn-chip tint-signal shrink-0">
             full audit →
           </button>
         )}

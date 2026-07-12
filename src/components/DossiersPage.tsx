@@ -194,44 +194,44 @@ export function DossiersPage({
           return (
             <div
               key={cardKey}
-              className="group relative flex flex-col rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:bg-panel/80 focus-within:border-line-2 soft-shadow"
+              className="panel group relative flex flex-col p-3 text-left transition hover:border-line-2 hover:bg-panel/80 focus-within:border-line-2 soft-shadow"
             >
               <div className="flex items-center gap-3">
                 {img ? (
-                  <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-lg border border-line object-cover" />
+                  <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-md border border-line object-cover" />
                 ) : (
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-void text-[14px] text-signal">{letter}</span>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal">{letter}</span>
                 )}
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
                     {isArchived ? (
-                      <span className="mono min-w-0 truncate text-[13px] text-ink">{r.query ?? r.ref}</span>
+                      <span className="mono min-w-0 truncate text-[13.5px] text-ink">{r.query ?? r.ref}</span>
                     ) : (
                       <button
                         type="button"
                         onClick={() => onOpen(r.ref, r.kind)}
                         aria-label={`Open stored report for ${r.query ?? r.ref}`}
                         title="Open the stored report"
-                        className="mono min-w-0 cursor-pointer truncate text-left text-[13px] text-ink after:absolute after:inset-0 after:cursor-pointer after:content-[''] focus-visible:outline-none"
+                        className="mono min-w-0 cursor-pointer truncate text-left text-[13.5px] text-ink after:absolute after:inset-0 after:cursor-pointer after:content-[''] focus-visible:outline-none"
                       >
                         {r.query ?? r.ref}
                       </button>
                     )}
-                    <span className="mono shrink-0 rounded px-1 py-0.5 text-[8.5px] uppercase" style={{ color: km.color, background: `${km.color}14` }}>{km.label}</span>
-                    {isArchived && <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[8.5px] uppercase text-ink-faint">archived</span>}
+                    <span className="chip tint-var shrink-0" style={{ "--tint": km.color } as React.CSSProperties}>{km.label}</span>
+                    {isArchived && <span className="chip shrink-0">archived</span>}
                     {readout.positiveNeedsQualification && (
-                      <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[8.5px] uppercase text-ink-faint">partial evidence</span>
+                      <span className="chip shrink-0">partial evidence</span>
                     )}
                   </span>
-                  <span className="mt-0.5 flex items-center gap-1.5 text-[10.5px] text-ink-faint">
+                  <span className="mt-0.5 flex items-center gap-1.5 text-[11px] text-ink-faint">
                     <span className="truncate">
                       {isArchived ? `archived ${ago(r.archivedAt)} · report ${ago(r.ts)}` : ago(r.ts)}
                       {r.contributor && r.contributor !== me && r.contributor !== "anonymous" ? ` · by ${r.contributor}` : ""}
                     </span>
                     {stat && stat.count > 0 && (
-                      <span className="mono shrink-0 inline-flex items-center gap-0.5 rounded-md border border-line/70 px-1.5 py-[1px] text-[10.5px] text-ink-dim" title={`Scanned ${stat.count} time${stat.count === 1 ? "" : "s"}${stat.rank <= 20 ? ` · #${stat.rank} most scanned` : ""}`}>
-                        {stat.trend === "up" && <span style={{ color: "var(--color-pass)" }}>▲</span>}
-                        {stat.trend === "down" && <span style={{ color: "var(--color-avoid)" }}>▼</span>}
+                      <span className="mono shrink-0 inline-flex items-center gap-0.5 rounded-md border border-line/70 px-1.5 py-[1px] text-[11px] text-ink-dim" title={`Scanned ${stat.count} time${stat.count === 1 ? "" : "s"}${stat.rank <= 20 ? ` · #${stat.rank} most scanned` : ""}`}>
+                        {stat.trend === "up" && <span className="text-pass">▲</span>}
+                        {stat.trend === "down" && <span className="text-avoid">▼</span>}
                         {stat.count}<span className="text-ink-faint">×</span>
                       </span>
                     )}
@@ -246,30 +246,29 @@ export function DossiersPage({
                           aria-controls={ledgerId}
                           title="Show the full call-by-call cost breakdown"
                           onClick={() => setCostOpen(open ? null : cardKey)}
-                          className="mono relative z-10 inline-flex shrink-0 items-center gap-0.5 rounded-md border border-line/70 bg-void/60 px-1.5 py-[1px] text-[10.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                          className="mono relative z-10 inline-flex shrink-0 items-center gap-0.5 rounded-md border border-line/70 bg-void/60 px-1.5 py-[1px] text-[11px] text-ink-dim transition hover:border-line-2 hover:text-ink"
                         >
                           ~${r.cost.usd.toFixed(2)}{open ? " ▾" : " ▸"}
                         </button>
                       ) : (
                         <span
                           title="estimated provider spend for this audit run"
-                          className="mono shrink-0 inline-flex items-center gap-0.5 rounded-md border border-line/70 bg-void/60 px-1.5 py-[1px] text-[10.5px] text-ink-dim"
+                          className="mono shrink-0 inline-flex items-center gap-0.5 rounded-md border border-line/70 bg-void/60 px-1.5 py-[1px] text-[11px] text-ink-dim"
                         >
                           ~${r.cost.usd.toFixed(2)}
                         </span>
                       )
                     ) : r.kind === "token" && (r.cost?.usd ?? 0) < 0.01 ? (
-                      <span className="mono shrink-0 rounded-md border border-line/70 px-1.5 py-[1px] text-[10.5px] text-ink-faint">free</span>
+                      <span className="mono shrink-0 rounded-md border border-line/70 px-1.5 py-[1px] text-[11px] text-ink-faint">free</span>
                     ) : null}
                   </span>
                 </span>
                 <span
-                  className="mono shrink-0 text-right leading-none"
-                  style={{ color }}
+                  className="flex shrink-0 flex-col items-end gap-1 leading-none"
                   title={readout.positiveNeedsQualification ? `Underlying model signal: ${r.verdict} ${r.score ?? "—"}. Stored evidence is not complete.` : undefined}
                 >
-                  <span className="block text-[18px] font-semibold tabular">{r.score ?? "—"}</span>
-                  <span className="block text-[8px] tracking-wider">{readout.label}</span>
+                  <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{r.score ?? "—"}</span>
+                  {readout.label && <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}>{readout.label}</span>}
                 </span>
                 <button
                   type="button"
@@ -279,7 +278,7 @@ export function DossiersPage({
                   }}
                   aria-label={`Open case brief for the ${r.kind} report ${r.query ?? r.ref}`}
                   title="Open the analyst decision brief for this exact case facet"
-                  className="mono relative z-10 shrink-0 rounded-md border border-line px-2 py-1 text-[10px] text-ink-dim transition hover:border-signal hover:text-signal"
+                  className="btn-chip relative z-10 shrink-0"
                 >
                   Brief
                 </button>
@@ -293,7 +292,7 @@ export function DossiersPage({
                       ev.stopPropagation();
                       void runLifecycle(lifecycleAction, [{ kind: r.kind, ref: r.ref }], r.query ?? r.ref);
                     }}
-                    className="mono relative z-10 shrink-0 rounded-md border border-line px-2 py-1 text-[10px] text-ink-faint transition hover:border-signal hover:text-signal disabled:cursor-wait disabled:opacity-50"
+                    className="btn-chip relative z-10 shrink-0 disabled:cursor-wait disabled:opacity-50"
                   >
                     {pending === lifecycleKey ? `${isArchived ? "Restoring" : "Archiving"}…` : isArchived ? "Restore" : "Archive"}
                   </button>
@@ -303,21 +302,21 @@ export function DossiersPage({
               {/* full A-to-Z ledger: every provider call this audit made */}
               {open && ledger.length > 0 && (
                 <div id={ledgerId} className="relative z-10 mt-2.5 border-t border-line/60 pt-2">
-                  <div className="mb-1 text-[9.5px] uppercase tracking-wider text-ink-faint">cost breakdown · estimated, priciest first</div>
+                  <div className="eyebrow mb-1">cost breakdown · estimated, priciest first</div>
                   <div className="space-y-0.5">
                     {ledger.map((l, i) => (
-                      <div key={i} className="mono flex items-baseline gap-2 text-[10.5px]">
+                      <div key={i} className="mono flex items-baseline gap-2 text-[11px]">
                         <span className="text-ink-dim">{l.provider}</span>
                         <span className="truncate text-ink-faint">{l.op}</span>
                         <span className="text-ink-faint">×{l.calls}</span>
-                        <span className="ml-auto shrink-0 tabular" style={{ color: l.usd >= 0.01 ? "var(--color-caution)" : "var(--color-ink-faint)" }}>
+                        <span className={`ml-auto shrink-0 tabular ${l.usd >= 0.01 ? "text-caution" : "text-ink-faint"}`}>
                           {l.usd > 0 ? `$${l.usd.toFixed(4)}` : "free"}
                         </span>
                       </div>
                     ))}
                   </div>
                   {ledger.some((l) => l.meta) && (
-                    <div className="mt-1 text-[9.5px] text-ink-faint">
+                    <div className="mt-1 text-[11px] text-ink-faint">
                       {ledger.filter((l) => l.meta).slice(0, 3).map((l) => `${l.provider}/${l.op}: ${l.meta}`).join(" · ")}
                     </div>
                   )}
@@ -352,36 +351,35 @@ export function DossiersPage({
     return (
       <div
         key={groupKey}
-        className="group flex flex-col rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 soft-shadow"
+        className="panel group flex flex-col p-3 text-left transition hover:border-line-2 soft-shadow"
       >
         <div className="flex items-center gap-3">
           {img ? (
-            <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-lg border border-line object-cover" />
+            <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-md border border-line object-cover" />
           ) : (
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-line bg-void text-[14px] text-signal">{letter}</span>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal">{letter}</span>
           )}
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
-              <span className="mono truncate text-[13px] text-ink">{title}</span>
-              <span className="mono shrink-0 rounded px-1 py-0.5 text-[8.5px] uppercase" style={{ color: "var(--color-unverifiable)", background: "var(--color-unverifiable)14" }}>project</span>
-              <span className="mono shrink-0 text-[9px] text-ink-faint">{sorted.length} facets</span>
-              {isArchived && <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[8.5px] uppercase text-ink-faint">archived</span>}
+              <span className="mono truncate text-[13.5px] text-ink">{title}</span>
+              <span className="chip tint-unverifiable shrink-0">project</span>
+              <span className="mono shrink-0 text-[11px] text-ink-faint">{sorted.length} facets</span>
+              {isArchived && <span className="chip shrink-0">archived</span>}
               {readout.positiveNeedsQualification && (
-                <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[8.5px] uppercase text-ink-faint">partial evidence</span>
+                <span className="chip shrink-0">partial evidence</span>
               )}
             </span>
-            <span className="mt-0.5 block truncate text-[10.5px] text-ink-faint">
+            <span className="mt-0.5 block truncate text-[11px] text-ink-faint">
               {isArchived ? `archived ${ago(primary.archivedAt)} · report ${ago(primary.ts)}` : ago(primary.ts)}
               {contributors.length ? ` · with ${contributors.join(", ")}` : ""}
             </span>
           </span>
           <span
-            className="mono shrink-0 text-right leading-none"
-            style={{ color }}
+            className="flex shrink-0 flex-col items-end gap-1 leading-none"
             title={readout.positiveNeedsQualification ? `Underlying model signal: ${scored.verdict} ${scored.score ?? "—"}. Stored evidence is not complete.` : undefined}
           >
-            <span className="block text-[18px] font-semibold tabular">{scored.score ?? "—"}</span>
-            <span className="block text-[8px] tracking-wider">{readout.label}</span>
+            <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{scored.score ?? "—"}</span>
+            {readout.label && <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}>{readout.label}</span>}
           </span>
           {role === "owner" && (
             <button
@@ -393,7 +391,7 @@ export function DossiersPage({
                 ev.stopPropagation();
                 void runLifecycle(lifecycleAction, subjects, `${title} and its ${sorted.length} case facets`);
               }}
-              className="mono shrink-0 rounded-md border border-line px-2 py-1 text-[10px] text-ink-faint transition hover:border-signal hover:text-signal disabled:cursor-wait disabled:opacity-50"
+              className="btn-chip shrink-0 disabled:cursor-wait disabled:opacity-50"
             >
               {pending === lifecycleKey ? `${isArchived ? "Restoring" : "Archiving"}…` : isArchived ? "Restore all" : "Archive all"}
             </button>
@@ -414,7 +412,7 @@ export function DossiersPage({
                   disabled={isArchived}
                   onClick={(ev) => { openBtn(ev); if (!isArchived) onOpen(r.ref, r.kind); }}
                   title={isArchived ? "Restore this case before opening its report" : `Open the ${km.label} report — ${r.query ?? r.ref}`}
-                  className="mono inline-flex min-h-8 min-w-0 items-center gap-1 px-2 py-1 text-[10px] text-ink-dim transition hover:bg-signal/5 hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-ink-dim"
+                  className="mono inline-flex min-h-8 min-w-0 items-center gap-1 px-2 py-1 text-[11px] text-ink-dim transition hover:bg-signal/5 hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-ink-dim"
                 >
                   <span className="uppercase" style={{ color: km.color }}>{km.label}</span>
                   <span className="max-w-40 truncate text-ink-faint">{r.query ?? r.ref}</span>
@@ -428,7 +426,7 @@ export function DossiersPage({
                   }}
                   aria-label={`Open case brief for the ${r.kind} facet ${r.query ?? r.ref}`}
                   title={`Open the analyst brief for this exact ${r.kind} case`}
-                  className="mono min-h-8 border-l border-line px-2 py-1 text-[10px] text-ink-faint transition hover:bg-signal/5 hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal"
+                  className="mono min-h-8 border-l border-line px-2 py-1 text-[11px] text-ink-faint transition hover:bg-signal/5 hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal"
                 >
                   Brief
                 </button>
@@ -442,8 +440,8 @@ export function DossiersPage({
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="text-[26px] font-medium tracking-[-0.02em] text-ink">Report library</h1>
-      <p className="mt-1.5 max-w-2xl text-[14px] leading-relaxed text-ink-dim">
+      <h1 className="display-sm text-[24px] text-ink">Report library</h1>
+      <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         Every audit persisted by you and your co-analysts — click to open the stored report instantly, no re-run.
         Owners can archive a case without erasing its evidence, audit history, or trust-graph intelligence.
       </p>
@@ -453,7 +451,7 @@ export function DossiersPage({
           type="button"
           onClick={() => { setView("active"); setCostOpen(null); }}
           aria-pressed={view === "active"}
-          className={`mono rounded-md px-3 py-1.5 text-[11px] transition ${view === "active" ? "bg-panel-2 text-ink" : "text-ink-faint hover:text-ink-dim"}`}
+          className={`mono rounded-md px-3 py-1.5 text-[11px] transition ${view === "active" ? "tint-signal" : "text-ink-faint hover:text-ink-dim"}`}
         >
           Active {reports ? `(${reports.length})` : ""}
         </button>
@@ -461,7 +459,7 @@ export function DossiersPage({
           type="button"
           onClick={() => { setView("archived"); setCostOpen(null); }}
           aria-pressed={view === "archived"}
-          className={`mono rounded-md px-3 py-1.5 text-[11px] transition ${view === "archived" ? "bg-panel-2 text-ink" : "text-ink-faint hover:text-ink-dim"}`}
+          className={`mono rounded-md px-3 py-1.5 text-[11px] transition ${view === "archived" ? "tint-signal" : "text-ink-faint hover:text-ink-dim"}`}
         >
           Archived {archivedReports ? `(${archivedReports.length})` : ""}
         </button>
@@ -474,22 +472,22 @@ export function DossiersPage({
         value={q}
         onChange={(e) => setQ(e.target.value)}
         placeholder="search by handle, token, site, or analyst…"
-        className="mono mt-4 w-full rounded-xl border border-line bg-panel px-3.5 py-2.5 text-[13.5px] text-ink placeholder:text-ink-faint transition focus:border-line-2 focus:outline-none"
+        className="field mono mt-4 w-full px-3.5 py-2.5 text-[13.5px]"
       />
 
       {error && (
-        <div role="alert" className="mt-3 rounded-lg border border-avoid/30 bg-avoid/5 px-3 py-2 text-[12px] text-avoid">
+        <div role="alert" className="tint-avoid mt-3 rounded-lg border px-3 py-2 text-[12.5px]">
           {error}
         </div>
       )}
 
-      <div className="mt-5 mb-2.5 flex items-center gap-2 text-[11px] uppercase tracking-[0.16em] text-ink-faint">
+      <div className="eyebrow mt-5 mb-2.5 flex items-center gap-2">
         <span>{selectedReports == null ? "loading…" : `${shown.length} ${isArchived ? "archived " : ""}report${shown.length === 1 ? "" : "s"}`}</span>
         {total > 0 && <span className="text-ink-faint/70">· {total.toLocaleString()} total scans</span>}
       </div>
 
       {selectedReports != null && shown.length === 0 && (
-        <p className="text-[13px] text-ink-faint">
+        <p className="empty-state">
           {needle
             ? "Nothing matches that search."
             : isArchived

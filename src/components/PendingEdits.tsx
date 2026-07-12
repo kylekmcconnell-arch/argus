@@ -124,28 +124,28 @@ export function PendingEdits() {
   if (role !== "owner") return null;
 
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="panel p-4">
       <div className="flex items-center gap-2">
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Pending edits · awaiting approval</span>
-        {items.length > 0 && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: "var(--color-caution)14", color: "var(--color-caution)" }}>{items.length}</span>}
-        <button type="button" onClick={() => void load()} className="mono ml-auto text-[10.5px] text-ink-faint hover:text-ink">refresh</button>
+        <span className="eyebrow">Pending edits · awaiting approval</span>
+        {items.length > 0 && <span className="chip tint-caution">{items.length}</span>}
+        <button type="button" onClick={() => void load()} className="mono ml-auto text-[11px] text-ink-faint transition hover:text-ink">refresh</button>
       </div>
 
-      {error && <p role="alert" className="mt-2 text-[11.5px]" style={{ color: "var(--color-caution)" }}>{error}</p>}
+      {error && <p role="alert" className="mt-2 text-[12.5px] text-caution">{error}</p>}
       {state === "loading" ? (
-        <p className="mt-2 text-[12px] text-ink-faint">loading…</p>
+        <p className="mt-2 text-[12.5px] text-ink-faint">loading…</p>
       ) : items.length === 0 ? (
-        <p className="mt-2 text-[12px] text-ink-faint">No edits pending. Additions ARGUS can auto-prove publish live; the rest land here.</p>
+        <p className="mt-2 text-[12.5px] text-ink-faint">No edits pending. Additions ARGUS can auto-prove publish live; the rest land here.</p>
       ) : (
         <div className="mt-2 divide-y divide-line/60">
           {items.map((item) => (
-            <div key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[12px]">
-              <span className="mono shrink-0 text-[10px] text-ink-faint">{item.subject}</span>
-              <span className="mono rounded px-1 text-[9.5px]" style={{ background: "var(--color-line)", color: "var(--color-ink-dim)" }}>{item.type === "link" ? REL_LABEL[item.rel ?? "other"] ?? "link" : item.type}</span>
-              {item.url ? <a href={item.url} target="_blank" rel="noreferrer" className="text-signal hover:underline">{item.label}</a> : <span className="text-ink">{item.label}</span>}
-              {item.why && <span className="min-w-0 flex-1 truncate text-[10.5px] text-ink-faint">{item.why} · by {item.by} · {ago(item.at)}</span>}
+            <div key={item.id} className="flex flex-wrap items-center gap-2 py-2 text-[12.5px]">
+              <span className="mono shrink-0 text-[11px] text-ink-faint">{item.subject}</span>
+              <span className="chip chip-sm shrink-0">{item.type === "link" ? REL_LABEL[item.rel ?? "other"] ?? "link" : item.type}</span>
+              {item.url ? <a href={item.url} target="_blank" rel="noreferrer" className="link-ext">{item.label}</a> : <span className="text-ink">{item.label}</span>}
+              {item.why && <span className="min-w-0 flex-1 truncate text-[11px] text-ink-faint">{item.why} · by {item.by} · {ago(item.at)}</span>}
               <span className="ml-auto flex shrink-0 gap-1.5">
-                <button type="button" onClick={() => void act(item, "approve")} disabled={busy !== null} className="mono rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40" style={{ borderColor: "var(--color-pass)", color: "var(--color-pass)" }}>approve</button>
+                <button type="button" onClick={() => void act(item, "approve")} disabled={busy !== null} className="mono rounded-md border border-pass/50 px-2 py-0.5 text-[11px] text-pass transition hover:border-pass disabled:opacity-40">approve</button>
                 <button type="button" onClick={() => void act(item, "deny")} disabled={busy !== null} className="mono rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-faint transition hover:border-avoid hover:text-avoid disabled:opacity-40">deny</button>
               </span>
             </div>
@@ -156,18 +156,18 @@ export function PendingEdits() {
       {/* self-learning: what ARGUS concluded it missed + the fix it proposes */}
       {learnings.length > 0 && (
         <div className="mt-4 border-t border-line/60 pt-3">
-          <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">What ARGUS learned · {learnings.length} proposed fix{learnings.length === 1 ? "" : "es"}</div>
+          <div className="eyebrow">What ARGUS learned · {learnings.length} proposed fix{learnings.length === 1 ? "" : "es"}</div>
           <div className="mt-2 space-y-2">
             {learnings.slice(0, 12).map((learning) => (
-              <div key={`${learning.subject}:${learning.at}:${learning.label}`} className="rounded-lg border border-line bg-panel-2/30 px-3 py-2">
+              <div key={`${learning.subject}:${learning.at}:${learning.label}`} className="panel-inset px-3 py-2">
                 <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
-                  <span className="mono text-[9.5px] text-ink-faint">{learning.subject}</span>
-                  <span className="mono rounded px-1 text-[9px]" style={{ background: "var(--color-line)", color: "var(--color-ink-dim)" }}>{learning.kind}</span>
+                  <span className="mono text-[11px] text-ink-faint">{learning.subject}</span>
+                  <span className="chip chip-sm">{learning.kind}</span>
                   <span className="text-ink-dim">missed {learning.label}</span>
-                  <span className="ml-auto text-[9.5px] text-ink-faint">{ago(learning.at)}</span>
+                  <span className="ml-auto text-[11px] text-ink-faint">{ago(learning.at)}</span>
                 </div>
-                <p className="mt-1 text-[11.5px] leading-snug text-ink-faint"><span className="text-ink-dim">why:</span> {learning.reason}</p>
-                <p className="mt-0.5 text-[11.5px] leading-snug" style={{ color: "var(--color-signal-dim)" }}><span className="text-ink-dim">fix:</span> {learning.fix}</p>
+                <p className="mt-1 text-[12.5px] leading-snug text-ink-faint"><span className="text-ink-dim">why:</span> {learning.reason}</p>
+                <p className="mt-0.5 text-[12.5px] leading-snug text-signal-dim"><span className="text-ink-dim">fix:</span> {learning.fix}</p>
               </div>
             ))}
           </div>

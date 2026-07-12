@@ -62,16 +62,16 @@ function EvidenceRecord({ record, relation }: { record: AxisEvidenceRecord; rela
   const source = safeExternalSource(record.sourceUrl);
   const captured = capturedLabel(record.capturedAt);
   return (
-    <li className="rounded-lg border border-line/70 bg-void/30 px-3 py-2.5">
+    <li className="panel-inset px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide text-ink-dim">{relation}</span>
-        <span className="mono text-[9.5px] uppercase tracking-wide text-ink-faint">{record.provider}</span>
-        <span className="mono text-[9.5px] uppercase tracking-wide text-ink-faint">{record.operation}</span>
-        <span className="mono ml-auto text-[9.5px] uppercase tracking-wide text-ink-faint">{record.verification.replace(/_/g, " ")}</span>
+        <span className="chip">{relation}</span>
+        <span className="mono text-[11px] uppercase tracking-wide text-ink-faint">{record.provider}</span>
+        <span className="mono text-[11px] uppercase tracking-wide text-ink-faint">{record.operation}</span>
+        <span className="mono ml-auto text-[11px] uppercase tracking-wide text-ink-faint">{record.verification.replace(/_/g, " ")}</span>
       </div>
-      <div className="mt-1.5 text-[12px] font-medium leading-snug text-ink">{record.title}</div>
+      <div className="mt-1.5 text-[12.5px] font-medium leading-snug text-ink">{record.title}</div>
       {record.excerpt && <p className="mt-1 text-[11px] leading-relaxed text-ink-dim">{record.excerpt}</p>}
-      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px] text-ink-faint">
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-faint">
         <span className="mono" title={record.artifactId}>Artifact {compactId(record.artifactId)}</span>
         <span className="mono" title={record.contentHash}>SHA-256 {compactId(record.contentHash)}</span>
         {captured && <span>Captured <time dateTime={record.capturedAt}>{captured}</time></span>}
@@ -80,7 +80,7 @@ function EvidenceRecord({ record, relation }: { record: AxisEvidenceRecord; rela
             href={source}
             target="_blank"
             rel="noopener noreferrer"
-            className="mono text-signal underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+            className="mono link-ext"
             aria-label={`Open source URL for ${record.title} in a new tab`}
           >
             Open source URL
@@ -113,20 +113,20 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }:
 
   if (!model.available) {
     return (
-      <section aria-label="Decision basis" className="rounded-xl border border-line bg-panel/70 px-4 py-3.5">
+      <section aria-label="Decision basis" className="panel px-4 py-3.5">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-[13px] font-semibold tracking-tight text-ink">Decision basis</h3>
-          <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide text-ink-faint">Lineage unavailable</span>
+          <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Decision basis</h3>
+          <span className="chip">Lineage unavailable</span>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-3">
-          <p className="min-w-0 flex-1 text-[11.5px] leading-relaxed text-ink-dim">
+          <p className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-ink-dim">
             This snapshot predates strict evidence-to-axis citations. ARGUS will not infer them from analyst prose or nearby sources.
           </p>
           {onRescan && (
             <button
               type="button"
               onClick={onRescan}
-              className="mono min-h-11 shrink-0 rounded-lg border border-signal px-3 py-2 text-[11px] font-medium text-signal transition hover:bg-signal/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+              className="btn-chip tint-signal min-h-11 shrink-0 font-medium"
             >
               Rescan to capture lineage
             </button>
@@ -161,11 +161,11 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }:
   };
 
   return (
-    <section aria-label="Decision basis" className="rounded-xl border border-line bg-panel/70 px-4 py-3.5">
+    <section aria-label="Decision basis" className="panel px-4 py-3.5">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <h3 className="text-[13px] font-semibold tracking-tight text-ink">Decision basis</h3>
-        <span className="text-[11.5px] text-ink-faint">{roleLabel(model.role ?? undefined)}</span>
-        <span className="mono ml-auto text-[10px] uppercase tracking-wide text-ink-faint">
+        <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Decision basis</h3>
+        <span className="text-[12.5px] text-ink-faint">{roleLabel(model.role ?? undefined)}</span>
+        <span className="mono ml-auto text-[11px] uppercase tracking-wide text-ink-faint">
           {model.grounded}/{model.rows.length} axes grounded
           {model.mixed ? ` · ${model.mixed} mixed` : ""}
           {model.gaps ? ` · ${model.gaps} gap${model.gaps === 1 ? "" : "s"}` : ""}
@@ -194,17 +194,17 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }:
                       event.preventDefault();
                       moveAxisSelection(index, event.key);
                     }}
-                    className="min-h-11 w-full rounded-lg border border-line/70 bg-void/30 px-3 py-2.5 text-left transition hover:border-line-2 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+                    className="min-h-11 w-full panel-inset px-3 py-2.5 text-left transition hover:bg-panel-2/50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
                   >
                     <span className="flex items-center gap-2">
-                      <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink">{axisLabel(row.axis)}</span>
-                      <span className="mono shrink-0 text-[10.5px] text-ink-faint">{row.score}/{row.weight}</span>
-                      <span className="mono shrink-0 rounded border px-1.5 py-0.5 text-[9px] uppercase tracking-wide" style={{ borderColor: `${meta.color}66`, color: meta.color }}>{meta.label}</span>
+                      <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">{axisLabel(row.axis)}</span>
+                      <span className="mono shrink-0 text-[11px] text-ink-faint">{row.score}/{row.weight}</span>
+                      <span className="chip tint-var shrink-0" style={{ ["--tint" as string]: meta.color }}>{meta.label}</span>
                     </span>
-                    <span className="mt-1 block text-[10.5px] text-ink-faint">
+                    <span className="mt-1 block text-[11px] text-ink-faint">
                       {row.support.length} support · {row.counter.length} counter · {Math.max(row.gaps.length, row.gapArtifacts.length)} gap{Math.max(row.gaps.length, row.gapArtifacts.length) === 1 ? "" : "s"}
                     </span>
-                    <span className="mt-0.5 block truncate text-[10.5px] text-ink-dim">
+                    <span className="mt-0.5 block truncate text-[11px] text-ink-dim">
                       {row.support[0]?.title ?? row.counter[0]?.title ?? row.gapArtifacts[0]?.title ?? row.gaps[0] ?? "No qualifying frozen citation recorded"}
                     </span>
                   </button>
@@ -214,16 +214,16 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }:
           </div>
 
           {selected && (
-            <div id={detailId} role="tabpanel" aria-labelledby={selectedTriggerId} className="mt-3 rounded-lg border border-line/70 bg-panel-2/25 px-3 py-3">
+            <div id={detailId} role="tabpanel" aria-labelledby={selectedTriggerId} className="panel-inset mt-3 px-3 py-3">
               <div className="flex flex-wrap items-center gap-2">
                 <h4 className="text-[12.5px] font-medium text-ink">{axisLabel(selected.axis)}</h4>
-                <span className="mono text-[10px] text-ink-faint">{selected.score}/{selected.weight}</span>
+                <span className="mono text-[11px] text-ink-faint">{selected.score}/{selected.weight}</span>
               </div>
-              <p className="mt-1 text-[10.5px] text-ink-faint">Frozen citations from the exact scorer packet. Analyst rationale is shown separately in the role breakdown.</p>
+              <p className="mt-1 text-[11px] text-ink-faint">Frozen citations from the exact scorer packet. Analyst rationale is shown separately in the role breakdown.</p>
 
               <div className="mt-3 grid gap-3 lg:grid-cols-2">
                 <div>
-                  <h5 className="text-[10px] uppercase tracking-wider text-ink-faint">Supporting evidence</h5>
+                  <h5 className="eyebrow">Supporting evidence</h5>
                   {selected.support.length ? (
                     <ul className="mt-1.5 space-y-2" aria-label={`Supporting evidence for ${axisLabel(selected.axis)}`}>
                       {selected.support.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="support" />)}
@@ -231,7 +231,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }:
                   ) : <p className="mt-1.5 text-[11px] text-ink-faint">No qualifying supporting artifact cited.</p>}
                 </div>
                 <div>
-                  <h5 className="text-[10px] uppercase tracking-wider text-ink-faint">Counter-evidence & conflicts</h5>
+                  <h5 className="eyebrow">Counter-evidence & conflicts</h5>
                   {selected.counter.length ? (
                     <ul className="mt-1.5 space-y-2" aria-label={`Counter-evidence for ${axisLabel(selected.axis)}`}>
                       {selected.counter.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="counter" />)}
@@ -241,7 +241,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }:
               </div>
 
               <div className="mt-3 border-t border-line/60 pt-2.5">
-                <h5 className="text-[10px] uppercase tracking-wider text-ink-faint">Evidence gaps</h5>
+                <h5 className="eyebrow">Evidence gaps</h5>
                 {selected.gapArtifacts.length > 0 && (
                   <ul className="mt-1.5 space-y-2" aria-label={`Gap artifacts for ${axisLabel(selected.axis)}`}>
                     {selected.gapArtifacts.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="gap" />)}
@@ -259,7 +259,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }:
           )}
         </>
       ) : (
-        <p className="mt-3 text-[11.5px] text-ink-dim">No scored governing axes were stored in this report.</p>
+        <p className="mt-3 text-[12.5px] text-ink-dim">No scored governing axes were stored in this report.</p>
       )}
     </section>
   );

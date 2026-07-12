@@ -32,13 +32,13 @@ export function ArkhamName({ address, chain, labels, fallback, className }: {
       ) : (
         <span className={`mono truncate ${className ?? ""}`} style={color ? { color } : undefined}>{text}</span>
       )}
-      {ak?.type && <span className="mono shrink-0 rounded px-1 py-0.5 text-[9px]" style={{ background: typeColor(ak) + "1a", color: typeColor(ak) }}>{ak.type}{ak.sublabel ? ` · ${ak.sublabel}` : ""}</span>}
+      {ak?.type && <span className="chip tint-var shrink-0" style={{ "--tint": typeColor(ak) } as React.CSSProperties}><span>{ak.type}{ak.sublabel ? ` · ${ak.sublabel}` : ""}</span></span>}
       {ak?.risk && rc && (
-        <span className="mono shrink-0 rounded px-1 py-0.5 text-[9px]" style={{ background: rc + "1a", color: rc }} title={ak.risk.incomingUsd ? `${usd(ak.risk.incomingUsd)} risk-weighted inflow (Arkham)` : "Arkham risk score"}>
-          ⚠ {riskLabel}{ak.risk.incomingUsd && ak.risk.incomingUsd >= 1e5 ? ` · ${usd(ak.risk.incomingUsd)}` : ""}
+        <span className="chip tint-var shrink-0" style={{ "--tint": rc } as React.CSSProperties} title={ak.risk.incomingUsd ? `${usd(ak.risk.incomingUsd)} risk-weighted inflow (Arkham)` : "Arkham risk score"}>
+          <span>⚠ {riskLabel}{ak.risk.incomingUsd && ak.risk.incomingUsd >= 1e5 ? ` · ${usd(ak.risk.incomingUsd)}` : ""}</span>
         </span>
       )}
-      {ak?.twitter && <a href={ak.twitter} target="_blank" rel="noreferrer" className="mono shrink-0 text-[9.5px] text-signal-dim hover:underline" title="Arkham-linked X account">𝕏↗</a>}
+      {ak?.twitter && <a href={ak.twitter} target="_blank" rel="noreferrer" className="link-ext mono shrink-0 text-[11px]" title="Arkham-linked X account">𝕏</a>}
     </span>
   );
 }

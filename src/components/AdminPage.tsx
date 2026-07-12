@@ -41,10 +41,11 @@ async function recategorizeAll(): Promise<{ updated: number; total: number } | {
   }
 }
 
+// Kind coloring canon (must match DossiersPage): person=signal, token=unverifiable, site=pass.
 const KIND_META: Record<string, { label: string; color: string }> = {
-  site: { label: "site", color: "var(--color-unverifiable)" },
-  token: { label: "token", color: "var(--color-signal)" },
-  person: { label: "person", color: "var(--color-caution)" },
+  site: { label: "site", color: "var(--color-pass)" },
+  token: { label: "token", color: "var(--color-unverifiable)" },
+  person: { label: "person", color: "var(--color-signal)" },
 };
 
 function ago(ts: number): string {
@@ -81,8 +82,8 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
     <div className="mx-auto max-w-4xl px-6 py-12">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[28px] font-medium tracking-[-0.02em] text-ink">Audit log</h1>
-          <p className="mt-2 max-w-2xl text-[14.5px] leading-relaxed text-ink-dim">
+          <h1 className="display-sm text-[24px] text-ink">Audit log</h1>
+          <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
             Every query that runs through ARGUS, with the verdict it returned and where coverage fell short. Your
             own record to check the engine against — and the seed of the data asset: a growing, queryable history
             of who and what has been audited.
@@ -93,8 +94,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
             onClick={onRecategorize}
             disabled={recat === "running"}
             title="Re-file every audited person under the current role taxonomy (Founder / Project / KOL / VC) from their stored summaries — no audits are rerun, scores stay"
-            className="mono shrink-0 rounded-lg border px-3 py-1.5 text-[12px] transition disabled:opacity-60"
-            style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
+            className="btn-chip tint-signal shrink-0 disabled:opacity-60"
           >
             {recat === "running" ? "recategorizing…" : "recategorize roles"}
           </button>
@@ -102,7 +102,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
           {log.length > 0 && (
             <button
               onClick={() => { clearLog(); setLog([]); }}
-              className="mono shrink-0 rounded-lg border border-line bg-panel px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+              className="btn-chip shrink-0"
             >
               clear
             </button>
@@ -124,12 +124,12 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
       </div>
 
       {/* filters */}
-      <div className="mt-5 flex flex-wrap gap-1.5 text-[12px]">
+      <div className="mt-5 flex flex-wrap gap-1.5">
         {(["all", "token", "site", "person", "gaps"] as const).map((f) => (
           <button
             key={f}
             onClick={() => setFilter(f)}
-            className={`mono rounded-md border px-2.5 py-1 transition ${filter === f ? "border-line-2 bg-panel-2 text-ink" : "border-line bg-panel text-ink-dim hover:text-ink"}`}
+            className={`mono rounded-md border px-2.5 py-1 text-[11px] transition ${filter === f ? "tint-signal" : "border-line text-ink-dim hover:text-ink"}`}
           >
             {f}
           </button>
@@ -138,11 +138,11 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
 
       {/* log */}
       {shown.length === 0 ? (
-        <div className="mt-6 rounded-xl border border-dashed border-line bg-panel/50 p-10 text-center text-[13px] text-ink-faint">
+        <div className="empty-state mt-6">
           {log.length === 0 ? "No audits yet. Run a token, a handle, or a site recon and it will appear here." : "Nothing matches this filter."}
         </div>
       ) : (
-        <div className="mt-4 overflow-hidden rounded-xl border border-line bg-panel">
+        <div className="panel mt-4 overflow-hidden">
           {shown.map((e) => {
             const currentRole = (e.flags ?? []).find((f) => /^role:/i.test(f))?.slice(5).toUpperCase() ?? "";
             return (
@@ -155,16 +155,16 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
               onKeyDown={(ev) => { if (ev.key === "Enter") onAudit?.(e.query); }}
               className="flex w-full cursor-pointer items-start gap-3 border-b border-line px-4 py-3 text-left transition last:border-0 hover:bg-panel/40"
             >
-              <span className="mono mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9.5px] font-semibold uppercase" style={{ color: KIND_META[e.kind].color, background: KIND_META[e.kind].color + "14" }}>
+              <span className="chip tint-var mt-0.5 shrink-0" style={{ "--tint": KIND_META[e.kind].color } as React.CSSProperties}>
                 {KIND_META[e.kind].label}
               </span>
               <span className="min-w-0 flex-1">
                 <span className="mono block truncate text-[12.5px] text-ink">{e.query}</span>
-                <span className="mt-0.5 block truncate text-[12px] text-ink-faint">{e.summary}</span>
+                <span className="mt-0.5 block truncate text-[12.5px] text-ink-faint">{e.summary}</span>
                 {e.flags && e.flags.length > 0 && (
                   <span className="mt-1 flex flex-wrap gap-1">
                     {e.flags.map((f) => (
-                      <span key={f} className="mono rounded bg-panel-2 px-1 py-0.5 text-[9.5px] text-ink-faint">{f}</span>
+                      <span key={f} className="chip chip-sm">{f}</span>
                     ))}
                   </span>
                 )}
@@ -177,7 +177,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
                   onClick={(ev) => ev.stopPropagation()}
                   onChange={(ev) => { ev.stopPropagation(); applyRoles(e.ref ?? e.query, [ev.target.value]); setLog(getLog()); }}
                   title="Set this subject's role (files it on the right category page). Overrides the auto-classification."
-                  className="mono mt-0.5 shrink-0 cursor-pointer rounded-md border border-line bg-panel px-1 py-0.5 text-[10px] text-ink-dim transition hover:border-line-2 hover:text-ink focus:outline-none"
+                  className="field mono mt-0.5 shrink-0 cursor-pointer px-1 py-0.5 text-[11px] text-ink-dim transition"
                 >
                   {["FOUNDER", "PROJECT", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"].map((r) => (
                     <option key={r} value={r}>{r === "INVESTOR" ? "VC" : r.charAt(0) + r.slice(1).toLowerCase()}</option>
@@ -185,11 +185,11 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
                 </select>
               )}
               <span className="flex shrink-0 flex-col items-end gap-1">
-                <span className="mono text-[11px] font-semibold uppercase" style={{ color: verdictColor(e) }}>
+                <span className="chip tint-var" style={{ "--tint": verdictColor(e) } as React.CSSProperties}>
                   {auditReadinessLabel(e)}{typeof e.score === "number" ? ` ${e.score}` : ""}
                 </span>
-                {hasCoverageGap(e) && <span className="mono text-[9px] uppercase tracking-wide text-caution">coverage gap</span>}
-                <span className="mono text-[10px] text-ink-faint">{ago(e.ts)}</span>
+                {hasCoverageGap(e) && <span className="chip tint-caution">coverage gap</span>}
+                <span className="mono text-[11px] text-ink-faint">{ago(e.ts)}</span>
               </span>
             </div>
             );
@@ -202,9 +202,9 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
 
 function Stat({ label, value, tone }: { label: string; value: number; tone?: string }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-3">
-      <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">{label}</div>
-      <div className="mono mt-1 text-[22px] font-semibold tabular" style={{ color: tone ?? "var(--color-ink)" }}>{value}</div>
+    <div className="stat-tile">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value mt-0.5 font-semibold" style={{ color: tone ?? "var(--color-ink)" }}>{value}</div>
     </div>
   );
 }

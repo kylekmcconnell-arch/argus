@@ -100,7 +100,7 @@ export function HolderBubbleMap({ wallets, edges, chain }: { wallets: BubbleWall
           );
         })}
       </svg>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 px-3 py-1.5 text-[9.5px] text-ink-faint">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 px-3 py-1.5 text-[11px] text-ink-faint">
         <span>bubble = holder · size = % supply · colour = same operator</span>
         <span className="ml-auto mono">{nodes.length} wallets</span>
       </div>

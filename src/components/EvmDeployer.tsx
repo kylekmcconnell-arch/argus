@@ -63,15 +63,15 @@ export function EvmDeployer({ address, chain, symbol, knownDeployer, panelCostTo
 
   if (chain === "solana" || !panelCostToken) return null;
   const current = result?.key === requestKey ? result : null;
-  if (!current) return <div className="rounded-xl border border-line bg-panel p-4 text-[11.5px] text-ink-faint">tracing the deployer on-chain…</div>;
+  if (!current) return <div className="panel p-4 text-[12.5px] text-ink-faint">tracing the deployer on-chain…</div>;
   if (current.failure) return <PanelRequestNotice failure={current.failure} label="Deployer intelligence" />;
   const data = current.data;
   if (!data || data.available === false || !data.deployer) {
     if (data && data.note && data.available !== false) {
       return (
-        <div className="rounded-xl border border-line bg-panel p-4">
-          <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Deployer trail</span>
-          <p className="mt-1.5 text-[12px] text-ink-dim">{data.note}</p>
+        <div className="panel p-4">
+          <span className="eyebrow">Deployer trail</span>
+          <p className="mt-1.5 text-[12.5px] text-ink-dim">{data.note}</p>
         </div>
       );
     }
@@ -82,32 +82,32 @@ export function EvmDeployer({ address, chain, symbol, knownDeployer, panelCostTo
   const serial = data.serialDeployer;
 
   return (
-    <div className="rounded-xl border p-4" style={{ borderColor: serial ? "var(--color-avoid)55" : "var(--color-line)", background: serial ? "var(--color-avoid)0d" : "var(--color-panel)" }}>
+    <div className={`panel p-4 ${serial ? "tint-var" : ""}`} style={serial ? ({ "--tint": "var(--color-avoid)" } as React.CSSProperties) : undefined}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Deployer trail</span>
+        <span className="eyebrow">Deployer trail</span>
         {typeof data.deployments === "number" && data.deployments > 0 && (
-          <span className="mono ml-auto text-[10px] text-ink-faint">{data.deployments} contract{data.deployments === 1 ? "" : "s"} deployed by this wallet</span>
+          <span className="mono ml-auto text-[11px] text-ink-faint">{data.deployments} contract{data.deployments === 1 ? "" : "s"} deployed by this wallet</span>
         )}
       </div>
 
-      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12px] text-ink-dim">
+      <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-ink-dim">
         <span>Deployer</span>
-        <a href={`https://${exp}/address/${data.deployer}`} target="_blank" rel="noreferrer" className="mono text-ink hover:text-signal-dim hover:underline">{shortAddr(data.deployer)}</a>
-        {data.walletAgeDays != null && <span className="text-[10.5px] text-ink-faint">· {data.walletAgeDays}d old</span>}
+        <a href={`https://${exp}/address/${data.deployer}`} target="_blank" rel="noreferrer" className="link-ext mono">{shortAddr(data.deployer)}</a>
+        {data.walletAgeDays != null && <span className="text-[11px] text-ink-faint">· {data.walletAgeDays}d old</span>}
         {data.funder && (
           <>
             <span className="text-ink-faint">← funded by</span>
             {data.funder.label ? (
-              <span className="mono rounded px-1.5 py-0.5 text-[11px]" style={{ background: "rgba(22,163,74,0.10)", color: "var(--color-pass)" }}>{data.funder.label}</span>
+              <span className="chip tint-pass">{data.funder.label}</span>
             ) : (
-              <a href={`https://${exp}/address/${data.funder.address}`} target="_blank" rel="noreferrer" className="mono text-ink-dim hover:underline">{shortAddr(data.funder.address)}</a>
+              <a href={`https://${exp}/address/${data.funder.address}`} target="_blank" rel="noreferrer" className="link-ext mono">{shortAddr(data.funder.address)}</a>
             )}
           </>
         )}
-        {serial && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: "var(--color-avoid)1a", color: "var(--color-avoid)" }}>serial deployer · {data.deployments}+ contracts</span>}
+        {serial && <span className="chip tint-avoid"><span>serial deployer · {data.deployments}+ contracts</span></span>}
       </div>
 
-      {data.note && <p className="mt-1.5 text-[11.5px] leading-snug" style={{ color: serial ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>{data.note}</p>}
+      {data.note && <p className="mt-1.5 text-[12.5px] leading-snug" style={{ color: serial ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>{data.note}</p>}
     </div>
   );
 }

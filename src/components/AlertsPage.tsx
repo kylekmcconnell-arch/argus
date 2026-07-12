@@ -33,8 +33,8 @@ export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
-      <h1 className="text-[26px] font-medium tracking-[-0.02em] text-ink">Alerts</h1>
-      <p className="mt-1.5 max-w-2xl text-[14px] leading-relaxed text-ink-dim">
+      <h1 className="display-sm text-[24px] text-ink">Alerts</h1>
+      <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         What sweeps have flagged: verdict flips and liquidity drains on watched tokens, and watched subjects newly
         connecting to flagged actors in the shared graph. Sweeps run only when you press Sweep now on the Watchlist —
         nothing monitors in the background.
@@ -43,24 +43,24 @@ export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
       <div className="mt-6 space-y-2">
         {alerts == null && <div className="text-[12.5px] text-ink-faint">loading…</div>}
         {alerts != null && alerts.length === 0 && (
-          <div className="rounded-xl border border-dashed border-line-2 bg-panel/50 p-10 text-center text-[13.5px] text-ink-faint">
+          <div className="empty-state">
             No alerts. Watch subjects, then run a sweep from the Watchlist.
           </div>
         )}
         {(alerts ?? []).map((a) => {
           const m = TYPE_META[a.type ?? ""] ?? TYPE_META.drift;
           return (
-            <div key={a.ref} className="flex items-start gap-3 rounded-xl border bg-panel px-4 py-3" style={{ borderColor: `${m.color}55` }}>
-              <span className="mono mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide" style={{ color: m.color, background: `${m.color}14` }}>
+            <div key={a.ref} className="finding flex items-start gap-3 px-4 py-3" style={{ "--tint": m.color } as React.CSSProperties}>
+              <span className="chip tint-var mt-0.5 shrink-0" style={{ "--tint": m.color } as React.CSSProperties}>
                 {m.label}
               </span>
               <div className="min-w-0 flex-1">
-                <button onClick={() => a.subject && onOpen(a.subject)} className="mono text-[13px] font-medium text-ink underline-offset-2 hover:text-signal-dim hover:underline">
+                <button onClick={() => a.subject && onOpen(a.subject)} className="mono text-[13.5px] font-medium text-ink underline-offset-2 hover:text-signal-dim hover:underline">
                   {a.label ?? a.subject}
                 </button>
                 <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-dim">{a.detail}</p>
               </div>
-              <span className="mono shrink-0 text-[10px] text-ink-faint">{ago(a)}</span>
+              <span className="mono shrink-0 text-[11px] text-ink-faint">{ago(a)}</span>
               <span
                 role="button"
                 tabIndex={0}
