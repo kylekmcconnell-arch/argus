@@ -108,8 +108,13 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
 
   const governingEligible = (row: { evidence_origin?: string; artifact_verified?: boolean }) =>
     row.evidence_origin !== "model_lead" && row.artifact_verified !== false;
+  const meaningfulTeamValue = (value: string) => Boolean(value.trim())
+    && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(value.trim());
   const identityGrounded = (row: WebTeamMember) =>
-    row.evidence_origin !== "model_lead" && row.artifact_verified === true;
+    meaningfulTeamValue(row.name)
+    && meaningfulTeamValue(row.role)
+    && row.evidence_origin !== "model_lead"
+    && row.artifact_verified === true;
   const groundedWebTeam = (ev.webTeam ?? [])
     .filter(identityGrounded)
     .map((member) => ({
@@ -120,6 +125,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       ...(member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}),
     }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
+    if (!meaningfulTeamValue(member.name) || !meaningfulTeamValue(member.role)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     if (member.identity_link_evidence_origin !== "model_lead" && member.projects_evidence_origin !== "model_lead") return [];
     return [{
@@ -159,8 +165,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   const graph = graphAudit.toPanoptes();
   const subjectKey = (graph.nodes.find((n) => (n as { subject?: boolean }).subject)?.key as string) ?? ev.profile.handle;
   const hasNode = (key: string) => graph.nodes.some((n) => String(n.key).toLowerCase() === key.toLowerCase());
-  for (const p of ev.webTeam ?? []) {
-    if (!governingEligible(p)) continue;
+  for (const p of groundedWebTeam) {
     const verifiedHandle = p.identity_link_evidence_origin === "model_lead" ? undefined : p.handle;
     const verifiedProjects = p.projects_evidence_origin === "model_lead" ? [] : p.projects ?? [];
     if (!verifiedHandle && !p.name) continue;

@@ -101,6 +101,7 @@ describe("dossier finding scope", () => {
         artifact_verified: true,
         identity_link_evidence_origin: "model_lead",
       },
+      { name: "<UNKNOWN>", role: "<UNKNOWN>", source: "team page", provider: "team-page", evidence_origin: "deterministic", artifact_verified: true },
     ];
     evidence.ventureTeams = [
       { key: "venture:verified", name: "Verified Venture", people: [{ name: "Verified Builder", handle: "@verified_builder" }], provider: "team-page", evidence_origin: "deterministic", artifact_verified: true },
@@ -115,12 +116,14 @@ describe("dossier finding scope", () => {
     expect(graphKeys.has("venture:verified")).toBe(true);
     expect(graphKeys.has("@model_peer")).toBe(false);
     expect(graphKeys.has("@model_leader")).toBe(false);
+    expect(graphKeys.has("<unknown>")).toBe(false);
     expect(graphKeys.has("venture:model")).toBe(false);
     expect(dossier.evidence.associates.map((associate) => associate.associate_key)).toEqual(
       expect.arrayContaining(["@verified_peer", "@model_peer"]),
     );
     expect(dossier.webTeam.map((member) => member.name)).toEqual(expect.arrayContaining(["Verified Leader", "Verified Name"]));
     expect(dossier.webTeam.map((member) => member.name)).not.toContain("Model Lead");
+    expect(dossier.webTeam.map((member) => member.name)).not.toContain("<UNKNOWN>");
     expect(dossier.webTeam.find((member) => member.name === "Verified Name")).toMatchObject({
       handle: undefined,
       linkedin: undefined,
@@ -129,6 +132,7 @@ describe("dossier finding scope", () => {
       expect.objectContaining({ name: "Model Lead", evidence_origin: "model_lead", artifact_verified: false }),
       expect.objectContaining({ name: "Verified Name", handle: "@model_link_candidate", evidence_origin: "model_lead", artifact_verified: false }),
     ]));
+    expect(dossier.webTeamLeads?.map((member) => member.name)).not.toContain("<UNKNOWN>");
     expect(dossier.ventureTeams?.map((team) => team.name)).toEqual(expect.arrayContaining(["Verified Venture", "Model Venture"]));
   });
 });

@@ -8,7 +8,7 @@ import { buildReport, SUBJECTS } from "../data/subjects";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn() }));
+const harness = vi.hoisted(() => ({ livePanel: vi.fn(), askReport: vi.fn(), trustGraph: vi.fn() }));
 
 vi.mock("../auth-context", () => ({ useArgusAuth: () => ({ role: "owner" }) }));
 vi.mock("../graph/store", () => ({ getContributions: () => [] }));
@@ -26,7 +26,7 @@ vi.mock("./IdentitySweep", () => ({ IdentitySweep: (props: Record<string, unknow
 vi.mock("./AddInfo", () => ({ AddInfo: () => { harness.livePanel("add-info"); return null; } }));
 vi.mock("./LinkEntity", () => ({ LinkEntity: () => { harness.livePanel("link-entity"); return null; } }));
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => <div>service-ready</div> }));
-vi.mock("./TrustGraph", () => ({ TrustGraph: () => null }));
+vi.mock("./TrustGraph", () => ({ TrustGraph: (props: Record<string, unknown>) => { harness.trustGraph(props); return null; } }));
 vi.mock("./AskReport", () => ({ AskReport: (props: Record<string, unknown>) => { harness.askReport(props); return null; } }));
 vi.mock("./Avatar", () => ({ Avatar: () => null }));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => null }));
@@ -39,6 +39,7 @@ let container: HTMLDivElement;
 beforeEach(() => {
   harness.livePanel.mockReset();
   harness.askReport.mockReset();
+  harness.trustGraph.mockReset();
   container = document.createElement("div");
   document.body.appendChild(container);
   root = createRoot(container);
@@ -265,6 +266,16 @@ describe("decision-safe person report presentation", () => {
         evidence_origin: "deterministic" as const,
         artifact_verified: true,
       }],
+      graph: {
+        nodes: [
+          ...base.graph.nodes,
+          { type: "Person", key: "<unknown>", label: "<UNKNOWN>", role: "<UNKNOWN>" },
+        ],
+        edges: [
+          ...base.graph.edges,
+          { src: base.report.handle, dst: "<unknown>", type: "TEAM" },
+        ],
+      },
       report: {
         ...base.report,
         roles: [],
@@ -286,6 +297,10 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Identity resolution collection failed");
     expect([...container.querySelectorAll("span")].some((node) => node.textContent?.trim() === "decision-ready")).toBe(false);
     expect(container.textContent).not.toContain("<UNKNOWN>");
+    expect(harness.trustGraph).toHaveBeenCalledWith(expect.objectContaining({
+      nodes: expect.not.arrayContaining([expect.objectContaining({ key: "<unknown>" })]),
+      edges: expect.not.arrayContaining([expect.objectContaining({ dst: "<unknown>" })]),
+    }));
     expect(decisionBasisText()).toContain("No evidence-backed role selected a scoring methodology");
     expect(decisionBasisText()).not.toContain("predates strict evidence-to-axis citations");
   });

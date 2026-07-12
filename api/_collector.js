@@ -966,13 +966,15 @@ function assembleDossier(ev, live) {
   a.setIdentity(ev.profile.identity_confidence);
   graphAudit.setIdentity(ev.profile.identity_confidence);
   const governingEligible = (row) => row.evidence_origin !== "model_lead" && row.artifact_verified !== false;
-  const identityGrounded = (row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true;
+  const meaningfulTeamValue = (value) => Boolean(value.trim()) && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(value.trim());
+  const identityGrounded = (row) => meaningfulTeamValue(row.name) && meaningfulTeamValue(row.role) && row.evidence_origin !== "model_lead" && row.artifact_verified === true;
   const groundedWebTeam = (ev.webTeam ?? []).filter(identityGrounded).map((member) => ({
     ...member,
     ...member.identity_link_evidence_origin === "model_lead" ? { handle: void 0, linkedin: void 0 } : {},
     ...member.projects_evidence_origin === "model_lead" ? { projects: [] } : {}
   }));
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
+    if (!meaningfulTeamValue(member.name) || !meaningfulTeamValue(member.role)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
     if (member.identity_link_evidence_origin !== "model_lead" && member.projects_evidence_origin !== "model_lead") return [];
     return [{
@@ -1029,8 +1031,7 @@ function assembleDossier(ev, live) {
   const graph = graphAudit.toPanoptes();
   const subjectKey = graph.nodes.find((n) => n.subject)?.key ?? ev.profile.handle;
   const hasNode = (key) => graph.nodes.some((n) => String(n.key).toLowerCase() === key.toLowerCase());
-  for (const p of ev.webTeam ?? []) {
-    if (!governingEligible(p)) continue;
+  for (const p of groundedWebTeam) {
     const verifiedHandle = p.identity_link_evidence_origin === "model_lead" ? void 0 : p.handle;
     const verifiedProjects = p.projects_evidence_origin === "model_lead" ? [] : p.projects ?? [];
     if (!verifiedHandle && !p.name) continue;

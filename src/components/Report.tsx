@@ -1046,12 +1046,17 @@ function FrozenSourceLedger({
 
 type ReportTeamMember = Dossier["webTeam"][number];
 
+function placeholderEntityValue(value: unknown): boolean {
+  return typeof value === "string"
+    && /^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(value.trim());
+}
+
 function meaningfulTeamMember(member: ReportTeamMember): boolean {
   const name = member.name.trim();
   const role = member.role.trim();
   return Boolean(name)
-    && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(name)
-    && !/^(?:<\s*)?(?:unknown|n\/a|null|undefined)(?:\s*>)?$/i.test(role);
+    && !placeholderEntityValue(name)
+    && !placeholderEntityValue(role);
 }
 
 function groundedTeamMember(member: ReportTeamMember): boolean {
@@ -1107,6 +1112,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   };
   const webTeam = (dossier.webTeam ?? []).filter(groundedTeamMember).map(sanitizedGroundedTeamMember);
   const webTeamLeads = reportTeamLeads(dossier);
+  const placeholderGraphKeys = new Set(graph.nodes
+    .filter((node) => placeholderEntityValue(node.key) || placeholderEntityValue(node.label))
+    .map((node) => node.key));
+  const visibleGraphNodes = graph.nodes.filter((node) => !placeholderGraphKeys.has(node.key));
+  const visibleGraphEdges = graph.edges.filter((edge) =>
+    !placeholderGraphKeys.has(edge.src) && !placeholderGraphKeys.has(edge.dst));
   const portfolioArtifactGroups = [...(f.sourceArtifacts ?? [])
     .filter((artifact) => artifact.kind === "portfolio_relationship" && artifact.projectName)
     .reduce((groups, artifact) => {
@@ -2611,7 +2622,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <div className="min-w-0 lg:col-span-2">
             <Section title="Connection web" kicker="click any node to open it · subject → projects → the people behind them">
               <Card className="p-2">
-                <TrustGraph nodes={graph.nodes} edges={graph.edges} connections={showTrustGraphSupplemental ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} />
+                <TrustGraph nodes={visibleGraphNodes} edges={visibleGraphEdges} connections={showTrustGraphSupplemental ? connections : []} onAudit={onAudit} onOpenProject={onOpenProject ? (name) => onOpenProject(name, undefined, panelCostToken) : undefined} />
               </Card>
             </Section>
           </div>
