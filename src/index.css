@@ -230,6 +230,13 @@
   color: color-mix(in oklab, var(--tint, var(--color-ink-dim)) 76%, var(--color-ink));
   white-space: nowrap;
 }
+/* Long evidence-state copy may wrap inside narrow report cards. */
+.chip-wrap {
+  max-width: 100%;
+  white-space: normal;
+  text-align: left;
+  line-height: 1.45;
+}
 /* Non-semantic footnote chip (counts, versions). NEVER pair with a tint. */
 .chip-sm {
   font-size: 10px;

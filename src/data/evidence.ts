@@ -115,7 +115,7 @@ export interface TraceStep {
 // that the named person is the audited subject.
 export interface SourceArtifact {
   kind: "press" | "legal_case" | "sanctions_screen" | "profile_photo" | "trust_graph" | "portfolio_relationship" | "fund_scale";
-  provider: "google-news" | "courtlistener" | "opensanctions" | "claude-vision" | "twitterapi" | "argus-graph" | "portfolio-web";
+  provider: "google-news" | "courtlistener" | "opensanctions" | "claude-vision" | "twitterapi" | "argus-graph" | "portfolio-web" | "fund-scale-web";
   title: string;
   /** External source when one exists. Internal frozen evidence may be hash-only. */
   sourceUrl?: string;
@@ -131,6 +131,7 @@ export interface SourceArtifact {
   /** Structured relationship fields are present only for portfolio evidence. */
   relationship?: "invested_in";
   subjectName?: string;
+  subjectHandle?: string;
   projectName?: string;
   projectHandle?: string;
   projectDomain?: string;
@@ -141,9 +142,20 @@ export interface SourceArtifact {
   attribution?: "direct_subject" | "affiliated_fund";
   /** Source that grounds person→fund affiliation separately from the deal page. */
   attributionSourceUrl?: string;
+  attributionSourceContentHash?: string;
+  attributionCapturedAt?: string;
+  attributionSourceKind?: "provider_profile" | "verified_venture";
   /** Present only on source-fetched, identity-bound fund-size artifacts. */
   fundName?: string;
   fundSizeUsd?: number;
+  fundVehicle?: string;
+  fundScaleMetric?: "regulatory_aum" | "reported_aum" | "fund_vehicle" | "first_close" | "final_close";
+  fundAmountQualifier?: "exact" | "at_least" | "approximate";
+  fundScaleBasis?: "regulatory" | "manager_reported" | "press_corroborated";
+  fundScaleAsOf?: string;
+  fundScaleTemporalState?: "current" | "historical" | "fixed_historical" | "unknown";
+  fundScaleSourceCount?: number;
+  fundScaleClaimId?: string;
 }
 
 /**

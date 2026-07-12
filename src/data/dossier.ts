@@ -29,6 +29,10 @@ export interface Dossier {
   avatar: string;
   avatar_url?: string;
   bio: string;
+  website?: string;
+  profile_collection_state?: CollectedEvidence["profile"]["profile_collection_state"];
+  profile_provider?: string;
+  profile_captured_at?: string;
   followers: string;
   joined: string;
   days_since_post?: number;
@@ -250,6 +254,10 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     avatar: ev.profile.avatar,
     avatar_url: ev.profile.avatar_url,
     bio: ev.profile.bio,
+    website: ev.profile.website,
+    profile_collection_state: ev.profile.profile_collection_state,
+    profile_provider: ev.profile.profile_provider,
+    profile_captured_at: ev.profile.profile_captured_at,
     followers: ev.profile.followers,
     joined: ev.profile.joined,
     days_since_post: ev.profile.days_since_post,

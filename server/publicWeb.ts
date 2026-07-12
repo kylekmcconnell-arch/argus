@@ -71,16 +71,21 @@ export function isPublicIpAddress(address: string): boolean {
   }
   if (version === 6) {
     const value = address.toLowerCase();
-    return !(
-      value === "::"
-      || value === "::1"
-      || value.startsWith("fc")
-      || value.startsWith("fd")
-      || /^fe[89ab]/.test(value)
-      || value.startsWith("ff")
-      || value.startsWith("2001:db8:")
-      || value.startsWith("::ffff:")
-    );
+    const parts = value.split(":");
+    const first = Number.parseInt(parts[0] || "0", 16);
+    const second = Number.parseInt(parts[1] || "0", 16);
+    // Public evidence fetches use a positive global-unicast policy. This
+    // rejects loopback/site-local/ULA, IPv4-compatible and NAT64 forms, plus
+    // 6to4/Teredo/ORCHID transition ranges that can encapsulate private IPv4.
+    if (!Number.isFinite(first) || first < 0x2000 || first > 0x3fff) return false;
+    if (first === 0x2002 || first === 0x3ffe) return false;
+    if (first === 0x2001 && (
+      second === 0x0000
+      || second === 0x0002
+      || (second >= 0x0010 && second <= 0x002f)
+      || second === 0x0db8
+    )) return false;
+    return true;
   }
   return false;
 }

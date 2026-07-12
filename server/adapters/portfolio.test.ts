@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
-import { SubjectClass } from "../../src/engine";
+import { SubjectClass, VentureOutcome, type Venture } from "../../src/engine";
 import { assembleDossier } from "../../src/data/dossier";
 import { emptyEvidence, type PortfolioLead } from "../../src/data/evidence";
 import type { CheckObservation, CollectContext } from "./types";
 import {
   collectPortfolioRelationships,
+  domainFromWebsite,
   parsePortfolioCandidates,
+  portfolioEntityForLead,
   supportsPortfolioRelationship,
 } from "./portfolio";
 import type { PublicTextDocument, PublicTextResult } from "../publicWeb";
+
+const NOW = new Date("2026-07-11T12:00:00.000Z");
 
 const lead = (overrides: Partial<PortfolioLead> = {}): PortfolioLead => ({
   projectName: "Acme Protocol",
@@ -34,6 +38,9 @@ const document = (overrides: Partial<PublicTextDocument> = {}): PublicTextDocume
 function context(handle = "@paradigm", displayName = "Paradigm") {
   const evidence = emptyEvidence(handle);
   evidence.profile.display_name = displayName;
+  evidence.profile.profile_collection_state = "resolved";
+  evidence.profile.profile_provider = "twitterapi";
+  evidence.profile.profile_captured_at = NOW.toISOString();
   if (handle === "@paradigm") evidence.profile.website = "https://paradigm.xyz";
   evidence.roles = [SubjectClass.INVESTOR];
   const checks: CheckObservation[] = [];
@@ -47,6 +54,23 @@ function context(handle = "@paradigm", displayName = "Paradigm") {
 }
 
 describe("portfolio candidate parsing", () => {
+  it.each([
+    "https://fund.medium.com/about",
+    "https://paradigm.substack.com",
+    "https://paradigm.github.io",
+    "https://paradigm.vercel.app",
+    "https://linktr.ee/paradigm",
+    "https://bio.link/paradigm",
+    "https://x.com/paradigm",
+    "http://127.0.0.1/site",
+  ])("does not promote shared or local hosting to an official domain: %s", (website) => {
+    expect(domainFromWebsite(website)).toBeUndefined();
+  });
+
+  it("normalizes a dedicated official domain", () => {
+    expect(domainFromWebsite("https://WWW.Paradigm.xyz/about")).toBe("paradigm.xyz");
+  });
+
   it("keeps source-linked model leads but drops unsafe source URLs", () => {
     const parsed = parsePortfolioCandidates(JSON.stringify({
       investments: [{
@@ -139,6 +163,135 @@ describe("portfolio relationship matching", () => {
   });
 });
 
+describe("investor affiliation resolution", () => {
+  const affiliatedLead = () => lead({
+    investorEntityName: "Paradigm",
+    investorEntityHandle: "@paradigm",
+    attribution: "affiliated_fund",
+  });
+
+  it.each([
+    ["unresolved profile", { profile_collection_state: "unavailable" }],
+    ["untrusted provider", { profile_provider: "fixture" }],
+    ["missing capture", { profile_captured_at: undefined }],
+    ["stale capture", { profile_captured_at: new Date(NOW.getTime() - 24 * 60 * 60 * 1_000 - 1).toISOString() }],
+    ["future capture", { profile_captured_at: new Date(NOW.getTime() + 5 * 60 * 1_000 + 1).toISOString() }],
+  ] as const)("does not ground a bio affiliation from a %s", (_label, profileOverrides) => {
+    const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+    evidence.profile.bio = "Research Partner at Paradigm";
+    Object.assign(evidence.profile, profileOverrides);
+    expect(portfolioEntityForLead(ctx, affiliatedLead(), NOW)).toBeNull();
+  });
+
+  it.each([
+    "Former Research Partner at Paradigm",
+    "No longer a Partner at Paradigm",
+    "Left my role at Paradigm",
+    "Departed from Paradigm after serving as Partner",
+    "Retired as Partner at Paradigm",
+    "Research Partner at Paradigm (retired 2025)",
+    "Research Partner at Paradigm until 2025",
+    "Currently independent, formerly Research Partner at Paradigm",
+    "Currently independent and formerly Research Partner at Paradigm",
+  ])("rejects ended-affiliation language in a current provider bio: %s", (bio) => {
+    const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+    evidence.profile.bio = bio;
+    expect(portfolioEntityForLead(ctx, affiliatedLead(), NOW)).toBeNull();
+  });
+
+  it.each(["Paradigm", "at Paradigm", "@Paradigm"])(
+    "does not treat a bare fund mention as a current role: %s",
+    (bio) => {
+      const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+      evidence.profile.bio = bio;
+      expect(portfolioEntityForLead(ctx, affiliatedLead(), NOW)).toBeNull();
+    },
+  );
+
+  it.each(["GP @Paradigm", "Research @Paradigm"])(
+    "accepts a scoped current role form shared with the scorer: %s",
+    (bio) => {
+      const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+      evidence.profile.bio = bio;
+      expect(portfolioEntityForLead(ctx, affiliatedLead(), NOW)).toMatchObject({
+        name: "Paradigm",
+        attributionSourceKind: "provider_profile",
+      });
+    },
+  );
+
+  it("permits an explicit current affiliation after a separate former role", () => {
+    const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+    evidence.profile.bio = "Previously at Sequoia, now Research Partner at Paradigm";
+    expect(portfolioEntityForLead(ctx, affiliatedLead(), NOW)).toMatchObject({
+      name: "Paradigm",
+      attribution: "affiliated_fund",
+      attributionSourceKind: "provider_profile",
+      attributionCapturedAt: NOW.toISOString(),
+    });
+    evidence.profile.bio = "Previously at Sequoia and now Research Partner at Paradigm";
+    expect(portfolioEntityForLead(ctx, affiliatedLead(), NOW)).toMatchObject({
+      name: "Paradigm",
+      attributionSourceKind: "provider_profile",
+    });
+  });
+
+  it("uses a fully attested current verified venture when the profile bio cannot ground the affiliation", () => {
+    const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+    evidence.profile.bio = "Independent researcher";
+    evidence.ventures.push({
+      project_name: "Paradigm",
+      x_handle: "@paradigm",
+      domain: "https://paradigm.xyz",
+      role: "Research Partner",
+      period: "2024-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://example.com/employment/gakonst",
+      provider: "peopledatalabs",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+
+    expect(portfolioEntityForLead(ctx, affiliatedLead(), NOW)).toMatchObject({
+      name: "Paradigm",
+      handle: "@paradigm",
+      domain: "paradigm.xyz",
+      subjectHandle: "@gakonst",
+      attribution: "affiliated_fund",
+      attributionSourceUrl: "https://example.com/employment/gakonst",
+      attributionSourceContentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      attributionCapturedAt: NOW.toISOString(),
+      attributionSourceKind: "verified_venture",
+    });
+  });
+
+  it.each([
+    ["former role", { role: "Former Research Partner" }],
+    ["ended period", { period: "2020-2023" }],
+    ["ended note", { notes: "No longer with Paradigm" }],
+    ["missing source", { evidence_url: undefined }],
+    ["company-root source without person binding", { evidence_url: "https://paradigm.xyz" }],
+    ["missing provider", { provider: undefined }],
+  ] as Array<[string, Partial<Venture>]>)('rejects a verified-venture fallback with %s', (_label, overrides) => {
+    const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+    evidence.profile.bio = "Independent researcher";
+    evidence.ventures.push({
+      project_name: "Paradigm",
+      x_handle: "@paradigm",
+      domain: "paradigm.xyz",
+      role: "Research Partner",
+      period: "2024-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://example.com/employment/gakonst",
+      provider: "peopledatalabs",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      ...overrides,
+    });
+    expect(portfolioEntityForLead(ctx, affiliatedLead(), NOW)).toBeNull();
+  });
+});
+
 describe("source-backed portfolio collection", () => {
   it("confirms a first-party fund portfolio relationship and creates INVESTED_IN, never FOUNDED", async () => {
     const { ctx, evidence, checks } = context();
@@ -158,6 +311,7 @@ describe("source-backed portfolio collection", () => {
     expect(evidence.portfolioLeads).toEqual([expect.objectContaining({ evidence_origin: "model_lead", artifact_verified: false })]);
     expect(evidence.sourceArtifacts).toContainEqual(expect.objectContaining({
       kind: "portfolio_relationship",
+      subjectHandle: "@paradigm",
       projectName: "Acme Protocol",
       match: "relationship_confirmed",
       sourceClass: "first_party_subject",
@@ -182,11 +336,17 @@ describe("source-backed portfolio collection", () => {
       discover: async () => [affiliatedLead],
       fetchSource: async () => document(),
       resolveInvestorDomain: async () => "paradigm.xyz",
+      now: () => NOW,
     });
 
     expect(evidence.sourceArtifacts).toContainEqual(expect.objectContaining({
+      subjectHandle: "@gakonst",
       investorEntityName: "Paradigm",
       attribution: "affiliated_fund",
+      attributionSourceUrl: "https://x.com/gakonst",
+      attributionSourceContentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      attributionCapturedAt: NOW.toISOString(),
+      attributionSourceKind: "provider_profile",
       match: "relationship_confirmed",
     }));
     const graph = assembleDossier(evidence, true).graph;
@@ -225,6 +385,7 @@ describe("source-backed portfolio collection", () => {
         attribution: "affiliated_fund",
       })],
       fetchSource: async () => document(),
+      now: () => NOW,
     });
 
     expect(checks.at(-1)).toMatchObject({ status: "unavailable" });
@@ -252,6 +413,7 @@ describe("source-backed portfolio collection", () => {
         host: "a16z.com",
         text: "a16z invested in Acme Protocol during its seed round.",
       }),
+      now: () => NOW,
     });
 
     expect(checks.at(-1)).toMatchObject({ status: "checked-empty" });
@@ -272,6 +434,59 @@ describe("source-backed portfolio collection", () => {
 
     expect(checks.at(-1)).toMatchObject({ status: "checked-empty" });
     expect(evidence.sourceArtifacts).toEqual([]);
+  });
+
+  it("does not treat a shared-host profile URL as an official investor domain", async () => {
+    const { ctx, evidence, checks } = context();
+    evidence.profile.website = "https://fund.medium.com";
+    await collectPortfolioRelationships(ctx, {
+      discover: async () => [lead({ sources: [{ url: "https://fund.medium.com/portfolio/acme" }] })],
+      fetchSource: async () => document({
+        url: "https://fund.medium.com/portfolio/acme",
+        host: "fund.medium.com",
+        text: "Our portfolio includes Acme Protocol.",
+      }),
+    });
+
+    expect(checks.at(-1)).toMatchObject({ status: "checked-empty" });
+    expect(evidence.sourceArtifacts).toEqual([]);
+  });
+
+  it("emits the verified-venture affiliation attestation with the relationship", async () => {
+    const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+    evidence.profile.bio = "Independent researcher";
+    evidence.ventures.push({
+      project_name: "Paradigm",
+      x_handle: "@paradigm",
+      domain: "paradigm.xyz",
+      role: "Research Partner",
+      period: "2024-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://example.com/employment/gakonst",
+      provider: "peopledatalabs",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+    await collectPortfolioRelationships(ctx, {
+      discover: async () => [lead({
+        investorEntityName: "Paradigm",
+        investorEntityHandle: "@paradigm",
+        attribution: "affiliated_fund",
+      })],
+      fetchSource: async () => document(),
+      now: () => NOW,
+    });
+
+    expect(evidence.sourceArtifacts).toContainEqual(expect.objectContaining({
+      subjectHandle: "@gakonst",
+      investorEntityName: "Paradigm",
+      attribution: "affiliated_fund",
+      attributionSourceUrl: "https://example.com/employment/gakonst",
+      attributionSourceContentHash: expect.stringMatching(/^[a-f0-9]{64}$/),
+      attributionCapturedAt: NOW.toISOString(),
+      attributionSourceKind: "verified_venture",
+      match: "relationship_confirmed",
+    }));
   });
 
   it("keeps one independent press source reported-only and completes the bounded check empty", async () => {

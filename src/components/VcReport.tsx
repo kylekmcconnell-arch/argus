@@ -237,19 +237,21 @@ export function VcReport({ handle, name, verifiedProjects = [], panelCostToken, 
 
   const priced = rows.filter((r) => r.resolved && r.verdict);
   const dead = priced.filter((r) => r.dead);
-  const frozenProjectOverlap = rows.filter((r) => verifiedProjectKeys.has(r.project.trim().toLowerCase())).length;
+  const projectNameOverlapCount = rows.filter((r) => verifiedProjectKeys.has(r.project.trim().toLowerCase())).length;
   const money = (n?: number) => (n == null ? "—" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
 
   return (
     <div className="panel p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="text-[12.5px] font-medium text-ink">{rows.length} unverified current-search portfolio {rows.length === 1 ? "candidate" : "candidates"}{frozenProjectOverlap ? ` · ${frozenProjectOverlap} project overlap${frozenProjectOverlap === 1 ? "" : "s"}` : ""}</span>
+        <span className="text-[12.5px] font-medium text-ink">{rows.length} unverified current-search portfolio {rows.length === 1 ? "candidate" : "candidates"}{projectNameOverlapCount ? ` · ${projectNameOverlapCount} name overlap${projectNameOverlapCount === 1 ? "" : "s"}` : ""}</span>
         {priced.length > 0 && dead.length > 0 && (
           <span className="mono text-[11px] text-caution">{dead.length}/{priced.length} priced token candidates inactive</span>
         )}
       </div>
       <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-        Grok surfaced these current-search leads. A project-overlap badge means only that the same project name appears in separately frozen relationship evidence; this panel does not verify the investor attribution. Every panel row remains outside the trust graph and verdict. Token market data checks the named token only, not the investment claim.
+        Grok surfaced these current-search leads. {projectNameOverlapCount
+          ? "The name overlap only chip means the same project appears in frozen evidence; this panel does not verify the investor attribution."
+          : "A name overlap only chip would indicate a matching project name in separately frozen evidence, not a verified investor attribution."} Every panel row remains outside the trust graph and verdict. Token market data checks the named token only, not the investment claim.
       </p>
       {message && <p className="mt-1 text-[11px] leading-relaxed text-caution">{message}</p>}
 
@@ -258,7 +260,7 @@ export function VcReport({ handle, name, verifiedProjects = [], panelCostToken, 
           const m = r.verdict ? verdictMeta(r.verdict) : null;
           const openTarget = r.address || r.x_handle;
           const source = safeCandidateSource(r.source_url);
-          const sourceVerified = verifiedProjectKeys.has(r.project.trim().toLowerCase());
+          const projectNameOverlap = verifiedProjectKeys.has(r.project.trim().toLowerCase());
           return (
             <div key={i} className="px-3 py-2 text-[12.5px]">
               <div className="flex flex-wrap items-center gap-2">
@@ -269,7 +271,7 @@ export function VcReport({ handle, name, verifiedProjects = [], panelCostToken, 
                 )}
                 {r.ticker && <span className="mono text-[11px] text-ink-faint">{r.ticker}</span>}
                 {(r.stage || r.year) && <span className="text-[11px] text-ink-faint">{[r.stage, r.year].filter(Boolean).join(" · ")}</span>}
-                {sourceVerified && <span className="chip tint-pass">same project appears in frozen evidence</span>}
+                {projectNameOverlap && <span className="chip">name overlap only</span>}
                 {m && <span className={`verdict-pill ${r.verdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={r.verdict === "FAIL" ? undefined : ({ "--tint": m.color } as React.CSSProperties)}>token risk · {r.verdict}{r.score != null ? ` ${r.score}` : ""}</span>}
                 {r.resolved && <span className="text-[11px] text-ink-faint">{r.mcap ? `mcap ${money(r.mcap)}` : `liq ${money(r.liquidityUsd)}`}</span>}
                 {r.dead && <span className="chip tint-caution">inactive market</span>}

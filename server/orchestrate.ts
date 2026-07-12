@@ -49,6 +49,7 @@ import { archivedAffiliation } from "./adapters/wayback";
 import { resolveForHandle } from "./adapters/wallet";
 import { collectTrustGraph } from "./adapters/trustgraph";
 import { collectPortfolioRelationships } from "./adapters/portfolio";
+import { collectFundScale } from "./adapters/fundScale";
 
 const ADAPTERS: Adapter[] = [
   xAdapter,
@@ -1352,8 +1353,31 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     } finally {
       finishRuntimeStage("portfolio-verification", portfolioStartedAt);
     }
+
+    // Fund scale is a separate semantic claim from portfolio membership. It
+    // reuses the same bounded discovery response, but only a fetched manager,
+    // regulatory, or independently corroborated amount can support I3.
+    const fundScaleStartedAt = startRuntimeStage("fund-scale-verification");
+    const fundScaleBefore = attemptTotals(["grok", "cache", "fund-scale-web", "twitterapi"]);
+    try {
+      const result = await collectFundScale(ctx);
+      const attempts = attemptDelta(fundScaleBefore, attemptTotals(["grok", "cache", "fund-scale-web", "twitterapi"]));
+      const state: ProviderRunState = result.state === "skipped"
+        ? "unavailable"
+        : result.state === "failed" || result.state === "partial"
+          ? result.state
+          : observedRunState(attempts);
+      checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", state, result.detail);
+    } catch (error) {
+      const detail = `Fund-scale verification failed: ${String(error)}`;
+      checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "failed", detail);
+      emit({ phase: "Investor", label: "Fund scale incomplete", detail, source: "fund-scale-web", tone: "warn" });
+    } finally {
+      finishRuntimeStage("fund-scale-verification", fundScaleStartedAt);
+    }
   } else {
     checkTracker.provider("portfolio-verification", "Source-backed portfolio verification", "skipped", "not a provider-backed investor/fund role");
+    checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "skipped", "not a provider-backed investor/fund role");
   }
 
   // Final deterministic pre-analyst pass: join the freshly collected graph to
