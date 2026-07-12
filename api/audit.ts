@@ -13,7 +13,11 @@ import {
 import { activateReportVersion, persistProvenance } from "./_provenance.js";
 import { issuePanelCostToken, recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
 import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
-import { AUDIT_SSE_HEARTBEAT_MS } from "../src/lib/investigationRuntime.js";
+import {
+  ANALYST_FINALIZATION_RESERVE_MS,
+  AUDIT_SSE_HEARTBEAT_MS,
+  DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
+} from "../src/lib/investigationRuntime.js";
 import { activateReportVersionWithAuthoritativeGraph } from "./_graph.js";
 
 export const config = { maxDuration: 600 };
@@ -195,7 +199,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       stage: "collection-start",
       elapsedMs: collectionStartedAt - requestStartedAt,
     }));
-    const dossier = await runAudit(handle, emit, { organizationId: auth.organizationId }) as ServerDossier | null;
+    const dossier = await runAudit(handle, emit, {
+      organizationId: auth.organizationId,
+      analystDeadlineAt: requestStartedAt
+        + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
+        - ANALYST_FINALIZATION_RESERVE_MS,
+    }) as ServerDossier | null;
     console.info("[audit-route-runtime]", JSON.stringify({
       stage: "collection-complete",
       stageMs: Date.now() - collectionStartedAt,

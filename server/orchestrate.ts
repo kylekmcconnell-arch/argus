@@ -33,6 +33,10 @@ import { checkSiteSubstance } from "./adapters/sitecheck";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { personChecks } from "../src/lib/scanChecklist";
+import {
+  ANALYST_FINALIZATION_RESERVE_MS,
+  DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
+} from "../src/lib/investigationRuntime";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
 import { crunchbaseAdapter } from "./adapters/crunchbase";
@@ -1146,7 +1150,12 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
   };
 }
 
-async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { organizationId?: string }): Promise<Dossier | null> {
+interface RunAuditOptions {
+  organizationId?: string;
+  analystDeadlineAt?: number;
+}
+
+async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
   const runtimeStartedAt = Date.now();
   const startRuntimeStage = (stage: string) => {
     const stageStartedAt = Date.now();
@@ -1415,9 +1424,15 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
     // must independently confirm that a fresh analyst attempt occurred.
     evidence.axes = [];
     const analystBefore = attemptTotals(["claude"]);
+    const analystDeadlineAt = options?.analystDeadlineAt
+      ?? runtimeStartedAt
+        + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
+        - ANALYST_FINALIZATION_RESERVE_MS;
     const [found, verdict] = await Promise.all([
-      scanContradictions(evidence.profile.handle, evidenceJson),
-      analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson),
+      scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt }),
+      analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson, {
+        analystDeadlineAt,
+      }),
     ]);
     const analystAttempts = attemptDelta(analystBefore, attemptTotals(["claude"]));
     const analystObserved = analystAttempts.total > 0;
@@ -1482,6 +1497,6 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
   return dossier;
 }
 
-export function runAudit(rawHandle: string, emit: Emit, options?: { organizationId?: string }): Promise<Dossier | null> {
+export function runAudit(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
   return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
 }

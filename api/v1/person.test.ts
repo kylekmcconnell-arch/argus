@@ -95,7 +95,10 @@ describe("v1 person input guard", () => {
     expect(runAudit).toHaveBeenCalledWith(
       "argus",
       expect.any(Function),
-      { organizationId: AUTH_ORGANIZATION_ID },
+      expect.objectContaining({
+        organizationId: AUTH_ORGANIZATION_ID,
+        analystDeadlineAt: expect.any(Number),
+      }),
     );
     expect(persistServerDossier).not.toHaveBeenCalled();
   });

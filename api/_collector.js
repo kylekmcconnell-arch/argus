@@ -1489,7 +1489,10 @@ function getCost() {
 }
 
 // src/lib/investigationRuntime.ts
-var ANALYST_SCORING_TIMEOUT_MS = 12e4;
+var DEEP_INVESTIGATION_MAX_DURATION_SECONDS = 600;
+var ANALYST_SCORING_TIMEOUT_MS = 18e4;
+var ANALYST_REPAIR_TIMEOUT_MS = 9e4;
+var ANALYST_FINALIZATION_RESERVE_MS = 9e4;
 
 // server/agent.ts
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -1500,6 +1503,22 @@ function analystAvailable() {
 async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4) {
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
+  const startedAt = Date.now();
+  const requestBody = JSON.stringify({
+    model: ANALYST_MODEL,
+    max_tokens: maxTokens,
+    system,
+    messages: [{ role: "user", content: user }],
+    tools: [tool],
+    tool_choice: { type: "tool", name: tool.name, disable_parallel_tool_use: true }
+  });
+  const requestMetrics = {
+    tool: tool.name,
+    requestBytes: Buffer.byteLength(requestBody),
+    schemaBytes: Buffer.byteLength(JSON.stringify(tool.input_schema)),
+    userBytes: Buffer.byteLength(user),
+    timeoutMs
+  };
   let res;
   try {
     res = await fetch(ANTHROPIC_URL, {
@@ -1509,22 +1528,22 @@ async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4)
         "anthropic-version": "2023-06-01",
         "content-type": "application/json"
       },
-      body: JSON.stringify({
-        model: ANALYST_MODEL,
-        max_tokens: maxTokens,
-        system,
-        messages: [{ role: "user", content: user }],
-        tools: [tool],
-        tool_choice: { type: "tool", name: tool.name }
-      }),
+      body: requestBody,
       signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (e) {
     const failure = failureMeta(e, timeoutMs, "transport_error");
     addClaudeUsage(void 0, tool.name, "failed", failure);
+    console.info("[agent-call]", JSON.stringify({
+      ...requestMetrics,
+      state: "failed",
+      failure,
+      elapsedMs: Date.now() - startedAt
+    }));
     console.error(`[agent] ${tool.name} request failed (${failure})`, e);
     return null;
   }
+  const requestId = res.headers.get("request-id") || res.headers.get("x-request-id");
   if (!res.ok) {
     addClaudeUsage(void 0, tool.name, "failed", `http_${res.status}`);
     let detail = "";
@@ -1532,6 +1551,13 @@ async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4)
       detail = await res.text();
     } catch {
     }
+    console.info("[agent-call]", JSON.stringify({
+      ...requestMetrics,
+      state: "failed",
+      httpStatus: res.status,
+      requestId,
+      elapsedMs: Date.now() - startedAt
+    }));
     console.error("[agent] anthropic error", res.status, detail);
     return null;
   }
@@ -1541,16 +1567,39 @@ async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4)
   } catch (e) {
     const failure = failureMeta(e, timeoutMs, "response_json_error");
     addClaudeUsage(void 0, tool.name, "failed", failure);
+    console.info("[agent-call]", JSON.stringify({
+      ...requestMetrics,
+      state: "failed",
+      failure,
+      httpStatus: res.status,
+      requestId,
+      elapsedMs: Date.now() - startedAt
+    }));
     console.error(`[agent] ${tool.name} response parse failed (${failure})`, e);
     return null;
   }
-  const block = Array.isArray(data.content) ? data.content.find((candidate) => candidate.type === "tool_use" && candidate.name === tool.name && candidate.input != null) : void 0;
+  const toolBlocks = Array.isArray(data.content) ? data.content.filter((candidate) => candidate.type === "tool_use") : [];
+  const matchingBlocks = toolBlocks.filter((candidate) => candidate.name === tool.name && candidate.input != null);
+  const block = data.stop_reason === "tool_use" && toolBlocks.length === 1 && matchingBlocks.length === 1 ? matchingBlocks[0] : void 0;
+  const partialReason = data.stop_reason !== "tool_use" ? `stop_reason_${data.stop_reason || "missing"}` : matchingBlocks.length === 0 ? "missing_tool_use" : "ambiguous_tool_use";
   addClaudeUsage(
     data.usage,
     tool.name,
     block ? "succeeded" : "partial",
-    block ? void 0 : "missing_tool_use"
+    block ? void 0 : partialReason
   );
+  console.info("[agent-call]", JSON.stringify({
+    ...requestMetrics,
+    state: block ? "succeeded" : "partial",
+    httpStatus: res.status,
+    requestId,
+    stopReason: data.stop_reason ?? null,
+    inputTokens: data.usage?.input_tokens ?? null,
+    outputTokens: data.usage?.output_tokens ?? null,
+    toolUseCount: toolBlocks.length,
+    elapsedMs: Date.now() - startedAt,
+    ...block ? {} : { failure: partialReason }
+  }));
   return block?.input ?? null;
 }
 async function extractClaims(handle, bio, posts) {
@@ -1609,7 +1658,7 @@ var lvl = (s) => {
   const v = (s ?? "").toLowerCase();
   return v === "high" ? "high" : v === "low" ? "low" : "medium";
 };
-async function scanContradictions(handle, evidenceJson) {
+async function scanContradictions(handle, evidenceJson, options = {}) {
   const system = "You are ARGUS contradiction analysis. From everything collected about a subject, find INTERNAL CONTRADICTIONS: where the subject's own stated claims conflict with each other or with the collected evidence. Examples: claims a team of N but only one builder is found; claims an audit but no auditor or verification exists; claims a named backer who never acknowledges them; a stated launch/founding date that conflicts with the account age, domain age, or on-chain history; claims 'doxxed' but no real identity resolves; claims locked liquidity that on-chain shows unlocked; a partnership the partner never confirmed; a venture in the bio that discovery found no evidence for. Be STRICT and grounded: report ONLY genuine contradictions, each with the EXACT claim and the EXACT conflicting fact from the evidence. A missing or unverifiable data point is a GAP, not a contradiction; never report gaps, and never invent. If there are none, return an empty list. Never use em dashes. SCOPE RULES \u2014 these are NOT contradictions: (1) ARGUS's OWN analysis metadata (fields like identity_confidence, identity_note, verdicts, evidence notes such as 'single-source lead, unverified') disagreeing with other ARGUS fields \u2014 only the SUBJECT's outward claims vs external facts count; a low-confidence evidence note is a gap, not a conflict. (2) Normal vertical integration: a project's token running on its own chain, its dApp on its own platform, or its products naming each other is how ecosystems work, not circularity. (3) Marketing self-description ('#1', 'leading') vs modest traction is puffery to note in scoring, not a contradiction, unless it conflicts with a specific verifiable fact. INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this evidence packet. Do not infer anything about the subject from their absence. FINDING ATTRIBUTION RULE: when comparing or interpreting finding collections, attribute only direct-subject findings to the audited subject. A claim targeting an associate or venture cannot contradict the subject's claims unless separate direct-subject evidence explicitly connects the conduct to the subject. Never rewrite an associate's allegation as the subject's allegation. This attribution rule is specific to finding collections; profile, team, wallet, check-outcome, and other non-finding evidence in the packet remain legitimate evidence for testing the subject's claims.";
   const user = `Subject: ${handle}
 
@@ -1638,32 +1687,92 @@ ${evidenceJson}`;
       required: ["contradictions"]
     }
   };
-  const r = await structured(system, user, tool, 2048);
+  const timeoutMs = typeof options.deadlineAt === "number" ? Math.min(6e4, Math.max(0, options.deadlineAt - Date.now())) : 6e4;
+  if (timeoutMs < 1e3) {
+    console.warn("[agent-runtime]", JSON.stringify({
+      tool: "record_contradictions",
+      state: "contradictions_skipped_budget",
+      remainingMs: timeoutMs
+    }));
+    return null;
+  }
+  const r = await structured(
+    system,
+    user,
+    tool,
+    2048,
+    timeoutMs
+  );
   if (!r) return null;
   return (r.contradictions ?? []).filter((c) => c && c.claim?.trim() && c.conflict?.trim()).map((c) => ({ claim: c.claim.trim(), conflict: c.conflict.trim(), severity: lvl(c.severity), confidence: lvl(c.confidence) })).slice(0, 10);
 }
 var ARTIFACT_ID = /^art_v1_[a-f0-9]{64}$/;
 var COVERAGE_ONLY_VERIFICATIONS = /* @__PURE__ */ new Set(["checked_empty", "unavailable"]);
 var isSubstantiveArtifact = (artifact) => !!artifact && !COVERAGE_ONLY_VERIFICATIONS.has(artifact.verification);
-function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = []) {
-  if (!value || typeof value !== "object" || !axisCatalog2.length || !evidenceCatalog.length) return null;
+function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onReject) {
+  const reject = (reason) => {
+    onReject?.(reason);
+    return null;
+  };
+  if (!value || typeof value !== "object" || Array.isArray(value) || !axisCatalog2.length || !evidenceCatalog.length) {
+    return reject("invalid-root-or-catalog");
+  }
   const raw = value;
-  if (!Array.isArray(raw.axes) || raw.axes.length !== axisCatalog2.length) return null;
-  if (typeof raw.headline !== "string" || !raw.headline.trim() || typeof raw.identity_note !== "string" || !raw.identity_note.trim()) return null;
+  if (Object.keys(value).some((key) => !["axes", "headline", "identity_note"].includes(key))) {
+    return reject("root-extra-field");
+  }
+  const headline = typeof raw.headline === "string" ? raw.headline.trim() : "";
+  const identityNote = typeof raw.identity_note === "string" ? raw.identity_note.trim() : "";
+  if (!headline || !identityNote) return reject("blank-headline-or-identity-note");
   const expected = /* @__PURE__ */ new Map();
   for (const spec of axisCatalog2) {
-    if (!spec.axis || expected.has(spec.axis) || !Number.isFinite(spec.weight) || spec.weight < 0) return null;
+    if (!spec.axis || expected.has(spec.axis) || !Number.isInteger(spec.weight) || spec.weight < 0) {
+      return reject("invalid-axis-catalog");
+    }
     expected.set(spec.axis, spec);
   }
   const artifacts = /* @__PURE__ */ new Map();
   for (const artifact of evidenceCatalog) {
-    if (!ARTIFACT_ID.test(artifact.artifactId) || artifacts.has(artifact.artifactId) || artifact.contentHash !== artifact.artifactId.slice("art_v1_".length) || !Array.isArray(artifact.eligibleAxes)) return null;
+    if (!ARTIFACT_ID.test(artifact.artifactId) || artifacts.has(artifact.artifactId) || artifact.contentHash !== artifact.artifactId.slice("art_v1_".length) || !Array.isArray(artifact.eligibleAxes)) return reject("invalid-evidence-catalog");
     artifacts.set(artifact.artifactId, artifact);
+  }
+  const artifactIdByAlias = new Map(
+    evidenceCatalog.map((artifact, index) => [
+      `e${String(index + 1).padStart(3, "0")}`,
+      artifact.artifactId
+    ])
+  );
+  const resolveRef = (value2) => {
+    const alias = /^e\d+$/i.test(value2) ? value2.toLowerCase() : value2;
+    return artifactIdByAlias.get(alias) ?? value2;
+  };
+  let keyedAxes = false;
+  const keyedRowKeys = /* @__PURE__ */ new Map();
+  let candidates;
+  if (Array.isArray(raw.axes)) {
+    if (raw.axes.length !== axisCatalog2.length) return reject("axis-count");
+    candidates = raw.axes;
+  } else if (raw.axes && typeof raw.axes === "object") {
+    keyedAxes = true;
+    const rows = raw.axes;
+    const keys = Object.keys(rows);
+    if (keys.length !== expected.size || keys.some((key) => !expected.has(key))) {
+      return reject("axis-key-set");
+    }
+    candidates = axisCatalog2.map((spec) => {
+      const candidate = rows[spec.axis];
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return candidate;
+      keyedRowKeys.set(spec.axis, Object.keys(candidate));
+      return { ...candidate, axis: spec.axis };
+    });
+  } else {
+    return reject("axis-shape");
   }
   const validRefs = (value2, min, max) => {
     if (!Array.isArray(value2) || value2.length < min || value2.length > max) return null;
-    if (!value2.every((item) => typeof item === "string" && ARTIFACT_ID.test(item))) return null;
-    const refs = value2;
+    if (!value2.every((item) => typeof item === "string")) return null;
+    const refs = value2.map(resolveRef);
+    if (!refs.every((item) => ARTIFACT_ID.test(item))) return null;
     return new Set(refs).size === refs.length ? [...refs] : null;
   };
   const validGaps = (value2) => {
@@ -1673,25 +1782,83 @@ function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = []) {
     return gaps;
   };
   const seen = /* @__PURE__ */ new Map();
-  for (const candidate of raw.axes) {
-    if (!candidate || typeof candidate !== "object") return null;
+  for (const candidate of candidates) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
+      return reject("axis-row-shape");
+    }
     const row = candidate;
-    if (typeof row.axis !== "string" || typeof row.score !== "number" || typeof row.rationale !== "string" || !row.rationale.trim()) return null;
+    if (typeof row.axis !== "string" || typeof row.score !== "number" || typeof row.rationale !== "string" || !row.rationale.trim()) return reject("axis-row-required-fields");
     const spec = expected.get(row.axis);
-    if (!spec || seen.has(row.axis) || !Number.isFinite(row.score) || row.score < 0 || row.score > spec.weight) return null;
-    const evidenceRefs = validRefs(row.evidenceRefs, 1, 12);
-    const counterEvidenceRefs = validRefs(row.counterEvidenceRefs, 0, 12);
+    if (!spec) return reject(`unknown-axis:${row.axis}`);
+    if (seen.has(row.axis)) return reject(`duplicate-axis:${row.axis}`);
+    if (!Number.isInteger(row.score) || row.score < 0 || row.score > spec.weight) {
+      return reject(`score-out-of-range:${row.axis}`);
+    }
+    let evidenceRefs;
+    let coverageRefs = [];
+    if (keyedAxes) {
+      const primary = typeof row.primaryEvidenceRef === "string" ? resolveRef(row.primaryEvidenceRef) : "";
+      const additional = validRefs(row.additionalEvidenceRefs, 0, 7);
+      const hasCoverageCandidates = [...artifacts.values()].some((artifact) => COVERAGE_ONLY_VERIFICATIONS.has(artifact.verification) && artifact.eligibleAxes.includes(row.axis));
+      const allowedFields = /* @__PURE__ */ new Set([
+        "score",
+        "rationale",
+        "primaryEvidenceRef",
+        "additionalEvidenceRefs",
+        "counterEvidenceRefs",
+        "gaps",
+        ...hasCoverageCandidates ? ["coverageRefs"] : []
+      ]);
+      if ((keyedRowKeys.get(row.axis) ?? []).some((key) => !allowedFields.has(key))) {
+        return reject(`axis-row-extra-field:${row.axis}`);
+      }
+      if (hasCoverageCandidates && row.coverageRefs === void 0 || !hasCoverageCandidates && row.coverageRefs !== void 0) {
+        return reject(`coverage-field-shape:${row.axis}`);
+      }
+      const rawCoverage = row.coverageRefs === void 0 ? [] : row.coverageRefs;
+      const coverage = validRefs(rawCoverage, 0, 4);
+      if (!ARTIFACT_ID.test(primary) || !additional || !coverage) {
+        return reject(`axis-reference-shape:${row.axis}`);
+      }
+      evidenceRefs = [primary, ...additional, ...coverage];
+      coverageRefs = coverage;
+      if (new Set(evidenceRefs).size !== evidenceRefs.length) {
+        return reject(`duplicate-evidence-reference:${row.axis}`);
+      }
+    } else {
+      evidenceRefs = validRefs(row.evidenceRefs, 1, 12);
+    }
+    const counterEvidenceRefs = validRefs(row.counterEvidenceRefs, 0, keyedAxes ? 8 : 12);
     const gaps = validGaps(row.gaps);
-    if (!evidenceRefs || !counterEvidenceRefs || !gaps) return null;
-    if (counterEvidenceRefs.some((ref) => evidenceRefs.includes(ref))) return null;
+    if (!evidenceRefs || evidenceRefs.length > 12 || !counterEvidenceRefs || !gaps) {
+      return reject(`axis-arrays-invalid:${row.axis}`);
+    }
+    if (counterEvidenceRefs.some((ref) => evidenceRefs.includes(ref))) {
+      return reject(`support-counter-overlap:${row.axis}`);
+    }
     const everyRefEligible = [...evidenceRefs, ...counterEvidenceRefs].every((ref) => {
       const artifact = artifacts.get(ref);
       return artifact?.eligibleAxes.includes(row.axis);
     });
-    if (!everyRefEligible) return null;
-    if (!evidenceRefs.some((ref) => isSubstantiveArtifact(artifacts.get(ref)))) return null;
-    if (evidenceRefs.some((ref) => !isSubstantiveArtifact(artifacts.get(ref))) && gaps.length === 0) return null;
-    if (!counterEvidenceRefs.every((ref) => isSubstantiveArtifact(artifacts.get(ref)))) return null;
+    if (!everyRefEligible) return reject(`axis-ineligible-reference:${row.axis}`);
+    if (!evidenceRefs.some((ref) => isSubstantiveArtifact(artifacts.get(ref)))) {
+      return reject(`missing-substantive-support:${row.axis}`);
+    }
+    if (keyedAxes) {
+      const supportRefs = evidenceRefs.filter((ref) => !coverageRefs.includes(ref));
+      if (!supportRefs.every((ref) => isSubstantiveArtifact(artifacts.get(ref)))) {
+        return reject(`non-substantive-support:${row.axis}`);
+      }
+      if (!coverageRefs.every((ref) => !isSubstantiveArtifact(artifacts.get(ref)))) {
+        return reject(`substantive-coverage-reference:${row.axis}`);
+      }
+    }
+    if (evidenceRefs.some((ref) => !isSubstantiveArtifact(artifacts.get(ref))) && gaps.length === 0) {
+      return reject(`coverage-without-gap:${row.axis}`);
+    }
+    if (!counterEvidenceRefs.every((ref) => isSubstantiveArtifact(artifacts.get(ref)))) {
+      return reject(`non-substantive-counter-reference:${row.axis}`);
+    }
     seen.set(row.axis, {
       axis: row.axis,
       score: row.score,
@@ -1701,12 +1868,12 @@ function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = []) {
       gaps
     });
   }
-  if (seen.size !== expected.size) return null;
+  if (seen.size !== expected.size) return reject("incomplete-axis-set");
   return {
     // Canonical order makes downstream completeness checks and snapshots stable.
     axes: axisCatalog2.map((spec) => seen.get(spec.axis)),
-    headline: raw.headline.trim(),
-    identity_note: raw.identity_note.trim()
+    headline,
+    identity_note: identityNote
   };
 }
 var ANALYST_EVIDENCE_MAX_CHARS = 24e3;
@@ -2522,13 +2689,74 @@ function serializeAnalystEvidencePacket(input, options) {
 function buildScoringEvidencePacket(input, axisCatalog2) {
   return serializeAnalystEvidencePacket(input, { includeInvestigativeLeads: false, axisCatalog: axisCatalog2 });
 }
-async function analyzeSubject(handle, roles, axisCatalog2, evidenceJson) {
-  if (!axisCatalog2.length) return null;
+async function analyzeSubject(handle, roles, axisCatalog2, evidenceJson, options = {}) {
+  const axisNames = axisCatalog2.map(({ axis }) => axis);
+  if (!axisCatalog2.length || new Set(axisNames).size !== axisNames.length || axisCatalog2.some((axis) => !axis.axis || !Number.isInteger(axis.weight) || axis.weight < 0)) return null;
   const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
   if (!evidenceCatalog.length || axisCatalog2.some((axis) => !evidenceCatalog.some((artifact) => isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis)))) return null;
-  const requestedAxisNames = new Set(axisCatalog2.map((axis) => axis.axis));
-  const allowedRefs = evidenceCatalog.filter((artifact) => artifact.eligibleAxes.some((axis) => requestedAxisNames.has(axis))).map((artifact) => artifact.artifactId);
-  const substantiveRefs = evidenceCatalog.filter((artifact) => isSubstantiveArtifact(artifact) && artifact.eligibleAxes.some((axis) => requestedAxisNames.has(axis))).map((artifact) => artifact.artifactId);
+  const citationAliases = evidenceCatalog.map((artifact, index) => ({
+    alias: `e${String(index + 1).padStart(3, "0")}`,
+    artifact
+  }));
+  const aliasesForAxis = (axis, coverageOnly) => citationAliases.filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && (coverageOnly ? !isSubstantiveArtifact(artifact) : isSubstantiveArtifact(artifact))).map(({ alias }) => alias);
+  const citationAliasTable = citationAliases.map(({ alias, artifact }) => `${alias} = ${artifact.artifactId}`).join("\n");
+  const axisSchemas = Object.fromEntries(axisCatalog2.map((spec) => {
+    const substantiveAliases = aliasesForAxis(spec.axis, false);
+    const coverageAliases = aliasesForAxis(spec.axis, true);
+    const properties = {
+      score: {
+        type: "number",
+        enum: Array.from({ length: spec.weight + 1 }, (_, score) => score),
+        description: `Integer score from 0 through ${spec.weight} for ${spec.axis}.`
+      },
+      rationale: {
+        type: "string",
+        description: `Tight evidence-grounded rationale for ${spec.axis}.`
+      },
+      primaryEvidenceRef: {
+        type: "string",
+        enum: substantiveAliases,
+        description: `One substantive citation alias eligible for ${spec.axis}.`
+      },
+      additionalEvidenceRefs: {
+        type: "array",
+        items: { type: "string", enum: substantiveAliases },
+        description: `Zero to seven additional, unique substantive citation aliases for ${spec.axis}; never repeat primaryEvidenceRef.`
+      },
+      counterEvidenceRefs: {
+        type: "array",
+        items: { type: "string", enum: substantiveAliases },
+        description: `Zero to eight unique substantive aliases that credibly pull against the ${spec.axis} score; never overlap support.`
+      },
+      gaps: {
+        type: "array",
+        items: { type: "string" },
+        description: `Zero to six unique, non-empty descriptions of material unresolved evidence for ${spec.axis}.`
+      }
+    };
+    const required = [
+      "score",
+      "rationale",
+      "primaryEvidenceRef",
+      "additionalEvidenceRefs",
+      "counterEvidenceRefs",
+      "gaps"
+    ];
+    if (coverageAliases.length > 0) {
+      properties.coverageRefs = {
+        type: "array",
+        items: { type: "string", enum: coverageAliases },
+        description: `Zero to four unique checked-empty or unavailable citation aliases for ${spec.axis}. If any alias is returned, gaps must include a material missing-coverage description.`
+      };
+      required.push("coverageRefs");
+    }
+    return [spec.axis, {
+      type: "object",
+      properties,
+      required,
+      additionalProperties: false
+    }];
+  }));
   const system = "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject on a fixed set of axes from collected evidence only. Be skeptical: a strong story never papers over a disqualifying fact. Score conservatively when evidence is thin. Each axis score must be between 0 and its weight. Write one tight rationale per axis citing the evidence. Never use em dashes.";
   const user = `Subject: ${handle}
 Held roles: ${roles.join(", ")}
@@ -2538,6 +2766,9 @@ Axes to score (axis | weight | role):
 
 Collected evidence (JSON):
 ${evidenceJson}
+
+Citation aliases (return these short aliases in the tool call; ARGUS maps them back to the exact immutable artifact IDs):
+${citationAliasTable}
 
 Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.
 
@@ -2551,67 +2782,88 @@ INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this scoring
 
 FINDING ATTRIBUTION RULE: when comparing or interpreting finding collections, only direct-subject findings may be attributed to the audited subject. A relationship alone is not evidence of participation or responsibility. This restriction applies to finding collections, not to legitimate non-finding evidence: profile, team, wallet, check-outcome, source, and provider evidence may affect scoring when relevant and reliable.
 
-CITATION RULE: every axis must return evidenceRefs, counterEvidenceRefs, and gaps. evidenceRefs must contain 1 to 12 exact artifactId values from evidenceCatalog whose eligibleAxes includes that axis. counterEvidenceRefs must contain 0 to 12 eligible artifact IDs that credibly pull against the score. Never put the same artifact in both arrays. gaps must contain 0 to 6 short descriptions of material unresolved evidence. Artifacts whose verification is "unavailable" or "checked_empty" are coverage gaps only. They may appear in evidenceRefs only alongside at least one substantive support artifact and a matching description in gaps; they may never appear in counterEvidenceRefs. providerRuns operational telemetry is excluded from the scoring packet and must never be inferred or cited.
+CITATION RULE: the tool exposes one required object for every exact axis. primaryEvidenceRef must be one substantive alias from that axis's allowed enum. additionalEvidenceRefs contains zero to seven other substantive aliases, without duplicates. coverageRefs, when the field exists, contains only checked-empty or unavailable aliases; if any are returned, gaps must include a material missing-coverage description. counterEvidenceRefs contains zero to eight substantive aliases that credibly pull against the score. Never repeat an alias or place it on both sides. gaps contains zero to six short descriptions of material unresolved evidence. providerRuns operational telemetry is excluded from the scoring packet and must never be inferred or cited.
 
 TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection findings bound to an exact complete server-collected report may influence scoring. Weak or unqualified ties are context only. ARGUS applies any graph cap deterministically after your axis scoring; do not invent or strengthen one.`;
   const tool = {
     name: "record_verdict",
-    description: "Record the per-axis scores, headline, and identity note.",
+    description: "Record one complete forensic score object for every exact requested axis, plus a composite headline and identity note. Axis keys, integer score choices, and citation aliases are constrained independently so evidence from one axis cannot be silently reused on another. Coverage-only citations belong only in coverageRefs and require a material missing-coverage gap when any are returned; they never count as substantive support or counter-evidence. Every declared field must be returned, even when an array is empty.",
+    strict: true,
     input_schema: {
       type: "object",
       properties: {
         axes: {
-          type: "array",
-          minItems: axisCatalog2.length,
-          maxItems: axisCatalog2.length,
-          items: {
-            type: "object",
-            properties: {
-              axis: { type: "string", enum: axisCatalog2.map((a) => a.axis) },
-              score: { type: "number", minimum: 0, maximum: Math.max(...axisCatalog2.map((a) => a.weight)) },
-              rationale: { type: "string", minLength: 1 },
-              evidenceRefs: {
-                type: "array",
-                minItems: 1,
-                maxItems: 12,
-                uniqueItems: true,
-                items: { type: "string", enum: allowedRefs }
-              },
-              counterEvidenceRefs: {
-                type: "array",
-                minItems: 0,
-                maxItems: 12,
-                uniqueItems: true,
-                items: { type: "string", enum: substantiveRefs }
-              },
-              gaps: {
-                type: "array",
-                minItems: 0,
-                maxItems: 6,
-                uniqueItems: true,
-                items: { type: "string", minLength: 1, maxLength: 400 }
-              }
-            },
-            required: ["axis", "score", "rationale", "evidenceRefs", "counterEvidenceRefs", "gaps"],
-            additionalProperties: false
-          }
+          type: "object",
+          properties: axisSchemas,
+          required: axisCatalog2.map((axis) => axis.axis),
+          additionalProperties: false
         },
-        headline: { type: "string", minLength: 1 },
-        identity_note: { type: "string", minLength: 1, description: "Identity resolution. Distinguish the ACCOUNT OPERATOR from the project's TEAM: if named team members are present in the evidence (especially with a LinkedIn), acknowledge them by name and do NOT claim 'no linked real-world identity' or 'zero credentials' \u2014 instead say the account/operator is pseudonymous while N named people are publicly tied to the project (list a few). Only say no one is identified if the evidence truly has no named people." }
+        headline: { type: "string", description: "One non-empty sentence explaining what governs the composite verdict." },
+        identity_note: { type: "string", description: "Non-empty identity resolution. Distinguish the ACCOUNT OPERATOR from the project's TEAM: if named team members are present in the evidence (especially with a LinkedIn), acknowledge them by name and do NOT claim 'no linked real-world identity' or 'zero credentials' \u2014 instead say the account/operator is pseudonymous while N named people are publicly tied to the project (list a few). Only say no one is identified if the evidence truly has no named people." }
       },
       required: ["axes", "headline", "identity_note"],
       additionalProperties: false
     }
   };
-  const raw = await structured(
+  const firstAttemptTimeoutMs = typeof options.analystDeadlineAt === "number" ? Math.min(ANALYST_SCORING_TIMEOUT_MS, Math.max(0, options.analystDeadlineAt - Date.now())) : ANALYST_SCORING_TIMEOUT_MS;
+  if (firstAttemptTimeoutMs < 1e3) {
+    console.warn("[agent-runtime]", JSON.stringify({
+      tool: "record_verdict",
+      state: "scoring_skipped_budget",
+      remainingMs: firstAttemptTimeoutMs
+    }));
+    return null;
+  }
+  let raw = await structured(
     system,
     user,
     tool,
     6e3,
-    ANALYST_SCORING_TIMEOUT_MS
+    firstAttemptTimeoutMs
   );
-  const validated = validateAnalystVerdict(raw, axisCatalog2, evidenceCatalog);
-  if (raw && !validated) console.warn("[agent] rejected incomplete or invalid analyst axis set");
+  let rejectionReason = "unknown";
+  let validated = validateAnalystVerdict(
+    raw,
+    axisCatalog2,
+    evidenceCatalog,
+    (reason) => {
+      rejectionReason = reason;
+    }
+  );
+  if (raw && !validated) {
+    console.warn(`[agent] rejected incomplete or invalid analyst axis set (${rejectionReason})`);
+    if (typeof options.analystDeadlineAt === "number" && Date.now() + ANALYST_REPAIR_TIMEOUT_MS > options.analystDeadlineAt) {
+      console.warn("[agent-runtime]", JSON.stringify({
+        tool: "record_verdict",
+        state: "repair_skipped_budget",
+        remainingMs: Math.max(0, options.analystDeadlineAt - Date.now()),
+        requiredMs: ANALYST_REPAIR_TIMEOUT_MS
+      }));
+      return null;
+    }
+    const repairUser = `${user}
+
+REPAIR REQUIRED: the prior record_verdict tool payload was rejected by deterministic validation with reason "${rejectionReason}". Make one fresh record_verdict call. Recheck the exact axis keys, per-axis score enum, citation eligibility, duplicate aliases, support/counter overlap, and the requirement that any returned coverageRefs have a material gap description. Do not invent evidence or fill a missing fact.`;
+    raw = await structured(
+      system,
+      repairUser,
+      tool,
+      6e3,
+      ANALYST_REPAIR_TIMEOUT_MS
+    );
+    rejectionReason = "unknown";
+    validated = validateAnalystVerdict(
+      raw,
+      axisCatalog2,
+      evidenceCatalog,
+      (reason) => {
+        rejectionReason = reason;
+      }
+    );
+    if (raw && !validated) {
+      console.warn(`[agent] rejected analyst repair axis set (${rejectionReason})`);
+    }
+  }
   return validated;
 }
 
@@ -8160,9 +8412,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     }
     evidence.axes = [];
     const analystBefore = attemptTotals(["claude"]);
+    const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
     const [found, verdict] = await Promise.all([
-      scanContradictions(evidence.profile.handle, evidenceJson),
-      analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson)
+      scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt }),
+      analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson, {
+        analystDeadlineAt
+      })
     ]);
     const analystAttempts = attemptDelta(analystBefore, attemptTotals(["claude"]));
     const analystObserved = analystAttempts.total > 0;

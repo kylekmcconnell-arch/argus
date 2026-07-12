@@ -132,7 +132,10 @@ describe("orchestrator provider execution truth", () => {
           : name === "record_contradictions"
             ? { contradictions: [] }
             : {};
-        return new Response(JSON.stringify({ content: [{ type: "tool_use", name, input: toolInput }] }), {
+        return new Response(JSON.stringify({
+          content: [{ type: "tool_use", name, input: toolInput }],
+          stop_reason: "tool_use",
+        }), {
           status: 200,
           headers: { "content-type": "application/json" },
         });

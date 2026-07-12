@@ -1,5 +1,7 @@
 import { createHash } from "node:crypto";
 import { serviceHeaders, type ServiceCredentials } from "./_auth.js";
+import { PROFILES } from "../src/engine/profiles.js";
+import { SubjectClass } from "../src/engine/taxonomy.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -234,10 +236,10 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
   }
 
   const report = asRecord(payload.report);
-  const roleReports = report?.role_reports;
-  if (!Array.isArray(roleReports) || roleReports.length < 1 || roleReports.length > 16) {
+  if (!report || !Array.isArray(report.role_reports) || report.role_reports.length < 1 || report.role_reports.length > 16) {
     throw new Error("invalid axis evidence lineage: report.role_reports");
   }
+  const roleReports = report.role_reports;
   const isIncomplete = report?.composite_verdict === "INCOMPLETE";
   if (isIncomplete && report?.governing_score !== null) {
     throw new Error("invalid axis evidence lineage: incomplete report must have a null governing score");
@@ -252,6 +254,8 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
     if (!ROLE_ID.test(role) || roles.has(role)) {
       throw new Error("invalid axis evidence lineage: role");
     }
+    const roleProfile = PROFILES[role as SubjectClass];
+    if (!roleProfile) throw new Error("invalid axis evidence lineage: unsupported role");
     roles.add(role);
     const axes = asRecord(roleReport.axes);
     const axisEntries = axes ? Object.entries(axes) : [];
@@ -287,6 +291,10 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
       ) {
         throw new Error(`invalid axis evidence lineage: ${axisId} cites absence evidence without a gap`);
       }
+      if (!support.some((artifactId) =>
+        !ABSENCE_VERIFICATIONS.has(verificationByArtifact.get(artifactId) ?? ""))) {
+        throw new Error(`invalid axis evidence lineage: ${axisId} lacks substantive support`);
+      }
       if (counter.some((artifactId) => ABSENCE_VERIFICATIONS.has(verificationByArtifact.get(artifactId) ?? ""))) {
         throw new Error(`invalid axis evidence lineage: ${axisId} cites absence evidence as counter-evidence`);
       }
@@ -307,7 +315,42 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
           });
         });
       }
+      const expectedWeight = roleProfile.axes[axisId];
+      if (
+        expectedWeight === undefined
+        || !Number.isInteger(axis.score)
+        || axis.score < 0
+        || axis.score > expectedWeight
+        || axis.weight !== expectedWeight
+        || axis.role !== role
+        || typeof axis.rationale !== "string"
+        || axis.rationale.trim().length < 1
+        || axis.rationale.trim().length > 2_000
+      ) {
+        throw new Error(`invalid axis evidence lineage: ${axisId} violates the scoring contract`);
+      }
     }
+    const expectedAxisIds = Object.keys(roleProfile.axes).sort();
+    const receivedAxisIds = axisEntries.map(([axisId]) => axisId).sort();
+    if (!isIncomplete && (
+      expectedAxisIds.length !== receivedAxisIds.length
+      || expectedAxisIds.some((axisId, index) => axisId !== receivedAxisIds[index])
+    )) {
+      throw new Error(`invalid axis evidence lineage: ${role} axis set is incomplete or non-canonical`);
+    }
+  }
+  const declaredRoles = strictStringArray(report.roles, "report.roles", {
+    min: 1,
+    max: 16,
+    itemMax: 80,
+    pattern: ROLE_ID,
+  }).sort();
+  const scoredRoles = [...roles].sort();
+  if (
+    declaredRoles.length !== scoredRoles.length
+    || declaredRoles.some((role, index) => role !== scoredRoles[index])
+  ) {
+    throw new Error("invalid axis evidence lineage: declared roles do not match role reports");
   }
   if (
     (isIncomplete && (scoredAxes !== 0 || axisRows.length !== 0))
@@ -478,6 +521,25 @@ export async function persistProvenance(
 ): Promise<void> {
   const payloadRecord = asRecord(payload);
   const hasLineageVersion = payloadRecord?.axisCitationVersion !== undefined;
+  const report = asRecord(payloadRecord?.report);
+  const roleReports = Array.isArray(report?.role_reports) ? report.role_reports : [];
+  const hasScoredAxis = roleReports.some((candidate) => {
+    const axes = asRecord(asRecord(candidate)?.axes);
+    return !!axes && Object.keys(axes).length > 0;
+  });
+  const compositeVerdict = typeof report?.composite_verdict === "string"
+    ? report.composite_verdict
+    : "";
+  const decisionBearing = hasScoredAxis
+    || typeof report?.governing_score === "number"
+    || (!!compositeVerdict && compositeVerdict !== "INCOMPLETE");
+  if (
+    context.attestationState === "server_collected"
+    && !hasLineageVersion
+    && decisionBearing
+  ) {
+    throw new Error("invalid axis evidence lineage: scored server-collected report omitted axisCitationVersion");
+  }
   const strict = hasLineageVersion
     ? collectStrictLineage(payloadRecord!, context)
     : null;

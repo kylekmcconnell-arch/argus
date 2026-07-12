@@ -11,7 +11,8 @@ import {
   type AnalystAxis,
 } from "./agent";
 import type { AxisEvidenceRecord } from "../src/data/evidence";
-import { ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
+import { getProfile, SubjectClass } from "../src/engine";
+import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
 import { getCost, withCostLedger } from "./cost";
 
 const catalog: AnalystAxis[] = [
@@ -81,6 +82,145 @@ describe("analyst verdict integrity", () => {
     expect(result?.axes.map((axis) => axis.score)).toEqual([10, 20]);
   });
 
+  it("normalizes a strict axis-keyed verdict and short citation aliases in canonical order", () => {
+    const result = validateAnalystVerdict({
+      axes: {
+        F2_track_record: {
+          score: 20,
+          rationale: "documented history",
+          primaryEvidenceRef: "e002",
+          additionalEvidenceRefs: [],
+          coverageRefs: ["e004"],
+          counterEvidenceRefs: ["e003"],
+          gaps: ["One track-record provider was unavailable."],
+        },
+        F1_identity_verifiability: {
+          score: 10,
+          rationale: "named identity",
+          primaryEvidenceRef: "E001",
+          additionalEvidenceRefs: [],
+          counterEvidenceRefs: [],
+          gaps: [],
+        },
+      },
+      headline: "Complete result",
+      identity_note: "Identity resolved",
+    }, catalog, validationCatalog);
+
+    expect(result?.axes).toEqual([
+      expect.objectContaining({ axis: "F1_identity_verifiability", evidenceRefs: [F1_REF] }),
+      expect.objectContaining({
+        axis: "F2_track_record",
+        evidenceRefs: [F2_REF, F2_UNAVAILABLE_REF],
+        counterEvidenceRefs: [F2_COUNTER_REF],
+      }),
+    ]);
+  });
+
+  it.each([
+    {
+      label: "missing keyed axis",
+      axes: {
+        F1_identity_verifiability: {
+          score: 10,
+          rationale: "named identity",
+          primaryEvidenceRef: "e001",
+          additionalEvidenceRefs: [],
+          counterEvidenceRefs: [],
+          gaps: [],
+        },
+      },
+      reason: "axis-key-set",
+    },
+    {
+      label: "extra keyed axis",
+      axes: {
+        F1_identity_verifiability: {},
+        F2_track_record: {},
+        MADE_UP: {},
+      },
+      reason: "axis-key-set",
+    },
+  ])("rejects a $label without filling or dropping an axis", ({ axes, reason }) => {
+    const rejection = vi.fn();
+    expect(validateAnalystVerdict({
+      axes,
+      headline: "Invalid result",
+      identity_note: "Identity resolved",
+    }, catalog, validationCatalog, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith(reason);
+  });
+
+  it("requires the keyed coverage field exactly when eligible gap artifacts exist", () => {
+    const rejection = vi.fn();
+    expect(validateAnalystVerdict({
+      axes: {
+        F1_identity_verifiability: {
+          score: 10,
+          rationale: "named identity",
+          primaryEvidenceRef: "e001",
+          additionalEvidenceRefs: [],
+          counterEvidenceRefs: [],
+          gaps: [],
+        },
+        F2_track_record: {
+          score: 20,
+          rationale: "documented history",
+          primaryEvidenceRef: "e002",
+          additionalEvidenceRefs: [],
+          counterEvidenceRefs: [],
+          gaps: [],
+        },
+      },
+      headline: "Invalid result",
+      identity_note: "Identity resolved",
+    }, catalog, validationCatalog, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("coverage-field-shape:F2_track_record");
+  });
+
+  it("rejects undeclared fields in a keyed axis row", () => {
+    const rejection = vi.fn();
+    expect(validateAnalystVerdict({
+      axes: {
+        F1_identity_verifiability: {
+          score: 10,
+          rationale: "named identity",
+          primaryEvidenceRef: "e001",
+          additionalEvidenceRefs: [],
+          counterEvidenceRefs: [],
+          gaps: [],
+          ignoredEvidenceRefs: ["e002"],
+        },
+        F2_track_record: {
+          score: 20,
+          rationale: "documented history",
+          primaryEvidenceRef: "e002",
+          additionalEvidenceRefs: [],
+          coverageRefs: [],
+          counterEvidenceRefs: [],
+          gaps: [],
+        },
+      },
+      headline: "Invalid result",
+      identity_note: "Identity resolved",
+    }, catalog, validationCatalog, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("axis-row-extra-field:F1_identity_verifiability");
+  });
+
+  it("rejects undeclared top-level fields", () => {
+    const rejection = vi.fn();
+    expect(validateAnalystVerdict({
+      axes: [
+        validAxis("F1_identity_verifiability", 10, F1_REF),
+        validAxis("F2_track_record", 20, F2_REF),
+      ],
+      headline: "Invalid result",
+      identity_note: "Identity resolved",
+      ignored: true,
+    }, catalog, validationCatalog, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("root-extra-field");
+  });
+
   it.each([
     {
       label: "missing axis",
@@ -111,6 +251,13 @@ describe("analyst verdict integrity", () => {
       label: "out-of-range score",
       axes: [
         validAxis("F1_identity_verifiability", 13, F1_REF),
+        validAxis("F2_track_record", 20, F2_REF),
+      ],
+    },
+    {
+      label: "fractional score",
+      axes: [
+        validAxis("F1_identity_verifiability", 10.5, F1_REF),
         validAxis("F2_track_record", 20, F2_REF),
       ],
     },
@@ -876,21 +1023,45 @@ describe("analyst verdict integrity", () => {
     }, catalog);
     const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
     const refFor = (axis: string) => scorerCatalog.find((artifact) =>
-      artifact.verification !== "unavailable" && artifact.eligibleAxes.includes(axis))!.artifactId;
+      artifact.verification !== "unavailable"
+      && artifact.verification !== "checked_empty"
+      && artifact.eligibleAxes.includes(axis))!.artifactId;
+    const aliasFor = (axis: string) => {
+      const index = scorerCatalog.findIndex((artifact) =>
+        artifact.verification !== "unavailable"
+        && artifact.verification !== "checked_empty"
+        && artifact.eligibleAxes.includes(axis));
+      return `e${String(index + 1).padStart(3, "0")}`;
+    };
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       const request = JSON.parse(String(init?.body)) as { tool_choice: { name: string } };
       const input = request.tool_choice.name === "record_contradictions"
         ? { contradictions: [] }
         : {
-            axes: [
-              validAxis("F1_identity_verifiability", 10, refFor("F1_identity_verifiability")),
-              validAxis("F2_track_record", 20, refFor("F2_track_record")),
-            ],
+            axes: {
+              F2_track_record: {
+                score: 20,
+                rationale: "documented history",
+                primaryEvidenceRef: aliasFor("F2_track_record"),
+                additionalEvidenceRefs: [],
+                counterEvidenceRefs: [],
+                gaps: [],
+              },
+              F1_identity_verifiability: {
+                score: 10,
+                rationale: "named identity",
+                primaryEvidenceRef: aliasFor("F1_identity_verifiability"),
+                additionalEvidenceRefs: [],
+                counterEvidenceRefs: [],
+                gaps: [],
+              },
+            },
             headline: "Evidence-backed result",
             identity_note: "Identity resolved",
           };
       return new Response(JSON.stringify({
         content: [{ type: "tool_use", name: request.tool_choice.name, input }],
+        stop_reason: "tool_use",
         usage: { input_tokens: 100, output_tokens: 20 },
       }), { status: 200, headers: { "content-type": "application/json" } });
     });
@@ -902,9 +1073,25 @@ describe("analyst verdict integrity", () => {
     const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as {
       system: string;
       messages: { content: string }[];
-      tool_choice: { name: string };
+      tool_choice: { name: string; disable_parallel_tool_use?: boolean };
       max_tokens: number;
-      tools: Array<{ input_schema: { properties: { axes: { items: { properties: Record<string, { items?: { enum?: string[] } }>; required: string[] } } } } }>;
+      tools: Array<{
+        strict?: boolean;
+        input_schema: {
+          properties: {
+            axes: {
+              type: string;
+              properties: Record<string, {
+                properties: Record<string, { enum?: number[] | string[]; items?: { enum?: string[] } }>;
+                required: string[];
+                additionalProperties: boolean;
+              }>;
+              required: string[];
+              additionalProperties: boolean;
+            };
+          };
+        };
+      }>;
     });
     const contradictionPrompt = requests.find((request) => request.tool_choice.name === "record_contradictions")?.system ?? "";
     const scoringPrompt = requests.find((request) => request.tool_choice.name === "record_verdict")?.messages[0]?.content ?? "";
@@ -916,13 +1103,211 @@ describe("analyst verdict integrity", () => {
     expect(scoringPrompt).toContain("when comparing or interpreting finding collections");
     expect(scoringPrompt).toContain("profile, team, wallet, check-outcome");
     expect(scoringPrompt).not.toContain("only rows in the findings array may influence");
-    expect(scoringPrompt).toContain("every axis must return evidenceRefs, counterEvidenceRefs, and gaps");
+    expect(scoringPrompt).toContain("Citation aliases");
+    expect(scoringPrompt).toContain("primaryEvidenceRef must be one substantive alias");
     const verdictRequest = requests.find((request) => request.tool_choice.name === "record_verdict")!;
-    const axisSchema = verdictRequest.tools[0].input_schema.properties.axes.items;
+    const verdictTool = verdictRequest.tools[0];
+    const axesSchema = verdictTool.input_schema.properties.axes;
     expect(verdictRequest.max_tokens).toBe(6000);
-    expect(axisSchema.required).toEqual(expect.arrayContaining(["evidenceRefs", "counterEvidenceRefs", "gaps"]));
-    expect(axisSchema.properties.evidenceRefs.items?.enum).toEqual(scorerCatalog.map((artifact) => artifact.artifactId));
-    expect(verdict?.axes.every((axis) => axis.evidenceRefs.length === 1)).toBe(true);
+    expect(verdictRequest.tool_choice.disable_parallel_tool_use).toBe(true);
+    expect(verdictTool.strict).toBe(true);
+    expect(axesSchema.type).toBe("object");
+    expect(axesSchema.required).toEqual(catalog.map((axis) => axis.axis));
+    expect(axesSchema.additionalProperties).toBe(false);
+    expect(Object.keys(axesSchema.properties)).toEqual(catalog.map((axis) => axis.axis));
+    expect(axesSchema.properties.F1_identity_verifiability.properties.score.enum).toEqual(
+      Array.from({ length: 13 }, (_, score) => score),
+    );
+    expect(axesSchema.properties.F1_identity_verifiability.required).toEqual(expect.arrayContaining([
+      "primaryEvidenceRef",
+      "additionalEvidenceRefs",
+      "counterEvidenceRefs",
+      "gaps",
+    ]));
+    const expectedF1Aliases = scorerCatalog.flatMap((artifact, index) =>
+      artifact.verification !== "unavailable"
+      && artifact.verification !== "checked_empty"
+      && artifact.eligibleAxes.includes("F1_identity_verifiability")
+        ? [`e${String(index + 1).padStart(3, "0")}`]
+        : []);
+    expect(axesSchema.properties.F1_identity_verifiability.properties.primaryEvidenceRef.enum).toEqual(expectedF1Aliases);
+    expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
+    expect(verdict?.axes.map((axis) => axis.evidenceRefs)).toEqual([
+      [refFor("F1_identity_verifiability")],
+      [refFor("F2_track_record")],
+    ]);
+
+    const unsupported = new Set([
+      "minimum", "maximum", "minLength", "maxLength", "minItems", "maxItems",
+      "uniqueItems", "oneOf", "anyOf", "allOf", "prefixItems", "pattern",
+    ]);
+    const findUnsupported = (value: unknown): string[] => {
+      if (!value || typeof value !== "object") return [];
+      if (Array.isArray(value)) return value.flatMap(findUnsupported);
+      return Object.entries(value as Record<string, unknown>).flatMap(([key, child]) => [
+        ...(unsupported.has(key) ? [key] : []),
+        ...findUnsupported(child),
+      ]);
+    };
+    expect(findUnsupported(verdictTool.input_schema)).toEqual([]);
+  });
+
+  it("skips contradiction analysis when the route has entered its finalization reserve", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(scanContradictions("@subject", "{}", {
+      deadlineAt: Date.now() + 500,
+    })).resolves.toBeNull();
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[agent-runtime]",
+      expect.stringContaining("contradictions_skipped_budget"),
+    );
+  });
+
+  it("keeps the live 14-axis founder, investor, and member contract strict and bounded", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const productionRoles = [SubjectClass.FOUNDER, SubjectClass.INVESTOR, SubjectClass.MEMBER];
+    const productionCatalog: AnalystAxis[] = productionRoles.flatMap((role) =>
+      Object.entries(getProfile(role).axes).map(([axis, weight]) => ({ axis, weight, role })),
+    );
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder and investor with a documented community role",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{
+        project_name: "Verified Venture",
+        role: "founder and investor",
+        outcome: "Active",
+        artifact_verified: true,
+      }],
+      testimonials: [{
+        claimed_endorser_handle: "@verified_backer",
+        claimed_relationship: "repeat backer",
+        artifact_verified: true,
+      }],
+      recentActivity: [{
+        provider: "twitterapi",
+        text: "Documented product, portfolio, and community activity",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+      }],
+      sourceArtifacts: Array.from({ length: 24 }, (_, index) => index === 0
+        ? {
+            kind: "trust_graph",
+            provider: "argus-graph",
+            title: "Qualified graph evidence",
+            excerpt: "Exact report-bound connection",
+            sourceUrl: "https://argus.example/report",
+            capturedAt: "2026-07-11T12:00:00.000Z",
+            contentHash: "a".repeat(64),
+            sourceContentHash: "b".repeat(64),
+            match: "risk_signal",
+          }
+        : {
+            kind: "press",
+            provider: "google-news",
+            title: `Verified source ${index}`,
+            excerpt: `Independent evidence ${index} ${"e".repeat(20)}`,
+            sourceUrl: `https://news.example/source-${index}`,
+            capturedAt: "2026-07-11T12:00:00.000Z",
+            contentHash: index.toString(16).padStart(64, "0"),
+            match: "exact_name",
+          }),
+    }, productionCatalog);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const aliasFor = (axis: string) => {
+      const index = scorerCatalog.findIndex((artifact) =>
+        artifact.verification !== "unavailable"
+        && artifact.verification !== "checked_empty"
+        && artifact.eligibleAxes.includes(axis));
+      expect(index).toBeGreaterThanOrEqual(0);
+      return `e${String(index + 1).padStart(3, "0")}`;
+    };
+    let requestBody = "";
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      requestBody = String(init?.body);
+      const request = JSON.parse(requestBody) as { tool_choice: { name: string } };
+      const axes = Object.fromEntries(productionCatalog.map(({ axis, weight }) => [axis, {
+        score: Math.floor(weight * 0.7),
+        rationale: `Evidence-backed rationale for ${axis}`,
+        primaryEvidenceRef: aliasFor(axis),
+        additionalEvidenceRefs: [],
+        counterEvidenceRefs: [],
+        gaps: [],
+      }]));
+      return new Response(JSON.stringify({
+        content: [{
+          type: "tool_use",
+          name: request.tool_choice.name,
+          input: {
+            axes,
+            headline: "Evidence-backed multi-role result",
+            identity_note: "Identity resolved",
+          },
+        }],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 4000, output_tokens: 1200 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const verdict = await analyzeSubject(
+      "@subject",
+      productionRoles,
+      productionCatalog,
+      evidenceJson,
+    );
+
+    const request = JSON.parse(requestBody) as {
+      tools: Array<{
+        strict?: boolean;
+        input_schema: {
+          properties: {
+            axes: {
+              properties: Record<string, {
+                properties: { score: { enum: number[] }; primaryEvidenceRef: { enum: string[] } };
+                required: string[];
+                additionalProperties: boolean;
+              }>;
+              required: string[];
+              additionalProperties: boolean;
+            };
+          };
+          required: string[];
+          additionalProperties: boolean;
+        };
+      }>;
+    };
+    const tool = request.tools[0];
+    const axesSchema = tool.input_schema.properties.axes;
+    expect(productionCatalog).toHaveLength(14);
+    expect(evidenceJson.length).toBeGreaterThan(20_000);
+    expect(scorerCatalog.length).toBeGreaterThanOrEqual(20);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(requestBody.length).toBeLessThan(100_000);
+    expect(JSON.stringify(tool.input_schema).length).toBeLessThan(30_000);
+    expect(tool.strict).toBe(true);
+    expect(tool.input_schema.required).toEqual(["axes", "headline", "identity_note"]);
+    expect(tool.input_schema.additionalProperties).toBe(false);
+    expect(axesSchema.required).toEqual(productionCatalog.map(({ axis }) => axis));
+    expect(Object.keys(axesSchema.properties)).toEqual(axesSchema.required);
+    expect(axesSchema.additionalProperties).toBe(false);
+    for (const { axis, weight } of productionCatalog) {
+      expect(axesSchema.properties[axis].additionalProperties).toBe(false);
+      expect(axesSchema.properties[axis].properties.score.enum).toEqual(
+        Array.from({ length: weight + 1 }, (_, score) => score),
+      );
+      expect(axesSchema.properties[axis].properties.primaryEvidenceRef.enum.length).toBeGreaterThan(0);
+    }
+    expect(verdict?.axes.map(({ axis }) => axis)).toEqual(productionCatalog.map(({ axis }) => axis));
   });
 
   it("fails before the provider call when the scorer packet has no valid frozen catalog", async () => {
@@ -957,7 +1342,249 @@ describe("analyst verdict integrity", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("gives the citation-rich flagship scorer a dedicated 120 second window", async () => {
+  it("makes one bounded semantic repair attempt after a schema-valid payload fails lineage checks", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{
+        project_name: "Verified Venture",
+        role: "founder",
+        outcome: "Active",
+        artifact_verified: true,
+      }],
+    }, catalog);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const aliasFor = (axis: string) => {
+      const index = scorerCatalog.findIndex((artifact) =>
+        artifact.verification !== "unavailable"
+        && artifact.verification !== "checked_empty"
+        && artifact.eligibleAxes.includes(axis));
+      return `e${String(index + 1).padStart(3, "0")}`;
+    };
+    const keyedAxis = (axis: string, score: number) => ({
+      score,
+      rationale: "Evidence-backed rationale",
+      primaryEvidenceRef: aliasFor(axis),
+      additionalEvidenceRefs: [],
+      counterEvidenceRefs: [],
+      gaps: [],
+    });
+    let attempt = 0;
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      attempt += 1;
+      const request = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }>; tool_choice: { name: string } };
+      const f1 = keyedAxis("F1_identity_verifiability", 10);
+      const input = {
+        axes: {
+          F1_identity_verifiability: attempt === 1
+            ? { ...f1, additionalEvidenceRefs: [f1.primaryEvidenceRef] }
+            : f1,
+          F2_track_record: keyedAxis("F2_track_record", 20),
+        },
+        headline: "Evidence-backed result",
+        identity_note: "Identity resolved",
+      };
+      if (attempt === 2) {
+        expect(request.messages[0].content).toContain(
+          "duplicate-evidence-reference:F1_identity_verifiability",
+        );
+      }
+      return new Response(JSON.stringify({
+        content: [{ type: "tool_use", name: request.tool_choice.name, input }],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 100, output_tokens: 20 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const verdict = await analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
+  });
+
+  it("skips semantic repair when the route cannot preserve its finalization reserve", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{ project_name: "Verified Venture", role: "founder", outcome: "Active" }],
+    }, catalog);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const aliasFor = (axis: string) => {
+      const index = scorerCatalog.findIndex((artifact) =>
+        artifact.verification !== "unavailable"
+        && artifact.verification !== "checked_empty"
+        && artifact.eligibleAxes.includes(axis));
+      return `e${String(index + 1).padStart(3, "0")}`;
+    };
+    const f1Alias = aliasFor("F1_identity_verifiability");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      content: [{
+        type: "tool_use",
+        name: "record_verdict",
+        input: {
+          axes: {
+            F1_identity_verifiability: {
+              score: 10,
+              rationale: "named identity",
+              primaryEvidenceRef: f1Alias,
+              additionalEvidenceRefs: [f1Alias],
+              counterEvidenceRefs: [],
+              gaps: [],
+            },
+            F2_track_record: {
+              score: 20,
+              rationale: "documented history",
+              primaryEvidenceRef: aliasFor("F2_track_record"),
+              additionalEvidenceRefs: [],
+              counterEvidenceRefs: [],
+              gaps: [],
+            },
+          },
+          headline: "Evidence-backed result",
+          identity_note: "Identity resolved",
+        },
+      }],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 100, output_tokens: 20 },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const verdict = await analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson, {
+      analystDeadlineAt: Date.now() + ANALYST_REPAIR_TIMEOUT_MS - 1,
+    });
+
+    expect(verdict).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[agent-runtime]",
+      expect.stringContaining("repair_skipped_budget"),
+    );
+  });
+
+  it("skips a late first scoring attempt to preserve the finalization reserve", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{ project_name: "Verified Venture", role: "founder", outcome: "Active" }],
+    }, catalog);
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const verdict = await analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson, {
+      analystDeadlineAt: Date.now() + 500,
+    });
+
+    expect(verdict).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledWith(
+      "[agent-runtime]",
+      expect.stringContaining("scoring_skipped_budget"),
+    );
+  });
+
+  it("fails closed after exactly one invalid semantic repair", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{ project_name: "Verified Venture", role: "founder", outcome: "Active" }],
+    }, catalog);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const aliasFor = (axis: string) => {
+      const index = scorerCatalog.findIndex((artifact) =>
+        artifact.verification !== "unavailable"
+        && artifact.verification !== "checked_empty"
+        && artifact.eligibleAxes.includes(axis));
+      return `e${String(index + 1).padStart(3, "0")}`;
+    };
+    const f1Alias = aliasFor("F1_identity_verifiability");
+    const invalidInput = {
+      axes: {
+        F1_identity_verifiability: {
+          score: 10,
+          rationale: "named identity",
+          primaryEvidenceRef: f1Alias,
+          additionalEvidenceRefs: [f1Alias],
+          counterEvidenceRefs: [],
+          gaps: [],
+        },
+        F2_track_record: {
+          score: 20,
+          rationale: "documented history",
+          primaryEvidenceRef: aliasFor("F2_track_record"),
+          additionalEvidenceRefs: [],
+          counterEvidenceRefs: [],
+          gaps: [],
+        },
+      },
+      headline: "Evidence-backed result",
+      identity_note: "Identity resolved",
+    };
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      content: [{ type: "tool_use", name: "record_verdict", input: invalidInput }],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 100, output_tokens: 20 },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await expect(analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson)).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not semantic-repair a max-token completion failure", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{ project_name: "Verified Venture", role: "founder", outcome: "Active" }],
+    }, catalog);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      content: [{ type: "tool_use", name: "record_verdict", input: {} }],
+      stop_reason: "max_tokens",
+      usage: { input_tokens: 100, output_tokens: 6000 },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    await expect(analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson)).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives the citation-rich flagship scorer a dedicated 180 second window", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
@@ -976,13 +1603,15 @@ describe("analyst verdict integrity", () => {
     }, catalog);
     const signal = new AbortController().signal;
     const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
-    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     await expect(analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson)).resolves.toBeNull();
 
-    expect(ANALYST_SCORING_TIMEOUT_MS).toBe(120_000);
+    expect(ANALYST_SCORING_TIMEOUT_MS).toBe(180_000);
     expect(timeoutSpy).toHaveBeenCalledWith(ANALYST_SCORING_TIMEOUT_MS);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -1077,6 +1706,7 @@ describe("Claude attempt accounting", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
       content: [{ type: "text", text: "not a tool call" }],
+      stop_reason: "end_turn",
       usage: { input_tokens: 1_000, output_tokens: 100 },
     }), { status: 200, headers: { "content-type": "application/json" } })));
 
@@ -1093,7 +1723,50 @@ describe("Claude attempt accounting", () => {
       partial: 1,
       failed: 0,
       status: "partial",
-      meta: expect.stringContaining("missing_tool_use"),
+      meta: expect.stringContaining("stop_reason_end_turn"),
+    }));
+  });
+
+  it("rejects ambiguous duplicate tool calls even when one could be parsed", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      content: [
+        { type: "tool_use", name: "record_test", input: { ok: true } },
+        { type: "tool_use", name: "record_test", input: { ok: false } },
+      ],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 1_000, output_tokens: 100 },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    const captured = await withCostLedger(async () => {
+      const result = await structured<{ ok: boolean }>("system", "user", tool);
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBeNull();
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      status: "partial",
+      meta: expect.stringContaining("ambiguous_tool_use"),
+    }));
+  });
+
+  it("rejects a tool block when generation stopped for max tokens", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      content: [{ type: "tool_use", name: "record_test", input: { ok: true } }],
+      stop_reason: "max_tokens",
+      usage: { input_tokens: 1_000, output_tokens: 100 },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    const captured = await withCostLedger(async () => {
+      const result = await structured<{ ok: boolean }>("system", "user", tool);
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBeNull();
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      status: "partial",
+      meta: expect.stringContaining("stop_reason_max_tokens"),
     }));
   });
 });
