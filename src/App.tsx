@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useRef } from "react";
 import { AppShell } from "./components/AppShell";
+import { AuditConsole } from "./components/AuditConsole";
 import { Landing } from "./components/Landing";
 import { logAudit, hydrateSharedLog } from "./lib/auditlog";
 import {
@@ -1224,7 +1225,7 @@ export default function App() {
       <Suspense fallback={<RouteLoading />}>
       {evidenceReviewVersionId && phase !== "idle" && phase !== "notfound" && (
         <div className="tint-signal mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-[12.5px]">
-          <span className="font-medium text-signal">Immutable evidence review</span>
+          <span className="font-medium text-signal-lift">Immutable evidence review</span>
           <span className="mono break-all">version {evidenceReviewVersionId}</span>
           <span>Opened in a separate tab so the Case Brief draft remains intact.</span>
         </div>
@@ -1310,22 +1311,23 @@ export default function App() {
       )}
 
       {phase === "resolving" && (
-        <div className="relative flex min-h-[60vh] flex-col items-center justify-center px-6 text-center" role="status" aria-live="polite">
-          <div className="grid-bg absolute inset-0 -z-10" />
-          <span className="h-2 w-2 animate-pulse rounded-full bg-signal" />
-          <h2 className="mt-4 display-sm text-[18px] text-ink">Resolving the exact subject</h2>
-          <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
-            {resolutionUsesStoredCases
-              ? "Checking durable cases and canonical contract identity before any collector or paid investigation can start."
-              : "Resolving canonical identity before starting a fresh provider run. Existing snapshots will remain unchanged and paid API quota may be used."}
-          </p>
-        </div>
+        <AuditConsole
+          handle={query || "Exact subject"}
+          subtitle={resolutionUsesStoredCases
+            ? "Durable cases and canonical identity · no provider spend during resolution"
+            : "Canonical identity first · provider acquisition begins only after subject confirmation"}
+          steps={[]}
+          working
+          mode="live"
+          kind="resolution"
+          hop="Resolving the exact subject"
+        />
       )}
 
       {phase === "token-choice" && (
         <div className="relative mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-16">
           <div className="grid-bg absolute inset-0 -z-10" />
-          <div className="eyebrow text-signal">Exact contract required</div>
+          <div className="eyebrow text-signal-lift">Exact contract required</div>
           <h2 className="mt-2 display-sm text-[24px] text-ink">Choose the token you meant</h2>
           <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
             More than one contract uses this ticker. ARGUS will never guess based on liquidity or popularity. Select the exact chain and address before any investigation starts.
@@ -1370,7 +1372,7 @@ export default function App() {
           <div className="grid-bg absolute inset-0 -z-10" />
           {caseNotice ? (
             <>
-              <div className="mono max-w-md break-all text-[13.5px] text-signal">{caseNotice.ref}</div>
+              <div className="mono max-w-md break-all text-[13.5px] text-signal-lift">{caseNotice.ref}</div>
               <h2 className="mt-3 display-sm text-[24px] text-ink">
                 {caseNotice.reason === "archived"
                   ? "This case is archived"
@@ -1455,7 +1457,7 @@ export default function App() {
             </>
           ) : resolveInput(query).kind === "token" ? (
             <>
-              <div className="mono max-w-md break-all text-[13.5px] text-signal">{query}</div>
+              <div className="mono max-w-md break-all text-[13.5px] text-signal-lift">{query}</div>
               <h2 className="mt-3 display-sm text-[24px] text-ink">Couldn't resolve that token</h2>
               <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
                 No DEX pair was found for this contract. It may be brand-new, unlisted, illiquid, or on a chain
@@ -1464,7 +1466,7 @@ export default function App() {
             </>
           ) : liveError ? (
             <>
-              <div className="mono text-[13.5px] text-signal">@{query.replace(/^@/, "")}</div>
+              <div className="mono text-[13.5px] text-signal-lift">@{query.replace(/^@/, "")}</div>
               <h2 className="mt-3 display-sm text-[24px] text-ink">The live audit didn't finish</h2>
               <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
                 ARGUS collected against this handle but the run ended before a report was assembled — usually a
@@ -1485,7 +1487,7 @@ export default function App() {
             </>
           ) : (
             <>
-              <div className="mono text-[13.5px] text-signal">@{query.replace(/^@/, "")}</div>
+              <div className="mono text-[13.5px] text-signal-lift">@{query.replace(/^@/, "")}</div>
               <h2 className="mt-3 display-sm text-[24px] text-ink">No live dossier yet</h2>
               <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
                 This demo ships with curated worked audits. With provider keys configured, ARGUS resolves any

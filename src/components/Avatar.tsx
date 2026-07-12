@@ -31,7 +31,7 @@ export function Avatar({
     );
   }
   return (
-    <span className={`flex shrink-0 items-center justify-center border border-line bg-panel-2 text-signal ${rounded} ${letterClass}`} style={dim}>
+    <span className={`flex shrink-0 items-center justify-center border border-line bg-panel-2 text-signal-lift ${rounded} ${letterClass}`} style={dim}>
       {letter}
     </span>
   );

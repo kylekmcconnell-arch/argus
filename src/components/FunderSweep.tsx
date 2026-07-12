@@ -92,7 +92,7 @@ export function FunderSweep({ wallet, onAudit }: { wallet: string; onAudit?: (q:
             <span className="block text-[11px] text-ink-dim">what else has this wallet launched, and who else did it fund?</span>
           </span>
         </span>
-        <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal transition group-hover:bg-signal group-hover:text-white">run →</span>
+        <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal-lift transition group-hover:bg-signal group-hover:text-white">run →</span>
       </button>
     );
   }

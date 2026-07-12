@@ -42,7 +42,7 @@ function ProjectCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string) => void
       {img ? (
         <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-md border border-line object-cover" />
       ) : (
-        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal">{letter}</span>
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal-lift">{letter}</span>
       )}
       <span className="min-w-0 flex-1">
         <span className="mono block truncate text-[13.5px] text-ink">{e.query}</span>

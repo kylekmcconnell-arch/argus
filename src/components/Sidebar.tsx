@@ -37,6 +37,7 @@ import { auditImage } from "../lib/avatars";
 import type { ReportKind } from "../lib/reports";
 import { normalizeSubjectRef } from "../lib/subjectRef";
 import { recentReportHref } from "../lib/recentReportRoute";
+import { currentArgusTheme, nextArgusTheme, setArgusTheme, type ArgusTheme } from "../lib/theme";
 
 // Subject thumbnail: the real logo/photo, falling back to a letter if it is
 // missing or fails to load (unavatar/favicon/dexscreener can 404).
@@ -55,7 +56,7 @@ function AuditAvatar({ src, letter }: { src: string | null; letter: string }) {
     );
   }
   return (
-    <span className="mono flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal">
+    <span className="mono flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal-lift">
       {letter}
     </span>
   );
@@ -92,11 +93,11 @@ function NavItem({ icon: Icon, label, active, onClick, badge, nested = false }: 
       }`}
     >
       {active && <span className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-full bg-signal" aria-hidden />}
-      <span className={active ? "text-signal" : "text-ink-faint"}>
+      <span className={active ? "text-signal-lift" : "text-ink-faint"}>
         <Icon size={17} weight={active ? "bold" : "regular"} aria-hidden />
       </span>
       <span className="truncate">{label}</span>
-      {badge ? <span className="mono ml-auto rounded-full bg-signal/15 px-1.5 text-[10px] text-signal-dim">{badge}</span> : null}
+      {badge ? <span className="mono ml-auto rounded-full bg-signal/15 px-1.5 text-[10px] text-signal-lift">{badge}</span> : null}
     </button>
   );
 }
@@ -111,17 +112,17 @@ function NavGroup({ label }: { label: string }) {
 }
 
 function ThemeToggle() {
-  const [theme, setTheme] = useState<string>(() => (typeof document !== "undefined" ? document.documentElement.dataset.theme || "dark" : "dark"));
+  const [theme, setTheme] = useState<ArgusTheme>(() => currentArgusTheme());
   const toggle = () => {
-    const next = theme === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    try { localStorage.setItem("argus-theme", next); } catch { /* noop */ }
+    const next = nextArgusTheme(theme);
+    setArgusTheme(next);
     setTheme(next);
   };
+  const actionLabel = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
   return (
-    <button type="button" onClick={toggle} className="flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] text-ink-dim transition hover:bg-panel/70 hover:text-ink">
+    <button type="button" onClick={toggle} aria-label={actionLabel} title={actionLabel} className="flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] text-ink-dim transition hover:bg-panel/70 hover:text-ink">
       <span className="text-ink-faint">
-        {theme === "dark" ? <MoonIcon size={17} aria-hidden /> : <SunIcon size={17} aria-hidden />}
+        {theme === "dark" ? <SunIcon size={17} aria-hidden /> : <MoonIcon size={17} aria-hidden />}
       </span>
       {theme === "dark" ? "Light mode" : "Dark mode"}
     </button>
@@ -189,7 +190,7 @@ export function Sidebar({
   };
   const [, setTick] = useState(0);
   // Re-render when the shared audit log hydrates/updates OR a background run
-  // makes progress (so "generating…" ticks up and flips to the finished audit).
+  // records real evidence and flips into the finished audit.
   useEffect(() => {
     const a = subscribeLog(() => setTick((t) => t + 1));
     const b = subscribeRuns(() => setTick((t) => t + 1));
@@ -233,8 +234,22 @@ export function Sidebar({
   // Everything in flight beyond person audits: backgrounded token/investigation
   // scans (scanrunner) + foreground site recons (activescans) — same chip.
   const scans = [
-    ...activeScanRuns().map((r) => ({ id: r.id, label: r.label, pct: r.pct, ref: r.ref, kind: r.kind })),
-    ...activeScans().map((s) => ({ id: s.id, label: s.label, pct: s.pct, ref: s.ref, kind: s.kind })),
+    ...activeScanRuns().map((r) => ({
+      id: r.id,
+      label: r.label,
+      ref: r.ref,
+      kind: r.kind,
+      events: r.steps.length,
+      activity: r.hop ?? r.steps.at(-1)?.label ?? "Preparing evidence acquisition",
+    })),
+    ...activeScans().map((s) => ({
+      id: s.id,
+      label: s.label,
+      ref: s.ref,
+      kind: s.kind,
+      events: null,
+      activity: s.kind === "site" ? "Site recon active" : "Evidence acquisition active",
+    })),
   ];
   // A subject being scanned right now shows only its live chip, not its old row.
   const scanRefs = new Set(scans.map((s) => normalizeSubjectRef(s.ref)));
@@ -292,7 +307,7 @@ export function Sidebar({
             className="group"
           >
             <summary className={`flex min-h-9 cursor-pointer list-none items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] transition hover:bg-panel/70 hover:text-ink [&::-webkit-details-marker]:hidden ${directoryActive ? "text-ink" : "text-ink-dim"}`}>
-              <UsersThreeIcon size={17} weight={directoryActive ? "bold" : "regular"} className={directoryActive ? "text-signal" : "text-ink-faint"} aria-hidden />
+              <UsersThreeIcon size={17} weight={directoryActive ? "bold" : "regular"} className={directoryActive ? "text-signal-lift" : "text-ink-faint"} aria-hidden />
               <span>Entity library</span>
               <CaretDownIcon size={14} className="ml-auto text-ink-faint transition-transform group-open:rotate-180" aria-hidden />
             </summary>
@@ -332,16 +347,16 @@ export function Sidebar({
               title="Generating — click to watch. Keeps running if you navigate away."
               className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${active ? "bg-panel soft-shadow" : "hover:bg-panel/70"}`}
             >
-              <span className="mono relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal">
+              <span className="mono relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal-lift">
                 {avatar}
-                <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-signal ring-2 ring-sidebar" />
+                <span className="pulse-ring absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-signal ring-2 ring-sidebar" aria-hidden />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="mono block truncate text-[12.5px] text-ink">{r.handle}</span>
-                <span className="mono block truncate text-[11px] text-signal-dim">generating… {r.pct}%</span>
-                <span className="mt-1 block h-[3px] w-full overflow-hidden rounded-full bg-line">
-                  <span className="block h-full rounded-full bg-signal transition-[width] duration-500" style={{ width: `${Math.max(6, r.pct)}%` }} />
+                <span className="mono block truncate text-[11px] text-signal-lift">
+                  {r.steps.length} evidence {r.steps.length === 1 ? "event" : "events"} · {r.steps.at(-1)?.phase ?? "initializing"}
                 </span>
+                <span className="scan-bar mt-1 block w-full" aria-hidden />
               </span>
             </button>
           );
@@ -358,16 +373,16 @@ export function Sidebar({
               title={`Scanning ${s.label} (${s.kind})…`}
               className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-panel/70"
             >
-              <span className="mono relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal">
+              <span className="mono relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal-lift">
                 {avatar}
-                <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-signal ring-2 ring-sidebar" />
+                <span className="pulse-ring absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-signal ring-2 ring-sidebar" aria-hidden />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="mono block truncate text-[12.5px] text-ink">{s.label}</span>
-                <span className="mono block truncate text-[11px] text-signal-dim">scanning… {s.pct}%</span>
-                <span className="mt-1 block h-[3px] w-full overflow-hidden rounded-full bg-line">
-                  <span className="block h-full rounded-full bg-signal transition-[width] duration-500" style={{ width: `${Math.max(6, s.pct)}%` }} />
+                <span className="mono block truncate text-[11px] text-signal-lift">
+                  {s.events === null ? s.activity : `${s.events} evidence ${s.events === 1 ? "event" : "events"} · ${s.activity}`}
                 </span>
+                <span className="scan-bar mt-1 block w-full" aria-hidden />
               </span>
             </button>
           );
@@ -405,7 +420,7 @@ export function Sidebar({
                   <span className="block truncate text-[11px] text-ink-faint">
                     {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}{displayedVerdict === "INCOMPLETE" ? " · incomplete" : ""}
                     {e.contributor && e.contributor !== me && e.contributor !== "anonymous" && (
-                      <span className="text-signal-dim"> · {e.contributor}</span>
+                      <span className="text-signal-lift"> · {e.contributor}</span>
                     )}
                   </span>
                 </span>
@@ -419,7 +434,7 @@ export function Sidebar({
             <button
               type="button"
               onClick={() => nav("dossiers")}
-              className="btn-ghost mono ml-4 mt-2 text-[11px] text-signal-dim"
+              className="btn-ghost mono ml-4 mt-2 text-[11px] text-signal-lift"
             >
               View all cases →
             </button>

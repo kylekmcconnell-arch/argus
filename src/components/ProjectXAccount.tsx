@@ -90,8 +90,8 @@ export function ProjectXAccount({ name, domain, seedHandle, panelCostToken, onAu
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[13.5px] font-medium text-ink">{d.name ?? d.handle}</span>
-            {d.verified && <span className="text-[11px] text-signal" title="Verified">✔</span>}
-            <a href={`https://x.com/${d.handle.replace(/^@/, "")}`} target="_blank" rel="noreferrer" className="mono text-[11px] text-ink-faint hover:text-signal-dim">{d.handle}</a>
+            {d.verified && <span className="text-[11px] text-signal-lift" title="Verified">✔</span>}
+            <a href={`https://x.com/${d.handle.replace(/^@/, "")}`} target="_blank" rel="noreferrer" className="mono text-[11px] text-ink-faint hover:text-signal-lift">{d.handle}</a>
           </div>
           {d.bio && <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-dim">{d.bio}</p>}
           <div className="mono mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">

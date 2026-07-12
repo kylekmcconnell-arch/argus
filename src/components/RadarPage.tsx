@@ -169,7 +169,7 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
                     {d.imageUrl ? (
                       <img src={d.imageUrl} alt="" className="h-7 w-7 rounded-md border border-line object-cover" />
                     ) : (
-                      <span className="flex h-7 w-7 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal">{d.symbol.slice(0, 3)}</span>
+                      <span className="flex h-7 w-7 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal-lift">{d.symbol.slice(0, 3)}</span>
                     )}
                     <div className="min-w-0 flex-1">
                       <div className="mono truncate text-[13.5px] text-ink">${d.symbol}</div>

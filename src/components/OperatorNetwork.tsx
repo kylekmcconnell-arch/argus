@@ -93,7 +93,7 @@ export function OperatorNetwork({ deployer, chain, label, onAudit, panelCostToke
               <span className="block text-[11px] text-ink-dim">follow the money past the deployer to every launch behind the same hand</span>
             </span>
           </span>
-          <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal transition group-hover:bg-signal group-hover:text-white">trace →</span>
+          <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal-lift transition group-hover:bg-signal group-hover:text-white">trace →</span>
         </button>
       </div>
     );

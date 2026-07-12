@@ -246,7 +246,7 @@ export function TeamAccess() {
           const pending = updatingUserId === member.userId;
           return (
             <div key={member.userId} className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5 last:border-0">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] font-medium text-signal">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] font-medium text-signal-lift">
                 {(member.displayName[0] || member.email[0] || "?").toUpperCase()}
               </span>
               <span className="min-w-[180px] flex-1">

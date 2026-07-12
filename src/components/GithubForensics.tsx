@@ -79,7 +79,7 @@ export function GithubForensics({ org, login, subjectKey, panelCostToken, record
             {leaks.map((p) => (
               <div key={p.email} className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                 <span className="text-[12.5px] text-ink">{p.name}</span>
-                <a href={`mailto:${p.email}`} className="mono text-[11px] text-signal underline-offset-2 hover:underline">{p.email}</a>
+                <a href={`mailto:${p.email}`} className="mono text-[11px] text-signal-lift underline-offset-2 hover:underline">{p.email}</a>
                 {p.login && <a href={`https://github.com/${p.login}`} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">@{p.login}</a>}
                 <span className="mono text-[11px] text-ink-faint">{p.commits} commits</span>
               </div>

@@ -201,7 +201,7 @@ function AxisBar({
       {evidenceRefs && (
         <a
           href={`#decision-basis-${axis}`}
-          className="mt-1.5 inline-flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 rounded-md text-[12.5px] text-signal underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+          className="mt-1.5 inline-flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 rounded-md text-[12.5px] text-signal-lift underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
         >
           <span>{evidenceRefs.length} evidence {evidenceRefs.length === 1 ? "artifact" : "artifacts"}</span>
           {(counterEvidenceRefs?.length ?? 0) > 0 && <span className="text-caution">{counterEvidenceRefs!.length} counter</span>}
@@ -1617,7 +1617,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     onClick={() => void archive()}
                     disabled={archiveState === "archiving"}
                     title="Remove this case from active work while preserving its immutable evidence and history"
-                    className="w-full rounded-lg px-3 py-2 text-left text-[12.5px] text-ink-dim transition hover:bg-signal/10 hover:text-signal disabled:cursor-wait disabled:opacity-60"
+                    className="w-full rounded-lg px-3 py-2 text-left text-[12.5px] text-ink-dim transition hover:bg-signal/10 hover:text-signal-lift disabled:cursor-wait disabled:opacity-60"
                   >
                     {archiveState === "archiving" ? "Archiving case…" : archiveState === "error" ? "Archive failed · retry" : "Archive case"}
                   </button>
@@ -1714,7 +1714,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               </div>
               <div>
                 <dt className="stat-label">Report state</dt>
-                <dd className="mono mt-1 text-signal">
+                <dd className="mono mt-1 text-signal-lift">
                   {versionContext ? `v${versionContext.version} · frozen` : f.live ? "live collection" : "curated dossier"}
                 </dd>
               </div>
@@ -1773,7 +1773,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 {legacyCoverageNotCaptured ? "this snapshot contains no frozen check-level outcomes" : "observable outcomes stored in this report"}
               </span>
               {!legacyCoverageNotCaptured && diligenceChecks.length > 0 && (
-                <a href="#scan-methodology" className="ml-auto inline-flex min-h-8 items-center text-[11px] text-signal underline-offset-2 hover:underline">
+                <a href="#scan-methodology" className="ml-auto inline-flex min-h-8 items-center text-[11px] text-signal-lift underline-offset-2 hover:underline">
                   Review coverage gaps
                 </a>
               )}
@@ -1883,21 +1883,21 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               tone={decisionNarrativeTone}
               count={`${evidenceBackedAxisCount} / ${governingAxes.length} axes`}
               items={decisionRailItems}
-              footer={<a href="#decision-basis" className="inline-flex min-h-8 items-center text-signal hover:underline">Inspect the full decision basis</a>}
+              footer={<a href="#decision-basis" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">Inspect the full decision basis</a>}
             />
             <ReportCanvasRailCard
               title="Open questions"
               tone="caution"
               count={`${readiness.unresolved}`}
               items={openQuestionRail}
-              footer={diligenceChecks.length > 0 ? <a href="#scan-methodology" className="inline-flex min-h-8 items-center text-signal hover:underline">Review every check outcome</a> : undefined}
+              footer={diligenceChecks.length > 0 ? <a href="#scan-methodology" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">Review every check outcome</a> : undefined}
             />
             <ReportCanvasRailCard
               title="Evidence provenance"
               tone="signal"
               count={`${f.sourceArtifacts?.length ?? 0} artifacts`}
               items={provenanceRail}
-              footer={(f.sourceArtifacts?.length ?? 0) > 0 ? <a href="#frozen-source-ledger" className="inline-flex min-h-8 items-center text-signal hover:underline">Open frozen source ledger</a> : undefined}
+              footer={(f.sourceArtifacts?.length ?? 0) > 0 ? <a href="#frozen-source-ledger" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">Open frozen source ledger</a> : undefined}
             />
             <ReportCanvasRailCard title="Report freshness" tone="neutral" items={freshnessRail} />
           </aside>
@@ -2092,7 +2092,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                             <span key={t.key}>
                               {ti > 0 && ", "}
                               {onOpenProject && t.type === "Company" ? (
-                                <button onClick={() => onOpenProject(t.label, undefined, panelCostToken)} className="text-ink underline-offset-2 transition hover:text-signal-dim hover:underline">{t.label}</button>
+                                <button onClick={() => onOpenProject(t.label, undefined, panelCostToken)} className="text-ink underline-offset-2 transition hover:text-signal-lift hover:underline">{t.label}</button>
                               ) : (
                                 <span className="text-ink">{t.label}</span>
                               )}
@@ -2342,7 +2342,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                           style={{ background: v.outcome === "Rug" ? "var(--color-avoid)" : v.outcome === "Acquisition" || v.outcome === "IPO" ? "var(--color-pass)" : "var(--color-ink-faint)" }}
                         />
                         {onOpenProject ? (
-                          <button onClick={() => onOpenProject(v.project_name, undefined, panelCostToken)} className="truncate text-left text-ink underline-offset-2 transition hover:text-signal-dim hover:underline" title="See everyone who worked on this">{v.project_name}</button>
+                          <button onClick={() => onOpenProject(v.project_name, undefined, panelCostToken)} className="truncate text-left text-ink underline-offset-2 transition hover:text-signal-lift hover:underline" title="See everyone who worked on this">{v.project_name}</button>
                         ) : (
                           <span className="truncate text-ink">{v.project_name}</span>
                         )}

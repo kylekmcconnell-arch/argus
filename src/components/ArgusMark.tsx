@@ -19,7 +19,7 @@ function eyeDots(x0: number, x1: number, cy: number, A: number, step: number, ir
     for (let y = cy - hh; y <= cy + hh + 0.001; y += step) {
       const edge = 1 - Math.abs(y - cy) / hh; // 1 at midline, 0 at the lid
       const nearLid = 1 - edge;
-      let r = (step * 0.46) * (1 - tx * 0.82) * (0.55 + 0.8 * nearLid);
+      const r = (step * 0.46) * (1 - tx * 0.82) * (0.55 + 0.8 * nearLid);
       if (Math.hypot(x - irisX, y - irisY) < irisR * 2.1) continue; // clear space around the iris
       if (r < step * 0.12) continue; // drop the faint far-right dots → sparse outline
       dots.push({ x, y, r, o: 0.34 + 0.62 * (1 - tx) });
@@ -38,10 +38,16 @@ export function ArgusMark({ size = 28, live = false }: { size?: number; live?: b
         ))}
       </g>
       {live && (
-        <circle cx={irisX} cy={irisY} r={irisR} fill="none" stroke="var(--color-signal)" strokeWidth="1.4" opacity="0.5">
-          <animate attributeName="r" values={`${irisR};${irisR * 2.1};${irisR}`} dur="2.2s" repeatCount="indefinite" />
-          <animate attributeName="opacity" values="0.5;0;0.5" dur="2.2s" repeatCount="indefinite" />
-        </circle>
+        <circle
+          cx={irisX}
+          cy={irisY}
+          r={irisR}
+          fill="none"
+          stroke="var(--color-signal)"
+          strokeWidth="1.4"
+          opacity="0.5"
+          className="origin-center motion-safe:animate-[pulse-ring_2.2s_ease-out_infinite] motion-reduce:opacity-0"
+        />
       )}
       <circle cx={irisX} cy={irisY} r={irisR} fill="var(--color-signal)" />
       <circle cx={irisX - irisR * 0.32} cy={irisY - irisR * 0.32} r={irisR * 0.3} fill="#ffffff" opacity="0.75" />

@@ -225,7 +225,7 @@ export function DossiersPage({
                 {img ? (
                   <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-md border border-line object-cover" />
                 ) : (
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal">{letter}</span>
+                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal-lift">{letter}</span>
                 )}
                 <span className="min-w-0 flex-1">
                   <span className="flex items-center gap-1.5">
@@ -382,7 +382,7 @@ export function DossiersPage({
           {img ? (
             <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-md border border-line object-cover" />
           ) : (
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal">{letter}</span>
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal-lift">{letter}</span>
           )}
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5">
@@ -437,7 +437,7 @@ export function DossiersPage({
                   disabled={isArchived}
                   onClick={(ev) => { openBtn(ev); if (!isArchived) onOpen(r.ref, r.kind); }}
                   title={isArchived ? "Restore this case before opening its report" : `Open the ${km.label} report — ${r.query ?? r.ref}`}
-                  className="mono inline-flex min-h-8 min-w-0 items-center gap-1 px-2 py-1 text-[11px] text-ink-dim transition hover:bg-signal/5 hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-ink-dim"
+                  className="mono inline-flex min-h-8 min-w-0 items-center gap-1 px-2 py-1 text-[11px] text-ink-dim transition hover:bg-signal/5 hover:text-signal-lift focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal disabled:cursor-default disabled:hover:bg-transparent disabled:hover:text-ink-dim"
                 >
                   <span className="uppercase" style={{ color: km.color }}>{km.label}</span>
                   <span className="max-w-40 truncate text-ink-faint">{r.query ?? r.ref}</span>
@@ -451,7 +451,7 @@ export function DossiersPage({
                   }}
                   aria-label={`Open case brief for the ${r.kind} facet ${r.query ?? r.ref}`}
                   title={`Open the analyst brief for this exact ${r.kind} case`}
-                  className="mono min-h-8 border-l border-line px-2 py-1 text-[11px] text-ink-faint transition hover:bg-signal/5 hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal"
+                  className="mono min-h-8 border-l border-line px-2 py-1 text-[11px] text-ink-faint transition hover:bg-signal/5 hover:text-signal-lift focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-signal"
                 >
                   Brief
                 </button>

@@ -108,7 +108,7 @@ export function OnchainReality({ promotions, wallets, symbolHints, onAudit }: { 
 
       {tok && (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px]">
-          <button onClick={() => onAudit?.(tok.address)} className="mono text-ink underline-offset-2 hover:text-signal-dim hover:underline">{subject?.label}</button>
+          <button onClick={() => onAudit?.(tok.address)} className="mono text-ink underline-offset-2 hover:text-signal-lift hover:underline">{subject?.label}</button>
           {m && <span className={`verdict-pill ${tok.verdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={tok.verdict === "FAIL" ? undefined : ({ "--tint": m.color } as React.CSSProperties)}>{tok.verdict}{tok.score != null ? ` ${tok.score}` : ""}</span>}
           {typeof tok.liquidityUsd === "number" && <span className="text-[11px] text-ink-faint">liquidity ${Math.round(tok.liquidityUsd).toLocaleString()}</span>}
           <span className="text-[11px] text-ink-faint">· the token this account promotes</span>

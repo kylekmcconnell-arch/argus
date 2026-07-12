@@ -265,7 +265,7 @@ export function VcReport({ handle, name, verifiedProjects = [], panelCostToken, 
             <div key={i} className="px-3 py-2 text-[12.5px]">
               <div className="flex flex-wrap items-center gap-2">
                 {openTarget && onAudit ? (
-                  <button onClick={() => onAudit(openTarget!)} className="font-medium text-ink underline-offset-2 hover:text-signal-dim hover:underline">{r.project}</button>
+                  <button onClick={() => onAudit(openTarget!)} className="font-medium text-ink underline-offset-2 hover:text-signal-lift hover:underline">{r.project}</button>
                 ) : (
                   <span className="font-medium text-ink">{r.project}</span>
                 )}

@@ -147,7 +147,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
             <div className="divide-y divide-line/70">
               {INVESTIGATION_OUTPUTS.map(({ icon: Icon, label, detail }) => (
                 <div key={label} className="flex gap-3 px-4 py-3.5">
-                  <Icon size={18} className="mt-0.5 shrink-0 text-signal" aria-hidden />
+                  <Icon size={18} className="mt-0.5 shrink-0 text-signal-lift" aria-hidden />
                   <div>
                     <div className="text-[13.5px] font-medium text-ink">{label}</div>
                     <div className="mt-1 text-[11px] leading-relaxed text-ink-faint">{detail}</div>
@@ -167,14 +167,14 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
               <div className="eyebrow">Decision coverage</div>
               <h2 id="investigation-lenses-title" className="display-sm mt-2 text-[18px] text-ink">One subject. Three diligence lenses.</h2>
             </div>
-            <button type="button" onClick={onAbout} className="btn-ghost flex min-h-9 items-center gap-1.5 text-[12.5px] text-signal-dim">
+            <button type="button" onClick={onAbout} className="btn-ghost flex min-h-9 items-center gap-1.5 text-[12.5px] text-signal-lift">
               See how ARGUS works <ArrowRightIcon size={14} aria-hidden />
             </button>
           </div>
           <div className="mt-5 grid divide-y divide-line/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             {INVESTIGATION_LENSES.map(({ icon: Icon, title, detail }) => (
               <div key={title} className="py-4 sm:px-5 sm:first:pl-0 sm:last:pr-0">
-                <Icon size={20} className="text-signal" aria-hidden />
+                <Icon size={20} className="text-signal-lift" aria-hidden />
                 <h3 className="mt-3 text-[15px] font-medium text-ink">{title}</h3>
                 <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">{detail}</p>
               </div>

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AuditConsole } from "./AuditConsole";
 import { subscribeScanRuns, getScanRun } from "../lib/scanrunner";
 import type { RunnableTokenInput } from "../lib/resolveInput";
@@ -17,6 +17,7 @@ export function TokenRun({
   onError: () => void;
 }) {
   const [, setTick] = useState(0);
+  const terminalNotificationRef = useRef<string | null>(null);
 
   useEffect(() => {
     const unsub = subscribeScanRuns(() => setTick((t) => t + 1));
@@ -27,19 +28,23 @@ export function TokenRun({
 
   useEffect(() => {
     if (!run) return;
+    const notificationKey = `${run.id}:${run.status}`;
+    if (run.status === "running" || terminalNotificationRef.current === notificationKey) return;
+    terminalNotificationRef.current = notificationKey;
     if (run.status === "done" && run.result) onDone(run.result as TokenDossier, run.priv, run.id);
     else if (run.status === "error") onError();
-  }, [run?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [onDone, onError, run, run?.status]);
 
   const label = input.ref.length > 20 ? input.ref.slice(0, 8) + "…" + input.ref.slice(-4) : input.ref;
+  const working = !run || run.status === "running";
   return (
     <AuditConsole
       handle={label}
-      subtitle="live token audit · DexScreener + GoPlus · runs in the background if you navigate away"
+      subtitle="Live market and contract evidence · observed sources appear as they respond · continues in background"
       steps={run?.steps ?? []}
-      pct={run?.pct ?? 0}
-      working
+      working={working}
       mode="live"
+      kind="token"
     />
   );
 }

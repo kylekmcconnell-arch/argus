@@ -60,7 +60,7 @@ export function TrendingPage({ onOpen }: { onOpen: (ref: string) => void }) {
         <div>
           <h1 className="flex items-center gap-2.5 display-sm text-[24px] text-ink">
             Trending
-            <span className="mono inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-[11px] uppercase tracking-wider text-signal-dim">
+            <span className="mono inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-[11px] uppercase tracking-wider text-signal-lift">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal" /> live
             </span>
           </h1>
@@ -103,11 +103,11 @@ export function TrendingPage({ onOpen }: { onOpen: (ref: string) => void }) {
                 title="Open the report"
                 className="panel group flex w-full items-center gap-3 px-3 py-2.5 text-left transition hover:border-line-2 hover:bg-panel/80"
               >
-                <span className={`mono w-7 shrink-0 text-center text-[15px] font-semibold tabular ${top ? "text-signal" : "text-ink-faint"}`}>{s.rank}</span>
+                <span className={`mono w-7 shrink-0 text-center text-[15px] font-semibold tabular ${top ? "text-signal-lift" : "text-ink-faint"}`}>{s.rank}</span>
                 {img ? (
                   <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-md border border-line object-cover" />
                 ) : (
-                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[12.5px] text-signal">{letter}</span>
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[12.5px] text-signal-lift">{letter}</span>
                 )}
                 <span className="min-w-0 flex-1">
                   <span className="mono block truncate text-[13.5px] text-ink">{s.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>

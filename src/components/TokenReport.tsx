@@ -378,7 +378,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           {d.imageUrl ? (
             <img src={d.imageUrl} alt="" className="h-14 w-14 rounded-2xl border border-line-2 object-cover" />
           ) : (
-            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line-2 bg-panel text-xl text-signal">${d.symbol.slice(0, 3)}</div>
+            <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-line-2 bg-panel text-xl text-signal-lift">${d.symbol.slice(0, 3)}</div>
           )}
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
@@ -446,7 +446,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 {readiness.status === "ready" ? "Evidence complete" : `${readiness.status} coverage`}
               </span>
               <span className="text-[11px] text-ink-faint">observable outcomes stored in this report</span>
-              <a href="#token-methodology" className="ml-auto text-[11px] text-signal-dim underline-offset-2 hover:underline">Review check-by-check methodology</a>
+              <a href="#token-methodology" className="ml-auto text-[11px] text-signal-lift underline-offset-2 hover:underline">Review check-by-check methodology</a>
             </div>
             <dl className="mt-3 grid gap-2 sm:grid-cols-3" aria-label="Evidence readiness summary">
               <div className="stat-tile">

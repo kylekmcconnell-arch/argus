@@ -26,9 +26,9 @@ export function RunConsole({ fixture, onDone }: { fixture: SubjectFixture; onDon
       handle={fixture.handle}
       subtitle={`${fixture.display_name} · ${fixture.followers} followers · joined ${fixture.joined}`}
       steps={steps.slice(0, shown)}
-      pct={Math.round((shown / steps.length) * 100)}
       working={shown < steps.length}
       mode="curated"
+      kind="person"
     />
   );
 }

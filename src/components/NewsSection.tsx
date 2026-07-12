@@ -71,7 +71,7 @@ export function NewsSection({ query, handle }: { query: string; handle?: string 
         >
           <span className="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-signal/50 group-hover:bg-signal" />
           <span className="min-w-0 flex-1">
-            <span className="block text-[12.5px] leading-snug text-ink group-hover:text-signal-dim">{a.title}</span>
+            <span className="block text-[12.5px] leading-snug text-ink group-hover:text-signal-lift">{a.title}</span>
             <span className="mono mt-0.5 block text-[11px] text-ink-faint">
               {a.source}{a.source && a.publishedAt ? " · " : ""}{ago(a.publishedAt)}
             </span>

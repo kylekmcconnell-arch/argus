@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AuditConsole } from "./AuditConsole";
 import { subscribeRuns, getRun } from "../lib/runner";
 import type { Dossier } from "../data/dossier";
@@ -17,6 +17,7 @@ export function LiveRun({
   onError: () => void;
 }) {
   const [, setTick] = useState(0);
+  const terminalNotificationRef = useRef<string | null>(null);
 
   useEffect(() => {
     const unsub = subscribeRuns(() => setTick((t) => t + 1));
@@ -30,21 +31,24 @@ export function LiveRun({
   // onComplete (logging), without pulling the user's view around.
   useEffect(() => {
     if (!run) return;
+    const notificationKey = `${run.key}:${run.startedAt}:${run.status}`;
+    if (run.status === "running" || terminalNotificationRef.current === notificationKey) return;
+    terminalNotificationRef.current = notificationKey;
     if (run.status === "done" && run.dossier) onDone(run.dossier);
     else if (run.status === "error") onError();
-  }, [run?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [onDone, onError, run, run?.status]);
 
   const steps = run?.steps ?? [];
-  const pct = run?.pct ?? 0;
+  const working = !run || run.status === "running";
 
   return (
     <AuditConsole
       handle={handle.startsWith("@") ? handle : "@" + handle.replace(/^@/, "")}
-      subtitle="live collection across configured providers · runs in the background if you navigate away"
+      subtitle="Live evidence acquisition · observed sources appear as they respond · continues in background"
       steps={steps}
-      pct={pct}
-      working
+      working={working}
       mode="live"
+      kind="person"
     />
   );
 }

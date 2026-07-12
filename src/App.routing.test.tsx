@@ -763,7 +763,8 @@ describe("App routing safety", () => {
     act(() => view.querySelector<HTMLButtonElement>("[data-testid='reopen-recent']")?.click());
 
     await vi.waitFor(() => expect(view.textContent).toContain("Resolving the exact subject"));
-    expect(view.textContent).toContain("Checking durable cases");
+    expect(view.textContent).toContain("Durable cases and canonical identity");
+    expect(view.textContent).toContain("no provider spend during resolution");
     expectNoRunnerStarted();
 
     await act(async () => {

@@ -79,7 +79,7 @@ export function AskReport({
   return (
     <div className="panel">
       <button type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)} className="flex w-full items-center gap-2 px-4 py-3 text-left">
-        <ChatCircleText aria-hidden="true" size={16} weight="duotone" className="text-signal" />
+        <ChatCircleText aria-hidden="true" size={16} weight="duotone" className="text-signal-lift" />
         <span className="eyebrow">Ask frozen evidence</span>
         {reportVersionId && <span className="mono text-[10px] text-ink-faint">frozen version {reportVersionId.slice(0, 8)}…</span>}
         <CaretDown aria-hidden="true" size={14} weight="bold" className={`ml-auto text-ink-faint transition-transform ${open ? "rotate-180" : ""}`} />

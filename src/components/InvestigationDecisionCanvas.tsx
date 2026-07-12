@@ -114,7 +114,7 @@ export function InvestigationDecisionCanvas({
         />
         <section className="panel p-3.5" aria-label="Evidence coverage and freshness">
           <div className="flex items-center gap-2">
-            <Database size={17} weight="duotone" aria-hidden="true" className="text-signal" />
+            <Database size={17} weight="duotone" aria-hidden="true" className="text-signal-lift" />
             <h2 className="eyebrow text-ink-dim">Evidence coverage</h2>
             <span className="mono ml-auto text-[13.5px] font-semibold text-ink">{coveragePercent}%</span>
           </div>

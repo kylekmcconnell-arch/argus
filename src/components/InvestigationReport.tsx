@@ -382,7 +382,7 @@ export function InvestigationReport({
                 project account · {projectReadiness.status} · {projectReadiness.successful}/{projectReadiness.applicable} outcomes
               </span>
             )}
-            <a href="#investigation-methodology" className="ml-auto text-[11px] text-signal-dim underline-offset-2 hover:text-signal hover:underline">
+            <a href="#investigation-methodology" className="ml-auto text-[11px] text-signal-lift underline-offset-2 hover:text-signal-lift hover:underline">
               Review checks
             </a>
             <p className="w-full text-[11px] leading-snug text-ink-faint">{readiness.guidance}</p>

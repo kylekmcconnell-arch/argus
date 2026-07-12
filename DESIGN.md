@@ -54,9 +54,16 @@ chips, "own token" / "rugged" / drift-alert flags. These use `.chip` + tint or
 
 ## 2 · Color
 
-Token NAMES are frozen (`--color-void/panel/panel-2/sidebar/line/line-2/ink/ink-dim/
-ink-faint/signal/signal-dim/accent-tint/pass/caution/fail/avoid/unverifiable`). Values are
+Token NAMES are frozen (`--color-void/panel/panel-2/sidebar/line/line-2/control-line/ink/
+ink-dim/ink-faint/signal/signal-dim/signal-lift/on-signal/accent-tint/pass/caution/fail/avoid/unverifiable`). Values are
 tuned in `src/index.css` for both themes — components never hardcode color.
+
+The signal family has three jobs: `signal` is the accessible primary fill/focus color,
+`signal-dim` is its pressed/strong-fill partner, and `signal-lift` is blue text/icons on
+dark surfaces. Never use `signal-dim` for small text in dark mode. `control-line` is the
+minimum-contrast boundary for inputs and outlined buttons; `line` and `line-2` remain
+quieter structural dividers. `on-signal` is the theme-stable foreground for primary
+signal fills.
 
 The palette is deliberately off-stock (no default Tailwind hex anywhere) — don't
 reintroduce stock values. `fail` (magenta-rose) vs `avoid` (alarm red) is load-bearing:
@@ -119,8 +126,9 @@ borderless washes + hairline `divide-y divide-line/60` rows — never box-in-box
 - Focus: global two-layer `:focus-visible` ring ships in index.css — remove per-component
   `focus:outline-none` hacks; inputs use `.field`.
 - Motion: `.rise-in` on page/report mounts; `.scan-bar` replaces the three duplicated
-  private scan-keyframe copies; existing `.sweep`/`.scan-line` for consoles. All disabled
-  under `prefers-reduced-motion`.
+  private scan-keyframe copies; existing `.sweep`/`.scan-line` for consoles. CSS motion,
+  Tailwind pulse/ping/spin/bounce utilities, and smooth scrolling are all visually
+  disabled under `prefers-reduced-motion`.
 
 ## 4 · Structure
 

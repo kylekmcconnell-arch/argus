@@ -1,6 +1,6 @@
 @import "tailwindcss";
 
-/* ARGUS — a forensic instrument. Cold near-black operations room, one electric
+/* ARGUS — a forensic instrument. Midnight-blue operations room, one electric
    royal-blue signal, verdicts that read like stamped findings. DARK is the
    default (the @theme values); LIGHT is a runtime override on
    :root[data-theme="light"]. Token NAMES never change — every component flips
@@ -12,59 +12,70 @@
 
    Deliberately off-stock palette: no value here is a default Tailwind hex. */
 @theme {
-  --color-void: #080d18; /* app background — cold near-black */
-  --color-panel: #0e1729; /* cards */
-  --color-panel-2: #15213a; /* raised / inset */
-  --color-sidebar: #0a1120; /* left rail */
-  --color-line: #1d2b47; /* hairline border */
-  --color-line-2: #2e4166; /* stronger border */
-  --color-ink: #eef2f9; /* primary text */
-  --color-ink-dim: #a6b4cc; /* secondary text */
-  --color-ink-faint: #8294af; /* tertiary text · AA on dark panels */
+  --color-void: #060a12; /* app background — cold midnight */
+  --color-panel: #0c1626; /* cards */
+  --color-panel-2: #12213a; /* raised / inset */
+  --color-sidebar: #08101d; /* left rail */
+  --color-line: #1b2a42; /* atmospheric hairline */
+  --color-line-2: #2b4263; /* stronger structural border */
+  --color-control-line: #526b90; /* accessible control boundary */
+  --color-ink: #f4f7fc; /* primary text */
+  --color-ink-dim: #aab7cb; /* secondary text */
+  --color-ink-faint: #8292aa; /* tertiary text · AA on dark panels */
 
-  --color-signal: #4272ff; /* electric royal blue (the iris) */
-  --color-signal-dim: #2e56e6;
-  --color-accent-tint: #0c1830; /* subtle blue-tinted wash */
+  --color-signal: #3b67e8; /* electric royal blue — fills / focus */
+  --color-signal-dim: #2e52c7; /* pressed / strong fill */
+  --color-signal-lift: #7fa2ff; /* accessible blue text on midnight */
+  --color-on-signal: #ffffff; /* text / highlights on signal fills */
+  --color-accent-tint: #0b1933; /* subtle blue-tinted wash */
 
-  --color-pass: #2dbd6e; /* jade — confirmed good */
-  --color-caution: #eda320; /* goldenrod — warn / partial */
-  --color-fail: #e0588f; /* cool magenta-rose — failed verdict score */
-  --color-avoid: #e5484d; /* alarm red — disqualifying */
-  --color-unverifiable: #9d86f7;
+  --color-pass: #35c97b; /* jade — confirmed good */
+  --color-caution: #f2ad3f; /* amber — warn / partial */
+  --color-fail: #e56c9d; /* cool magenta-rose — failed verdict score */
+  --color-avoid: #f05b61; /* alarm red — disqualifying */
+  --color-unverifiable: #a98cf5;
 
   --font-sans: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
 }
 
 :root {
-  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 34px -18px rgba(0, 0, 0, 0.65);
-  --select: rgba(66, 114, 255, 0.28);
+  color-scheme: dark;
+  --shadow:
+    0 1px 2px color-mix(in oklab, var(--color-void) 72%, transparent),
+    0 20px 54px -34px color-mix(in oklab, var(--color-void) 88%, transparent);
+  --select: color-mix(in oklab, var(--color-signal-lift) 30%, transparent);
 }
 
 /* LIGHT mode — the alternate. */
 :root[data-theme="light"] {
-  --color-void: #ffffff;
+  color-scheme: light;
+  --color-void: #f4f7fb;
   --color-panel: #ffffff;
-  --color-panel-2: #f2f5fa;
-  --color-sidebar: #f1f5fb;
-  --color-line: #e1e7f0;
-  --color-line-2: #c7d2e3;
-  --color-ink: #0a1120;
-  --color-ink-dim: #43556f;
-  --color-ink-faint: #5f7189;
+  --color-panel-2: #eef3f9;
+  --color-sidebar: #eff4fa;
+  --color-line: #d8e1ed;
+  --color-line-2: #b4c2d5;
+  --color-control-line: #72829a;
+  --color-ink: #0b1424;
+  --color-ink-dim: #42536a;
+  --color-ink-faint: #5c6e86;
 
-  --color-signal: #2050e0;
-  --color-signal-dim: #1a43c8;
-  --color-accent-tint: #edf3fe;
+  --color-signal: #2e5edb;
+  --color-signal-dim: #224abd;
+  --color-signal-lift: #224abd;
+  --color-accent-tint: #eaf0ff;
 
-  --color-pass: #107f42;
-  --color-caution: #96650a;
-  --color-fail: #c0266d;
-  --color-avoid: #d92d20;
-  --color-unverifiable: #6d38d8;
+  --color-pass: #147a43;
+  --color-caution: #8a5b06;
+  --color-fail: #b92564;
+  --color-avoid: #c72e35;
+  --color-unverifiable: #6940cc;
 
-  --shadow: 0 1px 2px rgba(9, 9, 11, 0.04), 0 8px 30px -16px rgba(9, 9, 11, 0.12);
-  --select: rgba(32, 80, 224, 0.16);
+  --shadow:
+    0 1px 2px color-mix(in oklab, var(--color-ink) 5%, transparent),
+    0 18px 48px -34px color-mix(in oklab, var(--color-ink) 18%, transparent);
+  --select: color-mix(in oklab, var(--color-signal) 18%, transparent);
 }
 
 @layer base {
@@ -79,6 +90,9 @@
     background: var(--color-void);
     color: var(--color-ink);
     font-family: var(--font-sans);
+    font-optical-sizing: auto;
+    font-synthesis: none;
+    text-rendering: optimizeLegibility;
     -webkit-font-smoothing: antialiased;
   }
   ::selection {
@@ -141,7 +155,16 @@
 .panel {
   border-radius: 12px;
   border: 1px solid color-mix(in oklab, var(--color-line) 72%, transparent);
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--color-panel-2) 16%, var(--color-panel)) 0%,
+    var(--color-panel) 62%
+  );
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-ink) 3.5%, transparent);
+}
+:root[data-theme="light"] .panel {
   background: var(--color-panel);
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent);
 }
 /* Borderless interior zone (a wash, not a box). */
 .panel-inset {
@@ -159,7 +182,8 @@
 /* Atmospheric glow for hero canvases. Sits on the void. */
 .atmosphere {
   background:
-    radial-gradient(1100px 480px at 68% -12%, color-mix(in oklab, var(--color-signal) 7%, transparent), transparent 68%),
+    radial-gradient(1050px 500px at 72% -10%, color-mix(in oklab, var(--color-signal) 9%, transparent), transparent 70%),
+    radial-gradient(760px 440px at 16% 112%, color-mix(in oklab, var(--color-signal) 3%, transparent), transparent 72%),
     var(--color-void);
 }
 
@@ -287,12 +311,16 @@
   justify-content: center;
   gap: 6px;
   background: var(--color-signal);
-  color: #ffffff;
+  color: var(--color-on-signal);
   border-radius: 8px;
-  transition: filter 0.15s ease, transform 0.05s ease;
+  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-on-signal) 18%, transparent);
+  transition: background-color 0.15s ease, box-shadow 0.15s ease, transform 0.05s ease;
 }
 .btn-primary:hover {
-  filter: brightness(1.12);
+  background: color-mix(in oklab, var(--color-signal) 78%, var(--color-signal-dim));
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-on-signal) 22%, transparent),
+    0 8px 24px -16px color-mix(in oklab, var(--color-signal) 72%, transparent);
 }
 .btn-primary:active {
   transform: scale(0.985);
@@ -306,13 +334,13 @@
   align-items: center;
   justify-content: center;
   gap: 6px;
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-control-line);
   border-radius: 8px;
   color: var(--color-ink-dim);
   transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
 .btn-secondary:hover {
-  border-color: var(--color-line-2);
+  border-color: var(--color-signal);
   color: var(--color-ink);
 }
 
@@ -351,7 +379,7 @@
    handles keyboard focus; the border shift is the pointer affordance.) */
 .field {
   background: color-mix(in oklab, var(--color-void) 60%, transparent);
-  border: 1px solid var(--color-line);
+  border: 1px solid var(--color-control-line);
   border-radius: 8px;
   color: var(--color-ink);
   transition: border-color 0.15s ease;
@@ -495,6 +523,13 @@
 .scores-marquee:hover { animation-play-state: paused; }
 
 @media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  :where(.animate-bounce, .animate-ping, .animate-pulse, .animate-spin) { animation: none !important; }
   .scores-marquee { animation: none; }
   .rise-in { animation: none; }
   .sweep { animation: none; }

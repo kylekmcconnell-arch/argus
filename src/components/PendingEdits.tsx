@@ -167,7 +167,7 @@ export function PendingEdits() {
                   <span className="ml-auto text-[11px] text-ink-faint">{ago(learning.at)}</span>
                 </div>
                 <p className="mt-1 text-[12.5px] leading-snug text-ink-faint"><span className="text-ink-dim">why:</span> {learning.reason}</p>
-                <p className="mt-0.5 text-[12.5px] leading-snug text-signal-dim"><span className="text-ink-dim">fix:</span> {learning.fix}</p>
+                <p className="mt-0.5 text-[12.5px] leading-snug text-signal-lift"><span className="text-ink-dim">fix:</span> {learning.fix}</p>
               </div>
             ))}
           </div>

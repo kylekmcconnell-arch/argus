@@ -123,7 +123,7 @@ function ProviderRow({ provider, latest }: { provider: Provider; latest?: UsageE
           <a href={`https://${provider.source.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">{provider.source}</a>
         </div>
         <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">{health.context}</p>
-        {provider.usage && <p className="mono mt-1 text-[11px] text-signal-dim">{provider.usage}</p>}
+        {provider.usage && <p className="mono mt-1 text-[11px] text-signal-lift">{provider.usage}</p>}
       </div>
     </div>
   );

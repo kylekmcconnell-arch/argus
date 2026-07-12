@@ -95,7 +95,7 @@ export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
               </span>
               <div className="min-w-[180px] flex-1">
                 {a.subject ? (
-                  <button onClick={() => onOpen(a.subject!)} className="mono text-[13.5px] font-medium text-ink underline-offset-2 hover:text-signal-dim hover:underline">
+                  <button onClick={() => onOpen(a.subject!)} className="mono text-[13.5px] font-medium text-ink underline-offset-2 hover:text-signal-lift hover:underline">
                     {a.label ?? a.subject}
                   </button>
                 ) : (

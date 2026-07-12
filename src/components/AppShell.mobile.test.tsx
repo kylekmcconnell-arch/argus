@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const harness = vi.hoisted(() => ({
   signOut: vi.fn(),
+  runs: [] as Array<Record<string, unknown>>,
 }));
 
 vi.mock("../auth-context", () => ({
@@ -22,7 +23,7 @@ vi.mock("./ArgusMark", () => ({ ArgusMark: () => <span aria-hidden="true">ARGUS<
 vi.mock("../lib/watchlist", () => ({ getWatchlist: () => [] }));
 vi.mock("../lib/analyst", () => ({ getAnalyst: () => "Kyle McConnell" }));
 vi.mock("../lib/avatars", () => ({ auditImage: () => null }));
-vi.mock("../lib/runner", () => ({ activeRuns: () => [], subscribeRuns: () => () => undefined }));
+vi.mock("../lib/runner", () => ({ activeRuns: () => harness.runs, subscribeRuns: () => () => undefined }));
 vi.mock("../lib/activescans", () => ({ activeScans: () => [], subscribeScans: () => () => undefined }));
 vi.mock("../lib/scanrunner", () => ({ activeScanRuns: () => [], subscribeScanRuns: () => () => undefined }));
 vi.mock("../lib/auditlog", () => ({
@@ -35,6 +36,7 @@ import { AppShell } from "./AppShell";
 
 let container: HTMLDivElement;
 let root: Root;
+const storageValues = new Map<string, string>();
 
 function mobileMatchMedia(): MediaQueryList {
   return {
@@ -76,6 +78,15 @@ function menuButton(): HTMLButtonElement {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  harness.runs = [];
+  storageValues.clear();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => storageValues.get(key) ?? null,
+    setItem: (key: string, value: string) => storageValues.set(key, value),
+    clear: () => storageValues.clear(),
+  });
+  document.documentElement.dataset.theme = "dark";
+  document.documentElement.style.colorScheme = "dark";
   vi.stubGlobal("matchMedia", vi.fn(() => mobileMatchMedia()));
   vi.stubGlobal("requestAnimationFrame", vi.fn((callback: FrameRequestCallback) => {
     callback(0);
@@ -154,5 +165,38 @@ describe("AppShell mobile navigation drawer", () => {
     expect(drawer().hasAttribute("inert")).toBe(true);
     expect(menuButton().getAttribute("aria-expanded")).toBe("false");
     expect(document.activeElement).toBe(menuButton());
+  });
+
+  it("defaults to dark and persists the explicit light-mode action", async () => {
+    await renderShell();
+    await act(async () => menuButton().click());
+
+    const lightMode = drawer().querySelector<HTMLButtonElement>("button[aria-label='Switch to light mode']");
+    expect(lightMode).not.toBeNull();
+    expect(document.documentElement.dataset.theme).toBe("dark");
+
+    await act(async () => lightMode?.click());
+
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement.style.colorScheme).toBe("light");
+    expect(localStorage.getItem("argus-theme")).toBe("light");
+    expect(drawer().querySelector("button[aria-label='Switch to dark mode']")).not.toBeNull();
+  });
+
+  it("shows observed evidence activity instead of a synthetic completion percentage", async () => {
+    harness.runs = [{
+      handle: "@alice",
+      key: "alice",
+      steps: [{ phase: "Market", label: "Pair observed", detail: "Evidence returned.", tone: "neutral" }],
+      pct: 55,
+      status: "running",
+      startedAt: 1,
+    }];
+    await renderShell();
+    await act(async () => menuButton().click());
+
+    expect(drawer().textContent).toContain("1 evidence event · Market");
+    expect(drawer().textContent).not.toContain("55%");
+    expect(drawer().textContent).not.toContain("generating");
   });
 });

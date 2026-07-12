@@ -217,7 +217,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
                 <div className="mb-1 flex items-center gap-2 px-1">
                   <button
                     onClick={() => onOpen(c.handle)}
-                    className="mono text-[12.5px] text-ink underline-offset-2 hover:text-signal-dim hover:underline"
+                    className="mono text-[12.5px] text-ink underline-offset-2 hover:text-signal-lift hover:underline"
                   >
                     {c.handle}
                   </button>

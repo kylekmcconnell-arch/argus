@@ -255,7 +255,7 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
         </form>
       )}
 
-      {message && <div className="mt-3 rounded-lg border border-signal/30 bg-signal/5 px-3 py-2.5 text-[12px] leading-relaxed text-signal" role="status">{message}</div>}
+      {message && <div className="mt-3 rounded-lg border border-signal/30 bg-signal/5 px-3 py-2.5 text-[12px] leading-relaxed text-signal-lift" role="status">{message}</div>}
       {error && <div className="mt-3 rounded-lg border border-avoid/30 bg-avoid/5 px-3 py-2.5 text-[12px] leading-relaxed text-avoid" role="alert">{error}</div>}
       <p className="mt-5 text-[11px] leading-relaxed text-ink-faint">
         Sessions are verified server-side. Workspace roles control reads, investigations, and destructive actions.

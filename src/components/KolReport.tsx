@@ -151,7 +151,7 @@ export function KolReport({ handle, promotions, associates, panelCostToken, reco
               return (
                 <div key={i} className="px-3 py-2 text-[12.5px]">
                   <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={() => t.address && onAudit?.(t.address)} className="mono text-ink underline-offset-2 hover:text-signal-dim hover:underline">{t.label}</button>
+                    <button onClick={() => t.address && onAudit?.(t.address)} className="mono text-ink underline-offset-2 hover:text-signal-lift hover:underline">{t.label}</button>
                     {m && <span className={`verdict-pill ${t.verdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={t.verdict === "FAIL" ? undefined : ({ "--tint": m.color } as React.CSSProperties)}>{t.verdict}{t.score != null ? ` ${t.score}` : ""}</span>}
                     <span className="text-[11px] text-ink-faint">{t.mcap ? `mcap ${money(t.mcap)}` : `liq ${money(t.liquidityUsd)}`}</span>
                     {t.dead && <span className="chip tint-caution">inactive now</span>}

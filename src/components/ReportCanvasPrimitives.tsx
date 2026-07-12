@@ -21,7 +21,7 @@ const TONE_CLASS: Record<ReportCanvasTone, string> = {
 const TONE_TEXT_CLASS: Record<ReportCanvasTone, string> = {
   pass: "text-pass",
   caution: "text-caution",
-  signal: "text-signal",
+  signal: "text-signal-lift",
   avoid: "text-avoid",
   neutral: "text-ink-dim",
 };
@@ -128,7 +128,7 @@ export function ReportCanvasNarrativeSection({
                     <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
                       {item.provenance && <span className="mono">{item.provenance}</span>}
                       {item.href && (
-                        <a href={item.href} className="inline-flex min-h-8 items-center gap-1 text-signal underline-offset-2 hover:underline">
+                        <a href={item.href} className="inline-flex min-h-8 items-center gap-1 text-signal-lift underline-offset-2 hover:underline">
                           Inspect evidence <ArrowRight aria-hidden="true" size={12} weight="bold" />
                         </a>
                       )}
@@ -180,7 +180,7 @@ export function ReportCanvasRailCard({
               {item.href ? (
                 <a href={item.href} className="group flex min-h-8 items-start gap-2 text-[12.5px] leading-snug text-ink-dim hover:text-ink">
                   <span className="min-w-0 flex-1">{item.label}</span>
-                  <ArrowRight aria-hidden="true" size={13} weight="bold" className="mt-0.5 shrink-0 text-ink-faint transition group-hover:text-signal" />
+                  <ArrowRight aria-hidden="true" size={13} weight="bold" className="mt-0.5 shrink-0 text-ink-faint transition group-hover:text-signal-lift" />
                 </a>
               ) : (
                 <p className="text-[12.5px] leading-snug text-ink-dim">{item.label}</p>

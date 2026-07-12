@@ -546,7 +546,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
         <header className="shrink-0 border-b border-line bg-panel/95 px-5 py-4 backdrop-blur">
           <div className="flex items-start gap-4">
             <div className="min-w-0 flex-1">
-              <div className="eyebrow text-signal">Analyst workspace</div>
+              <div className="eyebrow text-signal-lift">Analyst workspace</div>
               <h2 id="case-brief-title" className="mt-1 truncate display-sm text-[18px] text-ink">
                 Case brief{viewer ? ` · ${viewer.case.query || viewer.case.ref}` : ""}
               </h2>
@@ -582,7 +582,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
               <button
                 type="button"
                 onClick={() => void load()}
-                className="mt-3 rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink transition hover:border-signal hover:text-signal"
+                className="mt-3 rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink transition hover:border-signal hover:text-signal-lift"
               >
                 Retry
               </button>
@@ -959,7 +959,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                         type="button"
                         onClick={() => void saveNote()}
                         disabled={busy || !noteBody.trim()}
-                        className="rounded-lg border border-line px-3 py-1.5 text-[11px] font-medium text-ink transition hover:border-signal hover:text-signal disabled:cursor-not-allowed disabled:opacity-50"
+                        className="rounded-lg border border-line px-3 py-1.5 text-[11px] font-medium text-ink transition hover:border-signal hover:text-signal-lift disabled:cursor-not-allowed disabled:opacity-50"
                       >
                         {noteSaving ? "Appending…" : "Append note"}
                       </button>
@@ -986,7 +986,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     type="button"
                     disabled={historyLoading !== null}
                     onClick={() => void loadOlderNotes()}
-                    className="mt-3 min-h-8 rounded-lg border border-line-2 px-3 py-1.5 text-[11px] text-ink-dim transition hover:border-signal hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:opacity-60"
+                    className="mt-3 min-h-8 rounded-lg border border-line-2 px-3 py-1.5 text-[11px] text-ink-dim transition hover:border-signal hover:text-signal-lift focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:opacity-60"
                   >
                     {historyLoading === "notes" ? "Loading older notes…" : "Load older append-only notes"}
                   </button>
@@ -1059,7 +1059,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     type="button"
                     disabled={historyLoading !== null}
                     onClick={() => void loadOlderRevisions()}
-                    className="mt-3 min-h-8 rounded-lg border border-line-2 px-3 py-1.5 text-[11px] text-ink-dim transition hover:border-signal hover:text-signal focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:opacity-60"
+                    className="mt-3 min-h-8 rounded-lg border border-line-2 px-3 py-1.5 text-[11px] text-ink-dim transition hover:border-signal hover:text-signal-lift focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:opacity-60"
                   >
                     {historyLoading === "revisions" ? "Loading older revisions…" : "Load older immutable revisions"}
                   </button>

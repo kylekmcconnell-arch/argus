@@ -35,7 +35,7 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
       {img ? (
         <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-md border border-line bg-panel-2 object-cover" />
       ) : (
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal">{letter}</span>
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal-lift">{letter}</span>
       )}
       <span className="min-w-0 flex-1">
         <span className="mono block truncate text-[12.5px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>

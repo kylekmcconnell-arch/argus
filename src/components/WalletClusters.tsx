@@ -140,7 +140,7 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
               <span className="block text-[11px] text-ink-dim">how many of the top wallets are secretly one hand?</span>
             </span>
           </span>
-          <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal transition group-hover:bg-signal group-hover:text-white">cluster →</span>
+          <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal-lift transition group-hover:bg-signal group-hover:text-white">cluster →</span>
         </button>
         {bubbleLink && <div className="mt-2 flex justify-end">{bubbleLink}</div>}
       </div>

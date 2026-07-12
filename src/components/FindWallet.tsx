@@ -321,7 +321,7 @@ function WalletRow({ w, onAudit }: { w: Wallet; onAudit?: (q: string) => void })
             <div className="mono mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-faint">
               {trail.walletAgeDays != null && <span>age {trail.walletAgeDays}d</span>}
               {trail.tokensCreated != null && <span>{trail.tokensCreated} token{trail.tokensCreated === 1 ? "" : "s"} minted{trail.serialDeployer ? " · serial" : ""}</span>}
-              {trail.terminatesAtCex && trail.origin?.label && <span className="text-signal-dim">funds → {trail.origin.label}</span>}
+              {trail.terminatesAtCex && trail.origin?.label && <span className="text-signal-lift">funds → {trail.origin.label}</span>}
             </div>
           )}
         </div>

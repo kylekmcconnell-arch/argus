@@ -315,7 +315,7 @@ export function TrustGraph({
         <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12.5px] font-medium text-ink">
           <span id={ledgerTitleId}>Relationship ledger</span>
           <span className="mono text-[11px] text-ink-faint">{peri.length + connections.length} links</span>
-          <span className="mono ml-auto text-[11px] text-signal-dim">view readable list</span>
+          <span className="mono ml-auto text-[11px] text-signal-lift">view readable list</span>
         </summary>
         {peri.length === 0 && connections.length === 0 ? (
           <p className="border-t border-line/60 px-3 py-3 text-[12.5px] text-ink-faint">No relationships were recorded for this subject.</p>

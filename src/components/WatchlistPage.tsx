@@ -228,10 +228,10 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
               : undefined;
             return (
               <div key={r.item.id} className={`panel flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 ${alert ? "border-avoid/60" : ""}`}>
-                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[12.5px] text-signal">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[12.5px] text-signal-lift">
                   {r.item.kind === "token" ? r.item.label.replace("$", "").slice(0, 3) : r.item.label.replace("@", "").slice(0, 1).toUpperCase()}
                 </span>
-                <button onClick={() => onAudit(r.item.id)} className="mono min-w-0 flex-1 truncate text-left text-[13.5px] text-ink hover:text-signal-dim">
+                <button onClick={() => onAudit(r.item.id)} className="mono min-w-0 flex-1 truncate text-left text-[13.5px] text-ink hover:text-signal-lift">
                   {r.item.label}
                   <span className="ml-2 text-[11px] text-ink-faint capitalize">
                     {r.item.kind === "token" ? `${r.item.chain} · live refresh` : "person · stored snapshot"}

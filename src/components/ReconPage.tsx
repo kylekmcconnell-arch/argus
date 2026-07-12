@@ -440,7 +440,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
               <div className="flex flex-wrap items-center gap-2">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
                 <span className="text-[12.5px] font-medium text-signal-lift">This project has a live token — ${projToken.symbol}{projToken.rank ? ` · CoinGecko #${projToken.rank}` : ""} · {projToken.chain}</span>
-                <span className="mono ml-auto text-[11px] text-signal">open full on-chain report →</span>
+                <span className="mono ml-auto text-[11px] text-signal-lift">open full on-chain report →</span>
               </div>
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
                 The site recon only reads the website. Open the ${projToken.symbol} report for market intelligence, holder distribution, wallet clustering, deployer &amp; bytecode forensics, and the sanctions screen.
