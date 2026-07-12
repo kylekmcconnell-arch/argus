@@ -15,6 +15,7 @@ const EDGE_LABEL: Record<string, string> = {
   FUNDED: "funded",
   TEAM: "team",
   INVESTED_IN: "invested in",
+  AFFILIATED_WITH: "affiliated with",
   COMMIT_EMAIL: "commit email",
 };
 
@@ -64,16 +65,31 @@ export function TrustGraph({
   const subject = nodes.find((n) => n.subject)!;
   if (!subject) return null;
 
-  // inner rings: the subject's own entities (dedup by key, keep first edge)
+  // Inner rings: direct entities plus one bounded second hop. The second hop is
+  // required for correct affiliated-fund attribution (person → fund → project);
+  // flattening it into a one-hop star would visually claim a personal investment.
   const seen = new Set<string>([subject.key]);
-  const peri: { node: PanoptesNode; edge?: PanoptesEdge }[] = [];
+  const peri: { node: PanoptesNode; edge?: PanoptesEdge; parentKey?: string; depth: 1 | 2 }[] = [];
   for (const e of edges) {
+    if (e.src !== subject.key && e.dst !== subject.key) continue;
     const otherKey = e.src === subject.key ? e.dst : e.src;
     if (seen.has(otherKey)) continue;
     const node = nodes.find((n) => n.key === otherKey && !n.subject);
     if (!node) continue;
     seen.add(otherKey);
-    peri.push({ node, edge: e });
+    peri.push({ node, edge: e, depth: 1 });
+  }
+  const firstHopKeys = new Set(peri.map((entry) => String(entry.node.key)));
+  for (const e of edges) {
+    if (peri.length >= 42) break;
+    const parentKey = firstHopKeys.has(e.src) ? e.src : firstHopKeys.has(e.dst) ? e.dst : null;
+    if (!parentKey) continue;
+    const otherKey = e.src === parentKey ? e.dst : e.src;
+    if (seen.has(otherKey) || otherKey === subject.key) continue;
+    const node = nodes.find((n) => n.key === otherKey && !n.subject);
+    if (!node) continue;
+    seen.add(otherKey);
+    peri.push({ node, edge: e, parentKey, depth: 2 });
   }
 
   const hasConns = connections.length > 0;
@@ -89,13 +105,14 @@ export function TrustGraph({
   const cy = H / 2;
 
   const placed = peri.map((p, i) => {
-    const ring = i % rings;
+    const ring = p.depth === 2 ? Math.max(1, i % rings) : i % rings;
     const r = R1 + ring * RING_GAP;
     // Sequential angle over ALL nodes: consecutive entities land on different
     // rings, so angular neighbors never share a radius (labels stop colliding).
     const a = (i / Math.max(peri.length, 1)) * Math.PI * 2 - Math.PI / 2;
     return { ...p, x: cx + Math.cos(a) * r, y: cy + Math.sin(a) * r * 0.82, canon: canonical(p.node.key), id: `p${i}` };
   });
+  const placedByKey = new Map(placed.map((entry) => [String(entry.node.key), entry]));
   const innerByCanon = new Map(placed.map((p) => [p.canon, p]));
 
   // outermost ring: other audited subjects connected to this one, anchored to
@@ -169,13 +186,16 @@ export function TrustGraph({
             const unconfirmed = p.edge?.verdict === "Unconfirmed";
             const focused = hover === p.id;
             const faded = hover !== null && !focused;
+            const anchor = p.parentKey ? placedByKey.get(p.parentKey) : undefined;
+            const x1 = anchor?.x ?? cx;
+            const y1 = anchor?.y ?? cy;
             return (
               <g key={`e${i}`} opacity={faded ? 0.25 : 1}>
-                <line x1={cx} y1={cy} x2={p.x} y2={p.y} stroke={contradicted ? "var(--color-avoid)" : unconfirmed ? "var(--color-line-2)" : st.ring} strokeWidth={contradicted ? 1.4 : focused ? 1.4 : 1} strokeDasharray={unconfirmed ? "3 4" : contradicted ? "5 3" : undefined} opacity={unconfirmed ? 0.5 : 0.7} />
+                <line x1={x1} y1={y1} x2={p.x} y2={p.y} stroke={contradicted ? "var(--color-avoid)" : unconfirmed ? "var(--color-line-2)" : st.ring} strokeWidth={contradicted ? 1.4 : focused ? 1.4 : 1} strokeDasharray={unconfirmed ? "3 4" : contradicted ? "5 3" : undefined} opacity={unconfirmed ? 0.5 : 0.7} />
                 {/* per-spoke labels drown at scale: show them all only when sparse,
                     otherwise only on the hovered spoke */}
                 {p.edge && (!dense || focused) && (
-                  <text x={(cx + p.x) / 2} y={(cy + p.y) / 2 - 3} textAnchor="middle" className="mono" fontSize="9" fill={focused ? "var(--color-ink-dim)" : "var(--color-ink-faint)"}>
+                  <text x={(x1 + p.x) / 2} y={(y1 + p.y) / 2 - 3} textAnchor="middle" className="mono" fontSize="9" fill={focused ? "var(--color-ink-dim)" : "var(--color-ink-faint)"}>
                     {EDGE_LABEL[p.edge.type] ?? p.edge.type.toLowerCase()}
                   </text>
                 )}

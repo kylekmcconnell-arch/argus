@@ -184,7 +184,7 @@ describe("personChecks", () => {
 
     expect(byLabel(checks, "Identity resolution")).toMatchObject({ status: "confirmed" });
     expect(byLabel(checks, "Promoted-token performance")).toMatchObject({ status: "unknown" });
-    expect(byLabel(checks, "VC portfolio track record")).toMatchObject({ status: "unknown" });
+    expect(byLabel(checks, "Portfolio track record")).toMatchObject({ status: "unknown" });
     expect(byLabel(checks, "US legal history")).toMatchObject({ status: "unknown" });
     expect(byLabel(checks, "OFAC sanctions (name)")).toMatchObject({ status: "unknown" });
     expect(byLabel(checks, "Affiliations & associates")).toMatchObject({ status: "unknown" });
@@ -195,6 +195,6 @@ describe("personChecks", () => {
 
     expect(byLabel(checks, "Identity resolution")).toMatchObject({ status: "unknown" });
     expect(byLabel(checks, "Promoted-token performance")).toMatchObject({ status: "not-applicable" });
-    expect(byLabel(checks, "VC portfolio track record")).toMatchObject({ status: "not-applicable" });
+    expect(byLabel(checks, "Portfolio track record")).toMatchObject({ status: "not-applicable" });
   });
 });

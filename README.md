@@ -52,7 +52,8 @@ server/
   adapters/
     x.ts              Grok (content/acknowledgment) + twitterapi.io (follow graph)
     peopledatalabs.ts identity + career history (LinkedIn-derived, defensible)
-    crunchbase.ts     funding, investors, acquirers
+    portfolio.ts      cited investment discovery + deterministic source verification
+    crunchbase.ts     optional company/funding enrichment
     coingecko.ts      token market data by contract
     dexscreener.ts    live DEX liquidity/volume + rug signals (free, keyless)
     reddit.ts         community FUD scan (free tier)

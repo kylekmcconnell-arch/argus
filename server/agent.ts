@@ -791,7 +791,7 @@ const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   findings: [],
   ventures: [
     "F2_track_record", "F3_repeat_backing", "F4_build_substance", "F5_reputation_integrity", "F6_network_quality",
-    "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "I2_portfolio_quality", "I3_fund_scale_tier",
+    "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness",
     "AG2_client_outcomes", "AD2_advised_outcomes",
   ],
   testimonials: ["F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "I4_testimonial_corroboration", "AD3_relationship_corroboration"],
@@ -803,10 +803,10 @@ const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
     "P1_team_and_identity", "P2_product_substance", "P4_backing_and_partners", "I1_identity_legitimacy",
     "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity", "ME2_role_authenticity",
   ],
-  notableFollowers: ["F6_network_quality", "P4_backing_and_partners", "P5_traction_and_liveness", "K5_cabal_fud", "I2_portfolio_quality", "I4_testimonial_corroboration", "I5_reputation_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
+  notableFollowers: ["F6_network_quality", "P4_backing_and_partners", "P5_traction_and_liveness", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
   recentActivity: [
     "F2_track_record", "F4_build_substance", "F5_reputation_integrity", "P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity",
-    "K2_call_performance", "K3_disclosure_deletion", "K5_cabal_fud", "I2_portfolio_quality", "I4_testimonial_corroboration", "I5_reputation_fud",
+    "K2_call_performance", "K3_disclosure_deletion", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud",
     "AG2_client_outcomes", "AG3_service_integrity", "AG4_reputation_fud", "AD2_advised_outcomes", "AD3_relationship_corroboration", "AD4_advisory_conduct", "AD5_reputation_fud",
     "ME2_role_authenticity", "ME3_conduct_reputation",
   ],
@@ -860,10 +860,10 @@ const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "profile-photo-authenticity": [],
   "code-footprint-github": ["F2_track_record", "F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
   "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
-  "affiliations-associates": ["F2_track_record", "F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I2_portfolio_quality", "I4_testimonial_corroboration", "AD3_relationship_corroboration", "ME2_role_authenticity"],
+  "affiliations-associates": ["F2_track_record", "F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I4_testimonial_corroboration", "AD3_relationship_corroboration", "ME2_role_authenticity"],
   "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
-  "vc-portfolio-track-record": ["F2_track_record", "F3_repeat_backing", "I2_portfolio_quality", "I3_fund_scale_tier"],
-  "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "I2_portfolio_quality", "I3_fund_scale_tier", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  "vc-portfolio-track-record": ["I2_portfolio_quality"],
+  "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "ofac-sanctions-name": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation"],
   "trust-graph-connections": SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
@@ -884,10 +884,12 @@ const SOURCE_ARTIFACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
     "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud",
     "ME1_identity", "ME3_conduct_reputation",
   ],
+  portfolio_relationship: ["I2_portfolio_quality"],
+  fund_scale: ["I3_fund_scale_tier"],
   press: [
     "F2_track_record", "F3_repeat_backing", "F4_build_substance", "F5_reputation_integrity", "F6_network_quality",
     "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "P6_transparency_integrity",
-    "K5_cabal_fud", "I2_portfolio_quality", "I3_fund_scale_tier", "I5_reputation_fud",
+    "K5_cabal_fud", "I5_reputation_fud",
     "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation",
   ],
 };
@@ -902,6 +904,16 @@ const sourceArtifactKind = (value: Record<string, unknown>): string => {
   if (provider === "opensanctions") return "sanctions_screen";
   if (provider === "google-news") return "press";
   return "";
+};
+
+const sourceArtifactEligibleAxes = (value: Record<string, unknown>): readonly string[] => {
+  const kind = sourceArtifactKind(value);
+  // A fetched page that mentions a relationship can remain visible as a
+  // reported lead, but only a deterministic confirmation threshold may move
+  // portfolio quality. This keeps the scoring boundary aligned with the UI
+  // and prevents a single press report from becoming investment proof.
+  if (kind === "portfolio_relationship" && value.match !== "relationship_confirmed") return [];
+  return SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind] ?? [];
 };
 
 const stableJson = (value: unknown): string => {
@@ -935,10 +947,10 @@ const eligibleAxesFor = (section: string, value: Record<string, unknown>, axisCa
     ? []
     : section === "findings"
       ? FINDING_AXIS_ELIGIBILITY[findingType] ?? []
-      : section === "checkOutcomes" && checkId
+    : section === "checkOutcomes" && checkId
     ? CHECK_AXIS_ELIGIBILITY[checkId] ?? []
     : section === "sourceArtifacts"
-      ? SOURCE_ARTIFACT_AXIS_ELIGIBILITY[sourceArtifactKind(value)] ?? []
+      ? sourceArtifactEligibleAxes(value)
       : SECTION_AXIS_ELIGIBILITY[section] ?? [];
   const allowed = new Set(eligible);
   return [...new Set(axisCatalog.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
@@ -1007,6 +1019,20 @@ const verificationFor = (section: string, record: Record<string, unknown>): Axis
   if (section === "sourceArtifacts") {
     const match = recordText(record, ["match"], 40);
     const kind = recordText(record, ["kind"], 80);
+    if (kind === "portfolio_relationship") {
+      if (match === "relationship_confirmed") return "verified";
+      if (match === "candidate") return "reported";
+      return "unavailable";
+    }
+    if (kind === "fund_scale") {
+      const contentHash = recordText(record, ["contentHash"], 64);
+      const sourceContentHash = recordText(record, ["sourceContentHash"], 64);
+      return match === "fund_scale_confirmed"
+        && /^[a-f0-9]{64}$/i.test(contentHash ?? "")
+        && /^[a-f0-9]{64}$/i.test(sourceContentHash ?? "")
+        ? "verified"
+        : "unavailable";
+    }
     if (kind === "trust_graph") {
       if (record.coverageState === "unavailable" || match === "observed") return "unavailable";
       if (match === "screened_clear" || match === "no_match") return "checked_empty";

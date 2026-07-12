@@ -28,6 +28,7 @@ interface ServerDossier extends Dossier {
 }
 
 const LINEAGE_METHODOLOGY_VERSION = "argus-person-v3-lineage";
+const FINAL_GRAPH_VERDICTS = new Set(["PASS", "CAUTION", "FAIL", "AVOID", "UNVERIFIABLE_IDENTITY"]);
 
 const normRef = (value: string) =>
   value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^[@$]/, "").replace(/\/$/, "");
@@ -54,8 +55,9 @@ export async function persistServerDossier(
   // A curated fallback may be assembled server-side, but it was not collected
   // from live providers. Keep that distinction in every immutable surface.
   const attestationState = dossier.live ? "server_collected" : "analyst_submitted";
+  const decisionComplete = Boolean(verdict && FINAL_GRAPH_VERDICTS.has(verdict));
   const qualifiedCompleteness = coverageQualifiedCompleteness({
-    completeness: dossier?.completeness_state || "partial",
+    completeness: decisionComplete ? dossier?.completeness_state || "partial" : "partial",
     attestation: attestationState,
     checks: dossier.checkRuns ?? [],
   });

@@ -75,6 +75,19 @@ var GENERIC_KEYS = /* @__PURE__ */ new Set([
   "unknown"
 ]);
 var isGenericKey = (raw) => GENERIC_KEYS.has(canonical(raw));
+var CONTEXT_ONLY_EDGE_TYPES = /* @__PURE__ */ new Set(["INVESTED_IN", "AFFILIATED_WITH"]);
+function contextOnlyNodeKeys(contribution, resolve) {
+  const byNode = /* @__PURE__ */ new Map();
+  for (const edge of contribution.edges) {
+    const type = String(edge.type).toUpperCase();
+    for (const endpoint of [resolve(edge.src), resolve(edge.dst)]) {
+      const types = byNode.get(endpoint) ?? [];
+      types.push(type);
+      byNode.set(endpoint, types);
+    }
+  }
+  return new Set([...byNode.entries()].filter(([, types]) => types.length > 0 && types.every((type) => CONTEXT_ONLY_EDGE_TYPES.has(type))).map(([key]) => key));
+}
 function buildAliasResolver(contributions) {
   const targets = /* @__PURE__ */ new Map();
   const add = (alias, subject) => {
@@ -117,11 +130,12 @@ function subjectConnections(handle, contributions, max = 12) {
   const mine = /* @__PURE__ */ new Map();
   for (const c of contributions) {
     if (resolve(c.handle) !== me) continue;
+    const contextOnly = contextOnlyNodeKeys(c, resolve);
     for (const n of c.nodes) {
       if (isGenericKey(String(n.key))) continue;
       const k = resolve(n.key);
       const label = typeof n.label === "string" && n.label.trim() ? n.label : String(n.key);
-      if (k !== me) mine.set(k, { label, type: String(n.type) });
+      if (k !== me && !contextOnly.has(k)) mine.set(k, { label, type: String(n.type) });
     }
   }
   if (!mine.size) return [];
@@ -134,6 +148,7 @@ function subjectConnections(handle, contributions, max = 12) {
     const other = resolve(c.handle);
     if (other === me) continue;
     const otherLabel = c.aliases?.[0] ?? (typeof c.nodes.find((n) => n.subject)?.label === "string" ? String(c.nodes.find((n) => n.subject).label) : c.handle);
+    const contextOnly = contextOnlyNodeKeys(c, resolve);
     if (mine.has(other)) {
       const e = ensure(other, otherLabel, c.verdict);
       e.direct = true;
@@ -141,7 +156,7 @@ function subjectConnections(handle, contributions, max = 12) {
     for (const n of c.nodes) {
       if (isGenericKey(String(n.key))) continue;
       const k = resolve(n.key);
-      if (k !== me && k !== other && mine.has(k)) {
+      if (k !== me && k !== other && mine.has(k) && !contextOnly.has(k)) {
         const e = ensure(other, otherLabel, c.verdict);
         e.ties.set(k, { key: k, label: mine.get(k).label, type: mine.get(k).type });
       }
@@ -922,7 +937,7 @@ function personChecks(opts) {
   checks.push({ label: "Identity continuity", status: "unknown", note: `prior handles, cross-platform accounts; ${outcomeNotRecorded}` });
   checks.push(hasAssociates ? { label: "Affiliations & associates", status: "confirmed", note: "associate records present in the dossier" } : { label: "Affiliations & associates", status: "unknown", note: "no collection outcome recorded; an empty dossier is not a confirmed clean result" });
   checks.push(roles.includes("KOL") ? { label: "Promoted-token performance", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` } : { label: "Promoted-token performance", status: "not-applicable", note: "not a KOL" });
-  checks.push(roles.includes("INVESTOR") ? { label: "VC portfolio track record", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` } : { label: "VC portfolio track record", status: "not-applicable", note: "not a fund/investor" });
+  checks.push(roles.includes("INVESTOR") ? { label: "Portfolio track record", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` } : { label: "Portfolio track record", status: "not-applicable", note: "not a fund/investor" });
   checks.push({ label: "News & press", status: "unknown", note: outcomeNotRecorded });
   checks.push(resolved && realName ? { label: "US legal history", status: "unknown", note: `eligible by resolved name; ${outcomeNotRecorded}` } : { label: "US legal history", status: "not-applicable", note: "needs a resolved real name" });
   checks.push(resolved && realName ? { label: "OFAC sanctions (name)", status: "unknown", note: `eligible by resolved name; ${outcomeNotRecorded}` } : { label: "OFAC sanctions (name)", status: "not-applicable", note: "needs a resolved real name" });

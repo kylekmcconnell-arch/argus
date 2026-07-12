@@ -135,6 +135,13 @@ export function InvestigationReport({
   const presentedProjectVerdict = projectPositiveNeedsQualification
     ? "INCOMPLETE"
     : projectAccount?.report.composite_verdict;
+  const projectSourceBackedVentures = (projectAccount?.evidence.ventures ?? [])
+    .filter((venture) => venture.evidence_origin !== "model_lead" && venture.artifact_verified === true);
+  const projectUnverifiedVentureCount = (projectAccount?.evidence.ventures ?? [])
+    .filter((venture) => venture.evidence_origin === "model_lead" || venture.artifact_verified === false).length;
+  const projectLegacyVentureCount = (projectAccount?.evidence.ventures ?? []).length
+    - projectSourceBackedVentures.length
+    - projectUnverifiedVentureCount;
   // Arkham entity labels for the deployer + funder wallets.
   const { labels: arkham, state: arkhamState } = useArkhamLabels(
     showCurrentIntelligence && panelCostToken ? [token.deployer, deployerTrail?.funder?.address] : [],
@@ -606,7 +613,9 @@ export function InvestigationReport({
               </div>
               {/* why the score landed where it did */}
               <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
-                <span>governed by <span className="text-ink-dim">{String(projectAccount.report.governing_role).toLowerCase()}</span></span>
+                {projectAccount.report.governing_role
+                  ? <span>governed by <span className="text-ink-dim">{String(projectAccount.report.governing_role).toLowerCase()}</span></span>
+                  : <span>governing role withheld</span>}
                 {projectAccount.report.cap_applied && <span className="chip tint-avoid">cap · {String(projectAccount.report.cap_applied).replace(/_/g, " ")}</span>}
                 <button onClick={onOpenProjectAccount} className="btn-chip tint-signal ml-auto">why this score · full report →</button>
               </div>
@@ -614,11 +623,17 @@ export function InvestigationReport({
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink">{projectAccount.headline}</p>
               {projectAccount.evidence.ventures.length > 0 && (
                 <div className="mt-2 border-t border-line/60 pt-2">
-                  <div className="eyebrow">Claimed ventures (unverified — Crunchbase/PDL off)</div>
-                  <div className="mt-1 flex flex-wrap gap-1.5">
-                    {projectAccount.evidence.ventures.slice(0, 6).map((v, i) => (
+                  <div className="eyebrow">Source-backed ventures & affiliations</div>
+                  {projectSourceBackedVentures.length > 0 && <div className="mt-1 flex flex-wrap gap-1.5">
+                    {projectSourceBackedVentures.slice(0, 6).map((v, i) => (
                       <span key={i} className="chip normal-case tracking-normal">{v.project_name}</span>
                     ))}
+                  </div>}
+                  <div className="mt-1 text-[10.5px] text-ink-faint">
+                    {projectSourceBackedVentures.length} source-backed
+                    {projectLegacyVentureCount > 0 ? ` · ${projectLegacyVentureCount} legacy curated` : ""}
+                    {projectUnverifiedVentureCount > 0 ? ` · ${projectUnverifiedVentureCount} unverified lead${projectUnverifiedVentureCount === 1 ? "" : "s"} hidden here` : ""}
+                    {projectUnverifiedVentureCount > 0 ? " · open the full report to inspect" : ""}
                   </div>
                 </div>
               )}

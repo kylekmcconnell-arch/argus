@@ -115,9 +115,44 @@ describe("VC portfolio spend boundary", () => {
     await act(async () => run?.click());
     await settle();
 
-    expect(container.textContent).toContain("1 unverified portfolio candidate");
-    expect(container.textContent).toContain("excluded from the trust graph and frozen verdict");
+    expect(container.textContent).toContain("1 unverified current-search portfolio candidate");
+    expect(container.textContent).toContain("Every panel row remains outside the trust graph and verdict");
+    expect(container.textContent).not.toContain("same project appears in frozen evidence");
     expect(container.textContent).toContain("Candidate source · Round announcement");
+    expect(recordForensicEntities).not.toHaveBeenCalled();
+  });
+
+  it("labels a project-name overlap without claiming the panel verified attribution", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      available: true,
+      evidence_state: "model_lead",
+      candidates: [{
+        project: "Candidate Labs",
+        source_url: "https://example.com/round",
+        source_title: "Round announcement",
+        evidence_state: "model_lead",
+      }],
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await act(async () => {
+      root?.render(
+        <VcReport
+          handle="@investor"
+          name="Investor Example"
+          verifiedProjects={["Candidate Labs"]}
+          panelCostToken="report-bound-capability"
+        />,
+      );
+    });
+    const run = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.includes("Run portfolio analysis"));
+    await act(async () => run?.click());
+    await settle();
+
+    expect(container.textContent).toContain("1 unverified current-search portfolio candidate");
+    expect(container.textContent).toContain("same project appears in frozen evidence");
+    expect(container.textContent).toContain("this panel does not verify the investor attribution");
     expect(recordForensicEntities).not.toHaveBeenCalled();
   });
 

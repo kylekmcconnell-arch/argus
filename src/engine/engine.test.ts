@@ -396,6 +396,47 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(r.score_total).not.toBeNull();
   });
 
+  it("uses the lowest-scoring role when multiple roles share the same verdict band", () => {
+    const a = new Audit("@multi_role", { roles: [SubjectClass.FOUNDER, SubjectClass.INVESTOR] });
+    a.setIdentity("Confirmed");
+    for (const [axis, score] of [
+      ["F1_identity_verifiability", 12], ["F2_track_record", 22], ["F3_repeat_backing", 10],
+      ["F4_build_substance", 12], ["F5_reputation_integrity", 13], ["F6_network_quality", 10],
+      ["I1_identity_legitimacy", 15], ["I2_portfolio_quality", 15], ["I3_fund_scale_tier", 10],
+      ["I4_testimonial_corroboration", 10], ["I5_reputation_fud", 20],
+    ] as [string, number][]) a.setAxis(axis, score);
+
+    const report = a.finalize();
+    expect(report.role_reports.find((role) => role.role === SubjectClass.FOUNDER)?.score_total).toBe(84);
+    expect(report.role_reports.find((role) => role.role === SubjectClass.INVESTOR)?.score_total).toBe(75);
+    expect(report.composite_verdict).toBe("PASS");
+    expect(report.governing_role).toBe(SubjectClass.INVESTOR);
+    expect(report.governing_score).toBe(75);
+  });
+
+  it("does not render employment or operating affiliations as founded companies", () => {
+    const audit = new Audit("@operator", { subject_class: SubjectClass.MEMBER });
+    audit.addVenture({ project_name: "Paradigm", role: "CTO", period: "2022-2025", outcome: VentureOutcome.UNKNOWN });
+    const graph = audit.toPanoptes();
+    expect(graph.edges).toContainEqual(expect.objectContaining({ dst: "paradigm", type: "WORKED_ON", role: "CTO" }));
+    expect(graph.edges).not.toContainEqual(expect.objectContaining({ dst: "paradigm", type: "FOUNDED" }));
+  });
+
+  it("keeps employment-like venture titles out of founder and investment edges", () => {
+    const audit = new Audit("@operator", { subject_class: SubjectClass.MEMBER });
+    for (const [project_name, role] of [
+      ["Fund A", "Venture Partner"],
+      ["Bank B", "Capital Markets Lead"],
+      ["Protocol C", "Product Owner"],
+      ["Studio D", "Content Creator"],
+      ["Fund E", "GP Operations"],
+    ]) audit.addVenture({ project_name, role, period: "", outcome: VentureOutcome.UNKNOWN });
+    const graph = audit.toPanoptes();
+
+    expect(graph.edges.filter((edge) => edge.type === "WORKED_ON")).toHaveLength(5);
+    expect(graph.edges.some((edge) => edge.type === "FOUNDED" || edge.type === "INVESTED_IN")).toBe(false);
+  });
+
   it("impersonation blocks publication", () => {
     const a = new Audit("@imposter_fund", { subject_class: SubjectClass.INVESTOR });
     a.setIdentity("SuspectedImpersonation");

@@ -8,6 +8,7 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
+node_modules 2/
 dist
 dist-ssr
 .artifacts/
@@ -17,6 +18,7 @@ dist-ssr
 .vscode/*
 !.vscode/extensions.json
 .idea
+.claude/worktrees/
 .DS_Store
 *.suo
 *.ntvs*

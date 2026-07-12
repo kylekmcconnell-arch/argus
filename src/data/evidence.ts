@@ -114,8 +114,8 @@ export interface TraceStep {
 // court-caption or sanctions-name match is a lead tied to a source, not proof
 // that the named person is the audited subject.
 export interface SourceArtifact {
-  kind: "press" | "legal_case" | "sanctions_screen" | "profile_photo" | "trust_graph";
-  provider: "google-news" | "courtlistener" | "opensanctions" | "claude-vision" | "twitterapi" | "argus-graph";
+  kind: "press" | "legal_case" | "sanctions_screen" | "profile_photo" | "trust_graph" | "portfolio_relationship" | "fund_scale";
+  provider: "google-news" | "courtlistener" | "opensanctions" | "claude-vision" | "twitterapi" | "argus-graph" | "portfolio-web";
   title: string;
   /** External source when one exists. Internal frozen evidence may be hash-only. */
   sourceUrl?: string;
@@ -125,9 +125,48 @@ export interface SourceArtifact {
   sourceContentHash?: string;
   publishedAt?: string;
   excerpt?: string;
-  match: "exact_name" | "exact_handle" | "candidate" | "no_match" | "observed" | "risk_signal" | "screened_clear";
+  match: "exact_name" | "exact_handle" | "candidate" | "no_match" | "observed" | "risk_signal" | "screened_clear" | "relationship_confirmed" | "fund_scale_confirmed";
   /** Explicit failed/partial collection state when `match` alone is ambiguous. */
   coverageState?: "unavailable";
+  /** Structured relationship fields are present only for portfolio evidence. */
+  relationship?: "invested_in";
+  subjectName?: string;
+  projectName?: string;
+  projectHandle?: string;
+  projectDomain?: string;
+  sourceClass?: "first_party_subject" | "first_party_investor" | "first_party_project" | "public_primary" | "independent_press" | "other_public";
+  investorEntityName?: string;
+  investorEntityHandle?: string;
+  investorEntityDomain?: string;
+  attribution?: "direct_subject" | "affiliated_fund";
+  /** Source that grounds person→fund affiliation separately from the deal page. */
+  attributionSourceUrl?: string;
+  /** Present only on source-fetched, identity-bound fund-size artifacts. */
+  fundName?: string;
+  fundSizeUsd?: number;
+}
+
+/**
+ * Model-discovered portfolio candidates. These stay outside scoring and the
+ * trust graph until a collector fetches a cited page and verifies the relation.
+ */
+export interface PortfolioLead {
+  projectName: string;
+  projectHandle?: string;
+  projectDomain?: string;
+  investorEntityName?: string;
+  investorEntityHandle?: string;
+  attribution?: "direct_subject" | "affiliated_fund";
+  relationship: "invested_in";
+  stage?: string;
+  year?: string;
+  ticker?: string;
+  contract?: string;
+  chain?: string;
+  sources: { url: string; title?: string }[];
+  evidence_origin: "model_lead";
+  artifact_verified: false;
+  provider: "grok";
 }
 
 export type ProfilePhotoClassification =
@@ -240,6 +279,7 @@ export interface CollectedEvidence {
   notableFollowers: NotableFollower[]; // respected accounts that follow the subject
   contradictions: Contradiction[]; // internal contradictions across materials
   sourceArtifacts: SourceArtifact[]; // immutable off-chain sources collected before scoring
+  portfolioLeads?: PortfolioLead[]; // cited discovery candidates; never governing evidence
   profileAuthenticity?: ProfileAuthenticityResult;
   trustGraphScreen?: TrustGraphScreen;
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
@@ -279,5 +319,6 @@ export function emptyEvidence(handle: string): CollectedEvidence {
     notableFollowers: [],
     contradictions: [],
     sourceArtifacts: [],
+    portfolioLeads: [],
   };
 }

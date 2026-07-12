@@ -777,7 +777,7 @@ describe("analyst verdict integrity", () => {
   });
 
   it("uses an existing unavailable check as the gap artifact instead of synthesizing a duplicate", () => {
-    const trackRecordOnly: AnalystAxis[] = [{ axis: "F2_track_record", weight: 28, role: "FOUNDER" }];
+    const trackRecordOnly: AnalystAxis[] = [{ axis: "I2_portfolio_quality", weight: 25, role: "INVESTOR" }];
     const packet = buildScoringEvidencePacket({
       profile: { handle: "@subject", profile_collection_state: "resolved", profile_provider: "twitterapi" },
       profileAuthenticity: {
@@ -792,7 +792,7 @@ describe("analyst verdict integrity", () => {
         checkId: "vc-portfolio-track-record",
         status: "unavailable",
         note: "Portfolio provider did not return evidence.",
-        provider: "crunchbase",
+        provider: "portfolio-web",
       }],
     }, trackRecordOnly);
     const parsed = JSON.parse(packet);
@@ -803,8 +803,150 @@ describe("analyst verdict integrity", () => {
     expect(frozenCatalog).toContainEqual(expect.objectContaining({
       section: "checkOutcomes",
       verification: "unavailable",
-      eligibleAxes: ["F2_track_record"],
+      eligibleAxes: ["I2_portfolio_quality"],
     }));
+  });
+
+  it("routes a frozen investment relationship only to portfolio quality", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "F2_track_record", weight: 28, role: "FOUNDER" },
+      { axis: "I2_portfolio_quality", weight: 25, role: "INVESTOR" },
+      { axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" },
+    ];
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [{
+        kind: "portfolio_relationship",
+        provider: "portfolio-web",
+        title: "Paradigm → Acme Protocol",
+        sourceUrl: "https://paradigm.xyz/portfolio/acme",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        contentHash: "a".repeat(64),
+        sourceContentHash: "b".repeat(64),
+        match: "relationship_confirmed",
+        relationship: "invested_in",
+        subjectName: "Paradigm",
+        projectName: "Acme Protocol",
+        sourceClass: "first_party_subject",
+      }],
+    }, axes);
+    const parsed = JSON.parse(packet);
+    const relationship = extractScoringEvidenceCatalog(packet).find((artifact) =>
+      artifact.section === "sourceArtifacts" && artifact.operation === "sourceArtifacts:portfolio_relationship",
+    );
+
+    expect(relationship).toMatchObject({
+      verification: "verified",
+      eligibleAxes: ["I2_portfolio_quality"],
+      sourceUrl: "https://paradigm.xyz/portfolio/acme",
+    });
+    expect(parsed.axisGaps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ axis: "F2_track_record", status: "unavailable" }),
+      expect.objectContaining({ axis: "I3_fund_scale_tier", status: "unavailable" }),
+    ]));
+  });
+
+  it("keeps reported-only portfolio relationships outside the scoring packet", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "I2_portfolio_quality", weight: 25, role: "INVESTOR" },
+    ];
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [{
+        kind: "portfolio_relationship",
+        provider: "portfolio-web",
+        title: "Paradigm → Acme Protocol",
+        sourceUrl: "https://techcrunch.com/acme-round",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        contentHash: "a".repeat(64),
+        sourceContentHash: "b".repeat(64),
+        match: "candidate",
+        relationship: "invested_in",
+        subjectName: "Paradigm",
+        projectName: "Acme Protocol",
+        sourceClass: "independent_press",
+      }],
+    }, axes);
+    const parsed = JSON.parse(packet);
+
+    expect(parsed.sourceArtifacts).toEqual([]);
+    expect(extractScoringEvidenceCatalog(packet)).not.toContainEqual(expect.objectContaining({
+      operation: "sourceArtifacts:portfolio_relationship",
+    }));
+    expect(parsed.axisGaps).toEqual([
+      expect.objectContaining({ axis: "I2_portfolio_quality", status: "unavailable" }),
+    ]);
+  });
+
+  it("keeps an unfetched fund-size headline outside fund-scale scoring", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "I2_portfolio_quality", weight: 25, role: "INVESTOR" },
+      { axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" },
+    ];
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [{
+        kind: "press",
+        provider: "google-news",
+        title: "Paradigm raises $850 million for its new fund",
+        sourceUrl: "https://example.com/paradigm-fund",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        contentHash: "c".repeat(64),
+        match: "exact_name",
+      }],
+    }, axes);
+    const press = extractScoringEvidenceCatalog(packet).find((artifact) => artifact.section === "sourceArtifacts");
+    expect(press).toBeUndefined();
+    expect(JSON.parse(packet).axisGaps).toEqual(expect.arrayContaining([
+      expect.objectContaining({ axis: "I2_portfolio_quality", status: "unavailable" }),
+      expect.objectContaining({ axis: "I3_fund_scale_tier", status: "unavailable" }),
+    ]));
+  });
+
+  it("routes only a fetched, content-addressed fund-scale artifact to I3", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" },
+    ];
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [{
+        kind: "fund_scale",
+        provider: "portfolio-web",
+        title: "Paradigm Fund III closed at $850 million",
+        excerpt: "Paradigm announced the final close of its third venture fund at $850 million.",
+        sourceUrl: "https://paradigm.xyz/2024/05/fund-iii",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        contentHash: "a".repeat(64),
+        sourceContentHash: "b".repeat(64),
+        match: "fund_scale_confirmed",
+        fundName: "Paradigm Fund III",
+        fundSizeUsd: 850_000_000,
+      }],
+    }, axes);
+    expect(extractScoringEvidenceCatalog(packet)).toContainEqual(expect.objectContaining({
+      operation: "sourceArtifacts:fund_scale",
+      eligibleAxes: ["I3_fund_scale_tier"],
+      verification: "verified",
+    }));
+    expect(JSON.parse(packet).axisGaps).toEqual([]);
+  });
+
+  it("does not route an identity-unbound fund-size candidate into scoring", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" },
+    ];
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [{
+        kind: "press",
+        provider: "google-news",
+        title: "Candidate manager raises $850 million for a new fund",
+        sourceUrl: "https://example.com/candidate-fund",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        contentHash: "c".repeat(64),
+        match: "candidate",
+      }],
+    }, axes);
+
+    expect(JSON.parse(packet).sourceArtifacts).toEqual([]);
+    expect(JSON.parse(packet).axisGaps).toEqual([
+      expect.objectContaining({ axis: "I3_fund_scale_tier", status: "unavailable" }),
+    ]);
   });
 
   it("catalogs only corroborated client, associate, team, and venture-team records", () => {
@@ -1326,6 +1468,36 @@ describe("analyst verdict integrity", () => {
             sourceContentHash: "b".repeat(64),
             match: "risk_signal",
           }
+        : index === 1
+          ? {
+              kind: "portfolio_relationship",
+              provider: "portfolio-web",
+              title: "Subject → Verified Portfolio Company",
+              excerpt: "Verified Portfolio Company appears on the subject's official portfolio page.",
+              sourceUrl: "https://subject.example/portfolio/verified-company",
+              capturedAt: "2026-07-11T12:00:00.000Z",
+              contentHash: "c".repeat(64),
+              sourceContentHash: "d".repeat(64),
+              match: "relationship_confirmed",
+              relationship: "invested_in",
+              subjectName: "Subject",
+              projectName: "Verified Portfolio Company",
+              sourceClass: "first_party_subject",
+            }
+          : index === 2
+            ? {
+                kind: "fund_scale",
+                provider: "portfolio-web",
+                title: "Subject raises $500 million for its new fund",
+                excerpt: "Sourced fund size announcement.",
+                sourceUrl: "https://news.example/fund-size",
+                capturedAt: "2026-07-11T12:00:00.000Z",
+                contentHash: "e".repeat(64),
+                sourceContentHash: "f".repeat(64),
+                match: "fund_scale_confirmed",
+                fundName: "Subject Fund III",
+                fundSizeUsd: 500_000_000,
+              }
         : {
             kind: "press",
             provider: "google-news",
@@ -1475,6 +1647,33 @@ describe("analyst verdict integrity", () => {
         service: "growth and engineering",
         artifact_verified: true,
       }],
+      sourceArtifacts: [{
+        kind: "portfolio_relationship",
+        provider: "portfolio-web",
+        title: "Subject → Verified Portfolio Company",
+        excerpt: "Verified Portfolio Company appears on the subject's official portfolio page.",
+        sourceUrl: "https://subject.example/portfolio/verified-company",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        contentHash: "a".repeat(64),
+        sourceContentHash: "b".repeat(64),
+        match: "relationship_confirmed",
+        relationship: "invested_in",
+        subjectName: "Subject",
+        projectName: "Verified Portfolio Company",
+        sourceClass: "first_party_subject",
+      }, {
+        kind: "fund_scale",
+        provider: "portfolio-web",
+        title: "Subject raises $500 million for its new fund",
+        excerpt: "Sourced fund size announcement.",
+        sourceUrl: "https://news.example/fund-size",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        contentHash: "c".repeat(64),
+        sourceContentHash: "d".repeat(64),
+        match: "fund_scale_confirmed",
+        fundName: "Subject Fund III",
+        fundSizeUsd: 500_000_000,
+      }],
     }, allAxes);
     const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
     const aliasFor = (axis: string) => {
@@ -1543,17 +1742,17 @@ describe("analyst verdict integrity", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const trackRecordOnly: AnalystAxis[] = [{ axis: "F2_track_record", weight: 28, role: "FOUNDER" }];
+    const trackRecordOnly: AnalystAxis[] = [{ axis: "I2_portfolio_quality", weight: 25, role: "INVESTOR" }];
     const evidenceJson = buildScoringEvidencePacket({
       checkOutcomes: [{
         checkId: "vc-portfolio-track-record",
         status: "unavailable",
-        provider: "crunchbase",
+        provider: "portfolio-web",
         note: "Provider unavailable.",
       }],
     }, trackRecordOnly);
 
-    await expect(analyzeSubject("@subject", ["FOUNDER"], trackRecordOnly, evidenceJson)).resolves.toBeNull();
+    await expect(analyzeSubject("@subject", ["INVESTOR"], trackRecordOnly, evidenceJson)).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
 

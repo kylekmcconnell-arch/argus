@@ -94,21 +94,16 @@ export const crunchbaseAdapter: Adapter = {
       if (org.acquirer && !v.acquirer) v.acquirer = org.acquirer;
       ctx.emit({ phase: "Founder", label: v.project_name, detail: `verified · ${org.rounds ?? 0} rounds, backers: ${(org.investors ?? []).slice(0, 3).join(", ") || "n/a"}`, source: "crunchbase", tone: "good" });
     }
-    if (matched) {
-      ctx.recordCheck?.({
-        id: "vc-portfolio-track-record",
-        status: "confirmed",
-        note: `${matched} claimed venture${matched === 1 ? "" : "s"} matched to Crunchbase records`,
-        provider: "crunchbase",
-        sourceCount: matched,
-      });
-    } else {
-      ctx.recordCheck?.({
-        id: "vc-portfolio-track-record",
-        status: "checked-empty",
-        note: `Crunchbase lookup completed for ${ctx.evidence.ventures.length} claimed venture${ctx.evidence.ventures.length === 1 ? "" : "s"} without a matching record`,
-        provider: "crunchbase",
-      });
-    }
+    // An organization record proves that the company exists, not that this
+    // audited person/fund invested in or founded it. The source-agnostic
+    // portfolio verifier owns vc-portfolio-track-record and requires an actual
+    // relationship statement before completing that check.
+    ctx.emit({
+      phase: "Founder",
+      label: "Crunchbase enrichment complete",
+      detail: `${matched}/${ctx.evidence.ventures.length} named organization${ctx.evidence.ventures.length === 1 ? "" : "s"} matched; company records were treated as enrichment, not relationship proof.`,
+      source: "crunchbase",
+      tone: "neutral",
+    });
   },
 };
