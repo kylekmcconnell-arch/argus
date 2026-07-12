@@ -136,6 +136,7 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
   }
 
   const evidenceRows: JsonRecord[] = [];
+  const persistenceCapturedAt = new Date().toISOString();
   const eligibleByArtifact = new Map<string, Set<string>>();
   const verificationByArtifact = new Map<string, string>();
   for (const candidate of catalog) {
@@ -211,7 +212,11 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
       title,
       excerpt,
       content_hash: contentHash,
-      ...(capturedAt ? { captured_at: capturedAt } : {}),
+      // PostgREST requires every object in a bulk JSON insert to expose the
+      // same key set, while the column itself is NOT NULL. Artifacts without a
+      // source timestamp use one capture instant shared by this persistence
+      // batch instead of conditionally omitting the column or writing null.
+      captured_at: capturedAt ?? persistenceCapturedAt,
       attestation_state: context.attestationState,
       metadata: {
         strictLineage: true,

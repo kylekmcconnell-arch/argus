@@ -571,13 +571,22 @@ export default function App() {
     setPhase("token-report");
   }, [setPhase, setTokenDossier]);
 
-  // Data-side completion for a person audit: cache + persist + log + graph. This
-  // is view-independent — it's what makes a BACKGROUNDED audit still land in
-  // Recent audits and Dossiers — so the runner calls it for every finished run,
-  // whether or not the user is looking at it. It never touches the view.
+  // Data-side completion for a person audit: always keep the finished report in
+  // this session, then publish it to audit and graph surfaces only when the
+  // server returned an exact immutable version binding. This is view-independent
+  // and never pulls the user away from their current screen.
   const logPerson = useCallback((d: Dossier, priv = false) => {
     if (priv) return; // private: current view only — nothing is cached or leaves
     cacheResult(resultCache.current, d.handle, { kind: "person", dossier: d });
+    const persistedVersionId = d.persistence?.state === "persisted"
+      && typeof d.persistence.reportVersionId === "string"
+      && d.persistence.reportVersionId
+      ? d.persistence.reportVersionId
+      : null;
+    // A failed server save remains available in this session and the report UI
+    // explains how to rescan it, but it must not look like a durable audit or
+    // enter the shared graph without an exact immutable version binding.
+    if (!persistedVersionId) return;
     void syncReport("person", d.handle, d.handle, d, d.report.composite_verdict, d.report.governing_score);
     logAudit({
       kind: "person", query: d.handle, ref: d.handle, verdict: d.report.composite_verdict, score: d.report.governing_score,
