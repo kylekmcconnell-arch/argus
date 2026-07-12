@@ -105,6 +105,21 @@ describe("private person report evidence boundary", () => {
     expect(harness.livePanel).not.toHaveBeenCalled();
   });
 
+  it("keeps a failed immutable save visible and pauses supplemental providers", () => {
+    const dossier = {
+      ...buildReport(SUBJECTS[1]),
+      persistence: { state: "failed" as const },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("not safely bound to an immutable version");
+    expect(container.textContent).toContain("Rescan before spending on supplemental providers");
+    expect(harness.livePanel).not.toHaveBeenCalled();
+  });
+
   it("threads the saved report capability through GitHub and identity panels", () => {
     const dossier = {
       ...buildReport(SUBJECTS[1]),

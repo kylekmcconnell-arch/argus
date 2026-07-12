@@ -113,6 +113,9 @@ describe("frozen source artifact provenance", () => {
         },
       },
     });
+    expect(evidenceRows[1].captured_at).toEqual(expect.any(String));
+    expect(Number.isNaN(Date.parse(evidenceRows[1].captured_at))).toBe(false);
+    expect(Object.keys(evidenceRows[1]).sort()).toEqual(Object.keys(evidenceRows[0]).sort());
 
     const axisRows = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body));
     expect(axisRows).toEqual([

@@ -1488,8 +1488,12 @@ function getCost() {
   };
 }
 
+// src/lib/investigationRuntime.ts
+var ANALYST_SCORING_TIMEOUT_MS = 12e4;
+
 // server/agent.ts
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+var failureMeta = (error, timeoutMs, fallback) => error instanceof Error && error.name === "TimeoutError" ? `timeout_${timeoutMs}ms` : fallback;
 function analystAvailable() {
   return !!env("ANTHROPIC_API_KEY");
 }
@@ -1516,8 +1520,9 @@ async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4)
       signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (e) {
-    addClaudeUsage(void 0, tool.name, "failed", "transport_error");
-    console.error("[agent] request failed", e);
+    const failure = failureMeta(e, timeoutMs, "transport_error");
+    addClaudeUsage(void 0, tool.name, "failed", failure);
+    console.error(`[agent] ${tool.name} request failed (${failure})`, e);
     return null;
   }
   if (!res.ok) {
@@ -1534,8 +1539,9 @@ async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4)
   try {
     data = await res.json();
   } catch (e) {
-    addClaudeUsage(void 0, tool.name, "failed", "response_json_error");
-    console.error("[agent] response parse failed", e);
+    const failure = failureMeta(e, timeoutMs, "response_json_error");
+    addClaudeUsage(void 0, tool.name, "failed", failure);
+    console.error(`[agent] ${tool.name} response parse failed (${failure})`, e);
     return null;
   }
   const block = Array.isArray(data.content) ? data.content.find((candidate) => candidate.type === "tool_use" && candidate.name === tool.name && candidate.input != null) : void 0;
@@ -2597,7 +2603,13 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
       additionalProperties: false
     }
   };
-  const raw = await structured(system, user, tool, 6e3);
+  const raw = await structured(
+    system,
+    user,
+    tool,
+    6e3,
+    ANALYST_SCORING_TIMEOUT_MS
+  );
   const validated = validateAnalystVerdict(raw, axisCatalog2, evidenceCatalog);
   if (raw && !validated) console.warn("[agent] rejected incomplete or invalid analyst axis set");
   return validated;

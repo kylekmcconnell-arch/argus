@@ -11,6 +11,7 @@ import {
   type AnalystAxis,
 } from "./agent";
 import type { AxisEvidenceRecord } from "../src/data/evidence";
+import { ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
 import { getCost, withCostLedger } from "./cost";
 
 const catalog: AnalystAxis[] = [
@@ -955,6 +956,34 @@ describe("analyst verdict integrity", () => {
     await expect(analyzeSubject("@subject", ["FOUNDER"], trackRecordOnly, evidenceJson)).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it("gives the citation-rich flagship scorer a dedicated 120 second window", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{
+        project_name: "Verified Venture",
+        role: "founder",
+        outcome: "Active",
+        artifact_verified: true,
+      }],
+    }, catalog);
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    await expect(analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson)).resolves.toBeNull();
+
+    expect(ANALYST_SCORING_TIMEOUT_MS).toBe(120_000);
+    expect(timeoutSpy).toHaveBeenCalledWith(ANALYST_SCORING_TIMEOUT_MS);
+  });
 });
 
 describe("Claude attempt accounting", () => {
@@ -1019,6 +1048,29 @@ describe("Claude attempt accounting", () => {
       status: "failed",
       meta: expect.stringContaining("transport_error"),
     }));
+  });
+
+  it("records the tool and dedicated timeout when a request expires", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new DOMException("timed out", "TimeoutError")));
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const captured = await withCostLedger(async () => {
+      const result = await structured<{ ok: boolean }>("system", "user", tool, 2048, 120_000);
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBeNull();
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "claude",
+      op: "record_test",
+      failed: 1,
+      meta: expect.stringContaining("timeout_120000ms"),
+    }));
+    expect(errorSpy).toHaveBeenCalledWith(
+      expect.stringContaining("record_test request failed (timeout_120000ms)"),
+      expect.objectContaining({ name: "TimeoutError" }),
+    );
   });
 
   it("records billed usage as partial when the required tool result is missing", async () => {

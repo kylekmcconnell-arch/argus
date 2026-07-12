@@ -32,6 +32,10 @@ const harness = vi.hoisted(() => ({
   startPersonAudit: vi.fn(),
   startTokenScan: vi.fn(),
   syncReport: vi.fn(),
+  logAudit: vi.fn(),
+  personContribution: vi.fn(),
+  recordContribution: vi.fn(),
+  personOnComplete: null as ((dossier: Record<string, unknown>, priv?: boolean) => void) | null,
   scanOnComplete: null as ((run: Record<string, unknown>) => void) | null,
 }));
 
@@ -151,14 +155,14 @@ vi.mock("./components/CaseBriefPanel", () => ({
 
 vi.mock("./lib/auditlog", () => ({
   hydrateSharedLog: vi.fn(),
-  logAudit: vi.fn(),
+  logAudit: harness.logAudit,
 }));
 
 vi.mock("./graph/store", () => ({
   hydrateCommunityGraph: vi.fn(),
   investigationContribution: vi.fn(),
-  personContribution: vi.fn(),
-  recordContribution: vi.fn(),
+  personContribution: harness.personContribution,
+  recordContribution: harness.recordContribution,
   tokenContribution: vi.fn(),
 }));
 
@@ -168,7 +172,9 @@ vi.mock("./lib/live", () => ({
 
 vi.mock("./lib/runner", () => ({
   getRun: harness.getRun,
-  setOnComplete: vi.fn(),
+  setOnComplete: vi.fn((callback: (dossier: Record<string, unknown>, priv?: boolean) => void) => {
+    harness.personOnComplete = callback;
+  }),
   startPersonAudit: harness.startPersonAudit,
 }));
 
@@ -280,6 +286,30 @@ function tokenResult(address: string, headline: string) {
   };
 }
 
+function personResult(persistence: Record<string, unknown>) {
+  return {
+    handle: "@persisted_person",
+    display_name: "Persisted Person",
+    avatar: "P",
+    avatar_url: "",
+    headline: "Evidence-backed person report",
+    evidence: { associates: [] },
+    graph: {
+      nodes: [{ type: "Person", key: "@persisted_person", subject: true }],
+      edges: [],
+    },
+    report: {
+      audit_id: "person-audit-1",
+      composite_verdict: "PASS",
+      governing_score: 88,
+      governing_role: "FOUNDER",
+      roles: ["FOUNDER"],
+      cap_applied: null,
+    },
+    persistence,
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   harness.landingInput = "";
@@ -307,6 +337,12 @@ beforeEach(() => {
   harness.startInvestigationScan.mockImplementation((_input, priv: boolean) => ({ priv }));
   harness.startPersonAudit.mockImplementation((_input, priv: boolean) => ({ priv }));
   harness.syncReport.mockResolvedValue({ state: "failed" });
+  harness.personContribution.mockReturnValue({
+    handle: "@persisted_person",
+    nodes: [{ type: "Person", key: "@persisted_person", subject: true }],
+    edges: [],
+  });
+  harness.personOnComplete = null;
   harness.scanOnComplete = null;
   window.history.replaceState({}, "", "/");
 });
@@ -321,6 +357,36 @@ afterEach(async () => {
 });
 
 describe("App routing safety", () => {
+  it("keeps a failed person save session-only and out of shared audit surfaces", async () => {
+    await renderApp();
+    expect(harness.personOnComplete).not.toBeNull();
+
+    act(() => {
+      harness.personOnComplete?.(personResult({ state: "failed" }));
+    });
+
+    expect(harness.syncReport).not.toHaveBeenCalled();
+    expect(harness.logAudit).not.toHaveBeenCalled();
+    expect(harness.personContribution).not.toHaveBeenCalled();
+    expect(harness.recordContribution).not.toHaveBeenCalled();
+  });
+
+  it("publishes a person audit only when it carries an immutable version binding", async () => {
+    await renderApp();
+    const reportVersionId = "00000000-0000-4000-8000-000000000301";
+
+    act(() => {
+      harness.personOnComplete?.(personResult({ state: "persisted", reportVersionId }));
+    });
+
+    expect(harness.syncReport).toHaveBeenCalledTimes(1);
+    expect(harness.logAudit).toHaveBeenCalledTimes(1);
+    expect(harness.personContribution).toHaveBeenCalledWith(expect.objectContaining({
+      persistence: expect.objectContaining({ state: "persisted", reportVersionId }),
+    }));
+    expect(harness.recordContribution).toHaveBeenCalledTimes(1);
+  });
+
   it("does not attach to or launch any runner when the durable case is archived", async () => {
     harness.landingInput = "@archivedfounder";
     harness.resolveStoredCases.mockResolvedValue({
