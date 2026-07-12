@@ -9,6 +9,7 @@ import {
   MagnifyingGlassIcon,
   QuestionIcon,
   ShieldCheckIcon,
+  WaveformIcon,
 } from "@phosphor-icons/react";
 import { HeroBackdrop } from "./ArgusMark";
 import { PrivateToggle } from "./PrivateToggle";
@@ -52,7 +53,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
 
   return (
     <div className="relative min-h-full overflow-hidden">
-      <HeroBackdrop className="pointer-events-none absolute inset-x-0 bottom-[-100px] z-0 h-[520px] w-full opacity-35" />
+      <HeroBackdrop className="pointer-events-none absolute bottom-[-70px] left-[24%] z-0 h-[310px] w-[86%] opacity-55 max-md:bottom-[-15px] max-md:left-[5%] max-md:h-[260px] max-md:w-[120%] max-md:opacity-30" />
 
       <div className="relative z-10 mx-auto w-full max-w-5xl px-5 py-10 sm:px-7 lg:py-16">
         <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-10">
@@ -77,14 +78,14 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
               className="panel soft-shadow mt-8 w-full p-4 sm:p-5"
             >
               <label htmlFor="investigation-subject" className="eyebrow">Subject</label>
-              <div className="relative mt-2.5">
+              <div className="investigation-control relative mt-2.5">
                 <MagnifyingGlassIcon size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint" aria-hidden />
                 <input
                   id="investigation-subject"
                   value={value}
                   onChange={(e) => setValue(e.target.value)}
-                  placeholder="@handle, 0x contract, or project.com"
-                  className="field mono min-h-12 w-full py-3 pl-10 pr-4 text-[13.5px]"
+                  placeholder="@handle, contract, or project"
+                  className="field mono min-h-12 w-full py-3 pl-10 pr-4 text-[13.5px] sm:pr-20"
                   aria-describedby="subject-help fresh-audit-note"
                   autoComplete="off"
                   autoCapitalize="none"
@@ -93,6 +94,9 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
                   required
                   autoFocus
                 />
+                <span className="investigation-trace pointer-events-none absolute right-3 top-1/2 hidden items-center sm:flex" aria-hidden="true">
+                  <WaveformIcon size={42} weight="thin" />
+                </span>
               </div>
               <p id="subject-help" className="mt-2 text-[11px] leading-relaxed text-ink-faint">
                 ARGUS detects the subject type and builds the appropriate person, token, site, or combined project case.
@@ -104,7 +108,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
                   type="submit"
                   disabled={launching || !value.trim()}
                   aria-describedby="fresh-audit-note"
-                  className="btn-primary ml-auto flex min-h-10 items-center gap-2 px-4 py-2 text-[13.5px] font-medium disabled:cursor-wait disabled:opacity-70"
+                  className="btn-primary landing-cta-signal ml-auto flex min-h-10 items-center gap-2 px-4 py-2 text-[13.5px] font-medium disabled:cursor-wait"
                 >
                   {launching ? "Starting fresh audit…" : "Start investigation"}
                   <ArrowRightIcon size={16} weight="bold" aria-hidden />
@@ -125,7 +129,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
             <div className="divide-y divide-line/70">
               {INVESTIGATION_OUTPUTS.map(({ icon: Icon, label, detail }) => (
                 <div key={label} className="flex gap-3 px-4 py-3.5">
-                  <Icon size={18} className="mt-0.5 shrink-0 text-signal-lift" aria-hidden />
+                  <Icon size={18} className="mt-0.5 shrink-0 text-ink-faint" aria-hidden />
                   <div>
                     <div className="text-[13.5px] font-medium text-ink">{label}</div>
                     <div className="mt-1 text-[11px] leading-relaxed text-ink-faint">{detail}</div>
@@ -152,7 +156,7 @@ export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?:
           <div className="mt-5 grid divide-y divide-line/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
             {INVESTIGATION_LENSES.map(({ icon: Icon, title, detail }) => (
               <div key={title} className="py-4 sm:px-5 sm:first:pl-0 sm:last:pr-0">
-                <Icon size={20} className="text-signal-lift" aria-hidden />
+                <Icon size={20} className="text-ink-faint" aria-hidden />
                 <h3 className="mt-3 text-[15px] font-medium text-ink">{title}</h3>
                 <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">{detail}</p>
               </div>

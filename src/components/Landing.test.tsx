@@ -37,6 +37,11 @@ describe("Landing fresh audit launch", () => {
     const form = container.querySelector<HTMLFormElement>("form");
     expect(input).not.toBeNull();
     expect(form).not.toBeNull();
+    expect(input?.placeholder).toBe("@handle, contract, or project");
+    const trace = container.querySelector<HTMLElement>(".investigation-trace");
+    expect(trace).not.toBeNull();
+    expect(trace?.getAttribute("aria-hidden")).toBe("true");
+    expect(trace?.querySelector("svg")).not.toBeNull();
     expect(container.textContent).toContain("Starts a fresh provider run and may use paid API quota");
     expect(container.textContent).toContain("Open previous snapshots from Recent cases");
     expect(container.textContent).not.toContain("Try a live token");

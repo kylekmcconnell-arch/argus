@@ -100,6 +100,14 @@ describe("Recent report controls", () => {
     expect(container.textContent).toContain("v3.0");
     expect(container.textContent).not.toContain("v2.2");
 
+    const activeNav = container.querySelector<HTMLButtonElement>('aside button[aria-current="page"]');
+    expect(activeNav).not.toBeNull();
+    expect(activeNav?.className.split(/\s+/)).toContain("bg-panel-2/90");
+    expect(activeNav?.className.split(/\s+/)).not.toContain("bg-signal/[0.09]");
+    const activeRail = activeNav?.querySelector<HTMLElement>('span.absolute[aria-hidden="true"]');
+    expect(activeRail).not.toBeNull();
+    expect(activeRail?.className.split(/\s+/)).toEqual(expect.arrayContaining(["inset-y-0", "left-0", "w-[2px]", "bg-signal"]));
+
     const sidebarLink = [...container.querySelectorAll<HTMLAnchorElement>("aside a")]
       .find((link) => link.textContent?.includes("@gakonst") && link.textContent.includes("handle"));
     expect(sidebarLink).toBeDefined();
@@ -120,5 +128,31 @@ describe("Recent report controls", () => {
     expect(visibleTickerLink?.getAttribute("href")).toBe("?s=gakonst&kind=person");
     await act(async () => visibleTickerLink?.click());
     expect(onOpenRecent).toHaveBeenLastCalledWith("gakonst", "person");
+  });
+
+  it("keeps mobile account utilities inside the drawer scroller", async () => {
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+    await act(async () => {
+      root?.render(
+        <Sidebar
+          onNav={() => undefined}
+          onAudit={() => undefined}
+          view="idle"
+          mobile
+          open
+        />,
+      );
+    });
+
+    const drawer = container.querySelector<HTMLElement>('aside[role="dialog"]');
+    const scroller = drawer?.querySelector<HTMLElement>(".thin-scroll");
+    const account = drawer?.querySelector<HTMLElement>("[data-sidebar-account]");
+    expect(drawer).not.toBeNull();
+    expect(scroller).not.toBeNull();
+    expect(account).not.toBeNull();
+    expect(scroller?.contains(account ?? null)).toBe(true);
+    expect(account?.className.split(/\s+/)).toContain("mt-4");
   });
 });

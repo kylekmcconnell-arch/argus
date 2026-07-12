@@ -17,7 +17,7 @@ import {
 beforeEach(() => {
   document.documentElement.dataset.theme = "dark";
   document.documentElement.style.colorScheme = "dark";
-  document.head.innerHTML = '<meta name="theme-color" content="#060a12">';
+  document.head.innerHTML = '<meta name="theme-color" content="#06080c">';
 });
 
 function memoryStorage(initial: Record<string, string> = {}) {
@@ -64,13 +64,16 @@ describe("ARGUS theme persistence", () => {
 });
 
 describe("ARGUS theme application", () => {
-  it("synchronizes the root theme, native controls, and browser chrome", () => {
-    expect(applyArgusTheme("light", document)).toBe("light");
-    expect(document.documentElement.dataset.theme).toBe("light");
-    expect(document.documentElement.style.colorScheme).toBe("light");
+  it.each([
+    ["dark", ARGUS_THEME_COLORS.dark],
+    ["light", ARGUS_THEME_COLORS.light],
+  ] as const)("synchronizes the root, native controls, and browser chrome in %s mode", (theme, chromeColor) => {
+    expect(applyArgusTheme(theme, document)).toBe(theme);
+    expect(document.documentElement.dataset.theme).toBe(theme);
+    expect(document.documentElement.style.colorScheme).toBe(theme);
     expect(document.querySelector('meta[name="theme-color"]')?.getAttribute("content"))
-      .toBe(ARGUS_THEME_COLORS.light);
-    expect(currentArgusTheme(document)).toBe("light");
+      .toBe(chromeColor);
+    expect(currentArgusTheme(document)).toBe(theme);
   });
 
   it("applies and persists a user choice through one operation", () => {

@@ -89,11 +89,11 @@ function NavItem({ icon: Icon, label, active, onClick, badge, nested = false }: 
       onClick={onClick}
       aria-current={active ? "page" : undefined}
       className={`relative flex min-h-9 w-full items-center gap-2.5 rounded-md py-2 pr-2.5 text-[13.5px] transition ${nested ? "pl-7" : "pl-2.5"} ${
-        active ? "bg-signal/[0.09] text-ink" : "text-ink-dim hover:bg-panel/70 hover:text-ink"
+        active ? "bg-panel-2/90 text-ink" : "text-ink-dim hover:bg-panel/70 hover:text-ink"
       }`}
     >
-      {active && <span className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-full bg-signal" aria-hidden />}
-      <span className={active ? "text-signal-lift" : "text-ink-faint"}>
+      {active && <span className="absolute inset-y-0 left-0 w-[2px] rounded-full bg-signal" aria-hidden />}
+      <span className={active ? "text-ink-dim" : "text-ink-faint"}>
         <Icon size={17} weight={active ? "bold" : "regular"} aria-hidden />
       </span>
       <span className="truncate">{label}</span>
@@ -258,6 +258,15 @@ export function Sidebar({
     return !runningKeys.has(ref) && !scanRefs.has(ref);
   });
   const me = getAnalyst();
+  const accountControls = (
+    <div className={`${mobile ? "mt-4" : "mt-auto"} border-t border-line px-2.5 py-2.5`} data-sidebar-account>
+      <NavItem icon={InfoIcon} label="How it works" active={view === "about"} onClick={() => nav("about")} />
+      <NavItem icon={CodeIcon} label="API" active={view === "api"} onClick={() => nav("api")} />
+      <NavItem icon={ClockCounterClockwiseIcon} label="Changelog" active={view === "changelog"} onClick={() => nav("changelog")} />
+      <ThemeToggle />
+      <AnalystBadge />
+    </div>
+  );
   return (
     <aside
       ref={drawerRef}
@@ -267,7 +276,7 @@ export function Sidebar({
       aria-label={open && mobile ? "ARGUS navigation" : undefined}
       aria-hidden={mobile && !open ? true : undefined}
       inert={mobile && !open ? true : undefined}
-      className={`fixed inset-y-0 left-0 z-40 flex h-full w-[248px] shrink-0 flex-col border-r border-line bg-sidebar transition-transform lg:static lg:translate-x-0 ${
+      className={`fixed inset-y-0 left-0 z-40 flex h-full w-[248px] shrink-0 flex-col border-r border-line-2 bg-sidebar transition-transform lg:static lg:translate-x-0 ${
         open ? "translate-x-0" : "-translate-x-full"
       }`}
     >
@@ -440,16 +449,11 @@ export function Sidebar({
             </button>
           )}
         </section>
+        {mobile && accountControls}
       </div>
 
       {/* account */}
-      <div className="mt-auto border-t border-line px-2.5 py-2.5">
-        <NavItem icon={InfoIcon} label="How it works" active={view === "about"} onClick={() => nav("about")} />
-        <NavItem icon={CodeIcon} label="API" active={view === "api"} onClick={() => nav("api")} />
-        <NavItem icon={ClockCounterClockwiseIcon} label="Changelog" active={view === "changelog"} onClick={() => nav("changelog")} />
-        <ThemeToggle />
-        <AnalystBadge />
-      </div>
+      {!mobile && accountControls}
     </aside>
   );
 }

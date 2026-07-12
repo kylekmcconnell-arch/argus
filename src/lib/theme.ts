@@ -2,7 +2,7 @@ export type ArgusTheme = "dark" | "light";
 
 export const ARGUS_THEME_STORAGE_KEY = "argus-theme";
 export const ARGUS_THEME_COLORS: Readonly<Record<ArgusTheme, string>> = {
-  dark: "#060a12",
+  dark: "#06080c",
   light: "#f4f7fb",
 };
 

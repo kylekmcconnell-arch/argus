@@ -7,7 +7,7 @@ visual audit (2026-07-11) found 5 verdict-badge idioms, 5 external-link styles, 
 implementations, 25+ font sizes, three parallel status→color maps, and a broken
 `var(--color-x)14` alpha hack silently rendering nothing in 8 files. One concept, one idiom.
 
-The identity: **a forensic instrument, not a SaaS dashboard.** Deep-navy operations room,
+The identity: **a forensic instrument, not a SaaS dashboard.** Graphite-black intelligence room,
 one royal-blue signal, verdicts that read like stamped findings. Density over decoration
 (REPORT-UX-AUDIT.md P2); critical metadata legible at arm's length (P1).
 

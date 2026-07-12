@@ -49,7 +49,7 @@
 
 - Production deployment: `dpl_HsStkPh3NZEpkRk3ncPcv2eDpHWZ` · Ready · aliased to `https://argus-one-flax.vercel.app`.
 - Default-theme behavior: passed. Missing, invalid, or unavailable storage resolves to dark; the explicit light preference is restored before paint. The live control updates `data-theme`, native `color-scheme`, browser `theme-color`, its action label/icon, and persisted preference together.
-- Color hierarchy: passed. Dark uses a midnight-blue void rather than flat black; raised panels use restrained depth and an inner highlight. Light uses an off-white canvas and white panels. Text, control boundaries, and primary-button pairs are covered by automated WCAG contrast assertions in both themes.
+- Color hierarchy: passed. Dark uses a neutral graphite void with blue reserved for active signals; raised panels use restrained depth and an inner highlight. Light uses an off-white canvas and white panels. Text, control boundaries, and primary-button pairs are covered by automated WCAG contrast assertions in both themes.
 - Investigation progress: passed. The live canvas shows only observed evidence-event count, unique source-tagged evidence, review flags, latest event, and real investigation hop. Synthetic completion percentages and unobserved provider claims are absent.
 - Motion: passed. The live eye ring runs at 2.2s, the active-stage pulse at 2s, and the evidence-ledger sweep at 1.4s. New evidence rises in briefly. Reduced-motion removes animated utilities, sweep/pulse behavior, SMIL, and smooth auto-scrolling while preserving the same state information.
 - Resolution truthfulness: passed. Subject resolution is labeled as pre-acquisition, reports zero observed events/sources, and explicitly says provider acquisition has not started.
@@ -101,5 +101,49 @@
 - Vercel error scan: no error-level logs found for this deployment.
 
 No open P0, P1, or P2 visual or functional issues remain in the reviewed flows.
+
+final result: passed
+
+## Graphite intelligence redesign QA
+
+- Approved reference: `/Users/kyle/Documents/ARGUS/artifacts/design-targets/argus-graphite-intelligence.png`
+- Production deployment: `dpl_6v85UPhbtr95ap2WJHCTmn3nZMui` · Ready · aliased to `https://argus-one-flax.vercel.app`
+- Authenticated state: Kyle owner session, investigation home, mobile drawer, and frozen `@gakonst` report snapshot v11
+- Desktop verification: 1280 × 720 DOM viewport; the in-app compositor records the left 1000px while DOM measurements confirm the full desktop layout
+- Mobile verification: 390 × 844
+
+### Comparison evidence
+
+- Approved target / final production comparison: `/Users/kyle/Documents/ARGUS/artifacts/design-qa-graphite-2026-07-12/desktop-target-vs-production-final.png`
+- Final desktop home: `/Users/kyle/Documents/ARGUS/artifacts/design-qa-graphite-2026-07-12/argus-home-desktop-release.png`
+- Final mobile home: `/Users/kyle/Documents/ARGUS/artifacts/design-qa-graphite-2026-07-12/argus-home-mobile-release.png`
+- Final mobile navigation: `/Users/kyle/Documents/ARGUS/artifacts/design-qa-graphite-2026-07-12/argus-mobile-navigation-final.png`
+- Graphite desktop report: `/Users/kyle/Documents/ARGUS/artifacts/design-qa-graphite-2026-07-12/argus-report-desktop.png`
+- Graphite mobile report: `/Users/kyle/Documents/ARGUS/artifacts/design-qa-graphite-2026-07-12/argus-report-mobile-390x844.png`
+
+### Fidelity and interaction review
+
+- Color hierarchy: passed. The dark system uses `#06080c` graphite void, `#0c0e12` panels, and neutral structural surfaces. Cobalt is reserved for the brand iris, active navigation rail, focus signal, interactive trace, and enabled actions. Existing pass, caution, fail, avoid, and unverifiable verdict colors remain unchanged.
+- Brand and technical character: passed. The compact ARGUS mark separates a neutral point field from its cobalt iris; the home backdrop uses a neutral point cloud; the active subject field carries an aria-hidden Phosphor waveform cue; active navigation uses a neutral row with a two-pixel cobalt rail.
+- Typography, spacing, and surfaces: passed. Existing ARGUS display, body, and mono roles remain intact while graphite surface contrast, panel edges, and restrained elevation now match the approved intelligence-room direction without deleting product content.
+- Responsive behavior: passed. The subject placeholder is complete at 390px, the home and report have no document-level horizontal overflow, and the mobile drawer shows every primary item before recent cases. Account utilities participate in the same drawer scroller instead of clipping `Audit & access` behind a fixed footer.
+- Accessibility: passed. The dark focus ring remains a two-pixel visible outline with a void separation layer, but its pale signal treatment avoids the prior neon double ring. The inner field border stays neutral. Decorative trace and eye assets are aria-hidden. Automated WCAG checks cover text across every dark base surface, semantic verdict colors, graphical signal contrast, and control boundaries.
+- Interactions: passed. Empty and enabled investigation CTA states, subject focus, mobile drawer open and close, desktop navigation, and a real immutable report were exercised. No paid investigation was submitted.
+- Runtime: passed. Authenticated desktop, mobile, and report browser consoles contain no errors. The final Vercel error-level log scan returned no entries.
+
+### Iterations resolved
+
+- Pass 1 major: the mobile subject placeholder clipped mid-word. Shortened it while the label and helper preserve the complete subject-type explanation.
+- Pass 1 moderate: the focused field combined a saturated border and outline into a neon double ring. Restored the neutral control boundary and moved the global dark focus signal to a restrained pale-blue outline and glow.
+- Pass 1 moderate: the mobile utility footer obscured the bottom primary navigation item. Moved account utilities into the mobile drawer scroller while retaining the fixed desktop account footer.
+
+### Verification summary
+
+- Unit and integration: 108 files, 1,018 tests passed.
+- Focused graphite regression suite: 5 files, 24 tests passed before the final copy-only refinement; the final landing regression also passed.
+- Typecheck: application, collector server, and API configurations passed.
+- Production build: passed locally and on Vercel.
+- Focused lint and diff validation: passed.
+- Open design findings: none at P0, P1, or P2 in the reviewed flows.
 
 final result: passed

@@ -1,6 +1,6 @@
 // ARGUS mark — the all-seeing eye of Argus Panoptes, rendered as a halftone field
 // of dots forming an almond eye, dense on the left and fading right, with a solid
-// blue iris. Generated deterministically so it scales cleanly at any size.
+// cobalt iris. Generated deterministically so it scales cleanly at any size.
 
 interface Dot { x: number; y: number; r: number; o: number }
 
@@ -32,7 +32,7 @@ export function ArgusMark({ size = 28, live = false }: { size?: number; live?: b
   const { dots, irisX, irisY, irisR } = eyeDots(12, 88, 50, 23, 4.6);
   return (
     <svg width={size} height={size} viewBox="0 0 100 100" fill="none" aria-hidden>
-      <g fill="var(--color-signal)">
+      <g fill="var(--color-ink-faint)">
         {dots.map((d, i) => (
           <circle key={i} cx={d.x} cy={d.y} r={d.r} opacity={d.o} />
         ))}
@@ -50,22 +50,21 @@ export function ArgusMark({ size = 28, live = false }: { size?: number; live?: b
         />
       )}
       <circle cx={irisX} cy={irisY} r={irisR} fill="var(--color-signal)" />
-      <circle cx={irisX - irisR * 0.32} cy={irisY - irisR * 0.32} r={irisR * 0.3} fill="#ffffff" opacity="0.75" />
+      <circle cx={irisX - irisR * 0.32} cy={irisY - irisR * 0.32} r={irisR * 0.3} fill="var(--color-on-signal)" opacity="0.75" />
     </svg>
   );
 }
 
 // A faint, oversized dotted eye for the hero canvas — the hundred eyes at rest.
 export function HeroBackdrop({ className = "" }: { className?: string }) {
-  const { dots, irisX, irisY, irisR } = eyeDots(120, 1080, 300, 200, 30);
+  const { dots } = eyeDots(120, 1080, 300, 200, 30);
   return (
     <svg className={className} viewBox="0 0 1200 600" fill="none" preserveAspectRatio="xMidYMid meet" aria-hidden>
-      <g fill="var(--color-signal)" opacity="0.16">
+      <g fill="var(--color-ink-faint)" opacity="0.16">
         {dots.map((d, i) => (
           <circle key={i} cx={d.x} cy={d.y} r={d.r} opacity={d.o} />
         ))}
       </g>
-      <circle cx={irisX} cy={irisY} r={irisR} fill="var(--color-signal)" opacity="0.2" />
     </svg>
   );
 }

@@ -4,6 +4,8 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const css = readFileSync(new URL("../index.css", import.meta.url), "utf8");
+const themeSource = readFileSync(new URL("./theme.ts", import.meta.url), "utf8");
+const html = readFileSync(new URL("../../index.html", import.meta.url), "utf8");
 
 function token(block: string, name: string): string {
   const match = block.match(new RegExp(`--color-${name}:\\s*(#[0-9a-fA-F]{6})`));
@@ -27,28 +29,122 @@ function contrast(foreground: string, background: string): number {
 }
 
 const dark = css.slice(css.indexOf("@theme {"), css.indexOf(":root {"));
-const lightStart = css.indexOf(':root[data-theme="light"]');
+const lightStart = css.indexOf('\n:root[data-theme="light"] {') + 1;
 const light = css.slice(lightStart, css.indexOf("@layer base", lightStart));
 
+const DARK_SURFACES = ["void", "panel", "panel-2", "sidebar"] as const;
+const TEXT_TOKENS = ["ink", "ink-dim", "ink-faint", "signal-lift"] as const;
+const SEMANTIC_TOKENS = ["pass", "caution", "fail", "avoid", "unverifiable"] as const;
+
+const LIGHT_PALETTE = {
+  void: "#f4f7fb",
+  panel: "#ffffff",
+  "panel-2": "#eef3f9",
+  sidebar: "#eff4fa",
+  line: "#d8e1ed",
+  "line-2": "#b4c2d5",
+  "control-line": "#72829a",
+  ink: "#0b1424",
+  "ink-dim": "#42536a",
+  "ink-faint": "#5c6e86",
+  signal: "#2e5edb",
+  "signal-dim": "#224abd",
+  "signal-lift": "#224abd",
+  "accent-tint": "#eaf0ff",
+  pass: "#147a43",
+  caution: "#8a5b06",
+  fail: "#b92564",
+  avoid: "#c72e35",
+  unverifiable: "#6940cc",
+} as const;
+
+const SEMANTIC_PALETTES = {
+  dark: {
+    pass: "#35c97b",
+    caution: "#f2ad3f",
+    fail: "#e56c9d",
+    avoid: "#f05b61",
+    unverifiable: "#a98cf5",
+  },
+  light: {
+    pass: "#147a43",
+    caution: "#8a5b06",
+    fail: "#b92564",
+    avoid: "#c72e35",
+    unverifiable: "#6940cc",
+  },
+} as const;
+
 describe("ARGUS theme contrast", () => {
-  it.each([
-    ["dark", dark],
-    ["light", light],
-  ])("keeps normal text tokens at WCAG AA in %s mode", (_theme, block) => {
-    const panel = token(block, "panel");
-    for (const name of ["ink", "ink-dim", "ink-faint", "signal-lift"]) {
-      expect(contrast(token(block, name), panel), `${name} on panel`).toBeGreaterThanOrEqual(4.5);
+  it("keeps every dark text token at WCAG AA across every base surface", () => {
+    for (const foregroundName of TEXT_TOKENS) {
+      for (const backgroundName of DARK_SURFACES) {
+        expect(
+          contrast(token(dark, foregroundName), token(dark, backgroundName)),
+          `${foregroundName} on ${backgroundName}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("keeps every dark verdict color at WCAG AA across every base surface", () => {
+    for (const foregroundName of SEMANTIC_TOKENS) {
+      for (const backgroundName of DARK_SURFACES) {
+        expect(
+          contrast(token(dark, foregroundName), token(dark, backgroundName)),
+          `${foregroundName} on ${backgroundName}`,
+        ).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("keeps the dark signal and control boundary visible across every base surface", () => {
+    for (const backgroundName of DARK_SURFACES) {
+      const background = token(dark, backgroundName);
+      expect(
+        contrast(token(dark, "signal"), background),
+        `signal on ${backgroundName}`,
+      ).toBeGreaterThanOrEqual(3);
+      expect(
+        contrast(token(dark, "control-line"), background),
+        `control-line on ${backgroundName}`,
+      ).toBeGreaterThanOrEqual(3);
     }
   });
 
   it.each([
     ["dark", dark],
     ["light", light],
-  ])("keeps button text and control boundaries accessible in %s mode", (_theme, block) => {
-    const onSignal = block.includes("--color-on-signal")
-      ? token(block, "on-signal")
-      : token(dark, "on-signal");
+  ])("keeps button text and panel control boundaries accessible in %s mode", (_theme, block) => {
+    const onSignal = block.includes("--color-on-signal") ? token(block, "on-signal") : token(dark, "on-signal");
     expect(contrast(onSignal, token(block, "signal"))).toBeGreaterThanOrEqual(4.5);
     expect(contrast(token(block, "control-line"), token(block, "panel"))).toBeGreaterThanOrEqual(3);
+  });
+
+  it("locks the complete light color palette", () => {
+    for (const [name, expected] of Object.entries(LIGHT_PALETTE)) {
+      expect(token(light, name), name).toBe(expected);
+    }
+  });
+
+  it.each([
+    ["dark", dark, SEMANTIC_PALETTES.dark],
+    ["light", light, SEMANTIC_PALETTES.light],
+  ] as const)("locks the %s semantic verdict palette", (_theme, block, expected) => {
+    for (const [name, value] of Object.entries(expected)) {
+      expect(token(block, name), name).toBe(value);
+    }
+  });
+
+  it("keeps CSS, runtime theme colors, and the pre-paint browser chrome synchronized", () => {
+    const runtimeDark = themeSource.match(/dark:\s*"(#[0-9a-fA-F]{6})"/)?.[1];
+    const runtimeLight = themeSource.match(/light:\s*"(#[0-9a-fA-F]{6})"/)?.[1];
+    const initialChrome = html.match(/<meta name="theme-color" content="(#[0-9a-fA-F]{6})"/)?.[1];
+    const prePaintChrome = html.match(/theme === "light" \? "(#[0-9a-fA-F]{6})" : "(#[0-9a-fA-F]{6})"/)?.slice(1);
+
+    expect(runtimeDark).toBe(token(dark, "void"));
+    expect(runtimeLight).toBe(token(light, "void"));
+    expect(initialChrome).toBe(runtimeDark);
+    expect(prePaintChrome).toEqual([runtimeLight, runtimeDark]);
   });
 });
