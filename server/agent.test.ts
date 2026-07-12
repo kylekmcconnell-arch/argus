@@ -7,6 +7,7 @@ import {
   buildScoringEvidencePacket,
   extractScoringEvidenceCatalog,
   inspectAnalystScoringPreflight,
+  normalizeAnalystSupportCounterOverlap,
   scanContradictions,
   structured,
   validateAnalystVerdict,
@@ -365,6 +366,54 @@ describe("analyst verdict integrity", () => {
       headline: "Complete result",
       identity_note: "Identity resolved",
     }, catalog, validationCatalog)).toBeNull();
+  });
+
+  it("conservatively removes support/counter overlap when independent support remains", () => {
+    const alternateF1Ref = `art_v1_${"6".repeat(64)}`;
+    const evidenceCatalog = [
+      ...validationCatalog,
+      axisArtifact(alternateF1Ref, ["F1_identity_verifiability"], "verified"),
+    ];
+    const raw = {
+      axes: [
+        {
+          ...validAxis("F1_identity_verifiability", 8, F1_REF),
+          additionalEvidenceRefs: [alternateF1Ref],
+          counterEvidenceRefs: ["e001"],
+        },
+        validAxis("F2_track_record", 20, F2_REF),
+      ],
+      headline: "Independent support remains after conservative normalization.",
+      identity_note: "Identity remains supported.",
+    };
+
+    const normalized = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog);
+    const result = validateAnalystVerdict(normalized, catalog, evidenceCatalog);
+
+    expect(normalized).not.toBe(raw);
+    expect(result?.axes[0]).toMatchObject({
+      evidenceRefs: [alternateF1Ref],
+      counterEvidenceRefs: [F1_REF],
+    });
+  });
+
+  it("does not erase the only support reference to rescue an overlapping row", () => {
+    const raw = {
+      axes: [
+        {
+          ...validAxis("F1_identity_verifiability", 8, F1_REF),
+          counterEvidenceRefs: ["e001"],
+        },
+        validAxis("F2_track_record", 20, F2_REF),
+      ],
+      headline: "The only support reference is contradictory.",
+      identity_note: "Identity remains unresolved.",
+    };
+
+    const normalized = normalizeAnalystSupportCounterOverlap(raw, validationCatalog);
+
+    expect(normalized).toBe(raw);
+    expect(validateAnalystVerdict(normalized, catalog, validationCatalog)).toBeNull();
   });
 
   it.each([F2_UNAVAILABLE_REF, F2_CHECKED_EMPTY_REF])(
@@ -2189,6 +2238,88 @@ describe("analyst verdict integrity", () => {
       "{\"profile\":{\"handle\":\"@subject\"}}",
     )).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("accepts a complete verdict after deterministic counter-evidence precedence", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named founder of Verified Venture",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{
+        project_name: "Verified Venture",
+        role: "founder",
+        outcome: "Active",
+        artifact_verified: true,
+      }],
+      sourceArtifacts: [{
+        kind: "legal_case",
+        provider: "courtlistener",
+        match: "candidate",
+        title: "Exact-name legal-history candidate requiring review",
+        sourceUrl: "https://example.com/case",
+      }],
+    }, catalog);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const aliasesFor = (axis: string) => scorerCatalog.flatMap((artifact, index) =>
+      artifact.verification !== "unavailable"
+      && artifact.verification !== "checked_empty"
+      && artifact.eligibleAxes.includes(axis)
+        ? [`e${String(index + 1).padStart(3, "0")}`]
+        : []);
+    const f1Aliases = aliasesFor("F1_identity_verifiability");
+    const f2Alias = aliasesFor("F2_track_record")[0];
+    expect(f1Aliases.length).toBeGreaterThanOrEqual(2);
+    expect(f2Alias).toBeTruthy();
+
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      content: [{
+        type: "tool_use",
+        name: "record_verdict",
+        input: {
+          axes: [
+            {
+              axis: "F1_identity_verifiability",
+              score: 8,
+              rationale: "Identity has independent support and one contradictory artifact.",
+              primaryEvidenceRef: f1Aliases[0],
+              additionalEvidenceRefs: [f1Aliases[1]],
+              counterEvidenceRefs: [f1Aliases[0]],
+              coverageRefs: [],
+              gaps: [],
+            },
+            {
+              axis: "F2_track_record",
+              score: 20,
+              rationale: "The venture record is documented.",
+              primaryEvidenceRef: f2Alias,
+              additionalEvidenceRefs: [],
+              counterEvidenceRefs: [],
+              coverageRefs: [],
+              gaps: [],
+            },
+          ],
+          headline: "Independent support remains after contradictory evidence is separated.",
+          identity_note: "Identity is supported by the collected profile and venture evidence.",
+        },
+      }],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 100, output_tokens: 20 },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const verdict = await analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(verdict?.axes[0]).toMatchObject({
+      evidenceRefs: [scorerCatalog[Number.parseInt(f1Aliases[1].slice(1), 10) - 1].artifactId],
+      counterEvidenceRefs: [scorerCatalog[Number.parseInt(f1Aliases[0].slice(1), 10) - 1].artifactId],
+    });
   });
 
   it("distinguishes no methodology axes and unsupported axes from evidence gaps", () => {

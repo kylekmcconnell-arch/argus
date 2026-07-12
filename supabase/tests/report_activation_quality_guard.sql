@@ -116,6 +116,69 @@ begin
 end;
 $assert_routing_failure_preserved_decision$;
 
+-- Resolving a role is not enough to supersede a useful report when the scorer
+-- returns no axis rows. This attempt must also remain immutable but inactive.
+insert into quality_guard_versions (label, report_version_id)
+select 'scoring-failed', persisted.report_version_id
+from public.persist_report_version(
+  '00000000-0000-4000-8000-000000000090',
+  'person',
+  'world_xyz',
+  '@world_xyz',
+  '00000000-0000-4000-8000-000000000091',
+  '{
+    "handle":"@world_xyz",
+    "report":{
+      "roles":["PROJECT"],
+      "role_reports":[{"role":"PROJECT","axes":{}}],
+      "composite_verdict":"INCOMPLETE",
+      "governing_score":null
+    }
+  }'::jsonb,
+  'quality-guard-scoring-failed',
+  'server_collected',
+  'INCOMPLETE',
+  null,
+  'partial',
+  null,
+  '{}'::jsonb,
+  '{}'::jsonb
+) persisted;
+
+select public.activate_report_version(
+  '00000000-0000-4000-8000-000000000090',
+  (select report_version_id from quality_guard_versions where label = 'scoring-failed')
+);
+
+do $assert_scoring_failure_preserved_decision$
+declare
+  v_decision uuid;
+  v_scoring_failed uuid;
+  v_current uuid;
+  v_version_count integer;
+begin
+  select report_version_id into v_decision
+  from quality_guard_versions where label = 'decision';
+  select report_version_id into v_scoring_failed
+  from quality_guard_versions where label = 'scoring-failed';
+  select report_version_id into v_current
+  from public.reports
+  where organization_id = '00000000-0000-4000-8000-000000000090'
+    and kind = 'person'
+    and ref = 'world_xyz';
+  select pg_catalog.count(*) into v_version_count
+  from public.report_versions
+  where organization_id = '00000000-0000-4000-8000-000000000090';
+
+  if v_scoring_failed is null or v_scoring_failed = v_decision or v_version_count <> 3 then
+    raise exception 'scoring-failed attempt was not saved as a distinct immutable version';
+  end if;
+  if v_current is distinct from v_decision then
+    raise exception 'scoring-failed attempt replaced the decision-bearing projection';
+  end if;
+end;
+$assert_scoring_failure_preserved_decision$;
+
 -- A later decision-bearing report still supersedes normally.
 insert into quality_guard_versions (label, report_version_id)
 select 'new-decision', persisted.report_version_id
@@ -176,6 +239,22 @@ begin
     null
   ) then
     raise exception 'malformed role collections were classified as routing failure';
+  end if;
+
+  if not public.argus_is_routing_failed_report(
+    '{"report":{"roles":["PROJECT"],"role_reports":[{"role":"PROJECT","axes":{}}],"composite_verdict":"INCOMPLETE","governing_score":null}}'::jsonb,
+    'INCOMPLETE',
+    null
+  ) then
+    raise exception 'resolved-role scoring failure was not classified as decisionless';
+  end if;
+
+  if public.argus_is_routing_failed_report(
+    '{"report":{"roles":["PROJECT"],"role_reports":[{"role":"PROJECT","axes":{"P1_team_and_identity":{"score":16}}}],"composite_verdict":"INCOMPLETE","governing_score":null}}'::jsonb,
+    'INCOMPLETE',
+    null
+  ) then
+    raise exception 'partial scored report was classified as decisionless';
   end if;
 
   if pg_catalog.has_function_privilege(

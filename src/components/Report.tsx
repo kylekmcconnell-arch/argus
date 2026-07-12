@@ -1216,7 +1216,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
   const decisionBasisSummary = buildDecisionBasis(governingRoleReport, f.axisEvidenceCatalog, f.axisCitationVersion);
   const evidenceBackedAxisCount = decisionBasisSummary.evidenceBacked;
-  const routingUnresolved = roles.length === 0 || governingAxes.length === 0;
+  const routingUnresolved = roles.length === 0;
+  const scoringOutputIncomplete = roles.length > 0 && governingAxes.length === 0;
+  const decisionFrameworkUnavailable = routingUnresolved || scoringOutputIncomplete;
+  const resolvedRoleLabel = report.governing_role
+    ? ROLE_META[report.governing_role as SubjectClass]?.label ?? report.governing_role
+    : roles[0]
+      ? ROLE_META[roles[0]]?.label ?? roles[0]
+      : "subject";
   const derivedDiligenceChecks = personChecks({
     identityConfidence: report.identity_confidence ?? undefined,
     realName: (f.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
@@ -1528,6 +1535,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       provenance: "Required before scoring",
       href: "#identity-evidence" as `#${string}`,
     }] : []),
+    ...(scoringOutputIncomplete ? [{
+      id: "verify-scoring-pass",
+      title: `Complete the ${resolvedRoleLabel} scoring pass`,
+      detail: `ARGUS resolved this subject to ${resolvedRoleLabel}, but the analyst did not return a complete, valid governing-axis result. Rerun the scoring pass without discarding the collected provider evidence.`,
+      provenance: "Analyst output incomplete",
+      href: "#decision-basis" as `#${string}`,
+    }] : []),
     ...unresolvedChecks.map((check, index) => ({
       id: `verify-${check.checkId ?? index}`,
       title: check.label,
@@ -1549,7 +1563,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       id: `intel-finding-${index}`,
       title: finding.claim,
       detail: `${finding.verification_status} finding with ${finding.independent_source_count} recorded source${finding.independent_source_count === 1 ? "" : "s"}.`,
-      provenance: "Verified finding · excluded from scoring until routing resolves",
+      provenance: routingUnresolved
+        ? "Verified finding · excluded from scoring until routing resolves"
+        : "Verified finding · excluded because the scoring pass did not complete",
       href: "#publishable-findings" as `#${string}`,
     })),
     ...investigativeLeads.map((lead, index) => ({
@@ -1920,16 +1936,25 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         </div>
 
         <div id="decision-summary" className="grid scroll-mt-28 gap-4 py-5 lg:grid-cols-[minmax(0,1fr)_19rem]">
-          {routingUnresolved && (
-            <section className="finding tint-caution px-5 py-4 lg:col-span-2" aria-label="Project routing unresolved">
+          {decisionFrameworkUnavailable && (
+            <section
+              className="finding tint-caution px-5 py-4 lg:col-span-2"
+              aria-label={routingUnresolved ? "Project routing unresolved" : "Scoring output incomplete"}
+            >
               <div className="flex flex-wrap items-start gap-3">
                 <div className="min-w-0 flex-1">
-                  <div className="eyebrow text-caution">Project routing unresolved</div>
+                  <div className="eyebrow text-caution">
+                    {routingUnresolved ? "Project routing unresolved" : "Scoring output incomplete"}
+                  </div>
                   <h2 className="mt-1 text-[17px] font-semibold tracking-tight text-ink">
-                    ARGUS collected intelligence, but did not select a scoring methodology
+                    {routingUnresolved
+                      ? "ARGUS collected intelligence, but did not select a scoring methodology"
+                      : `ARGUS resolved this subject to ${resolvedRoleLabel}, but the scoring pass did not complete`}
                   </h2>
                   <p className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">
-                    This account was not resolved to an evidence-backed project, organization, token, or person role. The material below remains useful for investigation, but there is no decision-ready score or verdict in this snapshot.
+                    {routingUnresolved
+                      ? "This account was not resolved to an evidence-backed project, organization, token, or person role. The material below remains useful for investigation, but there is no decision-ready score or verdict in this snapshot."
+                      : `The ${resolvedRoleLabel} role is evidence-backed, but the analyst did not return a complete, valid governing-axis score. The collected intelligence remains useful, but there is no decision-ready score or verdict in this snapshot.`}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <span className="chip tint-caution">0 governing axes</span>
@@ -1941,7 +1966,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 {onRescan && (
                   <button type="button" onClick={onRescan} className="btn-chip tint-signal min-h-11 shrink-0 gap-1.5 font-medium">
                     <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
-                    Run corrected investigation
+                    {routingUnresolved ? "Run corrected investigation" : "Retry scoring investigation"}
                   </button>
                 )}
               </div>
@@ -1950,32 +1975,40 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <div className="panel px-5">
             <ReportCanvasNarrativeSection
               id="verdict-rationale"
-              title={routingUnresolved ? "Collected intelligence that did not enter a score" : "Why ARGUS reaches this verdict"}
-              description={routingUnresolved
-                ? "Verified artifacts and investigative leads stay visible while subject routing is unresolved. Leads remain explicitly unscored."
+              title={decisionFrameworkUnavailable ? "Collected intelligence that did not enter a score" : "Why ARGUS reaches this verdict"}
+              description={decisionFrameworkUnavailable
+                ? routingUnresolved
+                  ? "Verified artifacts and investigative leads stay visible while subject routing is unresolved. Leads remain explicitly unscored."
+                  : "Verified artifacts and investigative leads stay visible even though the scoring pass was incomplete. Leads remain explicitly unscored."
                 : favorableVerdict
                   ? "Only governing-axis rationales with frozen supporting citations appear here."
                   : "Hard caps, contradictions, low-scoring axes, and unresolved evidence that drive this stored result appear here."}
               tone={decisionNarrativeTone}
-              items={routingUnresolved ? unscoredIntelNarrative : verdictNarrative}
-              emptyCopy={routingUnresolved
-                ? "No verified artifact or investigative lead was stored. Review provider failures and rerun after resolving the subject type."
+              items={decisionFrameworkUnavailable ? unscoredIntelNarrative : verdictNarrative}
+              emptyCopy={decisionFrameworkUnavailable
+                ? routingUnresolved
+                  ? "No verified artifact or investigative lead was stored. Review provider failures and rerun after resolving the subject type."
+                  : "No verified artifact or investigative lead was stored. Review provider failures and retry the scoring investigation."
                 : favorableVerdict
                   ? "No evidence-backed governing-axis rationale is available in this snapshot. Inspect the decision basis before relying on the stored score."
                   : "No adverse evidence driver is recorded for this result. Inspect the decision basis before relying on the stored verdict."}
             />
             <ReportCanvasNarrativeSection
               id="confidence-limits"
-              title={routingUnresolved ? "Why ARGUS withheld a verdict" : favorableVerdict ? "What limits confidence" : "What evidence pulls the other way"}
-              description={routingUnresolved
-                ? "A scored conclusion is blocked until ARGUS resolves a provider-backed role and governing methodology."
+              title={decisionFrameworkUnavailable ? "Why ARGUS withheld a verdict" : favorableVerdict ? "What limits confidence" : "What evidence pulls the other way"}
+              description={decisionFrameworkUnavailable
+                ? routingUnresolved
+                  ? "A scored conclusion is blocked until ARGUS resolves a provider-backed role and governing methodology."
+                  : "A scored conclusion is blocked because the analyst did not return a complete, valid governing-axis result."
                 : favorableVerdict
                   ? "Coverage gaps, contradictions, counter-evidence, and policy caps remain visible even when the score is favorable."
                   : "Evidence-backed positive findings stay visible so an adverse verdict is presented with its counterweight."}
-              tone={routingUnresolved ? "caution" : favorableVerdict ? (report.cap_applied ? "avoid" : "caution") : "pass"}
-              items={routingUnresolved ? confidenceLimits : countervailingNarrative}
-              emptyCopy={routingUnresolved
-                ? "No decision methodology was selected, so ARGUS correctly withheld the score."
+              tone={decisionFrameworkUnavailable ? "caution" : favorableVerdict ? (report.cap_applied ? "avoid" : "caution") : "pass"}
+              items={decisionFrameworkUnavailable ? confidenceLimits : countervailingNarrative}
+              emptyCopy={decisionFrameworkUnavailable
+                ? routingUnresolved
+                  ? "No decision methodology was selected, so ARGUS correctly withheld the score."
+                  : "The role resolved, but no complete governing-axis result was stored, so ARGUS correctly withheld the score."
                 : favorableVerdict
                   ? "No unresolved coverage gaps, contradictions, governing-axis counter-evidence, or hard cap are recorded in this report."
                   : "No evidence-backed positive counterweight is recorded in this report."}
@@ -2023,7 +2056,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             roleReport={governingRoleReport}
             catalog={f.axisEvidenceCatalog}
             lineageVersion={f.axisCitationVersion}
-            routingUnresolved={routingUnresolved}
+            unavailableReason={routingUnresolved ? "routing" : scoringOutputIncomplete ? "scoring" : undefined}
             onRescan={onRescan}
           />
         </div>

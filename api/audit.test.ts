@@ -331,7 +331,20 @@ describe("person audit input guard", () => {
     expect(done.persistence).toMatchObject({ state: "persisted", reportVersionId });
   });
 
-  it("saves a no-role/no-axis routing failure without activating it", async () => {
+  it.each([
+    {
+      label: "no-role/no-axis routing failure",
+      auditId: "audit-run-routing-failed",
+      roles: [],
+      roleReports: [],
+    },
+    {
+      label: "resolved-role scoring failure",
+      auditId: "audit-run-scoring-failed",
+      roles: ["PROJECT"],
+      roleReports: [{ role: "PROJECT", axes: {} }],
+    },
+  ])("saves a $label without activating it", async ({ auditId, roles, roleReports }) => {
     const reportVersionId = "00000000-0000-4000-8000-000000000307";
     vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
     vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
@@ -340,9 +353,9 @@ describe("person audit input guard", () => {
       handle: "@world_xyz",
       completeness_state: "partial",
       report: {
-        audit_id: "audit-run-routing-failed",
-        roles: [],
-        role_reports: [],
+        audit_id: auditId,
+        roles,
+        role_reports: roleReports,
         composite_verdict: "INCOMPLETE",
         governing_score: null,
       },

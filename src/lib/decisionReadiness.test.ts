@@ -160,9 +160,29 @@ describe("deriveDecisionReadiness", () => {
       applicable: 3,
       unresolved: 1,
       decisionBlockers: 1,
-      title: "Decision framework unresolved",
+      title: "Subject routing unresolved",
     });
     expect(result.guidance).toContain("collected intelligence only");
+  });
+
+  it("labels a resolved role with no governing axes as incomplete scoring, not failed routing", () => {
+    const result = deriveDecisionReadiness(
+      checks(["confirmed", "finding", "checked-empty"]),
+      { roleCount: 1, decisionAxisTotal: 0, evidenceBackedAxes: 0 },
+    );
+
+    expect(result).toMatchObject({
+      status: "incomplete",
+      coveragePercent: 0,
+      successful: 3,
+      applicable: 3,
+      unresolved: 1,
+      decisionBlockers: 1,
+      title: "Scoring output incomplete",
+    });
+    expect(result.guidance).toContain("resolved an evidence-backed role");
+    expect(result.guidance).toContain("analyst did not return a complete, valid governing-axis score");
+    expect(result.guidance).not.toContain("did not resolve an evidence-backed role");
   });
 
   it("requires qualifying support for every governing axis before becoming ready", () => {

@@ -99,6 +99,33 @@ describe("DecisionBasis", () => {
     expect(onRescan).toHaveBeenCalledTimes(1);
   });
 
+  it("distinguishes incomplete analyst scoring from unresolved subject routing", () => {
+    const onRescan = vi.fn();
+    const report = roleReport();
+    report.axes = {};
+    act(() => {
+      root.render(
+        <DecisionBasis
+          roleReport={report}
+          catalog={[]}
+          lineageVersion={1}
+          unavailableReason="scoring"
+          onRescan={onRescan}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Scoring output incomplete");
+    expect(container.textContent).toContain("resolved an evidence-backed role");
+    expect(container.textContent).toContain("analyst did not return a complete, valid governing-axis score");
+    expect(container.textContent).not.toContain("No evidence-backed role selected");
+    const retry = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "Retry scoring investigation");
+    expect(retry).toBeDefined();
+    act(() => retry?.click());
+    expect(onRescan).toHaveBeenCalledTimes(1);
+  });
+
   it("renders all axes, accessible tab state, and exact safe source links", () => {
     const support = evidence("support-artifact", "F2_track_record");
     const counter = evidence("counter-artifact", "F2_track_record", {

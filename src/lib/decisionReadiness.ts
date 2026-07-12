@@ -73,11 +73,15 @@ export function deriveDecisionReadiness(
   const roleCount = typeof context.roleCount === "number"
     ? Math.max(0, Math.floor(context.roleCount))
     : null;
-  const routingUnresolved = roleCount === 0 || decisionAxisTotal === 0;
+  const routingUnresolved = roleCount === 0;
+  const scoringOutputIncomplete = roleCount !== null
+    && roleCount > 0
+    && decisionAxisTotal === 0;
+  const decisionFrameworkUnavailable = routingUnresolved || scoringOutputIncomplete;
   const missingAxisSupport = decisionAxisTotal !== null && evidenceBackedAxes !== null
     ? Math.max(0, decisionAxisTotal - evidenceBackedAxes)
     : 0;
-  const decisionBlockers = routingUnresolved ? 1 : missingAxisSupport;
+  const decisionBlockers = decisionFrameworkUnavailable ? 1 : missingAxisSupport;
   const unresolved = coverage.unknownOrFailed + decisionBlockers;
 
   // Floor rather than round so an unresolved check can never display as 100%.
@@ -89,16 +93,16 @@ export function deriveDecisionReadiness(
       ? Math.floor((Math.min(evidenceBackedAxes, decisionAxisTotal) / decisionAxisTotal) * 100)
       : 0
     : 100;
-  const coveragePercent = routingUnresolved
+  const coveragePercent = decisionFrameworkUnavailable
     ? 0
     : Math.min(checkCoveragePercent, axisCoveragePercent);
 
-  const status: DecisionReadinessStatus = !routingUnresolved
+  const status: DecisionReadinessStatus = !decisionFrameworkUnavailable
     && decisionBlockers === 0
     && applicable > 0
     && successful === applicable
     ? "ready"
-    : !routingUnresolved && coveragePercent >= PROVISIONAL_COVERAGE_FLOOR_PERCENT
+    : !decisionFrameworkUnavailable && coveragePercent >= PROVISIONAL_COVERAGE_FLOOR_PERCENT
       ? "provisional"
       : "incomplete";
 
@@ -123,8 +127,16 @@ export function deriveDecisionReadiness(
   if (routingUnresolved) {
     return {
       ...base,
-      title: "Decision framework unresolved",
+      title: "Subject routing unresolved",
       guidance: "Provider checks recorded intelligence, but ARGUS did not resolve an evidence-backed role and scoring methodology. Treat this as collected intelligence only, not a decision-ready assessment.",
+    };
+  }
+
+  if (scoringOutputIncomplete) {
+    return {
+      ...base,
+      title: "Scoring output incomplete",
+      guidance: "ARGUS resolved an evidence-backed role, but the analyst did not return a complete, valid governing-axis score. Treat the provider evidence as collected intelligence only until the scoring pass completes.",
     };
   }
 

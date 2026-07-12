@@ -2252,6 +2252,54 @@ var RECORD_VERDICT_INPUT_SCHEMA = {
 var ARTIFACT_ID = /^art_v1_[a-f0-9]{64}$/;
 var COVERAGE_ONLY_VERIFICATIONS = /* @__PURE__ */ new Set(["checked_empty", "unavailable"]);
 var isSubstantiveArtifact = (artifact) => !!artifact && !COVERAGE_ONLY_VERIFICATIONS.has(artifact.verification);
+function normalizeAnalystSupportCounterOverlap(value, evidenceCatalog) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const root = value;
+  const aliasToArtifactId = new Map(
+    evidenceCatalog.map((artifact, index) => [
+      `e${String(index + 1).padStart(3, "0")}`,
+      artifact.artifactId
+    ])
+  );
+  const refKey = (ref) => {
+    if (typeof ref !== "string") return null;
+    const alias = /^e\d+$/i.test(ref) ? ref.toLowerCase() : ref;
+    return aliasToArtifactId.get(alias) ?? alias;
+  };
+  const normalizeRow = (candidate) => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return candidate;
+    const row = candidate;
+    if (typeof row.primaryEvidenceRef !== "string" || !Array.isArray(row.additionalEvidenceRefs) || !Array.isArray(row.counterEvidenceRefs)) return candidate;
+    const counterKeys = new Set(row.counterEvidenceRefs.map(refKey).filter((ref) => !!ref));
+    const support = [row.primaryEvidenceRef, ...row.additionalEvidenceRefs];
+    const disjointSupport = support.filter((ref) => {
+      const key = refKey(ref);
+      return !key || !counterKeys.has(key);
+    });
+    if (disjointSupport.length === support.length || disjointSupport.length === 0) return candidate;
+    return {
+      ...row,
+      primaryEvidenceRef: disjointSupport[0],
+      additionalEvidenceRefs: disjointSupport.slice(1)
+    };
+  };
+  if (Array.isArray(root.axes)) {
+    const rawAxes = root.axes;
+    const axes = rawAxes.map(normalizeRow);
+    return axes.some((axis, index) => axis !== rawAxes[index]) ? { ...root, axes } : value;
+  }
+  if (root.axes && typeof root.axes === "object" && !Array.isArray(root.axes)) {
+    const entries = Object.entries(root.axes);
+    let changed = false;
+    const axes = Object.fromEntries(entries.map(([axis, row]) => {
+      const normalized3 = normalizeRow(row);
+      changed ||= normalized3 !== row;
+      return [axis, normalized3];
+    }));
+    return changed ? { ...root, axes } : value;
+  }
+  return value;
+}
 function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onReject) {
   const reject = (reason) => {
     onReject?.(reason);
@@ -3540,8 +3588,12 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
     firstAttemptTimeoutMs
   );
   let rejectionReason = "unknown";
+  let normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog);
+  if (normalizedRaw !== raw) {
+    console.info("[agent] normalized support/counter overlap with counter-evidence precedence");
+  }
   let validated = validateAnalystVerdict(
-    raw,
+    normalizedRaw,
     axisCatalog2,
     evidenceCatalog,
     (reason) => {
@@ -3561,7 +3613,8 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
     }
     const rejectedAxis = axisNames.find((axis) => rejectionReason.endsWith(`:${axis}`));
     const coverageLimitMatch = rejectionReason.match(/^coverage-reference-limit-observed-(\d+)-max-4:/);
-    const rejectedAxisHint = rejectedAxis ? coverageLimitMatch ? ` The prior ${rejectedAxis} coverageRefs contained ${coverageLimitMatch[1]} aliases; the maximum is 4. Return no more than these four preferred aliases: ${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}. Do not append or move omitted coverage aliases into support or counter fields.` : ` For ${rejectedAxis}, choose exactly one primary from the substantive aliases ${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. Assign each other substantive alias to at most one array. Return coverageRefs as zero to four distinct values chosen only from ${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}; [] is valid and you must not exhaustively copy coverage artifacts.` : "";
+    const supportCounterOverlap = rejectionReason.startsWith("support-counter-overlap:");
+    const rejectedAxisHint = rejectedAxis ? coverageLimitMatch ? ` The prior ${rejectedAxis} coverageRefs contained ${coverageLimitMatch[1]} aliases; the maximum is 4. Return no more than these four preferred aliases: ${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}. Do not append or move omitted coverage aliases into support or counter fields.` : supportCounterOverlap ? ` For ${rejectedAxis}, the same alias appeared in support and counter-evidence. Counter-evidence wins: keep that alias only in counterEvidenceRefs, then choose a different unused substantive alias as primaryEvidenceRef from ${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. No alias may appear in both primary/additional support and counter-evidence.` : ` For ${rejectedAxis}, choose exactly one primary from the substantive aliases ${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. Assign each other substantive alias to at most one array. Return coverageRefs as zero to four distinct values chosen only from ${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}; [] is valid and you must not exhaustively copy coverage artifacts.` : "";
     const repairUser = `${user}
 
 REPAIR REQUIRED: the prior record_verdict tool payload was rejected by deterministic validation with reason "${rejectionReason}". Make one fresh record_verdict call. Recheck the exact axis set, per-axis score bounds, citation eligibility, duplicate aliases, support/counter overlap, and the array limits (seven additional support, eight counter, four coverage, and six gaps), plus the requirement that any returned coverageRefs have a material gap description. Do not invent evidence or fill a missing fact.${rejectedAxisHint}`;
@@ -3573,8 +3626,12 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
       ANALYST_REPAIR_TIMEOUT_MS
     );
     rejectionReason = "unknown";
+    normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog);
+    if (normalizedRaw !== raw) {
+      console.info("[agent] normalized repaired support/counter overlap with counter-evidence precedence");
+    }
     validated = validateAnalystVerdict(
-      raw,
+      normalizedRaw,
       axisCatalog2,
       evidenceCatalog,
       (reason) => {

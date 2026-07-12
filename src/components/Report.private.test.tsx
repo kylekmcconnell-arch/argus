@@ -237,7 +237,7 @@ describe("private person report evidence boundary", () => {
 });
 
 describe("decision-safe person report presentation", () => {
-  it("presents a zero-axis project attempt as collected intelligence, never decision-ready", () => {
+  it("presents an unrouted project attempt as collected intelligence, never decision-ready", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
       ...base,
@@ -303,6 +303,51 @@ describe("decision-safe person report presentation", () => {
     }));
     expect(decisionBasisText()).toContain("No evidence-backed role selected a scoring methodology");
     expect(decisionBasisText()).not.toContain("predates strict evidence-to-axis citations");
+  });
+
+  it("presents a resolved Project role with zero axes as incomplete scoring, not failed routing", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      bio: "the solana prediction market",
+      completeness_state: "partial" as const,
+      checkRuns: [
+        { checkId: "profile", label: "X profile", status: "confirmed" as const, provider: "twitterapi" },
+        { checkId: "news", label: "News and press", status: "finding" as const, provider: "google-news" },
+        { checkId: "photo", label: "Profile photo", status: "checked-empty" as const, provider: "claude-vision" },
+      ],
+      report: {
+        ...base.report,
+        roles: ["PROJECT"],
+        role_reports: [{
+          role: "PROJECT",
+          verdict: "INCOMPLETE",
+          raw_total: 0,
+          score_total: 0,
+          cap_applied: null,
+          dox_bonus: 0,
+          axes: {},
+        }],
+        governing_role: "PROJECT",
+        governing_score: null,
+        composite_verdict: "INCOMPLETE" as const,
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onRescan={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Scoring output incomplete");
+    expect(container.textContent).toContain("ARGUS resolved this subject to Project, but the scoring pass did not complete");
+    expect(container.textContent).toContain("Decision coverage0%");
+    expect(container.textContent).toContain("Collected intelligence that did not enter a score");
+    expect(container.textContent).toContain("Complete the Project scoring pass");
+    expect(container.textContent).not.toContain("Project routing unresolved");
+    expect(container.textContent).not.toContain("Resolve whether this account represents a project");
+    expect([...container.querySelectorAll("span")].some((node) => node.textContent?.trim() === "decision-ready")).toBe(false);
+    expect(decisionBasisText()).toContain("resolved an evidence-backed role");
+    expect(decisionBasisText()).not.toContain("No evidence-backed role selected a scoring methodology");
   });
 
   it("explains an adverse verdict with adverse drivers and labels positive evidence as counterweight", () => {

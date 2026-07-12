@@ -8,7 +8,7 @@ export interface DecisionBasisProps {
   roleReport?: RoleReport;
   catalog?: AxisEvidenceRecord[];
   lineageVersion?: number;
-  routingUnresolved?: boolean;
+  unavailableReason?: "routing" | "scoring";
   onRescan?: () => void;
 }
 
@@ -94,7 +94,7 @@ function EvidenceRecord({ record, relation }: { record: AxisEvidenceRecord; rela
   );
 }
 
-export function DecisionBasis({ roleReport, catalog, lineageVersion, routingUnresolved = false, onRescan }: DecisionBasisProps) {
+export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailableReason, onRescan }: DecisionBasisProps) {
   const model = useMemo(
     () => buildDecisionBasis(roleReport, catalog, lineageVersion),
     [catalog, lineageVersion, roleReport],
@@ -114,18 +114,31 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, routingUnre
     return () => window.removeEventListener("hashchange", selectFromHash);
   }, [model.rows]);
 
-  if (!model.available) {
+  if (!model.available || unavailableReason) {
+    const statusLabel = unavailableReason === "routing"
+      ? "Methodology unavailable"
+      : unavailableReason === "scoring"
+        ? "Scoring output incomplete"
+        : "Lineage unavailable";
+    const explanation = unavailableReason === "routing"
+      ? "No evidence-backed role selected a scoring methodology, so this report contains no evidence-to-axis lineage. Collected intelligence remains visible without being converted into a score."
+      : unavailableReason === "scoring"
+        ? "ARGUS resolved an evidence-backed role, but the analyst did not return a complete, valid governing-axis score. Collected intelligence remains visible without being presented as decision-ready."
+        : "This snapshot does not contain strict evidence-to-axis citations. ARGUS will not infer them from analyst prose or nearby sources.";
+    const rescanLabel = unavailableReason === "routing"
+      ? "Run corrected investigation"
+      : unavailableReason === "scoring"
+        ? "Retry scoring investigation"
+        : "Rescan to capture lineage";
     return (
       <section aria-label="Decision basis" className="panel px-4 py-3.5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Decision basis</h3>
-          <span className="chip">{routingUnresolved ? "Methodology unavailable" : "Lineage unavailable"}</span>
+          <span className="chip">{statusLabel}</span>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-3">
           <p className="min-w-0 flex-1 text-[12.5px] leading-relaxed text-ink-dim">
-            {routingUnresolved
-              ? "No evidence-backed role selected a scoring methodology, so this report contains no evidence-to-axis lineage. Collected intelligence remains visible without being converted into a score."
-              : "This snapshot does not contain strict evidence-to-axis citations. ARGUS will not infer them from analyst prose or nearby sources."}
+            {explanation}
           </p>
           {onRescan && (
             <button
@@ -133,7 +146,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, routingUnre
               onClick={onRescan}
               className="btn-chip tint-signal min-h-11 shrink-0 font-medium"
             >
-              {routingUnresolved ? "Run corrected investigation" : "Rescan to capture lineage"}
+              {rescanLabel}
             </button>
           )}
         </div>
