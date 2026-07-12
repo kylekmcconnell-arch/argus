@@ -6,12 +6,14 @@
 // the relationship. The client may price a named token, but that market lookup
 // does not verify the investment claim. XAI_API_KEY.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { isIP } from "node:net";
 import { cacheGetJson, cacheSetJson, attachPanelCost, grokUsd, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
 
 export const config = { maxDuration: 120 };
 
 const q = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
 interface GrokInvestmentCandidate {
   project?: unknown;
@@ -41,7 +43,20 @@ function candidateSourceUrl(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 2_000) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:")
+      || url.username
+      || url.password
+      || !host
+      || isIP(host)
+      || host === "localhost"
+      || host.endsWith(".local")
+      || host.endsWith(".internal")
+    ) return null;
+    if ([...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM.test(key))) return null;
+    url.hash = "";
+    return url.toString();
   } catch {
     return null;
   }

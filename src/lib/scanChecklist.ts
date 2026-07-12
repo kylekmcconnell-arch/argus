@@ -232,8 +232,8 @@ export function personChecks(opts: {
     ? { label: "Promoted-token performance", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` }
     : { label: "Promoted-token performance", status: "not-applicable", note: "not a KOL" });
   checks.push(roles.includes("INVESTOR")
-    ? { label: "VC portfolio track record", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` }
-    : { label: "VC portfolio track record", status: "not-applicable", note: "not a fund/investor" });
+    ? { label: "Portfolio track record", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` }
+    : { label: "Portfolio track record", status: "not-applicable", note: "not a fund/investor" });
 
   checks.push({ label: "News & press", status: "unknown", note: outcomeNotRecorded });
   checks.push(resolved && realName

@@ -52,7 +52,21 @@ function safeCandidateSource(value?: string | null): string | null {
   if (!value) return null;
   try {
     const url = new URL(value);
-    return url.protocol === "https:" || url.protocol === "http:" ? url.toString() : null;
+    const host = url.hostname.toLowerCase();
+    if (
+      (url.protocol !== "https:" && url.protocol !== "http:")
+      || url.username
+      || url.password
+      || !host
+      || /^(?:\d{1,3}\.){3}\d{1,3}$/.test(host)
+      || host === "[::1]"
+      || host === "localhost"
+      || host.endsWith(".local")
+      || host.endsWith(".internal")
+    ) return null;
+    if ([...url.searchParams.keys()].some((key) => /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i.test(key))) return null;
+    url.hash = "";
+    return url.toString();
   } catch {
     return null;
   }
@@ -75,12 +89,13 @@ async function auditInvestment(inv: InvestmentLead): Promise<Scored> {
   return { ...inv, address: d.address, chainResolved: d.chain, verdict: d.verdict, score: d.score, liquidityUsd: d.liquidityUsd, mcap: d.mcap, dead, resolved: true };
 }
 
-export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: string; name: string; panelCostToken?: string; onAudit?: (q: string) => void }) {
+export function VcReport({ handle, name, verifiedProjects = [], panelCostToken, onAudit }: { handle: string; name: string; verifiedProjects?: string[]; panelCostToken?: string; onAudit?: (q: string) => void }) {
   const [rows, setRows] = useState<Scored[] | null>(null);
   const [state, setState] = useState<PanelState>("idle");
   const [message, setMessage] = useState("");
   const [attempt, setAttempt] = useState(0);
   const ran = useRef(-1);
+  const verifiedProjectKeys = new Set(verifiedProjects.map((project) => project.trim().toLowerCase()));
 
   useEffect(() => {
     if (attempt < 1 || ran.current === attempt || !panelCostToken) return;
@@ -222,18 +237,19 @@ export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: st
 
   const priced = rows.filter((r) => r.resolved && r.verdict);
   const dead = priced.filter((r) => r.dead);
+  const frozenProjectOverlap = rows.filter((r) => verifiedProjectKeys.has(r.project.trim().toLowerCase())).length;
   const money = (n?: number) => (n == null ? "—" : n >= 1e6 ? "$" + (n / 1e6).toFixed(1) + "M" : n >= 1e3 ? "$" + Math.round(n / 1e3) + "K" : "$" + Math.round(n));
 
   return (
     <div className="panel p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className="text-[12.5px] font-medium text-ink">{rows.length} unverified portfolio {rows.length === 1 ? "candidate" : "candidates"}</span>
+        <span className="text-[12.5px] font-medium text-ink">{rows.length} unverified current-search portfolio {rows.length === 1 ? "candidate" : "candidates"}{frozenProjectOverlap ? ` · ${frozenProjectOverlap} project overlap${frozenProjectOverlap === 1 ? "" : "s"}` : ""}</span>
         {priced.length > 0 && dead.length > 0 && (
           <span className="mono text-[11px] text-caution">{dead.length}/{priced.length} priced token candidates inactive</span>
         )}
       </div>
       <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-        Grok surfaced these source candidates. ARGUS has not verified the investor-project relationship; every row is excluded from the trust graph and frozen verdict. Token market data checks the named token only, not the investment claim.
+        Grok surfaced these current-search leads. A project-overlap badge means only that the same project name appears in separately frozen relationship evidence; this panel does not verify the investor attribution. Every panel row remains outside the trust graph and verdict. Token market data checks the named token only, not the investment claim.
       </p>
       {message && <p className="mt-1 text-[11px] leading-relaxed text-caution">{message}</p>}
 
@@ -242,6 +258,7 @@ export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: st
           const m = r.verdict ? verdictMeta(r.verdict) : null;
           const openTarget = r.address || r.x_handle;
           const source = safeCandidateSource(r.source_url);
+          const sourceVerified = verifiedProjectKeys.has(r.project.trim().toLowerCase());
           return (
             <div key={i} className="px-3 py-2 text-[12.5px]">
               <div className="flex flex-wrap items-center gap-2">
@@ -252,7 +269,8 @@ export function VcReport({ handle, name, panelCostToken, onAudit }: { handle: st
                 )}
                 {r.ticker && <span className="mono text-[11px] text-ink-faint">{r.ticker}</span>}
                 {(r.stage || r.year) && <span className="text-[11px] text-ink-faint">{[r.stage, r.year].filter(Boolean).join(" · ")}</span>}
-                {m && <span className={`verdict-pill ${r.verdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={r.verdict === "FAIL" ? undefined : ({ "--tint": m.color } as React.CSSProperties)}>{r.verdict}{r.score != null ? ` ${r.score}` : ""}</span>}
+                {sourceVerified && <span className="chip tint-pass">same project appears in frozen evidence</span>}
+                {m && <span className={`verdict-pill ${r.verdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={r.verdict === "FAIL" ? undefined : ({ "--tint": m.color } as React.CSSProperties)}>token risk · {r.verdict}{r.score != null ? ` ${r.score}` : ""}</span>}
                 {r.resolved && <span className="text-[11px] text-ink-faint">{r.mcap ? `mcap ${money(r.mcap)}` : `liq ${money(r.liquidityUsd)}`}</span>}
                 {r.dead && <span className="chip tint-caution">inactive market</span>}
                 {r.address && r.chainResolved && <span className="ml-auto"><TokenSparkline address={r.address} chain={r.chainResolved} compact /></span>}

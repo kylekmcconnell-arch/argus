@@ -305,6 +305,7 @@ describe("person audit input guard", () => {
     vi.mocked(runAudit).mockResolvedValue({
       live: true,
       handle: "@argus",
+      completeness_state: "complete",
       report: { audit_id: "audit-run-observed-empty", composite_verdict: "INCOMPLETE", governing_score: null },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
@@ -316,8 +317,14 @@ describe("person audit input guard", () => {
 
     await handler(request("argus"), res);
 
+    const versionWrite = vi.mocked(fetch).mock.calls[0]?.[1];
+    expect(JSON.parse(String(versionWrite?.body))).toMatchObject({ p_completeness_state: "partial" });
     expect(recordProviderUsageBatch).not.toHaveBeenCalled();
     expect(persistProvenance).toHaveBeenCalledOnce();
+    expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ completeness: "partial" }),
+    );
     expect(activateReportVersion).toHaveBeenCalledWith(expect.anything(), AUTH_ORGANIZATION_ID, reportVersionId);
     expect(issuePanelCostToken).toHaveBeenCalledWith(AUTH_ORGANIZATION_ID, reportVersionId);
     const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
 import type { Dossier } from "../data/dossier";
+import type { SourceArtifact } from "../data/evidence";
 import type { RoleReport, SubjectClass } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
@@ -511,12 +512,23 @@ function frozenSourceDate(value?: string): string | null {
   return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+const PORTFOLIO_SOURCE_LABEL: Record<NonNullable<SourceArtifact["sourceClass"]>, string> = {
+  first_party_subject: "subject's official site",
+  first_party_investor: "investor's official site",
+  first_party_project: "project announcement",
+  public_primary: "public primary record",
+  independent_press: "independent press",
+  other_public: "public corroborating source",
+};
+
 const SOURCE_KIND_LABEL: Record<FrozenSourceArtifact["kind"], string> = {
   press: "Press",
   legal_case: "Court record lead",
   sanctions_screen: "Sanctions screen",
   profile_photo: "Profile photo",
   trust_graph: "Trust graph screen",
+  portfolio_relationship: "Portfolio relationship",
+  fund_scale: "Fund scale",
 };
 
 const SOURCE_MATCH_LABEL: Record<FrozenSourceArtifact["match"], string> = {
@@ -527,6 +539,8 @@ const SOURCE_MATCH_LABEL: Record<FrozenSourceArtifact["match"], string> = {
   observed: "observed",
   risk_signal: "risk signal",
   screened_clear: "screened · no qualified match",
+  relationship_confirmed: "relationship verified",
+  fund_scale_confirmed: "fund size verified",
 };
 
 const PROFILE_CLASSIFICATION_LABEL: Record<FrozenProfileAuthenticity["classification"], string> = {
@@ -773,6 +787,8 @@ function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }
                 : "Source content";
           const matchColor = artifact.match === "risk_signal"
             ? "var(--color-caution)"
+            : artifact.match === "relationship_confirmed" || artifact.match === "fund_scale_confirmed"
+              ? "var(--color-pass)"
             : artifact.match === "candidate"
               ? "var(--color-caution)"
               : artifact.match === "no_match" || artifact.match === "screened_clear"
@@ -867,6 +883,30 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const groundedVentureNames = (evidence.ventures ?? [])
     .filter((venture) => venture.evidence_origin !== "model_lead" && venture.artifact_verified === true)
     .map((venture) => venture.project_name);
+  const portfolioArtifactGroups = [...(f.sourceArtifacts ?? [])
+    .filter((artifact) => artifact.kind === "portfolio_relationship" && artifact.projectName)
+    .reduce((groups, artifact) => {
+      const investor = artifact.investorEntityName || artifact.subjectName || f.display_name || report.handle;
+      const key = `${investor.trim().toLowerCase()}::${artifact.projectName!.trim().toLowerCase()}`;
+      const group = groups.get(key) ?? { key, project: artifact.projectName!, investor, attribution: artifact.attribution, sources: [] as SourceArtifact[] };
+      group.sources.push(artifact);
+      groups.set(key, group);
+      return groups;
+    }, new Map<string, { key: string; project: string; investor: string; attribution?: SourceArtifact["attribution"]; sources: SourceArtifact[] }>())
+    .values()]
+    .map((group) => ({
+      ...group,
+      confirmed: group.sources.some((source) => source.match === "relationship_confirmed"),
+      confirmedSourceCount: group.sources.filter((source) => source.match === "relationship_confirmed").length,
+      reportedSourceCount: group.sources.filter((source) => source.match !== "relationship_confirmed").length,
+    }))
+    .sort((left, right) => Number(right.confirmed) - Number(left.confirmed) || left.project.localeCompare(right.project));
+  const verifiedPortfolioProjects = portfolioArtifactGroups.filter((group) => group.confirmed).map((group) => group.project);
+  const reportedPortfolioProjects = portfolioArtifactGroups.filter((group) => !group.confirmed).map((group) => group.project);
+  const portfolioLeads = f.portfolioLeads ?? [];
+  const verifiedPortfolioProjectKeys = new Set(verifiedPortfolioProjects.map((project) => project.trim().toLowerCase()));
+  const unmatchedPortfolioLeadCount = portfolioLeads.filter((lead) =>
+    !verifiedPortfolioProjectKeys.has(lead.projectName.trim().toLowerCase())).length;
   const roles = report.roles as SubjectClass[];
   const derivedDiligenceChecks = personChecks({
     identityConfidence: report.identity_confidence ?? undefined,
@@ -1625,13 +1665,66 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
+          {(portfolioArtifactGroups.length > 0 || (roles.some((role) => role === "INVESTOR") && portfolioLeads.length > 0)) && (
+            <div className="min-w-0">
+              <Section
+                title="Portfolio evidence"
+                kicker={`${verifiedPortfolioProjects.length} verified relationship${verifiedPortfolioProjects.length === 1 ? "" : "s"} · ${reportedPortfolioProjects.length} reported-only · ${portfolioLeads.length} candidates inspected`}
+              >
+                <Card className="divide-y divide-line/60">
+                  {portfolioArtifactGroups.map((group) => (
+                    <div key={group.key} className="px-4 py-2.5 text-[12.5px]">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-medium text-ink">{group.project}</span>
+                        <span className="text-[10.5px] text-ink-faint">via {group.investor}</span>
+                        <span className={`chip ${group.confirmed ? "tint-pass" : "tint-caution"}`}>
+                          {group.confirmed
+                            ? group.attribution === "affiliated_fund"
+                              ? `${group.investor} investment verified · not attributed personally`
+                              : "direct investment verified"
+                            : "reported · needs corroboration"}
+                        </span>
+                        <span className="ml-auto text-[10.5px] text-ink-faint">
+                          {group.confirmedSourceCount} verified source{group.confirmedSourceCount === 1 ? "" : "s"}
+                          {group.reportedSourceCount ? ` · ${group.reportedSourceCount} reported source${group.reportedSourceCount === 1 ? "" : "s"}` : ""}
+                        </span>
+                      </div>
+                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                        {group.sources.map((source, index) => {
+                          const link = safeSourceLink(source.sourceUrl);
+                          if (!link) return null;
+                          return (
+                            <a key={`${source.sourceUrl}:${index}`} href={link.href} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">
+                              {source.sourceClass ? PORTFOLIO_SOURCE_LABEL[source.sourceClass] : "public source"} ↗
+                            </a>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {portfolioArtifactGroups.length === 0 && (
+                    <div className="px-4 py-3 text-[12px] leading-relaxed text-ink-dim">
+                      {portfolioLeads.length} source-linked candidate{portfolioLeads.length === 1 ? " was" : "s were"} discovered, but none passed deterministic relationship verification. Candidates remain outside the score and graph.
+                    </div>
+                  )}
+                </Card>
+                {unmatchedPortfolioLeadCount > 0 && (
+                  <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+                    Discovery breadth is not verification: unmatched or single-source candidates remain leads and cannot improve the frozen investor score.
+                  </p>
+                )}
+              </Section>
+            </div>
+          )}
+
           {evidence.ventures.length > 0 && (
             <div className="min-w-0">
-              <Section title="Ventures & affiliations" kicker="every company tied to them · corroborated where possible">
+              <Section title="Ventures & affiliations" kicker="founding, employment and operating ties · separate from investments">
                 <Card className="divide-y divide-line/60">
                   {evidence.ventures.map((v, i) => {
-                    const corroborated = /corroborated:/i.test(v.notes ?? "");
-                    const isLead = !corroborated && /unverified|lead/i.test(v.notes ?? "");
+                    const sourceBacked = v.evidence_origin !== "model_lead" && v.artifact_verified === true;
+                    const isLead = v.evidence_origin === "model_lead" || v.artifact_verified === false;
+                    const evidenceState = sourceBacked ? "source-backed" : isLead ? "unverified lead" : "legacy curated";
                     return (
                       <div key={i} className="flex items-center gap-2 px-4 py-2.5 text-[12.5px]">
                         <span
@@ -1648,8 +1741,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                         {v.evidence_url && (
                           <a href={v.evidence_url} target="_blank" rel="noreferrer" className="link-ext shrink-0 text-[11px]">source</a>
                         )}
-                        <span className={`mono ml-auto shrink-0 text-[11px] ${corroborated ? "text-pass" : "text-ink-faint"}`}>
-                          {corroborated ? "corroborated" : isLead ? "lead" : ""}
+                        <span className={`mono ml-auto shrink-0 text-[11px] ${sourceBacked ? "text-pass" : "text-ink-faint"}`}>
+                          {evidenceState}
                         </span>
                       </div>
                     );
@@ -1752,7 +1845,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           {showCurrentIntelligence && panelCostToken && roles.some((r) => r === "INVESTOR") && (
             <div className="min-w-0 lg:col-span-2">
               <Section title="VC portfolio leads" kicker="paid current supplemental search · unverified candidates · excluded from graph and verdict">
-                <VcReport key={`${report.handle}:${panelCostToken}`} handle={report.handle} name={f.display_name || report.handle} panelCostToken={panelCostToken} onAudit={onAudit} />
+                <VcReport key={`${report.handle}:${panelCostToken}`} handle={report.handle} name={f.display_name || report.handle} verifiedProjects={verifiedPortfolioProjects} panelCostToken={panelCostToken} onAudit={onAudit} />
               </Section>
             </div>
           )}

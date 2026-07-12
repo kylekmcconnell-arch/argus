@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { reconcileVerdict, tieStrength } from "./network";
+import { buildNetwork, reconcileVerdict, tieStrength } from "./network";
 import type { GraphContribution } from "./network";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 
@@ -54,6 +54,26 @@ describe("reconcileVerdict", () => {
       { handle: "$ALSOGOOD", verdict: "PASS", nodes: [N("Company", "$ALSOGOOD", { subject: true }), N("Identity", "wallet:1234abcd")], edges: [E("$ALSOGOOD", "wallet:1234abcd", "DEPLOYED_BY")] },
     ];
     expect(reconcileVerdict("$GOOD", g)).toBeNull();
+  });
+
+  it("does not treat two investors in the same company as an adverse operator link", () => {
+    const g: GraphContribution[] = [
+      { handle: "@fund_a", verdict: "PASS", nodes: [N("Person", "@fund_a", { subject: true }), N("Company", "popularco.com")], edges: [E("@fund_a", "popularco.com", "INVESTED_IN")] },
+      { handle: "@fund_b", verdict: "AVOID", nodes: [N("Person", "@fund_b", { subject: true }), N("Company", "popularco.com")], edges: [E("@fund_b", "popularco.com", "INVESTED_IN")] },
+    ];
+    expect(reconcileVerdict("@fund_a", g)).toBeNull();
+    const network = buildNetwork([], g);
+    expect(network.bridges).toContainEqual(expect.objectContaining({ id: "popularco.com" }));
+    expect(network.cabals).toEqual([]);
+    expect(network.nodes.find((node) => node.id === "popularco.com")?.rugLinks).toBe(0);
+  });
+
+  it("still treats a shared operating company as a contextual caution", () => {
+    const g: GraphContribution[] = [
+      { handle: "@operator_a", verdict: "PASS", nodes: [N("Person", "@operator_a", { subject: true }), N("Company", "sharedco.com")], edges: [E("@operator_a", "sharedco.com", "WORKED_ON")] },
+      { handle: "@operator_b", verdict: "AVOID", nodes: [N("Person", "@operator_b", { subject: true }), N("Company", "sharedco.com")], edges: [E("@operator_b", "sharedco.com", "FOUNDED")] },
+    ];
+    expect(reconcileVerdict("@operator_a", g)?.severity).toBe("caution");
   });
 
   it("overrides to AVOID on Arkham exposure to a flagged bad actor (risk: node)", () => {

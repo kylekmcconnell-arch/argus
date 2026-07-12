@@ -629,7 +629,20 @@ export class Audit {
     let govScore: number | null = null;
     let govCap: string | null = null;
     if (scored.length === roleReports.length && roleReports.length > 0) {
-      const governing = scored.reduce((m, r) => (SEVERITY[r.verdict] > SEVERITY[m.verdict] ? r : m));
+      const governing = scored.reduce((current, candidate) => {
+        const candidateSeverity = SEVERITY[candidate.verdict];
+        const currentSeverity = SEVERITY[current.verdict];
+        if (candidateSeverity !== currentSeverity) return candidateSeverity > currentSeverity ? candidate : current;
+        // Two PASS (or CAUTION/FAIL) roles are not interchangeable. The weaker
+        // applicable lens governs so a strong founder score cannot hide a weaker
+        // investor score merely because Founder appeared first in the role list.
+        const candidateScore = candidate.score_total;
+        const currentScore = current.score_total;
+        if (candidateScore != null && currentScore != null && candidateScore !== currentScore) {
+          return candidateScore < currentScore ? candidate : current;
+        }
+        return current;
+      });
       composite = governing.verdict;
       govRole = governing.role;
       govScore = governing.score_total;
@@ -683,7 +696,15 @@ export class Audit {
     for (const v of this.ventures) {
       const key = canonicalEntityKey({ handle: v.x_handle, domain: v.domain, name: v.project_name });
       nodes.push({ type: "Company", key, label: v.project_name, outcome: v.outcome });
-      edges.push({ src: this.handle, dst: key, type: "FOUNDED", outcome: v.outcome });
+      const role = (v.role ?? "").toLowerCase();
+      const edgeType = /\b(?:founder|co-?founder|founding team)\b/.test(role)
+        ? "FOUNDED"
+        : /\b(?:investor|backer|angel investor|limited partner)\b|\binvested in\b/.test(role)
+          ? "INVESTED_IN"
+          : /advisor|adviser|board/.test(role)
+            ? "ADVISED"
+            : "WORKED_ON";
+      edges.push({ src: this.handle, dst: key, type: edgeType, role: v.role, outcome: v.outcome });
     }
     for (const p of this.promotions) {
       // Strip an existing $ before re-prefixing — a ticker stored as "$SUSHI"

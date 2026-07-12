@@ -69,6 +69,7 @@ Grow the golden set in `src/calibration/golden.ts` as real ground truth accrues.
 ## Live collector (optional)
 
 To run real audits instead of curated dossiers, copy `.env.example` to `.env`
-and add the provider keys you have (Grok + twitterapi.io for X, Crunchbase,
-People Data Labs, CoinGecko, Reddit, Helius/Bitquery, and ANTHROPIC_API_KEY for
-the analyst). With no keys it stays in curated mode. Never commit `.env`.
+and add the provider keys you have (Grok + twitterapi.io for X, People Data
+Labs, CoinGecko, Reddit, Helius/Bitquery, and ANTHROPIC_API_KEY for the analyst).
+Crunchbase is optional company/funding enrichment and is not required for
+portfolio verification. With no keys it stays in curated mode. Never commit `.env`.

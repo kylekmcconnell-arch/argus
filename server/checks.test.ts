@@ -39,6 +39,29 @@ describe("PersonCheckTracker", () => {
     expect(check?.sourceCount).toBe(2);
   });
 
+  it("lets verified portfolio evidence outrank an unavailable optional vendor", () => {
+    const tracker = new PersonCheckTracker();
+    tracker.record({
+      id: "vc-portfolio-track-record",
+      status: "unavailable",
+      note: "optional company database not configured",
+      provider: "crunchbase",
+    });
+    tracker.record({
+      id: "vc-portfolio-track-record",
+      status: "confirmed",
+      note: "two unique investments verified from fetched public sources",
+      provider: "portfolio-web",
+      sourceCount: 2,
+    });
+
+    expect(byId(tracker, ["INVESTOR"], "vc-portfolio-track-record")).toMatchObject({
+      status: "confirmed",
+      provider: "crunchbase,portfolio-web",
+      sourceCount: 2,
+    });
+  });
+
   it("keeps unexecuted high-risk screens unknown and role-only checks out of scope", () => {
     const tracker = new PersonCheckTracker();
     tracker.record({

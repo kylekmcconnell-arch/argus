@@ -73,6 +73,8 @@ export interface Dossier {
   webTeamLeads?: WebTeamMember[];
   /** Second-hop discovery stays inspectable even when excluded from the graph. */
   ventureTeams?: CollectedEvidence["ventureTeams"];
+  /** Cited model discoveries that did not govern the frozen result. */
+  portfolioLeads?: CollectedEvidence["portfolioLeads"];
   sourceArtifacts?: SourceArtifact[];
   profileAuthenticity?: ProfileAuthenticityResult;
   trustGraphScreen?: TrustGraphScreen;
@@ -188,6 +190,50 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     }
   }
 
+  // Verified investment relationships are their own graph edge. Reusing Venture
+  // would incorrectly render every fund position as FOUNDED, which overstates the
+  // subject's role and contaminates cross-report graph reasoning.
+  for (const relationship of (ev.sourceArtifacts ?? []).filter((artifact) =>
+    artifact.kind === "portfolio_relationship"
+    && artifact.match === "relationship_confirmed"
+    && artifact.relationship === "invested_in"
+    && artifact.projectName,
+  )) {
+    const investorKey = relationship.attribution === "affiliated_fund" && relationship.investorEntityName
+      ? canonicalEntityKey({
+          handle: relationship.investorEntityHandle,
+          domain: relationship.investorEntityDomain,
+          name: relationship.investorEntityName,
+        })
+      : subjectKey;
+    if (investorKey !== subjectKey) {
+      if (!hasNode(investorKey)) graph.nodes.push({ type: "Company", key: investorKey, label: relationship.investorEntityName } as PanoptesNode);
+      const affiliationExists = graph.edges.some((edge) => edge.src === subjectKey && edge.dst === investorKey && edge.type === "AFFILIATED_WITH");
+      if (!affiliationExists) graph.edges.push({
+        src: subjectKey,
+        dst: investorKey,
+        type: "AFFILIATED_WITH",
+        context: "portfolio attribution",
+        ...(relationship.attributionSourceUrl ? { source_url: relationship.attributionSourceUrl } : {}),
+      });
+    }
+    const projectKey = canonicalEntityKey({
+      handle: relationship.projectHandle,
+      domain: relationship.projectDomain,
+      name: relationship.projectName,
+    });
+    if (!projectKey) continue;
+    if (!hasNode(projectKey)) graph.nodes.push({ type: "Company", key: projectKey, label: relationship.projectName } as PanoptesNode);
+    const exists = graph.edges.some((edge) => edge.src === investorKey && edge.dst === projectKey && edge.type === "INVESTED_IN");
+    if (!exists) graph.edges.push({
+      src: investorKey,
+      dst: projectKey,
+      type: "INVESTED_IN",
+      source_url: relationship.sourceUrl,
+      source_class: relationship.sourceClass,
+    });
+  }
+
   // PDL-resolved emails as graph nodes, keyed IDENTICALLY to the leaked GitHub
   // commit emails (email:<addr>) — so if a project's anon dev committed under an
   // email PDL ties to this named person, the two audits bridge to one node.
@@ -223,6 +269,7 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     webTeam: groundedWebTeam,
     ...(webTeamLeads.length ? { webTeamLeads } : {}),
     ventureTeams: ev.ventureTeams ?? [],
+    portfolioLeads: ev.portfolioLeads ?? [],
     sourceArtifacts: ev.sourceArtifacts,
     profileAuthenticity: ev.profileAuthenticity,
     trustGraphScreen: ev.trustGraphScreen,

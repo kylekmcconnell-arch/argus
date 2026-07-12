@@ -133,6 +133,22 @@ const GENERIC_KEYS = new Set([
   "coingecko", "dexscreener", "linkedin", "blog", "other", "unknown",
 ]);
 const isGenericKey = (raw: string) => GENERIC_KEYS.has(canonical(raw));
+const CONTEXT_ONLY_EDGE_TYPES = new Set(["INVESTED_IN", "AFFILIATED_WITH"]);
+
+function contextOnlyNodeKeys(contribution: GraphContribution, resolve: AliasResolver): Set<string> {
+  const byNode = new Map<string, string[]>();
+  for (const edge of contribution.edges) {
+    const type = String(edge.type).toUpperCase();
+    for (const endpoint of [resolve(edge.src), resolve(edge.dst)]) {
+      const types = byNode.get(endpoint) ?? [];
+      types.push(type);
+      byNode.set(endpoint, types);
+    }
+  }
+  return new Set([...byNode.entries()]
+    .filter(([, types]) => types.length > 0 && types.every((type) => CONTEXT_ONLY_EDGE_TYPES.has(type)))
+    .map(([key]) => key));
+}
 
 // ── Safe alias resolution ─────────────────────────────────────────────────
 // A token's address-backed id is authoritative. Its $ticker, observed project X
@@ -186,6 +202,19 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   const resolve = buildAliasResolver(extra);
   const map = new Map<string, NetNode>();
   const edgeMap = new Map<string, NetEdge>();
+  const governingSubjectsByNode = new Map<string, Set<string>>();
+
+  const markGoverningSurface = (contribution: GraphContribution, subjectId: string) => {
+    const contextOnly = contextOnlyNodeKeys(contribution, resolve);
+    for (const node of contribution.nodes) {
+      if (node.subject || isGenericKey(String(node.key))) continue;
+      const key = resolve(node.key);
+      if (contextOnly.has(key)) continue;
+      const subjects = governingSubjectsByNode.get(key) ?? new Set<string>();
+      subjects.add(subjectId);
+      governingSubjectsByNode.set(key, subjects);
+    }
+  };
 
   const upsert = (raw: PanoptesNode, surfacedBy: string): NetNode | null => {
     if (!raw.subject && isGenericKey(String(raw.key))) return null;
@@ -232,6 +261,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
 
   for (const { handle, d } of dossiers) {
     const subjId = resolve(handle);
+    markGoverningSurface({ handle, nodes: d.graph.nodes, edges: d.graph.edges }, subjId);
     for (const raw of d.graph.nodes) {
       const n = upsert(raw, subjId);
       if (n && raw.subject) n.verdict = d.report.composite_verdict;
@@ -241,6 +271,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
 
   for (const c of extra) {
     const subjId = resolve(c.handle);
+    markGoverningSurface(c, subjId);
     for (const raw of c.nodes) {
       const n = upsert(raw, subjId);
       if (n && raw.subject && c.verdict && !n.verdict) n.verdict = c.verdict;
@@ -255,6 +286,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   // degree + rug-link counts
   const neighbors = new Map<string, Set<string>>();
   for (const e of edges) {
+    if (CONTEXT_ONLY_EDGE_TYPES.has(e.type.toUpperCase())) continue;
     if (!neighbors.has(e.src)) neighbors.set(e.src, new Set());
     if (!neighbors.has(e.dst)) neighbors.set(e.dst, new Set());
     neighbors.get(e.src)!.add(e.dst);
@@ -294,10 +326,11 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   const find = (x: string): string => { while (parent.get(x) !== x) { parent.set(x, parent.get(parent.get(x)!)!); x = parent.get(x)!; } return x; };
   const subjectIds = nodes.filter((n) => n.subject).map((n) => n.id);
   for (const id of subjectIds) parent.set(id, id);
-  const sharedVias = nodes.filter((n) => !n.subject && n.subjects.length >= 2);
+  const governingSubjects = (node: NetNode): string[] => [...(governingSubjectsByNode.get(node.id) ?? [])];
+  const sharedVias = nodes.filter((n) => !n.subject && governingSubjects(n).length >= 2);
   const viasByCluster = new Map<string, NetNode[]>();
   for (const v of sharedVias) {
-    const present = v.subjects.filter((s) => parent.has(s));
+    const present = governingSubjects(v).filter((s) => parent.has(s));
     for (let i = 1; i < present.length; i++) {
       const a = find(present[0]), b = find(present[i]);
       if (a !== b) parent.set(a, b);
@@ -306,7 +339,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
   const clusters = new Map<string, string[]>();
   for (const id of subjectIds) { const r = find(id); (clusters.get(r) ?? clusters.set(r, []).get(r)!).push(id); }
   for (const v of sharedVias) {
-    const present = v.subjects.filter((s) => parent.has(s));
+    const present = governingSubjects(v).filter((s) => parent.has(s));
     if (present.length < 2) continue;
     const r = find(present[0]);
     (viasByCluster.get(r) ?? viasByCluster.set(r, []).get(r)!).push(v);
@@ -443,11 +476,12 @@ export function subjectConnections(handle: string, contributions: GraphContribut
   const mine = new Map<string, { label: string; type: string }>();
   for (const c of contributions) {
     if (resolve(c.handle) !== me) continue;
+    const contextOnly = contextOnlyNodeKeys(c, resolve);
     for (const n of c.nodes) {
       if (isGenericKey(String(n.key))) continue; // "site"/"twitter" junk can't be a tie
       const k = resolve(n.key);
       const label = typeof n.label === "string" && n.label.trim() ? n.label : String(n.key);
-      if (k !== me) mine.set(k, { label, type: String(n.type) });
+      if (k !== me && !contextOnly.has(k)) mine.set(k, { label, type: String(n.type) });
     }
   }
   if (!mine.size) return [];
@@ -462,13 +496,14 @@ export function subjectConnections(handle: string, contributions: GraphContribut
     if (other === me) continue;
     const otherLabel = c.aliases?.[0]
       ?? (typeof c.nodes.find((n) => n.subject)?.label === "string" ? String(c.nodes.find((n) => n.subject)!.label) : c.handle);
+    const contextOnly = contextOnlyNodeKeys(c, resolve);
     // direct tie: the other subject is itself one of the entities I surfaced
     if (mine.has(other)) { const e = ensure(other, otherLabel, c.verdict); e.direct = true; }
     // shared tie: a third entity both of us touch
     for (const n of c.nodes) {
       if (isGenericKey(String(n.key))) continue;
       const k = resolve(n.key);
-      if (k !== me && k !== other && mine.has(k)) {
+      if (k !== me && k !== other && mine.has(k) && !contextOnly.has(k)) {
         const e = ensure(other, otherLabel, c.verdict);
         e.ties.set(k, { key: k, label: mine.get(k)!.label, type: mine.get(k)!.type });
       }

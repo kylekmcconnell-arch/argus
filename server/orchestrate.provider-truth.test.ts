@@ -82,6 +82,7 @@ describe("orchestrator provider execution truth", () => {
     expect(dossier?.live).toBe(true);
     expect(dossier?.report.composite_verdict).toBe("INCOMPLETE");
     expect(dossier?.report.governing_score).toBeNull();
+    expect(dossier?.completeness_state).toBe("partial");
     expect(dossier?.headline).toContain("Investigation incomplete");
     expect(dossier?.providerSnapshot?.runs).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: "github", state: "failed" }),

@@ -30,7 +30,7 @@ const json = (value: unknown, count: string) => new Response(JSON.stringify(valu
   },
 });
 
-function fixture(options: { active?: boolean; stale?: boolean; missingCheck?: boolean; graphCount?: string } = {}) {
+function fixture(options: { active?: boolean; stale?: boolean; missingCheck?: boolean; graphCount?: string; verdict?: string } = {}) {
   const active = options.active ?? true;
   const graphRow = {
     handle: "@failed",
@@ -52,7 +52,7 @@ function fixture(options: { active?: boolean; stale?: boolean; missingCheck?: bo
     if (url.includes("/report_versions?")) {
       return Promise.resolve(json([{
         id: REPORT_VERSION_ID,
-        verdict: "FAIL",
+        verdict: options.verdict ?? "FAIL",
         completeness_state: "complete",
         attestation_state: "server_collected",
       }], "0-0/1"));
@@ -169,6 +169,56 @@ describe("frozen trust-graph collector", () => {
     expect(artifact).not.toHaveProperty("sourceUrl");
     const graphRead = decodeURIComponent(String(fetchMock.mock.calls[0][0]));
     expect(graphRead).not.toContain("select=handle,aliases,verdict");
+  });
+
+  it("keeps shared portfolio companies navigable but out of adverse trust qualification", async () => {
+    vi.stubEnv("SUPABASE_URL", "https://database.example");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test");
+    const base = fixture();
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = decodeURIComponent(String(input));
+      if (url.includes("/graph_contributions?")) {
+        return Promise.resolve(json([{
+          handle: "@failed",
+          aliases: [],
+          nodes: [
+            { type: "Person", key: "@failed", subject: true },
+            { type: "Company", key: "popularco.com", label: "Popular Co" },
+          ],
+          edges: [{ src: "@failed", dst: "popularco.com", type: "INVESTED_IN" }],
+          report_version_id: REPORT_VERSION_ID,
+          provenance_state: "server_collected",
+        }], "0-0/1"));
+      }
+      return base(input);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { ctx, checks, current } = context();
+    current.nodes = [
+      { type: "Person", key: "@current", subject: true },
+      { type: "Company", key: "popularco.com", label: "Popular Co" },
+    ];
+    current.edges = [{ src: "@current", dst: "popularco.com", type: "INVESTED_IN" }];
+
+    const { result } = await collectWithLedger(ctx, current);
+
+    expect(result).toMatchObject({ state: "executed" });
+    expect(ctx.evidence.trustGraphScreen).toMatchObject({ status: "clear", connections: [] });
+    expect(ctx.evidence.findings).toEqual([]);
+    expect(checks).toContainEqual(expect.objectContaining({ id: "trust-graph-connections", status: "checked-empty" }));
+  });
+
+  it("skips a historical graph row tied to an INCOMPLETE report without poisoning reconciliation", async () => {
+    vi.stubEnv("SUPABASE_URL", "https://database.example");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test");
+    vi.stubGlobal("fetch", fixture({ verdict: "INCOMPLETE" }));
+    const { ctx, checks, current } = context();
+
+    const { result } = await collectWithLedger(ctx, current);
+
+    expect(result).toMatchObject({ state: "executed" });
+    expect(ctx.evidence.trustGraphScreen).toMatchObject({ status: "clear", contributionCount: 0, connections: [] });
+    expect(checks).toContainEqual(expect.objectContaining({ id: "trust-graph-connections", status: "checked-empty" }));
   });
 
   it.each([

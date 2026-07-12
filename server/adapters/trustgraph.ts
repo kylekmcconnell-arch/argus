@@ -257,6 +257,7 @@ function chunk<T>(values: T[], size: number): T[][] {
 
 async function readVersions(c: Credentials, organizationId: string, ids: string[]): Promise<Map<string, VersionRow>> {
   const out = new Map<string, VersionRow>();
+  const seen = new Set<string>();
   for (const group of chunk(ids, VERSION_CHUNK)) {
     const rows = await readExactRows(c, "report_versions", {
       select: "id,verdict,completeness_state,attestation_state",
@@ -272,17 +273,18 @@ async function readVersions(c: Credentials, organizationId: string, ids: string[
       if (
         !UUID.test(id)
         || !group.includes(id)
-        || !FINAL_VERDICTS.has(verdict)
         || (completeness !== "complete" && completeness !== "partial" && completeness !== "failed")
         || (attestation !== "server_collected" && attestation !== "analyst_submitted" && attestation !== "legacy_unattested")
-        || out.has(id)
+        || seen.has(id)
       ) {
         throw new Error("graph report-version metadata was malformed or ambiguous");
       }
+      seen.add(id);
+      if (!FINAL_VERDICTS.has(verdict)) continue;
       out.set(id, { id, verdict, completeness, attestation });
     }
+    if (group.some((id) => !seen.has(id))) throw new Error("graph report-version qualification was incomplete");
   }
-  if (out.size !== ids.length) throw new Error("graph report-version qualification was incomplete");
   return out;
 }
 
@@ -584,12 +586,17 @@ export async function collectTrustGraph(
       checks = checkResult.value;
       activeVersions = activeResult.value;
     }
-    const qualified = stored.map((row) => qualification(
-      row,
-      versions.get(row.reportVersionId)!,
-      checks.get(row.reportVersionId) ?? [],
-      activeVersions.has(row.reportVersionId),
-    ));
+    // Historical graph rows tied to non-final reports are ignored rather than
+    // allowed to poison reconciliation for every later case in the tenant.
+    const qualified = stored.flatMap((row) => {
+      const version = versions.get(row.reportVersionId);
+      return version ? [qualification(
+        row,
+        version,
+        checks.get(row.reportVersionId) ?? [],
+        activeVersions.has(row.reportVersionId),
+      )] : [];
+    });
 
     // A prior row for this same subject is replaced by the freshly collected
     // in-memory graph. This prevents an older self-contribution from fabricating

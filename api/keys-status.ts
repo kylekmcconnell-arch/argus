@@ -21,7 +21,7 @@ const PROVIDERS: Prov[] = [
   { key: "SUPABASE_SECRET_KEY", alternativeKeys: ["SUPABASE_SERVICE_ROLE_KEY"], also: "SUPABASE_URL", label: "Supabase", powers: "Shared trust graph + shared audit log", source: "supabase.com/dashboard", tier: "infra" },
   { key: "COINGECKO_API_KEY", label: "CoinGecko Pro", powers: "Higher-rate token data (free tier works without)", source: "coingecko.com/api", tier: "optional" },
   { key: "CRYPTORANK_API_KEY", label: "CryptoRank", powers: "Market intel: rank, ATH drawdown, dilution, funding/vesting/unlock flags", source: "cryptorank.io/api", tier: "optional" },
-  { key: "CRUNCHBASE_API_KEY", label: "Crunchbase", powers: "Company / funding records", source: "crunchbase.com", tier: "optional" },
+  { key: "CRUNCHBASE_API_KEY", label: "Crunchbase", powers: "Optional company / funding enrichment; portfolio verification works without it", source: "crunchbase.com", tier: "optional" },
   { key: "ETHERSCAN_API_KEY", label: "Etherscan (multichain)", powers: "EVM deployer, contract-creation & funding traces (Ethereum/Base/BSC/Arbitrum/…)", source: "etherscan.io/apis", tier: "optional" },
   { key: "ARKHAM_API_KEY", label: "Arkham", powers: "Supplemental wallet labels, counterparties, holdings, and risk paths", source: "arkhamintelligence.com", tier: "optional" },
   { key: "BITQUERY_API_KEY", label: "Bitquery", powers: "Credential reserved for the next frozen EVM collector; it does not currently run or attest audits", source: "bitquery.io", tier: "optional" },

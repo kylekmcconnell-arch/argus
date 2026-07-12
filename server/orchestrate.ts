@@ -48,6 +48,7 @@ import { hasResolvedRealName, offchainAdapter } from "./adapters/offchain";
 import { archivedAffiliation } from "./adapters/wayback";
 import { resolveForHandle } from "./adapters/wallet";
 import { collectTrustGraph } from "./adapters/trustgraph";
+import { collectPortfolioRelationships } from "./adapters/portfolio";
 
 const ADAPTERS: Adapter[] = [
   xAdapter,
@@ -1143,6 +1144,7 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
     notableFollowers: [],
     contradictions: [],
     sourceArtifacts: [],
+    portfolioLeads: [],
     profileAuthenticity: undefined,
     trustGraphScreen: undefined,
     webTeam: [],
@@ -1236,13 +1238,6 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           note: "GitHub provider is not configured",
           provider: "github",
         });
-      } else if (a.id === "crunchbase") {
-        checkTracker.record({
-          id: "vc-portfolio-track-record",
-          status: "unavailable",
-          note: "Crunchbase provider is not configured",
-          provider: "crunchbase",
-        });
       }
       continue;
     }
@@ -1261,8 +1256,6 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       checkTracker.provider(a.id, a.label, "failed", String(e));
       if (a.id === "github") {
         checkTracker.record({ id: "code-footprint-github", status: "unavailable", note: `GitHub adapter failed: ${String(e)}`, provider: "github" });
-      } else if (a.id === "crunchbase") {
-        checkTracker.record({ id: "vc-portfolio-track-record", status: "unavailable", note: `Crunchbase adapter failed: ${String(e)}`, provider: "crunchbase" });
       }
       emit({ phase: "Collect", label: `${a.label} error`, detail: String(e), tone: "warn" });
     }
@@ -1328,6 +1321,39 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     emit({ phase: "P0 · Routing", label: "Classify roles", detail: `Provider-backed evidence routed to ${evidence.roles.join(", ")}.`, tone: "neutral" });
   } else {
     emit({ phase: "P0 · Routing", label: "Role unresolved", detail: "No deterministic or provider-corroborated role evidence was collected. Model role candidates remain leads; the report will publish INCOMPLETE.", tone: "warn" });
+  }
+
+  // Portfolio completion is source-agnostic. Crunchbase may enrich a company,
+  // but company existence alone never proves that this investor backed it. Run
+  // one bounded discovery + deterministic source-verification pass after the
+  // provider-backed role set is known, then let that pass own the check outcome.
+  if (evidence.roles.includes(SubjectClass.INVESTOR)) {
+    const portfolioStartedAt = startRuntimeStage("portfolio-verification");
+    const before = attemptTotals(["grok", "cache", "portfolio-web", "twitterapi"]);
+    try {
+      const result = await collectPortfolioRelationships(ctx);
+      const attempts = attemptDelta(before, attemptTotals(["grok", "cache", "portfolio-web", "twitterapi"]));
+      const state: ProviderRunState = result.state === "skipped"
+        ? "unavailable"
+        : result.state === "failed" || result.state === "partial"
+          ? result.state
+          : observedRunState(attempts);
+      checkTracker.provider("portfolio-verification", "Source-backed portfolio verification", state, result.detail);
+    } catch (error) {
+      const detail = `Portfolio verification failed: ${String(error)}`;
+      checkTracker.provider("portfolio-verification", "Source-backed portfolio verification", "failed", detail);
+      checkTracker.record({
+        id: "vc-portfolio-track-record",
+        status: "unavailable",
+        note: detail,
+        provider: "portfolio-web",
+      });
+      emit({ phase: "Investor", label: "Portfolio verification incomplete", detail, source: "portfolio-web", tone: "warn" });
+    } finally {
+      finishRuntimeStage("portfolio-verification", portfolioStartedAt);
+    }
+  } else {
+    checkTracker.provider("portfolio-verification", "Source-backed portfolio verification", "skipped", "not a provider-backed investor/fund role");
   }
 
   // Final deterministic pre-analyst pass: join the freshly collected graph to
@@ -1488,7 +1514,14 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const dossier = assembleDossier(evidence, cost.calls.some((line) => line.calls > 0));
   const checkScope = { resolvedRealName: hasResolvedRealName(ctx) };
   dossier.checkRuns = checkTracker.snapshot(evidence.roles, checkScope);
-  dossier.completeness_state = checkTracker.completeness(evidence.roles, checkScope);
+  const checkCompleteness = checkTracker.completeness(evidence.roles, checkScope);
+  // Coverage completeness and decision completeness are both required for an
+  // authoritative graph contribution. A fully run collector with no valid
+  // axis set is still a useful report, but it must remain partial and cannot
+  // poison later trust-graph reconciliation with an INCOMPLETE verdict.
+  dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE"
+    ? "partial"
+    : checkCompleteness;
   dossier.providerSnapshot = checkTracker.providers();
   // Attach what this run actually spent, so the report library can show it.
   dossier.cost = cost;
