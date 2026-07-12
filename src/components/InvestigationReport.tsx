@@ -27,6 +27,19 @@ import { PanelRequestNotice } from "./PanelRequestNotice";
 import { investigationContribution, getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
+import {
+  ArrowClockwise,
+  ArrowLeft,
+  Briefcase,
+  ClipboardText,
+  Database,
+  Graph,
+  IdentificationBadge,
+  ShareNetwork,
+  ShieldWarning,
+} from "@phosphor-icons/react";
+import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
+import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -56,7 +69,7 @@ function VerdictPill({ verdict, score }: { verdict: string; score: number | null
 
 function Card({ title, children, accent }: { title: string; children: React.ReactNode; accent?: string }) {
   return (
-    <div className="panel p-4" style={accent ? { borderColor: accent + "55" } : undefined}>
+    <div className={`panel p-4 ${accent ? "tint-var" : ""}`} style={accent ? ({ "--tint": accent } as React.CSSProperties) : undefined}>
       <div className="eyebrow mb-2">{title}</div>
       {children}
     </div>
@@ -233,57 +246,75 @@ export function InvestigationReport({
   // account, site) plus every cross-audit tie to other subjects you've scanned.
   const invGraph = investigationContribution(inv);
   const connections = subjectConnections("$" + token.symbol, getContributions());
+  const recordedChecks = diligenceChecks.filter((check) => ["confirmed", "finding", "checked-empty"].includes(check.status));
+  const gapChecks = diligenceChecks.filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
+  const supportItems = [
+    ...token.findings
+      .filter((finding) => finding.tone === "good")
+      .map((finding) => ({ label: finding.claim, detail: finding.source })),
+    ...(teamPeople.length > 0 ? [{
+      label: `${teamPeople.length} publicly tied team ${teamPeople.length === 1 ? "member" : "members"} identified`,
+      detail: teamPeople.slice(0, 4).map((person) => person.name).filter(Boolean).join(", "),
+    }] : []),
+    ...recordedChecks
+      .filter((check) => check.status !== "finding")
+      .map((check) => ({ label: check.label, detail: check.note })),
+  ].slice(0, 6);
+  const concernItems = [
+    ...token.findings
+      .filter((finding) => finding.tone !== "good")
+      .map((finding) => ({ label: finding.claim, detail: finding.source })),
+    ...recordedChecks
+      .filter((check) => check.status === "finding")
+      .map((check) => ({ label: check.label, detail: check.note })),
+    ...(readiness.status !== "ready" ? [{ label: readiness.title, detail: readiness.guidance }] : []),
+  ].slice(0, 6);
+  const nextStepItems = gapChecks.slice(0, 6).map((check) => ({ label: `Resolve ${check.label.toLowerCase()}`, detail: check.note }));
+  const verifiedItems = recordedChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
+  const openQuestionItems = gapChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
+  const capturedAt = versionContext?.createdAt
+    ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    : undefined;
+  const favorableVerdict = presentedTokenVerdict === "PASS";
+  const decisionCanvasTone = favorableVerdict
+    ? "pass"
+    : presentedTokenVerdict === "CAUTION" || presentedTokenVerdict === "INCOMPLETE" || presentedTokenVerdict === "UNVERIFIABLE_IDENTITY"
+      ? "caution"
+      : "avoid";
 
   return (
     <div className="relative min-h-full pb-24">
-      <div className="grid-bg absolute inset-0 top-0 -z-10 h-60" />
-      <header className="sticky top-0 z-20 border-b border-line bg-void/85 backdrop-blur">
-        <div className="mx-auto flex max-w-4xl items-center gap-3 px-5 py-3">
-          <button onClick={onReset} className="flex items-center gap-1.5 text-[13px] text-ink-dim transition hover:text-ink">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-            Home
+      <header className="border-b border-line bg-void/90">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
+          <button onClick={onReset} className="btn-ghost flex min-h-9 items-center gap-1.5 px-1 text-[12.5px]">
+            <ArrowLeft size={15} weight="bold" aria-hidden="true" /> New investigation
           </button>
-          <span className="mono text-[11px] text-ink-faint">/ investigation</span>
-          {onReAudit && (
-            <button onClick={onReAudit} title="Run this investigation again, fresh" className="ml-auto flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
-              Rescan
-            </button>
-          )}
-          {onOpenBrief && (
-            <button
-              type="button"
-              onClick={onOpenBrief}
-              title="Open the analyst decision brief anchored to this exact investigation case"
-              className={`rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink transition hover:border-signal hover:text-signal ${onReAudit ? "" : "ml-auto"}`}
-            >
-              Case brief
-            </button>
-          )}
-          {canShare && (
-            <button
-              type="button"
-              onClick={() => void share()}
-              disabled={shareState === "creating"}
-              aria-live="polite"
-              title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable investigation link"}
-              className={`rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:cursor-wait disabled:opacity-60 ${onReAudit || onOpenBrief ? "" : "ml-auto"}`}
-            >
-              {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share"}
-            </button>
-          )}
-          <span
-            className={`mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider ${onReAudit || onOpenBrief || canShare ? "" : "ml-auto"}`}
-            style={versionContext
-              ? { borderColor: "var(--color-line-2)", color: "var(--color-ink-faint)" }
-              : { borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
-          >
-            {versionContext ? `SNAPSHOT v${versionContext.version}` : "● LIVE SCAN"}
+          <span className="mono text-[11px] text-ink-faint">/ full investigation</span>
+          <span className={`chip ${versionContext ? "" : "tint-signal"}`}>
+            {versionContext ? `snapshot v${versionContext.version}` : "live scan"}
           </span>
+          <div className="scrollbar-none order-3 flex w-full items-center gap-2 overflow-x-auto pb-1 sm:order-none sm:ml-auto sm:w-auto sm:justify-end sm:overflow-visible sm:pb-0">
+            {onOpenBrief && (
+              <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact investigation case" className="btn-primary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
+                <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
+              </button>
+            )}
+            {canShare && (
+              <button type="button" onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable investigation link"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
+                <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
+                {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share"}
+              </button>
+            )}
+            {onReAudit && (
+              <button onClick={onReAudit} title="Run this investigation again with current evidence" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
+                <ArrowClockwise size={16} weight="duotone" aria-hidden="true" /> Rescan
+              </button>
+            )}
+          </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-4xl px-5">
+      <div className="mx-auto max-w-6xl px-4 sm:px-5">
         {!versionContext && <div className="mt-4"><ServiceAlert /></div>}
         {versionContext && (
           <div className="mt-4">
@@ -379,7 +410,38 @@ export function InvestigationReport({
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
 
-        <div className="mt-5 grid gap-3 lg:grid-cols-2">
+        <div className="sticky top-0 z-10 mt-5">
+          <ReportCanvasSectionNav
+            sticky={false}
+            items={[
+              { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#investigation-evidence", label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+              ...((teamPeople.length > 0 || advisors.length > 0) ? [{ href: "#investigation-team" as const, label: "Team", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
+              ...(invGraph && invGraph.nodes.length > 1 ? [{ href: "#investigation-relationships" as const, label: "Relationships", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
+              { href: "#investigation-methodology", label: "Sources & checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+            ]}
+          />
+        </div>
+
+        <InvestigationDecisionCanvas
+          verdictLabel={verdictMeta(presentedTokenVerdict).label}
+          favorable={favorableVerdict}
+          verdictTone={decisionCanvasTone}
+          supports={supportItems}
+          concerns={concernItems}
+          nextSteps={nextStepItems}
+          verified={verifiedItems}
+          openQuestions={openQuestionItems}
+          coveragePercent={readiness.coveragePercent}
+          successful={readiness.successful}
+          applicable={readiness.applicable}
+          capturedAt={capturedAt}
+          evidenceHref="#investigation-evidence"
+          methodologyHref="#investigation-methodology"
+        />
+
+        <div id="investigation-evidence" className="scroll-mt-28 mt-5 grid gap-3 lg:grid-cols-2">
           {/* on-chain */}
           <Card title="On-chain" accent={tm.color}>
             <div className="flex items-center justify-between">
@@ -492,7 +554,7 @@ export function InvestigationReport({
 
         {/* TEAM — the headline section, merged from every source, each clickable */}
         {(teamPeople.length > 0 || advisors.length > 0) && (
-          <div className="mt-3">
+          <div id="investigation-team" className="scroll-mt-28 mt-3">
             <Card title="Team · from X content, the site, and web/LinkedIn">
               {teamPeople.length > 0 && (
                 <div>
@@ -594,7 +656,7 @@ export function InvestigationReport({
         {/* Connection web: the subject's graph + its ties to everything else you've
             audited — the deeper map, below the team. */}
         {invGraph && invGraph.nodes.length > 1 && (
-          <div className="mt-3">
+          <div id="investigation-relationships" className="scroll-mt-28 mt-3">
             <Card title="Connection web · click any node to open it">
               <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={showCurrentIntelligence ? connections : []} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
             </Card>
@@ -654,7 +716,12 @@ export function InvestigationReport({
 
         {/* ask-the-report chat — grounded in this investigation's own evidence */}
         <div className="mt-3">
-          <AskReport subject={`$${token.symbol}`} context={[
+          <AskReport
+            subject={`$${token.symbol}`}
+            reportVersionId={versionContext?.reportVersionId
+              ?? (inv.persistence?.state === "persisted" ? inv.persistence.reportVersionId : undefined)
+              ?? undefined}
+            context={[
             inv.founderNote,
             token.headline,
             `scored token verdict ${token.verdict} ${token.score ?? ""}; decision readiness ${readiness.status}; ${readiness.successful}/${readiness.applicable} evidence outcomes recorded`,
@@ -665,7 +732,8 @@ export function InvestigationReport({
             deployerTrail?.funder ? `funder ${deployerTrail.funder.label ?? deployerTrail.funder.address}` : "",
             !versionContext && connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
             invGraph ? `graph entities: ${[...new Set(invGraph.nodes.map((n) => String(n.key)))].slice(0, 30).join(", ")}` : "",
-          ].filter(Boolean).join(" | ")} />
+            ].filter(Boolean).join(" | ")}
+          />
         </div>
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}

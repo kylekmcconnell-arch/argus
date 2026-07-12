@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
 import { verdictMeta } from "../lib/verdict";
 import { auditReadinessLabel, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { getAnalyst } from "../lib/analyst";
@@ -29,7 +29,8 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
         onOpen(ref, kind);
       }}
       title={presentedVerdict === "INCOMPLETE" ? "Open the report — positive score is not cleared because evidence coverage is incomplete" : "Open the full report"}
-      className="group panel flex w-[260px] shrink-0 items-center gap-2.5 p-3 text-left transition hover:border-line-2 hover:bg-panel/80 soft-shadow"
+      aria-label={`Open stored ${e.kind} case for ${e.query}${typeof e.score === "number" ? `, score ${e.score}` : ""}`}
+      className="group panel flex w-[240px] shrink-0 items-center gap-2.5 p-2.5 text-left transition hover:border-line-2 hover:bg-panel/80"
     >
       {img ? (
         <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-md border border-line bg-panel-2 object-cover" />
@@ -43,20 +44,20 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
         </span>
       </span>
       <span className="flex shrink-0 flex-col items-end gap-1 leading-none">
-        <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{e.score ?? "—"}</span>
+        <span className="mono tint-var rounded px-1.5 py-1 text-[15px] font-semibold tabular" style={{ "--tint": color } as CSSProperties}>{e.score ?? "—"}</span>
         {presentedLabel && <span className="chip tint-var" style={{ ["--tint" as string]: color }}>{presentedLabel}</span>}
       </span>
     </a>
   );
 }
 
-// The recent-scores strip: a full-width top bar with an auto-rotating marquee
-// (pauses on hover) once there are enough cards, else a plain scroll row. Renders
-// nothing when there's nothing scored to show. Shared by Home and every directory.
+// A contextual stored-case strip for directory pages. Home relies on the
+// persistent Recent cases rail so this secondary path never competes with the
+// primary investigation input.
 export function ScoreTicker({
   onOpen,
   filter,
-  label = "Recent investigations · coverage-qualified",
+  label = "Recent cases · open a frozen snapshot",
   max = 12,
 }: {
   onOpen: (ref: string, kind?: ReportKind) => void;
@@ -70,7 +71,7 @@ export function ScoreTicker({
   if (scores.length === 0) return null;
 
   return (
-    <div className="relative z-10 border-b border-line/60 px-6 py-3.5">
+    <section aria-label={label} className="relative z-10 border-b border-line/60 bg-sidebar/30 px-5 py-3">
       <div className="mx-auto max-w-5xl">
         <div className="eyebrow mb-2">{label}</div>
         {scores.length >= 5 ? (
@@ -91,6 +92,6 @@ export function ScoreTicker({
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

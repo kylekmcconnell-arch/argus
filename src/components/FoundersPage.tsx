@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { ScoreTicker } from "./ScoreTicker";
 import type { ReportKind } from "../lib/reports";
-import { PrivateToggle } from "./PrivateToggle";
 import { ScanChip } from "./ScanChip";
 import { auditReadinessLabel, mergedLog, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
+import { WorkspacePageHeader } from "./WorkspacePageHeader";
+import { DirectoryInvestigationForm } from "./DirectoryInvestigationForm";
 
 // The Founders directory: INDIVIDUALS who build (role FOUNDER), newest first —
 // the "who's building" counterpart to the KOLs "who's promoting" page. Project
@@ -68,29 +68,23 @@ export function FoundersPage({ onAudit, onOpenRecent }: { onAudit: (h: string, p
   const open = (ref: string, kind?: ReportKind) => onOpenRecent ? onOpenRecent(ref, kind) : onAudit(ref);
 
   return (
-    <>
-      <ScoreTicker onOpen={open} label="Recent founders · click to open the report" filter={(e) => (e.flags ?? []).some((f) => f.toLowerCase() === "role:founder")} />
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="display-sm text-[24px] text-ink">Founders</h1>
-      <p className="mt-1.5 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">
-        The individuals who build, graded on track record, repeat backing, and how each of their ventures actually
-        ended. Project brand accounts live on their own reports; this page is the people.
-      </p>
+      <WorkspacePageHeader
+        eyebrow="People intelligence"
+        title="Founders"
+        description={<>Investigate the individuals who build: identity, operating history, repeat backing, technical footprint, and how prior ventures ended. Project brand accounts remain separate evidence subjects.</>}
+        meta={<span className="chip tint-signal">{builders.length} investigated</span>}
+      />
 
-      <form
-        onSubmit={(e) => { e.preventDefault(); if (value.trim()) onAudit(value.trim(), priv); }}
-        className="panel mt-5 flex items-center gap-2 p-2.5 soft-shadow transition focus-within:border-line-2"
-      >
-        <span className="mono pl-2 text-[13.5px] text-ink-faint select-none">@</span>
-        <input
-          value={value}
-          onChange={(ev) => setValue(ev.target.value.replace(/^@/, ""))}
-          placeholder="audit a founder by handle (e.g. gakonst)"
-          className="mono min-w-0 flex-1 bg-transparent py-1.5 text-[13.5px] text-ink placeholder:text-ink-faint focus:outline-none"
-        />
-        <PrivateToggle on={priv} onToggle={setPriv} />
-        <button type="submit" className="btn-primary px-3.5 py-1.5 text-[13.5px] font-medium">Run audit</button>
-      </form>
+      <DirectoryInvestigationForm
+        value={value}
+        onValueChange={setValue}
+        privateMode={priv}
+        onPrivateModeChange={setPriv}
+        label="Investigate a founder"
+        placeholder="X handle, e.g. gakonst"
+        onSubmit={() => onAudit(value.trim(), priv)}
+      />
 
       <div className="eyebrow mt-7 mb-2.5">
         {builders.length ? `${builders.length} founder${builders.length === 1 ? "" : "s"} audited` : "No founders audited yet"}
@@ -105,6 +99,5 @@ export function FoundersPage({ onAudit, onOpenRecent }: { onAudit: (h: string, p
         </p>
       )}
     </div>
-    </>
   );
 }

@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { ScoreTicker } from "./ScoreTicker";
 import type { ReportKind } from "../lib/reports";
-import { PrivateToggle } from "./PrivateToggle";
 import { ScanChip } from "./ScanChip";
 import { auditReadinessLabel, mergedLog, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
+import { WorkspacePageHeader } from "./WorkspacePageHeader";
+import { DirectoryInvestigationForm } from "./DirectoryInvestigationForm";
 
 // The Projects directory: protocol / token / product brand accounts (role
 // PROJECT), graded as organizations — team, product substance, token conduct,
@@ -68,29 +68,23 @@ export function ProjectsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, p
   const open = (ref: string, kind?: ReportKind) => onOpenRecent ? onOpenRecent(ref, kind) : onAudit(ref);
 
   return (
-    <>
-      <ScoreTicker onOpen={open} label="Recent projects · click to open the report" filter={(e) => (e.flags ?? []).some((f) => f.toLowerCase() === "role:project")} />
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="display-sm text-[24px] text-ink">Projects</h1>
-      <p className="mt-1.5 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">
-        Protocols, tokens, and products graded as organizations: the team behind them, product substance, token
-        conduct, backing, and whether the account is still alive. The people themselves live under Founders.
-      </p>
+      <WorkspacePageHeader
+        eyebrow="Project intelligence"
+        title="Projects"
+        description={<>Investigate protocols, tokens, and products as organizations: the team behind them, product substance, token conduct, backing, liveness, and unresolved ownership questions.</>}
+        meta={<span className="chip tint-unverifiable">{projects.length} investigated</span>}
+      />
 
-      <form
-        onSubmit={(e) => { e.preventDefault(); if (value.trim()) onAudit(value.trim(), priv); }}
-        className="panel mt-5 flex items-center gap-2 p-2.5 soft-shadow transition focus-within:border-line-2"
-      >
-        <span className="mono pl-2 text-[13.5px] text-ink-faint select-none">@</span>
-        <input
-          value={value}
-          onChange={(ev) => setValue(ev.target.value.replace(/^@/, ""))}
-          placeholder="audit a project by handle (e.g. VulcanForged)"
-          className="mono min-w-0 flex-1 bg-transparent py-1.5 text-[13.5px] text-ink placeholder:text-ink-faint focus:outline-none"
-        />
-        <PrivateToggle on={priv} onToggle={setPriv} />
-        <button type="submit" className="btn-primary px-3.5 py-1.5 text-[13.5px] font-medium">Run audit</button>
-      </form>
+      <DirectoryInvestigationForm
+        value={value}
+        onValueChange={setValue}
+        privateMode={priv}
+        onPrivateModeChange={setPriv}
+        label="Investigate a project"
+        placeholder="Project handle, e.g. VulcanForged"
+        onSubmit={() => onAudit(value.trim(), priv)}
+      />
 
       <div className="eyebrow mt-7 mb-2.5">
         {projects.length ? `${projects.length} project${projects.length === 1 ? "" : "s"} audited` : "No projects audited yet"}
@@ -105,6 +99,5 @@ export function ProjectsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, p
         </p>
       )}
     </div>
-    </>
   );
 }

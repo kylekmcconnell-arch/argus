@@ -38,7 +38,7 @@ describe("Landing fresh audit launch", () => {
     expect(input).not.toBeNull();
     expect(form).not.toBeNull();
     expect(container.textContent).toContain("Starts a fresh provider run and may use paid API quota");
-    expect(container.textContent).toContain("Open previous snapshots from Recent audits");
+    expect(container.textContent).toContain("Open previous snapshots from Recent cases");
 
     await act(async () => {
       const valueSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
@@ -82,7 +82,7 @@ describe("Landing fresh audit launch", () => {
 
     const button = container.querySelector<HTMLButtonElement>("button[type='submit']");
     expect(button?.disabled).toBe(false);
-    expect(button?.textContent).toContain("Run audit");
+    expect(button?.textContent).toContain("Start investigation");
 
     await act(async () => {
       form?.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));

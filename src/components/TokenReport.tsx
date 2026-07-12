@@ -27,6 +27,20 @@ import { SecondOpinion } from "./SecondOpinion";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
+import {
+  ArrowClockwise,
+  ArrowLeft,
+  Briefcase,
+  ChartDonut,
+  ClipboardText,
+  Database,
+  Graph,
+  Plus,
+  ShareNetwork,
+  Star,
+} from "@phosphor-icons/react";
+import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
+import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
 
@@ -187,7 +201,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
     : presentation.displayVerdict;
   const presentationMeta = verdictMeta(presentedVerdict);
   const presentationColor = presentationMeta.color;
-  const presentationGlow = presentationMeta.glow;
   const s = d.safety;
   const gp = d.safetyChecked;
   const isSol = d.chain === "solana";
@@ -257,64 +270,82 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
       }),
     );
   };
+  const recordedChecks = checks.filter((check) => ["confirmed", "finding", "checked-empty"].includes(check.status));
+  const gapChecks = checks.filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
+  const supportingFindings = d.findings.filter((finding) => finding.tone === "good");
+  const limitingFindings = d.findings.filter((finding) => finding.tone !== "good");
+  const supportItems = [
+    ...supportingFindings.map((finding) => ({ label: finding.claim, detail: finding.source })),
+    ...recordedChecks
+      .filter((check) => check.status !== "finding")
+      .map((check) => ({ label: check.label, detail: check.note })),
+  ].slice(0, 6);
+  const concernItems = [
+    ...limitingFindings.map((finding) => ({ label: finding.claim, detail: finding.source })),
+    ...recordedChecks
+      .filter((check) => check.status === "finding")
+      .map((check) => ({ label: check.label, detail: check.note })),
+    ...(readiness.status !== "ready" ? [{ label: readiness.title, detail: readiness.guidance }] : []),
+  ].slice(0, 6);
+  const nextStepItems = gapChecks.slice(0, 6).map((check) => ({
+    label: `Resolve ${check.label.toLowerCase()}`,
+    detail: check.note,
+  }));
+  const verifiedItems = recordedChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
+  const openQuestionItems = gapChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
+  const capturedAt = versionContext?.createdAt
+    ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
+    : undefined;
+  const favorableVerdict = presentedVerdict === "PASS";
+  const decisionCanvasTone = favorableVerdict
+    ? "pass"
+    : presentedVerdict === "CAUTION" || presentedVerdict === "INCOMPLETE" || presentedVerdict === "UNVERIFIABLE_IDENTITY"
+      ? "caution"
+      : "avoid";
 
   return (
     <div className="relative min-h-full pb-24">
-      <div className="grid-bg absolute inset-0 top-0 -z-10 h-72" />
-
-      <header className="sticky top-0 z-20 border-b border-line bg-void/85 backdrop-blur">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-5 py-3">
-          <button onClick={onReset} className="flex items-center gap-1.5 text-[13px] text-ink-dim transition hover:text-ink">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
-            Audits
+      <header className="border-b border-line bg-void/90">
+        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
+          <button onClick={onReset} className="btn-ghost flex min-h-9 items-center gap-1.5 px-1 text-[12.5px]">
+            <ArrowLeft size={15} weight="bold" aria-hidden="true" />
+            New investigation
           </button>
-          <span className="mono text-[11px] text-ink-faint">/ token</span>
-          <span
-            className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider"
-            style={versionContext
-              ? { borderColor: "var(--color-line-2)", color: "var(--color-ink-faint)" }
-              : { borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
-          >
-            {versionContext ? `SNAPSHOT v${versionContext.version}` : "● LIVE SCAN"}
+          <span className="mono text-[11px] text-ink-faint">/ token investigation</span>
+          <span className={`chip ${versionContext ? "" : "tint-signal"}`}>
+            {versionContext ? `snapshot v${versionContext.version}` : "live scan"}
           </span>
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
-            <button onClick={onRescan} title="Run this audit again, fresh" className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
-              Rescan
-            </button>
+          <div className="scrollbar-none order-3 flex w-full items-center gap-2 overflow-x-auto pb-1 sm:order-none sm:ml-auto sm:w-auto sm:justify-end sm:overflow-visible sm:pb-0">
             {onOpenBrief && (
-              <button
-                type="button"
-                onClick={onOpenBrief}
-                title="Open the analyst decision brief anchored to this exact token case"
-                className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink transition hover:border-signal hover:text-signal"
-              >
-                Case brief
+              <button type="button" onClick={onOpenBrief} title="Open the analyst decision brief anchored to this exact token case" className="btn-primary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
+                <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
               </button>
             )}
-            <button onClick={copyReport} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">{copiedTxt ? "Copied ✓" : "Copy report"}</button>
             {canShare && (
-              <button
-                onClick={() => void share()}
-                disabled={shareState === "creating"}
-                aria-live="polite"
-                title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:cursor-wait disabled:opacity-60"
-              >
-                {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share"}
+              <button onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
+                <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
+                {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share"}
               </button>
             )}
+            <button onClick={onRescan} title="Run this audit again with current evidence" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
+              <ArrowClockwise size={16} weight="duotone" aria-hidden="true" /> Rescan
+            </button>
+            <button onClick={copyReport} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
+              <ClipboardText size={16} weight="duotone" aria-hidden="true" /> {copiedTxt ? "Copied" : "Copy report"}
+            </button>
             {canMutateWorkspace && (
-              <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
-                {watched ? "★ Watching" : "☆ Watch"}
+              <button onClick={watch} className={`btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] ${watched ? "tint-signal" : ""}`}>
+                <Star size={16} weight={watched ? "fill" : "duotone"} aria-hidden="true" /> {watched ? "Watching" : "Watch"}
               </button>
             )}
-            <button onClick={onReset} className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink">New audit</button>
+            <button onClick={onReset} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
+              <Plus size={16} weight="bold" aria-hidden="true" /> New
+            </button>
           </div>
         </div>
       </header>
 
-      <div className="mx-auto max-w-5xl px-5">
+      <div className="mx-auto max-w-6xl px-4 sm:px-5">
         {!versionContext && <div className="mt-4"><ServiceAlert /></div>}
         {versionContext && (
           <div className="mt-4">
@@ -375,8 +406,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         {/* Decision layer: model output and evidence completeness are separate.
             A thinly-supported PASS must never read like an investment-ready clearance. */}
-        <div className="relative mt-4 overflow-hidden rounded-2xl border bg-panel soft-shadow" style={{ borderColor: `color-mix(in oklab, ${presentationColor} 42%, transparent)` }}>
-          <div className="absolute right-0 top-0 h-full w-1/2" style={{ background: `radial-gradient(400px 200px at 100% 0%, ${presentationGlow}, transparent 70%)` }} />
+        <div className="panel tint-var tint-strong relative mt-4 overflow-hidden soft-shadow" style={{ "--tint": presentationColor } as React.CSSProperties}>
           <div className="relative flex flex-wrap items-start gap-6 p-6 pb-5">
             <div className="shrink-0 text-center">
               <Ring score={presentation.primaryScore ? d.score : null} verdict={presentedVerdict} color={presentationColor} />
@@ -434,6 +464,36 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             </dl>
           </div>
         </div>
+
+        <div className="sticky top-0 z-10 mt-5">
+          <ReportCanvasSectionNav
+            sticky={false}
+            items={[
+              { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#report-risks", label: "Risks", icon: <ChartDonut size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#token-evidence", label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#token-relationships", label: "Relationships", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#token-methodology", label: "Sources & checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+            ]}
+          />
+        </div>
+
+        <InvestigationDecisionCanvas
+          verdictLabel={presentationMeta.label}
+          favorable={favorableVerdict}
+          verdictTone={decisionCanvasTone}
+          supports={supportItems}
+          concerns={concernItems}
+          nextSteps={nextStepItems}
+          verified={verifiedItems}
+          openQuestions={openQuestionItems}
+          coveragePercent={readiness.coveragePercent}
+          successful={readiness.successful}
+          applicable={readiness.applicable}
+          capturedAt={capturedAt}
+        />
+
+        <div id="token-evidence" className="scroll-mt-28" aria-hidden="true" />
 
         {/* price momentum */}
         {d.priceChange && (
@@ -573,7 +633,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         </div>
 
         {/* team & provenance + unified graph */}
-        <div className="mt-3 grid gap-3 lg:grid-cols-2">
+        <div id="token-relationships" className="scroll-mt-28 mt-3 grid gap-3 lg:grid-cols-2">
           <Card title="Team & provenance">
             <div className="mb-1 text-[11px] leading-snug text-ink-faint">Vet the people behind it — these run a full audit of the project's account and site.</div>
             {d.projectX ? (
@@ -660,7 +720,12 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         {/* ask-the-report chat — grounded in this token's own evidence */}
         <div className="mt-3">
-          <AskReport subject={`$${d.symbol}`} context={[
+          <AskReport
+            subject={`$${d.symbol}`}
+            reportVersionId={versionContext?.reportVersionId
+              ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId : undefined)
+              ?? undefined}
+            context={[
             `${d.name} ($${d.symbol}) on ${d.chain}`,
             d.headline,
             `underlying model signal ${d.verdict} ${d.score ?? ""}`,
@@ -669,7 +734,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             d.cg ? `${d.cg.cexCount} CEX listings${d.cg.rank ? `, rank #${d.cg.rank}` : ""}` : "not on CoinGecko",
             projectSite ? `site ${projectSite}` : "",
             d.projectX ? `project X ${d.projectX}` : "",
-          ].filter(Boolean).join(" | ")} />
+            ].filter(Boolean).join(" | ")}
+          />
         </div>
 
         {/* analyst augmentation — add a piece the scan missed (verified before publish) */}

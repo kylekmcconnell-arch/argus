@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { CaretDown, ChatCircleText } from "@phosphor-icons/react";
 
 export interface AskReportProps {
   subject: string;
@@ -78,10 +79,10 @@ export function AskReport({
   return (
     <div className="panel">
       <button type="button" aria-expanded={open} onClick={() => setOpen((current) => !current)} className="flex w-full items-center gap-2 px-4 py-3 text-left">
-        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>
-        <span className="eyebrow">Ask this report</span>
+        <ChatCircleText aria-hidden="true" size={16} weight="duotone" className="text-signal" />
+        <span className="eyebrow">Ask frozen evidence</span>
         {reportVersionId && <span className="mono text-[10px] text-ink-faint">frozen version {reportVersionId.slice(0, 8)}…</span>}
-        <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-faint)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-auto transition-transform" style={{ transform: open ? "rotate(180deg)" : "none" }}><path d="M6 9l6 6 6-6" /></svg>
+        <CaretDown aria-hidden="true" size={14} weight="bold" className={`ml-auto text-ink-faint transition-transform ${open ? "rotate-180" : ""}`} />
       </button>
       {open && (
         <div className="border-t border-line/60 p-4">

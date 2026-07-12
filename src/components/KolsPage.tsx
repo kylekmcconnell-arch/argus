@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { ScoreTicker } from "./ScoreTicker";
 import type { ReportKind } from "../lib/reports";
-import { PrivateToggle } from "./PrivateToggle";
 import { ScanChip } from "./ScanChip";
 import { auditReadinessLabel, mergedLog, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
+import { WorkspacePageHeader } from "./WorkspacePageHeader";
+import { DirectoryInvestigationForm } from "./DirectoryInvestigationForm";
 
 // The KOL directory: every promoter/caller that's been audited (governing role
 // KOL), newest first, click to open their report — where the shill-timing
@@ -68,29 +68,24 @@ export function KolsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, priv?
   const open = (ref: string, kind?: ReportKind) => onOpenRecent ? onOpenRecent(ref, kind) : onAudit(ref);
 
   return (
-    <>
-      <ScoreTicker onOpen={open} label="Recent KOLs · click to open the report" filter={(e) => (e.flags ?? []).some((f) => f.toLowerCase() === "role:kol")} />
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="display-sm text-[24px] text-ink">KOLs</h1>
-      <p className="mt-1.5 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">
-        Promoters and callers graded on the only things that matter for a KOL: how the tokens they shilled actually
-        performed after the call, and whether their reach is real or bought. Audit a handle to build its call record.
-      </p>
+      <WorkspacePageHeader
+        eyebrow="Influence intelligence"
+        title="KOLs"
+        description={<>Investigate promoters and callers by what happened after their calls, whether their audience is authentic, and whether the public record supports their claimed influence.</>}
+        meta={<span className="chip tint-caution">{kols.length} investigated</span>}
+      />
 
-      <form
-        onSubmit={(e) => { e.preventDefault(); if (value.trim()) onAudit(value.trim(), priv); }}
-        className="panel mt-5 flex items-center gap-2 p-2.5 soft-shadow transition focus-within:border-line-2"
-      >
-        <span className="mono pl-2 text-[13.5px] text-ink-faint select-none">@</span>
-        <input
-          value={value}
-          onChange={(ev) => setValue(ev.target.value.replace(/^@/, ""))}
-          placeholder="grade a KOL by handle (e.g. CryptoGemsCom)"
-          className="mono min-w-0 flex-1 bg-transparent py-1.5 text-[13.5px] text-ink placeholder:text-ink-faint focus:outline-none"
-        />
-        <PrivateToggle on={priv} onToggle={setPriv} />
-        <button type="submit" className="btn-primary px-3.5 py-1.5 text-[13.5px] font-medium">Grade calls</button>
-      </form>
+      <DirectoryInvestigationForm
+        value={value}
+        onValueChange={setValue}
+        privateMode={priv}
+        onPrivateModeChange={setPriv}
+        label="Investigate a KOL"
+        placeholder="X handle, e.g. CryptoGemsCom"
+        actionLabel="Analyze influence"
+        onSubmit={() => onAudit(value.trim(), priv)}
+      />
 
       <div className="eyebrow mt-7 mb-2.5">
         {kols.length ? `${kols.length} KOL${kols.length === 1 ? "" : "s"} audited` : "No KOLs audited yet"}
@@ -106,6 +101,5 @@ export function KolsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, priv?
         </p>
       )}
     </div>
-    </>
   );
 }

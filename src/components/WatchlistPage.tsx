@@ -123,7 +123,8 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
   }, []);
 
   useEffect(() => {
-    // shared watchlist first (co-analyst watches merge in), then re-check
+    // Shared watchlist first (co-analyst watches merge in), then refresh each
+    // source according to its contract: live token data or stored person report.
     void hydrateSharedWatchlist().then(recheck);
   }, [recheck]);
 
@@ -153,12 +154,15 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <div className="flex items-end justify-between gap-3">
+      <div className="flex flex-col items-start gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="display-sm text-[24px] text-ink">Watchlist</h1>
-          <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">Saved audits, re-checked live. Drift since you last looked is flagged.</p>
+          <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
+            Saved investigations with an explicit baseline. Tokens refresh against current market data; people show
+            the latest stored report until a new investigation is run.
+          </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
+        <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:shrink-0 sm:justify-end">
           {sweep !== "idle" && sweep !== "running" && <span className="text-[11px] text-ink-faint">{sweep}</span>}
           <button
             onClick={onSweep}
@@ -168,7 +172,13 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
           >
             {sweep === "running" ? "sweeping…" : "Sweep now"}
           </button>
-          <button onClick={recheck} className="btn-chip">Re-check all</button>
+          <button
+            onClick={recheck}
+            title="Refresh live token data and reload the latest stored person reports"
+            className="btn-chip tint-signal"
+          >
+            Refresh status
+          </button>
         </div>
       </div>
 
@@ -205,25 +215,27 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
                       ? "ERR"
                       : currentLabel;
             const statusAria = r.loading
-              ? "Current assessment: checking."
+              ? `Current assessment: loading ${r.item.kind === "token" ? "live token data" : "the latest stored person report"}.`
               : r.caseStatus === "archived"
-                ? "Current assessment unavailable: case archived."
+                ? "Current assessment: unavailable because the case is archived."
                 : r.caseStatus === "missing"
-                  ? "Current assessment unavailable: no case."
+                  ? "Current assessment: unavailable because no case was found."
                   : r.caseStatus === "unavailable" || r.error
-                    ? "Current assessment unavailable: status error."
-                    : `Current assessment: ${currentPresentation.resultLabel}, ${currentPresentation.displayVerdict}. ${currentPresentation.readinessLabel}.`;
+                    ? "Current assessment: unavailable because status loading failed."
+                    : `Current assessment: ${r.item.kind === "token" ? "live token refresh" : "latest stored person report"}; ${currentPresentation.resultLabel}, ${currentPresentation.displayVerdict}. ${currentPresentation.readinessLabel}.`;
             const statusTitle = !r.loading && r.caseStatus === "open" && !r.error
               ? `${currentPresentation.coverageLabel}. ${currentPresentation.note}`
               : undefined;
             return (
-              <div key={r.item.id} className={`panel flex items-center gap-3 px-4 py-3 ${alert ? "border-avoid/60" : ""}`}>
+              <div key={r.item.id} className={`panel flex flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3 ${alert ? "border-avoid/60" : ""}`}>
                 <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[12.5px] text-signal">
                   {r.item.kind === "token" ? r.item.label.replace("$", "").slice(0, 3) : r.item.label.replace("@", "").slice(0, 1).toUpperCase()}
                 </span>
                 <button onClick={() => onAudit(r.item.id)} className="mono min-w-0 flex-1 truncate text-left text-[13.5px] text-ink hover:text-signal-dim">
                   {r.item.label}
-                  <span className="ml-2 text-[11px] text-ink-faint capitalize">{r.item.kind === "token" ? r.item.chain : "person"}</span>
+                  <span className="ml-2 text-[11px] text-ink-faint capitalize">
+                    {r.item.kind === "token" ? `${r.item.chain} · live refresh` : "person · stored snapshot"}
+                  </span>
                 </button>
 
                 {/* verdict, baseline -> current */}

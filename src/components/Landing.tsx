@@ -1,19 +1,45 @@
 import { useRef, useState } from "react";
+import {
+  ArrowRightIcon,
+  CheckCircleIcon,
+  ClockCounterClockwiseIcon,
+  CurrencyEthIcon,
+  DatabaseIcon,
+  FingerprintSimpleIcon,
+  MagnifyingGlassIcon,
+  QuestionIcon,
+  ShieldCheckIcon,
+} from "@phosphor-icons/react";
 import { HeroBackdrop } from "./ArgusMark";
-import { ScoreTicker } from "./ScoreTicker";
 import type { ReportKind } from "../lib/reports";
-import { recentScored } from "../lib/recentScored";
 import { PrivateToggle } from "./PrivateToggle";
 
-// The front door: the investigation question in the display voice, one
-// chat-style input, live samples. The old static announcement-bar copy lives
-// here now ("paste an X handle or a token contract") where it belongs.
-export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: string, priv?: boolean) => void | Promise<void>; onAbout: () => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
+const INVESTIGATION_OUTPUTS = [
+  { icon: CheckCircleIcon, label: "Verified facts", detail: "Claims tied directly to supporting sources." },
+  { icon: QuestionIcon, label: "Open questions", detail: "Unknowns ranked by their impact on the decision." },
+  { icon: DatabaseIcon, label: "Source quality", detail: "Coverage, provenance, and contradictions made visible." },
+  { icon: ClockCounterClockwiseIcon, label: "Decision freshness", detail: "A frozen case you can rescan and compare over time." },
+] as const;
+
+const INVESTIGATION_LENSES = [
+  { icon: FingerprintSimpleIcon, title: "Identity & authority", detail: "Who is involved, what they control, and what can actually be corroborated." },
+  { icon: CurrencyEthIcon, title: "Capital & contract risk", detail: "Wallet exposure, token powers, concentration, sanctions, and linked entities." },
+  { icon: ShieldCheckIcon, title: "Decision gaps", detail: "What keeps confidence below exceptional and what you should verify next." },
+] as const;
+
+const TOKEN_SAMPLES = [
+  { sym: "$PEPE", addr: "0x6982508145454ce325ddbe47a25d4ec3d2311933" },
+  { sym: "$SHIB", addr: "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce" },
+  { sym: "$UNI", addr: "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984" },
+] as const;
+
+// The front door is a decision-oriented investigation canvas. Previous cases
+// remain in the persistent rail instead of competing with the primary task.
+export function Landing({ onAudit, onAbout }: { onAudit: (handle: string, priv?: boolean) => void | Promise<void>; onAbout: () => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
   const [value, setValue] = useState("");
   const [priv, setPriv] = useState(false);
   const [launching, setLaunching] = useState(false);
   const launchingRef = useRef(false);
-  const hasScores = onOpenRecent && recentScored(1).length > 0;
 
   const launchFreshAudit = async (subject: string) => {
     if (!subject || launchingRef.current) return;
@@ -32,82 +58,132 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
   };
 
   return (
-    <div className="relative flex min-h-full flex-col">
-      <HeroBackdrop className="pointer-events-none absolute inset-x-0 bottom-0 z-0 h-[440px] w-full opacity-50" />
+    <div className="relative min-h-full overflow-hidden">
+      <HeroBackdrop className="pointer-events-none absolute inset-x-0 bottom-[-100px] z-0 h-[520px] w-full opacity-35" />
 
-      {onOpenRecent && <ScoreTicker onOpen={onOpenRecent} />}
+      <div className="relative z-10 mx-auto w-full max-w-5xl px-5 py-10 sm:px-7 lg:py-16">
+        <div className="grid items-start gap-8 lg:grid-cols-[minmax(0,1fr)_300px] lg:gap-10">
+          <section aria-labelledby="landing-title" className="rise-in">
+            <div className="eyebrow">Start a new investigation</div>
+            <h1 id="landing-title" className="display mt-3 max-w-3xl text-[44px] leading-[1.04] text-ink max-md:text-[32px]">
+              Know what you’re backing before capital moves.
+            </h1>
 
-      <div className={`relative z-10 mx-auto flex w-full max-w-2xl flex-1 flex-col items-center px-6 ${hasScores ? "pt-[7vh]" : "pt-[13vh]"}`}>
-        <div className="eyebrow rise-in">Forensic due-diligence</div>
-        <h1 className="display rise-in mt-3 text-center text-[44px] leading-[1.04] text-ink max-md:text-[32px]">
-          Who is actually behind the&nbsp;handle?
-        </h1>
+            <p className="mt-4 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
+              Enter an X handle, token contract, or project website. ARGUS resolves identity and control,
+              tests the on-chain story, and separates verified facts from the gaps you still need to close.
+            </p>
 
-        <p className="rise-in mt-4 max-w-lg text-center text-[13.5px] leading-relaxed text-ink-dim">
-          Paste an X handle, a token contract, or a project website. ARGUS audits the people on their
-          evidence and the tokens on-chain, then shows the assessment, supporting evidence, and unresolved gaps before capital is at risk.
-        </p>
-
-        {/* chat-style input */}
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            void launchFreshAudit(value.trim());
-          }}
-          aria-busy={launching}
-          className="mt-7 w-full rounded-xl border border-line bg-panel p-2.5 soft-shadow transition focus-within:border-signal/60"
-        >
-          <div className="flex items-center gap-2">
-            <span className="mono pl-2 text-[15px] text-ink-faint select-none">@</span>
-            <input
-              value={value}
-              onChange={(e) => setValue(e.target.value.replace(/^@/, ""))}
-              placeholder="@handle, a token contract, or a project site (e.g. neuro-mesh.io)"
-              className="mono min-w-0 flex-1 bg-transparent py-1.5 text-[13.5px] text-ink placeholder:text-ink-faint focus:outline-none"
-              autoFocus
-            />
-          </div>
-          <div className="mt-2 flex items-center gap-2 px-1">
-            <PrivateToggle on={priv} onToggle={setPriv} />
-            <button
-              type="submit"
-              disabled={launching}
-              aria-describedby="fresh-audit-note"
-              className="btn-primary ml-auto flex items-center gap-1.5 px-3.5 py-1.5 text-[13.5px] font-medium disabled:cursor-wait disabled:opacity-70"
+            {/* primary investigation input */}
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                void launchFreshAudit(value.trim());
+              }}
+              aria-busy={launching}
+              className="panel soft-shadow mt-8 w-full p-4 sm:p-5"
             >
-              {launching ? "Starting fresh audit…" : "Run audit"}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
-            </button>
-          </div>
-        </form>
-        <p id="fresh-audit-note" className="mt-2.5 text-center text-[11px] leading-relaxed text-ink-faint">
-          Starts a fresh provider run and may use paid API quota. Open previous snapshots from Recent audits.
-        </p>
+              <label htmlFor="investigation-subject" className="eyebrow">Subject</label>
+              <div className="relative mt-2.5">
+                <MagnifyingGlassIcon size={18} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-ink-faint" aria-hidden />
+                <input
+                  id="investigation-subject"
+                  value={value}
+                  onChange={(e) => setValue(e.target.value)}
+                  placeholder="@handle, 0x contract, or project.com"
+                  className="field mono min-h-12 w-full py-3 pl-10 pr-4 text-[13.5px]"
+                  aria-describedby="subject-help fresh-audit-note"
+                  autoComplete="off"
+                  autoCapitalize="none"
+                  enterKeyHint="go"
+                  spellCheck={false}
+                  required
+                  autoFocus
+                />
+              </div>
+              <p id="subject-help" className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+                ARGUS detects the subject type and builds the appropriate person, token, site, or combined project case.
+              </p>
 
-        {/* live token samples */}
-        <div className="mt-8 w-full">
-          <div className="eyebrow mb-2.5 text-center">Or audit a token, live on-chain</div>
-          <div className="flex flex-wrap justify-center gap-2">
-            {[
-              { sym: "$PEPE", addr: "0x6982508145454ce325ddbe47a25d4ec3d2311933" },
-              { sym: "$SHIB", addr: "0x95ad61b0a150d79219dcf64e1e6cc01f0b64c4ce" },
-              { sym: "$UNI", addr: "0x1f9840a85d5af5bf1d1762f925bdaddc4201f984" },
-            ].map((t) => (
-              <button
-                key={t.sym}
-                onClick={() => { void launchFreshAudit(t.addr); }}
-                disabled={launching}
-                className="mono rounded-full border border-line bg-panel px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-signal/50 hover:text-ink disabled:cursor-wait disabled:opacity-60"
-              >
-                {t.sym}
-              </button>
-            ))}
-          </div>
+              <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-line/70 pt-4">
+                <PrivateToggle on={priv} onToggle={setPriv} />
+                <button
+                  type="submit"
+                  disabled={launching || !value.trim()}
+                  aria-describedby="fresh-audit-note"
+                  className="btn-primary ml-auto flex min-h-10 items-center gap-2 px-4 py-2 text-[13.5px] font-medium disabled:cursor-wait disabled:opacity-70"
+                >
+                  {launching ? "Starting fresh audit…" : "Start investigation"}
+                  <ArrowRightIcon size={16} weight="bold" aria-hidden />
+                </button>
+              </div>
+            </form>
+            <p id="fresh-audit-note" className="mt-2.5 text-[11px] leading-relaxed text-ink-faint">
+              Starts a fresh provider run and may use paid API quota. Open previous snapshots from Recent cases.
+            </p>
+
+            {/* fast, live examples */}
+            <div className="mt-6 flex flex-wrap items-center gap-2.5">
+              <span className="eyebrow mr-1">Try a live token</span>
+              {TOKEN_SAMPLES.map((t) => (
+                <button
+                  type="button"
+                  key={t.sym}
+                  onClick={() => { void launchFreshAudit(t.addr); }}
+                  disabled={launching}
+                  className="btn-chip tint-signal min-h-8 px-3 disabled:cursor-wait disabled:opacity-60"
+                >
+                  {t.sym}
+                </button>
+              ))}
+            </div>
+          </section>
+
+          <aside aria-labelledby="investigation-output-title" className="panel rise-in overflow-hidden">
+            <div className="border-b border-line px-4 py-3.5">
+              <div id="investigation-output-title" className="eyebrow">Every investigation returns</div>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A decision canvas—not just a score.</p>
+            </div>
+            <div className="divide-y divide-line/70">
+              {INVESTIGATION_OUTPUTS.map(({ icon: Icon, label, detail }) => (
+                <div key={label} className="flex gap-3 px-4 py-3.5">
+                  <Icon size={18} className="mt-0.5 shrink-0 text-signal" aria-hidden />
+                  <div>
+                    <div className="text-[13.5px] font-medium text-ink">{label}</div>
+                    <div className="mt-1 text-[11px] leading-relaxed text-ink-faint">{detail}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="panel-inset mx-4 mb-4 px-3 py-2.5 text-[11px] leading-relaxed text-ink-dim">
+              Verified, inferred, and unresolved evidence stays visibly distinct.
+            </div>
+          </aside>
         </div>
 
-        <div className="py-10 text-center text-[11px] text-ink-faint">
+        <section aria-labelledby="investigation-lenses-title" className="mt-12 border-t border-line/70 pt-7">
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            <div>
+              <div className="eyebrow">Decision coverage</div>
+              <h2 id="investigation-lenses-title" className="display-sm mt-2 text-[18px] text-ink">One subject. Three diligence lenses.</h2>
+            </div>
+            <button type="button" onClick={onAbout} className="btn-ghost flex min-h-9 items-center gap-1.5 text-[12.5px] text-signal-dim">
+              See how ARGUS works <ArrowRightIcon size={14} aria-hidden />
+            </button>
+          </div>
+          <div className="mt-5 grid divide-y divide-line/70 sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+            {INVESTIGATION_LENSES.map(({ icon: Icon, title, detail }) => (
+              <div key={title} className="py-4 sm:px-5 sm:first:pl-0 sm:last:pr-0">
+                <Icon size={20} className="text-signal" aria-hidden />
+                <h3 className="mt-3 text-[15px] font-medium text-ink">{title}</h3>
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">{detail}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <div className="pt-10 text-[11px] text-ink-faint">
           Hard caps over scores · pseudonymity is neutral · evidence-disciplined
-          <button onClick={onAbout} className="ml-2 text-signal-dim underline-offset-2 hover:underline">How it works →</button>
         </div>
       </div>
     </div>

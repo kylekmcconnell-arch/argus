@@ -1,4 +1,29 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ComponentType, type CSSProperties } from "react";
+import {
+  BellIcon,
+  BuildingsIcon,
+  CaretDownIcon,
+  ChartLineUpIcon,
+  ClockCounterClockwiseIcon,
+  CodeIcon,
+  CrosshairIcon,
+  CubeIcon,
+  FilesIcon,
+  GitBranchIcon,
+  GlobeSimpleIcon,
+  InfoIcon,
+  KeyIcon,
+  MegaphoneIcon,
+  MoonIcon,
+  PlugsConnectedIcon,
+  SignOutIcon,
+  StarIcon,
+  SunIcon,
+  UserFocusIcon,
+  UsersThreeIcon,
+  WalletIcon,
+  XIcon,
+} from "@phosphor-icons/react";
 import { useArgusAuth } from "../auth-context";
 import { ArgusMark } from "./ArgusMark";
 import { verdictMeta } from "../lib/verdict";
@@ -53,50 +78,24 @@ function recentAudits(max: number): LogEntry[] {
 
 const KIND_LABEL: Record<LogEntry["kind"], string> = { person: "handle", token: "token", site: "site" };
 
-// Left rail: brand, grouped nav, a recent-audits live feed, account block.
+// Left rail: grouped investigation tools, compact case history, and account.
+type NavIcon = ComponentType<{ size?: number; weight?: "regular" | "bold" | "fill"; "aria-hidden"?: boolean }>;
 
-function Icon({ d }: { d: string }) {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d={d} />
-    </svg>
-  );
-}
-const ICONS = {
-  home: "M3 11.5 12 4l9 7.5M5 10v10h14V10",
-  radar: "M21 12a9 9 0 1 1-4.6-7.9M12 12l5.5-3.2",
-  gallery: "M4 5h16M4 12h16M4 19h16",
-  graph: "M5 19V5M5 19h14M9 16l3-5 3 3 4-7",
-  watch: "M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.8 6.8 19.1l1-5.8L3.5 9.2l5.9-.9z",
-  info: "M12 16v-5M12 8h.01M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z",
-  code: "M8 9l-4 3 4 3M16 9l4 3-4 3M14 6l-4 12",
-  track: "M3 3v18h18M7 15l3-4 3 3 5-7",
-  recon: "M12 3a9 9 0 1 0 9 9M21 3l-7 7M12 7a5 5 0 1 0 5 5",
-  admin: "M4 4h7v7H4zM13 4h7v4h-7zM13 11h7v9h-7zM4 14h7v6H4z",
-  wallet: "M3 7h15a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h12M16 13h.01",
-  key: "M15 7a4 4 0 1 1-4 4h-1l-2 2-2-2H3v-3l6-6a4 4 0 0 1 6 0M15.5 7.5h.01",
-  changelog: "M8 6h11M8 12h11M8 18h11M3.5 6h.01M3.5 12h.01M3.5 18h.01",
-  kol: "M3 11v2a1 1 0 0 0 1 1h2l4 4V6L6 10H4a1 1 0 0 0-1 1M14 8a4 4 0 0 1 0 8M17 5a8 8 0 0 1 0 14",
-  founder: "M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8M17 4l2 2 3.5-3.5M17 11h4",
-  vc: "M3 3v18h18M7 14l3-3 3 2 5-6M18 7h3v3",
-  project: "M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3M4 7.5l8 4.5 8-4.5M12 12v9",
-  bell: "M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9M13.7 21a2 2 0 0 1-3.4 0",
-  trending: "M3 17l6-6 4 4 8-8M21 7v6h-6",
-};
-
-function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof ICONS; label: string; active?: boolean; onClick?: () => void; badge?: number }) {
+function NavItem({ icon: Icon, label, active, onClick, badge, nested = false }: { icon: NavIcon; label: string; active?: boolean; onClick?: () => void; badge?: number; nested?: boolean }) {
   return (
     <button
+      type="button"
       onClick={onClick}
-      className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-[5.5px] text-[13.5px] transition ${
+      aria-current={active ? "page" : undefined}
+      className={`relative flex min-h-9 w-full items-center gap-2.5 rounded-md py-2 pr-2.5 text-[13.5px] transition ${nested ? "pl-7" : "pl-2.5"} ${
         active ? "bg-signal/[0.09] text-ink" : "text-ink-dim hover:bg-panel/70 hover:text-ink"
       }`}
     >
-      {active && <span className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-signal" aria-hidden />}
+      {active && <span className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-full bg-signal" aria-hidden />}
       <span className={active ? "text-signal" : "text-ink-faint"}>
-        <Icon d={ICONS[icon]} />
+        <Icon size={17} weight={active ? "bold" : "regular"} aria-hidden />
       </span>
-      {label}
+      <span className="truncate">{label}</span>
       {badge ? <span className="mono ml-auto rounded-full bg-signal/15 px-1.5 text-[10px] text-signal-dim">{badge}</span> : null}
     </button>
   );
@@ -120,13 +119,9 @@ function ThemeToggle() {
     setTheme(next);
   };
   return (
-    <button onClick={toggle} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[5.5px] text-[13.5px] text-ink-dim transition hover:bg-panel/70 hover:text-ink">
+    <button type="button" onClick={toggle} className="flex min-h-9 w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] text-ink-dim transition hover:bg-panel/70 hover:text-ink">
       <span className="text-ink-faint">
-        {theme === "dark" ? (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg>
-        ) : (
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden><circle cx="12" cy="12" r="4.2" /><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8" /></svg>
-        )}
+        {theme === "dark" ? <MoonIcon size={17} aria-hidden /> : <SunIcon size={17} aria-hidden />}
       </span>
       {theme === "dark" ? "Light mode" : "Dark mode"}
     </button>
@@ -153,9 +148,7 @@ function AnalystBadge() {
         aria-label="Sign out"
         className="rounded p-1 text-ink-faint transition hover:bg-panel hover:text-ink"
       >
-        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="M10 17l5-5-5-5M15 12H3M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-        </svg>
+        <SignOutIcon size={16} aria-hidden />
       </button>
     </div>
   );
@@ -170,6 +163,7 @@ export function Sidebar({
   activeHandle,
   view,
   open,
+  mobile = false,
   onClose,
 }: {
   onNav: (t: NavTarget) => void;
@@ -178,9 +172,14 @@ export function Sidebar({
   activeHandle?: string | null;
   view: NavTarget | "audit";
   open?: boolean;
+  mobile?: boolean;
   onClose?: () => void;
 }) {
   const auth = useArgusAuth();
+  const drawerRef = useRef<HTMLElement>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const directoryActive = view === "founders" || view === "projects" || view === "kols" || view === "vcs";
+  const [directoriesOpen, setDirectoriesOpen] = useState(false);
   const nav = (t: NavTarget) => { onNav(t); onClose?.(); };
   // Recent-audit clicks SHOW the cached result (with Rescan) rather than re-run.
   const openRecent = (ref: string, kind?: ReportKind) => {
@@ -198,6 +197,37 @@ export function Sidebar({
     const d = subscribeScanRuns(() => setTick((t) => t + 1));
     return () => { a(); b(); c(); d(); };
   }, []);
+  useEffect(() => {
+    if (!open || !mobile) return;
+    const drawer = drawerRef.current;
+    if (!drawer) return;
+    closeButtonRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose?.();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = [...drawer.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), summary, input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      )].filter((element) => !element.hasAttribute("inert"));
+      const first = focusable[0];
+      const last = focusable.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+
+    drawer.addEventListener("keydown", onKeyDown);
+    return () => drawer.removeEventListener("keydown", onKeyDown);
+  }, [mobile, onClose, open]);
   const running = activeRuns();
   const runningKeys = new Set(running.map((r) => r.key));
   // Everything in flight beyond person audits: backgrounded token/investigation
@@ -208,49 +238,86 @@ export function Sidebar({
   ];
   // A subject being scanned right now shows only its live chip, not its old row.
   const scanRefs = new Set(scans.map((s) => normalizeSubjectRef(s.ref)));
-  const recent = recentAudits(14).filter((e) => {
+  const recent = recentAudits(5).filter((e) => {
     const ref = normalizeSubjectRef(e.ref ?? e.query);
     return !runningKeys.has(ref) && !scanRefs.has(ref);
   });
   const me = getAnalyst();
   return (
     <aside
-      className={`fixed inset-y-0 left-0 z-40 flex h-full w-[232px] shrink-0 flex-col border-r border-line bg-sidebar transition-transform md:static md:translate-x-0 ${
+      ref={drawerRef}
+      id="argus-navigation-drawer"
+      role={open && mobile ? "dialog" : undefined}
+      aria-modal={open && mobile ? true : undefined}
+      aria-label={open && mobile ? "ARGUS navigation" : undefined}
+      aria-hidden={mobile && !open ? true : undefined}
+      inert={mobile && !open ? true : undefined}
+      className={`fixed inset-y-0 left-0 z-40 flex h-full w-[248px] shrink-0 flex-col border-r border-line bg-sidebar transition-transform lg:static lg:translate-x-0 ${
         open ? "translate-x-0" : "-translate-x-full"
       }`}
     >
       {/* brand */}
-      <button onClick={() => nav("idle")} className="flex items-center gap-2.5 px-4 pb-3 pt-4">
-        <ArgusMark size={26} />
-        <span className="display text-[15px] tracking-[0.02em] text-ink">ARGUS</span>
-        <span className="chip ml-auto">v2.2</span>
-      </button>
-
-      {/* nav */}
-      <nav className="space-y-px px-2.5">
-        <NavItem icon="home" label="Home" active={view === "idle"} onClick={() => nav("idle")} />
-        <NavItem icon="radar" label="Radar" active={view === "radar"} onClick={() => nav("radar")} />
-        <NavItem icon="trending" label="Trending" active={view === "trending"} onClick={() => nav("trending")} />
-        <NavItem icon="recon" label="Site recon" active={view === "recon"} onClick={() => nav("recon")} />
-        <NavItem icon="wallet" label="Find wallet" active={view === "find"} onClick={() => nav("find")} />
-        <NavGroup label="Directories" />
-        <NavItem icon="gallery" label="Dossiers" active={view === "dossiers"} onClick={() => nav("dossiers")} />
-        <NavItem icon="founder" label="Founders" active={view === "founders"} onClick={() => nav("founders")} />
-        <NavItem icon="project" label="Projects" active={view === "projects"} onClick={() => nav("projects")} />
-        <NavItem icon="kol" label="KOLs" active={view === "kols"} onClick={() => nav("kols")} />
-        <NavItem icon="vc" label="VCs" active={view === "vcs"} onClick={() => nav("vcs")} />
-        <NavGroup label="Signals" />
-        <NavItem icon="graph" label="Trust graph" active={view === "graph"} onClick={() => nav("graph")} />
-        <NavItem icon="watch" label="Watchlist" active={view === "watchlist"} onClick={() => nav("watchlist")} badge={getWatchlist().length || undefined} />
-        <NavItem icon="bell" label="Alerts" active={view === "alerts"} onClick={() => nav("alerts")} />
-        <NavItem icon="admin" label={auth.role === "owner" ? "Audit & access" : "Audit log"} active={view === "admin"} onClick={() => nav("admin")} />
-      </nav>
-
-      {/* recent audits */}
-      <div className="eyebrow mt-4 px-4">
-        Recent audits
+      <div className="flex min-h-16 items-center gap-2 px-4">
+        <button type="button" onClick={() => nav("idle")} className="flex min-w-0 flex-1 items-center gap-2.5 rounded-md text-left">
+          <ArgusMark size={26} />
+          <span className="display text-[15px] tracking-[0.02em] text-ink">ARGUS</span>
+          <span className="chip ml-auto">v2.2</span>
+        </button>
+        <button
+          ref={closeButtonRef}
+          type="button"
+          onClick={onClose}
+          aria-label="Close navigation"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-ink-dim transition hover:bg-panel hover:text-ink lg:hidden"
+        >
+          <XIcon size={19} aria-hidden />
+        </button>
       </div>
-      <div className="mt-1.5 space-y-0.5 overflow-y-auto px-2.5 thin-scroll">
+
+      <div className="thin-scroll flex-1 overflow-y-auto pb-3">
+        {/* primary navigation */}
+        <nav aria-label="Primary" className="space-y-px px-2.5">
+          <NavGroup label="Investigate" />
+          <NavItem icon={FilesIcon} label="Investigation canvas" active={view === "idle"} onClick={() => nav("idle")} />
+          <NavItem icon={CrosshairIcon} label="Radar" active={view === "radar"} onClick={() => nav("radar")} />
+          <NavItem icon={GlobeSimpleIcon} label="Site recon" active={view === "recon"} onClick={() => nav("recon")} />
+          <NavItem icon={WalletIcon} label="Find wallet" active={view === "find"} onClick={() => nav("find")} />
+
+          <NavGroup label="Intelligence" />
+          <NavItem icon={GitBranchIcon} label="Trust graph" active={view === "graph"} onClick={() => nav("graph")} />
+          <NavItem icon={ChartLineUpIcon} label="Market signals" active={view === "trending"} onClick={() => nav("trending")} />
+          <details
+            open={directoryActive || directoriesOpen}
+            onToggle={(event) => setDirectoriesOpen(event.currentTarget.open)}
+            className="group"
+          >
+            <summary className={`flex min-h-9 cursor-pointer list-none items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] transition hover:bg-panel/70 hover:text-ink [&::-webkit-details-marker]:hidden ${directoryActive ? "text-ink" : "text-ink-dim"}`}>
+              <UsersThreeIcon size={17} weight={directoryActive ? "bold" : "regular"} className={directoryActive ? "text-signal" : "text-ink-faint"} aria-hidden />
+              <span>Entity library</span>
+              <CaretDownIcon size={14} className="ml-auto text-ink-faint transition-transform group-open:rotate-180" aria-hidden />
+            </summary>
+            <div className="space-y-px">
+              <NavItem nested icon={UserFocusIcon} label="Founders" active={view === "founders"} onClick={() => nav("founders")} />
+              <NavItem nested icon={CubeIcon} label="Projects" active={view === "projects"} onClick={() => nav("projects")} />
+              <NavItem nested icon={MegaphoneIcon} label="KOLs" active={view === "kols"} onClick={() => nav("kols")} />
+              <NavItem nested icon={BuildingsIcon} label="VCs" active={view === "vcs"} onClick={() => nav("vcs")} />
+            </div>
+          </details>
+
+          <NavGroup label="Cases" />
+          <NavItem icon={FilesIcon} label="All cases" active={view === "dossiers"} onClick={() => nav("dossiers")} />
+          <NavItem icon={StarIcon} label="Watchlist" active={view === "watchlist"} onClick={() => nav("watchlist")} badge={getWatchlist().length || undefined} />
+
+          <NavGroup label="Workspace" />
+          <NavItem icon={BellIcon} label="Alerts" active={view === "alerts"} onClick={() => nav("alerts")} />
+          <NavItem icon={PlugsConnectedIcon} label="Data sources" active={view === "providers"} onClick={() => nav("providers")} />
+          <NavItem icon={KeyIcon} label={auth.role === "owner" ? "Audit & access" : "Audit log"} active={view === "admin"} onClick={() => nav("admin")} />
+        </nav>
+
+        {/* recent cases */}
+        <section aria-labelledby="recent-cases-label" className="mt-4 border-t border-line/70 pt-3">
+          <div id="recent-cases-label" className="eyebrow px-4">Recent cases</div>
+          <div className="mt-1.5 space-y-0.5 px-2.5">
         {/* In-progress background runs: keep streaming across navigation and flip
             into the finished audit below the moment they complete. Click to jump
             back into the live console. */}
@@ -259,6 +326,7 @@ export function Sidebar({
           const avatar = (r.handle.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
           return (
             <button
+              type="button"
               key={`run:${r.key}`}
               onClick={() => openRecent(r.handle, "person")}
               title="Generating — click to watch. Keeps running if you navigate away."
@@ -284,6 +352,7 @@ export function Sidebar({
           const avatar = (s.label.replace(/^[@$]/, "").replace(/^https?:\/\//, "")[0] ?? "?").toUpperCase();
           return (
             <button
+              type="button"
               key={`scan:${s.id}`}
               onClick={() => openRecent(s.ref, s.kind)}
               title={`Scanning ${s.label} (${s.kind})…`}
@@ -340,19 +409,29 @@ export function Sidebar({
                     )}
                   </span>
                 </span>
-                {vm && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: vm.color }} />}
+                {vm && <span className="tint-var h-1.5 w-1.5 shrink-0 rounded-full" style={{ "--tint": vm.color } as CSSProperties} />}
               </a>
             );
           })
         )}
+          </div>
+          {(recent.length > 0 || running.length > 0 || scans.length > 0) && (
+            <button
+              type="button"
+              onClick={() => nav("dossiers")}
+              className="btn-ghost mono ml-4 mt-2 text-[11px] text-signal-dim"
+            >
+              View all cases →
+            </button>
+          )}
+        </section>
       </div>
 
       {/* account */}
       <div className="mt-auto border-t border-line px-2.5 py-2.5">
-        <NavItem icon="key" label="Providers" active={view === "providers"} onClick={() => nav("providers")} />
-        <NavItem icon="changelog" label="Changelog" active={view === "changelog"} onClick={() => nav("changelog")} />
-        <NavItem icon="code" label="API" active={view === "api"} onClick={() => nav("api")} />
-        <NavItem icon="info" label="How it works" active={view === "about"} onClick={() => nav("about")} />
+        <NavItem icon={InfoIcon} label="How it works" active={view === "about"} onClick={() => nav("about")} />
+        <NavItem icon={CodeIcon} label="API" active={view === "api"} onClick={() => nav("api")} />
+        <NavItem icon={ClockCounterClockwiseIcon} label="Changelog" active={view === "changelog"} onClick={() => nav("changelog")} />
         <ThemeToggle />
         <AnalystBadge />
       </div>

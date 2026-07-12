@@ -1,12 +1,12 @@
 import { useEffect, useState } from "react";
-import { ScoreTicker } from "./ScoreTicker";
 import type { ReportKind } from "../lib/reports";
-import { PrivateToggle } from "./PrivateToggle";
 import { ScanChip } from "./ScanChip";
 import { auditReadinessLabel, mergedLog, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
+import { WorkspacePageHeader } from "./WorkspacePageHeader";
+import { DirectoryInvestigationForm } from "./DirectoryInvestigationForm";
 
 // The VC / investor directory: every fund or angel audited (governing role
 // INVESTOR), newest first, click to open the portfolio + on-chain track record.
@@ -67,29 +67,24 @@ export function VcsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, priv?:
   const open = (ref: string, kind?: ReportKind) => onOpenRecent ? onOpenRecent(ref, kind) : onAudit(ref);
 
   return (
-    <>
-      <ScoreTicker onOpen={open} label="Recent VCs · click to open the report" filter={(e) => (e.flags ?? []).some((f) => f.toLowerCase() === "role:investor")} />
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="display-sm text-[24px] text-ink">VCs &amp; investors</h1>
-      <p className="mt-1.5 max-w-xl text-[13.5px] leading-relaxed text-ink-dim">
-        Funds and angels graded on their scoreboard: the portfolio they actually backed, and how each bet ended.
-        Every token investment is priced on-chain, so a prolific fund with a graveyard of dead bets has nowhere to hide.
-      </p>
+      <WorkspacePageHeader
+        eyebrow="Capital intelligence"
+        title="VCs &amp; investors"
+        description={<>Investigate funds and angels by the portfolio they actually backed, how those bets ended, and whether claimed scale and attribution survive evidence review.</>}
+        meta={<span className="chip tint-neutral">{vcs.length} investigated</span>}
+      />
 
-      <form
-        onSubmit={(e) => { e.preventDefault(); if (value.trim()) onAudit(value.trim(), priv); }}
-        className="panel mt-5 flex items-center gap-2 p-2.5 soft-shadow transition focus-within:border-line-2"
-      >
-        <span className="mono pl-2 text-[13.5px] text-ink-faint select-none">@</span>
-        <input
-          value={value}
-          onChange={(ev) => setValue(ev.target.value.replace(/^@/, ""))}
-          placeholder="audit a VC or fund by handle (e.g. paradigm)"
-          className="mono min-w-0 flex-1 bg-transparent py-1.5 text-[13.5px] text-ink placeholder:text-ink-faint focus:outline-none"
-        />
-        <PrivateToggle on={priv} onToggle={setPriv} />
-        <button type="submit" className="btn-primary px-3.5 py-1.5 text-[13.5px] font-medium">Grade the fund</button>
-      </form>
+      <DirectoryInvestigationForm
+        value={value}
+        onValueChange={setValue}
+        privateMode={priv}
+        onPrivateModeChange={setPriv}
+        label="Investigate a fund or investor"
+        placeholder="X handle, e.g. paradigm"
+        actionLabel="Analyze track record"
+        onSubmit={() => onAudit(value.trim(), priv)}
+      />
 
       <div className="eyebrow mt-7 mb-2.5">
         {vcs.length ? `${vcs.length} investor${vcs.length === 1 ? "" : "s"} audited` : "No investors audited yet"}
@@ -105,6 +100,5 @@ export function VcsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, priv?:
         </p>
       )}
     </div>
-    </>
   );
 }

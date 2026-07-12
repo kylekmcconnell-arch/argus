@@ -8,21 +8,34 @@ import type { TokenDossier } from "../token/audit";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
-const harness = vi.hoisted(() => ({ clipboard: vi.fn(), livePanel: vi.fn(), arkham: vi.fn(() => ({})) }));
+const harness = vi.hoisted(() => ({
+  clipboard: vi.fn(),
+  livePanel: vi.fn(),
+  askReport: vi.fn(),
+  arkham: vi.fn(() => ({})),
+  graph: null as null | { nodes: Array<Record<string, unknown>>; edges: Array<Record<string, unknown>> },
+}));
 
 vi.mock("../lib/useArkhamLabels", () => ({ useArkhamLabels: harness.arkham }));
-vi.mock("../graph/store", () => ({ getContributions: () => [], investigationContribution: () => null }));
+vi.mock("../graph/store", () => ({ getContributions: () => [], investigationContribution: () => harness.graph }));
 vi.mock("../graph/network", () => ({ subjectConnections: () => [] }));
 
 vi.mock("./Avatar", () => ({ Avatar: () => null }));
 vi.mock("./OnChainForensics", () => ({ OnChainForensics: (props: Record<string, unknown>) => { harness.livePanel("on-chain", props); return null; } }));
 vi.mock("./ProjectResearch", () => ({ ProjectResearch: () => { harness.livePanel("project-research"); return null; } }));
 vi.mock("./ProjectLinks", () => ({ ProjectLinks: () => null }));
-vi.mock("./MethodologyChecklist", () => ({ MethodologyChecklist: () => null }));
+vi.mock("./MethodologyChecklist", () => ({
+  MethodologyChecklist: ({ id }: { id?: string }) => <div id={id} data-panel="methodology" />,
+}));
 vi.mock("./ArkhamName", () => ({ ArkhamName: () => null }));
 vi.mock("./AddInfo", () => ({ AddInfo: () => { harness.livePanel("add-info"); return null; } }));
 vi.mock("./LinkEntity", () => ({ LinkEntity: () => { harness.livePanel("link-entity"); return null; } }));
-vi.mock("./AskReport", () => ({ AskReport: () => null }));
+vi.mock("./AskReport", () => ({
+  AskReport: (props: Record<string, unknown>) => {
+    harness.askReport(props);
+    return <div data-panel="ask-report" />;
+  },
+}));
 vi.mock("./ArkhamGraphBridge", () => ({ ArkhamGraphBridge: () => null }));
 vi.mock("./Counterparties", () => ({ Counterparties: (props: Record<string, unknown>) => { harness.livePanel("counterparties", props); return null; } }));
 vi.mock("./RiskPaths", () => ({ RiskPaths: (props: Record<string, unknown>) => { harness.livePanel("risk-paths", props); return null; } }));
@@ -110,7 +123,9 @@ beforeEach(() => {
   root = createRoot(container);
   harness.clipboard.mockReset().mockResolvedValue(undefined);
   harness.livePanel.mockReset();
+  harness.askReport.mockReset();
   harness.arkham.mockClear();
+  harness.graph = null;
   Object.defineProperty(navigator, "clipboard", {
     configurable: true,
     value: { writeText: harness.clipboard },
@@ -124,6 +139,55 @@ afterEach(async () => {
 });
 
 describe("investigation exact sharing", () => {
+  it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
+    harness.graph = {
+      nodes: [
+        { type: "Token", key: "$ARG", subject: true },
+        { type: "Person", key: "@ada" },
+      ],
+      edges: [{ src: "$ARG", dst: "@ada", type: "BUILT_BY" }],
+    };
+    render(investigation({
+      founders: [{ name: "Ada Founder", handle: "@ada", source: "site" }],
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000144",
+        reportVersionId,
+        version: 3,
+        completenessState: "complete",
+        attestationState: "server_collected",
+        methodologyVersion: "test-v1",
+        createdAt: "2026-07-10T12:00:00.000Z",
+        checks: [{ label: "Contract safety", status: "confirmed" }],
+      },
+    }));
+
+    expect(harness.askReport).toHaveBeenLastCalledWith(expect.objectContaining({
+      subject: "$ARG",
+      reportVersionId,
+    }));
+
+    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report sections"]');
+    expect(nav).not.toBeNull();
+    const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
+      .map((link) => link.getAttribute("href"));
+    expect(hrefs).toEqual([
+      "#report-summary",
+      "#report-risks",
+      "#investigation-evidence",
+      "#investigation-team",
+      "#investigation-relationships",
+      "#investigation-methodology",
+    ]);
+    for (const href of hrefs) {
+      expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();
+    }
+
+    expect(container.textContent).toContain("Why ARGUS reaches PASS");
+    expect(container.textContent).toContain("Recorded outcomes");
+    expect(container.textContent).toContain("Open questions");
+    expect(container.querySelector('[role="progressbar"][aria-label="Evidence coverage"]')).not.toBeNull();
+  });
+
   it("shares the exact immutable investigation version being reviewed", async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,

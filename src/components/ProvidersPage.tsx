@@ -24,36 +24,107 @@ type UsageFeed = {
   totals: { eventCount: number; calls: number; usd: number };
 };
 
-const TIER_LABEL: Record<string, string> = { paid: "key", optional: "optional", infra: "infra", keyless: "keyless" };
+const TIER_LABEL: Record<string, string> = {
+  paid: "credential",
+  optional: "optional",
+  infra: "infrastructure",
+  keyless: "no key",
+};
 
-function dotColor(p: Provider): string {
-  if (p.tier === "keyless") return "var(--color-pass)";
-  if (p.configured) return "var(--color-pass)";
-  return p.tier === "optional" ? "var(--color-ink-faint)" : "var(--color-avoid)";
-}
-function statusFor(p: Provider): { text: string; color: string } {
-  if (p.tier === "keyless") return { text: "always on", color: "var(--color-pass)" };
-  if (p.configured) return { text: "configured", color: "var(--color-pass)" };
-  return p.tier === "optional"
-    ? { text: "unset", color: "var(--color-ink-faint)" }
-    : { text: "MISSING", color: "var(--color-avoid)" };
+const PROVIDER_ALIASES: Record<string, string[]> = {
+  "Claude (Anthropic)": ["claude", "anthropic", "claudevision"],
+  "Grok (xAI)": ["grok", "xai"],
+  "twitterapi.io": ["twitterapi", "twitterapiio"],
+  "Helius (Solana)": ["helius"],
+  GitHub: ["github"],
+  "People Data Labs": ["peopledatalabs", "pdl"],
+  "Reddit OAuth": ["reddit"],
+  Supabase: ["supabase"],
+  "CoinGecko Pro": ["coingecko"],
+  CryptoRank: ["cryptorank"],
+  Crunchbase: ["crunchbase"],
+  "Etherscan (multichain)": ["etherscan"],
+  Arkham: ["arkham"],
+  Bitquery: ["bitquery"],
+  DexScreener: ["dexscreener"],
+  "GoPlus + honeypot.is": ["goplus", "honeypotis"],
+  GeckoTerminal: ["geckoterminal"],
+  "Wayback Machine": ["wayback", "archiveorg"],
+  "Farcaster / Warpcast": ["farcaster", "warpcast"],
+  "memory.lol": ["memorylol"],
+  Telegram: ["telegram"],
+  "web3.bio / ENS / Bonfida": ["web3bio", "ens", "bonfida"],
+  RDAP: ["rdap"],
+  "SEC EDGAR": ["secedgar", "sec"],
+};
+
+type ProviderHealth = {
+  label: "Healthy" | "Degraded" | "Unavailable" | "Configured" | "No key required" | "Not configured";
+  tone: string;
+  context: string;
+};
+
+function normalizedProvider(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/g, "");
 }
 
-function ProviderRow({ p }: { p: Provider }) {
-  const status = statusFor(p);
+function latestProviderEvent(provider: Provider, events: UsageEvent[]): UsageEvent | undefined {
+  const aliases = PROVIDER_ALIASES[provider.label] ?? [normalizedProvider(provider.label)];
+  return events
+    .filter((event) => aliases.some((alias) => normalizedProvider(event.provider).includes(alias)))
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+}
+
+function providerHealth(provider: Provider, latest?: UsageEvent): ProviderHealth {
+  if (provider.tier !== "keyless" && !provider.configured) {
+    return {
+      label: "Not configured",
+      tone: provider.tier === "optional" ? "tint-neutral" : "tint-avoid",
+      context: provider.tier === "optional" ? "Optional enrichment is not active." : "Required coverage is unavailable until this is configured.",
+    };
+  }
+  if (latest?.status === "succeeded") {
+    return { label: "Healthy", tone: "tint-pass", context: `Latest visible request succeeded ${eventTime(latest.createdAt)}.` };
+  }
+  if (latest?.status === "cached") {
+    return {
+      label: provider.tier === "keyless" ? "No key required" : "Configured",
+      tone: provider.tier === "keyless" ? "tint-neutral" : "tint-signal",
+      context: `Latest visible result was served from cache ${eventTime(latest.createdAt)}; no provider request occurred.`,
+    };
+  }
+  if (latest?.status === "partial") {
+    return { label: "Degraded", tone: "tint-caution", context: `Latest visible request was partial ${eventTime(latest.createdAt)}.` };
+  }
+  if (latest?.status === "failed") {
+    return { label: "Unavailable", tone: "tint-avoid", context: `Latest visible request failed ${eventTime(latest.createdAt)}.` };
+  }
+  if (provider.tier === "keyless") {
+    return { label: "No key required", tone: "tint-neutral", context: "Availability is checked when an investigation runs." };
+  }
+  if (provider.configured) {
+    return { label: "Configured", tone: "tint-signal", context: "Credential present; no request appears in the latest activity window." };
+  }
+  return { label: "Not configured", tone: "tint-avoid", context: "Required coverage is unavailable until this is configured." };
+}
+
+function ProviderRow({ provider, latest }: { provider: Provider; latest?: UsageEvent }) {
+  const health = providerHealth(provider, latest);
   return (
-    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-3">
-      <span className="flex items-center gap-2">
-        <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: dotColor(p) }} />
-        <span className="text-[13.5px] font-medium text-ink">{p.label}</span>
-        <span className="chip chip-sm">{TIER_LABEL[p.tier] ?? p.tier}</span>
-      </span>
-      <span className="min-w-0 flex-1 text-[12.5px] text-ink-dim">{p.powers}</span>
-      <span className="flex items-center gap-2">
-        {p.usage && <span className="mono text-[11px] text-signal-dim">{p.usage}</span>}
-        <span className="mono text-[11px]" style={{ color: status.color }}>{status.text}</span>
-        <a href={`https://${p.source.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">{p.source}</a>
-      </span>
+    <div className="grid gap-2 px-4 py-3 md:grid-cols-[minmax(150px,0.8fr)_minmax(220px,1.3fr)_minmax(200px,0.9fr)] md:gap-4">
+      <div className="min-w-0">
+        <span className="text-[13.5px] font-medium text-ink">{provider.label}</span>
+        <span className="chip chip-sm ml-2">{TIER_LABEL[provider.tier] ?? provider.tier}</span>
+      </div>
+      <p className="text-[12.5px] leading-relaxed text-ink-dim">{provider.powers}</p>
+      <div className="min-w-0 md:text-right">
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+          <span className={`chip ${health.tone}`}>{health.label}</span>
+          <a href={`https://${provider.source.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">{provider.source}</a>
+        </div>
+        <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">{health.context}</p>
+        {provider.usage && <p className="mono mt-1 text-[11px] text-signal-dim">{provider.usage}</p>}
+      </div>
     </div>
   );
 }
@@ -92,10 +163,28 @@ function eventCost(event: UsageEvent): string {
 
 export function ProvidersPage() {
   const [data, setData] = useState<{ providers: Provider[]; keyless: Provider[]; note?: string } | null>(null);
+  const [dataError, setDataError] = useState("");
   const [usage, setUsage] = useState<UsageFeed | null>(null);
   const [usageError, setUsageError] = useState("");
   useEffect(() => {
-    fetch("/api/keys-status").then((r) => r.json()).then(setData).catch(() => setData({ providers: [], keyless: [] }));
+    const controller = new AbortController();
+    fetch("/api/keys-status", { signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({})) as { providers?: Provider[]; keyless?: Provider[]; note?: string; message?: string };
+        if (!response.ok || !Array.isArray(body.providers) || !Array.isArray(body.keyless)) {
+          throw new Error(body.message || "Provider configuration is unavailable.");
+        }
+        return { providers: body.providers, keyless: body.keyless, note: body.note };
+      })
+      .then((next) => {
+        setData(next);
+        setDataError("");
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setDataError(error instanceof Error ? error.message : "Provider configuration is unavailable.");
+      });
+    return () => controller.abort();
   }, []);
   useEffect(() => {
     const controller = new AbortController();
@@ -121,14 +210,52 @@ export function ProvidersPage() {
   const providers = data?.providers ?? [];
   const keyless = data?.keyless ?? [];
   const missing = providers.filter((p) => !p.configured && p.tier !== "optional");
+  const allProviders = [...providers, ...keyless];
+  const health = allProviders.map((provider) => providerHealth(provider, usage ? latestProviderEvent(provider, usage.events) : undefined));
+  const healthy = health.filter((status) => status.label === "Healthy").length;
+  const configured = providers.filter((provider) => provider.configured).length;
+  const attention = allProviders.filter((provider, index) => {
+    const status = health[index];
+    return status?.label === "Degraded"
+      || status?.label === "Unavailable"
+      || (provider.tier !== "optional" && provider.tier !== "keyless" && !provider.configured);
+  }).length;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
-      <h1 className="display-sm text-[24px] text-ink">Providers &amp; keys</h1>
+    <div className="mx-auto max-w-5xl px-6 py-10">
+      <h1 className="display-sm text-[24px] text-ink">Providers &amp; coverage</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-        What ARGUS is plugged into. Shows configured or not (never a secret), what each key powers, where to top up,
-        and live usage where the provider exposes it.
+        Credential readiness and observed request health across ARGUS. Configured means access is present; Healthy
+        means a recorded request succeeded. Secret values are never shown.
       </p>
+      {data && (
+        <div className="panel mt-5 grid grid-cols-2 gap-px overflow-hidden bg-line/60 sm:grid-cols-4" aria-label="Provider status summary">
+          <div className="stat-tile rounded-none">
+            <span className="stat-label">sources</span>
+            <span className="stat-value">{allProviders.length}</span>
+          </div>
+          <div className="stat-tile rounded-none">
+            <span className="stat-label">credentials present</span>
+            <span className="stat-value">{configured}/{providers.length}</span>
+          </div>
+          <div className="stat-tile rounded-none">
+            <span className="stat-label">recently healthy</span>
+            <span className="stat-value text-pass">{usage ? healthy : "…"}</span>
+          </div>
+          <div className="stat-tile rounded-none">
+            <span className="stat-label">needs attention</span>
+            <span className={`stat-value ${attention > 0 ? "text-caution" : "text-ink"}`}>
+              {usage ? attention : missing.length > 0 ? `${missing.length}+` : "…"}
+            </span>
+          </div>
+        </div>
+      )}
+      {dataError && (
+        <div className="panel mt-5 px-4 py-3" role="alert">
+          <p className="text-[13.5px] font-medium text-ink">Provider configuration could not be loaded</p>
+          <p className="mt-1 text-[12.5px] text-ink-dim">{dataError} This is a status failure, not confirmation that sources are unconfigured.</p>
+        </div>
+      )}
       {missing.length > 0 && (
         <div className="tint-caution mt-4 rounded-lg border px-3 py-2 text-[12.5px]">
           {missing.length} required provider{missing.length === 1 ? "" : "s"} not configured: {missing.map((m) => m.label).join(", ")}.
@@ -137,19 +264,37 @@ export function ProvidersPage() {
 
       <div className="panel mt-5 divide-y divide-line/60 overflow-hidden">
         {/* keyed / optional / infra — the ones with a key to manage */}
-        {providers.map((p) => <ProviderRow key={p.label} p={p} />)}
+        {providers.map((provider) => (
+          <ProviderRow
+            key={provider.label}
+            provider={provider}
+            latest={usage ? latestProviderEvent(provider, usage.events) : undefined}
+          />
+        ))}
 
-        {!data && <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">loading provider status…</div>}
+        {!data && !dataError && <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">loading provider status…</div>}
 
         {/* the bar: one labeled divider, then keyless sources as identical rows */}
         {keyless.length > 0 && (
           <div className="flex items-center gap-2 bg-void/40 px-4 py-2">
-            <span className="eyebrow">Keyless · always on, no key required</span>
+            <span className="eyebrow">Sources without credentials</span>
             <span className="mono ml-auto text-[11px] text-ink-faint">{keyless.length} sources</span>
           </div>
         )}
-        {keyless.map((p) => <ProviderRow key={p.label} p={p} />)}
+        {keyless.map((provider) => (
+          <ProviderRow
+            key={provider.label}
+            provider={provider}
+            latest={usage ? latestProviderEvent(provider, usage.events) : undefined}
+          />
+        ))}
       </div>
+
+      {usageError && data && (
+        <p className="mt-3 text-[12.5px] leading-relaxed text-caution" role="status">
+          Request health could not be refreshed. Credential states above are still valid, but should not be read as live provider health.
+        </p>
+      )}
 
       <section className="mt-6" aria-labelledby="provider-usage-title">
         <div className="flex flex-wrap items-end justify-between gap-3">

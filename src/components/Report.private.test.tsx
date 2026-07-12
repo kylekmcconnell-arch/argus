@@ -235,6 +235,20 @@ describe("private person report evidence boundary", () => {
 });
 
 describe("decision-safe person report presentation", () => {
+  it("explains an adverse verdict with adverse drivers and labels positive evidence as counterweight", () => {
+    const dossier = buildReport(SUBJECTS[0]);
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(dossier.report.composite_verdict).not.toBe("PASS");
+    const verdictDrivers = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
+    const counterweight = container.querySelector('section[aria-labelledby="confidence-limits-title"]')?.textContent ?? "";
+    expect(verdictDrivers).toMatch(/hard cap governs|scored \d+\/\d+/i);
+    expect(counterweight).toContain("What evidence pulls the other way");
+  });
+
   it("withholds incomplete PASS clearance while preserving it as a preliminary signal", () => {
     const dossier = {
       ...buildReport(SUBJECTS[1]),

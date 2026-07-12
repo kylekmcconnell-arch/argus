@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useId, useRef, useState } from "react";
 import type { PanoptesNode, PanoptesEdge } from "../engine";
 import { canonical, type SubjectConnection } from "../graph/network";
 
@@ -40,6 +40,20 @@ function nodeAction(n: PanoptesNode, onAudit?: (q: string) => void, onOpenProjec
   return undefined;
 }
 
+function activateWithKeyboard(event: React.KeyboardEvent, action?: () => void) {
+  if (!action || (event.key !== "Enter" && event.key !== " ")) return;
+  event.preventDefault();
+  event.stopPropagation();
+  action();
+}
+
+function relationshipTone(verdict: unknown): string {
+  if (verdict === "Contradicted") return "tint-avoid";
+  if (verdict === "Unconfirmed") return "tint-caution";
+  if (verdict === "Confirmed" || verdict === "Acknowledged") return "tint-pass";
+  return "tint-neutral";
+}
+
 // Radial star map with legibility at scale: entities spread over concentric
 // rings (one ring drowns at 15+), labels stagger per ring, per-spoke edge
 // labels collapse to hover once dense, and the whole map zooms (wheel) and
@@ -61,6 +75,9 @@ export function TrustGraph({
   const [hover, setHover] = useState<string | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
   const pan = useRef<{ sx: number; sy: number; vx: number; vy: number; moved: boolean } | null>(null);
+  const graphTitleId = useId();
+  const graphDescriptionId = useId();
+  const ledgerTitleId = useId();
 
   const subject = nodes.find((n) => n.subject)!;
   if (!subject) return null;
@@ -160,11 +177,15 @@ export function TrustGraph({
   };
 
   return (
-    <div className="relative">
-      <svg
+    <div>
+      <div className="relative">
+        <svg
         ref={svgRef}
         viewBox={`0 0 ${W} ${H}`}
         className="w-full touch-none select-none"
+        role="group"
+        aria-labelledby={graphTitleId}
+        aria-describedby={graphDescriptionId}
         onWheel={onWheel}
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
@@ -173,6 +194,10 @@ export function TrustGraph({
         onClickCapture={onClickCapture}
         style={{ cursor: "grab" }}
       >
+        <title id={graphTitleId}>Relationship map for {String(subject.key)}</title>
+        <desc id={graphDescriptionId}>
+          Interactive relationship map. Navigable people and companies can be opened with Enter or Space. The complete readable relationship ledger follows the map.
+        </desc>
         <g transform={`translate(${view.x} ${view.y}) scale(${view.k})`}>
           {/* faint ring guides */}
           {Array.from({ length: rings }, (_, ri) => (
@@ -219,8 +244,14 @@ export function TrustGraph({
                 key={`n${i}`}
                 opacity={faded ? 0.35 : 1}
                 onClick={act}
+                onKeyDown={(event) => activateWithKeyboard(event, act)}
                 onPointerEnter={() => setHover(p.id)}
                 onPointerLeave={() => setHover((h) => (h === p.id ? null : h))}
+                onFocus={() => setHover(p.id)}
+                onBlur={() => setHover((h) => (h === p.id ? null : h))}
+                role={act ? "button" : undefined}
+                tabIndex={act ? 0 : undefined}
+                aria-label={act ? `Open ${String(p.node.key)}. ${p.edge ? EDGE_LABEL[p.edge.type] ?? p.edge.type.toLowerCase() : "Connected entity"}.` : undefined}
                 style={{ cursor: act ? "pointer" : "inherit" }}
               >
                 <title>{`${p.node.key}${p.edge ? ` · ${EDGE_LABEL[p.edge.type] ?? p.edge.type.toLowerCase()}` : ""}`}</title>
@@ -237,8 +268,19 @@ export function TrustGraph({
           {placedConns.map((p, i) => {
             const vm = p.c.otherVerdict;
             const color = vm === "FAIL" || vm === "AVOID" ? "var(--color-avoid)" : vm === "PASS" ? "var(--color-pass)" : "var(--color-caution)";
+            const act = onAudit ? () => onAudit(p.c.other) : undefined;
             return (
-              <g key={`cn${i}`} onClick={onAudit ? () => onAudit(p.c.other) : undefined} style={{ cursor: onAudit ? "pointer" : "inherit" }}>
+              <g
+                key={`cn${i}`}
+                onClick={act}
+                onKeyDown={(event) => activateWithKeyboard(event, act)}
+                onFocus={() => setHover(p.id)}
+                onBlur={() => setHover((h) => (h === p.id ? null : h))}
+                role={act ? "button" : undefined}
+                tabIndex={act ? 0 : undefined}
+                aria-label={act ? `Open connected subject ${p.c.other}. ${p.c.ties.length} shared ${p.c.ties.length === 1 ? "entity" : "entities"}.` : undefined}
+                style={{ cursor: act ? "pointer" : "inherit" }}
+              >
                 <title>{p.c.other}</title>
                 <circle cx={p.x} cy={p.y} r={7} fill="var(--color-panel-2)" stroke={color} strokeWidth="1.6" />
                 <circle cx={p.x} cy={p.y} r={11} fill="none" stroke={color} strokeWidth="1" opacity="0.3" />
@@ -256,22 +298,84 @@ export function TrustGraph({
             <text x={cx} y={cy + 30} textAnchor="middle" className="mono" fontSize="10" fill="var(--color-ink)">{trunc(subject.key, 20)}</text>
           </g>
         </g>
-      </svg>
+        </svg>
 
-      <div className="pointer-events-none absolute bottom-1.5 left-2 text-[11px] text-ink-faint">scroll to zoom · drag to pan{dense ? " · hover a node for its link" : ""}</div>
-      {zoomed && (
-        // span, not <button>: this graph also renders inside clickable card
-        // buttons (GraphPage "By subject"), and nested buttons are invalid HTML.
-        <span
-          role="button"
-          tabIndex={0}
-          onClick={(e) => { e.stopPropagation(); setView({ x: 0, y: 0, k: 1 }); }}
-          onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setView({ x: 0, y: 0, k: 1 }); } }}
-          className="btn-chip absolute right-2 top-2 cursor-pointer bg-panel"
-        >
-          reset view
-        </span>
-      )}
+        <div className="pointer-events-none absolute bottom-1.5 left-2 text-[11px] text-ink-faint">scroll to zoom · drag to pan{dense ? " · hover or focus a node for its link" : ""}</div>
+        {zoomed && (
+          <button
+            onClick={(e) => { e.stopPropagation(); setView({ x: 0, y: 0, k: 1 }); }}
+            className="btn-chip absolute right-2 top-2 bg-panel"
+          >
+            reset view
+          </button>
+        )}
+      </div>
+
+      <details className="panel-inset mt-3 overflow-hidden">
+        <summary className="flex cursor-pointer list-none items-center gap-2 px-3 py-2.5 text-[12.5px] font-medium text-ink">
+          <span id={ledgerTitleId}>Relationship ledger</span>
+          <span className="mono text-[11px] text-ink-faint">{peri.length + connections.length} links</span>
+          <span className="mono ml-auto text-[11px] text-signal-dim">view readable list</span>
+        </summary>
+        {peri.length === 0 && connections.length === 0 ? (
+          <p className="border-t border-line/60 px-3 py-3 text-[12.5px] text-ink-faint">No relationships were recorded for this subject.</p>
+        ) : (
+          <ul className="divide-y divide-line/60 border-t border-line/60" aria-labelledby={ledgerTitleId}>
+            {peri.map((entry, index) => {
+              const edge = entry.edge;
+              const action = nodeAction(entry.node, onAudit, onOpenProject);
+              const relation = edge ? EDGE_LABEL[edge.type] ?? edge.type.toLowerCase() : "connected to";
+              const verdict = typeof edge?.verdict === "string" ? edge.verdict : "Observed";
+              return (
+                <li key={`${entry.depth}:${entry.node.key}:${index}`} className="grid gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
+                      <span className="chip chip-sm">{entry.depth === 1 ? "direct" : "second hop"}</span>
+                      <span className="mono text-ink-faint">from</span>
+                      <span className="mono truncate text-ink">{edge?.src ?? subject.key}</span>
+                      <span className="text-ink-dim">{relation}</span>
+                      <span className="mono text-ink-faint">to</span>
+                      <span className="mono truncate text-ink">{edge?.dst ?? entry.node.key}</span>
+                    </div>
+                    <p className="mt-1 text-[11px] text-ink-faint">Entity type: {String(entry.node.type)}</p>
+                  </div>
+                  <div className="flex items-center gap-2 sm:justify-end">
+                    <span className={`chip ${relationshipTone(edge?.verdict)}`}>{verdict}</span>
+                    {action && <button onClick={action} className="btn-chip tint-signal">open →</button>}
+                  </div>
+                </li>
+              );
+            })}
+            {connections.map((connection) => {
+              const action = onAudit ? () => onAudit(connection.other) : undefined;
+              const verdictTone = connection.otherVerdict === "PASS"
+                ? "tint-pass"
+                : connection.otherVerdict === "FAIL" || connection.otherVerdict === "AVOID"
+                  ? "tint-avoid"
+                  : "tint-caution";
+              return (
+                <li key={`connected:${connection.other}`} className="grid gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-1.5 text-[12.5px]">
+                      <span className="chip chip-sm">cross-audit</span>
+                      <span className="mono text-ink">{String(subject.key)}</span>
+                      <span className="text-ink-dim">shares {connection.ties.length} {connection.ties.length === 1 ? "entity" : "entities"} with</span>
+                      <span className="mono text-ink">{connection.other}</span>
+                    </div>
+                    <p className="mt-1 truncate text-[11px] text-ink-faint" title={connection.ties.map((tie) => tie.label).join(", ")}>
+                      Via {connection.ties.map((tie) => tie.label).join(", ") || "an unresolved shared entity"}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 sm:justify-end">
+                    {connection.otherVerdict && <span className={`chip ${verdictTone}`}>{connection.otherVerdict}</span>}
+                    {action && <button onClick={action} className="btn-chip tint-signal">open →</button>}
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </details>
     </div>
   );
 }

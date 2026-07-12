@@ -18,8 +18,11 @@ import { getContributions } from "../graph/store";
 import { useArgusAuth } from "../auth-context";
 import { normalizeSubjectRef } from "../lib/subjectRef";
 import type { CaseBriefTarget } from "../lib/caseBrief";
+import { Archive, FolderOpen, MagnifyingGlass, UsersThree } from "@phosphor-icons/react";
+import { WorkspacePageHeader } from "./WorkspacePageHeader";
 
 const normRef = normalizeSubjectRef;
+type LibraryFilter = "all" | "people" | "projects" | "sites";
 
 // The report library: every persisted audit (yours + Enigma's) from the shared
 // backend, searchable, newest first. Click opens the stored report (no re-run).
@@ -67,6 +70,12 @@ function reportReadout(report: ReportListing) {
   };
 }
 
+function libraryKind(report: ReportListing, roleByRef: Map<string, string>): Exclude<LibraryFilter, "all"> {
+  if (report.kind === "site") return "sites";
+  if (report.kind === "token" || report.kind === "investigation") return "projects";
+  return roleByRef.get(normalizeSubjectRef(report.ref)) === "PROJECT" ? "projects" : "people";
+}
+
 export function DossiersPage({
   onOpen,
   onOpenBrief,
@@ -78,6 +87,7 @@ export function DossiersPage({
   const [reports, setReports] = useState<ReportListing[] | null>(null);
   const [archivedReports, setArchivedReports] = useState<ReportListing[] | null>(null);
   const [view, setView] = useState<"active" | "archived">("active");
+  const [filter, setFilter] = useState<LibraryFilter>("all");
   const [q, setQ] = useState("");
   const [costOpen, setCostOpen] = useState<string | null>(null); // "<kind>:<ref>" with expanded cost ledger
   const [pending, setPending] = useState<string | null>(null);
@@ -158,9 +168,24 @@ export function DossiersPage({
   }, [reports, archivedReports]); // eslint-disable-line react-hooks/exhaustive-deps
   const total = totalScans();
   const needle = q.trim().toLowerCase();
-  const shown = (selectedReports ?? []).filter((r) =>
-    !needle || r.ref.toLowerCase().includes(needle) || (r.query ?? "").toLowerCase().includes(needle) || (r.contributor ?? "").toLowerCase().includes(needle),
-  );
+  const libraryCounts = useMemo(() => {
+    const rows = selectedReports ?? [];
+    return {
+      all: rows.length,
+      people: rows.filter((report) => libraryKind(report, roleByRef) === "people").length,
+      projects: rows.filter((report) => libraryKind(report, roleByRef) === "projects").length,
+      sites: rows.filter((report) => libraryKind(report, roleByRef) === "sites").length,
+    };
+  }, [roleByRef, selectedReports]);
+  const shown = (selectedReports ?? []).filter((r) => {
+    const matchesKind = filter === "all"
+      || filter === libraryKind(r, roleByRef);
+    const matchesQuery = !needle
+      || r.ref.toLowerCase().includes(needle)
+      || (r.query ?? "").toLowerCase().includes(needle)
+      || (r.contributor ?? "").toLowerCase().includes(needle);
+    return matchesKind && matchesQuery;
+  });
 
   // Entity unification: a project wears three names — the $TOKEN audit, the
   // @handle person audit, and the site recon are three library cards for ONE
@@ -440,40 +465,73 @@ export function DossiersPage({
 
   return (
     <div className="mx-auto max-w-4xl px-6 py-10">
-      <h1 className="display-sm text-[24px] text-ink">Report library</h1>
-      <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-        Every audit persisted by you and your co-analysts — click to open the stored report instantly, no re-run.
-        Owners can archive a case without erasing its evidence, audit history, or trust-graph intelligence.
-      </p>
-
-      <div className="mt-5 inline-flex rounded-lg border border-line bg-panel p-1" aria-label="Report library status">
-        <button
-          type="button"
-          onClick={() => { setView("active"); setCostOpen(null); }}
-          aria-pressed={view === "active"}
-          className={`mono rounded-md px-3 py-1.5 text-[11px] transition ${view === "active" ? "tint-signal" : "text-ink-faint hover:text-ink-dim"}`}
-        >
-          Active {reports ? `(${reports.length})` : ""}
-        </button>
-        <button
-          type="button"
-          onClick={() => { setView("archived"); setCostOpen(null); }}
-          aria-pressed={view === "archived"}
-          className={`mono rounded-md px-3 py-1.5 text-[11px] transition ${view === "archived" ? "tint-signal" : "text-ink-faint hover:text-ink-dim"}`}
-        >
-          Archived {archivedReports ? `(${archivedReports.length})` : ""}
-        </button>
-      </div>
-
-      <label htmlFor="dossier-search" className="sr-only">Search reports</label>
-      <input
-        id="dossier-search"
-        type="search"
-        value={q}
-        onChange={(e) => setQ(e.target.value)}
-        placeholder="search by handle, token, site, or analyst…"
-        className="field mono mt-4 w-full px-3.5 py-2.5 text-[13.5px]"
+      <WorkspacePageHeader
+        eyebrow="Cases"
+        title="Case library"
+        description={<>Every persisted investigation in one decision workspace. Open the frozen evidence without paying for a rerun, or archive a case while retaining its history and graph intelligence.</>}
+        meta={(
+          <>
+            <span className="chip tint-signal"><FolderOpen size={13} weight="bold" aria-hidden="true" /> {reports?.length ?? 0} active</span>
+            <span className="chip"><Archive size={13} weight="bold" aria-hidden="true" /> {archivedReports?.length ?? 0} archived</span>
+            {total > 0 && <span className="chip"><UsersThree size={13} weight="bold" aria-hidden="true" /> {total.toLocaleString()} scans</span>}
+          </>
+        )}
       />
+
+      <div className="panel mt-5 p-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="inline-flex self-start rounded-lg bg-panel-2 p-1" aria-label="Case lifecycle">
+            <button
+              type="button"
+              onClick={() => { setView("active"); setCostOpen(null); }}
+              aria-pressed={view === "active"}
+              className={`mono min-h-9 rounded-md px-3 py-1.5 text-[11px] transition ${view === "active" ? "tint-signal" : "text-ink-faint hover:text-ink-dim"}`}
+            >
+              Active {reports ? `(${reports.length})` : ""}
+            </button>
+            <button
+              type="button"
+              onClick={() => { setView("archived"); setCostOpen(null); }}
+              aria-pressed={view === "archived"}
+              className={`mono min-h-9 rounded-md px-3 py-1.5 text-[11px] transition ${view === "archived" ? "tint-signal" : "text-ink-faint hover:text-ink-dim"}`}
+            >
+              Archived {archivedReports ? `(${archivedReports.length})` : ""}
+            </button>
+          </div>
+
+          <div className="relative min-w-0 flex-1">
+            <MagnifyingGlass size={16} aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-faint" />
+            <label htmlFor="dossier-search" className="sr-only">Search cases</label>
+            <input
+              id="dossier-search"
+              type="search"
+              value={q}
+              onChange={(e) => setQ(e.target.value)}
+              placeholder="Search handle, token, site, or analyst"
+              className="field mono min-h-11 w-full pl-9 pr-3 text-[13.5px]"
+            />
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap items-center gap-1.5 border-t border-line/60 pt-3" aria-label="Case type filter">
+          {([
+            ["all", "All cases"],
+            ["people", "People"],
+            ["projects", "Projects"],
+            ["sites", "Sites"],
+          ] as const).map(([key, label]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setFilter(key)}
+              aria-pressed={filter === key}
+              className={`btn-chip min-h-8 ${filter === key ? "tint-signal" : ""}`}
+            >
+              {label} <span className="text-ink-faint">{libraryCounts[key]}</span>
+            </button>
+          ))}
+        </div>
+      </div>
 
       {error && (
         <div role="alert" className="tint-avoid mt-3 rounded-lg border px-3 py-2 text-[12.5px]">
@@ -483,7 +541,7 @@ export function DossiersPage({
 
       <div className="eyebrow mt-5 mb-2.5 flex items-center gap-2">
         <span>{selectedReports == null ? "loading…" : `${shown.length} ${isArchived ? "archived " : ""}report${shown.length === 1 ? "" : "s"}`}</span>
-        {total > 0 && <span className="text-ink-faint/70">· {total.toLocaleString()} total scans</span>}
+        {filter !== "all" && <span className="text-ink-faint/70">· {filter}</span>}
       </div>
 
       {selectedReports != null && shown.length === 0 && (

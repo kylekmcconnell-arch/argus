@@ -11,6 +11,7 @@ import type { NormalizedSafety, TokenDossier } from "../token/audit";
 const harness = vi.hoisted(() => ({
   clipboard: vi.fn(),
   livePanel: vi.fn(),
+  askReport: vi.fn(),
   secondOpinion: vi.fn(),
   serviceAlert: vi.fn(),
 }));
@@ -37,9 +38,16 @@ vi.mock("./ServiceAlert", () => ({
   },
 }));
 vi.mock("./TrustGraph", () => ({ TrustGraph: () => <div /> }));
-vi.mock("./AskReport", () => ({ AskReport: () => <div /> }));
+vi.mock("./AskReport", () => ({
+  AskReport: (props: Record<string, unknown>) => {
+    harness.askReport(props);
+    return <div data-panel="ask-report" />;
+  },
+}));
 vi.mock("./Unknowns", () => ({ Unknowns: () => <div /> }));
-vi.mock("./MethodologyChecklist", () => ({ MethodologyChecklist: () => <div /> }));
+vi.mock("./MethodologyChecklist", () => ({
+  MethodologyChecklist: ({ id }: { id?: string }) => <div id={id} data-panel="methodology" />,
+}));
 vi.mock("./ArgusMark", () => ({ ArgusMark: () => <span /> }));
 
 import { TokenReport } from "./TokenReport";
@@ -141,6 +149,7 @@ function render(report: TokenDossier): void {
 beforeEach(() => {
   harness.clipboard.mockReset().mockResolvedValue(undefined);
   harness.livePanel.mockReset();
+  harness.askReport.mockReset();
   harness.secondOpinion.mockReset();
   harness.serviceAlert.mockReset();
   container = document.createElement("div");
@@ -158,6 +167,54 @@ afterEach(() => {
 });
 
 describe("token report supplemental evidence boundary", () => {
+  it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
+    render(dossier({ versionContext }));
+
+    expect(harness.askReport).toHaveBeenLastCalledWith(expect.objectContaining({
+      subject: "$ARG",
+      reportVersionId: versionContext.reportVersionId,
+    }));
+
+    const nav = container.querySelector<HTMLElement>('nav[aria-label="Report sections"]');
+    expect(nav).not.toBeNull();
+    const hrefs = [...(nav?.querySelectorAll<HTMLAnchorElement>('a[href^="#"]') ?? [])]
+      .map((link) => link.getAttribute("href"));
+    expect(hrefs).toEqual([
+      "#report-summary",
+      "#report-risks",
+      "#token-evidence",
+      "#token-relationships",
+      "#token-methodology",
+    ]);
+    for (const href of hrefs) {
+      expect(container.querySelector(`[id="${href?.slice(1)}"]`), `${href} should resolve inside the report`).not.toBeNull();
+    }
+
+    expect(container.textContent).toContain("Why ARGUS reaches PASS");
+    expect(container.textContent).toContain("Recorded outcomes");
+    expect(container.textContent).toContain("Open questions");
+    expect(container.querySelector('[role="progressbar"][aria-label="Evidence coverage"]')).not.toBeNull();
+  });
+
+  it("uses adverse evidence to explain an adverse verdict and keeps positive evidence as counterweight", () => {
+    render(dossier({
+      verdict: "FAIL",
+      score: 22,
+      versionContext,
+      findings: [
+        { claim: "Liquidity is unlocked and removable.", tone: "bad", source: "goplus" },
+        { claim: "Contract source is verified.", tone: "good", source: "explorer" },
+      ],
+    }));
+
+    const verdictDrivers = container.querySelector('ul[aria-label="Why ARGUS reaches FAIL"]')?.textContent ?? "";
+    const counterweight = container.querySelector('ul[aria-label="What evidence pulls the other way"]')?.textContent ?? "";
+    expect(verdictDrivers).toContain("Liquidity is unlocked and removable.");
+    expect(verdictDrivers).not.toContain("Contract source is verified.");
+    expect(counterweight).toContain("Contract source is verified.");
+    expect(counterweight).not.toContain("Liquidity is unlocked and removable.");
+  });
+
   it("keeps every current-data panel paused on an immutable snapshot until explicit opt-in", () => {
     render(dossier({ versionContext }));
 

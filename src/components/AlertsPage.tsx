@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { X } from "@phosphor-icons/react";
 
 // The alerts feed: everything manual sweeps have flagged — on-chain drift on
 // watched tokens and new connections to flagged subjects in the shared graph.
@@ -22,9 +23,25 @@ const ago = (a: Alert) => {
 
 export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
   const [alerts, setAlerts] = useState<Alert[] | null>(null);
+  const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
   useEffect(() => {
-    fetch("/api/alerts").then((r) => r.json()).then((d) => setAlerts(d?.alerts ?? [])).catch(() => setAlerts([]));
-  }, []);
+    const controller = new AbortController();
+    fetch("/api/alerts", { signal: controller.signal })
+      .then(async (response) => {
+        const body = await response.json().catch(() => ({})) as { alerts?: Alert[]; message?: string };
+        if (!response.ok || !Array.isArray(body.alerts)) {
+          throw new Error(body.message || "ARGUS could not reach alert storage.");
+        }
+        return body.alerts;
+      })
+      .then(setAlerts)
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setLoadError(error instanceof Error ? error.message : "The alerts feed is unavailable.");
+      });
+    return () => controller.abort();
+  }, [reloadKey]);
 
   const dismiss = (ref: string) => {
     void fetch(`/api/alerts?ref=${encodeURIComponent(ref)}`, { method: "DELETE" }).catch(() => { /* offline */ });
@@ -41,8 +58,30 @@ export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
       </p>
 
       <div className="mt-6 space-y-2">
-        {alerts == null && <div className="text-[12.5px] text-ink-faint">loading…</div>}
-        {alerts != null && alerts.length === 0 && (
+        {alerts == null && !loadError && <div className="text-[12.5px] text-ink-faint">loading alerts…</div>}
+        {loadError && (
+          <div className="panel px-4 py-4" role="alert">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p className="text-[13.5px] font-medium text-ink">Alerts could not be loaded</p>
+                <p className="mt-1 max-w-xl text-[12.5px] leading-relaxed text-ink-dim">
+                  {loadError} This is a data-access failure, not confirmation that there are no alerts.
+                </p>
+              </div>
+              <button
+                onClick={() => {
+                  setAlerts(null);
+                  setLoadError("");
+                  setReloadKey((key) => key + 1);
+                }}
+                className="btn-chip tint-signal"
+              >
+                Retry
+              </button>
+            </div>
+          </div>
+        )}
+        {alerts != null && !loadError && alerts.length === 0 && (
           <div className="empty-state">
             No alerts. Watch subjects, then run a sweep from the Watchlist.
           </div>
@@ -50,26 +89,29 @@ export function AlertsPage({ onOpen }: { onOpen: (ref: string) => void }) {
         {(alerts ?? []).map((a) => {
           const m = TYPE_META[a.type ?? ""] ?? TYPE_META.drift;
           return (
-            <div key={a.ref} className="finding flex items-start gap-3 px-4 py-3" style={{ "--tint": m.color } as React.CSSProperties}>
+            <div key={a.ref} className="finding flex flex-wrap items-start gap-3 px-4 py-3" style={{ "--tint": m.color } as React.CSSProperties}>
               <span className="chip tint-var mt-0.5 shrink-0" style={{ "--tint": m.color } as React.CSSProperties}>
                 {m.label}
               </span>
-              <div className="min-w-0 flex-1">
-                <button onClick={() => a.subject && onOpen(a.subject)} className="mono text-[13.5px] font-medium text-ink underline-offset-2 hover:text-signal-dim hover:underline">
-                  {a.label ?? a.subject}
-                </button>
+              <div className="min-w-[180px] flex-1">
+                {a.subject ? (
+                  <button onClick={() => onOpen(a.subject!)} className="mono text-[13.5px] font-medium text-ink underline-offset-2 hover:text-signal-dim hover:underline">
+                    {a.label ?? a.subject}
+                  </button>
+                ) : (
+                  <span className="mono text-[13.5px] font-medium text-ink">{a.label ?? "Unknown subject"}</span>
+                )}
                 <p className="mt-0.5 text-[12.5px] leading-relaxed text-ink-dim">{a.detail}</p>
               </div>
               <span className="mono shrink-0 text-[11px] text-ink-faint">{ago(a)}</span>
-              <span
-                role="button"
-                tabIndex={0}
+              <button
                 onClick={() => dismiss(a.ref)}
                 title="Dismiss this alert"
-                className="mono shrink-0 cursor-pointer rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-faint transition hover:border-avoid hover:text-avoid"
+                aria-label={`Dismiss alert for ${a.label ?? a.subject ?? "unknown subject"}`}
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line text-ink-faint transition hover:border-avoid hover:text-avoid"
               >
-                ×
-              </span>
+                <X size={13} weight="bold" aria-hidden="true" />
+              </button>
             </div>
           );
         })}

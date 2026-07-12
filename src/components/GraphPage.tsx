@@ -67,11 +67,12 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
             subjects sharing one hidden hub becomes a cabal. None of that shows in a single report.
           </p>
         </div>
-        <div className="flex shrink-0 rounded-lg border border-line bg-panel p-1">
+        <div className="flex shrink-0 rounded-lg border border-line bg-panel p-1" role="group" aria-label="Trust graph view">
           {(["network", "subject"] as const).map((m) => (
             <button
               key={m}
               onClick={() => setMode(m)}
+              aria-pressed={mode === m}
               className={`mono rounded-md px-3 py-1.5 text-[11px] transition ${mode === m ? "tint-signal" : "text-ink-faint hover:text-ink-dim"}`}
             >
               {m === "network" ? "Network" : "By subject"}
@@ -102,6 +103,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => setActiveCat(null)}
+              aria-pressed={!activeCat}
               className={`mono rounded-md border px-2.5 py-1 text-[11px] transition ${!activeCat ? "tint-signal" : "border-line text-ink-dim hover:text-ink"}`}
             >
               All
@@ -114,6 +116,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
                 <button
                   key={c.key}
                   onClick={() => setActiveCat(active ? null : c.key)}
+                  aria-pressed={active}
                   className={`mono rounded-md border px-2.5 py-1 text-[11px] transition ${active ? "tint-signal" : "border-line text-ink-dim hover:text-ink"}`}
                 >
                   {c.label} <span className="text-ink-faint">{n}</span>
@@ -207,13 +210,17 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
           {mine.map((c) => {
             const m = verdictMeta(c.verdict ?? "INCOMPLETE");
             return (
-              <button
+              <div
                 key={c.handle}
-                onClick={() => onOpen(c.handle)}
-                className="panel group p-3 text-left transition hover:border-line-2 soft-shadow"
+                className="panel p-3 soft-shadow"
               >
                 <div className="mb-1 flex items-center gap-2 px-1">
-                  <span className="mono text-[12.5px] text-ink">{c.handle}</span>
+                  <button
+                    onClick={() => onOpen(c.handle)}
+                    className="mono text-[12.5px] text-ink underline-offset-2 hover:text-signal-dim hover:underline"
+                  >
+                    {c.handle}
+                  </button>
                   <span
                     className={`verdict-pill ml-auto ${c.verdict === "FAIL" ? "tint-fail" : "tint-var"}`}
                     style={c.verdict === "FAIL" ? undefined : ({ "--tint": m.color } as React.CSSProperties)}
@@ -221,8 +228,8 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
                     {m.label}
                   </span>
                 </div>
-                <TrustGraph nodes={c.nodes} edges={c.edges} />
-              </button>
+                <TrustGraph nodes={c.nodes} edges={c.edges} onAudit={onOpen} onOpenProject={onOpen} />
+              </div>
             );
           })}
         </div>
