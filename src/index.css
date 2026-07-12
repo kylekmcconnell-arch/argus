@@ -28,6 +28,7 @@
   --color-signal-lift: #7fa2ff; /* accessible blue text on graphite */
   --color-on-signal: #ffffff; /* text / highlights on signal fills */
   --color-accent-tint: #101621; /* localized active-state wash */
+  --color-eye-pupil: #05070b; /* live iris center; deliberately dark in both themes */
 
   --color-pass: #35c97b; /* jade — confirmed good */
   --color-caution: #f2ad3f; /* amber — warn / partial */
@@ -65,6 +66,7 @@
   --color-signal-dim: #224abd;
   --color-signal-lift: #224abd;
   --color-accent-tint: #eaf0ff;
+  --color-eye-pupil: #0b1424;
 
   --color-pass: #147a43;
   --color-caution: #8a5b06;
@@ -520,6 +522,67 @@
   animation: pulse-ring 2.2s ease-out infinite;
 }
 
+/* The live ARGUS eye scans while sources are being gathered, holds focus while
+   the analyst is scoring, and transitions back to center during finalization. The
+   dotted mark stays fixed so the motion reads as attention, not decoration. */
+@keyframes argus-eye-search {
+  0%, 8%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  16%, 24% { transform: translate3d(-5px, -2px, 0) scale(0.98); }
+  34%, 42% { transform: translate3d(4px, -3px, 0) scale(1.02); }
+  52%, 60% { transform: translate3d(5px, 3px, 0) scale(1); }
+  70%, 78% { transform: translate3d(-3px, 4px, 0) scale(0.99); }
+  88%, 94% { transform: translate3d(2px, -1px, 0) scale(1.01); }
+}
+
+@keyframes argus-eye-focus {
+  0%, 100% { transform: translate3d(0, 0, 0) scale(1); }
+  18% { transform: translate3d(2px, -1px, 0) scale(1.08); }
+  34% { transform: translate3d(-1px, 1px, 0) scale(1.03); }
+  52%, 82% { transform: translate3d(0, 0, 0) scale(1.1); }
+}
+
+@keyframes argus-eye-live-ring {
+  0% { transform: scale(0.86); opacity: 0.48; }
+  72%, 100% { transform: scale(1.65); opacity: 0; }
+}
+
+@keyframes argus-eye-evidence {
+  0% { transform: scale(0.88); opacity: 0.86; }
+  72%, 100% { transform: scale(1.9); opacity: 0; }
+}
+
+.argus-eye-field,
+.argus-eye-iris,
+.argus-eye-live-ring,
+.argus-eye-evidence-pulse {
+  transform-box: fill-box;
+  transform-origin: center;
+}
+.argus-eye-iris--searching,
+.argus-eye-iris--focused {
+  will-change: transform;
+}
+.argus-eye-iris {
+  transition: transform 700ms ease-out;
+}
+.argus-eye-iris--searching {
+  animation: argus-eye-search 5.8s cubic-bezier(0.42, 0, 0.22, 1) infinite;
+}
+.argus-eye-iris--focused {
+  animation: argus-eye-focus 2.5s ease-in-out infinite;
+}
+.argus-eye-iris--settling {
+  transform: translate3d(0, 0, 0) scale(1);
+}
+.argus-eye-live-ring {
+  opacity: 0;
+  animation: argus-eye-live-ring 2.4s ease-out infinite;
+}
+.argus-eye-evidence-pulse {
+  opacity: 0;
+  animation: argus-eye-evidence 0.9s ease-out both;
+}
+
 @keyframes sweep {
   0% { transform: translateX(-100%); }
   100% { transform: translateX(100%); }
@@ -583,4 +646,9 @@
   .sweep { animation: none; }
   .scan-bar::after { animation: none; width: 100%; opacity: 0.4; }
   .pulse-ring::after { animation: none; opacity: 0; }
+  .argus-eye-iris,
+  .argus-eye-live-ring,
+  .argus-eye-evidence-pulse { animation: none; transform: none; }
+  .argus-eye-live-ring,
+  .argus-eye-evidence-pulse { opacity: 0; }
 }

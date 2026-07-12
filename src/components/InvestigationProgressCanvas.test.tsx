@@ -62,12 +62,51 @@ describe("InvestigationProgressCanvas", () => {
     expect(container?.textContent).not.toMatch(/DexScreener|GoPlus|Claude|Grok|GitHub/);
   });
 
-  it("uses CSS motion classes instead of SVG SMIL for the live eye", async () => {
+  it("uses CSS gaze motion instead of SVG SMIL for the live eye", async () => {
     await renderCanvas({ kind: "token", steps: [], working: true });
 
     expect(container?.querySelector("animate")).toBeNull();
-    const liveRing = container?.querySelector<SVGCircleElement>("circle[class*='motion-safe:animate']");
+    const eye = container?.querySelector<SVGSVGElement>("[data-argus-eye-state='searching']");
+    const iris = eye?.querySelector(".argus-eye-iris--searching");
+    const liveRing = eye?.querySelector(".argus-eye-live-ring");
+    expect(eye).not.toBeNull();
+    expect(iris).not.toBeNull();
     expect(liveRing).not.toBeNull();
-    expect(liveRing?.getAttribute("class")).toContain("motion-reduce:opacity-0");
+    expect(eye?.querySelector(".argus-eye-evidence-pulse")).toBeNull();
+  });
+
+  it("focuses for analysis, settles for finalization, and pulses on real evidence", async () => {
+    await renderCanvas({
+      kind: "person",
+      working: true,
+      steps: [{ phase: "P6 · Analyst", label: "Score axes", detail: "Scoring evidence.", tone: "neutral" }],
+    });
+
+    expect(container?.querySelector("[data-argus-eye-state='focused']")).not.toBeNull();
+    expect(container?.querySelector(".argus-eye-evidence-pulse")).not.toBeNull();
+
+    await act(async () => root?.render(
+      <InvestigationProgressCanvas
+        kind="person"
+        working
+        steps={[
+          { phase: "P6 · Analyst", label: "Score axes", detail: "Scoring evidence.", tone: "neutral" },
+          { phase: "P7 · Finalize", label: "Seal report", detail: "Freezing the report.", tone: "neutral" },
+        ]}
+      />,
+    ));
+
+    expect(container?.querySelector("[data-argus-eye-state='settling']")).not.toBeNull();
+
+    await act(async () => root?.render(
+      <InvestigationProgressCanvas
+        kind="person"
+        working={false}
+        steps={[{ phase: "P7 · Finalize", label: "Report sealed", detail: "Done.", tone: "neutral" }]}
+      />,
+    ));
+
+    expect(container?.querySelector("[data-argus-eye-state='idle']")).not.toBeNull();
+    expect(container?.querySelector(".argus-eye-live-ring")).toBeNull();
   });
 });

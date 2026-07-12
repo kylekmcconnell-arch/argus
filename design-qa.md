@@ -147,3 +147,33 @@ final result: passed
 - Open design findings: none at P0, P1, or P2 in the reviewed flows.
 
 final result: passed
+
+## Animated investigation eye QA
+
+- Reference: `/Users/kyle/Downloads/Screenshot 2026-07-12 at 5.36.05 PM.png`
+- Implementation: `/Users/kyle/Documents/ARGUS/artifacts/design-qa/argus-searching-eye/search-final.png`
+- Focused comparison: `/Users/kyle/Documents/ARGUS/artifacts/design-qa/argus-searching-eye/reference-vs-implementation-final.png`
+- Light-mode verification: `/Users/kyle/Documents/ARGUS/artifacts/design-qa/argus-searching-eye/light-mode.png`
+- Tested viewport: 1000 × 750
+
+### Iterations resolved
+
+- Preserved the existing dotted ARGUS eye and circular shell, then moved the complete live iris as one unit so it reads as a gaze.
+- Removed the fixed iris cutout during live investigations so the moving eye never exposes an empty hole.
+- Added a dark pupil, highlight, restrained live ring, and one-shot evidence pulse only to the investigation state. Static brand marks remain unchanged.
+- Tuned searching, analysis focus, and finalization settling as distinct motion states. Two browser frames recorded different search transforms.
+- Added a reduced-motion fallback that centers the pupil and removes all looping motion.
+- Kept the pupil dark in light mode and removed the translated finalization start frame so stage changes cannot snap the gaze across the eye.
+
+### Verification summary
+
+- Typography and spacing: passed. Existing type roles, 112px shell, and 88px mark are unchanged.
+- Color and fidelity: passed. The original ARGUS mark remains the base and the pupil remains dark in both themes.
+- Motion: passed. Search, evidence focus, finalization, idle, and reduced-motion states are covered.
+- Accessibility: passed. The SVG remains decorative and hidden from assistive technology.
+- Responsive layout: passed. The component dimensions and layout contract are unchanged.
+- Unit and integration: 109 files, 1,044 tests passed.
+- Typecheck, focused lint, and production build: passed.
+- Open design findings: none at P0, P1, or P2 in the reviewed flow.
+
+final result: passed

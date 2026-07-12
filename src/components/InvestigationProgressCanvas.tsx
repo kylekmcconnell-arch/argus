@@ -17,7 +17,7 @@ import {
   type InvestigationProgressKind,
   type InvestigationStageState,
 } from "../lib/investigationProgress";
-import { ArgusMark } from "./ArgusMark";
+import { ArgusMark, type ArgusEyeMotion } from "./ArgusMark";
 
 type StageIcon = ComponentType<{ size?: number; weight?: "regular" | "bold" | "fill"; "aria-hidden"?: boolean }>;
 
@@ -59,6 +59,14 @@ export function InvestigationProgressCanvas({
   const latestKey = progress.latestEvent
     ? `${steps.length}:${progress.latestEvent.phase}:${progress.latestEvent.label}`
     : `empty:${kind}:${working}`;
+  const activeStage = progress.stages.find((stage) => stage.state === "active")?.key;
+  const eyeMotion: ArgusEyeMotion = !working
+    ? "idle"
+    : activeStage === "finalize" || activeStage === "complete"
+      ? "settling"
+      : activeStage === "analysis"
+        ? "focused"
+        : "searching";
 
   return (
     <section className="panel overflow-hidden" aria-label="Investigation progress">
@@ -66,7 +74,12 @@ export function InvestigationProgressCanvas({
         <div className="relative border-b border-line p-5 sm:p-6 lg:border-b-0 lg:border-r">
           <div className="grid gap-5 sm:grid-cols-[112px_minmax(0,1fr)] sm:items-center">
             <div className="relative flex h-28 w-28 items-center justify-center rounded-full bg-accent-tint ring-1 ring-signal/15">
-              <ArgusMark size={88} live={working} />
+              <ArgusMark
+                size={88}
+                live={working}
+                motion={eyeMotion}
+                eventKey={progress.latestEvent ? latestKey : undefined}
+              />
             </div>
 
             <div className="min-w-0">
