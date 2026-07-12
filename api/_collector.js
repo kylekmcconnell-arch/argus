@@ -1870,10 +1870,13 @@ function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onRej
       return reject(`coverage-field-shape:${row.axis}`);
     }
     const rawCoverage = row.coverageRefs === void 0 ? [] : row.coverageRefs;
-    const coverage = validRefs(rawCoverage, 0, 4);
-    if (!ARTIFACT_ID.test(primary) || !additional || !coverage) {
-      return reject(`axis-reference-shape:${row.axis}`);
+    if (Array.isArray(rawCoverage) && rawCoverage.length > 4) {
+      return reject(`coverage-reference-limit-observed-${rawCoverage.length}-max-4:${row.axis}`);
     }
+    const coverage = validRefs(rawCoverage, 0, 4);
+    if (!ARTIFACT_ID.test(primary)) return reject(`primary-reference-shape:${row.axis}`);
+    if (!additional) return reject(`additional-reference-shape:${row.axis}`);
+    if (!coverage) return reject(`coverage-reference-shape:${row.axis}`);
     const supportRefs = [primary, ...additional];
     const coverageRefs = coverage;
     const evidenceRefs = [...supportRefs, ...coverageRefs];
@@ -2747,10 +2750,11 @@ async function analyzeSubject(handle, roles, axisCatalog2, evidenceJson, options
     alias: `e${String(index + 1).padStart(3, "0")}`,
     artifact
   }));
-  const aliasesForAxis = (axis, coverageOnly) => citationAliases.filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && (coverageOnly ? !isSubstantiveArtifact(artifact) : isSubstantiveArtifact(artifact))).map(({ alias }) => alias);
+  const substantiveAliasesForAxis = (axis) => citationAliases.filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && isSubstantiveArtifact(artifact)).map(({ alias }) => alias);
+  const preferredCoverageAliasesForAxis = (axis) => citationAliases.filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && !isSubstantiveArtifact(artifact)).sort((a, b) => Number(b.artifact.verification === "unavailable") - Number(a.artifact.verification === "unavailable")).slice(0, 4).map(({ alias }) => alias);
   const formatAliases = (aliases) => aliases.length > 0 ? aliases.join(", ") : "(none)";
   const citationAliasTable = citationAliases.map(({ alias, artifact }) => `${alias} = ${artifact.artifactId}`).join("\n");
-  const citationEligibilityTable = axisCatalog2.map(({ axis }) => `${axis} | substantive: ${formatAliases(aliasesForAxis(axis, false))} | coverage-only: ${formatAliases(aliasesForAxis(axis, true))}`).join("\n");
+  const citationEligibilityTable = axisCatalog2.map(({ axis }) => `${axis} | substantive aliases (choose 1 primary; do not exhaustively copy): ${formatAliases(substantiveAliasesForAxis(axis))} | coverageRefs preferred return set (optional; return 0-4 total, never the whole coverage catalog): ${formatAliases(preferredCoverageAliasesForAxis(axis))}`).join("\n");
   const system = "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject on a fixed set of axes from collected evidence only. Be skeptical: a strong story never papers over a disqualifying fact. Score conservatively when evidence is thin. Each axis score must be between 0 and its weight. Write one tight rationale per axis citing the evidence. Never use em dashes.";
   const user = `Subject: ${handle}
 Held roles: ${roles.join(", ")}
@@ -2764,7 +2768,7 @@ ${evidenceJson}
 Citation aliases (return these short aliases in the tool call; ARGUS maps them back to the exact immutable artifact IDs):
 ${citationAliasTable}
 
-Axis citation allowlists (authoritative; an alias not listed for that axis is forbidden. primaryEvidenceRef and additionalEvidenceRefs may use only the substantive list. coverageRefs may use only the coverage-only list. counterEvidenceRefs may use only the substantive list):
+Axis citation guidance (the substantive aliases are authoritative, while each coverageRefs preferred return set is intentionally bounded. These are candidate sets, not checklists: never copy every available artifact. Other eligible coverage artifacts remain frozen in the evidence packet and need not be cited. primaryEvidenceRef and additionalEvidenceRefs may use only the substantive aliases. For this call, coverageRefs may use only the preferred return set. counterEvidenceRefs may use only unused substantive aliases):
 ${citationEligibilityTable}
 
 Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.
@@ -2825,7 +2829,8 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
       return null;
     }
     const rejectedAxis = axisNames.find((axis) => rejectionReason.endsWith(`:${axis}`));
-    const rejectedAxisHint = rejectedAxis ? ` For ${rejectedAxis}, the authoritative substantive aliases are ${formatAliases(aliasesForAxis(rejectedAxis, false))}; the coverage-only aliases are ${formatAliases(aliasesForAxis(rejectedAxis, true))}.` : "";
+    const coverageLimitMatch = rejectionReason.match(/^coverage-reference-limit-observed-(\d+)-max-4:/);
+    const rejectedAxisHint = rejectedAxis ? coverageLimitMatch ? ` The prior ${rejectedAxis} coverageRefs contained ${coverageLimitMatch[1]} aliases; the maximum is 4. Return no more than these four preferred aliases: ${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}. Do not append or move omitted coverage aliases into support or counter fields.` : ` For ${rejectedAxis}, choose exactly one primary from the substantive aliases ${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. Assign each other substantive alias to at most one array. Return coverageRefs as zero to four distinct values chosen only from ${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}; [] is valid and you must not exhaustively copy coverage artifacts.` : "";
     const repairUser = `${user}
 
 REPAIR REQUIRED: the prior record_verdict tool payload was rejected by deterministic validation with reason "${rejectionReason}". Make one fresh record_verdict call. Recheck the exact axis set, per-axis score bounds, citation eligibility, duplicate aliases, support/counter overlap, and the array limits (seven additional support, eight counter, four coverage, and six gaps), plus the requirement that any returned coverageRefs have a material gap description. Do not invent evidence or fill a missing fact.${rejectedAxisHint}`;

@@ -1205,7 +1205,7 @@ describe("analyst verdict integrity", () => {
     expect(scoringPrompt).toContain("profile, team, wallet, check-outcome");
     expect(scoringPrompt).not.toContain("only rows in the findings array may influence");
     expect(scoringPrompt).toContain("Citation aliases");
-    expect(scoringPrompt).toContain("Axis citation allowlists");
+    expect(scoringPrompt).toContain("Axis citation guidance");
     expect(scoringPrompt).toContain("primaryEvidenceRef must be one substantive alias");
     const expectedF1SubstantiveAliases = scorerCatalog.flatMap((artifact, index) =>
       artifact.verification !== "unavailable"
@@ -1219,8 +1219,11 @@ describe("analyst verdict integrity", () => {
         ? [`e${String(index + 1).padStart(3, "0")}`]
         : []);
     expect(scoringPrompt).toContain(
-      `F1_identity_verifiability | substantive: ${expectedF1SubstantiveAliases.join(", ") || "(none)"}` +
-      ` | coverage-only: ${expectedF1CoverageAliases.join(", ") || "(none)"}`,
+      `F1_identity_verifiability | substantive aliases (choose 1 primary; do not exhaustively ` +
+      `copy): ${expectedF1SubstantiveAliases.join(", ") || "(none)"}` +
+      ` | coverageRefs preferred return set (optional; return 0-4 total, never the whole ` +
+      `coverage catalog): ` +
+      `${expectedF1CoverageAliases.join(", ") || "(none)"}`,
     );
     const verdictRequest = requests.find((request) => request.tool_choice.name === "record_verdict")!;
     const verdictTool = verdictRequest.tools[0];
@@ -1683,10 +1686,10 @@ describe("analyst verdict integrity", () => {
           "non-substantive-support:F1_identity_verifiability",
         );
         expect(request.messages[0].content).toContain(
-          `For F1_identity_verifiability, the authoritative substantive aliases are ${f1Support}`,
+          `For F1_identity_verifiability, choose exactly one primary from the substantive aliases ${f1Support}`,
         );
         expect(request.messages[0].content).toContain(
-          `the coverage-only aliases are ${f1Coverage}`,
+          `Return coverageRefs as zero to four distinct values chosen only from ${f1Coverage}`,
         );
       }
       const f1 = attempt === 1
@@ -1726,6 +1729,132 @@ describe("analyst verdict integrity", () => {
       artifactIdForAlias(f1Coverage),
     ]);
     expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
+  });
+
+  it("bounds model-facing coverage candidates and repairs exhaustive coverage copying", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const singleAxisCatalog: AnalystAxis[] = [{
+      axis: "F1_identity_verifiability",
+      weight: 12,
+      role: "FOUNDER",
+    }];
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      sourceArtifacts: [
+        {
+          kind: "legal_case",
+          provider: "courtlistener",
+          match: "no_match",
+          title: "US legal-history exact-name screen",
+        },
+        {
+          kind: "sanctions_screen",
+          provider: "sanctions-secondary",
+          match: "no_match",
+          title: "Secondary sanctions exact-name screen",
+        },
+      ],
+      checkOutcomes: [
+        { checkId: "identity-resolution", status: "unavailable", provider: "peopledatalabs", note: "Identity provider unavailable." },
+        { checkId: "identity-continuity", status: "checked-empty", provider: "memory.lol", note: "No prior handle found." },
+        { checkId: "ofac-sanctions-name", status: "checked-empty", provider: "opensanctions", note: "No exact sanctions match." },
+        { checkId: "trust-graph-connections", status: "checked-empty", provider: "argus-graph", note: "No qualified graph connection." },
+      ],
+    }, singleAxisCatalog);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const aliasRows = scorerCatalog.map((artifact, index) => ({
+      artifact,
+      alias: `e${String(index + 1).padStart(3, "0")}`,
+    }));
+    const substantiveAlias = aliasRows.find(({ artifact }) =>
+      artifact.verification !== "unavailable" && artifact.verification !== "checked_empty")?.alias;
+    const orderedCoverage = aliasRows
+      .filter(({ artifact }) => artifact.verification === "unavailable" || artifact.verification === "checked_empty")
+      .sort((a, b) => Number(b.artifact.verification === "unavailable") - Number(a.artifact.verification === "unavailable"));
+    const coverageCandidates = orderedCoverage.slice(0, 4).map(({ alias }) => alias);
+    const omittedCoverageAlias = orderedCoverage[4]?.alias;
+    if (!substantiveAlias || !omittedCoverageAlias) throw new Error("coverage fixture did not produce bounded aliases");
+    expect(coverageCandidates).toHaveLength(4);
+
+    let attempt = 0;
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      attempt += 1;
+      const request = JSON.parse(String(init?.body)) as {
+        messages: Array<{ content: string }>;
+        tool_choice: { name: string };
+      };
+      const eligibilityLine = request.messages[0].content.split("\n")
+        .find((line) => line.startsWith("F1_identity_verifiability |")) ?? "";
+      expect(eligibilityLine).toContain(
+        `coverageRefs preferred return set (optional; return 0-4 total, never the whole ` +
+        `coverage catalog): ${coverageCandidates.join(", ")}`,
+      );
+      expect(eligibilityLine).not.toContain(omittedCoverageAlias);
+      if (attempt === 2) {
+        expect(request.messages[0].content).toContain(
+          "coverage-reference-limit-observed-5-max-4:F1_identity_verifiability",
+        );
+        expect(request.messages[0].content).toContain(
+          `The prior F1_identity_verifiability coverageRefs contained 5 aliases; the maximum is 4. ` +
+          `Return no more than these four preferred aliases: ${coverageCandidates.join(", ")}`,
+        );
+        expect(request.messages[0].content).toContain(
+          "Do not append or move omitted coverage aliases into support or counter fields",
+        );
+      }
+      return new Response(JSON.stringify({
+        content: [{
+          type: "tool_use",
+          name: request.tool_choice.name,
+          input: {
+            axes: [{
+              axis: "F1_identity_verifiability",
+              score: 10,
+              rationale: "Identity is supported while coverage gaps remain explicit.",
+              primaryEvidenceRef: substantiveAlias,
+              additionalEvidenceRefs: [],
+              counterEvidenceRefs: [],
+              coverageRefs: attempt === 1
+                ? [...coverageCandidates, omittedCoverageAlias]
+                : coverageCandidates,
+              gaps: ["Some identity and background checks had limited coverage."],
+            }],
+            headline: "Identity is supported with disclosed coverage limits.",
+            identity_note: "Identity resolved from the collected profile evidence.",
+          },
+        }],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 100, output_tokens: 20 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const verdict = await analyzeSubject("@subject", ["FOUNDER"], singleAxisCatalog, evidenceJson);
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(verdict?.axes[0].evidenceRefs).toHaveLength(5);
+
+    const nonPreferredCoverage = validateAnalystVerdict({
+      axes: [{
+        axis: "F1_identity_verifiability",
+        score: 10,
+        rationale: "Identity is supported with one different eligible coverage gap.",
+        primaryEvidenceRef: substantiveAlias,
+        additionalEvidenceRefs: [],
+        counterEvidenceRefs: [],
+        coverageRefs: [omittedCoverageAlias],
+        gaps: ["One eligible identity check had limited coverage."],
+      }],
+      headline: "Identity is supported with a disclosed coverage limit.",
+      identity_note: "Identity resolved from the collected profile evidence.",
+    }, singleAxisCatalog, scorerCatalog);
+    expect(nonPreferredCoverage?.axes[0].evidenceRefs).toHaveLength(2);
   });
 
   it("skips semantic repair when the route cannot preserve its finalization reserve", async () => {
