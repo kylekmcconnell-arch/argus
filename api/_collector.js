@@ -2747,7 +2747,10 @@ async function analyzeSubject(handle, roles, axisCatalog2, evidenceJson, options
     alias: `e${String(index + 1).padStart(3, "0")}`,
     artifact
   }));
+  const aliasesForAxis = (axis, coverageOnly) => citationAliases.filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && (coverageOnly ? !isSubstantiveArtifact(artifact) : isSubstantiveArtifact(artifact))).map(({ alias }) => alias);
+  const formatAliases = (aliases) => aliases.length > 0 ? aliases.join(", ") : "(none)";
   const citationAliasTable = citationAliases.map(({ alias, artifact }) => `${alias} = ${artifact.artifactId}`).join("\n");
+  const citationEligibilityTable = axisCatalog2.map(({ axis }) => `${axis} | substantive: ${formatAliases(aliasesForAxis(axis, false))} | coverage-only: ${formatAliases(aliasesForAxis(axis, true))}`).join("\n");
   const system = "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject on a fixed set of axes from collected evidence only. Be skeptical: a strong story never papers over a disqualifying fact. Score conservatively when evidence is thin. Each axis score must be between 0 and its weight. Write one tight rationale per axis citing the evidence. Never use em dashes.";
   const user = `Subject: ${handle}
 Held roles: ${roles.join(", ")}
@@ -2760,6 +2763,9 @@ ${evidenceJson}
 
 Citation aliases (return these short aliases in the tool call; ARGUS maps them back to the exact immutable artifact IDs):
 ${citationAliasTable}
+
+Axis citation allowlists (authoritative; an alias not listed for that axis is forbidden. primaryEvidenceRef and additionalEvidenceRefs may use only the substantive list. coverageRefs may use only the coverage-only list. counterEvidenceRefs may use only the substantive list):
+${citationEligibilityTable}
 
 Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.
 
@@ -2818,9 +2824,11 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
       }));
       return null;
     }
+    const rejectedAxis = axisNames.find((axis) => rejectionReason.endsWith(`:${axis}`));
+    const rejectedAxisHint = rejectedAxis ? ` For ${rejectedAxis}, the authoritative substantive aliases are ${formatAliases(aliasesForAxis(rejectedAxis, false))}; the coverage-only aliases are ${formatAliases(aliasesForAxis(rejectedAxis, true))}.` : "";
     const repairUser = `${user}
 
-REPAIR REQUIRED: the prior record_verdict tool payload was rejected by deterministic validation with reason "${rejectionReason}". Make one fresh record_verdict call. Recheck the exact axis set, per-axis score bounds, citation eligibility, duplicate aliases, support/counter overlap, and the array limits (seven additional support, eight counter, four coverage, and six gaps), plus the requirement that any returned coverageRefs have a material gap description. Do not invent evidence or fill a missing fact.`;
+REPAIR REQUIRED: the prior record_verdict tool payload was rejected by deterministic validation with reason "${rejectionReason}". Make one fresh record_verdict call. Recheck the exact axis set, per-axis score bounds, citation eligibility, duplicate aliases, support/counter overlap, and the array limits (seven additional support, eight counter, four coverage, and six gaps), plus the requirement that any returned coverageRefs have a material gap description. Do not invent evidence or fill a missing fact.${rejectedAxisHint}`;
     raw = await structured(
       system,
       repairUser,

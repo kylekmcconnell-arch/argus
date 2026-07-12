@@ -1480,8 +1480,19 @@ export async function analyzeSubject(
     alias: `e${String(index + 1).padStart(3, "0")}`,
     artifact,
   }));
+  const aliasesForAxis = (axis: string, coverageOnly: boolean): string[] => citationAliases
+    .filter(({ artifact }) => artifact.eligibleAxes.includes(axis)
+      && (coverageOnly ? !isSubstantiveArtifact(artifact) : isSubstantiveArtifact(artifact)))
+    .map(({ alias }) => alias);
+  const formatAliases = (aliases: string[]): string => aliases.length > 0
+    ? aliases.join(", ")
+    : "(none)";
   const citationAliasTable = citationAliases
     .map(({ alias, artifact }) => `${alias} = ${artifact.artifactId}`)
+    .join("\n");
+  const citationEligibilityTable = axisCatalog
+    .map(({ axis }) => `${axis} | substantive: ${formatAliases(aliasesForAxis(axis, false))}` +
+      ` | coverage-only: ${formatAliases(aliasesForAxis(axis, true))}`)
     .join("\n");
   const system =
     "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject " +
@@ -1496,6 +1507,11 @@ export async function analyzeSubject(
     `\n\nCollected evidence (JSON):\n${evidenceJson}\n\n` +
     `Citation aliases (return these short aliases in the tool call; ARGUS maps ` +
     `them back to the exact immutable artifact IDs):\n${citationAliasTable}\n\n` +
+    `Axis citation allowlists (authoritative; an alias not listed for that axis is ` +
+    `forbidden. primaryEvidenceRef and additionalEvidenceRefs may use only the ` +
+    `substantive list. coverageRefs may use only the coverage-only list. ` +
+    `counterEvidenceRefs may use only the substantive list):\n` +
+    `${citationEligibilityTable}\n\n` +
     `Score every listed axis, write the composite headline (one sentence on what ` +
     `governs the verdict), and an identity note.\n\n` +
     `ACTIVITY RULE: weigh posting cadence. profile.days_since_post is how long the ` +
@@ -1587,13 +1603,19 @@ export async function analyzeSubject(
       }));
       return null;
     }
+    const rejectedAxis = axisNames.find((axis) => rejectionReason.endsWith(`:${axis}`));
+    const rejectedAxisHint = rejectedAxis
+      ? ` For ${rejectedAxis}, the authoritative substantive aliases are ` +
+        `${formatAliases(aliasesForAxis(rejectedAxis, false))}; the coverage-only aliases are ` +
+        `${formatAliases(aliasesForAxis(rejectedAxis, true))}.`
+      : "";
     const repairUser = `${user}\n\nREPAIR REQUIRED: the prior record_verdict tool payload was rejected by ` +
       `deterministic validation with reason "${rejectionReason}". Make one fresh ` +
       `record_verdict call. Recheck the exact axis set, per-axis score bounds, ` +
       `citation eligibility, duplicate aliases, support/counter overlap, and the ` +
       `array limits (seven additional support, eight counter, four coverage, and six ` +
       `gaps), plus the requirement that any returned coverageRefs have a material gap description. ` +
-      `Do not invent evidence or fill a missing fact.`;
+      `Do not invent evidence or fill a missing fact.${rejectedAxisHint}`;
     raw = await structured<unknown>(
       system,
       repairUser,
