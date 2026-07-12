@@ -3,10 +3,16 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { resolveInput, runAudit } from "../_collector.js";
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
 import { persistServerDossier } from "../audit.js";
+import type { Dossier } from "../../src/data/dossier.js";
+import { deriveDecisionReadiness } from "../../src/lib/decisionReadiness.js";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
   DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
 } from "../../src/lib/investigationRuntime.js";
+import {
+  coverageQualifiedCompleteness,
+  presentPublicReport,
+} from "../../src/lib/reportPresentation.js";
 
 export const config = { maxDuration: 600 };
 
@@ -17,6 +23,98 @@ function cors(req: VercelRequest, res: VercelResponse): void {
   res.setHeader("vary", "Origin");
   res.setHeader("access-control-allow-headers", "Authorization, Content-Type");
   res.setHeader("access-control-allow-methods", "GET, OPTIONS");
+}
+
+function rawRoles(dossier: Dossier) {
+  return dossier.report.role_reports.map((role) => ({
+    role: role.role,
+    verdict: role.verdict,
+    score: role.score_total,
+    cap: role.cap_applied,
+  }));
+}
+
+function canonicalApiVerdict(value: string): string {
+  return value === "UNVERIFIABLE" ? "UNVERIFIABLE_IDENTITY" : value;
+}
+
+/**
+ * Project the immutable scorer output through the same fail-closed readiness
+ * policy used by the dashboard. The raw model result stays auditable, but it
+ * cannot occupy the API's final verdict/score fields until every applicable
+ * frozen check has a successful outcome.
+ */
+export function personApiResult(dossier: Dossier, reportVersionId: string | null) {
+  const report = dossier.report;
+  const checks = dossier.checkRuns ?? [];
+  const attestation = dossier.live ? "server_collected" : "analyst_submitted";
+  const completeness = coverageQualifiedCompleteness({
+    completeness: dossier.completeness_state ?? "partial",
+    attestation,
+    checks,
+  });
+  const presentation = presentPublicReport({
+    verdict: report.composite_verdict,
+    score: report.governing_score,
+    completeness,
+  });
+  const coverage = deriveDecisionReadiness(checks);
+  const roles = rawRoles(dossier);
+  const decisionReady = presentation.final;
+  const finalScore = decisionReady && presentation.primaryScore
+    ? Number(presentation.primaryScore)
+    : null;
+  const readinessState = decisionReady
+    ? "ready"
+    : completeness === "failed"
+      ? "failed"
+      : coverage.status === "provisional"
+        ? "provisional"
+        : "incomplete";
+  const hasRawModelSignal = report.composite_verdict !== "INCOMPLETE"
+    || report.governing_score !== null
+    || roles.some((role) => role.verdict !== "INCOMPLETE" || role.score !== null);
+
+  return {
+    api: "argus/v1",
+    kind: "person",
+    handle: dossier.handle,
+    display_name: dossier.display_name,
+    live: dossier.live,
+    // These two fields are the final, coverage-qualified decision output.
+    verdict: decisionReady ? canonicalApiVerdict(presentation.displayVerdict) : "INCOMPLETE",
+    score: finalScore,
+    decision_ready: decisionReady,
+    completeness_state: completeness,
+    decision_readiness: {
+      state: readinessState,
+      coverage_percent: coverage.coveragePercent,
+      successful_checks: coverage.successful,
+      applicable_checks: coverage.applicable,
+      unresolved_checks: coverage.unresolved,
+      note: presentation.note,
+    },
+    preliminary_model_signal: !decisionReady && hasRawModelSignal ? {
+      verdict: report.composite_verdict,
+      score: report.governing_score,
+      headline: dossier.headline,
+      roles,
+      classification: presentation.resultLabel === "RISK SIGNAL" ? "risk_signal" : "preliminary",
+    } : null,
+    governing_role: report.governing_role,
+    cap_applied: report.cap_applied,
+    identity: report.identity_confidence,
+    headline: decisionReady ? dossier.headline : presentation.note,
+    roles: roles.map((role) => ({
+      ...role,
+      verdict: decisionReady ? role.verdict : "INCOMPLETE",
+      score: decisionReady ? role.score : null,
+      status: decisionReady ? "final" : "preliminary",
+    })),
+    findings: report.publishable_findings,
+    report_version_id: reportVersionId,
+    links: { app: `https://argus-one-flax.vercel.app/?s=${dossier.handle.replace(/^@/, "")}` },
+  };
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -49,24 +147,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return;
     }
     const reportVersionId = await persistServerDossier(handle, dossier, auth);
-    const r = dossier.report;
-    res.status(200).json({
-      api: "argus/v1",
-      kind: "person",
-      handle: dossier.handle,
-      display_name: dossier.display_name,
-      live: dossier.live,
-      verdict: r.composite_verdict,
-      score: r.governing_score,
-      governing_role: r.governing_role,
-      cap_applied: r.cap_applied,
-      identity: r.identity_confidence,
-      headline: dossier.headline,
-      roles: r.role_reports.map((rr) => ({ role: rr.role, verdict: rr.verdict, score: rr.score_total, cap: rr.cap_applied })),
-      findings: r.publishable_findings,
-      report_version_id: reportVersionId,
-      links: { app: `https://argus-one-flax.vercel.app/?s=${dossier.handle.replace(/^@/, "")}` },
-    });
+    res.status(200).json(personApiResult(dossier, reportVersionId));
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }

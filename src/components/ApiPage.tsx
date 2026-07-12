@@ -91,22 +91,33 @@ export function ApiPage() {
         <Endpoint
           method="GET"
           path="/api/v1/person"
-          desc="Multi-class principal audit (founder / fund / KOL / advisor / agency), governed by the most severe role."
-          params={[["handle", "an X handle, e.g. @0xlumen"]]}
+          desc="Multi-class principal audit (founder / fund / KOL / advisor / agency), governed by the most severe role. Final verdict and score are withheld until frozen coverage is decision-ready; raw scorer output remains explicit and preliminary."
+          params={[["handle", "an X handle, e.g. @gakonst"]]}
           curl={`curl -H "Authorization: Bearer $ARGUS_ACCESS_TOKEN" \\
-  "${BASE}/api/v1/person?handle=0xlumen"`}
+  "${BASE}/api/v1/person?handle=gakonst"`}
           response={`{
   "api": "argus/v1",
   "kind": "person",
-  "handle": "@0xlumen",
-  "verdict": "FAIL",
-  "governing_role": "ADVISOR",
-  "score": 25,
-  "cap_applied": "advised_rug_with_allocation",
+  "handle": "@gakonst",
+  "verdict": "INCOMPLETE",
+  "score": null,
+  "decision_ready": false,
+  "completeness_state": "partial",
+  "decision_readiness": {
+    "state": "provisional",
+    "coverage_percent": 90,
+    "successful_checks": 9,
+    "applicable_checks": 10,
+    "unresolved_checks": 1
+  },
+  "preliminary_model_signal": {
+    "verdict": "PASS",
+    "score": 83,
+    "classification": "preliminary"
+  },
+  "governing_role": "INVESTOR",
   "roles": [
-    { "role": "FOUNDER", "verdict": "PASS", "score": 71 },
-    { "role": "INVESTOR", "verdict": "CAUTION", "score": 46 },
-    { "role": "ADVISOR", "verdict": "FAIL", "score": 25 }
+    { "role": "INVESTOR", "verdict": "INCOMPLETE", "score": null, "status": "preliminary" }
   ]
 }`}
         />

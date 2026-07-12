@@ -117,6 +117,53 @@ describe("PersonCheckTracker", () => {
     }));
   });
 
+  it("keeps a partial portfolio adapter run visible while treating a strong verified track record as a completed check", () => {
+    const tracker = new PersonCheckTracker();
+    for (const id of [
+      "identity-resolution",
+      "profile-photo-authenticity",
+      "code-footprint-github",
+      "identity-continuity",
+      "affiliations-associates",
+      "news-press",
+      "trust-graph-connections",
+    ] as const) {
+      tracker.record({ id, status: "checked-empty", note: `${id} completed`, provider: "test-provider" });
+    }
+    tracker.record({
+      id: "vc-portfolio-track-record",
+      status: "confirmed",
+      note: "6 relationships verified; bounded candidate coverage remained partial because 1 cited source fetch failed",
+      provider: "portfolio-web",
+      sourceCount: 6,
+    });
+    tracker.provider(
+      "portfolio-verification",
+      "Source-backed portfolio verification",
+      "partial",
+      "6 verified · 0 reported · 1 incomplete",
+    );
+
+    const scope = { resolvedRealName: false };
+    const checks = tracker.snapshot(["INVESTOR"], scope);
+    expect(checks.find((check) => check.checkId === "vc-portfolio-track-record")).toMatchObject({
+      status: "confirmed",
+      sourceCount: 6,
+      note: expect.stringContaining("1 cited source fetch failed"),
+    });
+    expect(tracker.providers().runs).toContainEqual(expect.objectContaining({
+      id: "portfolio-verification",
+      state: "partial",
+      detail: "6 verified · 0 reported · 1 incomplete",
+    }));
+    expect(tracker.completeness(["INVESTOR"], scope)).toBe("complete");
+    expect(deriveDecisionReadiness(checks)).toMatchObject({
+      status: "ready",
+      coveragePercent: 100,
+      unresolved: 0,
+    });
+  });
+
   it("keeps a not-applicable provider run explicitly skipped", () => {
     const tracker = new PersonCheckTracker();
     tracker.provider("onchain", "On-chain forensics (Helius)", "skipped", "no attributed Solana wallet");

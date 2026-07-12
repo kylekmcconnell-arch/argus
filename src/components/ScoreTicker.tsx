@@ -5,6 +5,7 @@ import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
 import { recentScored } from "../lib/recentScored";
 import type { ReportKind } from "../lib/reports";
+import { recentReportHref } from "../lib/recentReportRoute";
 
 // A clickable score card → opens the full report (persisted, no re-run).
 function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: ReportKind) => void }) {
@@ -15,14 +16,18 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
   const letter = (e.query.replace(/^[@$]/, "").replace(/^https?:\/\//, "")[0] ?? "?").toUpperCase();
   const img = auditImage(e);
   const me = getAnalyst();
+  const ref = e.ref ?? e.query;
+  const kind = e.flags?.some((flag) => flag.toLowerCase() === "investigation")
+    ? "investigation"
+    : e.kind;
   return (
-    <button
-      onClick={() => onOpen(
-        e.ref ?? e.query,
-        e.flags?.some((flag) => flag.toLowerCase() === "investigation")
-          ? "investigation"
-          : e.kind,
-      )}
+    <a
+      href={recentReportHref(ref, kind)}
+      onClick={(event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        onOpen(ref, kind);
+      }}
       title={presentedVerdict === "INCOMPLETE" ? "Open the report — positive score is not cleared because evidence coverage is incomplete" : "Open the full report"}
       className="group panel flex w-[260px] shrink-0 items-center gap-2.5 p-3 text-left transition hover:border-line-2 hover:bg-panel/80 soft-shadow"
     >
@@ -41,7 +46,7 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
         <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{e.score ?? "—"}</span>
         {presentedLabel && <span className="chip tint-var" style={{ ["--tint" as string]: color }}>{presentedLabel}</span>}
       </span>
-    </button>
+    </a>
   );
 }
 

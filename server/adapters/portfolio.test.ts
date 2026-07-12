@@ -752,7 +752,7 @@ describe("source-backed portfolio collection", () => {
 
   it("keeps the check unavailable when one candidate verifies but another source fails", async () => {
     const { ctx, checks } = context();
-    await collectPortfolioRelationships(ctx, {
+    const result = await collectPortfolioRelationships(ctx, {
       discover: async () => [
         lead(),
         lead({ projectName: "Broken Labs", sources: [{ url: "https://paradigm.xyz/portfolio/broken" }] }),
@@ -761,7 +761,72 @@ describe("source-backed portfolio collection", () => {
         ? { status: "failed", reason: "http_403" }
         : document(),
     });
+    expect(result.state).toBe("partial");
     expect(checks.at(-1)).toMatchObject({ status: "unavailable", sourceCount: 1 });
+    expect(checks.at(-1)?.note).toContain("coverage remained too weak");
+  });
+
+  it("records a strong verified outcome while preserving partial coverage when one of seven cited sources fails", async () => {
+    const { ctx, checks } = context();
+    const projects = Array.from({ length: 7 }, (_, index) => `Project ${index + 1}`);
+    const result = await collectPortfolioRelationships(ctx, {
+      discover: async () => projects.map((projectName, index) => lead({
+        projectName,
+        sources: [{ url: `https://paradigm.xyz/portfolio/project-${index + 1}` }],
+      })),
+      fetchSource: async (url): Promise<PublicTextResult> => url.endsWith("project-7")
+        ? { status: "failed", reason: "http_403" }
+        : document({
+            url,
+            text: `<h1>Our portfolio</h1><article>${projects[Number(url.at(-1)) - 1]}</article>`,
+            contentHash: String(url.at(-1)).repeat(64),
+          }),
+    });
+
+    expect(result).toMatchObject({
+      state: "partial",
+      detail: "6 verified · 0 reported · 1 incomplete",
+    });
+    expect(checks.at(-1)).toMatchObject({
+      id: "vc-portfolio-track-record",
+      status: "confirmed",
+      provider: "portfolio-web",
+      sourceCount: 6,
+    });
+    expect(checks.at(-1)?.note).toContain("bounded candidate coverage remained partial");
+    expect(checks.at(-1)?.note).toContain("1 cited source fetch failed");
+    expect(checks.at(-1)?.note).toContain("Incomplete candidates were not used as verification");
+    expect(ctx.emit).toHaveBeenCalledWith(expect.objectContaining({
+      label: "Portfolio verification partial",
+      tone: "warn",
+    }));
+  });
+
+  it("keeps a thin verified sample unavailable when many cited source fetches fail", async () => {
+    const { ctx, checks } = context();
+    const projects = ["Verified Project", "Broken One", "Broken Two", "Broken Three"];
+    const result = await collectPortfolioRelationships(ctx, {
+      discover: async () => projects.map((projectName, index) => lead({
+        projectName,
+        sources: [{ url: `https://paradigm.xyz/portfolio/project-${index + 1}` }],
+      })),
+      fetchSource: async (url): Promise<PublicTextResult> => url.endsWith("project-1")
+        ? document({
+            url,
+            text: "<h1>Our portfolio</h1><article>Verified Project</article>",
+          })
+        : { status: "failed", reason: "http_403" },
+    });
+
+    expect(result).toMatchObject({
+      state: "partial",
+      detail: "1 verified · 0 reported · 3 incomplete",
+    });
+    expect(checks.at(-1)).toMatchObject({
+      status: "unavailable",
+      sourceCount: 1,
+    });
+    expect(checks.at(-1)?.note).toContain("coverage remained too weak");
   });
 
   it("does not treat empty model discovery as an exhaustive checked-empty screen", async () => {

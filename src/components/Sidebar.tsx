@@ -11,6 +11,7 @@ import { getAnalyst } from "../lib/analyst";
 import { auditImage } from "../lib/avatars";
 import type { ReportKind } from "../lib/reports";
 import { normalizeSubjectRef } from "../lib/subjectRef";
+import { recentReportHref } from "../lib/recentReportRoute";
 
 // Subject thumbnail: the real logo/photo, falling back to a letter if it is
 // missing or fails to load (unavatar/favicon/dexscreener can 404).
@@ -309,17 +310,22 @@ export function Sidebar({
         ) : (
           recent.map((e) => {
             const ref = e.ref ?? e.query;
+            const kind = e.flags?.some((flag) => flag.toLowerCase() === "investigation") ? "investigation" : e.kind;
             const displayedVerdict = presentedAuditVerdict(e);
             const vm = displayedVerdict ? verdictMeta(displayedVerdict) : null;
             const active = activeHandle === ref || activeHandle === e.query;
             const avatar = (e.query.replace(/^[@$]/, "").replace(/^https?:\/\//, "")[0] ?? "?").toUpperCase();
             return (
-              <button
+              <a
                 key={e.id}
-                onClick={() => openRecent(
-                  ref,
-                  e.flags?.some((flag) => flag.toLowerCase() === "investigation") ? "investigation" : e.kind,
-                )}
+                href={recentReportHref(ref, kind)}
+                onClick={(event) => {
+                  if (!onOpenRecent) return;
+                  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+                  event.preventDefault();
+                  onOpenRecent(ref, kind);
+                  onClose?.();
+                }}
                 className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${
                   active ? "bg-panel soft-shadow" : "hover:bg-panel/70"
                 }`}
@@ -335,7 +341,7 @@ export function Sidebar({
                   </span>
                 </span>
                 {vm && <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: vm.color }} />}
-              </button>
+              </a>
             );
           })
         )}
