@@ -1558,25 +1558,58 @@ var SHARED_PUBLICATION_HOSTS = /* @__PURE__ */ new Set([
   "blogspot.com",
   "blob.core.windows.net",
   "carrd.co",
+  "discord.com",
+  "discord.gg",
+  "facebook.com",
+  "github.com",
+  "githubusercontent.com",
   "github.io",
+  "gitlab.com",
   "gitbook.io",
+  "hackmd.io",
+  "instagram.com",
+  "ipfs.io",
   "linktr.ee",
+  "linkedin.com",
   "medium.com",
+  "mirror.xyz",
+  "arweave.net",
+  "cloudflare-ipfs.com",
+  "dweb.link",
   "netlify.app",
   "notion.site",
   "notion.so",
   "pages.dev",
+  "paragraph.xyz",
+  "pinata.cloud",
+  "raw.githubusercontent.com",
+  "docs.google.com",
+  "drive.google.com",
+  "dropbox.com",
+  "box.com",
+  "firebaseapp.com",
+  "framer.app",
+  "framer.website",
+  "railway.app",
+  "render.com",
   "sites.google.com",
   "storage.googleapis.com",
   "substack.com",
   "t.co",
+  "t.me",
+  "telegram.me",
+  "threads.net",
+  "tiktok.com",
   "tinyurl.com",
+  "twitch.tv",
   "twitter.com",
   "vercel.app",
   "webflow.io",
   "wixsite.com",
   "wordpress.com",
-  "x.com"
+  "x.com",
+  "youtu.be",
+  "youtube.com"
 ]);
 var INDEPENDENT_PRESS_HOSTS = [
   "reuters.com",
@@ -1649,14 +1682,24 @@ var namesExactlyMatch = (left, right) => {
 };
 var canonicalHandle = (value) => typeof value === "string" ? value.trim().replace(/^https?:\/\/(?:www\.)?(?:x|twitter)\.com\//i, "").replace(/^@/, "").toLowerCase() : "";
 var normalizedWords = (value) => typeof value === "string" ? value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9@_]+/g, " ").trim() : "";
+var providerEntityNamesMatch = (left, right) => {
+  const a = normalizedWords(left);
+  const b = normalizedWords(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const shorter = a.length <= b.length ? a : b;
+  const longer = a.length > b.length ? a : b;
+  return shorter.length >= 5 && (longer.startsWith(`${shorter} `) || longer.endsWith(` ${shorter}`));
+};
 var regexEscape = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var AFFILIATION_ROLE = "(?:founding |general |managing |research )?(?:partner|principal|investor|researcher|research|engineer|developer|employee|advisor|adviser|cto|chief technology officer|team member|team|lead|director|gp)|(?:co founder|cofounder|founder|ceo|chief executive officer|cio|chief investment officer|portfolio manager|managing director)";
 var profileBioHasCurrentAffiliation = (profile, value) => {
   const bio = normalizedWords(profile.bio);
   if (!bio) return false;
   const entity = normalizedWords(value.investorEntityName ?? value.fundName);
   const handle = canonicalHandle(value.investorEntityHandle);
   const aliases = [entity, handle].filter((alias, index, all) => Boolean(alias) && all.indexOf(alias) === index);
-  const role = "(?:founding |general |managing |research )?(?:partner|principal|investor|researcher|research|engineer|developer|employee|advisor|adviser|cto|chief technology officer|team member|team|lead|director|gp)";
+  const role = `(?:${AFFILIATION_ROLE})`;
   const affiliationLink = "(?:(?:at|with)\\s+|@\\s*)";
   return aliases.some((alias) => {
     const escaped = normalizedWords(alias).split(/\s+/).filter(Boolean).map(regexEscape).join("[^a-z0-9@_]+");
@@ -1676,9 +1719,36 @@ var profileBioHasCurrentAffiliation = (profile, value) => {
       const lastEnded = endedMarkers.at(-1)?.index ?? -1;
       const lastCurrent = currentMarkers.at(-1)?.index ?? -1;
       if (lastEnded >= 0 && lastCurrent < lastEnded) return false;
+      const matchedContext = `${before.slice(-40)} ${match[0]}`;
+      if (new RegExp(`\\b(?:not|never)\\s+(?:currently\\s+)?(?:an?\\s+)?(?:${AFFILIATION_ROLE})\\b`, "i").test(matchedContext) || /\b(?:no\s+(?:current\s+)?affiliation|not\s+affiliated|never\s+(?:worked|working))\b/i.test(matchedContext) || /\b(?:not|never)(?:\s+an?)?\s*$/i.test(before) && new RegExp(`(?:${role})\\b`, "i").test(match[0])) return false;
       return !/^.{0,45}\b(?:former|formerly|no longer|left|departed|retired|until|through)\b/i.test(after);
     }));
   });
+};
+var profileBioHasCurrentHandleAffiliation = (profile, value) => {
+  const bio = normalizedWords(profile.bio);
+  const handle = canonicalHandle(value);
+  if (!bio || !HANDLE.test(handle)) return false;
+  const role = `(?:${AFFILIATION_ROLE})`;
+  const pattern = new RegExp(`@${regexEscape(handle)}(?=$|[^a-z0-9_])`, "gi");
+  for (const match of bio.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const before = bio.slice(Math.max(0, start - 100), start);
+    const after = bio.slice(end, Math.min(bio.length, end + 70));
+    const endedMarkers = [...before.matchAll(/\b(?:former|formerly|previously|ex|no longer|left|departed|retired)\b/gi)];
+    const currentMarkers = [...before.matchAll(/\b(?:now|currently)\b/gi)];
+    const lastEnded = endedMarkers.at(-1)?.index ?? -1;
+    const lastCurrent = currentMarkers.at(-1)?.index ?? -1;
+    if (lastEnded >= 0 && lastCurrent < lastEnded) continue;
+    if (/^[^.;|]{0,55}\b(?:no longer|left|departed|retired|until|through)\b/i.test(after)) continue;
+    if (new RegExp(`\\b(?:not|never)\\s+(?:currently\\s+)?(?:an?\\s+)?(?:${AFFILIATION_ROLE})\\b[^.;|]{0,35}$`, "i").test(before) || /\b(?:no\s+(?:current\s+)?affiliation|not\s+affiliated|never\s+(?:worked|working))\b[^.;|]{0,35}$/i.test(before)) continue;
+    if (/\b(?:not|never)(?:\s+an?)?\s*$/i.test(before) && new RegExp(`^\\s*(?:${role})\\b`, "i").test(after)) continue;
+    if (new RegExp(`${role}\\s*(?:(?:at|with)\\s*)?$`, "i").test(before)) return true;
+    if (/\b(?:work(?:ing|s)?|build(?:ing|s)?|research(?:ing|es)?)\s*(?:(?:at|with)\s*)?$/i.test(before)) return true;
+    if (new RegExp(`^\\s*(?:${role})\\b`, "i").test(after)) return true;
+  }
+  return false;
 };
 var cleanHost = (value) => value.replace(/^www\./i, "").toLowerCase();
 var isSharedPublicationHost = (host) => {
@@ -1709,14 +1779,44 @@ var boundedWebUrl = (value) => {
   }
 };
 var profileWebsiteHost = (value) => {
+  return canonicalOfficialWebsite(value)?.domain ?? null;
+};
+var canonicalPublicProfileWebsite = (value) => {
   if (typeof value !== "string" || !value.trim() || value.length > 2e3) return null;
   try {
     const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
-    const host = cleanHost(url.hostname);
-    return (url.protocol === "https:" || url.protocol === "http:") && isCredibleOfficialDomain(host) ? host : null;
+    const host = cleanHost(url.hostname).replace(/\.$/, "");
+    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || url.port || !isPublicHostname(host) || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM.test(key))) return null;
+    const pathname = url.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/";
+    return `https://${host}${pathname === "/" ? "/" : pathname}`;
   } catch {
     return null;
   }
+};
+var canonicalOfficialWebsite = (value) => {
+  const canonical2 = canonicalPublicProfileWebsite(value);
+  if (!canonical2) return null;
+  try {
+    const url = new URL(canonical2);
+    const domain = cleanHost(url.hostname).replace(/\.$/, "");
+    if (!isCredibleOfficialDomain(domain)) return null;
+    return {
+      domain,
+      canonicalUrl: canonical2
+    };
+  } catch {
+    return null;
+  }
+};
+var sourceMatchesOfficialWebsiteScope = (sourceValue, profileWebsite) => {
+  const source = sourceValue instanceof URL ? sourceValue : boundedWebUrl(sourceValue);
+  const scope = canonicalOfficialWebsite(profileWebsite);
+  if (!source || !scope || !hostMatches(source.hostname, scope.domain)) return false;
+  const scopeUrl = new URL(scope.canonicalUrl);
+  if (scopeUrl.pathname === "/") return true;
+  const sourcePath = source.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/";
+  const scopePath = scopeUrl.pathname.replace(/\/$/, "");
+  return cleanHost(source.hostname) === scope.domain && (sourcePath === scopePath || sourcePath.startsWith(`${scopePath}/`));
 };
 var validatedPacketProfile = (context, now, artifactCapturedAt) => {
   const profile = asRecord(context.profile);
@@ -1758,12 +1858,12 @@ var isRecordSpecificRegulatoryUrl = (url) => {
   return false;
 };
 var hasCurrentAffiliationProof = (value, capturedAt, now, profile) => {
-  const subjectName = comparable(value.subjectName);
+  const subjectName2 = comparable(value.subjectName);
   const handle = typeof value.subjectHandle === "string" ? value.subjectHandle.trim().replace(/^@/, "") : "";
   const source = boundedWebUrl(value.attributionSourceUrl);
   const sourceHash = typeof value.attributionSourceContentHash === "string" ? value.attributionSourceContentHash : "";
   const affiliationCapturedAt = validDate(value.attributionCapturedAt);
-  if (!subjectName || !HANDLE.test(handle) || !source || !SHA256_HEX.test(sourceHash) || !affiliationCapturedAt) return false;
+  if (!subjectName2 || !HANDLE.test(handle) || !source || !SHA256_HEX.test(sourceHash) || !affiliationCapturedAt) return false;
   if (affiliationCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || affiliationCapturedAt.getTime() > capturedAt.getTime() + CLOCK_SKEW_MS || capturedAt.getTime() - affiliationCapturedAt.getTime() > 7 * DAY_MS) return false;
   const host = cleanHost(source.hostname);
   const path = source.pathname.split("/").filter(Boolean);
@@ -1775,6 +1875,21 @@ var hasCurrentAffiliationProof = (value, capturedAt, now, profile) => {
   return Boolean(
     profileCapturedAt && Math.abs(profileCapturedAt.getTime() - affiliationCapturedAt.getTime()) <= 1e3 && profileBioHasCurrentAffiliation(profile, value)
   );
+};
+var hasOfficialInvestorDomainProof = (value, capturedAt, now, profile) => {
+  const officialDomain = typeof value.investorEntityDomain === "string" ? cleanHost(value.investorEntityDomain) : "";
+  const source = boundedWebUrl(value.investorDomainSourceUrl);
+  const sourceHash = typeof value.investorDomainSourceContentHash === "string" ? value.investorDomainSourceContentHash : "";
+  const domainCapturedAt = validDate(value.investorDomainCapturedAt);
+  const fundHandle = canonicalHandle(value.investorEntityHandle);
+  const profileName = typeof value.investorDomainProfileName === "string" ? value.investorDomainProfileName.trim() : "";
+  const profileWebsite = typeof value.investorDomainProfileWebsite === "string" ? value.investorDomainProfileWebsite.trim() : "";
+  const profileWebsiteUrl = boundedWebUrl(profileWebsite);
+  if (value.investorDomainSourceKind !== "provider_profile" || !isCredibleOfficialDomain(officialDomain) || !source || !SHA256_HEX.test(sourceHash) || !domainCapturedAt || !fundHandle || !profileName || !profileWebsite || !profileWebsiteUrl || profileWebsiteUrl.search || profileWebsiteUrl.hash || !providerEntityNamesMatch(profileName, value.investorEntityName) || profileWebsiteHost(profileWebsite) !== officialDomain || !sourceMatchesOfficialWebsiteScope(value.sourceUrl, profileWebsite) || !profile || !profileBioHasCurrentHandleAffiliation(profile, fundHandle)) return false;
+  if (domainCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || domainCapturedAt.getTime() > capturedAt.getTime() + CLOCK_SKEW_MS || capturedAt.getTime() - domainCapturedAt.getTime() > 7 * DAY_MS) return false;
+  const host = cleanHost(source.hostname);
+  const path = source.pathname.split("/").filter(Boolean);
+  return (host === "x.com" || host === "twitter.com") && path.length === 1 && path[0].toLowerCase() === fundHandle && !source.search && !source.hash;
 };
 var structurallyStrictFundScaleArtifact = (value, now, context) => {
   if (value.kind !== "fund_scale" || value.provider !== "fund-scale-web" || value.match !== "fund_scale_confirmed") return false;
@@ -1805,8 +1920,9 @@ var structurallyStrictFundScaleArtifact = (value, now, context) => {
   if (sourceClass3 === "first_party_subject" || sourceClass3 === "first_party_investor") {
     const officialDomain = typeof value.investorEntityDomain === "string" ? cleanHost(value.investorEntityDomain) : "";
     if (!isCredibleOfficialDomain(officialDomain) || !hostMatches(sourceUrl.hostname, officialDomain) || basis !== "manager_reported" || metric === "regulatory_aum" || sourceClass3 === "first_party_subject" !== (attribution === "direct_subject")) return false;
-    if (sourceClass3 === "first_party_investor") return false;
-    if (profile && profileWebsiteHost(profile.website) !== officialDomain) return false;
+    if (sourceClass3 === "first_party_investor") {
+      if (!hasOfficialInvestorDomainProof(value, capturedAt, now, profile)) return false;
+    } else if (profile && (profileWebsiteHost(profile.website) !== officialDomain || !sourceMatchesOfficialWebsiteScope(sourceUrl, profile.website))) return false;
   } else if (sourceClass3 === "public_primary") {
     if (basis !== "regulatory" || metric !== "regulatory_aum" || !isRecordSpecificRegulatoryUrl(sourceUrl)) return false;
   } else if (basis !== "press_corroborated" || metric === "regulatory_aum" || !listedHost(sourceUrl.hostname, INDEPENDENT_PRESS_HOSTS) || typeof value.fundScaleSourceCount !== "number" || !Number.isInteger(value.fundScaleSourceCount) || value.fundScaleSourceCount < 2) return false;
@@ -2293,6 +2409,16 @@ function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onRej
   };
 }
 var ANALYST_EVIDENCE_MAX_CHARS = 24e3;
+var SCORING_PACKET_STATE_FIELD = "scoring_packet_state";
+var SCORING_PACKET_OVERSIZE = "oversize";
+var scoringPacketOversizeJson = (requestedAxisCount, reason) => JSON.stringify({
+  schema_version: 4,
+  [SCORING_PACKET_STATE_FIELD]: SCORING_PACKET_OVERSIZE,
+  reason,
+  limit_chars: ANALYST_EVIDENCE_MAX_CHARS,
+  requested_axis_count: requestedAxisCount,
+  evidenceCatalog: []
+});
 var clip = (value, max) => {
   if (typeof value !== "string") return void 0;
   return value.length <= max ? value : value.slice(0, max) + "\u2026";
@@ -2355,6 +2481,12 @@ var SOURCE_ARTIFACT_FIELDS = [
   "attributionSourceContentHash",
   "attributionCapturedAt",
   "attributionSourceKind",
+  "investorDomainSourceUrl",
+  "investorDomainSourceContentHash",
+  "investorDomainCapturedAt",
+  "investorDomainSourceKind",
+  "investorDomainProfileName",
+  "investorDomainProfileWebsite",
   "fundName",
   "fundSizeUsd",
   "fundVehicle",
@@ -2726,6 +2858,12 @@ var SOURCE_ARTIFACT_AXIS_ELIGIBILITY = {
     "ME3_conduct_reputation"
   ]
 };
+var SCORING_SUPPORTED_AXES = /* @__PURE__ */ new Set([
+  ...Object.values(SECTION_AXIS_ELIGIBILITY).flat(),
+  ...Object.values(FINDING_AXIS_ELIGIBILITY).flat(),
+  ...Object.values(CHECK_AXIS_ELIGIBILITY).flat(),
+  ...Object.values(SOURCE_ARTIFACT_AXIS_ELIGIBILITY).flat()
+]);
 var sourceArtifactKind = (value) => {
   const kind = typeof value.kind === "string" ? value.kind : "";
   if (SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind]) return kind;
@@ -2801,7 +2939,9 @@ var ARTIFACT_URL_FIELDS = /* @__PURE__ */ new Set([
   "href",
   "citation",
   "link_evidence_url",
-  "attributionSourceUrl"
+  "attributionSourceUrl",
+  "investorDomainSourceUrl",
+  "investorDomainProfileWebsite"
 ]);
 var sanitizeArtifactUrls = (value, depth = 0) => {
   if (value == null || typeof value !== "object" || depth > 4) return value;
@@ -2810,7 +2950,7 @@ var sanitizeArtifactUrls = (value, depth = 0) => {
   const sanitized = {};
   for (const [key, item] of Object.entries(sourceRecord)) {
     if (ARTIFACT_URL_FIELDS.has(key) && typeof item === "string") {
-      if (key === "attributionSourceUrl" || sourceRecord.kind === "fund_scale" && (key === "sourceUrl" || key === "source_url")) {
+      if (key === "attributionSourceUrl" || key === "investorDomainSourceUrl" || key === "investorDomainProfileWebsite" || sourceRecord.kind === "fund_scale" && (key === "sourceUrl" || key === "source_url")) {
         try {
           if ([...new URL(item).searchParams.keys()].some((param) => ARTIFACT_SENSITIVE_URL_PARAM.test(param))) continue;
         } catch {
@@ -3142,7 +3282,7 @@ function serializeAnalystEvidencePacket(input, options) {
       const record2 = item;
       return record2.evidence_origin !== "model_lead" && record2.artifact_verified !== false;
     });
-    const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source, limit) : source.slice(0, limit);
+    const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source, options.axisCatalog ? source.length : limit) : source.slice(0, limit);
     const included = selected.map((item) => section === "sourceArtifacts" ? compactSourceArtifact(item) : compactObject(item)).filter((item) => item !== void 0);
     packet[section] = included;
     coverage[section] = { available: source.length, included: included.length };
@@ -3165,40 +3305,89 @@ function serializeAnalystEvidencePacket(input, options) {
     "sourceArtifacts"
   ];
   const render = () => options.axisCatalog ? renderScoringPacket(packet, options.axisCatalog) : packet;
+  const substantiveAxesIn = (rendered) => {
+    if (!Array.isArray(rendered.evidenceCatalog)) return /* @__PURE__ */ new Set();
+    return new Set(rendered.evidenceCatalog.flatMap((value) => isAxisEvidenceRecord(value) && isSubstantiveArtifact(value) ? value.eligibleAxes : []));
+  };
+  const requiredSubstantiveAxes = options.axisCatalog ? substantiveAxesIn(render()) : /* @__PURE__ */ new Set();
+  const preservesSubstantiveCoverage = () => {
+    if (!options.axisCatalog || requiredSubstantiveAxes.size === 0) return true;
+    const retained = substantiveAxesIn(render());
+    return [...requiredSubstantiveAxes].every((axis) => retained.has(axis));
+  };
+  const removeOneArrayItem = (section, minimumLength = 0) => {
+    const values = Array.isArray(packet[section]) ? packet[section] : [];
+    if (values.length <= minimumLength) return false;
+    for (let index = values.length - 1; index >= minimumLength; index -= 1) {
+      const [removed] = values.splice(index, 1);
+      if (preservesSubstantiveCoverage()) {
+        if (coverage[section]) coverage[section].included = values.length;
+        return true;
+      }
+      values.splice(index, 0, removed);
+    }
+    return false;
+  };
+  const removeOneFrom = (sections, allowed) => {
+    for (const section of sections) {
+      if (allowed(section) && removeOneArrayItem(section)) return true;
+    }
+    return false;
+  };
+  const pruneTrustGraphPreservingCoverage = () => {
+    const previous = packet.trustGraphScreen == null ? void 0 : structuredClone(packet.trustGraphScreen);
+    if (!pruneTrustGraphPacket(packet)) return false;
+    if (preservesSubstantiveCoverage()) return true;
+    if (previous === void 0) delete packet.trustGraphScreen;
+    else packet.trustGraphScreen = previous;
+    return false;
+  };
+  const deleteProfilePreservingCoverage = () => {
+    if (packet.profile == null) return false;
+    const previous = packet.profile;
+    delete packet.profile;
+    if (preservesSubstantiveCoverage()) return true;
+    packet.profile = previous;
+    return false;
+  };
+  if (options.axisCatalog) {
+    const sourceArtifactLimit = sectionLimits.sourceArtifacts;
+    const sourceArtifacts = Array.isArray(packet.sourceArtifacts) ? packet.sourceArtifacts : [];
+    while (sourceArtifacts.length > sourceArtifactLimit) {
+      if (!removeOneArrayItem("sourceArtifacts")) break;
+    }
+    if (sourceArtifacts.length > sourceArtifactLimit) {
+      return scoringPacketOversizeJson(options.axisCatalog.length, "source_artifact_cap_irreducible");
+    }
+  }
   let json = JSON.stringify(render());
   const protectedEvidenceSections = /* @__PURE__ */ new Set(["checkOutcomes", "sourceArtifacts"]);
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
-    const section = pruneOrder.find((key) => !protectedEvidenceSections.has(key) && Array.isArray(packet[key]) && packet[key].length > 0);
-    if (!section) break;
-    packet[section].pop();
-    coverage[section].included = packet[section].length;
+    if (!removeOneFrom(pruneOrder, (section) => !protectedEvidenceSections.has(section))) break;
     json = JSON.stringify(render());
   }
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS && findings.length > 1) {
-    findings.pop();
-    coverage.findings.included = findings.length;
+    if (!removeOneArrayItem("findings", 1)) break;
     json = JSON.stringify(render());
   }
-  while (json.length > ANALYST_EVIDENCE_MAX_CHARS && pruneTrustGraphPacket(packet)) {
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS && pruneTrustGraphPreservingCoverage()) {
     json = JSON.stringify(render());
   }
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
-    const section = pruneOrder.find((key) => protectedEvidenceSections.has(key) && Array.isArray(packet[key]) && packet[key].length > 0);
-    if (!section) break;
-    packet[section].pop();
-    coverage[section].included = packet[section].length;
+    if (!removeOneFrom(pruneOrder, (section) => protectedEvidenceSections.has(section))) break;
     json = JSON.stringify(render());
   }
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS && findings.length > 0) {
-    findings.pop();
-    coverage.findings.included = findings.length;
+    if (!removeOneArrayItem("findings")) break;
     json = JSON.stringify(render());
   }
-  if (json.length > ANALYST_EVIDENCE_MAX_CHARS && packet.profile != null) {
-    delete packet.profile;
+  if (json.length > ANALYST_EVIDENCE_MAX_CHARS && deleteProfilePreservingCoverage()) {
     json = JSON.stringify(render());
   }
   if (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
+    if (options.axisCatalog) {
+      return scoringPacketOversizeJson(options.axisCatalog.length, "substantive_coverage_irreducible");
+    }
     throw new Error(`analyst evidence packet exceeds ${ANALYST_EVIDENCE_MAX_CHARS} characters after structural pruning`);
   }
   return json;
@@ -3206,11 +3395,78 @@ function serializeAnalystEvidencePacket(input, options) {
 function buildScoringEvidencePacket(input, axisCatalog2) {
   return serializeAnalystEvidencePacket(input, { includeInvestigativeLeads: false, axisCatalog: axisCatalog2 });
 }
+function inspectAnalystScoringPreflight(axisCatalog2, evidenceJson) {
+  if (axisCatalog2.length === 0) {
+    return {
+      state: "no_axes",
+      requestedAxisCount: 0,
+      evidenceArtifactCount: 0,
+      missingSubstantiveAxes: [],
+      unsupportedAxes: []
+    };
+  }
+  const axisNames = axisCatalog2.map(({ axis }) => axis);
+  if (new Set(axisNames).size !== axisNames.length || axisCatalog2.some((axis) => !axis.axis || !Number.isInteger(axis.weight) || axis.weight < 0)) {
+    return {
+      state: "invalid_catalog",
+      requestedAxisCount: axisCatalog2.length,
+      evidenceArtifactCount: 0,
+      missingSubstantiveAxes: [],
+      unsupportedAxes: []
+    };
+  }
+  const unsupportedAxes = axisNames.filter((axis) => !SCORING_SUPPORTED_AXES.has(axis));
+  if (unsupportedAxes.length > 0) {
+    return {
+      state: "unsupported_axes",
+      requestedAxisCount: axisCatalog2.length,
+      evidenceArtifactCount: 0,
+      missingSubstantiveAxes: [],
+      unsupportedAxes
+    };
+  }
+  try {
+    const packet = JSON.parse(evidenceJson);
+    if (packet && typeof packet === "object" && !Array.isArray(packet) && packet[SCORING_PACKET_STATE_FIELD] === SCORING_PACKET_OVERSIZE) {
+      return {
+        state: "packet_oversize",
+        requestedAxisCount: axisCatalog2.length,
+        evidenceArtifactCount: 0,
+        missingSubstantiveAxes: [],
+        unsupportedAxes: []
+      };
+    }
+  } catch {
+  }
+  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
+  if (!evidenceCatalog.length) {
+    return {
+      state: "invalid_catalog",
+      requestedAxisCount: axisCatalog2.length,
+      evidenceArtifactCount: 0,
+      missingSubstantiveAxes: [],
+      unsupportedAxes: []
+    };
+  }
+  const missingSubstantiveAxes = axisCatalog2.filter((axis) => !evidenceCatalog.some((artifact) => isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis))).map(({ axis }) => axis);
+  return {
+    state: missingSubstantiveAxes.length > 0 ? "insufficient_evidence" : "ready",
+    requestedAxisCount: axisCatalog2.length,
+    evidenceArtifactCount: evidenceCatalog.length,
+    missingSubstantiveAxes,
+    unsupportedAxes: []
+  };
+}
 async function analyzeSubject(handle, roles, axisCatalog2, evidenceJson, options = {}) {
   const axisNames = axisCatalog2.map(({ axis }) => axis);
   if (!axisCatalog2.length || new Set(axisNames).size !== axisNames.length || axisCatalog2.some((axis) => !axis.axis || !Number.isInteger(axis.weight) || axis.weight < 0)) return null;
+  const preflight = inspectAnalystScoringPreflight(axisCatalog2, evidenceJson);
+  console.info("[agent-preflight]", JSON.stringify({
+    tool: "record_verdict",
+    ...preflight
+  }));
+  if (preflight.state !== "ready") return null;
   const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
-  if (!evidenceCatalog.length || axisCatalog2.some((axis) => !evidenceCatalog.some((artifact) => isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis)))) return null;
   const citationAliases = evidenceCatalog.map((artifact, index) => ({
     alias: `e${String(index + 1).padStart(3, "0")}`,
     artifact
@@ -4569,6 +4825,7 @@ var xAdapter = {
       ctx.evidence.profile.profile_captured_at = (/* @__PURE__ */ new Date()).toISOString();
       ctx.evidence.profile.display_name = prof.name ?? ctx.evidence.profile.display_name;
       ctx.evidence.profile.bio = prof.bio ?? ctx.evidence.profile.bio;
+      ctx.evidence.profile.website = canonicalPublicProfileWebsite(prof.website) ?? ctx.evidence.profile.website;
       ctx.evidence.profile.followers = fmtFollowers(prof.followers);
       if (prof.image) {
         ctx.evidence.profile.avatar_url = prof.image;
@@ -7962,19 +8219,52 @@ async function fetchPublicText(raw, dependencies = {}) {
 
 // server/adapters/investorDiscovery.ts
 var discoveryByEvidence = /* @__PURE__ */ new WeakMap();
+var focusedPortfolioByEvidence = /* @__PURE__ */ new WeakMap();
+var focusedFundScaleByEvidence = /* @__PURE__ */ new WeakMap();
+var subjectName = (ctx) => ctx.evidence.profile.resolved_name || ctx.evidence.profile.display_name || ctx.handle;
+var affiliationHints = (ctx) => ctx.evidence.ventures.slice(0, 12).map((venture) => `${venture.project_name} (${venture.role})`).join(", ");
+var subjectContext = (ctx) => {
+  const hints = affiliationHints(ctx);
+  return `Audited subject: ${subjectName(ctx)} (X ${ctx.handle})${ctx.evidence.profile.website ? `, official website ${ctx.evidence.profile.website}` : ""}. Official X bio: ${ctx.evidence.profile.bio || "not available"}.${hints ? ` Affiliation leads to investigate without assuming: ${hints}.` : ""}`;
+};
+var normalizedHandle = (ctx) => ctx.handle.replace(/^@/, "").toLowerCase();
 function discoverInvestorEvidenceText(ctx) {
   if (!env("XAI_API_KEY")) return Promise.resolve(null);
   const existing = discoveryByEvidence.get(ctx.evidence);
   if (existing) return existing;
-  const subjectName = ctx.evidence.profile.resolved_name || ctx.evidence.profile.display_name || ctx.handle;
-  const affiliationHints = ctx.evidence.ventures.slice(0, 12).map((venture) => `${venture.project_name} (${venture.role})`).join(", ");
   const system = 'You discover public investment and fund-scale evidence for a forensic due-diligence collector. Use live web and X search only. For investments, find a bounded representative set disclosed by this exact fund, VC, or angel. For fund scale, find disclosed USD fund closes, first closes, fund vehicle sizes, or dated assets under management for the exact manager or a fund the person currently works for. Prefer the verified manager website, regulatory filings, project financing announcements for investment relationships, or reputable independent editorial reporting. Every candidate must include an exact public source URL. URLs and all model fields are leads only and will be fetched and re-derived. Never use model memory alone. Never infer an investment from a follow, employment, token holding, or company-name match. Never treat a portfolio company round, valuation, TVL, dry powder, deployed capital, target raise, or proposed hard cap as fund scale. Distinguish a personal investment from the portfolio or scale of a fund the person works for. If a source names the fund, attribute it to the affiliated fund and never rewrite it as personal capital. Return only compact JSON with both arrays: {"investments":[{"project":"","investor_entity":"person or fund actually named by the source","investor_x_handle":"@...","attribution":"direct_subject|affiliated_fund","relationship":"invested|backed|led round|incubated","stage":"","year":"","project_x_handle":"@...","project_domain":"example.com","ticker":"$...","contract":"","chain":"","sources":[{"url":"https://...","title":""}]}],"fund_scale":[{"fund_name":"manager or fund entity","fund_vehicle":"named vehicle if stated","fund_x_handle":"@...","attribution":"direct_subject|affiliated_fund","metric_hint":"aum|fund_vehicle|first_close|final_close","amount_hint_usd":0,"sources":[{"url":"https://...","title":""}]}]}. Return at most 10 investment candidates and 6 fund-scale candidates. Return empty arrays when none are found.';
-  const user = `Audited subject: ${subjectName} (X ${ctx.handle})${ctx.evidence.profile.website ? `, official website ${ctx.evidence.profile.website}` : ""}. Official X bio: ${ctx.evidence.profile.bio || "not available"}.${affiliationHints ? ` Affiliation leads to investigate without assuming: ${affiliationHints}.` : ""} Find source-linked direct investments, affiliated-fund investments, and source-linked fund-scale claims while keeping every attribution separate.`;
+  const user = subjectContext(ctx) + " Find source-linked direct investments, affiliated-fund investments, and source-linked fund-scale claims while keeping every attribution separate.";
   const pending = grokSearch(system, user, {
     maxToolCalls: 14,
-    cacheKey: `investor-core:v3:${ctx.handle.replace(/^@/, "").toLowerCase()}`
+    cacheKey: `investor-core:v3:${normalizedHandle(ctx)}`
   });
   discoveryByEvidence.set(ctx.evidence, pending);
+  return pending;
+}
+function discoverFocusedPortfolioEvidenceText(ctx) {
+  if (!env("XAI_API_KEY")) return Promise.resolve(null);
+  const existing = focusedPortfolioByEvidence.get(ctx.evidence);
+  if (existing) return existing;
+  const system = `You discover public investment relationships for a forensic due-diligence collector. Use live web and X search only. Find a bounded, representative set of disclosed investments made by this exact fund, VC, or angel. Prefer the fund's official portfolio page, a project or company financing announcement, a regulatory filing, or reputable independent editorial reporting. Every candidate must include at least one exact public source URL; prefer two independent URLs. URLs and all model fields are leads only and will be fetched and independently re-derived. Never use model memory alone. Never infer an investment from a follow, employment, token holding, trading activity, or company-name match. Distinguish a personal investment from the portfolio of a fund the person works for. If a source names the fund, set investor_entity to that fund, attribution to affiliated_fund, and never rewrite it as the person's direct investment. Return only compact JSON: {"investments":[{"project":"","investor_entity":"person or fund actually named by the source","investor_x_handle":"@...","attribution":"direct_subject|affiliated_fund","relationship":"invested|backed|led round|incubated","stage":"","year":"","project_x_handle":"@...","project_domain":"example.com","ticker":"$...","contract":"","chain":"","sources":[{"url":"https://...","title":""}]}]}. Return at most 10 strong source-linked candidates. Return an empty list when none are found.`;
+  const user = subjectContext(ctx) + " Find source-linked direct investments and, separately, investments made by a fund this subject is currently and publicly affiliated with. Keep every attribution separate.";
+  const pending = grokSearch(system, user, {
+    maxToolCalls: 12,
+    cacheKey: `investor-portfolio-focused:v1:${normalizedHandle(ctx)}`
+  });
+  focusedPortfolioByEvidence.set(ctx.evidence, pending);
+  return pending;
+}
+function discoverFocusedFundScaleEvidenceText(ctx) {
+  if (!env("XAI_API_KEY")) return Promise.resolve(null);
+  const existing = focusedFundScaleByEvidence.get(ctx.evidence);
+  if (existing) return existing;
+  const system = `You discover public fund-scale evidence for a forensic due-diligence collector. Use live web and X search only. Find disclosed USD fund closes, first closes, completed fund vehicle sizes, or dated assets under management for this exact manager or a fund the person currently works for. Prefer the verified manager website, regulatory filings, or reputable independent editorial reporting. Every candidate must include an exact public source URL; prefer two independent URLs. URLs and all model fields are leads only and will be fetched and independently re-derived. Never use model memory alone. Never treat a portfolio-company financing round, valuation, TVL, revenue, dry powder, deployed or invested capital, target raise, or proposed hard cap as fund scale. Accept USD claims only. Distinguish personal capital from an affiliated fund. If a source names the fund, set attribution to affiliated_fund and never rewrite its capital as the person's own. Return only compact JSON: {"fund_scale":[{"fund_name":"manager or fund entity","fund_vehicle":"named vehicle if stated","fund_x_handle":"@...","attribution":"direct_subject|affiliated_fund","metric_hint":"aum|fund_vehicle|first_close|final_close","amount_hint_usd":0,"sources":[{"url":"https://...","title":""}]}]}. Return at most 6 strong source-linked candidates. Return an empty list when none are found.`;
+  const user = subjectContext(ctx) + " Find source-linked scale claims for the exact subject and, separately, any fund the subject is currently and publicly affiliated with. Keep every attribution separate.";
+  const pending = grokSearch(system, user, {
+    maxToolCalls: 12,
+    cacheKey: `investor-fund-scale-focused:v1:${normalizedHandle(ctx)}`
+  });
+  focusedFundScaleByEvidence.set(ctx.evidence, pending);
   return pending;
 }
 
@@ -8002,35 +8292,6 @@ var PRESS_HOSTS = [
   "blockworks.co",
   "venturebeat.com"
 ];
-var SHARED_WEBSITE_HOSTS = [
-  "amazonaws.com",
-  "beacons.ai",
-  "bio.link",
-  "bio.site",
-  "bit.ly",
-  "blogspot.com",
-  "blob.core.windows.net",
-  "carrd.co",
-  "github.io",
-  "gitbook.io",
-  "linktr.ee",
-  "medium.com",
-  "netlify.app",
-  "notion.site",
-  "notion.so",
-  "pages.dev",
-  "sites.google.com",
-  "storage.googleapis.com",
-  "substack.com",
-  "t.co",
-  "tinyurl.com",
-  "twitter.com",
-  "vercel.app",
-  "webflow.io",
-  "wixsite.com",
-  "wordpress.com",
-  "x.com"
-];
 var PROFILE_AFFILIATION_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
 var PROFILE_AFFILIATION_CLOCK_SKEW_MS = 5 * 60 * 1e3;
 var SENSITIVE_URL_PARAM3 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
@@ -8042,15 +8303,8 @@ var hostMatches2 = (host, expected) => {
 };
 var listedHost2 = (host, list) => list.some((candidate) => hostMatches2(host, candidate));
 function domainFromWebsite(value) {
-  if (!value) return void 0;
-  try {
-    const url = new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`);
-    const host = url.hostname.replace(/^www\./i, "").replace(/\.$/, "").toLowerCase();
-    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host || isIP2(host) || host === "localhost" || host.endsWith(".local") || host.endsWith(".internal") || listedHost2(host, SHARED_WEBSITE_HOSTS)) return void 0;
-    return host;
-  } catch {
-    return void 0;
-  }
+  const scope = canonicalOfficialWebsite(value);
+  return scope && isCredibleOfficialDomain(scope.domain) ? scope.domain : void 0;
 }
 function safeCandidateUrl(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
@@ -8139,7 +8393,13 @@ function parsePortfolioCandidates(text2) {
 async function discoverPortfolioCandidates(ctx) {
   if (!env("XAI_API_KEY")) return null;
   const text2 = await discoverInvestorEvidenceText(ctx);
-  return text2 ? parsePortfolioCandidates(text2) : null;
+  if (!text2) return null;
+  const shared = parsePortfolioCandidates(text2);
+  if (!shared) return null;
+  const sourceLinked = shared.filter((lead) => lead.sources.length > 0);
+  if (sourceLinked.length > 0) return shared;
+  const focusedText = await discoverFocusedPortfolioEvidenceText(ctx);
+  return focusedText ? parsePortfolioCandidates(focusedText) : null;
 }
 var defaultProjectDomainResolver = async (lead, lookupProfile = getProfile2) => {
   if (!lead.projectHandle || lookupProfile === getProfile2 && !env("TWITTERAPI_KEY")) return void 0;
@@ -8238,6 +8498,7 @@ function portfolioEntityForLead(ctx, lead, now = /* @__PURE__ */ new Date()) {
     return left === right || left.length >= 5 && right.length >= 5 && (left.includes(right) || right.includes(left));
   });
   if (!requested || matches(directAliases) || requestedHandle === ctx.handle.replace(/^@/, "").toLowerCase()) {
+    const directDomainScope = likelyIndividualSubject(ctx) ? null : canonicalOfficialWebsite(ctx.evidence.profile.website);
     return {
       name: directName,
       aliases: directAliases,
@@ -8248,7 +8509,8 @@ function portfolioEntityForLead(ctx, lead, now = /* @__PURE__ */ new Date()) {
       // personal investments. Personal attribution therefore requires the
       // person's name in the fetched source unless an explicit personal-domain
       // verifier is added later.
-      domain: likelyIndividualSubject(ctx) ? void 0 : domainFromWebsite(ctx.evidence.profile.website),
+      domain: directDomainScope?.domain,
+      domainScope: directDomainScope?.canonicalUrl,
       attribution: "direct_subject",
       entityType: likelyIndividualSubject(ctx) ? "person" : "organization",
       subjectHandle
@@ -8257,11 +8519,12 @@ function portfolioEntityForLead(ctx, lead, now = /* @__PURE__ */ new Date()) {
   const bio = normalized(ctx.evidence.profile.bio);
   const profileProof = providerProfileAffiliationProof(ctx, now);
   if (lead.attribution === "affiliated_fund" && profileProof && bioHasCurrentAffiliation(bio, requested, requestedHandle)) {
+    const handleTrusted = Boolean(requestedHandle && bioHasCurrentHandleAffiliation(bio, requestedHandle));
     return {
       name: requested,
       aliases: [requested],
       handle: lead.investorEntityHandle,
-      handleTrusted: false,
+      handleTrusted,
       attribution: "affiliated_fund",
       entityType: "organization",
       ...profileProof
@@ -8283,19 +8546,52 @@ function portfolioEntityForLead(ctx, lead, now = /* @__PURE__ */ new Date()) {
   }
   return null;
 }
-var defaultInvestorDomainResolver = async (lead, entity, lookupProfile = getProfile2) => {
+var defaultInvestorDomainResolver = async (lead, entity, lookupProfile = getProfile2, now = /* @__PURE__ */ new Date()) => {
+  if (entity.domainProof) return entity.domainProof;
   if (entity.domain) return entity.domain;
   if (entity.entityType === "person") return void 0;
+  if (entity.attribution === "affiliated_fund" && !entity.handleTrusted) return void 0;
   const handle = entity.handle || lead.investorEntityHandle;
   if (!handle || lookupProfile === getProfile2 && !env("TWITTERAPI_KEY")) return void 0;
   const profile = await lookupProfile(handle);
   if (!profile?.name || !entityNamesMatch(profile.name, entity.name)) return void 0;
-  return domainFromWebsite(profile.website);
+  const websiteScope = canonicalOfficialWebsite(profile.website);
+  const domain = websiteScope?.domain;
+  const profileHandle = canonicalSubjectHandle(profile.handle);
+  const profileWebsite = websiteScope?.canonicalUrl;
+  if (!domain || !profileHandle || !profileWebsite || !Number.isFinite(now.getTime())) return void 0;
+  const capturedAt = now.toISOString();
+  const sourceUrl = `https://x.com/${profileHandle.slice(1)}`;
+  return {
+    domain,
+    sourceUrl,
+    sourceContentHash: attributionProofHash({
+      kind: "provider_profile_domain",
+      provider: "twitterapi",
+      handle: profileHandle,
+      name: profile.name,
+      website: profileWebsite,
+      domain,
+      capturedAt
+    }),
+    capturedAt,
+    sourceKind: "provider_profile",
+    profileName: profile.name,
+    profileWebsite
+  };
 };
-function sourceClass(host, investorDomain, projectDomain, attribution = "direct_subject") {
+function sourceClass(sourceUrl, investorDomain, investorDomainScope, projectDomain, attribution = "direct_subject") {
+  let host;
+  try {
+    const url = new URL(sourceUrl);
+    if (url.protocol !== "https:" || url.username || url.password) return "other_public";
+    host = url.hostname;
+  } catch {
+    return "other_public";
+  }
   if (listedHost2(host, PRIMARY_HOSTS)) return "public_primary";
   if (listedHost2(host, PRESS_HOSTS)) return "independent_press";
-  if (investorDomain && hostMatches2(host, investorDomain)) {
+  if (investorDomain && hostMatches2(host, investorDomain) && (!investorDomainScope || sourceMatchesOfficialWebsiteScope(sourceUrl, investorDomainScope))) {
     return attribution === "direct_subject" ? "first_party_subject" : "first_party_investor";
   }
   if (projectDomain && hostMatches2(host, projectDomain)) return "first_party_project";
@@ -8307,6 +8603,7 @@ function htmlToVisibleText(raw) {
 var normalized = (value) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9@$._ -]+/g, " ").replace(/\s+/g, " ").trim();
 var compact = (value) => normalized(value).replace(/[^a-z0-9]+/g, "");
 var regexEscape2 = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+var AFFILIATION_ROLE2 = "(?:founding |general |managing |research )?(?:partner|principal|investor|researcher|research|engineer|developer|employee|advisor|adviser|cto|chief technology officer|team member|team|lead|director|gp)|(?:co founder|cofounder|founder|ceo|chief executive officer|cio|chief investment officer|portfolio manager|managing director)";
 function entityWords(entity) {
   return normalized(entity.replace(/^@/, "")).split(/[^a-z0-9]+/).filter(Boolean);
 }
@@ -8363,7 +8660,7 @@ function entityNamesMatch(leftRaw, rightRaw) {
 }
 function bioHasCurrentAffiliation(bio, entity, handle) {
   const aliases = [entity, handle?.replace(/^@/, "")].filter((value) => Boolean(value));
-  const role = "(?:founding |general |managing |research )?(?:partner|principal|investor|researcher|research|engineer|developer|employee|advisor|adviser|cto|chief technology officer|team member|team|lead|director|gp)";
+  const role = `(?:${AFFILIATION_ROLE2})`;
   for (const alias of aliases) {
     for (const span of entitySpans(bio, alias)) {
       const before = bio.slice(Math.max(0, span.start - 100), span.start);
@@ -8374,11 +8671,36 @@ function bioHasCurrentAffiliation(bio, entity, handle) {
       const lastCurrent = currentMarkers.at(-1)?.index ?? -1;
       const endedBefore = lastEnded >= 0 && lastCurrent < lastEnded;
       const endedAfter = /^[^.;|]{0,55}\b(?:no longer|left|departed|retired|until|through)\b/i.test(after);
-      if (endedBefore || endedAfter) continue;
+      const negated = new RegExp(`\\b(?:not|never)\\s+(?:currently\\s+)?(?:an?\\s+)?(?:${AFFILIATION_ROLE2})\\b[^.;|]{0,35}$`, "i").test(before) || /\b(?:no\s+(?:current\s+)?affiliation|not\s+affiliated|never\s+(?:worked|working))\b[^.;|]{0,35}$/i.test(before) || /\b(?:not|never)(?:\s+an?)?\s*@?\s*$/i.test(before) && new RegExp(`^\\s*(?:${role})\\b`, "i").test(after);
+      if (endedBefore || endedAfter || negated) continue;
       if (new RegExp(`${role}\\s+(?:at|with|@)\\s*(?:the\\s+)?$`, "i").test(before)) return true;
       if (/\b(?:work(?:ing|s)?|build(?:ing|s)?|research(?:ing|es)?)\s+(?:at|with|@)\s*(?:the\s+)?$/i.test(before)) return true;
       if (new RegExp(`^\\s*(?:${role})\\b`, "i").test(after)) return true;
     }
+  }
+  return false;
+}
+function bioHasCurrentHandleAffiliation(bio, handle) {
+  const bare = handle.replace(/^@/, "").toLowerCase();
+  if (!/^[a-z0-9_]{2,30}$/.test(bare)) return false;
+  const role = `(?:${AFFILIATION_ROLE2})`;
+  const pattern = new RegExp(`@${regexEscape2(bare)}(?=$|[^a-z0-9_])`, "gi");
+  for (const match of bio.matchAll(pattern)) {
+    const start = match.index ?? 0;
+    const end = start + match[0].length;
+    const before = bio.slice(Math.max(0, start - 100), start);
+    const after = bio.slice(end, Math.min(bio.length, end + 70));
+    const endedMarkers = [...before.matchAll(/\b(?:former|formerly|previously|ex|no longer|left|departed|retired)\b/gi)];
+    const currentMarkers = [...before.matchAll(/\b(?:now|currently)\b/gi)];
+    const lastEnded = endedMarkers.at(-1)?.index ?? -1;
+    const lastCurrent = currentMarkers.at(-1)?.index ?? -1;
+    if (lastEnded >= 0 && lastCurrent < lastEnded) continue;
+    if (/^[^.;|]{0,55}\b(?:no longer|left|departed|retired|until|through)\b/i.test(after)) continue;
+    if (new RegExp(`\\b(?:not|never)\\s+(?:currently\\s+)?(?:an?\\s+)?(?:${AFFILIATION_ROLE2})\\b[^.;|]{0,35}$`, "i").test(before) || /\b(?:no\s+(?:current\s+)?affiliation|not\s+affiliated|never\s+(?:worked|working))\b[^.;|]{0,35}$/i.test(before)) continue;
+    if (/\b(?:not|never)(?:\s+an?)?\s*$/i.test(before) && new RegExp(`^\\s*(?:${role})\\b`, "i").test(after)) continue;
+    if (new RegExp(`${role}\\s*(?:(?:at|with)\\s*)?$`, "i").test(before)) return true;
+    if (/\b(?:work(?:ing|s)?|build(?:ing|s)?|research(?:ing|es)?)\s*(?:(?:at|with)\s*)?$/i.test(before)) return true;
+    if (new RegExp(`^\\s*(?:${role})\\b`, "i").test(after)) return true;
   }
   return false;
 }
@@ -8418,7 +8740,34 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
   const lookupProfile = dependencies.lookupProfile ?? getProfile2;
   const now = dependencies.now?.() ?? /* @__PURE__ */ new Date();
   const resolveProjectDomain = dependencies.resolveProjectDomain ?? ((lead) => defaultProjectDomainResolver(lead, lookupProfile));
-  const resolveInvestorDomain = dependencies.resolveInvestorDomain ?? ((lead, entity) => defaultInvestorDomainResolver(lead, entity, lookupProfile));
+  const resolveInvestorDomain = dependencies.resolveInvestorDomain ?? ((lead, entity) => defaultInvestorDomainResolver(lead, entity, lookupProfile, now));
+  const investorDomainByEntity = /* @__PURE__ */ new Map();
+  const sourceByUrl = /* @__PURE__ */ new Map();
+  const fetchSourceOnce = (url) => {
+    const key = new URL(url).toString();
+    const existing = sourceByUrl.get(key);
+    if (existing) return existing;
+    const pending = fetchSource(url).then((result) => {
+      recordCall(
+        "portfolio-web",
+        "source-fetch",
+        0,
+        result.status === "ok" ? "source_fetched" : result.reason,
+        result.status === "ok" ? "succeeded" : "failed"
+      );
+      return result;
+    });
+    sourceByUrl.set(key, pending);
+    return pending;
+  };
+  const resolveInvestorDomainOnce = (lead, entity) => {
+    const key = `${entity.attribution}::${compact(entity.name)}::${entity.handle ? canonicalSubjectHandle(entity.handle) ?? "" : ""}`;
+    const existing = investorDomainByEntity.get(key);
+    if (existing) return existing;
+    const pending = resolveInvestorDomain(lead, entity).catch(() => entity.domain);
+    investorDomainByEntity.set(key, pending);
+    return pending;
+  };
   if (!dependencies.discover && !env("XAI_API_KEY")) {
     ctx.recordCheck?.({
       id: "vc-portfolio-track-record",
@@ -8464,7 +8813,11 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
   const inspections = (await Promise.all(leads.slice(0, MAX_CANDIDATES).map(async (lead) => {
     const entity = entityByLead.get(lead) ?? null;
     if (!entity) return [];
-    const officialInvestorDomain = await resolveInvestorDomain(lead, entity).catch(() => entity.domain);
+    const resolvedInvestorDomain = await resolveInvestorDomainOnce(lead, entity);
+    const resolvedDomain = typeof resolvedInvestorDomain === "string" ? resolvedInvestorDomain : resolvedInvestorDomain?.domain;
+    const officialInvestorDomain = domainFromWebsite(resolvedDomain);
+    const investorDomainProof = typeof resolvedInvestorDomain === "object" && officialInvestorDomain === resolvedInvestorDomain.domain ? { ...resolvedInvestorDomain, domain: officialInvestorDomain } : void 0;
+    const officialInvestorDomainScope = investorDomainProof?.profileWebsite ?? entity.domainScope;
     const investorAliases = [
       ...entity.aliases,
       entity.handle && (entity.handleTrusted || officialInvestorDomain) ? entity.handle.replace(/^@/, "") : void 0
@@ -8481,20 +8834,24 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
     );
     const officialProjectDomain = needsProjectDomain ? await resolveProjectDomain(lead).catch(() => void 0) : void 0;
     return Promise.all(lead.sources.slice(0, MAX_SOURCES_PER_CANDIDATE).map(async (source) => {
-      const result = await fetchSource(source.url);
+      const result = await fetchSourceOnce(source.url);
       if (result.status !== "ok") {
-        recordCall("portfolio-web", "source-fetch", 0, result.reason, "failed");
-        return { lead, entity, source, officialProjectDomain, officialInvestorDomain, failed: true };
+        return { lead, entity, source, officialProjectDomain, officialInvestorDomain, investorDomainProof, failed: true };
       }
-      const classification = sourceClass(result.host, officialInvestorDomain, officialProjectDomain, entity.attribution);
+      const classification = sourceClass(
+        result.url,
+        officialInvestorDomain,
+        officialInvestorDomainScope,
+        officialProjectDomain,
+        entity.attribution
+      );
       const match = supportsPortfolioRelationship({
         document: result,
         sourceClass: classification,
         subjectAliases: investorAliases,
         projectName: lead.projectName
       });
-      recordCall("portfolio-web", "source-fetch", 0, `${classification} \xB7 ${match.supported ? "relationship_supported" : "no_relationship_match"}`, "succeeded");
-      return { lead, entity, source, document: result, sourceClass: classification, officialProjectDomain, officialInvestorDomain, match, failed: false };
+      return { lead, entity, source, document: result, sourceClass: classification, officialProjectDomain, officialInvestorDomain, investorDomainProof, match, failed: false };
     }));
   }))).flat();
   const supported = inspections.filter((item) => Boolean(item.entity && item.document && item.sourceClass && item.match?.supported));
@@ -8508,7 +8865,7 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
   const confirmedProjects = /* @__PURE__ */ new Set();
   const confirmationByProject = /* @__PURE__ */ new Map();
   for (const [project, rows] of byProject) {
-    const authoritative = rows.some((row) => row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor" || row.sourceClass === "first_party_project" || row.sourceClass === "public_primary");
+    const authoritative = rows.some((row) => row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor" || row.sourceClass === "public_primary");
     const pressDomains = new Set(rows.filter((row) => row.sourceClass === "independent_press").map((row) => registrableApprox2(row.document.host)));
     const pressFingerprints = new Set(rows.filter((row) => row.sourceClass === "independent_press").map((row) => createHash7("sha256").update(normalized(row.match.excerpt ?? "")).digest("hex")));
     const pressConfirmed = pressDomains.size >= 2 && pressFingerprints.size >= 2;
@@ -8519,7 +8876,7 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
   for (const row of supported) {
     const projectKey = `${row.entity.name.toLowerCase()}::${row.lead.projectName.toLowerCase()}`;
     const confirmation = confirmationByProject.get(projectKey);
-    const sourceConfirmed = Boolean(confirmation?.confirmed && (row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor" || row.sourceClass === "first_party_project" || row.sourceClass === "public_primary" || row.sourceClass === "independent_press" && confirmation.pressConfirmed));
+    const sourceConfirmed = Boolean(confirmation?.confirmed && (row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor" || row.sourceClass === "public_primary" || row.sourceClass === "independent_press" && confirmation.pressConfirmed));
     const unhashed = {
       kind: "portfolio_relationship",
       provider: "portfolio-web",
@@ -8535,6 +8892,14 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
       investorEntityName: row.entity.name,
       ...row.entity.handle && (row.entity.handleTrusted || row.officialInvestorDomain) ? { investorEntityHandle: row.entity.handle } : {},
       ...row.officialInvestorDomain ? { investorEntityDomain: row.officialInvestorDomain } : {},
+      ...row.investorDomainProof ? {
+        investorDomainSourceUrl: row.investorDomainProof.sourceUrl,
+        investorDomainSourceContentHash: row.investorDomainProof.sourceContentHash,
+        investorDomainCapturedAt: row.investorDomainProof.capturedAt,
+        investorDomainSourceKind: row.investorDomainProof.sourceKind,
+        investorDomainProfileName: row.investorDomainProof.profileName,
+        investorDomainProfileWebsite: row.investorDomainProof.profileWebsite
+      } : {},
       attribution: row.entity.attribution,
       ...row.entity.attributionSourceUrl ? { attributionSourceUrl: row.entity.attributionSourceUrl } : {},
       ...row.entity.attributionSourceContentHash ? { attributionSourceContentHash: row.entity.attributionSourceContentHash } : {},
@@ -8725,7 +9090,13 @@ function parseFundScaleCandidates(text2) {
 async function discoverFundScaleCandidates(ctx) {
   if (!env("XAI_API_KEY")) return null;
   const text2 = await discoverInvestorEvidenceText(ctx);
-  return text2 ? parseFundScaleCandidates(text2) : null;
+  if (!text2) return null;
+  const shared = parseFundScaleCandidates(text2);
+  if (!shared) return null;
+  const sourceLinked = shared.filter((lead) => lead.sources.length > 0);
+  if (sourceLinked.length > 0) return shared;
+  const focusedText = await discoverFocusedFundScaleEvidenceText(ctx);
+  return focusedText ? parseFundScaleCandidates(focusedText) : null;
 }
 var USD_AMOUNT = /(?<![A-Za-z])(?:US\s*\$|USD\s*|\$)\s*([0-9]{1,3}(?:,[0-9]{3})+(?:\.[0-9]+)?|[0-9]+(?:\.[0-9]+)?)\s*(trillion|tn|billion|bn|million|mm|mn|thousand|[tbmk])?\b/gi;
 var NON_USD_CURRENCY_SUFFIX = /^\s*(?:[,;(]\s*)?(?:(?:denominated\s+)?in\s+)?(?:AED|ARS|AUD|BRL|CAD|CHF|CLP|CNY|COP|DKK|EUR|GBP|HKD|IDR|ILS|INR|JPY|KRW|MXN|MYR|NGN|NOK|NZD|PHP|PLN|RMB|RUB|SAR|SEK|SGD|THB|TRY|TWD|ZAR|Australian(?:\s+dollars?)?|Canadian(?:\s+dollars?)?|Hong\s+Kong(?:\s+dollars?)?|New\s+Zealand(?:\s+dollars?)?|Singapore(?:\s+dollars?)?|pounds?\s+sterling|euros?|yen|yuan)\b/i;
@@ -8942,18 +9313,18 @@ function isRegulatoryRecordUrl(raw) {
   }
   return false;
 }
-function sourceClass2(document, investorDomain, attribution) {
-  let host = document.host;
+function sourceClass2(document, investorDomain, investorDomainScope, attribution) {
+  let url;
   try {
-    const url = new URL(document.url);
+    url = new URL(document.url);
     if (url.protocol !== "https:") return "other_public";
-    host = url.hostname;
   } catch {
     return "other_public";
   }
+  const host = url.hostname;
   if (listedHost3(host, PRIMARY_HOSTS2) && isRegulatoryRecordUrl(document.url)) return "public_primary";
   if (listedHost3(host, PRESS_HOSTS2)) return "independent_press";
-  if (investorDomain && hostMatches3(host, investorDomain)) {
+  if (investorDomain && hostMatches3(host, investorDomain) && (!investorDomainScope || sourceMatchesOfficialWebsiteScope(document.url, investorDomainScope))) {
     return attribution === "direct_subject" ? "first_party_subject" : "first_party_investor";
   }
   return "other_public";
@@ -8985,17 +9356,32 @@ function syntheticPortfolioLead(lead) {
     provider: "grok"
   };
 }
+function frozenInvestorDomainProof(artifact) {
+  if (!artifact.investorEntityDomain || !artifact.investorDomainSourceUrl || !artifact.investorDomainSourceContentHash || !artifact.investorDomainCapturedAt || artifact.investorDomainSourceKind !== "provider_profile" || !artifact.investorDomainProfileName || !artifact.investorDomainProfileWebsite) return void 0;
+  return {
+    domain: artifact.investorEntityDomain,
+    sourceUrl: artifact.investorDomainSourceUrl,
+    sourceContentHash: artifact.investorDomainSourceContentHash,
+    capturedAt: artifact.investorDomainCapturedAt,
+    sourceKind: artifact.investorDomainSourceKind,
+    profileName: artifact.investorDomainProfileName,
+    profileWebsite: artifact.investorDomainProfileWebsite
+  };
+}
 function resolveFundEntity(ctx, lead, now) {
   const existing = ctx.evidence.sourceArtifacts.find(
     (artifact) => artifact.kind === "portfolio_relationship" && artifact.match === "relationship_confirmed" && artifact.investorEntityName && entityNamesMatch2(artifact.investorEntityName, lead.fundName)
   );
   if (existing?.investorEntityName && existing.attribution) {
+    const domainProof = frozenInvestorDomainProof(existing);
     return {
       name: existing.investorEntityName,
       aliases: [existing.investorEntityName, lead.fundName],
       ...existing.investorEntityHandle ? { handle: existing.investorEntityHandle } : {},
       handleTrusted: Boolean(existing.investorEntityHandle),
       ...existing.investorEntityDomain ? { domain: existing.investorEntityDomain } : {},
+      ...domainProof ? { domainScope: domainProof.profileWebsite } : {},
+      ...domainProof ? { domainProof } : {},
       attribution: existing.attribution,
       entityType: "organization",
       ...existing.subjectHandle ? { subjectHandle: existing.subjectHandle } : {},
@@ -9062,8 +9448,35 @@ async function collectFundScale(ctx, dependencies = {}) {
   const fetchSource = dependencies.fetchSource ?? fetchPublicText;
   const lookupProfile = dependencies.lookupProfile ?? getProfile2;
   const resolveEntity = dependencies.resolveEntity ?? resolveFundEntity;
-  const resolveInvestorDomain = dependencies.resolveInvestorDomain ?? ((lead, entity) => defaultInvestorDomainResolver(syntheticPortfolioLead(lead), entity, lookupProfile));
   const now = dependencies.now?.() ?? /* @__PURE__ */ new Date();
+  const resolveInvestorDomain = dependencies.resolveInvestorDomain ?? ((lead, entity) => defaultInvestorDomainResolver(syntheticPortfolioLead(lead), entity, lookupProfile, now));
+  const investorDomainByEntity = /* @__PURE__ */ new Map();
+  const sourceByUrl = /* @__PURE__ */ new Map();
+  const fetchSourceOnce = (url) => {
+    const key = new URL(url).toString();
+    const existing = sourceByUrl.get(key);
+    if (existing) return existing;
+    const pending = fetchSource(url).then((result) => {
+      recordCall(
+        "fund-scale-web",
+        "source-fetch",
+        0,
+        result.status === "ok" ? "source_fetched" : result.reason,
+        result.status === "ok" ? "succeeded" : "failed"
+      );
+      return result;
+    });
+    sourceByUrl.set(key, pending);
+    return pending;
+  };
+  const resolveInvestorDomainOnce = (lead, entity) => {
+    const key = `${entity.attribution}::${compact2(entity.name)}::${entity.handle?.replace(/^@/, "").toLowerCase() ?? ""}`;
+    const existing = investorDomainByEntity.get(key);
+    if (existing) return existing;
+    const pending = resolveInvestorDomain(lead, entity).catch(() => entity.domain);
+    investorDomainByEntity.set(key, pending);
+    return pending;
+  };
   if (!dependencies.discover && !env("XAI_API_KEY")) {
     return { state: "skipped", detail: "source-linked fund-scale discovery is not configured" };
   }
@@ -9094,21 +9507,23 @@ async function collectFundScale(ctx, dependencies = {}) {
   const inspections = (await Promise.all(leads.slice(0, MAX_CANDIDATES2).map(async (lead) => {
     const entity = entityByLead.get(lead) ?? null;
     if (!entity) return [];
-    const officialInvestorDomain = await resolveInvestorDomain(lead, entity).catch(() => entity.domain);
+    const resolvedInvestorDomain = await resolveInvestorDomainOnce(lead, entity);
+    const resolvedDomain = typeof resolvedInvestorDomain === "string" ? resolvedInvestorDomain : resolvedInvestorDomain?.domain;
+    const officialInvestorDomain = domainFromWebsite(resolvedDomain);
+    const investorDomainProof = typeof resolvedInvestorDomain === "object" && officialInvestorDomain === resolvedInvestorDomain.domain ? { ...resolvedInvestorDomain, domain: officialInvestorDomain } : void 0;
+    const officialInvestorDomainScope = investorDomainProof?.profileWebsite ?? entity.domainScope;
     const aliases = [
       ...entity.aliases,
       entity.handle && (entity.handleTrusted || officialInvestorDomain) ? entity.handle.replace(/^@/, "") : void 0
     ].filter((value) => Boolean(value?.trim()));
     return Promise.all(lead.sources.slice(0, MAX_SOURCES_PER_CANDIDATE2).map(async (source) => {
-      const result = await fetchSource(source.url);
+      const result = await fetchSourceOnce(source.url);
       if (result.status !== "ok") {
-        recordCall("fund-scale-web", "source-fetch", 0, result.reason, "failed");
-        return { lead, entity, source, officialInvestorDomain, matches: [], failed: true };
+        return { lead, entity, source, officialInvestorDomain, investorDomainProof, matches: [], failed: true };
       }
-      const classification = sourceClass2(result, officialInvestorDomain, entity.attribution);
+      const classification = sourceClass2(result, officialInvestorDomain, officialInvestorDomainScope, entity.attribution);
       const matches = supportsFundScaleClaim({ document: result, sourceClass: classification, subjectAliases: aliases, now });
-      recordCall("fund-scale-web", "source-fetch", 0, `${classification} \xB7 ${matches.length ? "scale_match" : "no_scale_match"}`, "succeeded");
-      return { lead, entity, source, document: result, sourceClass: classification, officialInvestorDomain, matches, failed: false };
+      return { lead, entity, source, document: result, sourceClass: classification, officialInvestorDomain, investorDomainProof, matches, failed: false };
     }));
   }))).flat();
   const unclusteredSupported = inspections.flatMap((inspection) => {
@@ -9128,7 +9543,7 @@ async function collectFundScale(ctx, dependencies = {}) {
   for (const row of supported) groups.set(row.claimKey, [...groups.get(row.claimKey) ?? [], row]);
   const baseRowEligibleForConfirmation = (row) => {
     if (!row.match.eligibleForConfirmation) return false;
-    if (row.entity.attribution === "affiliated_fund" && row.sourceClass === "first_party_investor") return false;
+    if (row.entity.attribution === "affiliated_fund" && row.sourceClass === "first_party_investor" && !row.investorDomainProof) return false;
     if (row.entity.attribution === "affiliated_fund" && row.entity.attributionSourceKind !== "provider_profile") return false;
     return true;
   };
@@ -9148,7 +9563,7 @@ async function collectFundScale(ctx, dependencies = {}) {
     [...groups].map(([claimKey, rows]) => [claimKey, pressGroupCorroborated(rows)])
   );
   const latestAumByEntity = /* @__PURE__ */ new Map();
-  const conflictEligibleAum = supported.filter((candidate) => isAumMetric2(candidate.match.metric) && candidate.match.asOf && baseRowEligibleForConfirmation(candidate) && (candidate.sourceClass === "first_party_subject" || candidate.sourceClass === "public_primary" || candidate.sourceClass === "independent_press" && preliminaryPressConfirmation.get(candidate.claimKey) === true));
+  const conflictEligibleAum = supported.filter((candidate) => isAumMetric2(candidate.match.metric) && candidate.match.asOf && baseRowEligibleForConfirmation(candidate) && (candidate.sourceClass === "first_party_subject" || candidate.sourceClass === "first_party_investor" || candidate.sourceClass === "public_primary" || candidate.sourceClass === "independent_press" && preliminaryPressConfirmation.get(candidate.claimKey) === true));
   for (const row of conflictEligibleAum) {
     const entityKey = compact2(row.entity.name);
     const timestamp = new Date(row.match.asOf).getTime();
@@ -9199,6 +9614,14 @@ async function collectFundScale(ctx, dependencies = {}) {
       investorEntityName: row.entity.name,
       ...row.entity.handle && (row.entity.handleTrusted || row.officialInvestorDomain) ? { investorEntityHandle: row.entity.handle } : {},
       ...row.officialInvestorDomain ? { investorEntityDomain: row.officialInvestorDomain } : {},
+      ...row.investorDomainProof ? {
+        investorDomainSourceUrl: row.investorDomainProof.sourceUrl,
+        investorDomainSourceContentHash: row.investorDomainProof.sourceContentHash,
+        investorDomainCapturedAt: row.investorDomainProof.capturedAt,
+        investorDomainSourceKind: row.investorDomainProof.sourceKind,
+        investorDomainProfileName: row.investorDomainProof.profileName,
+        investorDomainProfileWebsite: row.investorDomainProof.profileWebsite
+      } : {},
       attribution: row.entity.attribution,
       ...row.entity.attributionSourceUrl ? { attributionSourceUrl: row.entity.attributionSourceUrl } : {},
       ...row.entity.attributionSourceContentHash ? { attributionSourceContentHash: row.entity.attributionSourceContentHash } : {},
@@ -9274,10 +9697,12 @@ var ADAPTERS = [
   onchainAdapter
 ];
 var KEYED = /* @__PURE__ */ new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain"]);
-var attemptTotals = (providers) => {
+var attemptTotals = (providers, operations) => {
   const allow = providers ? new Set(providers) : null;
+  const allowOperations = operations ? new Set(operations) : null;
   return getCost().calls.reduce((totals, line) => {
     if (allow && !allow.has(line.provider)) return totals;
+    if (allowOperations && !allowOperations.has(line.op)) return totals;
     totals.total += line.calls;
     totals.succeeded += line.succeeded;
     totals.partial += line.partial;
@@ -9333,7 +9758,9 @@ async function coldIntake(ctx) {
       ctx.evidence.profile.avatar_source_state = "none";
     }
     ctx.evidence.profile.bio = prof.bio ?? "";
-    siteUrl = prof.website;
+    const profileWebsite = canonicalPublicProfileWebsite(prof.website) ?? void 0;
+    ctx.evidence.profile.website = profileWebsite;
+    siteUrl = profileWebsite;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);
@@ -10400,50 +10827,119 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   };
   const analystStartedAt = startRuntimeStage("analyst");
   if (analystAvailable()) {
-    emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions\u2026", tone: "neutral" });
-    emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence\u2026", tone: "neutral" });
     const requestedAxes = axisCatalog(evidence.roles);
     const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
     const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson);
+    const scoringPreflight = inspectAnalystScoringPreflight(requestedAxes, evidenceJson);
+    const decisionPacketUsable = scoringPreflight.state === "ready" || scoringPreflight.state === "insufficient_evidence";
+    if (decisionPacketUsable) {
+      emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions\u2026", tone: "neutral" });
+    }
+    if (scoringPreflight.state === "ready") {
+      emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence\u2026", tone: "neutral" });
+    }
     if (frozenAxisEvidence.length > 0) {
       evidence.axisCitationVersion = 1;
       evidence.axisEvidenceCatalog = frozenAxisEvidence;
     }
     evidence.axes = [];
-    const analystBefore = attemptTotals(["claude"]);
+    const contradictionBefore = attemptTotals(["claude"], ["record_contradictions"]);
+    const scorerBefore = attemptTotals(["claude"], ["record_verdict"]);
     const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
     const [found, verdict] = await Promise.all([
-      scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt }),
-      analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson, {
+      decisionPacketUsable ? scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt }) : Promise.resolve(null),
+      scoringPreflight.state === "ready" ? analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson, {
         analystDeadlineAt
-      })
+      }) : Promise.resolve(null)
     ]);
-    const analystAttempts = attemptDelta(analystBefore, attemptTotals(["claude"]));
-    const analystObserved = analystAttempts.total > 0;
-    if (analystObserved && found && found.length) {
+    const contradictionAttempts = attemptDelta(
+      contradictionBefore,
+      attemptTotals(["claude"], ["record_contradictions"])
+    );
+    const scorerAttempts = attemptDelta(
+      scorerBefore,
+      attemptTotals(["claude"], ["record_verdict"])
+    );
+    const contradictionObserved = contradictionAttempts.total > 0;
+    const scorerObserved = scorerAttempts.total > 0;
+    if (!decisionPacketUsable) {
+      const detail = scoringPreflight.state === "packet_oversize" ? "Contradiction analysis was skipped because the bounded evidence packet could not preserve required coverage." : scoringPreflight.state === "no_axes" ? "Contradiction analysis was skipped because no provider-backed role selected a methodology." : scoringPreflight.state === "unsupported_axes" ? "Contradiction analysis was skipped because the requested methodology contains unsupported axes." : "Contradiction analysis was skipped because the frozen evidence catalog failed validation.";
+      emit({ phase: "Contradictions", label: "Skipped", detail, tone: "warn" });
+    } else if (contradictionObserved && found && found.length) {
       evidence.contradictions = found;
       const worst = found.some((c) => c.severity === "high") ? "bad" : "warn";
       emit({ phase: "Contradictions", label: `${found.length} contradiction${found.length === 1 ? "" : "s"}`, detail: found.slice(0, 3).map((c) => `${c.claim} vs ${c.conflict}`).join(" \xB7 "), source: "claude", tone: worst });
-    } else if (analystObserved && found) {
+    } else if (contradictionObserved && found) {
       emit({ phase: "Contradictions", label: "None found", detail: "No internal contradictions surfaced across the subject's claims and the evidence.", source: "claude", tone: "good" });
     } else {
       emit({ phase: "Contradictions", label: "Incomplete", detail: "Contradiction analysis did not return a complete result.", source: "claude", tone: "warn" });
     }
-    if (analystObserved && verdict) {
+    if (scorerObserved && verdict) {
       evidence.axes = verdict.axes;
       evidence.headline = verdict.headline || evidence.headline;
       if (verdict.identity_note) evidence.profile.identity_note = verdict.identity_note;
       emit({ phase: "Analyst", label: "Scored", detail: `${verdict.axes.length} axes scored.`, source: "claude", tone: "good" });
+    } else if (scoringPreflight.state === "packet_oversize") {
+      evidence.headline = `Investigation incomplete: the analyst evidence packet could not preserve required coverage within ${ANALYST_EVIDENCE_MAX_CHARS.toLocaleString("en-US")} characters. No axis scores were inferred.`;
+      emit({
+        phase: "Analyst",
+        label: "Packet budget exceeded",
+        detail: "Scoring failed closed before any model call; the evidence packet was replaced by an explicit oversize marker instead of dropping required axis coverage.",
+        tone: "warn"
+      });
+    } else if (scoringPreflight.state === "no_axes") {
+      evidence.headline = "Investigation incomplete: no provider-backed role selected a scoring methodology. No axis scores were inferred.";
+      emit({
+        phase: "Analyst",
+        label: "No methodology",
+        detail: "No scorer call was made because provider-backed role routing produced no methodology axes.",
+        tone: "warn"
+      });
+    } else if (scoringPreflight.state === "unsupported_axes") {
+      const unsupportedAxes = scoringPreflight.unsupportedAxes.join(", ");
+      evidence.headline = `Investigation incomplete: unsupported methodology axes were requested (${unsupportedAxes}). No axis scores were inferred.`;
+      emit({
+        phase: "Analyst",
+        label: "Unsupported methodology",
+        detail: `No scorer call was made because these axes have no deterministic evidence-routing rule: ${unsupportedAxes}.`,
+        tone: "warn"
+      });
+    } else if (scoringPreflight.state === "insufficient_evidence") {
+      const missingAxes = scoringPreflight.missingSubstantiveAxes.join(", ");
+      evidence.headline = `Investigation incomplete: substantive evidence is missing for ${missingAxes}. No axis scores were inferred.`;
+      emit({
+        phase: "Analyst",
+        label: "Coverage abstention",
+        detail: `Scoring did not run because these axes lack substantive eligible evidence: ${missingAxes}. Coverage-only gaps were preserved; no zero scores were inferred.`,
+        tone: "warn"
+      });
+    } else if (scoringPreflight.state === "invalid_catalog") {
+      evidence.headline = "Investigation incomplete: the frozen analyst evidence catalog did not pass preflight validation.";
+      emit({
+        phase: "Analyst",
+        label: "Preflight failed",
+        detail: "The frozen evidence catalog was invalid, so no scorer call was made and no verdict score will be published.",
+        tone: "warn"
+      });
+    } else if (!scorerObserved) {
+      evidence.headline = "Investigation incomplete: the analyst scorer did not run within the available execution budget.";
+      emit({
+        phase: "Analyst",
+        label: "Not run",
+        detail: "Evidence preflight passed, but no scorer provider attempt was observed. No verdict score will be published.",
+        tone: "warn"
+      });
     } else {
       evidence.headline = "Investigation incomplete: the analyst did not return one valid score for every required axis.";
-      emit({ phase: "Analyst", label: "Incomplete", detail: "The analyst response was unavailable, partial, duplicated an axis, or contained an invalid score. No verdict score will be published.", tone: "warn" });
+      emit({ phase: "Analyst", label: "Invalid response", detail: "The scorer response was unavailable, partial, duplicated an axis, or contained an invalid score. No verdict score will be published.", tone: "warn" });
     }
-    const analystState = !analystObserved ? "skipped" : verdict ? "executed" : observedRunState(analystAttempts) === "failed" ? "failed" : "partial";
+    const analystState = scoringPreflight.state === "packet_oversize" || scoringPreflight.state === "unsupported_axes" || scoringPreflight.state === "invalid_catalog" ? "failed" : scoringPreflight.state !== "ready" || !scorerObserved ? "skipped" : verdict ? "executed" : observedRunState(scorerAttempts) === "failed" ? "failed" : "partial";
+    const analystDetail = scoringPreflight.state === "packet_oversize" ? `scoring packet exceeded the ${ANALYST_EVIDENCE_MAX_CHARS}-character structural budget while preserving required axis coverage; no scorer call made` : scoringPreflight.state === "no_axes" ? "no provider-backed methodology axes were requested; no scorer call made" : scoringPreflight.state === "unsupported_axes" ? `unsupported methodology axes: ${scoringPreflight.unsupportedAxes.join(", ")}; no scorer call made` : scoringPreflight.state === "insufficient_evidence" ? `coverage preflight abstained; missing substantive evidence for ${scoringPreflight.missingSubstantiveAxes.join(", ")}; no scorer call made` : scoringPreflight.state === "invalid_catalog" ? "scoring preflight rejected the frozen evidence or axis catalog; no scorer call made" : !scorerObserved ? "evidence preflight passed; no scorer provider attempt was observed" : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`;
     checkTracker.provider(
       "claude-analyst",
       "Claude analyst",
       analystState,
-      analystObserved ? `${analystAttempts.total} observed attempt${analystAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}` : "no Claude provider attempt was observed"
+      analystDetail
     );
   } else {
     checkTracker.provider("claude-analyst", "Claude analyst", "unavailable", "analyst provider is not configured");

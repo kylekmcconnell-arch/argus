@@ -95,9 +95,16 @@ describe("orchestrator provider execution truth", () => {
   it("keeps model role candidates visible but publishes INCOMPLETE without provider-backed routing", async () => {
     vi.stubEnv("GITHUB_TOKEN", "github-key");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("provider unavailable", { status: 503 })));
+    const fetchMock = vi.fn().mockResolvedValue(new Response("provider unavailable", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
 
     const dossier = await finishAudit("@satoshi_builds");
+    const anthropicTools = fetchMock.mock.calls.flatMap(([input, init]) => {
+      if (!String(input).includes("api.anthropic.com")) return [];
+      const request = JSON.parse(String(init?.body)) as { tool_choice?: { name?: string } };
+      return request.tool_choice?.name ? [request.tool_choice.name] : [];
+    });
+    const analystRun = dossier?.providerSnapshot?.runs.find((run) => run.id === "claude-analyst");
 
     expect(dossier).toMatchObject({
       live: true,
@@ -109,6 +116,13 @@ describe("orchestrator provider execution truth", () => {
     expect(dossier?.report.role_reports.every((role) => Object.keys(role.axes).length === 0)).toBe(true);
     expect(dossier).not.toHaveProperty("axisCitationVersion");
     expect(dossier).not.toHaveProperty("axisEvidenceCatalog");
+    expect(dossier?.headline).toContain("no provider-backed role selected a scoring methodology");
+    expect(anthropicTools).not.toContain("record_contradictions");
+    expect(anthropicTools).not.toContain("record_verdict");
+    expect(analystRun).toMatchObject({
+      state: "skipped",
+      detail: expect.stringContaining("no provider-backed methodology axes"),
+    });
     expect(dossier?.report.investigative_leads).toEqual(expect.arrayContaining([
       expect.objectContaining({ finding_type: "RoleCandidate", evidence_origin: "model_lead" }),
     ]));
@@ -158,6 +172,67 @@ describe("orchestrator provider execution truth", () => {
       expect.objectContaining({ project_name: "Model Venture", role: "founder", evidence_origin: "model_lead", artifact_verified: false }),
     ]));
     expect(anthropicTools).not.toContain("record_verdict");
+  });
+
+  it("reports a coverage-preflight abstention separately from an invalid analyst response", async () => {
+    vi.stubEnv("PDL_API_KEY", "pdl-key");
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
+    const emitted: Array<{ phase: string; label: string; detail: string }> = [];
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.includes("api.peopledatalabs.com")) {
+        return new Response(JSON.stringify({
+          data: {
+            full_name: "Nova Managing Partner",
+            job_title: "Managing Partner",
+            job_company_name: "Nova Capital",
+            linkedin_url: "https://linkedin.com/in/nova-managing-partner",
+            experience: [{
+              company: { name: "Nova Capital", website: "https://novacap.example" },
+              title: { name: "Partner" },
+              start_date: "2023",
+            }],
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      if (url.includes("api.anthropic.com")) {
+        const request = JSON.parse(String(init?.body)) as { tool_choice?: { name?: string } };
+        const name = request.tool_choice?.name ?? "unknown";
+        const toolInput = name === "record_contradictions" ? { contradictions: [] } : {};
+        return new Response(JSON.stringify({
+          content: [{ type: "tool_use", name, input: toolInput }],
+          stop_reason: "tool_use",
+          usage: { input_tokens: 100, output_tokens: 20 },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response("provider unavailable", { status: 503 });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const pending = runAudit("@nova_capital", (step) => emitted.push(step));
+    await vi.runAllTimersAsync();
+    const dossier = await pending;
+    const anthropicTools = fetchMock.mock.calls.flatMap(([input, init]) => {
+      if (!String(input).includes("api.anthropic.com")) return [];
+      const request = JSON.parse(String(init?.body)) as { tool_choice?: { name?: string } };
+      return request.tool_choice?.name ? [request.tool_choice.name] : [];
+    });
+    const analystRun = dossier?.providerSnapshot?.runs.find((run) => run.id === "claude-analyst");
+
+    expect(anthropicTools).toContain("record_contradictions");
+    expect(anthropicTools).not.toContain("record_verdict");
+    expect(dossier?.report.composite_verdict).toBe("INCOMPLETE");
+    expect(dossier?.headline).toContain("substantive evidence is missing");
+    expect(emitted).toContainEqual(expect.objectContaining({
+      phase: "Analyst",
+      label: "Coverage abstention",
+      detail: expect.stringContaining("lack substantive eligible evidence"),
+    }));
+    expect(analystRun).toMatchObject({
+      state: "skipped",
+      detail: expect.stringContaining("coverage preflight abstained"),
+    });
+    expect(analystRun?.detail).not.toContain("axis result incomplete");
   });
 
   it("moves curated cap evidence to unverified leads before a live provider run", async () => {

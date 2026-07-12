@@ -618,6 +618,17 @@ export function validateAnalystVerdict(
 }
 
 export const ANALYST_EVIDENCE_MAX_CHARS = 24_000;
+const SCORING_PACKET_STATE_FIELD = "scoring_packet_state";
+const SCORING_PACKET_OVERSIZE = "oversize";
+
+const scoringPacketOversizeJson = (requestedAxisCount: number, reason: string): string => JSON.stringify({
+  schema_version: 4,
+  [SCORING_PACKET_STATE_FIELD]: SCORING_PACKET_OVERSIZE,
+  reason,
+  limit_chars: ANALYST_EVIDENCE_MAX_CHARS,
+  requested_axis_count: requestedAxisCount,
+  evidenceCatalog: [],
+});
 
 interface AnalystEvidencePacketOptions {
   /**
@@ -671,7 +682,9 @@ const SOURCE_ARTIFACT_FIELDS = [
   "publishedAt", "excerpt", "match", "coverageState", "relationship", "subjectName", "subjectHandle",
   "projectName", "projectHandle", "projectDomain", "sourceClass", "investorEntityName",
   "investorEntityHandle", "investorEntityDomain", "attribution", "attributionSourceUrl",
-  "attributionSourceContentHash", "attributionCapturedAt", "attributionSourceKind", "fundName", "fundSizeUsd",
+  "attributionSourceContentHash", "attributionCapturedAt", "attributionSourceKind", "investorDomainSourceUrl",
+  "investorDomainSourceContentHash", "investorDomainCapturedAt", "investorDomainSourceKind",
+  "investorDomainProfileName", "investorDomainProfileWebsite", "fundName", "fundSizeUsd",
   "fundVehicle", "fundScaleMetric", "fundAmountQualifier", "fundScaleBasis", "fundScaleAsOf",
   "fundScaleTemporalState", "fundScaleSourceCount", "fundScaleClaimId",
 ] as const;
@@ -950,6 +963,16 @@ const SOURCE_ARTIFACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   ],
 };
 
+// A requested axis must be owned by at least one deterministic routing rule.
+// Synthesizing an unavailable gap for a misspelled or newly added-but-unwired
+// methodology axis would misdiagnose a configuration error as missing evidence.
+const SCORING_SUPPORTED_AXES = new Set<string>([
+  ...Object.values(SECTION_AXIS_ELIGIBILITY).flat(),
+  ...Object.values(FINDING_AXIS_ELIGIBILITY).flat(),
+  ...Object.values(CHECK_AXIS_ELIGIBILITY).flat(),
+  ...Object.values(SOURCE_ARTIFACT_AXIS_ELIGIBILITY).flat(),
+]);
+
 const sourceArtifactKind = (value: Record<string, unknown>): string => {
   const kind = typeof value.kind === "string" ? value.kind : "";
   if (SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind]) return kind;
@@ -1054,7 +1077,8 @@ const safeArtifactSourceUrl = (value?: string): string | undefined => {
 
 const ARTIFACT_URL_FIELDS = new Set([
   "sourceUrl", "source_url", "evidence_url", "url", "linkedin", "link", "href",
-  "citation", "link_evidence_url", "attributionSourceUrl",
+  "citation", "link_evidence_url", "attributionSourceUrl", "investorDomainSourceUrl",
+  "investorDomainProfileWebsite",
 ]);
 
 const sanitizeArtifactUrls = (value: unknown, depth = 0): unknown => {
@@ -1064,7 +1088,12 @@ const sanitizeArtifactUrls = (value: unknown, depth = 0): unknown => {
   const sanitized: Record<string, unknown> = {};
   for (const [key, item] of Object.entries(sourceRecord)) {
     if (ARTIFACT_URL_FIELDS.has(key) && typeof item === "string") {
-      if (key === "attributionSourceUrl" || (sourceRecord.kind === "fund_scale" && (key === "sourceUrl" || key === "source_url"))) {
+      if (
+        key === "attributionSourceUrl"
+        || key === "investorDomainSourceUrl"
+        || key === "investorDomainProfileWebsite"
+        || (sourceRecord.kind === "fund_scale" && (key === "sourceUrl" || key === "source_url"))
+      ) {
         try {
           if ([...new URL(item).searchParams.keys()].some((param) => ARTIFACT_SENSITIVE_URL_PARAM.test(param))) continue;
         } catch {
@@ -1481,7 +1510,14 @@ function serializeAnalystEvidencePacket(
           // wallets, promotions, and advisory rows as for findings.
           return record.evidence_origin !== "model_lead" && record.artifact_verified !== false;
         });
-    const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source, limit) : source.slice(0, limit);
+    // Scoring packets first inspect the complete bounded collector output for
+    // source artifacts, then reduce it with the same substantive-axis invariant
+    // used by the 24k structural pruner. Applying the 24-row cap here would let
+    // many high-priority I3 rows crowd out the sole I2 relationship before the
+    // coverage baseline even exists.
+    const selected = section === "sourceArtifacts"
+      ? retainSourceArtifacts(source, options.axisCatalog ? source.length : limit)
+      : source.slice(0, limit);
     const included = selected
       .map((item) => section === "sourceArtifacts" ? compactSourceArtifact(item) : compactObject(item))
       .filter((item) => item !== undefined);
@@ -1509,52 +1545,109 @@ function serializeAnalystEvidencePacket(
   const render = () => options.axisCatalog
     ? renderScoringPacket(packet, options.axisCatalog)
     : packet;
+  const substantiveAxesIn = (rendered: Record<string, unknown>): Set<string> => {
+    if (!Array.isArray(rendered.evidenceCatalog)) return new Set();
+    return new Set((rendered.evidenceCatalog as unknown[]).flatMap((value) =>
+      isAxisEvidenceRecord(value) && isSubstantiveArtifact(value)
+        ? value.eligibleAxes
+        : []));
+  };
+  // Capture the axes the unpruned packet can honestly support. Structural
+  // budget reduction may remove redundant evidence, but it must never turn a
+  // supported axis into a coverage-only gap merely because that evidence lived
+  // in a lower-priority section (for example, the sole testimonial supporting
+  // I4 in a large multi-role packet).
+  const requiredSubstantiveAxes = options.axisCatalog
+    ? substantiveAxesIn(render())
+    : new Set<string>();
+  const preservesSubstantiveCoverage = (): boolean => {
+    if (!options.axisCatalog || requiredSubstantiveAxes.size === 0) return true;
+    const retained = substantiveAxesIn(render());
+    return [...requiredSubstantiveAxes].every((axis) => retained.has(axis));
+  };
+  const removeOneArrayItem = (section: string, minimumLength = 0): boolean => {
+    const values = Array.isArray(packet[section]) ? packet[section] as unknown[] : [];
+    if (values.length <= minimumLength) return false;
+    for (let index = values.length - 1; index >= minimumLength; index -= 1) {
+      const [removed] = values.splice(index, 1);
+      if (preservesSubstantiveCoverage()) {
+        if (coverage[section]) coverage[section].included = values.length;
+        return true;
+      }
+      values.splice(index, 0, removed);
+    }
+    return false;
+  };
+  const removeOneFrom = (sections: readonly string[], allowed: (section: string) => boolean): boolean => {
+    for (const section of sections) {
+      if (allowed(section) && removeOneArrayItem(section)) return true;
+    }
+    return false;
+  };
+  const pruneTrustGraphPreservingCoverage = (): boolean => {
+    const previous = packet.trustGraphScreen == null
+      ? undefined
+      : structuredClone(packet.trustGraphScreen);
+    if (!pruneTrustGraphPacket(packet)) return false;
+    if (preservesSubstantiveCoverage()) return true;
+    if (previous === undefined) delete packet.trustGraphScreen;
+    else packet.trustGraphScreen = previous;
+    return false;
+  };
+  const deleteProfilePreservingCoverage = (): boolean => {
+    if (packet.profile == null) return false;
+    const previous = packet.profile;
+    delete packet.profile;
+    if (preservesSubstantiveCoverage()) return true;
+    packet.profile = previous;
+    return false;
+  };
+  if (options.axisCatalog) {
+    const sourceArtifactLimit = sectionLimits.sourceArtifacts;
+    const sourceArtifacts = Array.isArray(packet.sourceArtifacts)
+      ? packet.sourceArtifacts as unknown[]
+      : [];
+    while (sourceArtifacts.length > sourceArtifactLimit) {
+      if (!removeOneArrayItem("sourceArtifacts")) break;
+    }
+    if (sourceArtifacts.length > sourceArtifactLimit) {
+      return scoringPacketOversizeJson(options.axisCatalog.length, "source_artifact_cap_irreducible");
+    }
+  }
   let json = JSON.stringify(render());
   const protectedEvidenceSections = new Set(["checkOutcomes", "sourceArtifacts"]);
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
-    const section = pruneOrder.find((key) =>
-      !protectedEvidenceSections.has(key)
-      && Array.isArray(packet[key])
-      && (packet[key] as unknown[]).length > 0);
-    if (!section) break;
-    (packet[section] as unknown[]).pop();
-    coverage[section].included = (packet[section] as unknown[]).length;
+    if (!removeOneFrom(pruneOrder, (section) => !protectedEvidenceSections.has(section))) break;
     json = JSON.stringify(render());
   }
   // Pathological inputs can fill the entire budget with findings alone. Remove
   // complete lowest-priority rows, never bytes, and disclose the omitted count.
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS && findings.length > 1) {
-    findings.pop();
-    coverage.findings.included = findings.length;
+    if (!removeOneArrayItem("findings", 1)) break;
     json = JSON.stringify(render());
   }
   // A graph is a high-priority predicate, but its nested connection/tie arrays
   // must still obey the same hard request budget as every other section.
-  while (json.length > ANALYST_EVIDENCE_MAX_CHARS && pruneTrustGraphPacket(packet)) {
+  while (json.length > ANALYST_EVIDENCE_MAX_CHARS && pruneTrustGraphPreservingCoverage()) {
     json = JSON.stringify(render());
   }
   // Only after low-priority context and oversized graph detail are bounded do we
   // trim primary source/check artifacts.
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
-    const section = pruneOrder.find((key) =>
-      protectedEvidenceSections.has(key)
-      && Array.isArray(packet[key])
-      && (packet[key] as unknown[]).length > 0);
-    if (!section) break;
-    (packet[section] as unknown[]).pop();
-    coverage[section].included = (packet[section] as unknown[]).length;
+    if (!removeOneFrom(pruneOrder, (section) => protectedEvidenceSections.has(section))) break;
     json = JSON.stringify(render());
   }
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS && findings.length > 0) {
-    findings.pop();
-    coverage.findings.included = findings.length;
+    if (!removeOneArrayItem("findings")) break;
     json = JSON.stringify(render());
   }
-  if (json.length > ANALYST_EVIDENCE_MAX_CHARS && packet.profile != null) {
-    delete packet.profile;
+  if (json.length > ANALYST_EVIDENCE_MAX_CHARS && deleteProfilePreservingCoverage()) {
     json = JSON.stringify(render());
   }
   if (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
+    if (options.axisCatalog) {
+      return scoringPacketOversizeJson(options.axisCatalog.length, "substantive_coverage_irreducible");
+    }
     throw new Error(`analyst evidence packet exceeds ${ANALYST_EVIDENCE_MAX_CHARS} characters after structural pruning`);
   }
   return json;
@@ -1577,6 +1670,105 @@ export function buildScoringEvidencePacket(input: Record<string, unknown>, axisC
   return serializeAnalystEvidencePacket(input, { includeInvestigativeLeads: false, axisCatalog });
 }
 
+export type AnalystScoringPreflightState =
+  | "ready"
+  | "no_axes"
+  | "unsupported_axes"
+  | "packet_oversize"
+  | "invalid_catalog"
+  | "insufficient_evidence";
+
+export interface AnalystScoringPreflight {
+  state: AnalystScoringPreflightState;
+  requestedAxisCount: number;
+  evidenceArtifactCount: number;
+  missingSubstantiveAxes: string[];
+  unsupportedAxes: string[];
+}
+
+/**
+ * Inspect the immutable scorer packet before spending a model call. A genuine
+ * evidence gap is an abstention, not an invalid model response and never an
+ * instruction to synthesize a zero score.
+ */
+export function inspectAnalystScoringPreflight(
+  axisCatalog: AnalystAxis[],
+  evidenceJson: string,
+): AnalystScoringPreflight {
+  if (axisCatalog.length === 0) {
+    return {
+      state: "no_axes",
+      requestedAxisCount: 0,
+      evidenceArtifactCount: 0,
+      missingSubstantiveAxes: [],
+      unsupportedAxes: [],
+    };
+  }
+  const axisNames = axisCatalog.map(({ axis }) => axis);
+  if (
+    new Set(axisNames).size !== axisNames.length
+    || axisCatalog.some((axis) => !axis.axis || !Number.isInteger(axis.weight) || axis.weight < 0)
+  ) {
+    return {
+      state: "invalid_catalog",
+      requestedAxisCount: axisCatalog.length,
+      evidenceArtifactCount: 0,
+      missingSubstantiveAxes: [],
+      unsupportedAxes: [],
+    };
+  }
+  const unsupportedAxes = axisNames.filter((axis) => !SCORING_SUPPORTED_AXES.has(axis));
+  if (unsupportedAxes.length > 0) {
+    return {
+      state: "unsupported_axes",
+      requestedAxisCount: axisCatalog.length,
+      evidenceArtifactCount: 0,
+      missingSubstantiveAxes: [],
+      unsupportedAxes,
+    };
+  }
+  try {
+    const packet = JSON.parse(evidenceJson) as unknown;
+    if (
+      packet
+      && typeof packet === "object"
+      && !Array.isArray(packet)
+      && (packet as Record<string, unknown>)[SCORING_PACKET_STATE_FIELD] === SCORING_PACKET_OVERSIZE
+    ) {
+      return {
+        state: "packet_oversize",
+        requestedAxisCount: axisCatalog.length,
+        evidenceArtifactCount: 0,
+        missingSubstantiveAxes: [],
+        unsupportedAxes: [],
+      };
+    }
+  } catch {
+    // The catalog integrity check below owns malformed JSON classification.
+  }
+  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
+  if (!evidenceCatalog.length) {
+    return {
+      state: "invalid_catalog",
+      requestedAxisCount: axisCatalog.length,
+      evidenceArtifactCount: 0,
+      missingSubstantiveAxes: [],
+      unsupportedAxes: [],
+    };
+  }
+  const missingSubstantiveAxes = axisCatalog
+    .filter((axis) => !evidenceCatalog.some((artifact) =>
+      isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis)))
+    .map(({ axis }) => axis);
+  return {
+    state: missingSubstantiveAxes.length > 0 ? "insufficient_evidence" : "ready",
+    requestedAxisCount: axisCatalog.length,
+    evidenceArtifactCount: evidenceCatalog.length,
+    missingSubstantiveAxes,
+    unsupportedAxes: [],
+  };
+}
+
 export async function analyzeSubject(
   handle: string,
   roles: string[],
@@ -1590,12 +1782,13 @@ export async function analyzeSubject(
     || new Set(axisNames).size !== axisNames.length
     || axisCatalog.some((axis) => !axis.axis || !Number.isInteger(axis.weight) || axis.weight < 0)
   ) return null;
+  const preflight = inspectAnalystScoringPreflight(axisCatalog, evidenceJson);
+  console.info("[agent-preflight]", JSON.stringify({
+    tool: "record_verdict",
+    ...preflight,
+  }));
+  if (preflight.state !== "ready") return null;
   const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
-  if (
-    !evidenceCatalog.length
-    || axisCatalog.some((axis) => !evidenceCatalog.some((artifact) =>
-      isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis)))
-  ) return null;
   const citationAliases = evidenceCatalog.map((artifact, index) => ({
     alias: `e${String(index + 1).padStart(3, "0")}`,
     artifact,

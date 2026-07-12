@@ -271,14 +271,17 @@ export default function App() {
   // instead of the "no live dossier / demo" copy that implies nothing ever ran.
   const [liveError, setLiveError] = useState<string | null>(null);
   const [caseNotice, setCaseNotice] = useState<{
-    reason: "archived" | "missing" | "unavailable" | "search-unavailable" | "token-unresolved" | "case-ambiguous" | "privacy-conflict";
+    reason: "archived" | "missing" | "unavailable" | "search-unavailable" | "launch-failed" | "token-unresolved" | "case-ambiguous" | "privacy-conflict";
     ref: string;
     kind?: ReportKind;
     mode?: TokenLaunchMode;
+    reuseStored?: boolean;
   } | null>(null);
   const [tokenChoices, setTokenChoices] = useState<TokenCandidate[]>([]);
   const [tokenChoicePrivate, setTokenChoicePrivate] = useState(false);
   const [tokenChoiceMode, setTokenChoiceMode] = useState<TokenLaunchMode>("investigation");
+  const [tokenChoiceReuseStored, setTokenChoiceReuseStored] = useState(true);
+  const [resolutionUsesStoredCases, setResolutionUsesStoredCases] = useState(true);
   const [caseBriefTarget, setCaseBriefTarget] = useState<CaseBriefTarget | null>(null);
   const caseBriefDirtyRef = useRef(false);
   const caseBriefBusyRef = useRef(false);
@@ -825,198 +828,238 @@ export default function App() {
     else onAudit(ref);
   }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, onInvestigate, showCached]);
 
+  const showAuditLaunchFailure = useCallback((
+    ref: string,
+    mode: TokenLaunchMode,
+    reuseStored: boolean,
+    error: unknown,
+  ) => {
+    const detail = error instanceof Error ? error.message : String(error);
+    setQuery(ref);
+    setCaseNotice({ reason: "launch-failed", ref, mode, reuseStored });
+    setLiveError(detail.trim().slice(0, 500) || "Unexpected audit launch failure.");
+    setPhase("notfound");
+  }, []);
+
   const openOrLaunchTokenCandidate = useCallback(async (
     candidate: TokenCandidate,
     priv = false,
     mode: TokenLaunchMode = "investigation",
     requestId?: number,
     allowLaunch = true,
+    reuseStored = true,
   ) => {
     const activeRequestId = requestId ?? ++safeAuditRequestRef.current;
-    privRef.current = priv;
-    setPrivateMode(priv);
-    setPhase("resolving");
-    if (!priv) {
-      const storedLookup = await resolveStoredCases(candidate.canonicalRef);
+    try {
+      privRef.current = priv;
+      setPrivateMode(priv);
+      setPhase("resolving");
+      if (!priv && reuseStored) {
+        const storedLookup = await resolveStoredCases(candidate.canonicalRef);
+        if (activeRequestId !== safeAuditRequestRef.current) return;
+        if (storedLookup.status === "unavailable") {
+          setQuery(candidate.canonicalRef);
+          setCaseNotice({ reason: "search-unavailable", ref: candidate.canonicalRef, mode, reuseStored });
+          setLiveError(null);
+          setPhase("notfound");
+          return;
+        }
+        const preferredKind: ReportKind = mode === "token" ? "token" : "investigation";
+        const stored = preferredStoredCase(storedLookup.subjects, preferredKind);
+        if (stored) {
+          await onOpenRecent(stored.ref, stored.kind);
+          return;
+        }
+        if (storedLookup.subjects.length) {
+          setQuery(candidate.canonicalRef);
+          setCaseNotice({ reason: "case-ambiguous", ref: candidate.canonicalRef });
+          setLiveError(null);
+          setPhase("notfound");
+          return;
+        }
+        if (!allowLaunch) {
+          setQuery(candidate.canonicalRef);
+          setCaseNotice({ reason: "missing", ref: candidate.canonicalRef, kind: preferredKind });
+          setLiveError(null);
+          setPhase("notfound");
+          return;
+        }
+      }
+
+      setTokenChoices([]);
+      setCaseNotice(null);
+      setQuery(candidate.input.ref);
+      privRef.current = priv;
+      setPrivateMode(priv);
+      if (mode === "token") {
+        setTokenInput(candidate.input);
+        const run = reuseStored
+          ? startTokenScan(candidate.input, priv)
+          : startTokenScan(candidate.input, priv, { force: true });
+        if (run.priv !== priv) { showPrivacyConflict(candidate.canonicalRef); return; }
+        setPhase("token-run");
+      } else {
+        setInvestigationInput(candidate.input);
+        const run = reuseStored
+          ? startInvestigationScan(candidate.input, priv)
+          : startInvestigationScan(candidate.input, priv, { force: true });
+        if (run.priv !== priv) { showPrivacyConflict(candidate.canonicalRef); return; }
+        setPhase("investigation");
+      }
+    } catch (error) {
       if (activeRequestId !== safeAuditRequestRef.current) return;
-      if (storedLookup.status === "unavailable") {
-        setQuery(candidate.canonicalRef);
-        setCaseNotice({ reason: "search-unavailable", ref: candidate.canonicalRef, mode });
-        setLiveError(null);
-        setPhase("notfound");
-        return;
-      }
-      const preferredKind: ReportKind = mode === "token" ? "token" : "investigation";
-      const stored = preferredStoredCase(storedLookup.subjects, preferredKind);
-      if (stored) {
-        await onOpenRecent(stored.ref, stored.kind);
-        return;
-      }
-      if (storedLookup.subjects.length) {
-        setQuery(candidate.canonicalRef);
-        setCaseNotice({ reason: "case-ambiguous", ref: candidate.canonicalRef });
-        setLiveError(null);
-        setPhase("notfound");
-        return;
-      }
-      if (!allowLaunch) {
-        setQuery(candidate.canonicalRef);
-        setCaseNotice({ reason: "missing", ref: candidate.canonicalRef, kind: preferredKind });
-        setLiveError(null);
-        setPhase("notfound");
-        return;
-      }
+      showAuditLaunchFailure(candidate.canonicalRef, mode, reuseStored, error);
     }
+  }, [onOpenRecent, showAuditLaunchFailure, showPrivacyConflict]);
 
-    setTokenChoices([]);
-    setCaseNotice(null);
-    setQuery(candidate.input.ref);
-    privRef.current = priv;
-    setPrivateMode(priv);
-    if (mode === "token") {
-      setTokenInput(candidate.input);
-      const run = startTokenScan(candidate.input, priv);
-      if (run.priv !== priv) { showPrivacyConflict(candidate.canonicalRef); return; }
-      setPhase("token-run");
-    } else {
-      setInvestigationInput(candidate.input);
-      const run = startInvestigationScan(candidate.input, priv);
-      if (run.priv !== priv) { showPrivacyConflict(candidate.canonicalRef); return; }
-      setPhase("investigation");
-    }
-  }, [onOpenRecent, showPrivacyConflict]);
-
-  // The public search entry is storage-first and token-intent aware. It resolves
-  // labels and legacy refs from durable cases before any provider work, then
-  // canonicalizes token candidates with free DexScreener data. A scan begins
-  // only after those two gates say the subject is genuinely new.
+  // Search and pivot entry points are storage-first; the Home CTA explicitly
+  // opts out so "Run audit" always means a fresh provider run. Both paths still
+  // canonicalize token candidates with free DexScreener data before spending.
   const onSafeAuditMode = useCallback(async (
     raw: string,
     priv = false,
     mode: TokenLaunchMode,
     allowLaunch = true,
+    reuseStored = true,
   ) => {
     if (!closeCaseBriefForNavigation()) return;
     leaveEvidenceReview();
     const requestId = ++safeAuditRequestRef.current;
-    setCaseNotice(null);
-    setTokenChoices([]);
-    privRef.current = priv;
-    setPrivateMode(priv);
-    setQuery(raw);
-    setPhase("resolving");
-
-    const parsed = resolveInput(raw);
-    const lookupInput = parsed.kind === "handle"
-      ? parsed.ref
-      : parsed.kind === "site"
-        ? siteCaseRef(parsed.ref)
-        : raw;
-    const storedLookup: StoredCaseResolution = priv
-      ? { status: "ok", subjects: [] }
-      : await resolveStoredCases(lookupInput);
-    if (requestId !== safeAuditRequestRef.current) return;
-    if (storedLookup.status === "unavailable") {
-      setQuery(raw);
-      setCaseNotice({ reason: "search-unavailable", ref: raw, mode });
-      setLiveError(null);
-      setPhase("notfound");
-      return;
-    }
-
-    if (parsed.kind !== "token") {
-      const stored = preferredStoredCase(storedLookup.subjects);
-      if (stored) {
-        await onOpenRecent(stored.ref, stored.kind);
-        return;
-      }
-      if (storedLookup.subjects.length) {
-        setQuery(raw);
-        setCaseNotice({ reason: "case-ambiguous", ref: raw });
-        setLiveError(null);
-        setPhase("notfound");
-        return;
-      }
-      if (!allowLaunch) {
-        setQuery(raw);
-        setCaseNotice({ reason: "missing", ref: raw, kind: parsed.kind === "site" ? "site" : "person" });
-        setLiveError(null);
-        setPhase("notfound");
-        return;
-      }
-      await onAudit(raw, priv);
-      return;
-    }
-
-    // Exact private token inputs are already canonical enough to launch. Do not
-    // consult durable storage (which would reopen a public report) or spend a
-    // resolver call merely to recover the same contract.
-    if (priv && isRunnableTokenInput(parsed)) {
-      setTokenChoices([]);
+    try {
       setCaseNotice(null);
-      setQuery(parsed.ref);
-      if (mode === "token") {
-        setTokenInput(parsed);
-        const run = startTokenScan(parsed, true);
-        if (!run.priv) { showPrivacyConflict(parsed.ref); return; }
-        setPhase("token-run");
-      } else {
-        setInvestigationInput(parsed);
-        const run = startInvestigationScan(parsed, true);
-        if (!run.priv) { showPrivacyConflict(parsed.ref); return; }
-        setPhase("investigation");
-      }
-      return;
-    }
+      setTokenChoices([]);
+      privRef.current = priv;
+      setPrivateMode(priv);
+      setQuery(raw);
+      setLiveError(null);
+      setResolutionUsesStoredCases(reuseStored);
+      setPhase("resolving");
 
-    // Exact contracts and historical exact aliases can open immediately. A
-    // ticker must still resolve against the live contract set even if only one
-    // stored case currently uses that display label.
-    if (parsed.via !== "ticker" && parsed.via !== "dexscreener") {
-      const preferredKind: ReportKind = mode === "token" ? "token" : "investigation";
-      const stored = preferredStoredCase(storedLookup.subjects, preferredKind);
-      if (stored) {
-        await onOpenRecent(stored.ref, stored.kind);
-        return;
-      }
-      if (storedLookup.subjects.length) {
+      const parsed = resolveInput(raw);
+      const lookupInput = parsed.kind === "handle"
+        ? parsed.ref
+        : parsed.kind === "site"
+          ? siteCaseRef(parsed.ref)
+          : raw;
+      const storedLookup: StoredCaseResolution = priv || !reuseStored
+        ? { status: "ok", subjects: [] }
+        : await resolveStoredCases(lookupInput);
+      if (requestId !== safeAuditRequestRef.current) return;
+      if (storedLookup.status === "unavailable") {
         setQuery(raw);
-        setCaseNotice({ reason: "case-ambiguous", ref: raw });
+        setCaseNotice({ reason: "search-unavailable", ref: raw, mode, reuseStored });
         setLiveError(null);
         setPhase("notfound");
         return;
       }
-    }
 
-    const resolution = await resolveTokenSubject(parsed);
-    if (requestId !== safeAuditRequestRef.current) return;
-    if (resolution.state === "unavailable") {
-      setQuery(raw);
-      setCaseNotice({ reason: "search-unavailable", ref: raw, mode });
-      setLiveError(null);
-      setPhase("notfound");
-      return;
-    }
-    if (resolution.state === "not_found") {
-      setQuery(raw);
-      setCaseNotice({ reason: "token-unresolved", ref: raw });
-      setLiveError(null);
-      setPhase("notfound");
-      return;
-    }
-    if (resolution.state === "ambiguous") {
-      setQuery(raw);
-      setTokenChoices(resolution.candidates);
-      setTokenChoicePrivate(priv);
-      setTokenChoiceMode(mode);
-      setLiveError(null);
-      setPhase("token-choice");
-      return;
-    }
-    await openOrLaunchTokenCandidate(resolution.candidate, priv, mode, requestId, allowLaunch);
-  }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, onOpenRecent, openOrLaunchTokenCandidate, showPrivacyConflict]);
+      if (parsed.kind !== "token") {
+        const stored = preferredStoredCase(storedLookup.subjects);
+        if (stored) {
+          await onOpenRecent(stored.ref, stored.kind);
+          return;
+        }
+        if (storedLookup.subjects.length) {
+          setQuery(raw);
+          setCaseNotice({ reason: "case-ambiguous", ref: raw });
+          setLiveError(null);
+          setPhase("notfound");
+          return;
+        }
+        if (!allowLaunch) {
+          setQuery(raw);
+          setCaseNotice({ reason: "missing", ref: raw, kind: parsed.kind === "site" ? "site" : "person" });
+          setLiveError(null);
+          setPhase("notfound");
+          return;
+        }
+        await onAudit(raw, priv);
+        return;
+      }
 
-  const onLandingAudit = useCallback(
+      // Exact private token inputs are already canonical enough to launch. Do not
+      // consult durable storage (which would reopen a public report) or spend a
+      // resolver call merely to recover the same contract.
+      if (priv && isRunnableTokenInput(parsed)) {
+        setTokenChoices([]);
+        setCaseNotice(null);
+        setQuery(parsed.ref);
+        if (mode === "token") {
+          setTokenInput(parsed);
+          const run = reuseStored
+            ? startTokenScan(parsed, true)
+            : startTokenScan(parsed, true, { force: true });
+          if (!run.priv) { showPrivacyConflict(parsed.ref); return; }
+          setPhase("token-run");
+        } else {
+          setInvestigationInput(parsed);
+          const run = reuseStored
+            ? startInvestigationScan(parsed, true)
+            : startInvestigationScan(parsed, true, { force: true });
+          if (!run.priv) { showPrivacyConflict(parsed.ref); return; }
+          setPhase("investigation");
+        }
+        return;
+      }
+
+      // Exact contracts and historical exact aliases can open immediately. A
+      // ticker must still resolve against the live contract set even if only one
+      // stored case currently uses that display label.
+      if (reuseStored && parsed.via !== "ticker" && parsed.via !== "dexscreener") {
+        const preferredKind: ReportKind = mode === "token" ? "token" : "investigation";
+        const stored = preferredStoredCase(storedLookup.subjects, preferredKind);
+        if (stored) {
+          await onOpenRecent(stored.ref, stored.kind);
+          return;
+        }
+        if (storedLookup.subjects.length) {
+          setQuery(raw);
+          setCaseNotice({ reason: "case-ambiguous", ref: raw });
+          setLiveError(null);
+          setPhase("notfound");
+          return;
+        }
+      }
+
+      const resolution = await resolveTokenSubject(parsed);
+      if (requestId !== safeAuditRequestRef.current) return;
+      if (resolution.state === "unavailable") {
+        setQuery(raw);
+        setCaseNotice({ reason: "search-unavailable", ref: raw, mode, reuseStored });
+        setLiveError(null);
+        setPhase("notfound");
+        return;
+      }
+      if (resolution.state === "not_found") {
+        setQuery(raw);
+        setCaseNotice({ reason: "token-unresolved", ref: raw });
+        setLiveError(null);
+        setPhase("notfound");
+        return;
+      }
+      if (resolution.state === "ambiguous") {
+        setQuery(raw);
+        setTokenChoices(resolution.candidates);
+        setTokenChoicePrivate(priv);
+        setTokenChoiceMode(mode);
+        setTokenChoiceReuseStored(reuseStored);
+        setLiveError(null);
+        setPhase("token-choice");
+        return;
+      }
+      await openOrLaunchTokenCandidate(resolution.candidate, priv, mode, requestId, allowLaunch, reuseStored);
+    } catch (error) {
+      if (requestId !== safeAuditRequestRef.current) return;
+      showAuditLaunchFailure(raw, mode, reuseStored, error);
+    }
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, onOpenRecent, openOrLaunchTokenCandidate, showAuditLaunchFailure, showPrivacyConflict]);
+
+  const onHomeAudit = useCallback(
+    (raw: string, priv = false) => onSafeAuditMode(raw, priv, "investigation", true, false),
+    [onSafeAuditMode],
+  );
+
+  const onSafeInvestigationAudit = useCallback(
     (raw: string, priv = false) => onSafeAuditMode(raw, priv, "investigation"),
     [onSafeAuditMode],
   );
@@ -1184,7 +1227,7 @@ export default function App() {
           <span>Opened in a separate tab so the Case Brief draft remains intact.</span>
         </div>
       )}
-      {phase === "idle" && <Landing onAudit={onLandingAudit} onAbout={() => setPhase("about")} onOpenRecent={onOpenRecent} />}
+      {phase === "idle" && <Landing onAudit={onHomeAudit} onAbout={() => setPhase("about")} onOpenRecent={onOpenRecent} />}
 
       {phase === "about" && <AboutPage onStart={reset} />}
 
@@ -1214,7 +1257,7 @@ export default function App() {
 
       {phase === "alerts" && <AlertsPage onOpen={onOpenRecent} />}
 
-      {phase === "recon" && <ReconPage key={storedRecon ? `stored:${storedRecon.retrieval.url}:${storedReconVersionContext?.reportVersionId ?? "legacy"}` : reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialRecon={storedRecon ?? undefined} initialVersionContext={storedReconVersionContext ?? undefined} initialPrivate={privateMode} onAudit={onSafeAudit} onInvestigate={onLandingAudit} onOpenRecent={onOpenRecent} onOpenBrief={!evidenceReviewVersionId && !privateMode && storedReconBriefTarget ? () => setCaseBriefTarget(storedReconBriefTarget) : undefined} onStartFresh={leaveEvidenceReview} />}
+      {phase === "recon" && <ReconPage key={storedRecon ? `stored:${storedRecon.retrieval.url}:${storedReconVersionContext?.reportVersionId ?? "legacy"}` : reconUrl ?? "manual"} initialUrl={reconUrl ?? undefined} initialRecon={storedRecon ?? undefined} initialVersionContext={storedReconVersionContext ?? undefined} initialPrivate={privateMode} onAudit={onSafeAudit} onInvestigate={onSafeInvestigationAudit} onOpenRecent={onOpenRecent} onOpenBrief={!evidenceReviewVersionId && !privateMode && storedReconBriefTarget ? () => setCaseBriefTarget(storedReconBriefTarget) : undefined} onStartFresh={leaveEvidenceReview} />}
 
       {phase === "find" && <FindWallet onAudit={onSafeAudit} onReset={reset} onOpenRecent={onOpenRecent} />}
 
@@ -1270,7 +1313,9 @@ export default function App() {
           <span className="h-2 w-2 animate-pulse rounded-full bg-signal" />
           <h2 className="mt-4 display-sm text-[18px] text-ink">Resolving the exact subject</h2>
           <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
-            Checking durable cases and canonical contract identity before any collector or paid investigation can start.
+            {resolutionUsesStoredCases
+              ? "Checking durable cases and canonical contract identity before any collector or paid investigation can start."
+              : "Resolving canonical identity before starting a fresh provider run. Existing snapshots will remain unchanged and paid API quota may be used."}
           </p>
         </div>
       )}
@@ -1283,13 +1328,18 @@ export default function App() {
           <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
             More than one contract uses this ticker. ARGUS will never guess based on liquidity or popularity. Select the exact chain and address before any investigation starts.
           </p>
+          {!tokenChoiceReuseStored && (
+            <p className="mt-3 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
+              This is still a fresh-audit request. Choosing a contract starts a new provider run and may use paid API quota; previous snapshots remain in Recent audits.
+            </p>
+          )}
           <div className="mt-6 grid gap-3">
             {tokenChoices.map((candidate) => (
               <button
                 key={`${candidate.chain}:${candidate.canonicalRef}`}
-                onClick={() => { void openOrLaunchTokenCandidate(candidate, tokenChoicePrivate, tokenChoiceMode); }}
+                onClick={() => { void openOrLaunchTokenCandidate(candidate, tokenChoicePrivate, tokenChoiceMode, undefined, true, tokenChoiceReuseStored); }}
                 className="panel p-4 text-left transition hover:border-line-2"
-                aria-label={`Investigate ${candidate.symbol || candidate.name || "token"} on ${candidate.chain} at ${candidate.canonicalRef}`}
+                aria-label={`${tokenChoiceReuseStored ? "Investigate" : "Start fresh audit of"} ${candidate.symbol || candidate.name || "token"} on ${candidate.chain} at ${candidate.canonicalRef}`}
               >
                 <span className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-[15px] font-medium text-ink">
@@ -1324,37 +1374,49 @@ export default function App() {
                   ? "This case is archived"
                   : caseNotice.reason === "missing"
                     ? "No stored case exists yet"
-                  : caseNotice.reason === "privacy-conflict"
-                    ? "A scan is already running in another privacy mode"
-                  : caseNotice.reason === "token-unresolved"
-                    ? "Couldn't resolve that token"
-                    : caseNotice.reason === "case-ambiguous"
-                      ? "More than one stored case matches"
-                      : "Stored case status is unavailable"}
+                    : caseNotice.reason === "launch-failed"
+                      ? "Couldn't start the audit"
+                      : caseNotice.reason === "privacy-conflict"
+                        ? "A scan is already running in another privacy mode"
+                        : caseNotice.reason === "token-unresolved"
+                          ? "Couldn't resolve that token"
+                          : caseNotice.reason === "case-ambiguous"
+                            ? "More than one stored case matches"
+                            : "Stored case status is unavailable"}
               </h2>
               <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
                 {caseNotice.reason === "archived"
                   ? "Its immutable reports, evidence, audit history, and trust-graph intelligence are preserved. ARGUS did not start a new scan."
                   : caseNotice.reason === "missing"
                     ? "This link does not point to an existing immutable report. ARGUS did not automatically start a collector or spend investigation quota."
-                  : caseNotice.reason === "privacy-conflict"
-                    ? "ARGUS will not attach a private view to a public run, or suppress persistence for a public request by reusing a private run. Let the current scan finish, then retry."
-                  : caseNotice.reason === "token-unresolved"
-                    ? "No exact DexScreener contract matched that token input. ARGUS did not reinterpret it as a person or spend any investigation quota. Paste the contract address, a DexScreener URL, or an exact $TICKER."
-                    : caseNotice.reason === "case-ambiguous"
-                      ? "Several durable cases share that label. Open the report library and choose the exact case facet; ARGUS will not guess or start a scan."
-                      : "ARGUS could not safely verify whether this case is active or archived. No cached report was opened and no paid scan was started."}
+                    : caseNotice.reason === "launch-failed"
+                      ? "ARGUS hit an unexpected resolver or orchestration error and exited the launch flow instead of leaving it stuck. Retry once; any same-subject run already in flight will be reused rather than duplicated."
+                      : caseNotice.reason === "privacy-conflict"
+                        ? "ARGUS will not attach a private view to a public run, or suppress persistence for a public request by reusing a private run. Let the current scan finish, then retry."
+                        : caseNotice.reason === "token-unresolved"
+                          ? "No exact DexScreener contract matched that token input. ARGUS did not reinterpret it as a person or spend any investigation quota. Paste the contract address, a DexScreener URL, or an exact $TICKER."
+                          : caseNotice.reason === "case-ambiguous"
+                            ? "Several durable cases share that label. Open the report library and choose the exact case facet; ARGUS will not guess or start a scan."
+                            : "ARGUS could not safely verify whether this case is active or archived. No cached report was opened and no paid scan was started."}
               </p>
+              {caseNotice.reason === "launch-failed" && liveError && (
+                <div role="alert" className="mono panel-inset mt-3 max-w-md break-words px-3 py-2 text-left text-[12.5px] text-ink-dim">
+                  {liveError}
+                </div>
+              )}
               <div className="mt-6 flex flex-wrap items-center justify-center gap-3">
                 <button
                   onClick={() => {
                     if (caseNotice.reason === "archived") setPhase("dossiers");
                     else if (caseNotice.reason === "missing") reset();
                     else if (caseNotice.reason === "unavailable") void onOpenRecent(caseNotice.ref, caseNotice.kind);
-                    else if (caseNotice.reason === "search-unavailable") {
-                      if (caseNotice.mode === "token") void onSafeAudit(caseNotice.ref, privRef.current);
-                      else void onLandingAudit(caseNotice.ref, privRef.current);
-                    }
+                    else if (caseNotice.reason === "search-unavailable" || caseNotice.reason === "launch-failed") void onSafeAuditMode(
+                      caseNotice.ref,
+                      privRef.current,
+                      caseNotice.mode ?? "investigation",
+                      true,
+                      caseNotice.reuseStored ?? true,
+                    );
                     else if (caseNotice.reason === "case-ambiguous") setPhase("dossiers");
                     else reset();
                   }}
@@ -1366,11 +1428,13 @@ export default function App() {
                       ? "Back to home"
                     : caseNotice.reason === "privacy-conflict"
                       ? "Back to home"
-                    : caseNotice.reason === "unavailable" || caseNotice.reason === "search-unavailable"
-                      ? "Retry safely"
-                      : caseNotice.reason === "case-ambiguous"
-                        ? "Go to report library"
-                        : "Try another token"}
+                      : caseNotice.reason === "launch-failed"
+                        ? "Retry audit"
+                        : caseNotice.reason === "unavailable" || caseNotice.reason === "search-unavailable"
+                          ? "Retry safely"
+                          : caseNotice.reason === "case-ambiguous"
+                            ? "Go to report library"
+                            : "Try another token"}
                 </button>
                 {(caseNotice.reason === "archived" || caseNotice.reason === "missing") && role !== "viewer" && (
                   <button

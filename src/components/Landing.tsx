@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { HeroBackdrop } from "./ArgusMark";
 import { ScoreTicker } from "./ScoreTicker";
 import type { ReportKind } from "../lib/reports";
@@ -8,10 +8,28 @@ import { PrivateToggle } from "./PrivateToggle";
 // The front door: the investigation question in the display voice, one
 // chat-style input, live samples. The old static announcement-bar copy lives
 // here now ("paste an X handle or a token contract") where it belongs.
-export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: string, priv?: boolean) => void; onAbout: () => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
+export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: string, priv?: boolean) => void | Promise<void>; onAbout: () => void; onOpenRecent?: (ref: string, kind?: ReportKind) => void }) {
   const [value, setValue] = useState("");
   const [priv, setPriv] = useState(false);
+  const [launching, setLaunching] = useState(false);
+  const launchingRef = useRef(false);
   const hasScores = onOpenRecent && recentScored(1).length > 0;
+
+  const launchFreshAudit = async (subject: string) => {
+    if (!subject || launchingRef.current) return;
+    launchingRef.current = true;
+    setLaunching(true);
+    try {
+      await onAudit(subject, priv);
+    } catch {
+      // The app owns the explicit failure state; Home only releases its lock.
+    } finally {
+      // A successful launch normally unmounts Home. If navigation is declined
+      // or the launch rejects before that happens, let the analyst retry.
+      launchingRef.current = false;
+      setLaunching(false);
+    }
+  };
 
   return (
     <div className="relative flex min-h-full flex-col">
@@ -34,8 +52,9 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
         <form
           onSubmit={(e) => {
             e.preventDefault();
-            if (value.trim()) onAudit(value.trim(), priv);
+            void launchFreshAudit(value.trim());
           }}
+          aria-busy={launching}
           className="mt-7 w-full rounded-xl border border-line bg-panel p-2.5 soft-shadow transition focus-within:border-signal/60"
         >
           <div className="flex items-center gap-2">
@@ -50,12 +69,20 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
           </div>
           <div className="mt-2 flex items-center gap-2 px-1">
             <PrivateToggle on={priv} onToggle={setPriv} />
-            <button type="submit" className="btn-primary ml-auto flex items-center gap-1.5 px-3.5 py-1.5 text-[13.5px] font-medium">
-              Run audit
+            <button
+              type="submit"
+              disabled={launching}
+              aria-describedby="fresh-audit-note"
+              className="btn-primary ml-auto flex items-center gap-1.5 px-3.5 py-1.5 text-[13.5px] font-medium disabled:cursor-wait disabled:opacity-70"
+            >
+              {launching ? "Starting fresh audit…" : "Run audit"}
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
             </button>
           </div>
         </form>
+        <p id="fresh-audit-note" className="mt-2.5 text-center text-[11px] leading-relaxed text-ink-faint">
+          Starts a fresh provider run and may use paid API quota. Open previous snapshots from Recent audits.
+        </p>
 
         {/* live token samples */}
         <div className="mt-8 w-full">
@@ -68,8 +95,9 @@ export function Landing({ onAudit, onAbout, onOpenRecent }: { onAudit: (handle: 
             ].map((t) => (
               <button
                 key={t.sym}
-                onClick={() => onAudit(t.addr, priv)}
-                className="mono rounded-full border border-line bg-panel px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-signal/50 hover:text-ink"
+                onClick={() => { void launchFreshAudit(t.addr); }}
+                disabled={launching}
+                className="mono rounded-full border border-line bg-panel px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-signal/50 hover:text-ink disabled:cursor-wait disabled:opacity-60"
               >
                 {t.sym}
               </button>

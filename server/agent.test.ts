@@ -6,6 +6,7 @@ import {
   buildAnalystEvidencePacket,
   buildScoringEvidencePacket,
   extractScoringEvidenceCatalog,
+  inspectAnalystScoringPreflight,
   scanContradictions,
   structured,
   validateAnalystVerdict,
@@ -804,6 +805,147 @@ describe("analyst verdict integrity", () => {
     }));
   });
 
+  it("preserves one substantive artifact per covered axis while pruning a large 14-axis packet", () => {
+    const roles = [SubjectClass.FOUNDER, SubjectClass.INVESTOR, SubjectClass.MEMBER];
+    const axes: AnalystAxis[] = roles.flatMap((role) =>
+      Object.entries(getProfile(role).axes).map(([axis, weight]) => ({ axis, weight, role })));
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named founder, investor, and community contributor",
+        website: "https://subject.example",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-11T12:00:00.000Z",
+      },
+      ventures: [{
+        project_name: "Verified Venture",
+        role: "founder and investor",
+        outcome: "Active",
+        artifact_verified: true,
+      }],
+      testimonials: [{
+        claimed_endorser_handle: "@verified_backer",
+        claimed_relationship: "repeat backer",
+        artifact_verified: true,
+      }],
+      recentActivity: Array.from({ length: 12 }, (_, index) => ({
+        provider: "twitterapi",
+        text: `Documented subject activity ${index} ${"x".repeat(300)}`,
+        capturedAt: "2026-07-11T12:00:00.000Z",
+      })),
+      sourceArtifacts: [
+        {
+          kind: "portfolio_relationship",
+          provider: "portfolio-web",
+          title: "Subject → Verified Portfolio Company",
+          excerpt: "Verified Portfolio Company appears on the subject's official portfolio page.",
+          sourceUrl: "https://subject.example/portfolio/verified-company",
+          capturedAt: "2026-07-11T12:00:00.000Z",
+          contentHash: "c".repeat(64),
+          sourceContentHash: "d".repeat(64),
+          match: "relationship_confirmed",
+          relationship: "invested_in",
+          subjectName: "Subject",
+          projectName: "Verified Portfolio Company",
+          sourceClass: "first_party_subject",
+        },
+        verifiedFundScaleArtifact(),
+        ...Array.from({ length: 22 }, (_, index) => ({
+          kind: "press",
+          provider: "google-news",
+          title: `Verified source ${index}`,
+          excerpt: `Independent evidence ${index} ${"e".repeat(300)}`,
+          sourceUrl: `https://news.example/source-${index}`,
+          capturedAt: "2026-07-11T12:00:00.000Z",
+          contentHash: (index + 10).toString(16).padStart(64, "0"),
+          match: "exact_name",
+        })),
+      ],
+      checkOutcomes: Array.from({ length: 20 }, (_, index) => ({
+        checkId: index % 2 === 0 ? "us-legal-history" : "news-press",
+        status: "unavailable",
+        provider: `coverage-provider-${index}`,
+        note: `Provider coverage unavailable ${index} ${"n".repeat(200)}`,
+      })),
+    }, axes);
+    const parsed = JSON.parse(packet) as Record<string, unknown>;
+    const frozenCatalog = extractScoringEvidenceCatalog(packet);
+    const substantive = frozenCatalog.filter((artifact) =>
+      artifact.verification !== "checked_empty" && artifact.verification !== "unavailable");
+
+    expect(axes).toHaveLength(14);
+    expect(packet.length).toBeLessThanOrEqual(ANALYST_EVIDENCE_MAX_CHARS);
+    expect((parsed.recentActivity as unknown[]).length).toBeLessThan(12);
+    expect(parsed.testimonials).toEqual([expect.objectContaining({
+      claimed_endorser_handle: "@verified_backer",
+    })]);
+    expect(axes.every(({ axis }) => substantive.some((artifact) => artifact.eligibleAxes.includes(axis)))).toBe(true);
+    expect(inspectAnalystScoringPreflight(axes, packet)).toMatchObject({
+      state: "ready",
+      requestedAxisCount: 14,
+      missingSubstantiveAxes: [],
+    });
+  });
+
+  it("preserves a lower-priority covered axis before applying the 24-row source cap", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "I2_portfolio_quality", weight: 25, role: "INVESTOR" },
+      { axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" },
+    ];
+    const fundScaleRows = Array.from({ length: 24 }, (_, index) => verifiedFundScaleArtifact({
+      title: `Subject closed Fund ${index + 1}`,
+      sourceUrl: `https://subject.example/fund-${index + 1}`,
+      contentHash: (index + 1).toString(16).padStart(64, "0"),
+      sourceContentHash: (index + 40).toString(16).padStart(64, "0"),
+      fundVehicle: `Subject Venture Fund ${index + 1}`,
+      fundScaleClaimId: `fund_scale_claim_v1_subject_fund_${index + 1}`,
+    }));
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Investor",
+        website: "https://subject.example",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-11T12:00:00.000Z",
+      },
+      sourceArtifacts: [...fundScaleRows, {
+        kind: "portfolio_relationship",
+        provider: "portfolio-web",
+        title: "Subject → Verified Portfolio Company",
+        excerpt: "Verified Portfolio Company appears on the subject's official portfolio page.",
+        sourceUrl: "https://subject.example/portfolio/verified-company",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        contentHash: "c".repeat(64),
+        sourceContentHash: "d".repeat(64),
+        match: "relationship_confirmed",
+        relationship: "invested_in",
+        subjectName: "Subject",
+        subjectHandle: "@subject",
+        projectName: "Verified Portfolio Company",
+        sourceClass: "first_party_subject",
+        investorEntityName: "Subject",
+        investorEntityDomain: "subject.example",
+        attribution: "direct_subject",
+      }],
+    }, axes);
+    const parsed = JSON.parse(packet) as { sourceArtifacts: SourceArtifact[] };
+
+    expect(packet.length).toBeLessThanOrEqual(ANALYST_EVIDENCE_MAX_CHARS);
+    expect(parsed.sourceArtifacts.length).toBeLessThanOrEqual(24);
+    expect(parsed.sourceArtifacts).toContainEqual(expect.objectContaining({
+      kind: "portfolio_relationship",
+      match: "relationship_confirmed",
+    }));
+    expect(inspectAnalystScoringPreflight(axes, packet)).toMatchObject({
+      state: "ready",
+      missingSubstantiveAxes: [],
+    });
+  });
+
   it("uses an existing unavailable check as the gap artifact instead of synthesizing a duplicate", () => {
     const trackRecordOnly: AnalystAxis[] = [{ axis: "I2_portfolio_quality", weight: 25, role: "INVESTOR" }];
     const packet = buildScoringEvidencePacket({
@@ -1058,6 +1200,66 @@ describe("analyst verdict integrity", () => {
     expect(JSON.parse(buildScoringEvidencePacket({ sourceArtifacts: [affiliated] }, axes)).axisGaps).toEqual([]);
     const unsafe = { ...affiliated, attributionSourceUrl: "https://x.com/alice?token=secret" };
     expect(JSON.parse(buildScoringEvidencePacket({ sourceArtifacts: [unsafe] }, axes)).sourceArtifacts).toEqual([]);
+  });
+
+  it("retains frozen official fund-domain proof and rejects credential-bearing proof URLs", () => {
+    const axes: AnalystAxis[] = [{ axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" }];
+    const profile = {
+      handle: "@alice",
+      display_name: "Alice Investor",
+      bio: "Research Partner @subjectcapital",
+      website: "https://alice.example",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-11T11:58:00.000Z",
+    };
+    const affiliated = verifiedFundScaleArtifact({
+      subjectName: "Alice Investor",
+      subjectHandle: "@alice",
+      fundName: "Subject Capital",
+      investorEntityName: "Subject Capital",
+      investorEntityHandle: "@subjectcapital",
+      investorEntityDomain: "subject.example",
+      sourceUrl: "https://subject.example/fund-size",
+      sourceClass: "first_party_investor",
+      attribution: "affiliated_fund",
+      attributionSourceUrl: "https://x.com/alice",
+      attributionSourceContentHash: "e".repeat(64),
+      attributionCapturedAt: "2026-07-11T11:58:00.000Z",
+      attributionSourceKind: "provider_profile",
+      investorDomainSourceUrl: "https://x.com/subjectcapital",
+      investorDomainSourceContentHash: "f".repeat(64),
+      investorDomainCapturedAt: "2026-07-11T11:57:00.000Z",
+      investorDomainSourceKind: "provider_profile",
+      investorDomainProfileName: "Subject Capital",
+      investorDomainProfileWebsite: "https://subject.example/",
+    });
+    const packet = JSON.parse(buildScoringEvidencePacket({ profile, sourceArtifacts: [affiliated] }, axes));
+
+    expect(packet.sourceArtifacts).toEqual([expect.objectContaining({
+      investorDomainSourceUrl: "https://x.com/subjectcapital",
+      investorDomainSourceContentHash: "f".repeat(64),
+      investorDomainSourceKind: "provider_profile",
+      investorDomainProfileName: "Subject Capital",
+      investorDomainProfileWebsite: "https://subject.example/",
+    })]);
+    expect(packet.axisGaps).toEqual([]);
+
+    const unsafe = {
+      ...affiliated,
+      investorDomainSourceUrl: "https://x.com/subjectcapital?token=secret",
+    };
+    expect(JSON.parse(buildScoringEvidencePacket({ profile, sourceArtifacts: [unsafe] }, axes)).sourceArtifacts).toEqual([]);
+    const unsafeProfileWebsite = {
+      ...affiliated,
+      investorDomainProfileWebsite: "https://subject.example?access_token=secret",
+    };
+    const unsafeWebsitePacket = buildScoringEvidencePacket({
+      profile,
+      sourceArtifacts: [unsafeProfileWebsite],
+    }, axes);
+    expect(unsafeWebsitePacket).not.toContain("access_token");
+    expect(JSON.parse(unsafeWebsitePacket).sourceArtifacts).toEqual([]);
   });
 
   it("binds affiliated fund scale to the audited provider profile and its current bio", () => {
@@ -1437,6 +1639,57 @@ describe("analyst verdict integrity", () => {
     const artifacts = extractScoringEvidenceCatalog(packet);
     expect(artifacts).toHaveLength(parsed.evidenceCatalog.length);
     expect(artifacts.length).toBeGreaterThan(0);
+  });
+
+  it("fails closed with a bounded marker when required all-role coverage is irreducibly oversized", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const allRoles = Object.values(SubjectClass);
+    const allAxes: AnalystAxis[] = allRoles.flatMap((role) =>
+      Object.entries(getProfile(role).axes).map(([axis, weight]) => ({ axis, weight, role })));
+    const filler = Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
+      `field_${index}`,
+      `${index}`.repeat(320),
+    ]));
+    const fatRow = (provider: string) => ({ provider, ...filler });
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        ...filler,
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named multi-role subject",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [fatRow("ventures")],
+      testimonials: [fatRow("testimonials")],
+      advised: [fatRow("advised")],
+      promotions: [fatRow("promotions")],
+      wallets: [fatRow("wallets")],
+      team: [fatRow("team")],
+      notableFollowers: [fatRow("notable-followers")],
+      recentActivity: [fatRow("recent-activity")],
+      clientEngagements: [fatRow("client-engagements")],
+      associates: [fatRow("associates")],
+      ventureTeams: [fatRow("venture-teams")],
+    }, allAxes);
+
+    expect(packet.length).toBeLessThanOrEqual(ANALYST_EVIDENCE_MAX_CHARS);
+    expect(JSON.parse(packet)).toMatchObject({
+      scoring_packet_state: "oversize",
+      limit_chars: ANALYST_EVIDENCE_MAX_CHARS,
+      requested_axis_count: 34,
+      evidenceCatalog: [],
+    });
+    expect(extractScoringEvidenceCatalog(packet)).toEqual([]);
+    expect(inspectAnalystScoringPreflight(allAxes, packet)).toMatchObject({
+      state: "packet_oversize",
+      requestedAxisCount: 34,
+      evidenceArtifactCount: 0,
+    });
+    await expect(analyzeSubject("@subject", allRoles, allAxes, packet)).resolves.toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("structurally prunes an oversized trust graph to the hard scorer budget", () => {
@@ -1938,11 +2191,47 @@ describe("analyst verdict integrity", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("fails before the provider call when an axis has coverage only and no substantive support", async () => {
+  it("distinguishes no methodology axes and unsupported axes from evidence gaps", () => {
+    const profile = {
+      handle: "@subject",
+      display_name: "Subject",
+      bio: "Investor",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+    };
+    const noAxesPacket = buildScoringEvidencePacket({ profile }, []);
+    const unsupportedAxes: AnalystAxis[] = [{
+      axis: "I9_unwired_methodology_axis",
+      weight: 10,
+      role: "INVESTOR",
+    }];
+    const unsupportedPacket = buildScoringEvidencePacket({ profile }, unsupportedAxes);
+
+    expect(inspectAnalystScoringPreflight([], noAxesPacket)).toEqual({
+      state: "no_axes",
+      requestedAxisCount: 0,
+      evidenceArtifactCount: 0,
+      missingSubstantiveAxes: [],
+      unsupportedAxes: [],
+    });
+    expect(inspectAnalystScoringPreflight(unsupportedAxes, unsupportedPacket)).toEqual({
+      state: "unsupported_axes",
+      requestedAxisCount: 1,
+      evidenceArtifactCount: 0,
+      missingSubstantiveAxes: [],
+      unsupportedAxes: ["I9_unwired_methodology_axis"],
+    });
+  });
+
+  it("diagnoses true I2 and I3 coverage abstentions before any scorer provider call", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);
-    const trackRecordOnly: AnalystAxis[] = [{ axis: "I2_portfolio_quality", weight: 25, role: "INVESTOR" }];
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+    const unsupportedInvestorAxes: AnalystAxis[] = [
+      { axis: "I2_portfolio_quality", weight: 25, role: "INVESTOR" },
+      { axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" },
+    ];
     const evidenceJson = buildScoringEvidencePacket({
       checkOutcomes: [{
         checkId: "vc-portfolio-track-record",
@@ -1950,10 +2239,18 @@ describe("analyst verdict integrity", () => {
         provider: "portfolio-web",
         note: "Provider unavailable.",
       }],
-    }, trackRecordOnly);
+    }, unsupportedInvestorAxes);
 
-    await expect(analyzeSubject("@subject", ["INVESTOR"], trackRecordOnly, evidenceJson)).resolves.toBeNull();
+    expect(inspectAnalystScoringPreflight(unsupportedInvestorAxes, evidenceJson)).toMatchObject({
+      state: "insufficient_evidence",
+      missingSubstantiveAxes: ["I2_portfolio_quality", "I3_fund_scale_tier"],
+    });
+    await expect(analyzeSubject("@subject", ["INVESTOR"], unsupportedInvestorAxes, evidenceJson)).resolves.toBeNull();
     expect(fetchMock).not.toHaveBeenCalled();
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[agent-preflight]",
+      expect.stringContaining('"missingSubstantiveAxes":["I2_portfolio_quality","I3_fund_scale_tier"]'),
+    );
   });
 
   it("makes one bounded semantic repair attempt after a schema-valid array omits an axis", async () => {

@@ -17,11 +17,13 @@ import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence } from "../src/data/evidence";
 import type { AdapterRunResult, CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import {
+  ANALYST_EVIDENCE_MAX_CHARS,
   analystAvailable,
   analyzeSubject,
   buildScoringEvidencePacket,
   extractClaims,
   extractScoringEvidenceCatalog,
+  inspectAnalystScoringPreflight,
   scanContradictions,
 } from "./agent";
 import { getCost, withCostLedger } from "./cost";
@@ -32,6 +34,7 @@ import { fetchTeamPage } from "./adapters/teampage";
 import { checkSiteSubstance } from "./adapters/sitecheck";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
+import { canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
 import { personChecks } from "../src/lib/scanChecklist";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
@@ -75,10 +78,12 @@ interface AttemptTotals {
   cached: number;
 }
 
-const attemptTotals = (providers?: readonly string[]): AttemptTotals => {
+const attemptTotals = (providers?: readonly string[], operations?: readonly string[]): AttemptTotals => {
   const allow = providers ? new Set(providers) : null;
+  const allowOperations = operations ? new Set(operations) : null;
   return getCost().calls.reduce<AttemptTotals>((totals, line) => {
     if (allow && !allow.has(line.provider)) return totals;
+    if (allowOperations && !allowOperations.has(line.op)) return totals;
     totals.total += line.calls;
     totals.succeeded += line.succeeded;
     totals.partial += line.partial;
@@ -153,7 +158,9 @@ async function coldIntake(ctx: CollectContext) {
       ctx.evidence.profile.avatar_source_state = "none";
     }
     ctx.evidence.profile.bio = prof.bio ?? "";
-    siteUrl = prof.website;
+    const profileWebsite = canonicalPublicProfileWebsite(prof.website) ?? undefined;
+    ctx.evidence.profile.website = profileWebsite;
+    siteUrl = profileWebsite;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);
@@ -1458,14 +1465,21 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   //    same evidence) so the extra Claude call doesn't extend the critical path. ──
   const analystStartedAt = startRuntimeStage("analyst");
   if (analystAvailable()) {
-    emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions…", tone: "neutral" });
-    emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence…", tone: "neutral" });
     // Decision models receive a structurally isolated packet. Related-entity and
     // model-discovered leads remain visible to investigators, but are absent from
     // both the subject scorer and contradiction analyzer context.
     const requestedAxes = axisCatalog(evidence.roles);
     const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
     const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson);
+    const scoringPreflight = inspectAnalystScoringPreflight(requestedAxes, evidenceJson);
+    const decisionPacketUsable = scoringPreflight.state === "ready"
+      || scoringPreflight.state === "insufficient_evidence";
+    if (decisionPacketUsable) {
+      emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions…", tone: "neutral" });
+    }
+    if (scoringPreflight.state === "ready") {
+      emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence…", tone: "neutral" });
+    }
     if (frozenAxisEvidence.length > 0) {
       evidence.axisCitationVersion = 1;
       evidence.axisEvidenceCatalog = frozenAxisEvidence;
@@ -1473,51 +1487,138 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     // The validator accepts all requested axes or none, and the collector ledger
     // must independently confirm that a fresh analyst attempt occurred.
     evidence.axes = [];
-    const analystBefore = attemptTotals(["claude"]);
+    const contradictionBefore = attemptTotals(["claude"], ["record_contradictions"]);
+    const scorerBefore = attemptTotals(["claude"], ["record_verdict"]);
     const analystDeadlineAt = options?.analystDeadlineAt
       ?? runtimeStartedAt
         + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
         - ANALYST_FINALIZATION_RESERVE_MS;
     const [found, verdict] = await Promise.all([
-      scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt }),
-      analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson, {
-        analystDeadlineAt,
-      }),
+      decisionPacketUsable
+        ? scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt })
+        : Promise.resolve(null),
+      scoringPreflight.state === "ready"
+        ? analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson, {
+            analystDeadlineAt,
+          })
+        : Promise.resolve(null),
     ]);
-    const analystAttempts = attemptDelta(analystBefore, attemptTotals(["claude"]));
-    const analystObserved = analystAttempts.total > 0;
-    if (analystObserved && found && found.length) {
+    const contradictionAttempts = attemptDelta(
+      contradictionBefore,
+      attemptTotals(["claude"], ["record_contradictions"]),
+    );
+    const scorerAttempts = attemptDelta(
+      scorerBefore,
+      attemptTotals(["claude"], ["record_verdict"]),
+    );
+    const contradictionObserved = contradictionAttempts.total > 0;
+    const scorerObserved = scorerAttempts.total > 0;
+    if (!decisionPacketUsable) {
+      const detail = scoringPreflight.state === "packet_oversize"
+        ? "Contradiction analysis was skipped because the bounded evidence packet could not preserve required coverage."
+        : scoringPreflight.state === "no_axes"
+          ? "Contradiction analysis was skipped because no provider-backed role selected a methodology."
+          : scoringPreflight.state === "unsupported_axes"
+            ? "Contradiction analysis was skipped because the requested methodology contains unsupported axes."
+            : "Contradiction analysis was skipped because the frozen evidence catalog failed validation.";
+      emit({ phase: "Contradictions", label: "Skipped", detail, tone: "warn" });
+    } else if (contradictionObserved && found && found.length) {
       evidence.contradictions = found;
       const worst = found.some((c) => c.severity === "high") ? "bad" : "warn";
       emit({ phase: "Contradictions", label: `${found.length} contradiction${found.length === 1 ? "" : "s"}`, detail: found.slice(0, 3).map((c) => `${c.claim} vs ${c.conflict}`).join(" · "), source: "claude", tone: worst });
-    } else if (analystObserved && found) {
+    } else if (contradictionObserved && found) {
       emit({ phase: "Contradictions", label: "None found", detail: "No internal contradictions surfaced across the subject's claims and the evidence.", source: "claude", tone: "good" });
     } else {
       emit({ phase: "Contradictions", label: "Incomplete", detail: "Contradiction analysis did not return a complete result.", source: "claude", tone: "warn" });
     }
-    if (analystObserved && verdict) {
+    if (scorerObserved && verdict) {
       evidence.axes = verdict.axes;
       evidence.headline = verdict.headline || evidence.headline;
       if (verdict.identity_note) evidence.profile.identity_note = verdict.identity_note;
       emit({ phase: "Analyst", label: "Scored", detail: `${verdict.axes.length} axes scored.`, source: "claude", tone: "good" });
+    } else if (scoringPreflight.state === "packet_oversize") {
+      evidence.headline = `Investigation incomplete: the analyst evidence packet could not preserve required coverage within ${ANALYST_EVIDENCE_MAX_CHARS.toLocaleString("en-US")} characters. No axis scores were inferred.`;
+      emit({
+        phase: "Analyst",
+        label: "Packet budget exceeded",
+        detail: "Scoring failed closed before any model call; the evidence packet was replaced by an explicit oversize marker instead of dropping required axis coverage.",
+        tone: "warn",
+      });
+    } else if (scoringPreflight.state === "no_axes") {
+      evidence.headline = "Investigation incomplete: no provider-backed role selected a scoring methodology. No axis scores were inferred.";
+      emit({
+        phase: "Analyst",
+        label: "No methodology",
+        detail: "No scorer call was made because provider-backed role routing produced no methodology axes.",
+        tone: "warn",
+      });
+    } else if (scoringPreflight.state === "unsupported_axes") {
+      const unsupportedAxes = scoringPreflight.unsupportedAxes.join(", ");
+      evidence.headline = `Investigation incomplete: unsupported methodology axes were requested (${unsupportedAxes}). No axis scores were inferred.`;
+      emit({
+        phase: "Analyst",
+        label: "Unsupported methodology",
+        detail: `No scorer call was made because these axes have no deterministic evidence-routing rule: ${unsupportedAxes}.`,
+        tone: "warn",
+      });
+    } else if (scoringPreflight.state === "insufficient_evidence") {
+      const missingAxes = scoringPreflight.missingSubstantiveAxes.join(", ");
+      evidence.headline = `Investigation incomplete: substantive evidence is missing for ${missingAxes}. No axis scores were inferred.`;
+      emit({
+        phase: "Analyst",
+        label: "Coverage abstention",
+        detail: `Scoring did not run because these axes lack substantive eligible evidence: ${missingAxes}. Coverage-only gaps were preserved; no zero scores were inferred.`,
+        tone: "warn",
+      });
+    } else if (scoringPreflight.state === "invalid_catalog") {
+      evidence.headline = "Investigation incomplete: the frozen analyst evidence catalog did not pass preflight validation.";
+      emit({
+        phase: "Analyst",
+        label: "Preflight failed",
+        detail: "The frozen evidence catalog was invalid, so no scorer call was made and no verdict score will be published.",
+        tone: "warn",
+      });
+    } else if (!scorerObserved) {
+      evidence.headline = "Investigation incomplete: the analyst scorer did not run within the available execution budget.";
+      emit({
+        phase: "Analyst",
+        label: "Not run",
+        detail: "Evidence preflight passed, but no scorer provider attempt was observed. No verdict score will be published.",
+        tone: "warn",
+      });
     } else {
       evidence.headline = "Investigation incomplete: the analyst did not return one valid score for every required axis.";
-      emit({ phase: "Analyst", label: "Incomplete", detail: "The analyst response was unavailable, partial, duplicated an axis, or contained an invalid score. No verdict score will be published.", tone: "warn" });
+      emit({ phase: "Analyst", label: "Invalid response", detail: "The scorer response was unavailable, partial, duplicated an axis, or contained an invalid score. No verdict score will be published.", tone: "warn" });
     }
-    const analystState: ProviderRunState = !analystObserved
-      ? "skipped"
-      : verdict
-        ? "executed"
-        : observedRunState(analystAttempts) === "failed"
-          ? "failed"
-          : "partial";
+    const analystState: ProviderRunState = scoringPreflight.state === "packet_oversize"
+      || scoringPreflight.state === "unsupported_axes"
+      || scoringPreflight.state === "invalid_catalog"
+      ? "failed"
+      : scoringPreflight.state !== "ready" || !scorerObserved
+        ? "skipped"
+        : verdict
+          ? "executed"
+          : observedRunState(scorerAttempts) === "failed"
+            ? "failed"
+            : "partial";
+    const analystDetail = scoringPreflight.state === "packet_oversize"
+      ? `scoring packet exceeded the ${ANALYST_EVIDENCE_MAX_CHARS}-character structural budget while preserving required axis coverage; no scorer call made`
+      : scoringPreflight.state === "no_axes"
+        ? "no provider-backed methodology axes were requested; no scorer call made"
+        : scoringPreflight.state === "unsupported_axes"
+          ? `unsupported methodology axes: ${scoringPreflight.unsupportedAxes.join(", ")}; no scorer call made`
+          : scoringPreflight.state === "insufficient_evidence"
+            ? `coverage preflight abstained; missing substantive evidence for ${scoringPreflight.missingSubstantiveAxes.join(", ")}; no scorer call made`
+            : scoringPreflight.state === "invalid_catalog"
+              ? "scoring preflight rejected the frozen evidence or axis catalog; no scorer call made"
+              : !scorerObserved
+                ? "evidence preflight passed; no scorer provider attempt was observed"
+                : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`;
     checkTracker.provider(
       "claude-analyst",
       "Claude analyst",
       analystState,
-      analystObserved
-        ? `${analystAttempts.total} observed attempt${analystAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`
-        : "no Claude provider attempt was observed",
+      analystDetail,
     );
   } else {
     checkTracker.provider("claude-analyst", "Claude analyst", "unavailable", "analyst provider is not configured");

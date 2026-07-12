@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isStrictFundScaleArtifact } from "./fundScaleEvidence";
+import {
+  canonicalOfficialWebsite,
+  canonicalPublicProfileWebsite,
+  isStrictFundScaleArtifact,
+} from "./fundScaleEvidence";
 
 const base = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
   kind: "fund_scale",
@@ -40,6 +44,17 @@ const press = (overrides: Record<string, unknown> = {}): Record<string, unknown>
 });
 
 describe("isStrictFundScaleArtifact", () => {
+  it("sanitizes public profile URLs and only promotes dedicated official domains", () => {
+    expect(canonicalPublicProfileWebsite("https://subject.example/about?utm_source=x#team")).toBe("https://subject.example/about");
+    expect(canonicalPublicProfileWebsite("https://subject.example/private?token=secret")).toBeNull();
+    expect(canonicalOfficialWebsite("https://subject.example/about")).toEqual({
+      domain: "subject.example",
+      canonicalUrl: "https://subject.example/about",
+    });
+    expect(canonicalOfficialWebsite("https://mirror.xyz/subject.eth")).toBeNull();
+    expect(canonicalOfficialWebsite("https://ipfs.io/ipfs/bafy-profile")).toBeNull();
+    expect(canonicalOfficialWebsite("https://co.uk")).toBeNull();
+  });
   it("accepts a content-addressed, entity-bound first-party vehicle claim", () => {
     expect(isStrictFundScaleArtifact(base())).toBe(true);
     expect(isStrictFundScaleArtifact(base({ subjectName: "NotSubjectScam" }))).toBe(false);
@@ -74,6 +89,10 @@ describe("isStrictFundScaleArtifact", () => {
     expect(isStrictFundScaleArtifact(base({
       sourceUrl: "https://linktr.ee/attacker/fund",
       investorEntityDomain: "linktr.ee",
+    }))).toBe(false);
+    expect(isStrictFundScaleArtifact(base({
+      sourceUrl: "https://github.com/attacker/fake",
+      investorEntityDomain: "github.com",
     }))).toBe(false);
   });
 
@@ -120,7 +139,19 @@ describe("isStrictFundScaleArtifact", () => {
     })).toBe(true);
     expect(isStrictFundScaleArtifact(affiliated, [], {
       subjectHandle: "@alice",
+      profile: { ...profile, bio: "Co-founder @Subject Capital" },
+    })).toBe(true);
+    expect(isStrictFundScaleArtifact(affiliated, [], {
+      subjectHandle: "@alice",
+      profile: { ...profile, bio: "Portfolio manager @Subject Capital" },
+    })).toBe(true);
+    expect(isStrictFundScaleArtifact(affiliated, [], {
+      subjectHandle: "@alice",
       profile: { ...profile, bio: "Currently independent, formerly Research Partner at Subject Capital" },
+    })).toBe(false);
+    expect(isStrictFundScaleArtifact(affiliated, [], {
+      subjectHandle: "@alice",
+      profile: { ...profile, bio: "Not @Subject Capital partner" },
     })).toBe(false);
     expect(isStrictFundScaleArtifact(affiliated, [], {
       subjectHandle: "@alice",
@@ -167,6 +198,83 @@ describe("isStrictFundScaleArtifact", () => {
       ...affiliated,
       attributionSourceKind: "verified_venture",
       attributionSourceUrl: "https://employment.example/people/malice-record",
+    })).toBe(false);
+  });
+
+  it("accepts an affiliated manager page only with a frozen exact fund-domain profile proof", () => {
+    const affiliatedPage = base({
+      subjectName: "Alice Investor",
+      subjectHandle: "@alice",
+      investorEntityName: "Subject Capital",
+      investorEntityHandle: "@subjectcapital",
+      investorEntityDomain: "subjectcapital.example",
+      fundName: "Subject Capital",
+      sourceUrl: "https://subjectcapital.example/funds/venture-i",
+      attribution: "affiliated_fund",
+      sourceClass: "first_party_investor",
+      attributionSourceUrl: "https://x.com/alice",
+      attributionSourceContentHash: "d".repeat(64),
+      attributionCapturedAt: "2026-07-11T11:58:00.000Z",
+      attributionSourceKind: "provider_profile",
+      investorDomainSourceUrl: "https://x.com/subjectcapital",
+      investorDomainSourceContentHash: "e".repeat(64),
+      investorDomainCapturedAt: "2026-07-11T11:59:00.000Z",
+      investorDomainSourceKind: "provider_profile",
+      investorDomainProfileName: "Subject Capital",
+      investorDomainProfileWebsite: "https://subjectcapital.example",
+    });
+    const profile = {
+      handle: "@alice",
+      display_name: "Alice Investor",
+      bio: "Research Partner @subjectcapital",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-11T11:58:00.000Z",
+    };
+    const context = { subjectHandle: "@alice", profile };
+
+    expect(isStrictFundScaleArtifact(affiliatedPage, [], context)).toBe(true);
+    expect(isStrictFundScaleArtifact(affiliatedPage, [], {
+      subjectHandle: "@alice",
+      profile: { ...profile, bio: "Co-founder @subjectcapital" },
+    })).toBe(true);
+    expect(isStrictFundScaleArtifact({
+      ...affiliatedPage,
+      sourceUrl: "https://subjectcapital.example/about/funds/venture-i",
+      investorDomainProfileWebsite: "https://subjectcapital.example/about",
+    }, [], context)).toBe(true);
+    expect(isStrictFundScaleArtifact({
+      ...affiliatedPage,
+      sourceUrl: "https://dev.to/attacker/fake-fund-123",
+      investorEntityDomain: "dev.to",
+      investorDomainProfileWebsite: "https://dev.to/paradigm",
+    }, [], context)).toBe(false);
+    expect(isStrictFundScaleArtifact(affiliatedPage, [], {
+      subjectHandle: "@alice",
+      profile: { ...profile, bio: "Research Partner at Subject Capital" },
+    })).toBe(false);
+    expect(isStrictFundScaleArtifact({ ...affiliatedPage, investorDomainProfileName: "Subject Capital Ventures" }, [], context)).toBe(true);
+    expect(isStrictFundScaleArtifact({ ...affiliatedPage, investorDomainSourceUrl: "https://x.com/attacker" }, [], context)).toBe(false);
+    expect(isStrictFundScaleArtifact({ ...affiliatedPage, investorDomainSourceContentHash: undefined }, [], context)).toBe(false);
+    expect(isStrictFundScaleArtifact({ ...affiliatedPage, investorDomainProfileName: "Attacker Capital" }, [], context)).toBe(false);
+    expect(isStrictFundScaleArtifact({ ...affiliatedPage, investorDomainProfileWebsite: "https://attacker.example" }, [], context)).toBe(false);
+    expect(isStrictFundScaleArtifact({ ...affiliatedPage, investorDomainProfileWebsite: "https://subjectcapital.example/?token=secret" }, [], context)).toBe(false);
+    expect(isStrictFundScaleArtifact({ ...affiliatedPage, investorDomainSourceKind: undefined }, [], context)).toBe(false);
+    expect(isStrictFundScaleArtifact(affiliatedPage, [], {
+      subjectHandle: "@alice",
+      profile: { ...profile, bio: "Not a partner @subjectcapital" },
+    })).toBe(false);
+    expect(isStrictFundScaleArtifact(affiliatedPage, [], {
+      subjectHandle: "@alice",
+      profile: { ...profile, bio: "Former co-founder @subjectcapital" },
+    })).toBe(false);
+    expect(isStrictFundScaleArtifact(affiliatedPage, [], {
+      subjectHandle: "@alice",
+      profile: { ...profile, bio: "Not @subjectcapital partner" },
+    })).toBe(false);
+    expect(isStrictFundScaleArtifact(affiliatedPage, [], {
+      subjectHandle: "@alice",
+      profile: { ...profile, bio: "Never @subjectcapital employee" },
     })).toBe(false);
   });
 

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
 import { SubjectClass } from "../../src/engine";
 import { isStrictFundScaleArtifact } from "../../src/lib/fundScaleEvidence";
+import { getCost, withCostLedger } from "../cost";
 import type { PublicTextDocument, PublicTextResult } from "../publicWeb";
 import type { CollectContext } from "./types";
 import {
@@ -13,7 +14,7 @@ import {
   supportsFundScaleClaim,
   type FundScaleLead,
 } from "./fundScale";
-import { discoverPortfolioCandidates } from "./portfolio";
+import { collectPortfolioRelationships, discoverPortfolioCandidates } from "./portfolio";
 
 const NOW = new Date("2026-07-11T12:00:00.000Z");
 const SEC_RECORD_URL = "https://www.sec.gov/Archives/edgar/data/1234567/000123456726000001/fund.htm";
@@ -86,15 +87,50 @@ describe("fund-scale discovery parsing", () => {
     })]);
   });
 
-  it("shares one bounded Grok search with portfolio discovery", async () => {
+  it("uses focused discovery when shared candidates contain only rejected URLs", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const response = (output: unknown) => new Response(JSON.stringify({
+      output_text: JSON.stringify(output),
+      output: [{ type: "web_search_call" }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    const portfolioFetch = vi.fn()
+      .mockResolvedValueOnce(response({ investments: [{ project: "Acme", sources: [{ url: "https://example.com/private?token=secret" }] }], fund_scale: [] }))
+      .mockResolvedValueOnce(response({ investments: [{ project: "Acme", sources: [{ url: "https://paradigm.xyz/portfolio/acme" }] }] }));
+    vi.stubGlobal("fetch", portfolioFetch);
+    await expect(discoverPortfolioCandidates(context().ctx)).resolves.toEqual([
+      expect.objectContaining({ projectName: "Acme", sources: [{ url: "https://paradigm.xyz/portfolio/acme" }] }),
+    ]);
+    expect(portfolioFetch).toHaveBeenCalledTimes(2);
+
+    const fundFetch = vi.fn()
+      .mockResolvedValueOnce(response({ investments: [], fund_scale: [{ fund_name: "Paradigm", sources: [{ url: "https://example.com/private?token=secret" }] }] }))
+      .mockResolvedValueOnce(response({ fund_scale: [{ fund_name: "Paradigm", sources: [{ url: "https://paradigm.xyz/fund" }] }] }));
+    vi.stubGlobal("fetch", fundFetch);
+    await expect(discoverFundScaleCandidates(context().ctx)).resolves.toEqual([
+      expect.objectContaining({ fundName: "Paradigm", sources: [{ url: "https://paradigm.xyz/fund" }] }),
+    ]);
+    expect(fundFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("preserves mixed source coverage without running a focused fallback", async () => {
     vi.stubEnv("XAI_API_KEY", "xai-test-key");
     vi.stubEnv("SUPABASE_URL", "");
     vi.stubEnv("SUPABASE_SECRET_KEY", "");
     vi.spyOn(console, "log").mockImplementation(() => undefined);
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
       output_text: JSON.stringify({
-        investments: [{ project: "Acme", sources: [{ url: "https://paradigm.xyz/portfolio/acme" }] }],
-        fund_scale: [{ fund_name: "Paradigm", sources: [{ url: "https://paradigm.xyz/fund" }] }],
+        investments: [
+          { project: "Acme", sources: [{ url: "https://paradigm.xyz/portfolio/acme" }] },
+          { project: "Uncited portfolio lead", sources: [{ url: "https://example.com/private?token=secret" }] },
+        ],
+        fund_scale: [
+          { fund_name: "Paradigm", sources: [{ url: "https://paradigm.xyz/fund" }] },
+          { fund_name: "Uncited Fund", sources: [{ url: "https://example.com/private?token=secret" }] },
+        ],
       }),
       output: [{ type: "web_search_call" }],
       usage: { input_tokens: 10, output_tokens: 10 },
@@ -102,9 +138,150 @@ describe("fund-scale discovery parsing", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { ctx } = context();
 
-    await expect(discoverPortfolioCandidates(ctx)).resolves.toHaveLength(1);
-    await expect(discoverFundScaleCandidates(ctx)).resolves.toHaveLength(1);
+    await expect(discoverPortfolioCandidates(ctx)).resolves.toEqual([
+      expect.objectContaining({ projectName: "Acme", sources: [expect.any(Object)] }),
+      expect.objectContaining({ projectName: "Uncited portfolio lead", sources: [] }),
+    ]);
+    await expect(discoverFundScaleCandidates(ctx)).resolves.toEqual([
+      expect.objectContaining({ fundName: "Paradigm", sources: [expect.any(Object)] }),
+      expect.objectContaining({ fundName: "Uncited Fund", sources: [] }),
+    ]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("runs only the focused portfolio fallback when shared investments are empty", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          investments: [],
+          fund_scale: [{ fund_name: "Paradigm", sources: [{ url: "https://paradigm.xyz/fund" }] }],
+        }),
+        output: [{ type: "web_search_call" }],
+        usage: { input_tokens: 10, output_tokens: 10 },
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          investments: [{
+            project: "Acme",
+            investor_entity: "Paradigm",
+            attribution: "direct_subject",
+            sources: [{ url: "https://paradigm.xyz/portfolio/acme" }],
+          }],
+        }),
+        output: [{ type: "web_search_call" }],
+        usage: { input_tokens: 10, output_tokens: 10 },
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { ctx } = context();
+
+    const cost = await withCostLedger(async () => {
+      await expect(discoverPortfolioCandidates(ctx)).resolves.toEqual([
+        expect.objectContaining({ projectName: "Acme", investorEntityName: "Paradigm", attribution: "direct_subject" }),
+      ]);
+      await expect(discoverPortfolioCandidates(ctx)).resolves.toHaveLength(1);
+      await expect(discoverFundScaleCandidates(ctx)).resolves.toHaveLength(1);
+      return getCost();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(cost.grokCalls).toBe(2);
+    expect(cost.calls).toContainEqual(expect.objectContaining({ provider: "grok", op: "live-search", calls: 2 }));
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as {
+      input: { content: string }[];
+      max_tool_calls?: number;
+    });
+    expect(requests[0].input[0].content).toContain("both arrays");
+    expect(requests[1].input[0].content).toContain("public investment relationships");
+    expect(requests[1].input[0].content).not.toContain("public fund-scale evidence");
+    expect(requests[1].max_tool_calls).toBe(12);
+  });
+
+  it("runs only the focused fund-scale fallback when shared fund scale is empty", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          investments: [{ project: "Acme", sources: [{ url: "https://paradigm.xyz/portfolio/acme" }] }],
+          fund_scale: [],
+        }),
+        output: [{ type: "web_search_call" }],
+        usage: { input_tokens: 10, output_tokens: 10 },
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({
+          fund_scale: [{
+            fund_name: "Paradigm",
+            attribution: "direct_subject",
+            metric_hint: "fund_vehicle",
+            amount_hint_usd: 850_000_000,
+            sources: [{ url: "https://paradigm.xyz/fund" }],
+          }],
+        }),
+        output: [{ type: "web_search_call" }],
+        usage: { input_tokens: 10, output_tokens: 10 },
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { ctx } = context();
+
+    await expect(discoverPortfolioCandidates(ctx)).resolves.toHaveLength(1);
+    await expect(discoverFundScaleCandidates(ctx)).resolves.toEqual([
+      expect.objectContaining({
+        fundName: "Paradigm",
+        attribution: "direct_subject",
+        metricHint: "fund_vehicle",
+        amountHintUsd: 850_000_000,
+      }),
+    ]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    const requests = fetchMock.mock.calls.map(([, init]) => JSON.parse(String(init?.body)) as {
+      input: { content: string }[];
+      max_tool_calls?: number;
+    });
+    expect(requests[1].input[0].content).toContain("public fund-scale evidence");
+    expect(requests[1].input[0].content).not.toContain("public investment relationships");
+    expect(requests[1].max_tool_calls).toBe(12);
+  });
+
+  it("does not turn a missing shared investments array into a focused search", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      output_text: JSON.stringify({ fund_scale: [] }),
+      output: [{ type: "web_search_call" }],
+      usage: { input_tokens: 10, output_tokens: 10 },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { ctx } = context();
+
+    await expect(discoverPortfolioCandidates(ctx)).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("preserves a focused provider failure as null", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: JSON.stringify({ investments: [], fund_scale: [] }),
+        output: [{ type: "web_search_call" }],
+        usage: { input_tokens: 10, output_tokens: 10 },
+      }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response("upstream unavailable", { status: 503 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const { ctx } = context();
+
+    await expect(discoverFundScaleCandidates(ctx)).resolves.toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -342,6 +519,207 @@ describe("source-backed fund-scale collection", () => {
     }));
     expect(evidence.sourceArtifacts).not.toContainEqual(expect.objectContaining({ fundName: "Georgios Konstantopoulos" }));
     expect(isStrictFundScaleArtifact(evidence.sourceArtifacts[0], evidence.sourceArtifacts)).toBe(false);
+  });
+
+  it("verifies an affiliated fund page when the fund profile freezes an exact official-domain proof", async () => {
+    const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+    evidence.profile.resolved_name = "Georgios Konstantopoulos";
+    evidence.profile.bio = "General Partner @paradigm";
+    const result = await collectFundScale(ctx, {
+      discover: async () => [lead({ attribution: "affiliated_fund", fundVehicleHint: "Venture Fund III" })],
+      fetchSource: async () => document({
+        url: "https://www.paradigm.xyz/writing/paradigms-third-fund",
+        host: "www.paradigm.xyz",
+        text: "Paradigm has raised our third fund: an $850M venture fund focused on crypto projects at the earliest stages.",
+      }),
+      lookupProfile: async () => ({
+        handle: "@paradigm",
+        name: "Paradigm",
+        website: "https://www.paradigm.xyz",
+      }),
+      now: () => NOW,
+    });
+
+    expect(result.state).toBe("executed");
+    const artifact = evidence.sourceArtifacts[0];
+    expect(artifact).toMatchObject({
+      fundName: "Paradigm",
+      attribution: "affiliated_fund",
+      sourceClass: "first_party_investor",
+      match: "fund_scale_confirmed",
+      investorEntityDomain: "paradigm.xyz",
+      investorDomainSourceUrl: "https://x.com/paradigm",
+      investorDomainSourceKind: "provider_profile",
+      investorDomainProfileName: "Paradigm",
+      investorDomainProfileWebsite: "https://paradigm.xyz/",
+    });
+    expect(artifact?.investorDomainSourceContentHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(isStrictFundScaleArtifact(artifact, evidence.sourceArtifacts, {
+      now: NOW,
+      subjectHandle: "@gakonst",
+      profile: evidence.profile,
+    })).toBe(true);
+  });
+
+  it("reuses portfolio-frozen fund-domain proof when fund scale runs later in the same audit", async () => {
+    const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+    evidence.profile.resolved_name = "Georgios Konstantopoulos";
+    evidence.profile.bio = "General Partner @paradigm";
+    const lookupProfile = vi.fn().mockResolvedValue({
+      handle: "@paradigm",
+      name: "Paradigm",
+      website: "https://paradigm.xyz",
+    });
+    await collectPortfolioRelationships(ctx, {
+      discover: async () => [{
+        projectName: "Acme Protocol",
+        investorEntityName: "Paradigm",
+        investorEntityHandle: "@paradigm",
+        attribution: "affiliated_fund",
+        relationship: "invested_in",
+        sources: [{ url: "https://paradigm.xyz/portfolio/acme" }],
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        provider: "grok",
+      }],
+      fetchSource: async () => document({ text: "Our portfolio includes Acme Protocol." }),
+      lookupProfile,
+      now: () => NOW,
+    });
+    const callsAfterPortfolio = lookupProfile.mock.calls.length;
+
+    const result = await collectFundScale(ctx, {
+      discover: async () => [lead({ attribution: "affiliated_fund", fundVehicleHint: "Venture Fund III" })],
+      fetchSource: async () => document({
+        text: "Paradigm has raised our third fund: an $850M venture fund focused on crypto projects.",
+      }),
+      lookupProfile,
+      now: () => NOW,
+    });
+
+    const fundArtifact = evidence.sourceArtifacts.find((artifact) => artifact.kind === "fund_scale");
+    expect(result.state).toBe("executed");
+    expect(lookupProfile).toHaveBeenCalledTimes(callsAfterPortfolio);
+    expect(fundArtifact).toMatchObject({
+      match: "fund_scale_confirmed",
+      sourceClass: "first_party_investor",
+      investorDomainSourceUrl: "https://x.com/paradigm",
+      investorDomainProfileWebsite: "https://paradigm.xyz/",
+    });
+    expect(isStrictFundScaleArtifact(fundArtifact, evidence.sourceArtifacts, {
+      now: NOW,
+      subjectHandle: "@gakonst",
+      profile: evidence.profile,
+    })).toBe(true);
+  });
+
+  it("confirms current affiliated AUM from a proven first-party fund page", async () => {
+    const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+    evidence.profile.resolved_name = "Georgios Konstantopoulos";
+    evidence.profile.bio = "General Partner @paradigm";
+    const result = await collectFundScale(ctx, {
+      discover: async () => [lead({ attribution: "affiliated_fund", metricHint: "aum" })],
+      fetchSource: async () => document({
+        url: "https://paradigm.xyz/aum",
+        text: "Paradigm manages $2.5 billion in assets under management as of May 1, 2026.",
+      }),
+      lookupProfile: async () => ({
+        handle: "@paradigm",
+        name: "Paradigm",
+        website: "https://paradigm.xyz",
+      }),
+      now: () => NOW,
+    });
+
+    expect(result.state).toBe("executed");
+    expect(evidence.sourceArtifacts).toContainEqual(expect.objectContaining({
+      match: "fund_scale_confirmed",
+      sourceClass: "first_party_investor",
+      fundScaleMetric: "reported_aum",
+      fundScaleTemporalState: "current",
+      fundSizeUsd: 2_500_000_000,
+    }));
+  });
+
+  it("rejects account-host paths even when a custom resolver returns their parent host", async () => {
+    const { ctx, evidence } = context();
+    const result = await collectFundScale(ctx, {
+      discover: async () => [lead({ sources: [{ url: "https://github.com/attacker/fake" }] })],
+      fetchSource: async () => document({
+        url: "https://github.com/attacker/fake",
+        host: "github.com",
+        text: "Paradigm has raised a new $999 million venture fund.",
+      }),
+      resolveInvestorDomain: async () => "github.com",
+      now: () => NOW,
+    });
+
+    expect(result.state).toBe("partial");
+    expect(evidence.sourceArtifacts).toContainEqual(expect.objectContaining({
+      sourceClass: "other_public",
+      match: "candidate",
+    }));
+    expect(evidence.sourceArtifacts.every((artifact) => !isStrictFundScaleArtifact(artifact, evidence.sourceArtifacts))).toBe(true);
+  });
+
+  it("scopes an unknown path-host profile to its exact account path", async () => {
+    const { ctx, evidence } = context("@gakonst", "Georgios Konstantopoulos");
+    evidence.profile.resolved_name = "Georgios Konstantopoulos";
+    evidence.profile.bio = "General Partner @paradigm";
+    const result = await collectFundScale(ctx, {
+      discover: async () => [lead({
+        attribution: "affiliated_fund",
+        sources: [{ url: "https://dev.to/attacker/fake-fund-123" }],
+      })],
+      fetchSource: async () => document({
+        url: "https://dev.to/attacker/fake-fund-123",
+        host: "dev.to",
+        text: "Paradigm has raised a new $999 million venture fund.",
+      }),
+      lookupProfile: async () => ({
+        handle: "@paradigm",
+        name: "Paradigm",
+        website: "https://dev.to/paradigm",
+      }),
+      now: () => NOW,
+    });
+
+    expect(result.state).toBe("partial");
+    expect(evidence.sourceArtifacts).toContainEqual(expect.objectContaining({
+      sourceClass: "other_public",
+      match: "candidate",
+    }));
+    expect(evidence.sourceArtifacts.every((artifact) => !isStrictFundScaleArtifact(artifact, evidence.sourceArtifacts, {
+      now: NOW,
+      subjectHandle: "@gakonst",
+      profile: evidence.profile,
+    }))).toBe(true);
+  });
+
+  it("memoizes official-domain resolution for repeated leads from the same fund", async () => {
+    const { ctx } = context();
+    const resolveInvestorDomain = vi.fn().mockResolvedValue("paradigm.xyz");
+    const fetchSource = vi.fn().mockResolvedValue(document());
+    const cost = await withCostLedger(async () => {
+      await collectFundScale(ctx, {
+        discover: async () => [
+          lead(),
+          lead({ fundVehicleHint: "Growth Fund" }),
+        ],
+        fetchSource,
+        resolveInvestorDomain,
+        now: () => NOW,
+      });
+      return getCost();
+    });
+
+    expect(resolveInvestorDomain).toHaveBeenCalledTimes(1);
+    expect(fetchSource).toHaveBeenCalledTimes(1);
+    expect(cost.calls).toContainEqual(expect.objectContaining({
+      provider: "fund-scale-web",
+      op: "source-fetch",
+      calls: 1,
+    }));
   });
 
   it("rejects a former employer as the current fund context", async () => {
