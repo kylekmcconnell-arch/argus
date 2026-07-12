@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getCost, withCostLedger } from "../cost";
-import { getRecentPosts, grokSearch, handleHistory, searchAdverseSignals } from "./x";
+import { checkFollow, getRecentPosts, grokSearch, handleHistory, notableFollowers, searchAdverseSignals } from "./x";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -147,6 +147,144 @@ describe("X provider attempt accounting", () => {
       status: "failed",
       meta: expect.stringContaining("response_json_error"),
     }));
+  });
+
+  it("normalizes documented nested and legacy flat follow responses without coercing missing fields", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({
+        status: "success",
+        data: { following: false, followed_by: true },
+      }))
+      .mockResolvedValueOnce(json({
+        following: true,
+        isFollowedBy: false,
+      }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(checkFollow("@source", "@target")).resolves.toEqual({
+      following: false,
+      followedBy: true,
+    });
+    await expect(checkFollow("source", "target")).resolves.toEqual({
+      following: true,
+      followedBy: false,
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("treats the production status=failed follow envelope as unavailable, not schema drift or success", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      status: "failed",
+      message: "check follow relationship failed",
+    })));
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const captured = await withCostLedger(async () => ({
+      result: await checkFollow("@source", "@target"),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toBeNull();
+    expect(logSpy).not.toHaveBeenCalledWith(
+      expect.stringContaining("unrecognized"),
+      expect.anything(),
+    );
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "twitterapi",
+      op: "user/check_follow_relationship",
+      calls: 1,
+      succeeded: 0,
+      failed: 1,
+      status: "failed",
+      meta: "provider_status_failed",
+    }));
+  });
+
+  it("counts only observed notable relationships when a reverse-check chunk is partially unavailable", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    vi.spyOn(Date, "now")
+      .mockReturnValueOnce(1_000) // establish the deadline
+      .mockReturnValueOnce(1_000) // allow one chunk
+      .mockReturnValue(1_200); // stop before the next chunk
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ status: "success", data: { following: false } }))
+      .mockResolvedValueOnce(json({ status: "success", data: { following: true } }))
+      .mockResolvedValue(json({ status: "failed", message: "check follow relationship failed" }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const scan = await notableFollowers("@subject", {
+      followerCount: Number.POSITIVE_INFINITY,
+      budgetMs: 100,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(15);
+    expect(scan.checked).toBe(2);
+    expect(scan.coverage).toBe("partial");
+    expect(scan.list).toHaveLength(1);
+  });
+
+  it("stops reverse-check fan-out after an entirely unavailable provider chunk", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    const fetchMock = vi.fn().mockResolvedValue(json({
+      status: "failed",
+      message: "check follow relationship failed",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const scan = await notableFollowers("@subject", {
+      followerCount: Number.POSITIVE_INFINITY,
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(15);
+    expect(scan).toEqual({ list: [], checked: 0, coverage: "unavailable" });
+  });
+
+  it("withholds negative enumeration coverage when a follower page returns a failure envelope", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      status: "failed",
+      message: "followers lookup failed",
+    })));
+
+    const captured = await withCostLedger(async () => ({
+      scan: await notableFollowers("@subject", { followerCount: 1 }),
+      cost: getCost(),
+    }));
+
+    expect(captured.scan).toEqual({ list: [], checked: 0, coverage: "unavailable" });
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "twitterapi",
+      op: "user/followers",
+      calls: 1,
+      succeeded: 0,
+      failed: 1,
+      status: "failed",
+      meta: "provider_status_failed",
+    }));
+  });
+
+  it("preserves an observed enumeration hit while marking interrupted pagination partial", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    vi.stubGlobal("fetch", vi.fn()
+      .mockResolvedValueOnce(json({
+        followers: [{ userName: "a16zcrypto" }, null],
+        has_next_page: true,
+        next_cursor: "next-page",
+      }))
+      .mockResolvedValueOnce(json({
+        status: "failed",
+        message: "followers lookup failed",
+      })));
+
+    const scan = await notableFollowers("@subject", { followerCount: 201 });
+
+    expect(scan).toEqual({
+      list: [{ handle: "a16zcrypto", label: "VC · a16z crypto", size: "" }],
+      checked: 1,
+      coverage: "partial",
+    });
   });
 
   it("records an unreadable memory.lol response once as failed", async () => {

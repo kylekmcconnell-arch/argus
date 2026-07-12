@@ -4191,6 +4191,13 @@ var NOTABLE_ACCOUNTS = [
 var TWITTERAPI = "https://api.twitterapi.io";
 var asRecord2 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : {};
 var optionalNumber = (value) => typeof value === "number" && Number.isFinite(value) ? value : void 0;
+var twitterProviderFailure = (payload) => {
+  const status = typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
+  if (["error", "failed", "failure"].includes(status)) return `provider_status_${status}`;
+  if (payload.success === false) return "provider_success_false";
+  if (payload.data === null) return "provider_data_null";
+  return null;
+};
 async function grokSearch(system, user, opts) {
   const key = env("XAI_API_KEY");
   if (!key) return null;
@@ -4272,8 +4279,8 @@ async function twFetch(url, key, tries = 2) {
     } else {
       try {
         const payload = asRecord2(await res.clone().json());
-        const providerError = payload.status === "error" || payload.data === null;
-        recordTwitterapi(op, providerError ? "failed" : "succeeded", providerError ? "provider_error_envelope" : void 0);
+        const providerFailure = twitterProviderFailure(payload);
+        recordTwitterapi(op, providerFailure ? "failed" : "succeeded", providerFailure ?? void 0);
       } catch {
         recordTwitterapi(op, "failed", "response_json_error");
       }
@@ -4516,17 +4523,20 @@ async function checkFollow(source, target) {
   try {
     const res = await twFetch(`${TWITTERAPI}/twitter/user/check_follow_relationship?source_user_name=${encodeURIComponent(s)}&target_user_name=${encodeURIComponent(t)}`, key);
     if (!res || !res.ok) return null;
-    const d = await res.json();
-    if (d?.status === "error") return null;
-    const raw = d?.data ?? d ?? {};
+    const d = asRecord2(await res.json());
+    if (twitterProviderFailure(d)) return null;
+    const nested = asRecord2(d.data);
+    const records = Object.keys(nested).length ? [nested, d] : [d];
     const pick = (...keys) => {
-      for (const k of keys) if (typeof raw[k] === "boolean") return raw[k];
+      for (const record2 of records) {
+        for (const k of keys) if (typeof record2[k] === "boolean") return record2[k];
+      }
       return null;
     };
     const following = pick("following", "is_following", "isFollowing", "follows", "source_following_target");
     const followedBy = pick("followed_by", "is_followed_by", "isFollowedBy", "followed", "target_following_source");
     if (following === null && followedBy === null) {
-      console.log("[check-follow] unrecognized shape:", JSON.stringify(raw).slice(0, 200));
+      console.log("[check-follow] unrecognized success shape:", JSON.stringify(d).slice(0, 200));
       return null;
     }
     return { following, followedBy };
@@ -4555,7 +4565,7 @@ async function dynamicNotable(organizationId) {
 }
 async function notableFollowers(subject, opts) {
   const key = env("TWITTERAPI_KEY");
-  if (!key) return { list: [], checked: 0 };
+  if (!key) return { list: [], checked: 0, coverage: "unavailable" };
   const subj = subject.replace(/^@/, "").toLowerCase();
   const seen = /* @__PURE__ */ new Set();
   const candidates = [...NOTABLE_ACCOUNTS, ...await dynamicNotable(opts?.organizationId)].filter((n) => {
@@ -4573,14 +4583,28 @@ async function notableFollowers(subject, opts) {
     const got = /* @__PURE__ */ new Set();
     const u = subject.replace(/^@/, "");
     let cursor = "";
+    let observedFollowers = 0;
+    let observedPage = false;
+    let coverageComplete = false;
     for (let page = 0; page < enumPages + 2; page++) {
       const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
       const res = await twFetch(url, key);
       if (!res || !res.ok) break;
-      const d = await res.json();
-      const followers = d.followers ?? d.data?.followers ?? [];
-      if (!followers.length) break;
-      for (const f of followers) {
+      let d;
+      try {
+        d = asRecord2(await res.json());
+      } catch {
+        break;
+      }
+      if (twitterProviderFailure(d)) break;
+      const nested = asRecord2(d.data);
+      const followerValue = Array.isArray(d.followers) ? d.followers : Array.isArray(nested.followers) ? nested.followers : null;
+      if (!followerValue) break;
+      const followers = followerValue;
+      observedPage = true;
+      observedFollowers += followers.length;
+      for (const follower of followers) {
+        const f = asRecord2(follower);
         const h = String(f.userName ?? f.screen_name ?? "").toLowerCase();
         const m = set.get(h);
         if (m && !got.has(h)) {
@@ -4588,10 +4612,21 @@ async function notableFollowers(subject, opts) {
           hits2.push({ handle: m.handle, label: m.label, size: "" });
         }
       }
-      if (!d.has_next_page || !d.next_cursor) break;
-      cursor = d.next_cursor;
+      const hasNextPage = typeof d.has_next_page === "boolean" ? d.has_next_page : typeof nested.has_next_page === "boolean" ? nested.has_next_page : void 0;
+      const nextCursorValue = d.next_cursor ?? nested.next_cursor;
+      const nextCursor = typeof nextCursorValue === "string" ? nextCursorValue : "";
+      if (hasNextPage === false || hasNextPage === void 0 && observedFollowers >= fc) {
+        coverageComplete = true;
+        break;
+      }
+      if (!hasNextPage || !nextCursor) break;
+      cursor = nextCursor;
     }
-    return { list: hits2, checked: total };
+    return {
+      list: hits2,
+      checked: coverageComplete ? total : hits2.length,
+      coverage: coverageComplete ? "complete" : observedPage ? "partial" : "unavailable"
+    };
   }
   const REVERSE_CAP = 500;
   const toCheck = candidates.slice(0, REVERSE_CAP);
@@ -4605,13 +4640,23 @@ async function notableFollowers(subject, opts) {
     const res = await Promise.all(
       slice.map(async (n) => {
         const rel = await checkFollow(n.handle, subject);
-        return rel?.following ? { handle: n.handle, label: n.label, size: "" } : null;
+        return { notable: n, rel };
       })
     );
-    checked += slice.length;
-    for (const r of res) if (r) hits.push(r);
+    let observedInChunk = 0;
+    for (const { notable, rel } of res) {
+      if (!rel || rel.following === null) continue;
+      observedInChunk += 1;
+      checked += 1;
+      if (rel.following) hits.push({ handle: notable.handle, label: notable.label, size: "" });
+    }
+    if (observedInChunk === 0) break;
   }
-  return { list: hits, checked };
+  return {
+    list: hits,
+    checked,
+    coverage: toCheck.length === total && checked === toCheck.length && toCheck.length > 0 ? "complete" : checked > 0 ? "partial" : "unavailable"
+  };
 }
 async function acknowledgments(endorsers, subject) {
   const out = /* @__PURE__ */ new Map();
@@ -4864,9 +4909,14 @@ var xAdapter = {
       const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
       if (nf.length) {
-        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `Followed by ${nf.length} of ${scan.checked} known accounts checked: ${nf.slice(0, 8).map((n) => `@${n.handle}${n.label ? ` (${n.label})` : ""}`).join(", ")}${nf.length > 8 ? ", \u2026" : ""}.`, source: "twitterapi.io", tone: "good" });
-      } else {
+        const coverageDetail = scan.coverage === "complete" ? `Followed by ${nf.length} of ${scan.checked} known accounts checked` : `Observed ${nf.length} notable follower${nf.length === 1 ? "" : "s"} before provider coverage became incomplete`;
+        ctx.emit({ phase: "P0 \xB7 Intake", label: scan.coverage === "complete" ? "Notable followers" : "Notable followers \xB7 partial coverage", detail: `${coverageDetail}: ${nf.slice(0, 8).map((n) => `@${n.handle}${n.label ? ` (${n.label})` : ""}`).join(", ")}${nf.length > 8 ? ", \u2026" : ""}.${scan.coverage === "complete" ? "" : " Unobserved relationships remain unknown."}`, source: "twitterapi.io", tone: scan.coverage === "complete" ? "good" : "warn" });
+      } else if (scan.coverage === "complete" && scan.checked > 0) {
         ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable followers", detail: `None of the ${scan.checked} known funds/founders/KOLs checked follow this subject.`, source: "twitterapi.io", tone: "neutral" });
+      } else if (scan.coverage === "partial") {
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable follower check incomplete", detail: scan.checked > 0 ? `No notable follower was observed in ${scan.checked} returned relationship result${scan.checked === 1 ? "" : "s"}; unobserved accounts remain unknown, so ARGUS withheld the negative conclusion.` : "Some follower data returned, but full reference-set coverage was not established; ARGUS withheld the negative conclusion.", source: "twitterapi.io", tone: "warn" });
+      } else {
+        ctx.emit({ phase: "P0 \xB7 Intake", label: "Notable follower check unavailable", detail: "The relationship provider returned no observable results; ARGUS withheld the notable-follower conclusion.", source: "twitterapi.io", tone: "warn" });
       }
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);
