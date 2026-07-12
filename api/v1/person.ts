@@ -3,6 +3,10 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { resolveInput, runAudit } from "../_collector.js";
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
 import { persistServerDossier } from "../audit.js";
+import {
+  ANALYST_FINALIZATION_RESERVE_MS,
+  DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
+} from "../../src/lib/investigationRuntime.js";
 
 export const config = { maxDuration: 600 };
 
@@ -16,6 +20,7 @@ function cors(req: VercelRequest, res: VercelResponse): void {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const requestStartedAt = Date.now();
   cors(req, res);
   if (req.method === "OPTIONS") { res.status(204).end(); return; }
   if (req.method !== "GET") { res.status(405).setHeader("Allow", "GET, OPTIONS").json({ error: "method_not_allowed" }); return; }
@@ -33,7 +38,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (quota.error) { res.status(503).json({ error: quota.error }); return; }
   if (!quota.allowed) { res.status(429).json({ error: "daily_investigation_limit_reached", remaining: 0 }); return; }
   try {
-    const dossier = await runAudit(handle, () => {}, { organizationId: auth.organizationId });
+    const dossier = await runAudit(handle, () => {}, {
+      organizationId: auth.organizationId,
+      analystDeadlineAt: requestStartedAt
+        + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
+        - ANALYST_FINALIZATION_RESERVE_MS,
+    });
     if (!dossier) {
       res.status(404).json({ error: "could not resolve subject (no keys configured for live people audits)" });
       return;

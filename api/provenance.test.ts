@@ -1,6 +1,29 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { persistProvenance } from "./_provenance";
+import { getProfile, PROFILES, SubjectClass } from "../src/engine";
+
+const FOUNDER_WEIGHTS = getProfile(SubjectClass.FOUNDER).axes;
+interface TestAxisScore {
+  score: number;
+  weight: number;
+  rationale: string;
+  role: string;
+  evidenceRefs: string[];
+  counterEvidenceRefs: string[];
+  gaps: string[];
+}
+const founderAxes = (supportId: string): Record<string, TestAxisScore> => Object.fromEntries(
+  Object.entries(FOUNDER_WEIGHTS).map(([axis, weight]) => [axis, {
+    score: Math.floor(weight * 0.7),
+    weight,
+    rationale: `Verified evidence supports ${axis}.`,
+    role: SubjectClass.FOUNDER,
+    evidenceRefs: [supportId],
+    counterEvidenceRefs: [],
+    gaps: [],
+  }]),
+);
 
 describe("frozen source artifact provenance", () => {
   afterEach(() => {
@@ -34,7 +57,7 @@ describe("frozen source artifact provenance", () => {
             excerpt: "twitter_username matched the audited handle",
             sourceUrl: "https://github.com/alice",
             capturedAt: "2026-07-11T07:00:00-05:00",
-            eligibleAxes: ["F1_identity_verifiability"],
+            eligibleAxes: Object.keys(FOUNDER_WEIGHTS),
             verification: "verified",
             scope: "direct_subject",
           },
@@ -54,12 +77,14 @@ describe("frozen source artifact provenance", () => {
         report: {
           composite_verdict: "PASS",
           governing_score: 81,
+          roles: ["FOUNDER"],
           role_reports: [{
             role: "FOUNDER",
             axes: {
+              ...founderAxes(supportId),
               F1_identity_verifiability: {
+                ...founderAxes(supportId).F1_identity_verifiability,
                 score: 9,
-                evidenceRefs: [supportId],
                 counterEvidenceRefs: [counterId],
                 gaps: ["No government registry artifact was collected."],
               },
@@ -93,7 +118,7 @@ describe("frozen source artifact provenance", () => {
         strictLineage: true,
         axisCitationVersion: 1,
         operation: "account-resolution",
-        eligibleAxes: ["F1_identity_verifiability"],
+        eligibleAxes: Object.keys(FOUNDER_WEIGHTS),
         verification: "verified",
         scope: "direct_subject",
         catalogArtifact: {
@@ -107,7 +132,7 @@ describe("frozen source artifact provenance", () => {
           sourceUrl: "https://github.com/alice",
           capturedAt: "2026-07-11T12:00:00.000Z",
           contentHash: "a".repeat(64),
-          eligibleAxes: ["F1_identity_verifiability"],
+          eligibleAxes: Object.keys(FOUNDER_WEIGHTS),
           verification: "verified",
           scope: "direct_subject",
         },
@@ -118,7 +143,8 @@ describe("frozen source artifact provenance", () => {
     expect(Object.keys(evidenceRows[1]).sort()).toEqual(Object.keys(evidenceRows[0]).sort());
 
     const axisRows = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body));
-    expect(axisRows).toEqual([
+    expect(axisRows).toHaveLength(7);
+    expect(axisRows).toEqual(expect.arrayContaining([
       expect.objectContaining({
         role: "FOUNDER",
         axis_id: "F1_identity_verifiability",
@@ -133,7 +159,140 @@ describe("frozen source artifact provenance", () => {
         relation: "counter",
         ordinal: 0,
       }),
-    ]);
+    ]));
+  });
+
+  it("rejects a scored role that omits any canonical axis", async () => {
+    const artifactId = `art_v1_${"a".repeat(64)}`;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(persistProvenance(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        reportVersionId: "00000000-0000-4000-8000-000000000022",
+        attestationState: "server_collected",
+      },
+      {
+        axisCitationVersion: 1,
+        axisEvidenceCatalog: [{
+          artifactId,
+          contentHash: "a".repeat(64),
+          kind: "axis_evidence",
+          provider: "github",
+          operation: "lookup",
+          section: "identity",
+          title: "Verified identity evidence",
+          eligibleAxes: ["F1_identity_verifiability"],
+          verification: "verified",
+          scope: "direct_subject",
+        }],
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 80,
+          role_reports: [{
+            role: "FOUNDER",
+            axes: {
+              F1_identity_verifiability: {
+                score: 8,
+                weight: 12,
+                rationale: "Verified identity evidence.",
+                role: "FOUNDER",
+                evidenceRefs: [artifactId],
+                counterEvidenceRefs: [],
+                gaps: [],
+              },
+            },
+          }],
+        },
+      },
+      [],
+    )).rejects.toThrow("FOUNDER axis set is incomplete or non-canonical");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects a report that drops an entire declared role", async () => {
+    const artifactId = `art_v1_${"a".repeat(64)}`;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(persistProvenance(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        reportVersionId: "00000000-0000-4000-8000-000000000022",
+        attestationState: "server_collected",
+      },
+      {
+        axisCitationVersion: 1,
+        axisEvidenceCatalog: [{
+          artifactId,
+          contentHash: "a".repeat(64),
+          kind: "axis_evidence",
+          provider: "test-provider",
+          operation: "lookup",
+          section: "profile",
+          title: "Verified founder evidence",
+          eligibleAxes: Object.keys(FOUNDER_WEIGHTS),
+          verification: "verified",
+          scope: "direct_subject",
+        }],
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 80,
+          roles: ["FOUNDER", "INVESTOR"],
+          role_reports: [{ role: "FOUNDER", axes: founderAxes(artifactId) }],
+        },
+      },
+      [],
+    )).rejects.toThrow("declared roles do not match role reports");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { label: "an out-of-range score", patch: { score: 13 } },
+    { label: "a fractional score", patch: { score: 8.5 } },
+    { label: "a non-canonical weight", patch: { weight: 13 } },
+    { label: "a mismatched role", patch: { role: "INVESTOR" } },
+    { label: "a blank rationale", patch: { rationale: "   " } },
+  ])("rejects $label in an otherwise complete role", async ({ patch }) => {
+    const artifactId = `art_v1_${"a".repeat(64)}`;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const axes = founderAxes(artifactId);
+    axes.F1_identity_verifiability = { ...axes.F1_identity_verifiability, ...patch };
+
+    await expect(persistProvenance(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        reportVersionId: "00000000-0000-4000-8000-000000000022",
+        attestationState: "server_collected",
+      },
+      {
+        axisCitationVersion: 1,
+        axisEvidenceCatalog: [{
+          artifactId,
+          contentHash: "a".repeat(64),
+          kind: "axis_evidence",
+          provider: "test-provider",
+          operation: "lookup",
+          section: "profile",
+          title: "Verified founder evidence",
+          eligibleAxes: Object.keys(FOUNDER_WEIGHTS),
+          verification: "verified",
+          scope: "direct_subject",
+        }],
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 80,
+          role_reports: [{ role: "FOUNDER", axes }],
+        },
+      },
+      [],
+    )).rejects.toThrow("violates the scoring contract");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("persists a strict INCOMPLETE catalog with zero scored axes and no link write", async () => {
@@ -165,6 +324,7 @@ describe("frozen source artifact provenance", () => {
         report: {
           composite_verdict: "INCOMPLETE",
           governing_score: null,
+          roles: ["FOUNDER"],
           role_reports: [{ role: "FOUNDER", score_total: null, axes: {} }],
         },
       },
@@ -203,6 +363,29 @@ describe("frozen source artifact provenance", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0][0])).toContain("/evidence_items?");
+  });
+
+  it("rejects a scored server-collected report that drops the lineage marker", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(persistProvenance(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        reportVersionId: "00000000-0000-4000-8000-000000000022",
+        attestationState: "server_collected",
+      },
+      {
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 80,
+          role_reports: [{ role: "FOUNDER", axes: { F1_identity_verifiability: { score: 8 } } }],
+        },
+      },
+      [],
+    )).rejects.toThrow("omitted axisCitationVersion");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -511,6 +694,56 @@ describe("frozen source artifact provenance", () => {
   );
 
   it.each(["unavailable", "checked_empty"])(
+    "rejects %s as the only support even when the coverage gap is disclosed",
+    async (verification) => {
+      const artifactId = `art_v1_${"a".repeat(64)}`;
+      const fetchMock = vi.fn();
+      vi.stubGlobal("fetch", fetchMock);
+
+      await expect(persistProvenance(
+        { url: "https://database.example", key: "sb_secret_test" },
+        {
+          organizationId: "00000000-0000-4000-8000-000000000011",
+          reportVersionId: "00000000-0000-4000-8000-000000000022",
+          attestationState: "server_collected",
+        },
+        {
+          axisCitationVersion: 1,
+          axisEvidenceCatalog: [{
+            artifactId,
+            contentHash: "a".repeat(64),
+            kind: "axis_evidence",
+            provider: "github",
+            operation: "lookup",
+            section: "identity",
+            title: "Coverage absence",
+            eligibleAxes: ["F1_identity_verifiability"],
+            verification,
+            scope: "direct_subject",
+          }],
+          report: {
+            composite_verdict: "PASS",
+            governing_score: 80,
+            role_reports: [{
+              role: "FOUNDER",
+              axes: {
+                F1_identity_verifiability: {
+                  score: 8,
+                  evidenceRefs: [artifactId],
+                  counterEvidenceRefs: [],
+                  gaps: ["This provider returned no substantive result."],
+                },
+              },
+            }],
+          },
+        },
+        [],
+      )).rejects.toThrow("lacks substantive support");
+      expect(fetchMock).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["unavailable", "checked_empty"])(
     "rejects %s as counter-evidence before persistence",
     async (verification) => {
       const supportId = `art_v1_${"a".repeat(64)}`;
@@ -672,6 +905,18 @@ describe("axis evidence migration contract (static SQL assertions only)", () => 
     new URL("../supabase/migrations/20260711212542_axis_evidence_lineage.sql", import.meta.url),
     "utf8",
   );
+  const substantiveSql = readFileSync(
+    new URL("../supabase/migrations/20260712014526_require_substantive_axis_support.sql", import.meta.url),
+    "utf8",
+  );
+  const requiredFieldsSql = readFileSync(
+    new URL("../supabase/migrations/20260712015001_require_scoring_axis_fields.sql", import.meta.url),
+    "utf8",
+  );
+  const roleSetSql = readFileSync(
+    new URL("../supabase/migrations/20260712015647_require_scoring_role_set.sql", import.meta.url),
+    "utf8",
+  );
 
   it("declares tenant-safe lineage tables, RLS, and immutable certification", () => {
     expect(sql).toContain("create table public.report_axis_evidence");
@@ -715,6 +960,40 @@ describe("axis evidence migration contract (static SQL assertions only)", () => 
     expect(sql).toContain("pg_catalog.string_agg(catalog_artifact::text");
     expect(sql).toContain("verification' in ('unavailable', 'checked_empty')");
     expect(sql).toContain("absence evidence cannot be used as counter-evidence");
+  });
+
+  it("adds a forward database gate requiring substantive support on every scored axis", () => {
+    expect(substantiveSql).toContain("create or replace function public.enforce_axis_scoring_contract()");
+    expect(substantiveSql).toContain("reports_enforce_axis_evidence_scoring_contract");
+    expect(substantiveSql).toContain("before insert or update on public.reports");
+    for (const [role, profile] of Object.entries(PROFILES)) {
+      expect(substantiveSql).toContain(`"${role}": {`);
+      for (const [axis, weight] of Object.entries(profile.axes)) {
+        expect(substantiveSql).toContain(`"${axis}": ${weight}`);
+      }
+    }
+    expect(substantiveSql).toContain("strict report role axis set is incomplete or non-canonical");
+    expect(substantiveSql).toContain("strict report axis violates the canonical scoring contract");
+    expect(substantiveSql).toContain("where not exists (");
+    expect(substantiveSql).toContain("'verification' not in ('unavailable', 'checked_empty')");
+    expect(substantiveSql).toContain("strict report axis lacks substantive support");
+    expect(substantiveSql).toContain("new server-collected scored person report requires strict axis lineage");
+    expect(substantiveSql).toContain("revoke all on function public.enforce_axis_scoring_contract()");
+  });
+
+  it("requires every canonical scoring field without relying on nullable SQL inequalities", () => {
+    expect(requiredFieldsSql).toContain("create or replace function public.enforce_axis_scoring_required_fields()");
+    expect(requiredFieldsSql).toContain("axis.item ?& array[");
+    expect(requiredFieldsSql).toContain("coalesce(pg_catalog.jsonb_typeof(axis.item -> 'weight'), '') <> 'number'");
+    expect(requiredFieldsSql).toContain("strict report axis is missing a required scoring field");
+    expect(requiredFieldsSql).toContain("reports_enforce_axis_evidence_scoring_required_fields");
+  });
+
+  it("binds declared roles to the exact role-report set", () => {
+    expect(roleSetSql).toContain("create or replace function public.enforce_axis_scoring_role_set()");
+    expect(roleSetSql).toContain("pg_catalog.jsonb_array_elements_text(v_declared_roles)");
+    expect(roleSetSql).toContain("strict report declared roles do not match role reports");
+    expect(roleSetSql).toContain("reports_enforce_axis_evidence_scoring_role_set");
   });
 
   it("hashes and freezes the complete certified decision", () => {

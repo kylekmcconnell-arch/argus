@@ -10,7 +10,12 @@ export const AUDIT_SSE_HEARTBEAT_MS = 15_000;
 // The flagship scorer has to return a complete, citation-rich axis set. Large
 // multi-role subjects need more time than short extraction calls, while still
 // remaining well inside the deployed function ceiling.
-export const ANALYST_SCORING_TIMEOUT_MS = 120_000;
+export const ANALYST_SCORING_TIMEOUT_MS = 180_000;
+
+// A repair reuses the same strict schema, so its compiled grammar should be
+// warm. Bound it separately and preserve time for persistence/certification.
+export const ANALYST_REPAIR_TIMEOUT_MS = 90_000;
+export const ANALYST_FINALIZATION_RESERVE_MS = 90_000;
 
 // This is an inactivity deadline, not a cap on the whole investigation. The
 // route emits heartbeats every 15 seconds even while the longer scorer is
