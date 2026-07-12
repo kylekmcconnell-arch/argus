@@ -75,6 +75,31 @@
 - Focused lint for all substantive theme, progress, routing, and test changes: passed. Repository-wide lint remains blocked by a separate local `.claude/worktrees/visual-overhaul` dependency resolution and pre-existing lint debt outside this iteration.
 - Vercel runtime scan: no failed requests from this release. One Node `url.parse()` deprecation warning from a dependency was classified as an error-level log on a successful `304` report request.
 
+## v3.0 copy and homepage cleanup QA
+
+- Production deployment: `dpl_FdFfaS76WD4v1ePB8qEDMJLgT2pN` · Ready · aliased to `https://argus-one-flax.vercel.app`.
+- Homepage focus: passed. The live-token sample row and `$PEPE`, `$SHIB`, and `$UNI` shortcuts are absent. The investigation form now flows directly into the evidence-output panel on mobile and the decision-coverage section on desktop.
+- Version label: passed. The authenticated desktop sidebar renders `v3.0`; the prior `v2.2` label is absent.
+- Copy policy: passed. Authored runtime copy contains no literal em dashes across `src`, `api`, `server`, or middleware. Missing values use `N/A`; prose uses contextual periods, commas, colons, or middle dots. Third-party title parsing still recognizes em dashes through escaped `\u2014` compatibility patterns.
+- Responsive layout: passed. The 1440 × 1000 desktop and 390 × 844 mobile pages have no document-level horizontal overflow. Removing the sample row leaves intentional, balanced spacing at both breakpoints.
+- Accessibility and runtime: passed. Existing semantic controls and labels remain intact. The authenticated production browser console reports no warnings or errors, and no paid investigation was submitted during QA.
+
+### v3.0 comparison evidence
+
+- Desktop before / production after: `/Users/kyle/Documents/ARGUS/artifacts/home-v3-desktop-before-after.png`
+- Mobile before / production after: `/Users/kyle/Documents/ARGUS/artifacts/home-v3-mobile-before-after.png`
+- Final production desktop: `/Users/kyle/Documents/ARGUS/artifacts/home-after-v3-desktop.png`
+- Final production mobile: `/Users/kyle/Documents/ARGUS/artifacts/home-after-v3-mobile.png`
+
+### v3.0 verification summary
+
+- Unit and integration: 107 files, 1,009 tests passed.
+- Typecheck: application, collector server, and API configurations passed.
+- Production build: passed locally and on Vercel.
+- Runtime copy policy: passed.
+- Focused lint for the homepage, sidebar, authentication, routing, and policy-test changes: passed.
+- Vercel error scan: no error-level logs found for this deployment.
+
 No open P0, P1, or P2 visual or functional issues remain in the reviewed flows.
 
 final result: passed
