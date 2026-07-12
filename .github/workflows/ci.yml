@@ -25,5 +25,8 @@ jobs:
       - name: Calibration (verdict drift table)
         run: npm run calibrate
 
+      - name: Deterministic release canary (no live providers)
+        run: npm run canary:offline
+
       - name: Build (client typecheck + bundle)
         run: npm run build

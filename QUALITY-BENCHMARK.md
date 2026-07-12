@@ -3,6 +3,28 @@
 ARGUS uses two complementary quality checks. Neither is presented as a claim of
 universal real-world accuracy.
 
+## Deterministic release canary
+
+Before a deployment, run the focused offline matrix:
+
+```sh
+npm run canary:offline
+```
+
+The matrix exercises the real person dossier/verdict engine and the real token
+scorer across six release-critical scenarios: a known-good founder, a
+known-good investor protected from an unverified model allegation, a verified
+risky actor, a sparse/unknown identity that must abstain, an established token,
+and a honeypot token. Token-provider calls are intercepted by exact synthetic
+DexScreener, GoPlus, Honeypot, and CoinGecko responses. Unknown URLs are blocked
+and fail the canary, so the command cannot trigger live or paid scans.
+
+For machine-readable CI output:
+
+```sh
+npm run --silent canary:offline:json
+```
+
 ## Offline person and founder calibration
 
 `src/calibration/golden.ts` contains deterministic evidence packages that run

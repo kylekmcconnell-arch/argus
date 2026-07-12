@@ -23,6 +23,14 @@ const asRecord = (value: unknown): JsonRecord =>
 const optionalNumber = (value: unknown): number | undefined =>
   typeof value === "number" && Number.isFinite(value) ? value : undefined;
 
+const twitterProviderFailure = (payload: JsonRecord): string | null => {
+  const status = typeof payload.status === "string" ? payload.status.trim().toLowerCase() : "";
+  if (["error", "failed", "failure"].includes(status)) return `provider_status_${status}`;
+  if (payload.success === false) return "provider_success_false";
+  if (payload.data === null) return "provider_data_null";
+  return null;
+};
+
 // Grok search via the current Responses API + tools (the legacy search_parameters
 // Live Search API was retired -> 410 Gone). Returns the model's text, or null.
 export async function grokSearch(system: string, user: string, opts?: { maxToolCalls?: number; cacheKey?: string }): Promise<string | null> {
@@ -126,8 +134,8 @@ async function twFetch(url: string, key: string, tries = 2): Promise<Response | 
     } else {
       try {
         const payload = asRecord(await res.clone().json());
-        const providerError = payload.status === "error" || payload.data === null;
-        recordTwitterapi(op, providerError ? "failed" : "succeeded", providerError ? "provider_error_envelope" : undefined);
+        const providerFailure = twitterProviderFailure(payload);
+        recordTwitterapi(op, providerFailure ? "failed" : "succeeded", providerFailure ?? undefined);
       } catch {
         recordTwitterapi(op, "failed", "response_json_error");
       }
@@ -461,21 +469,27 @@ export async function checkFollow(source: string, target: string): Promise<{ fol
   try {
     const res = await twFetch(`${TWITTERAPI}/twitter/user/check_follow_relationship?source_user_name=${encodeURIComponent(s)}&target_user_name=${encodeURIComponent(t)}`, key);
     if (!res || !res.ok) return null;
-    const d = (await res.json()) as any;
-    if (d?.status === "error") return null;
-    const raw = d?.data ?? d ?? {};
+    const d = asRecord(await res.json());
+    if (twitterProviderFailure(d)) return null;
+    const nested = asRecord(d.data);
+    // The documented response nests the relationship under `data`; the
+    // provider's own examples have also shown the booleans at the top level.
+    // Inspect both without ever coercing a missing field to false.
+    const records = Object.keys(nested).length ? [nested, d] : [d];
     // CRITICAL: a MISSING field must be `null` (unknown), NEVER coerced to false.
     // twitterapi's field name has varied (following / is_following / follows), and
     // `!!undefined === false` was silently asserting "does not follow subject" for
     // accounts that genuinely follow — poisoning every corroboration verdict.
     const pick = (...keys: string[]): boolean | null => {
-      for (const k of keys) if (typeof raw[k] === "boolean") return raw[k];
+      for (const record of records) {
+        for (const k of keys) if (typeof record[k] === "boolean") return record[k];
+      }
       return null;
     };
     const following = pick("following", "is_following", "isFollowing", "follows", "source_following_target");
     const followedBy = pick("followed_by", "is_followed_by", "isFollowedBy", "followed", "target_following_source");
     if (following === null && followedBy === null) {
-      console.log("[check-follow] unrecognized shape:", JSON.stringify(raw).slice(0, 200)); // surface the real fields
+      console.log("[check-follow] unrecognized success shape:", JSON.stringify(d).slice(0, 200)); // surface real schema drift, not provider-declared failures
       return null;
     }
     return { following, followedBy };
@@ -495,8 +509,14 @@ export async function checkFollow(source: string, target: string): Promise<{ fol
 //     and matches the ENTIRE reference set for free (in-memory) — so read them all.
 //   - large subject: reverse-check the reference set — one check_follow_relationship
 //     call per account ("does @paradigm follow this subject?"), run in parallel.
-// Either way the answer is complete for the set that matters, never sampled.
-export interface NotableScan { list: NotableFollower[]; checked: number }
+// A completed path is exact for the reference set it covers. Provider failures,
+// pagination interruptions, and the reverse-check cap remain explicitly partial.
+export interface NotableScan {
+  list: NotableFollower[];
+  /** Directly observed candidate relationships, or the full reference set after complete enumeration. */
+  checked: number;
+  coverage: "complete" | "partial" | "unavailable";
+}
 
 // AUTO-GROW: every person ARGUS has audited and PASSed is a verified-legit account
 // — a real founder / fund / KOL whose follow is a credibility signal. Fold them
@@ -525,7 +545,7 @@ export async function dynamicNotable(organizationId?: string): Promise<{ handle:
 
 export async function notableFollowers(subject: string, opts?: { followerCount?: number; budgetMs?: number; organizationId?: string }): Promise<NotableScan> {
   const key = env("TWITTERAPI_KEY");
-  if (!key) return { list: [], checked: 0 };
+  if (!key) return { list: [], checked: 0, coverage: "unavailable" };
   const subj = subject.replace(/^@/, "").toLowerCase();
   // Dedup the combined reference set: the hand-curated core FIRST (so its richer
   // labels win), then the auto-grown ARGUS-verified accounts.
@@ -547,22 +567,60 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
     const got = new Set<string>();
     const u = subject.replace(/^@/, "");
     let cursor = "";
+    let observedFollowers = 0;
+    let observedPage = false;
+    let coverageComplete = false;
     for (let page = 0; page < enumPages + 2; page++) {
       const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
       const res = await twFetch(url, key);
       if (!res || !res.ok) break;
-      const d = (await res.json()) as any;
-      const followers: any[] = d.followers ?? d.data?.followers ?? [];
-      if (!followers.length) break;
-      for (const f of followers) {
+      let d: JsonRecord;
+      try {
+        d = asRecord(await res.json());
+      } catch {
+        break;
+      }
+      if (twitterProviderFailure(d)) break;
+      const nested = asRecord(d.data);
+      const followerValue = Array.isArray(d.followers)
+        ? d.followers
+        : Array.isArray(nested.followers)
+          ? nested.followers
+          : null;
+      // A 200 without an explicit follower array is schema drift, not proof that
+      // none of the reference accounts follows the subject.
+      if (!followerValue) break;
+      const followers = followerValue;
+      observedPage = true;
+      observedFollowers += followers.length;
+      for (const follower of followers) {
+        const f = asRecord(follower);
         const h = String(f.userName ?? f.screen_name ?? "").toLowerCase();
         const m = set.get(h);
         if (m && !got.has(h)) { got.add(h); hits.push({ handle: m.handle, label: m.label, size: "" }); }
       }
-      if (!d.has_next_page || !d.next_cursor) break;
-      cursor = d.next_cursor;
+      const hasNextPage = typeof d.has_next_page === "boolean"
+        ? d.has_next_page
+        : typeof nested.has_next_page === "boolean"
+          ? nested.has_next_page
+          : undefined;
+      const nextCursorValue = d.next_cursor ?? nested.next_cursor;
+      const nextCursor = typeof nextCursorValue === "string" ? nextCursorValue : "";
+      if (hasNextPage === false || (hasNextPage === undefined && observedFollowers >= fc)) {
+        coverageComplete = true;
+        break;
+      }
+      if (!hasNextPage || !nextCursor) break;
+      cursor = nextCursor;
     }
-    return { list: hits, checked: total };
+    // Enumeration can assert a negative only after every page completed. On a
+    // partial run, the positive matches are still observed facts, but every
+    // unobserved candidate remains unknown.
+    return {
+      list: hits,
+      checked: coverageComplete ? total : hits.length,
+      coverage: coverageComplete ? "complete" : observedPage ? "partial" : "unavailable",
+    };
   }
 
   // Large / unknown-size subject: reverse-check the reference set (one call each).
@@ -585,13 +643,29 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
     const res = await Promise.all(
       slice.map(async (n) => {
         const rel = await checkFollow(n.handle, subject); // does the notable account follow the subject?
-        return rel?.following ? ({ handle: n.handle, label: n.label, size: "" } as NotableFollower) : null;
+        return { notable: n, rel };
       }),
     );
-    checked += slice.length;
-    for (const r of res) if (r) hits.push(r);
+    let observedInChunk = 0;
+    for (const { notable, rel } of res) {
+      if (!rel || rel.following === null) continue;
+      observedInChunk += 1;
+      checked += 1;
+      if (rel.following) hits.push({ handle: notable.handle, label: notable.label, size: "" });
+    }
+    // A whole unavailable chunk is an endpoint-level failure signal. Stop the
+    // audit-wide fan-out instead of spending the remaining budget repeating it.
+    if (observedInChunk === 0) break;
   }
-  return { list: hits, checked };
+  return {
+    list: hits,
+    checked,
+    coverage: toCheck.length === total && checked === toCheck.length && toCheck.length > 0
+      ? "complete"
+      : checked > 0
+        ? "partial"
+        : "unavailable",
+  };
 }
 
 // ── Grok Live Search: did the endorsers publicly acknowledge the subject? ──
@@ -1049,11 +1123,17 @@ export const xAdapter: Adapter = {
       const scan = await notableFollowers(ctx.handle, { followerCount, organizationId: ctx.organizationId });
       const nf = scan.list;
       ctx.evidence.notableFollowers = nf;
-      // Complete coverage: we checked every account on the curated list directly.
       if (nf.length) {
-        ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `Followed by ${nf.length} of ${scan.checked} known accounts checked: ${nf.slice(0, 8).map((n) => `@${n.handle}${n.label ? ` (${n.label})` : ""}`).join(", ")}${nf.length > 8 ? ", …" : ""}.`, source: "twitterapi.io", tone: "good" });
-      } else {
+        const coverageDetail = scan.coverage === "complete"
+          ? `Followed by ${nf.length} of ${scan.checked} known accounts checked`
+          : `Observed ${nf.length} notable follower${nf.length === 1 ? "" : "s"} before provider coverage became incomplete`;
+        ctx.emit({ phase: "P0 · Intake", label: scan.coverage === "complete" ? "Notable followers" : "Notable followers · partial coverage", detail: `${coverageDetail}: ${nf.slice(0, 8).map((n) => `@${n.handle}${n.label ? ` (${n.label})` : ""}`).join(", ")}${nf.length > 8 ? ", …" : ""}.${scan.coverage === "complete" ? "" : " Unobserved relationships remain unknown."}`, source: "twitterapi.io", tone: scan.coverage === "complete" ? "good" : "warn" });
+      } else if (scan.coverage === "complete" && scan.checked > 0) {
         ctx.emit({ phase: "P0 · Intake", label: "Notable followers", detail: `None of the ${scan.checked} known funds/founders/KOLs checked follow this subject.`, source: "twitterapi.io", tone: "neutral" });
+      } else if (scan.coverage === "partial") {
+        ctx.emit({ phase: "P0 · Intake", label: "Notable follower check incomplete", detail: scan.checked > 0 ? `No notable follower was observed in ${scan.checked} returned relationship result${scan.checked === 1 ? "" : "s"}; unobserved accounts remain unknown, so ARGUS withheld the negative conclusion.` : "Some follower data returned, but full reference-set coverage was not established; ARGUS withheld the negative conclusion.", source: "twitterapi.io", tone: "warn" });
+      } else {
+        ctx.emit({ phase: "P0 · Intake", label: "Notable follower check unavailable", detail: "The relationship provider returned no observable results; ARGUS withheld the notable-follower conclusion.", source: "twitterapi.io", tone: "warn" });
       }
     }
 
