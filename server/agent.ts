@@ -9,6 +9,7 @@ import { createHash } from "node:crypto";
 import { ANALYST_MODEL, env } from "./config";
 import { addClaudeUsage } from "./cost";
 import type { AxisEvidenceRecord, Contradiction } from "../src/data/evidence";
+import { isStrictFundScaleArtifact } from "../src/lib/fundScaleEvidence";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -647,6 +648,61 @@ const compactObject = (value: unknown, depth = 0): unknown => {
   );
 };
 
+const SCORING_PROFILE_FIELDS = [
+  "handle", "display_name", "resolved_name", "bio", "website",
+  "profile_collection_state", "profile_provider", "profile_captured_at",
+] as const;
+
+const compactScoringProfile = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const prioritized = Object.fromEntries(SCORING_PROFILE_FIELDS.flatMap((key) => {
+    const compacted = compactObject(row[key], 1);
+    return compacted === undefined ? [] : [[key, compacted]];
+  }));
+  const remainder = compactObject(value);
+  return remainder && typeof remainder === "object" && !Array.isArray(remainder)
+    ? { ...(remainder as Record<string, unknown>), ...prioritized }
+    : prioritized;
+};
+
+const SOURCE_ARTIFACT_FIELDS = [
+  "kind", "provider", "title", "sourceUrl", "capturedAt", "contentHash", "sourceContentHash",
+  "publishedAt", "excerpt", "match", "coverageState", "relationship", "subjectName", "subjectHandle",
+  "projectName", "projectHandle", "projectDomain", "sourceClass", "investorEntityName",
+  "investorEntityHandle", "investorEntityDomain", "attribution", "attributionSourceUrl",
+  "attributionSourceContentHash", "attributionCapturedAt", "attributionSourceKind", "fundName", "fundSizeUsd",
+  "fundVehicle", "fundScaleMetric", "fundAmountQualifier", "fundScaleBasis", "fundScaleAsOf",
+  "fundScaleTemporalState", "fundScaleSourceCount", "fundScaleClaimId",
+] as const;
+
+const compactSourceArtifact = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  return Object.fromEntries(SOURCE_ARTIFACT_FIELDS.flatMap((key) => {
+    const compacted = compactObject(row[key], 1);
+    return compacted === undefined ? [] : [[key, compacted]];
+  }));
+};
+
+const sourceArtifactPriority = (value: unknown): number => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return 9;
+  const row = value as Record<string, unknown>;
+  if (row.kind === "fund_scale" && row.match === "fund_scale_confirmed") return 0;
+  if (row.kind === "portfolio_relationship" && row.match === "relationship_confirmed") return 1;
+  if (row.match === "risk_signal") return 2;
+  if (row.kind === "fund_scale") return 3;
+  if (row.kind === "portfolio_relationship") return 4;
+  if (row.kind === "legal_case" || row.kind === "sanctions_screen" || row.kind === "trust_graph") return 5;
+  return 6;
+};
+
+const retainSourceArtifacts = (source: readonly unknown[], limit: number): unknown[] => source
+  .map((value, index) => ({ value, index, priority: sourceArtifactPriority(value) }))
+  .sort((left, right) => left.priority - right.priority || left.index - right.index)
+  .slice(0, limit)
+  .map(({ value }) => value);
+
 const compactProfileAuthenticity = (value: unknown): Record<string, unknown> | undefined => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const row = value as Record<string, unknown>;
@@ -906,13 +962,19 @@ const sourceArtifactKind = (value: Record<string, unknown>): string => {
   return "";
 };
 
-const sourceArtifactEligibleAxes = (value: Record<string, unknown>): readonly string[] => {
+const sourceArtifactEligibleAxes = (
+  value: Record<string, unknown>,
+  sourceArtifactPeers: readonly Record<string, unknown>[] = [],
+  subjectHandle?: string,
+  profile?: Record<string, unknown>,
+): readonly string[] => {
   const kind = sourceArtifactKind(value);
   // A fetched page that mentions a relationship can remain visible as a
   // reported lead, but only a deterministic confirmation threshold may move
   // portfolio quality. This keeps the scoring boundary aligned with the UI
   // and prevents a single press report from becoming investment proof.
   if (kind === "portfolio_relationship" && value.match !== "relationship_confirmed") return [];
+  if (kind === "fund_scale" && !isStrictFundScaleArtifact(value, sourceArtifactPeers, { subjectHandle, profile })) return [];
   return SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind] ?? [];
 };
 
@@ -940,7 +1002,14 @@ const evidencePayload = (value: unknown): Record<string, unknown> => {
   return base;
 };
 
-const eligibleAxesFor = (section: string, value: Record<string, unknown>, axisCatalog: AnalystAxis[]): string[] => {
+const eligibleAxesFor = (
+  section: string,
+  value: Record<string, unknown>,
+  axisCatalog: AnalystAxis[],
+  sourceArtifactPeers: readonly Record<string, unknown>[] = [],
+  subjectHandle?: string,
+  profile?: Record<string, unknown>,
+): string[] => {
   const checkId = typeof value.checkId === "string" ? value.checkId : typeof value.check_id === "string" ? value.check_id : "";
   const findingType = typeof value.finding_type === "string" ? value.finding_type : "";
   const eligible = section === "profile" && value.profile_collection_state !== "resolved"
@@ -950,7 +1019,7 @@ const eligibleAxesFor = (section: string, value: Record<string, unknown>, axisCa
     : section === "checkOutcomes" && checkId
     ? CHECK_AXIS_ELIGIBILITY[checkId] ?? []
     : section === "sourceArtifacts"
-      ? sourceArtifactEligibleAxes(value)
+      ? sourceArtifactEligibleAxes(value, sourceArtifactPeers, subjectHandle, profile)
       : SECTION_AXIS_ELIGIBILITY[section] ?? [];
   const allowed = new Set(eligible);
   return [...new Set(axisCatalog.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
@@ -964,6 +1033,8 @@ const recordText = (record: Record<string, unknown>, keys: string[], max: number
   return undefined;
 };
 
+const ARTIFACT_SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
+
 const safeArtifactSourceUrl = (value?: string): string | undefined => {
   if (!value) return undefined;
   try {
@@ -973,9 +1044,7 @@ const safeArtifactSourceUrl = (value?: string): string | undefined => {
     }
     url.hash = "";
     for (const key of [...url.searchParams.keys()]) {
-      if (/^(?:access[_-]?token|api[_-]?key|key|token|signature|sig|auth)$/i.test(key)) {
-        url.searchParams.delete(key);
-      }
+      if (ARTIFACT_SENSITIVE_URL_PARAM.test(key)) url.searchParams.delete(key);
     }
     return url.toString();
   } catch {
@@ -985,15 +1054,23 @@ const safeArtifactSourceUrl = (value?: string): string | undefined => {
 
 const ARTIFACT_URL_FIELDS = new Set([
   "sourceUrl", "source_url", "evidence_url", "url", "linkedin", "link", "href",
-  "citation", "link_evidence_url",
+  "citation", "link_evidence_url", "attributionSourceUrl",
 ]);
 
 const sanitizeArtifactUrls = (value: unknown, depth = 0): unknown => {
   if (value == null || typeof value !== "object" || depth > 4) return value;
   if (Array.isArray(value)) return value.map((item) => sanitizeArtifactUrls(item, depth + 1));
+  const sourceRecord = value as Record<string, unknown>;
   const sanitized: Record<string, unknown> = {};
-  for (const [key, item] of Object.entries(value as Record<string, unknown>)) {
+  for (const [key, item] of Object.entries(sourceRecord)) {
     if (ARTIFACT_URL_FIELDS.has(key) && typeof item === "string") {
+      if (key === "attributionSourceUrl" || (sourceRecord.kind === "fund_scale" && (key === "sourceUrl" || key === "source_url"))) {
+        try {
+          if ([...new URL(item).searchParams.keys()].some((param) => ARTIFACT_SENSITIVE_URL_PARAM.test(param))) continue;
+        } catch {
+          continue;
+        }
+      }
       const safe = safeArtifactSourceUrl(item);
       if (safe) sanitized[key] = safe;
       continue;
@@ -1003,7 +1080,13 @@ const sanitizeArtifactUrls = (value: unknown, depth = 0): unknown => {
   return sanitized;
 };
 
-const verificationFor = (section: string, record: Record<string, unknown>): AxisEvidenceRecord["verification"] => {
+const verificationFor = (
+  section: string,
+  record: Record<string, unknown>,
+  sourceArtifactPeers: readonly Record<string, unknown>[] = [],
+  subjectHandle?: string,
+  profile?: Record<string, unknown>,
+): AxisEvidenceRecord["verification"] => {
   if (section === "axisGaps") return "unavailable";
   if (section === "checkOutcomes") {
     const status = recordText(record, ["status"], 40)?.toLowerCase();
@@ -1025,13 +1108,7 @@ const verificationFor = (section: string, record: Record<string, unknown>): Axis
       return "unavailable";
     }
     if (kind === "fund_scale") {
-      const contentHash = recordText(record, ["contentHash"], 64);
-      const sourceContentHash = recordText(record, ["sourceContentHash"], 64);
-      return match === "fund_scale_confirmed"
-        && /^[a-f0-9]{64}$/i.test(contentHash ?? "")
-        && /^[a-f0-9]{64}$/i.test(sourceContentHash ?? "")
-        ? "verified"
-        : "unavailable";
+      return isStrictFundScaleArtifact(record, sourceArtifactPeers, { subjectHandle, profile }) ? "verified" : "unavailable";
     }
     if (kind === "trust_graph") {
       if (record.coverageState === "unavailable" || match === "observed") return "unavailable";
@@ -1090,11 +1167,14 @@ const makeAxisArtifact = (
   value: unknown,
   axisCatalog: AnalystAxis[],
   eligibleOverride?: string[],
+  sourceArtifactPeers: readonly Record<string, unknown>[] = [],
+  subjectHandle?: string,
+  profile?: Record<string, unknown>,
 ): { decorated: Record<string, unknown>; catalog: AxisEvidenceRecord } => {
   const payload = sanitizeArtifactUrls(evidencePayload(value)) as Record<string, unknown>;
   const contentHash = createHash("sha256").update(stableJson({ section, payload })).digest("hex");
   const artifactId = `art_v1_${contentHash}`;
-  const eligibleAxes = eligibleOverride ?? eligibleAxesFor(section, payload, axisCatalog);
+  const eligibleAxes = eligibleOverride ?? eligibleAxesFor(section, payload, axisCatalog, sourceArtifactPeers, subjectHandle, profile);
   const provider = providerFor(section, payload);
   const operationKey = recordText(payload, ["checkId", "check_id", "finding_type", "kind", "type"], 100);
   const title = recordText(payload, ["title", "label", "claim", "name", "project_name", "handle", "axis"], 180)
@@ -1118,7 +1198,7 @@ const makeAxisArtifact = (
       ...(capturedAt ? { capturedAt } : {}),
       contentHash,
       eligibleAxes,
-      verification: verificationFor(section, payload),
+      verification: verificationFor(section, payload, sourceArtifactPeers, subjectHandle, profile),
       scope: DIRECT_SECTIONS.has(section) ? "direct_subject" : "subject_context",
     },
   };
@@ -1133,6 +1213,10 @@ const SCORING_ARRAY_SECTIONS = [
 
 function renderScoringPacket(packet: Record<string, unknown>, axisCatalog: AnalystAxis[]): Record<string, unknown> {
   const rendered: Record<string, unknown> = { ...packet, schema_version: 4 };
+  const packetProfile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile)
+    ? packet.profile as Record<string, unknown>
+    : undefined;
+  const subjectHandle = recordText(packetProfile ?? {}, ["handle"], 80);
   const packetCoverage = packet.coverage && typeof packet.coverage === "object" && !Array.isArray(packet.coverage)
     ? packet.coverage as Record<string, { available: number; included: number }>
     : {};
@@ -1157,8 +1241,12 @@ function renderScoringPacket(packet: Record<string, unknown>, axisCatalog: Analy
   }
   for (const section of SCORING_ARRAY_SECTIONS) {
     const values = Array.isArray(packet[section]) ? packet[section] as unknown[] : [];
+    const sourceArtifactPeers = section === "sourceArtifacts"
+      ? values.map((value) => sanitizeArtifactUrls(evidencePayload(value)))
+        .filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value)))
+      : [];
     const eligibleValues = values.flatMap((value) => {
-      const artifact = makeAxisArtifact(section, value, axisCatalog);
+      const artifact = makeAxisArtifact(section, value, axisCatalog, undefined, sourceArtifactPeers, subjectHandle, packetProfile);
       if (artifact.catalog.eligibleAxes.length === 0) return [];
       artifacts.push(artifact.catalog);
       return [artifact.decorated];
@@ -1349,7 +1437,7 @@ function serializeAnalystEvidencePacket(
     finding_scope_policy: {
       findings: "Direct subject evidence eligible for scoring, subject to provenance and verification.",
     },
-    profile: compactObject(input.profile),
+    profile: compactScoringProfile(input.profile),
     profileAuthenticity: compactProfileAuthenticity(input.profileAuthenticity),
     trustGraphScreen: compactTrustGraphScreen(input.trustGraphScreen),
     // Findings stay ahead of descriptive context in the budget. This prevents a
@@ -1393,7 +1481,10 @@ function serializeAnalystEvidencePacket(
           // wallets, promotions, and advisory rows as for findings.
           return record.evidence_origin !== "model_lead" && record.artifact_verified !== false;
         });
-    const included = source.slice(0, limit).map((item) => compactObject(item)).filter((item) => item !== undefined);
+    const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source, limit) : source.slice(0, limit);
+    const included = selected
+      .map((item) => section === "sourceArtifacts" ? compactSourceArtifact(item) : compactObject(item))
+      .filter((item) => item !== undefined);
     packet[section] = included;
     coverage[section] = { available: source.length, included: included.length };
   }
@@ -1575,6 +1666,12 @@ export async function analyzeSubject(
     `not identity proof. A real-looking photo never establishes who operates the ` +
     `account, and an AI, stock, celebrity, logo, cartoon, unclear, or missing photo ` +
     `never establishes impersonation by itself. Use it only as a review lead.\n\n` +
+    `FUND SCALE RULE: score I3 only from verified fund_scale artifacts. Keep ` +
+    `firm-wide AUM separate from an individual vehicle close, never sum several ` +
+    `vehicles into AUM, and treat first_close or at_least values as lower bounds. ` +
+    `An affiliated fund's scale is context for that fund and is never the audited ` +
+    `person's personal capital. Historical vehicle closes remain fixed facts, while ` +
+    `historical or undated AUM must not be presented as current.\n\n` +
     `INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this ` +
     `scoring packet. Do not infer anything about the subject from their absence. ` +
     `Use all remaining collected evidence according to its provenance and ` +

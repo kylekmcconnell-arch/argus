@@ -292,6 +292,256 @@ describe("decision-safe person report presentation", () => {
     expect(container.querySelector('a[href*="user:secret"]')).toBeNull();
   });
 
+  it("renders verified fund scale beside portfolio attribution without inflating personal capital", () => {
+    const base = buildReport(SUBJECTS[2]);
+    const dossier = {
+      ...base,
+      website: "https://novacap.io",
+      profile_collection_state: "resolved" as const,
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-11T14:00:00.000Z",
+      sourceArtifacts: [{
+        kind: "fund_scale" as const,
+        provider: "fund-scale-web" as const,
+        title: "Nova Capital reports $850 million AUM",
+        excerpt: "Nova Capital reports $850 million in assets under management.",
+        sourceUrl: "https://novacap.io/fund",
+        capturedAt: "2026-07-11T14:00:00.000Z",
+        publishedAt: "2026-06-30T00:00:00.000Z",
+        sourceContentHash: "a".repeat(64),
+        contentHash: "b".repeat(64),
+        match: "fund_scale_confirmed" as const,
+        subjectName: "Nova Capital",
+        subjectHandle: "@nova_capital",
+        investorEntityName: "Nova Capital",
+        investorEntityDomain: "novacap.io",
+        attribution: "direct_subject" as const,
+        sourceClass: "first_party_subject" as const,
+        fundName: "Nova Capital",
+        fundSizeUsd: 850_000_000,
+        fundVehicle: "Nova Capital managed funds",
+        fundScaleMetric: "reported_aum" as const,
+        fundAmountQualifier: "exact" as const,
+        fundScaleBasis: "manager_reported" as const,
+        fundScaleAsOf: "2026-06-30T00:00:00.000Z",
+        fundScaleTemporalState: "current" as const,
+        fundScaleSourceCount: 1,
+        fundScaleClaimId: "nova-aum-2026q2",
+      }, {
+        kind: "portfolio_relationship" as const,
+        provider: "portfolio-web" as const,
+        title: "Nova Capital → Acme Protocol",
+        excerpt: "Acme Protocol appears on the official portfolio page.",
+        sourceUrl: "https://novacap.io/portfolio/acme",
+        capturedAt: "2026-07-11T14:00:00.000Z",
+        sourceContentHash: "c".repeat(64),
+        contentHash: "d".repeat(64),
+        match: "relationship_confirmed" as const,
+        relationship: "invested_in" as const,
+        subjectName: "Nova Capital",
+        investorEntityName: "Nova Capital",
+        attribution: "direct_subject" as const,
+        projectName: "Acme Protocol",
+        sourceClass: "first_party_subject" as const,
+      }],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Investor evidence");
+    expect(container.textContent).toContain("1 verified relationship · 1 verified scale claim");
+    const investorHeading = [...container.querySelectorAll("h2")]
+      .find((heading) => heading.textContent === "Investor evidence");
+    expect(investorHeading?.closest("section")?.parentElement?.classList.contains("lg:col-span-2")).toBe(true);
+    expect(container.textContent).toContain("Fund scale");
+    expect(container.textContent).toContain("Portfolio relationships");
+    expect(container.textContent).toContain("Nova Capital managed funds");
+    expect(container.textContent).toContain("$850M");
+    expect(container.textContent).toContain("reported AUM");
+    expect(container.textContent).toContain("manager reported");
+    expect(container.textContent).toContain("As of Jun 30, 2026");
+    expect(container.textContent).toContain("fund scale verified");
+    expect(container.textContent).toContain("Nova Capital → invested in Acme Protocol");
+    expect(container.textContent).toContain("direct investment verified");
+    expect(container.querySelector('a[href="https://novacap.io/fund"]')).not.toBeNull();
+    expect(container.querySelector('a[href="https://novacap.io/portfolio/acme"]')).not.toBeNull();
+    expect(container.querySelector('a[aria-label*="Open scale source"][aria-label*="novacap.io/fund"][aria-label*="captured Jul 11, 2026"]')).not.toBeNull();
+    expect(container.querySelector('a[aria-label*="Open deal source"][aria-label*="novacap.io/portfolio/acme"][aria-label*="captured Jul 11, 2026"]')).not.toBeNull();
+  });
+
+  it("shows the complete person-to-affiliated-fund chain with separate affiliation, scale, and deal sources", () => {
+    const affiliationUrl = "https://x.com/satoshi_builds";
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      bio: "Research Partner at Paradigm",
+      profile_collection_state: "resolved" as const,
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-10T14:00:00.000Z",
+      sourceArtifacts: [{
+        kind: "fund_scale" as const,
+        provider: "fund-scale-web" as const,
+        title: "Reuters reports Paradigm Fund III close",
+        excerpt: "Reuters reports that Paradigm completed the final close of Paradigm Fund III at $850 million.",
+        sourceUrl: "https://reuters.com/markets/paradigm-fund-iii",
+        capturedAt: "2026-07-11T14:00:00.000Z",
+        publishedAt: "2026-07-01T00:00:00.000Z",
+        sourceContentHash: "e".repeat(64),
+        contentHash: "f".repeat(64),
+        match: "fund_scale_confirmed" as const,
+        subjectName: "Mara Voss",
+        subjectHandle: "@satoshi_builds",
+        investorEntityName: "Paradigm",
+        investorEntityDomain: "paradigm.xyz",
+        attribution: "affiliated_fund" as const,
+        attributionSourceUrl: affiliationUrl,
+        attributionSourceContentHash: "1".repeat(64),
+        attributionCapturedAt: "2026-07-10T14:00:00.000Z",
+        attributionSourceKind: "provider_profile" as const,
+        sourceClass: "independent_press" as const,
+        fundName: "Paradigm",
+        fundSizeUsd: 850_000_000,
+        fundVehicle: "Paradigm Fund III",
+        fundScaleMetric: "final_close" as const,
+        fundAmountQualifier: "exact" as const,
+        fundScaleBasis: "press_corroborated" as const,
+        fundScaleAsOf: "2026-07-01T00:00:00.000Z",
+        fundScaleTemporalState: "fixed_historical" as const,
+        fundScaleSourceCount: 2,
+        fundScaleClaimId: "paradigm-fund-iii-final-close",
+      }, {
+        kind: "fund_scale" as const,
+        provider: "fund-scale-web" as const,
+        title: "Financial Times confirms Paradigm Fund III close",
+        excerpt: "The Financial Times independently confirms Paradigm Fund III completed a final close at $850 million.",
+        sourceUrl: "https://ft.com/content/paradigm-fund-iii",
+        capturedAt: "2026-07-11T14:01:00.000Z",
+        publishedAt: "2026-07-02T00:00:00.000Z",
+        sourceContentHash: "6".repeat(64),
+        contentHash: "7".repeat(64),
+        match: "fund_scale_confirmed" as const,
+        subjectName: "Mara Voss",
+        subjectHandle: "@satoshi_builds",
+        investorEntityName: "Paradigm",
+        investorEntityDomain: "paradigm.xyz",
+        attribution: "affiliated_fund" as const,
+        attributionSourceUrl: affiliationUrl,
+        attributionSourceContentHash: "1".repeat(64),
+        attributionCapturedAt: "2026-07-10T14:00:00.000Z",
+        attributionSourceKind: "provider_profile" as const,
+        sourceClass: "independent_press" as const,
+        fundName: "Paradigm",
+        fundSizeUsd: 850_000_000,
+        fundVehicle: "Paradigm Fund III",
+        fundScaleMetric: "final_close" as const,
+        fundAmountQualifier: "exact" as const,
+        fundScaleBasis: "press_corroborated" as const,
+        fundScaleAsOf: "2026-07-01T00:00:00.000Z",
+        fundScaleTemporalState: "fixed_historical" as const,
+        fundScaleSourceCount: 2,
+        fundScaleClaimId: "paradigm-fund-iii-final-close",
+      }, {
+        kind: "portfolio_relationship" as const,
+        provider: "portfolio-web" as const,
+        title: "Paradigm → Acme Protocol",
+        excerpt: "Acme Protocol appears on Paradigm's official portfolio page.",
+        sourceUrl: "https://paradigm.xyz/portfolio/acme",
+        capturedAt: "2026-07-11T15:00:00.000Z",
+        sourceContentHash: "2".repeat(64),
+        contentHash: "3".repeat(64),
+        match: "relationship_confirmed" as const,
+        relationship: "invested_in" as const,
+        subjectName: "Mara Voss",
+        subjectHandle: "@satoshi_builds",
+        investorEntityName: "Paradigm",
+        investorEntityDomain: "paradigm.xyz",
+        attribution: "affiliated_fund" as const,
+        attributionSourceUrl: affiliationUrl,
+        attributionSourceContentHash: "1".repeat(64),
+        attributionCapturedAt: "2026-07-10T14:00:00.000Z",
+        attributionSourceKind: "provider_profile" as const,
+        projectName: "Acme Protocol",
+        sourceClass: "first_party_investor" as const,
+      }],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Mara Voss → affiliated with Paradigm");
+    expect(container.textContent).toContain("Mara Voss → affiliated with Paradigm → invested in Acme Protocol");
+    expect(container.textContent).toContain("Paradigm Fund III");
+    expect(container.textContent).toContain("Fixed historical · Jul 1, 2026");
+    expect(container.textContent).toContain("fund scale verified · not personal capital");
+    expect(container.textContent).toContain("fund investment verified · not attributed personally");
+    const longStatus = [...container.querySelectorAll(".chip")]
+      .find((chip) => chip.textContent?.includes("fund investment verified · not attributed personally"));
+    expect(longStatus?.classList.contains("chip-wrap")).toBe(true);
+
+    const affiliationLinks = container.querySelectorAll(`a[href="${affiliationUrl}"][aria-label*="Open affiliation source"][aria-label*="captured Jul 10, 2026"]`);
+    expect(affiliationLinks.length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelector('a[href="https://reuters.com/markets/paradigm-fund-iii"][aria-label*="Open scale source"][aria-label*="reuters.com/markets/paradigm-fund-iii"]')).not.toBeNull();
+    expect(container.querySelector('a[href="https://ft.com/content/paradigm-fund-iii"][aria-label*="Open scale source"][aria-label*="ft.com/content/paradigm-fund-iii"]')).not.toBeNull();
+    expect(container.querySelector('a[href="https://paradigm.xyz/portfolio/acme"][aria-label*="Open deal source"][aria-label*="paradigm.xyz/portfolio/acme"]')).not.toBeNull();
+  });
+
+  it("does not style or label a nominally confirmed fund-size payload as verified when the strict gate rejects it", () => {
+    const base = buildReport(SUBJECTS[2]);
+    const dossier = {
+      ...base,
+      website: "https://novacap.io",
+      profile_collection_state: "resolved" as const,
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-11T14:00:00.000Z",
+      sourceArtifacts: [{
+        kind: "fund_scale" as const,
+        provider: "fund-scale-web" as const,
+        title: "Incomplete Nova Capital AUM claim",
+        excerpt: "Nova Capital reports $850 million in assets under management.",
+        sourceUrl: "https://novacap.io/fund",
+        capturedAt: "2026-07-11T14:00:00.000Z",
+        publishedAt: "2026-06-30T00:00:00.000Z",
+        sourceContentHash: "4".repeat(64),
+        contentHash: "5".repeat(64),
+        match: "fund_scale_confirmed" as const,
+        subjectName: "Nova Capital",
+        subjectHandle: "@nova_capital",
+        investorEntityName: "Nova Capital",
+        investorEntityDomain: "novacap.io",
+        attribution: "direct_subject" as const,
+        sourceClass: "first_party_subject" as const,
+        fundName: "Nova Capital",
+        fundSizeUsd: 850_000_000,
+        fundScaleMetric: "reported_aum" as const,
+        fundAmountQualifier: "exact" as const,
+        fundScaleBasis: "manager_reported" as const,
+        fundScaleTemporalState: "current" as const,
+        fundScaleSourceCount: 1,
+        fundScaleClaimId: "nova-aum-missing-claim-date",
+        // No claim-local fundScaleAsOf: publication time must not impersonate it.
+      }],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const investorHeading = [...container.querySelectorAll("h2")]
+      .find((heading) => heading.textContent === "Investor evidence");
+    const investorSection = investorHeading?.closest("section");
+    expect(investorSection).not.toBeNull();
+    expect(investorSection?.textContent).toContain("0 verified scale claims");
+    expect(investorSection?.textContent).toContain("reported scale · strict verification incomplete");
+    expect(investorSection?.textContent).toContain("Current AUM · as-of unavailable");
+    expect(investorSection?.textContent).not.toContain("As of Jun 30, 2026");
+    expect(investorSection?.textContent).not.toContain("fund scale verified");
+    expect(investorSection?.querySelector(".tint-pass")).toBeNull();
+    expect(container.textContent).toContain("reported · strict verification incomplete");
+  });
+
   it("renders frozen photo and graph evidence, links exact versions, and suppresses duplicate live panels", () => {
     const currentVersionId = "00000000-0000-4000-8000-000000000211";
     const connectedVersionId = "00000000-0000-4000-8000-000000000311";

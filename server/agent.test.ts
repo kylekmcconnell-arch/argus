@@ -11,7 +11,7 @@ import {
   validateAnalystVerdict,
   type AnalystAxis,
 } from "./agent";
-import type { AxisEvidenceRecord } from "../src/data/evidence";
+import type { AxisEvidenceRecord, SourceArtifact } from "../src/data/evidence";
 import { getProfile, SubjectClass } from "../src/engine";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
 import { getCost, withCostLedger } from "./cost";
@@ -27,6 +27,34 @@ const F2_COUNTER_REF = `art_v1_${"3".repeat(64)}`;
 const F2_UNAVAILABLE_REF = `art_v1_${"4".repeat(64)}`;
 const F2_CHECKED_EMPTY_REF = `art_v1_${"5".repeat(64)}`;
 const ARTIFACT_ID_FOR_TEST = /^art_v1_[a-f0-9]{64}$/;
+
+const verifiedFundScaleArtifact = (overrides: Partial<SourceArtifact> = {}): SourceArtifact => ({
+  kind: "fund_scale",
+  provider: "fund-scale-web",
+  title: "Subject closed a $500 million fund",
+  excerpt: "Subject announced a completed $500 million venture fund.",
+  sourceUrl: "https://subject.example/fund-size",
+  capturedAt: "2026-07-11T12:00:00.000Z",
+  contentHash: "a".repeat(64),
+  sourceContentHash: "b".repeat(64),
+  match: "fund_scale_confirmed",
+  subjectName: "Subject",
+  subjectHandle: "@subject",
+  investorEntityName: "Subject",
+  investorEntityDomain: "subject.example",
+  attribution: "direct_subject",
+  sourceClass: "first_party_subject",
+  fundName: "Subject",
+  fundSizeUsd: 500_000_000,
+  fundVehicle: "Subject Venture Fund I",
+  fundScaleMetric: "fund_vehicle",
+  fundAmountQualifier: "exact",
+  fundScaleBasis: "manager_reported",
+  fundScaleTemporalState: "fixed_historical",
+  fundScaleSourceCount: 1,
+  fundScaleClaimId: "fund_scale_claim_v1_subject_fund_i",
+  ...overrides,
+});
 
 const axisArtifact = (
   artifactId: string,
@@ -905,19 +933,7 @@ describe("analyst verdict integrity", () => {
       { axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" },
     ];
     const packet = buildScoringEvidencePacket({
-      sourceArtifacts: [{
-        kind: "fund_scale",
-        provider: "portfolio-web",
-        title: "Paradigm Fund III closed at $850 million",
-        excerpt: "Paradigm announced the final close of its third venture fund at $850 million.",
-        sourceUrl: "https://paradigm.xyz/2024/05/fund-iii",
-        capturedAt: "2026-07-11T12:00:00.000Z",
-        contentHash: "a".repeat(64),
-        sourceContentHash: "b".repeat(64),
-        match: "fund_scale_confirmed",
-        fundName: "Paradigm Fund III",
-        fundSizeUsd: 850_000_000,
-      }],
+      sourceArtifacts: [verifiedFundScaleArtifact()],
     }, axes);
     expect(extractScoringEvidenceCatalog(packet)).toContainEqual(expect.objectContaining({
       operation: "sourceArtifacts:fund_scale",
@@ -925,6 +941,210 @@ describe("analyst verdict integrity", () => {
       verification: "verified",
     }));
     expect(JSON.parse(packet).axisGaps).toEqual([]);
+  });
+
+  it("does not let a singleton press artifact impersonate two-source corroboration", () => {
+    const axes: AnalystAxis[] = [{ axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" }];
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [verifiedFundScaleArtifact({
+        sourceUrl: "https://reuters.com/markets/subject-fund",
+        sourceClass: "independent_press",
+        fundScaleBasis: "press_corroborated",
+        fundScaleSourceCount: 2,
+      })],
+    }, axes);
+    expect(JSON.parse(packet).sourceArtifacts).toEqual([]);
+    expect(JSON.parse(packet).axisGaps).toEqual([
+      expect.objectContaining({ axis: "I3_fund_scale_tier", status: "unavailable" }),
+    ]);
+  });
+
+  it("rejects a credential-bearing fund source instead of laundering it during packet sanitization", () => {
+    const axes: AnalystAxis[] = [{ axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" }];
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [verifiedFundScaleArtifact({ sourceUrl: "https://subject.example/fund-size?token=secret" })],
+    }, axes);
+    expect(JSON.parse(packet).sourceArtifacts).toEqual([]);
+    expect(JSON.parse(packet).axisGaps).toEqual([
+      expect.objectContaining({ axis: "I3_fund_scale_tier", status: "unavailable" }),
+    ]);
+  });
+
+  it("retains two compatible, distinct press artifacts for the same canonical scale claim", () => {
+    const axes: AnalystAxis[] = [{ axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" }];
+    const first = verifiedFundScaleArtifact({
+      sourceUrl: "https://reuters.com/markets/subject-fund",
+      sourceClass: "independent_press",
+      fundScaleBasis: "press_corroborated",
+      fundScaleSourceCount: 2,
+    });
+    const second = verifiedFundScaleArtifact({
+      sourceUrl: "https://ft.com/content/subject-fund",
+      sourceClass: "independent_press",
+      fundScaleBasis: "press_corroborated",
+      fundScaleSourceCount: 2,
+      contentHash: "c".repeat(64),
+      sourceContentHash: "d".repeat(64),
+      excerpt: "The Financial Times reports a completed $500 million close for Subject Venture Fund I.",
+    });
+    const packet = buildScoringEvidencePacket({ sourceArtifacts: [first, second] }, axes);
+    const scaleEvidence = extractScoringEvidenceCatalog(packet).filter((artifact) => artifact.operation === "sourceArtifacts:fund_scale");
+    expect(scaleEvidence).toHaveLength(2);
+    expect(scaleEvidence.every((artifact) => artifact.verification === "verified")).toBe(true);
+    expect(JSON.parse(packet).axisGaps).toEqual([]);
+  });
+
+  it("does not retain a press root when its only peer fails the full corroboration contract", () => {
+    const axes: AnalystAxis[] = [{ axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" }];
+    const root = verifiedFundScaleArtifact({
+      sourceUrl: "https://reuters.com/markets/subject-fund",
+      sourceClass: "independent_press",
+      fundScaleBasis: "press_corroborated",
+      fundScaleSourceCount: 2,
+    });
+    const incompletePeer = verifiedFundScaleArtifact({
+      sourceUrl: "https://ft.com/content/subject-fund",
+      sourceClass: "independent_press",
+      fundScaleBasis: "press_corroborated",
+      fundScaleSourceCount: undefined,
+      contentHash: "c".repeat(64),
+      sourceContentHash: "d".repeat(64),
+      excerpt: "The Financial Times reports a completed $500 million close for Subject Venture Fund I.",
+    });
+    const packet = buildScoringEvidencePacket({ sourceArtifacts: [root, incompletePeer] }, axes);
+    expect(JSON.parse(packet).sourceArtifacts).toEqual([]);
+    expect(JSON.parse(packet).axisGaps).toHaveLength(1);
+  });
+
+  it("prioritizes fund-scale evidence before the source-artifact packet cap", () => {
+    const axes: AnalystAxis[] = [{ axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" }];
+    const generic = Array.from({ length: 24 }, (_, index) => ({
+      kind: "press" as const,
+      provider: "google-news" as const,
+      title: `Generic press ${index}`,
+      sourceUrl: `https://example.com/press/${index}`,
+      capturedAt: "2026-07-11T12:00:00.000Z",
+      contentHash: `${index.toString(16).padStart(2, "0")}${"a".repeat(62)}`,
+      match: "exact_name" as const,
+    }));
+    const packet = buildScoringEvidencePacket({ sourceArtifacts: [...generic, verifiedFundScaleArtifact()] }, axes);
+    expect(extractScoringEvidenceCatalog(packet)).toContainEqual(expect.objectContaining({
+      operation: "sourceArtifacts:fund_scale",
+      eligibleAxes: ["I3_fund_scale_tier"],
+    }));
+    expect(JSON.parse(packet).axisGaps).toEqual([]);
+  });
+
+  it("requires an exact, sanitized current-profile source before affiliated fund scale can score", () => {
+    const axes: AnalystAxis[] = [{ axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" }];
+    const affiliated = verifiedFundScaleArtifact({
+      subjectName: "Alice Investor",
+      subjectHandle: "@alice",
+      fundName: "Subject Capital",
+      investorEntityName: "Subject Capital",
+      sourceUrl: "https://www.sec.gov/Archives/edgar/data/123456/000012345626000001/adv.html",
+      fundVehicle: undefined,
+      fundScaleMetric: "regulatory_aum",
+      fundScaleBasis: "regulatory",
+      fundScaleTemporalState: "current",
+      fundScaleAsOf: "2026-06-30T00:00:00.000Z",
+      attribution: "affiliated_fund",
+      sourceClass: "public_primary",
+      attributionSourceUrl: "https://x.com/alice",
+      attributionSourceContentHash: "e".repeat(64),
+      attributionCapturedAt: "2026-07-11T11:58:00.000Z",
+      attributionSourceKind: "provider_profile",
+    });
+    expect(JSON.parse(buildScoringEvidencePacket({ sourceArtifacts: [affiliated] }, axes)).axisGaps).toEqual([]);
+    const unsafe = { ...affiliated, attributionSourceUrl: "https://x.com/alice?token=secret" };
+    expect(JSON.parse(buildScoringEvidencePacket({ sourceArtifacts: [unsafe] }, axes)).sourceArtifacts).toEqual([]);
+  });
+
+  it("binds affiliated fund scale to the audited provider profile and its current bio", () => {
+    const axes: AnalystAxis[] = [{ axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" }];
+    const profile = {
+      handle: "@victim",
+      display_name: "Victim Researcher",
+      bio: "Independent researcher; no fund role",
+      website: "https://real.example",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-11T11:58:00.000Z",
+    };
+    const affiliated = verifiedFundScaleArtifact({
+      subjectName: "Victim Researcher",
+      subjectHandle: "@victim",
+      fundName: "Subject Capital",
+      investorEntityName: "Subject Capital",
+      sourceUrl: "https://www.sec.gov/Archives/edgar/data/123456/000012345626000001/adv.html",
+      fundVehicle: undefined,
+      fundScaleMetric: "regulatory_aum",
+      fundScaleBasis: "regulatory",
+      fundScaleTemporalState: "current",
+      fundScaleAsOf: "2026-06-30T00:00:00.000Z",
+      attribution: "affiliated_fund",
+      sourceClass: "public_primary",
+      attributionSourceUrl: "https://x.com/victim",
+      attributionSourceContentHash: "e".repeat(64),
+      attributionCapturedAt: "2026-07-11T11:58:00.000Z",
+      attributionSourceKind: "provider_profile",
+    });
+    const rejected = JSON.parse(buildScoringEvidencePacket({ profile, sourceArtifacts: [affiliated] }, axes));
+    expect(rejected.sourceArtifacts).toEqual([]);
+    expect(rejected.axisGaps).toHaveLength(1);
+
+    const accepted = JSON.parse(buildScoringEvidencePacket({
+      profile: { ...profile, bio: "Research Partner at Subject Capital" },
+      sourceArtifacts: [affiliated],
+    }, axes));
+    expect(accepted.sourceArtifacts).toHaveLength(1);
+    expect(accepted.axisGaps).toEqual([]);
+  });
+
+  it("binds a direct first-party fund source to the audited profile website", () => {
+    const axes: AnalystAxis[] = [{ axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" }];
+    const profile = {
+      handle: "@subject",
+      display_name: "Subject",
+      bio: "Investment manager",
+      website: "https://real.example",
+      profile_collection_state: "resolved",
+      profile_provider: "twitterapi",
+      profile_captured_at: "2026-07-11T11:58:00.000Z",
+    };
+    const forged = verifiedFundScaleArtifact({
+      sourceUrl: "https://attacker.com/fund",
+      investorEntityDomain: "attacker.com",
+    });
+    const packet = JSON.parse(buildScoringEvidencePacket({ profile, sourceArtifacts: [forged] }, axes));
+    expect(packet.sourceArtifacts).toEqual([]);
+    expect(packet.axisGaps).toHaveLength(1);
+  });
+
+  it.each([
+    ["provider", { provider: "portfolio-web" }],
+    ["sourceUrl", { sourceUrl: undefined }],
+    ["sourceContentHash", { sourceContentHash: undefined }],
+    ["fundName", { fundName: undefined }],
+    ["fundSizeUsd", { fundSizeUsd: Number.NaN }],
+    ["investorEntityName", { investorEntityName: undefined }],
+    ["subjectName", { subjectName: undefined }],
+    ["attribution", { attribution: undefined }],
+    ["sourceClass", { sourceClass: undefined }],
+    ["investorEntityDomain", { investorEntityDomain: undefined }],
+    ["fundScaleMetric", { fundScaleMetric: undefined }],
+    ["fundAmountQualifier", { fundAmountQualifier: undefined }],
+    ["fundScaleBasis", { fundScaleBasis: undefined }],
+    ["fundScaleTemporalState", { fundScaleTemporalState: undefined }],
+  ] as const)("keeps a malformed confirmed fund-scale artifact out of I3 when %s is invalid", (_field, overrides) => {
+    const axes: AnalystAxis[] = [{ axis: "I3_fund_scale_tier", weight: 15, role: "INVESTOR" }];
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [verifiedFundScaleArtifact(overrides as Partial<SourceArtifact>)],
+    }, axes);
+    expect(JSON.parse(packet).sourceArtifacts).toEqual([]);
+    expect(JSON.parse(packet).axisGaps).toEqual([
+      expect.objectContaining({ axis: "I3_fund_scale_tier", status: "unavailable" }),
+    ]);
   });
 
   it("does not route an identity-unbound fund-size candidate into scoring", () => {
@@ -1437,8 +1657,10 @@ describe("analyst verdict integrity", () => {
         handle: "@subject",
         display_name: "Subject",
         bio: "Named builder and investor with a documented community role",
+        website: "https://subject.example",
         profile_collection_state: "resolved",
         profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-11T11:58:00.000Z",
       },
       ventures: [{
         project_name: "Verified Venture",
@@ -1485,19 +1707,7 @@ describe("analyst verdict integrity", () => {
               sourceClass: "first_party_subject",
             }
           : index === 2
-            ? {
-                kind: "fund_scale",
-                provider: "portfolio-web",
-                title: "Subject raises $500 million for its new fund",
-                excerpt: "Sourced fund size announcement.",
-                sourceUrl: "https://news.example/fund-size",
-                capturedAt: "2026-07-11T12:00:00.000Z",
-                contentHash: "e".repeat(64),
-                sourceContentHash: "f".repeat(64),
-                match: "fund_scale_confirmed",
-                fundName: "Subject Fund III",
-                fundSizeUsd: 500_000_000,
-              }
+            ? verifiedFundScaleArtifact({ contentHash: "e".repeat(64), sourceContentHash: "f".repeat(64) })
         : {
             kind: "press",
             provider: "google-news",
@@ -1607,8 +1817,10 @@ describe("analyst verdict integrity", () => {
         handle: "@subject",
         display_name: "Subject",
         bio: "Named builder, investor, adviser, promoter, agency operator, and community contributor",
+        website: "https://subject.example",
         profile_collection_state: "resolved",
         profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-11T11:58:00.000Z",
       },
       ventures: [{
         project_name: "Verified Venture",
@@ -1661,19 +1873,7 @@ describe("analyst verdict integrity", () => {
         subjectName: "Subject",
         projectName: "Verified Portfolio Company",
         sourceClass: "first_party_subject",
-      }, {
-        kind: "fund_scale",
-        provider: "portfolio-web",
-        title: "Subject raises $500 million for its new fund",
-        excerpt: "Sourced fund size announcement.",
-        sourceUrl: "https://news.example/fund-size",
-        capturedAt: "2026-07-11T12:00:00.000Z",
-        contentHash: "c".repeat(64),
-        sourceContentHash: "d".repeat(64),
-        match: "fund_scale_confirmed",
-        fundName: "Subject Fund III",
-        fundSizeUsd: 500_000_000,
-      }],
+      }, verifiedFundScaleArtifact({ contentHash: "c".repeat(64), sourceContentHash: "d".repeat(64) })],
     }, allAxes);
     const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
     const aliasFor = (axis: string) => {

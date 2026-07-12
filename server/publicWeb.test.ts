@@ -15,6 +15,16 @@ describe("public web evidence fetcher", () => {
     expect(isPublicIpAddress("169.254.169.254")).toBe(false);
     expect(isPublicIpAddress("192.168.1.10")).toBe(false);
     expect(isPublicIpAddress("93.184.216.34")).toBe(true);
+    for (const address of [
+      "::127.0.0.1",
+      "::10.0.0.1",
+      "fec0::1",
+      "64:ff9b::7f00:1",
+      "2001:0000:4136:e378:8000:63bf:3fff:fdd2",
+      "2002:7f00:1::",
+      "2001:db8::1",
+    ]) expect(isPublicIpAddress(address)).toBe(false);
+    expect(isPublicIpAddress("2606:4700:4700::1111")).toBe(true);
   });
 
   it("accepts a credential-free public web URL", async () => {

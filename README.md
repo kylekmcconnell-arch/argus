@@ -53,6 +53,8 @@ server/
     x.ts              Grok (content/acknowledgment) + twitterapi.io (follow graph)
     peopledatalabs.ts identity + career history (LinkedIn-derived, defensible)
     portfolio.ts      cited investment discovery + deterministic source verification
+    fundScale.ts      fetched fund-close/AUM verification with entity + date binding
+    investorDiscovery.ts one bounded search shared by portfolio + fund-scale verification
     crunchbase.ts     optional company/funding enrichment
     coingecko.ts      token market data by contract
     dexscreener.ts    live DEX liquidity/volume + rug signals (free, keyless)

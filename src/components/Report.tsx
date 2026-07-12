@@ -33,6 +33,7 @@ import { RingAlert } from "./RingAlert";
 import { useArgusAuth } from "../auth-context";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
 import { DecisionBasis } from "./DecisionBasis";
+import { isStrictFundScaleArtifact } from "../lib/fundScaleEvidence";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -512,6 +513,13 @@ function frozenSourceDate(value?: string): string | null {
   return date.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+function compactSourceDate(value?: string): string | null {
+  if (!value) return null;
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  return date.toLocaleDateString(undefined, { dateStyle: "medium", timeZone: "UTC" });
+}
+
 const PORTFOLIO_SOURCE_LABEL: Record<NonNullable<SourceArtifact["sourceClass"]>, string> = {
   first_party_subject: "subject's official site",
   first_party_investor: "investor's official site",
@@ -520,6 +528,107 @@ const PORTFOLIO_SOURCE_LABEL: Record<NonNullable<SourceArtifact["sourceClass"]>,
   independent_press: "independent press",
   other_public: "public corroborating source",
 };
+
+const FUND_SCALE_METRIC_LABEL: Record<NonNullable<SourceArtifact["fundScaleMetric"]>, string> = {
+  regulatory_aum: "regulatory AUM",
+  reported_aum: "reported AUM",
+  fund_vehicle: "fund vehicle",
+  first_close: "first close",
+  final_close: "final close",
+};
+
+const FUND_SCALE_BASIS_LABEL: Record<NonNullable<SourceArtifact["fundScaleBasis"]>, string> = {
+  regulatory: "regulatory filing",
+  manager_reported: "manager reported",
+  press_corroborated: "press corroborated",
+};
+
+type InvestorSourceRole = "Affiliation source" | "Scale source" | "Deal source";
+
+function InvestorEvidenceLinks({
+  sources,
+  role,
+  context,
+}: {
+  sources: readonly SourceArtifact[];
+  role: InvestorSourceRole;
+  context: string;
+}) {
+  const seen = new Set<string>();
+  const references = sources.flatMap((source) => {
+    const rawUrl = role === "Affiliation source" ? source.attributionSourceUrl : source.sourceUrl;
+    const link = safeSourceLink(rawUrl);
+    if (!link || seen.has(link.href)) return [];
+    seen.add(link.href);
+    const capturedValue = role === "Affiliation source"
+      ? source.attributionCapturedAt ?? source.capturedAt
+      : source.capturedAt;
+    const capturedLabel = compactSourceDate(capturedValue);
+    const descriptor = role === "Affiliation source"
+      ? `${source.subjectName || "subject"} affiliation with ${source.investorEntityName || source.fundName || "fund"}`
+      : source.title || (source.sourceClass ? PORTFOLIO_SOURCE_LABEL[source.sourceClass] : "public evidence");
+    return [{
+      href: link.href,
+      hostAndPath: link.label,
+      descriptor,
+      capturedValue,
+      capturedLabel,
+    }];
+  });
+
+  if (!references.length) {
+    return <span className="text-[11px] text-ink-faint">{role} unavailable</span>;
+  }
+
+  return references.map((reference) => {
+    const dateDescription = reference.capturedLabel ? `captured ${reference.capturedLabel}` : "capture date unavailable";
+    return (
+      <a
+        key={`${role}:${reference.href}`}
+        href={reference.href}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={`Open ${role.toLowerCase()} for ${context}: ${reference.descriptor}; ${reference.hostAndPath}; ${dateDescription}`}
+        className="link-ext mono inline-flex max-w-full flex-wrap items-center gap-x-1 text-[11px]"
+      >
+        <span className="text-ink-faint">{role}</span>
+        <span aria-hidden="true">·</span>
+        <span className="max-w-full truncate" title={reference.descriptor}>{reference.descriptor}</span>
+        <span aria-hidden="true">·</span>
+        <span>{reference.hostAndPath}</span>
+        <span aria-hidden="true">·</span>
+        {reference.capturedLabel && reference.capturedValue ? (
+          <span className="text-ink-faint">captured <time dateTime={reference.capturedValue}>{reference.capturedLabel}</time></span>
+        ) : (
+          <span className="text-ink-faint">capture date unavailable</span>
+        )}
+      </a>
+    );
+  });
+}
+
+function fundScaleTemporalLabel(source: SourceArtifact): string {
+  const aum = source.fundScaleMetric === "regulatory_aum" || source.fundScaleMetric === "reported_aum";
+  // Publication time is not an AUM measurement date. AUM can say "as of"
+  // only when the fetched claim itself supplied fundScaleAsOf.
+  const asOf = compactSourceDate(aum ? source.fundScaleAsOf : source.fundScaleAsOf ?? source.publishedAt);
+  if (aum) {
+    if (source.fundScaleTemporalState === "historical") return asOf ? `Historical AUM · As of ${asOf}` : "Historical AUM · as-of unavailable";
+    return asOf ? `As of ${asOf}` : source.fundScaleTemporalState === "current" ? "Current AUM · as-of unavailable" : "AUM as-of unavailable";
+  }
+  if (source.fundScaleTemporalState === "fixed_historical") return asOf ? `Fixed historical · ${asOf}` : "Fixed historical";
+  if (source.fundScaleTemporalState === "historical") return asOf ? `Historical · ${asOf}` : "Historical";
+  return asOf ? `As of ${asOf}` : "Period unavailable";
+}
+
+function formatFundScaleUsd(value?: number): string {
+  if (!Number.isFinite(value)) return "amount unavailable";
+  const amount = value as number;
+  if (amount >= 1_000_000_000_000) return `$${(amount / 1_000_000_000_000).toFixed(amount % 1_000_000_000_000 ? 1 : 0)}T`;
+  if (amount >= 1_000_000_000) return `$${(amount / 1_000_000_000).toFixed(amount % 1_000_000_000 ? 1 : 0)}B`;
+  if (amount >= 1_000_000) return `$${(amount / 1_000_000).toFixed(amount % 1_000_000 ? 1 : 0)}M`;
+  return `$${amount.toLocaleString()}`;
+}
 
 const SOURCE_KIND_LABEL: Record<FrozenSourceArtifact["kind"], string> = {
   press: "Press",
@@ -763,8 +872,17 @@ function FrozenTrustGraphPanel({
   );
 }
 
-function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }) {
+function FrozenSourceLedger({
+  artifacts,
+  subjectHandle,
+  profile,
+}: {
+  artifacts: FrozenSourceArtifact[];
+  subjectHandle: string;
+  profile: unknown;
+}) {
   if (!artifacts.length) return null;
+  const fundScalePeers = artifacts.filter((artifact) => artifact.kind === "fund_scale");
   return (
     <div id="frozen-source-ledger" className="scroll-mt-24">
       <Section
@@ -785,9 +903,14 @@ function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }
               : artifact.kind === "trust_graph"
                 ? "Graph snapshot"
                 : "Source content";
+          const strictFundScaleMatch = artifact.kind === "fund_scale"
+            && isStrictFundScaleArtifact(artifact, fundScalePeers, { subjectHandle, profile });
+          const matchLabel = artifact.kind === "fund_scale" && artifact.match === "fund_scale_confirmed"
+            ? strictFundScaleMatch ? "fund size verified" : "reported · strict verification incomplete"
+            : SOURCE_MATCH_LABEL[artifact.match];
           const matchColor = artifact.match === "risk_signal"
             ? "var(--color-caution)"
-            : artifact.match === "relationship_confirmed" || artifact.match === "fund_scale_confirmed"
+            : artifact.match === "relationship_confirmed" || strictFundScaleMatch
               ? "var(--color-pass)"
             : artifact.match === "candidate"
               ? "var(--color-caution)"
@@ -802,7 +925,7 @@ function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }
                 </span>
                 <span className="mono text-[11px] uppercase tracking-wide text-ink-faint">{artifact.provider}</span>
                 <span className="chip tint-var" style={{ "--tint": matchColor } as React.CSSProperties}>
-                  {SOURCE_MATCH_LABEL[artifact.match]}
+                  {matchLabel}
                 </span>
               </div>
               <h3 className="mt-2 text-[13.5px] font-medium leading-snug text-ink">{artifact.title}</h3>
@@ -878,6 +1001,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const { role } = useArgusAuth();
   const f = dossier;
   const { report, graph, founderSummary, evidence } = dossier;
+  const fundScaleProfile = {
+    handle: f.handle,
+    display_name: f.display_name,
+    resolved_name: f.resolved_name,
+    bio: f.bio,
+    website: f.website,
+    profile_collection_state: f.profile_collection_state,
+    profile_provider: f.profile_provider,
+    profile_captured_at: f.profile_captured_at,
+  };
   const webTeam = (dossier.webTeam ?? []).filter(groundedTeamMember).map(sanitizedGroundedTeamMember);
   const webTeamLeads = reportTeamLeads(dossier);
   const groundedVentureNames = (evidence.ventures ?? [])
@@ -887,12 +1020,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .filter((artifact) => artifact.kind === "portfolio_relationship" && artifact.projectName)
     .reduce((groups, artifact) => {
       const investor = artifact.investorEntityName || artifact.subjectName || f.display_name || report.handle;
-      const key = `${investor.trim().toLowerCase()}::${artifact.projectName!.trim().toLowerCase()}`;
-      const group = groups.get(key) ?? { key, project: artifact.projectName!, investor, attribution: artifact.attribution, sources: [] as SourceArtifact[] };
+      const subject = artifact.subjectName || f.display_name || report.handle;
+      const attribution = artifact.attribution ?? "unattributed";
+      const key = `${investor.trim().toLowerCase()}::${artifact.projectName!.trim().toLowerCase()}::${attribution}`;
+      const group = groups.get(key) ?? { key, project: artifact.projectName!, investor, subject, attribution: artifact.attribution, sources: [] as SourceArtifact[] };
       group.sources.push(artifact);
       groups.set(key, group);
       return groups;
-    }, new Map<string, { key: string; project: string; investor: string; attribution?: SourceArtifact["attribution"]; sources: SourceArtifact[] }>())
+    }, new Map<string, { key: string; project: string; investor: string; subject: string; attribution?: SourceArtifact["attribution"]; sources: SourceArtifact[] }>())
     .values()]
     .map((group) => ({
       ...group,
@@ -903,6 +1038,62 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .sort((left, right) => Number(right.confirmed) - Number(left.confirmed) || left.project.localeCompare(right.project));
   const verifiedPortfolioProjects = portfolioArtifactGroups.filter((group) => group.confirmed).map((group) => group.project);
   const reportedPortfolioProjects = portfolioArtifactGroups.filter((group) => !group.confirmed).map((group) => group.project);
+  const fundScaleArtifacts = (f.sourceArtifacts ?? []).filter((artifact) => artifact.kind === "fund_scale");
+  const fundScaleArtifactGroups = [...fundScaleArtifacts
+    .filter((artifact) => artifact.kind === "fund_scale" && artifact.fundName && Number.isFinite(artifact.fundSizeUsd))
+    .reduce((groups, artifact) => {
+      const key = artifact.fundScaleClaimId?.trim() || [
+        "legacy",
+        artifact.fundName!.trim().toLowerCase(),
+        artifact.fundVehicle?.trim().toLowerCase() ?? "vehicle-unknown",
+        artifact.fundScaleMetric ?? "metric-unknown",
+        artifact.fundSizeUsd,
+        artifact.fundAmountQualifier ?? "qualifier-unknown",
+        artifact.attribution ?? "attribution-unknown",
+      ].join("::");
+      const group = groups.get(key) ?? {
+        key,
+        fundName: artifact.fundName!,
+        amountUsd: artifact.fundSizeUsd!,
+        metric: artifact.fundScaleMetric,
+        qualifier: artifact.fundAmountQualifier,
+        attribution: artifact.attribution,
+        sources: [] as SourceArtifact[],
+      };
+      group.sources.push(artifact);
+      groups.set(key, group);
+      return groups;
+    }, new Map<string, {
+      key: string;
+      fundName: string;
+      amountUsd: number;
+      metric?: SourceArtifact["fundScaleMetric"];
+      qualifier?: SourceArtifact["fundAmountQualifier"];
+      attribution?: SourceArtifact["attribution"];
+      sources: SourceArtifact[];
+    }>())
+    .values()]
+    .map((group) => {
+      const strictSources = group.sources.filter((source) => isStrictFundScaleArtifact(source, fundScaleArtifacts, {
+        subjectHandle: report.handle,
+        profile: fundScaleProfile,
+      }));
+      const representative = strictSources[0] ?? group.sources[0];
+      return {
+        ...group,
+        subject: representative.subjectName || f.display_name || report.handle,
+        investor: representative.investorEntityName || group.fundName,
+        fundVehicle: representative.fundVehicle,
+        basis: representative.fundScaleBasis,
+        temporalLabel: fundScaleTemporalLabel(representative),
+        confirmed: strictSources.length > 0,
+        confirmedSourceCount: strictSources.length,
+        reportedSourceCount: group.sources.length - strictSources.length,
+      };
+    })
+    .sort((left, right) => Number(right.confirmed) - Number(left.confirmed) || right.amountUsd - left.amountUsd);
+  const verifiedFundScaleClaims = fundScaleArtifactGroups.filter((group) => group.confirmed);
+  const reportedFundScaleClaims = fundScaleArtifactGroups.filter((group) => !group.confirmed);
   const portfolioLeads = f.portfolioLeads ?? [];
   const verifiedPortfolioProjectKeys = new Set(verifiedPortfolioProjects.map((project) => project.trim().toLowerCase()));
   const unmatchedPortfolioLeadCount = portfolioLeads.filter((lead) =>
@@ -1550,7 +1741,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           />
         )}
 
-        <FrozenSourceLedger artifacts={f.sourceArtifacts ?? []} />
+        <FrozenSourceLedger artifacts={f.sourceArtifacts ?? []} subjectHandle={report.handle} profile={fundScaleProfile} />
 
         {/* connections — the compounding web: other audited subjects tied to this one */}
         {showTrustGraphSupplemental && connections.length > 0 && (
@@ -1665,22 +1856,88 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           )}
 
-          {(portfolioArtifactGroups.length > 0 || (roles.some((role) => role === "INVESTOR") && portfolioLeads.length > 0)) && (
-            <div className="min-w-0">
+          {(fundScaleArtifactGroups.length > 0 || portfolioArtifactGroups.length > 0 || (roles.some((role) => role === "INVESTOR") && portfolioLeads.length > 0)) && (
+            <div className="min-w-0 lg:col-span-2">
               <Section
-                title="Portfolio evidence"
-                kicker={`${verifiedPortfolioProjects.length} verified relationship${verifiedPortfolioProjects.length === 1 ? "" : "s"} · ${reportedPortfolioProjects.length} reported-only · ${portfolioLeads.length} candidates inspected`}
+                title="Investor evidence"
+                kicker={`${verifiedPortfolioProjects.length} verified relationship${verifiedPortfolioProjects.length === 1 ? "" : "s"} · ${verifiedFundScaleClaims.length} verified scale claim${verifiedFundScaleClaims.length === 1 ? "" : "s"} · ${reportedFundScaleClaims.length} reported-only scale claim${reportedFundScaleClaims.length === 1 ? "" : "s"} · ${reportedPortfolioProjects.length} reported-only relationship${reportedPortfolioProjects.length === 1 ? "" : "s"}`}
               >
                 <Card className="divide-y divide-line/60">
-                  {portfolioArtifactGroups.map((group) => (
-                    <div key={group.key} className="px-4 py-2.5 text-[12.5px]">
-                      <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium text-ink">{group.project}</span>
-                        <span className="text-[10.5px] text-ink-faint">via {group.investor}</span>
-                        <span className={`chip ${group.confirmed ? "tint-pass" : "tint-caution"}`}>
+                  {fundScaleArtifactGroups.length > 0 && (
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-2.5">
+                      <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-dim">Fund scale</h3>
+                      <span className="text-[10.5px] text-ink-faint">Capital managed by the named entity, never assumed to be the subject's personal capital</span>
+                    </div>
+                  )}
+                  {fundScaleArtifactGroups.map((group) => (
+                    <article key={group.key} className="px-4 py-3 text-[12.5px]">
+                      {group.attribution === "affiliated_fund" && (
+                        <p className="mb-2 text-[12px] font-medium text-ink-dim">
+                          {group.subject} → affiliated with {group.fundName}
+                        </p>
+                      )}
+                      <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                        <h4 className="font-medium text-ink">{group.fundVehicle || group.fundName}</h4>
+                        {group.fundVehicle && (
+                          <span className="text-[10.5px] text-ink-faint">fund vehicle · {group.fundName}</span>
+                        )}
+                        <span className="mono text-[12px] font-medium text-ink-dim">
+                          {group.qualifier === "at_least" ? "≥ " : group.qualifier === "approximate" ? "≈ " : ""}
+                          {formatFundScaleUsd(group.amountUsd)}
+                        </span>
+                        <span className="chip">
+                          {group.metric ? FUND_SCALE_METRIC_LABEL[group.metric] : "fund scale"}
+                        </span>
+                        {group.basis && <span className="chip">{FUND_SCALE_BASIS_LABEL[group.basis]}</span>}
+                        <span className="chip">{group.temporalLabel}</span>
+                        <span className={`chip chip-wrap ${group.confirmed ? "tint-pass" : "tint-caution"}`}>
                           {group.confirmed
                             ? group.attribution === "affiliated_fund"
-                              ? `${group.investor} investment verified · not attributed personally`
+                              ? "fund scale verified · not personal capital"
+                              : "fund scale verified"
+                            : "reported scale · strict verification incomplete"}
+                        </span>
+                        <span className="ml-auto text-[10.5px] text-ink-faint">
+                          {group.confirmedSourceCount > 0
+                            ? `${group.confirmedSourceCount} source${group.confirmedSourceCount === 1 ? "" : "s"} passed strict gate`
+                            : "no source passed the strict gate"}
+                          {group.reportedSourceCount ? ` · ${group.reportedSourceCount} other source${group.reportedSourceCount === 1 ? "" : "s"}` : ""}
+                        </span>
+                      </div>
+                      <div className="mt-2 flex flex-col items-start gap-1">
+                        {group.attribution === "affiliated_fund" && (
+                          <InvestorEvidenceLinks
+                            sources={group.sources}
+                            role="Affiliation source"
+                            context={`${group.subject} affiliation with ${group.fundName}`}
+                          />
+                        )}
+                        <InvestorEvidenceLinks
+                          sources={group.sources}
+                          role="Scale source"
+                          context={`${group.fundVehicle || group.fundName} fund scale`}
+                        />
+                      </div>
+                    </article>
+                  ))}
+                  {(portfolioArtifactGroups.length > 0 || portfolioLeads.length > 0) && (
+                    <div className="flex flex-wrap items-baseline justify-between gap-2 px-4 py-2.5">
+                      <h3 className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-dim">Portfolio relationships</h3>
+                      <span className="text-[10.5px] text-ink-faint">Entity attribution and deal evidence are shown separately</span>
+                    </div>
+                  )}
+                  {portfolioArtifactGroups.map((group) => (
+                    <article key={group.key} className="px-4 py-3 text-[12.5px]">
+                      <h4 className="font-medium text-ink">
+                        {group.attribution === "affiliated_fund"
+                          ? `${group.subject} → affiliated with ${group.investor} → invested in ${group.project}`
+                          : `${group.subject} → invested in ${group.project}`}
+                      </h4>
+                      <div className="mt-1.5 flex flex-wrap items-center gap-2">
+                        <span className={`chip chip-wrap ${group.confirmed ? "tint-pass" : "tint-caution"}`}>
+                          {group.confirmed
+                            ? group.attribution === "affiliated_fund"
+                              ? "fund investment verified · not attributed personally"
                               : "direct investment verified"
                             : "reported · needs corroboration"}
                         </span>
@@ -1689,20 +1946,23 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                           {group.reportedSourceCount ? ` · ${group.reportedSourceCount} reported source${group.reportedSourceCount === 1 ? "" : "s"}` : ""}
                         </span>
                       </div>
-                      <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
-                        {group.sources.map((source, index) => {
-                          const link = safeSourceLink(source.sourceUrl);
-                          if (!link) return null;
-                          return (
-                            <a key={`${source.sourceUrl}:${index}`} href={link.href} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">
-                              {source.sourceClass ? PORTFOLIO_SOURCE_LABEL[source.sourceClass] : "public source"} ↗
-                            </a>
-                          );
-                        })}
+                      <div className="mt-2 flex flex-col items-start gap-1">
+                        {group.attribution === "affiliated_fund" && (
+                          <InvestorEvidenceLinks
+                            sources={group.sources}
+                            role="Affiliation source"
+                            context={`${group.subject} affiliation with ${group.investor}`}
+                          />
+                        )}
+                        <InvestorEvidenceLinks
+                          sources={group.sources}
+                          role="Deal source"
+                          context={`${group.investor} investment in ${group.project}`}
+                        />
                       </div>
-                    </div>
+                    </article>
                   ))}
-                  {portfolioArtifactGroups.length === 0 && (
+                  {portfolioArtifactGroups.length === 0 && portfolioLeads.length > 0 && (
                     <div className="px-4 py-3 text-[12px] leading-relaxed text-ink-dim">
                       {portfolioLeads.length} source-linked candidate{portfolioLeads.length === 1 ? " was" : "s were"} discovered, but none passed deterministic relationship verification. Candidates remain outside the score and graph.
                     </div>
