@@ -1,7 +1,5 @@
 import { createHash } from "node:crypto";
 import { serviceHeaders, type ServiceCredentials } from "./_auth.js";
-import { PROFILES } from "../src/engine/profiles.js";
-import { SubjectClass } from "../src/engine/taxonomy.js";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -37,6 +35,62 @@ const CATALOG_ARTIFACT_KEYS = new Set([
   "sourceUrl", "capturedAt", "contentHash", "eligibleAxes", "verification", "scope",
 ]);
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
+
+// Keep the serverless provenance boundary self-contained. Importing the
+// browser/engine profile graph from this API module pulls extensionless engine
+// dependencies into Vercel's function bundle, where native ESM cannot resolve
+// them at runtime. The synchronization test in provenance.test.ts guards this
+// manifest against drift from the canonical engine profiles.
+export const AXIS_SCORING_CONTRACT: Readonly<Record<string, Readonly<Record<string, number>>>> = {
+  FOUNDER: {
+    F1_identity_verifiability: 12,
+    F2_track_record: 28,
+    F3_repeat_backing: 15,
+    F4_build_substance: 15,
+    F5_reputation_integrity: 18,
+    F6_network_quality: 12,
+  },
+  PROJECT: {
+    P1_team_and_identity: 16,
+    P2_product_substance: 24,
+    P3_token_conduct: 20,
+    P4_backing_and_partners: 14,
+    P5_traction_and_liveness: 14,
+    P6_transparency_integrity: 12,
+  },
+  KOL: {
+    K1_identity_roster: 12,
+    K2_call_performance: 30,
+    K3_disclosure_deletion: 18,
+    K4_onchain_conduct: 20,
+    K5_cabal_fud: 20,
+  },
+  INVESTOR: {
+    I1_identity_legitimacy: 15,
+    I2_portfolio_quality: 25,
+    I3_fund_scale_tier: 15,
+    I4_testimonial_corroboration: 20,
+    I5_reputation_fud: 25,
+  },
+  AGENCY: {
+    AG1_identity_legitimacy: 15,
+    AG2_client_outcomes: 25,
+    AG3_service_integrity: 25,
+    AG4_reputation_fud: 35,
+  },
+  ADVISOR: {
+    AD1_identity_verifiability: 12,
+    AD2_advised_outcomes: 28,
+    AD3_relationship_corroboration: 25,
+    AD4_advisory_conduct: 20,
+    AD5_reputation_fud: 15,
+  },
+  MEMBER: {
+    ME1_identity: 25,
+    ME2_role_authenticity: 35,
+    ME3_conduct_reputation: 40,
+  },
+};
 
 interface StrictLineageRows {
   evidenceRows: JsonRecord[];
@@ -254,8 +308,8 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
     if (!ROLE_ID.test(role) || roles.has(role)) {
       throw new Error("invalid axis evidence lineage: role");
     }
-    const roleProfile = PROFILES[role as SubjectClass];
-    if (!roleProfile) throw new Error("invalid axis evidence lineage: unsupported role");
+    const roleAxes = AXIS_SCORING_CONTRACT[role];
+    if (!roleAxes) throw new Error("invalid axis evidence lineage: unsupported role");
     roles.add(role);
     const axes = asRecord(roleReport.axes);
     const axisEntries = axes ? Object.entries(axes) : [];
@@ -315,7 +369,7 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
           });
         });
       }
-      const expectedWeight = roleProfile.axes[axisId];
+      const expectedWeight = roleAxes[axisId];
       if (
         expectedWeight === undefined
         || !Number.isInteger(axis.score)
@@ -330,7 +384,7 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
         throw new Error(`invalid axis evidence lineage: ${axisId} violates the scoring contract`);
       }
     }
-    const expectedAxisIds = Object.keys(roleProfile.axes).sort();
+    const expectedAxisIds = Object.keys(roleAxes).sort();
     const receivedAxisIds = axisEntries.map(([axisId]) => axisId).sort();
     if (!isIncomplete && (
       expectedAxisIds.length !== receivedAxisIds.length

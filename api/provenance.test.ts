@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { persistProvenance } from "./_provenance";
+import { AXIS_SCORING_CONTRACT, persistProvenance } from "./_provenance";
 import { getProfile, PROFILES, SubjectClass } from "../src/engine";
 
 const FOUNDER_WEIGHTS = getProfile(SubjectClass.FOUNDER).axes;
@@ -24,6 +24,16 @@ const founderAxes = (supportId: string): Record<string, TestAxisScore> => Object
     gaps: [],
   }]),
 );
+
+describe("API scoring contract", () => {
+  it("stays synchronized with the canonical engine profiles", () => {
+    const engineContract = Object.fromEntries(
+      Object.entries(PROFILES).map(([role, profile]) => [role, profile.axes]),
+    );
+
+    expect(AXIS_SCORING_CONTRACT).toEqual(engineContract);
+  });
+});
 
 describe("frozen source artifact provenance", () => {
   afterEach(() => {
