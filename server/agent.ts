@@ -29,6 +29,7 @@ export async function structured<T>(
   user: string,
   tool: ToolSchema,
   maxTokens = 2048,
+  timeoutMs = 60_000,
 ): Promise<T | null> {
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
@@ -49,6 +50,7 @@ export async function structured<T>(
         tools: [tool],
         tool_choice: { type: "tool", name: tool.name },
       }),
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
     addClaudeUsage(undefined, tool.name, "failed", "transport_error");

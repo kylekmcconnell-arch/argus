@@ -40,7 +40,11 @@ vi.mock("./_graph.js", () => ({ activateReportVersionWithAuthoritativeGraph }));
 import { consumeInvestigationQuota, requireArgusAuth, serviceCredentials } from "./_auth.js";
 import { activateReportVersion, persistProvenance } from "./_provenance.js";
 import { resolveInput, runAudit } from "./_collector.js";
-import handler from "./audit";
+import handler, { config } from "./audit";
+import {
+  AUDIT_SSE_HEARTBEAT_MS,
+  DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
+} from "../src/lib/investigationRuntime";
 
 const AUTH_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -81,6 +85,7 @@ describe("person audit input guard", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -118,6 +123,27 @@ describe("person audit input guard", () => {
       expect.any(Function),
       { organizationId: AUTH_ORGANIZATION_ID },
     );
+  });
+
+  it("keeps the SSE connection active while a slow bounded provider is still working", async () => {
+    vi.useFakeTimers();
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    let resolveAudit!: (value: null) => void;
+    vi.mocked(runAudit).mockReturnValue(new Promise<null>((resolve) => {
+      resolveAudit = resolve;
+    }) as never);
+    const { res, captured } = response();
+
+    const pending = handler(request("argus"), res);
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(AUDIT_SSE_HEARTBEAT_MS);
+
+    expect(captured.chunks.join("")).toContain(": argus-heartbeat\n\n");
+    resolveAudit(null);
+    await pending;
+    const heartbeatCount = captured.chunks.filter((chunk) => chunk === ": argus-heartbeat\n\n").length;
+    await vi.advanceTimersByTimeAsync(AUDIT_SSE_HEARTBEAT_MS * 2);
+    expect(captured.chunks.filter((chunk) => chunk === ": argus-heartbeat\n\n")).toHaveLength(heartbeatCount);
   });
 
   it("issues a panel-cost capability only after fresh persistence succeeds", async () => {
@@ -370,5 +396,11 @@ describe("person audit input guard", () => {
     expect(issuePanelCostToken).not.toHaveBeenCalled();
     const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
     expect(done.persistence).toEqual({ state: "failed", reportVersionId: null });
+  });
+});
+
+describe("person audit runtime budget", () => {
+  it("keeps the deep-investigation route inside the Pro Fluid Compute ceiling", () => {
+    expect(config).toEqual({ maxDuration: DEEP_INVESTIGATION_MAX_DURATION_SECONDS });
   });
 });

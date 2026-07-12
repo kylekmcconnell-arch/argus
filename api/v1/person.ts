@@ -4,7 +4,7 @@ import { resolveInput, runAudit } from "../_collector.js";
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
 import { persistServerDossier } from "../audit.js";
 
-export const config = { maxDuration: 180 };
+export const config = { maxDuration: 600 };
 
 function cors(req: VercelRequest, res: VercelResponse): void {
   const origin = typeof req.headers.origin === "string" ? req.headers.origin : "";

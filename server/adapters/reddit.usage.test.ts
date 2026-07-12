@@ -25,6 +25,8 @@ describe("Reddit provider attempt accounting", () => {
   });
 
   it("records OAuth and search only after both requests succeed", async () => {
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(json({ access_token: "token", expires_in: 3600 }))
       .mockResolvedValueOnce(json({
@@ -54,6 +56,8 @@ describe("Reddit provider attempt accounting", () => {
       url: "https://reddit.com/r/web3/comments/argus",
     }]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(timeoutSpy.mock.calls).toEqual([[8_000], [10_000]]);
+    expect(fetchMock.mock.calls.every(([, init]) => init?.signal === signal)).toBe(true);
     expect(captured.cost.calls).toHaveLength(2);
     expect(captured.cost.calls).toEqual(expect.arrayContaining([
       expect.objectContaining({ op: "oauth-token", calls: 1, succeeded: 1, partial: 0, failed: 0 }),

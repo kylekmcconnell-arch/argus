@@ -18,6 +18,8 @@ describe("People Data Labs provider attempt accounting", () => {
 
   it("records one succeeded, billed attempt after a usable match", async () => {
     vi.stubEnv("PDL_API_KEY", "pdl-test-key");
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     const fetchMock = vi.fn().mockResolvedValue(json({
       data: {
         full_name: "Ada Lovelace",
@@ -35,6 +37,11 @@ describe("People Data Labs provider attempt accounting", () => {
 
     expect(captured.result?.fullName).toBe("Ada Lovelace");
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(10_000);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signal }),
+    );
     expect(captured.cost.calls).toEqual([
       expect.objectContaining({
         provider: "peopledatalabs",

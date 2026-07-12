@@ -13,9 +13,10 @@ import {
 import { activateReportVersion, persistProvenance } from "./_provenance.js";
 import { issuePanelCostToken, recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
 import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
+import { AUDIT_SSE_HEARTBEAT_MS } from "../src/lib/investigationRuntime.js";
 import { activateReportVersionWithAuthoritativeGraph } from "./_graph.js";
 
-export const config = { maxDuration: 180 };
+export const config = { maxDuration: 600 };
 
 interface ServerDossier extends Dossier {
   completeness_state?: "complete" | "partial" | "failed";
@@ -124,6 +125,7 @@ export async function persistServerDossier(
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const requestStartedAt = Date.now();
   if (req.method !== "GET") {
     res.status(405).setHeader("Allow", "GET").json({ error: "method_not_allowed" });
     return;
@@ -178,21 +180,51 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   };
   const emit = (step: TraceStep) => send("step", step);
   send("quota", { remaining: quota.remaining });
+  const heartbeat = setInterval(() => {
+    try {
+      res.write(": argus-heartbeat\n\n");
+    } catch {
+      // Persistence continues even if the browser has disconnected.
+    }
+  }, AUDIT_SSE_HEARTBEAT_MS);
+  heartbeat.unref?.();
 
   try {
+    const collectionStartedAt = Date.now();
+    console.info("[audit-route-runtime]", JSON.stringify({
+      stage: "collection-start",
+      elapsedMs: collectionStartedAt - requestStartedAt,
+    }));
     const dossier = await runAudit(handle, emit, { organizationId: auth.organizationId }) as ServerDossier | null;
+    console.info("[audit-route-runtime]", JSON.stringify({
+      stage: "collection-complete",
+      stageMs: Date.now() - collectionStartedAt,
+      elapsedMs: Date.now() - requestStartedAt,
+    }));
     if (!dossier) {
       send("error", { error: "not_found" });
     } else {
       let reportVersionId: string | null = null;
       let persistence: "private" | "persisted" | "failed" = req.query.private === "1" ? "private" : "persisted";
       if (req.query.private !== "1") {
+        const persistenceStartedAt = Date.now();
+        console.info("[audit-route-runtime]", JSON.stringify({
+          stage: "persistence-start",
+          elapsedMs: persistenceStartedAt - requestStartedAt,
+        }));
         try {
           reportVersionId = await persistServerDossier(handle, dossier, auth);
         } catch (persistenceError) {
           persistence = "failed";
           console.error("[api/audit] persistence failed", persistenceError);
           send("persistence", { state: "failed" });
+        } finally {
+          console.info("[audit-route-runtime]", JSON.stringify({
+            stage: "persistence-complete",
+            state: persistence,
+            stageMs: Date.now() - persistenceStartedAt,
+            elapsedMs: Date.now() - requestStartedAt,
+          }));
         }
       }
       const panelCostToken = persistence === "persisted" && reportVersionId
@@ -211,5 +243,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     console.error("[api/audit] failed", error);
     send("error", { error: "investigation_failed", message: String(error) });
   }
+  console.info("[audit-route-runtime]", JSON.stringify({
+    stage: "request-complete",
+    elapsedMs: Date.now() - requestStartedAt,
+  }));
+  clearInterval(heartbeat);
   res.end();
 }

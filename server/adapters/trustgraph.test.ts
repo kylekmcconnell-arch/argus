@@ -212,6 +212,52 @@ describe("frozen trust-graph collector", () => {
     expect(checks).toContainEqual(expect.objectContaining({ id: "trust-graph-connections", status: "unavailable" }));
   });
 
+  it("awaits every parallel qualification read before failing closed and freezing cost", async () => {
+    vi.stubEnv("SUPABASE_URL", "https://database.example");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test");
+    const base = fixture();
+    let resolveChecks!: (value: Response) => void;
+    let resolveActive!: (value: Response) => void;
+    const fetchMock = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = decodeURIComponent(String(input));
+      if (url.includes("/graph_contributions?")) return base(input);
+      if (url.includes("/report_versions?")) return Promise.reject(new Error("versions offline"));
+      if (url.includes("/check_runs?")) {
+        return new Promise<Response>((resolve) => { resolveChecks = resolve; });
+      }
+      if (url.includes("/reports?")) {
+        return new Promise<Response>((resolve) => { resolveActive = resolve; });
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { ctx, checks, current } = context();
+    let finished = false;
+
+    const pending = collectWithLedger(ctx, current).then((value) => {
+      finished = true;
+      return value;
+    });
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+    await Promise.resolve();
+    expect(finished).toBe(false);
+
+    resolveChecks(json([], "*/0"));
+    await Promise.resolve();
+    expect(finished).toBe(false);
+    resolveActive(json([], "*/0"));
+
+    const captured = await pending;
+    expect(captured.result).toMatchObject({ state: "failed" });
+    expect(captured.cost.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ op: "trust-graph/report-versions", failed: 1, status: "failed" }),
+      expect.objectContaining({ op: "trust-graph/check-runs", succeeded: 1, status: "succeeded" }),
+      expect.objectContaining({ op: "trust-graph/reports", succeeded: 1, status: "succeeded" }),
+    ]));
+    expect(ctx.evidence.trustGraphScreen).toMatchObject({ status: "incomplete", connections: [] });
+    expect(checks).toContainEqual(expect.objectContaining({ id: "trust-graph-connections", status: "unavailable" }));
+  });
+
   it("hashes canonical graph semantics, including the fresh subject contribution", async () => {
     vi.stubEnv("SUPABASE_URL", "https://database.example");
     vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test");

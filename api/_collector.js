@@ -1493,7 +1493,7 @@ var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 function analystAvailable() {
   return !!env("ANTHROPIC_API_KEY");
 }
-async function structured(system, user, tool, maxTokens = 2048) {
+async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4) {
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
   let res;
@@ -1512,7 +1512,8 @@ async function structured(system, user, tool, maxTokens = 2048) {
         messages: [{ role: "user", content: user }],
         tools: [tool],
         tool_choice: { type: "tool", name: tool.name }
-      })
+      }),
+      signal: AbortSignal.timeout(timeoutMs)
     });
   } catch (e) {
     addClaudeUsage(void 0, tool.name, "failed", "transport_error");
@@ -3279,7 +3280,10 @@ async function twFetch(url, key, tries = 2) {
   for (let i = 0; i < tries; i++) {
     let res;
     try {
-      res = await fetch(url, { headers: { "x-api-key": key } });
+      res = await fetch(url, {
+        headers: { "x-api-key": key },
+        signal: AbortSignal.timeout(1e4)
+      });
     } catch {
       recordTwitterapi(op, "failed", "transport_error");
       if (i + 1 >= tries) return null;
@@ -4107,7 +4111,9 @@ var recordDex = (op, status, detail) => {
 async function lookupToken(address) {
   let res;
   try {
-    res = await fetch(`${BASE}/latest/dex/tokens/${address}`);
+    res = await fetch(`${BASE}/latest/dex/tokens/${address}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
   } catch {
     recordDex("token-pairs", "failed", "transport_error");
     return null;
@@ -4155,7 +4161,9 @@ async function detectTokenLifecycle(ticker, knownAddress) {
   if (!sym) return null;
   let res;
   try {
-    res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`);
+    res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
   } catch {
     recordDex("token-search", "failed", "transport_error");
     return null;
@@ -4301,7 +4309,10 @@ async function enrichPerson(params) {
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
   let res;
   try {
-    res = await fetch(`${BASE2}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
+    res = await fetch(`${BASE2}/person/enrich?${qs}`, {
+      headers: { "X-Api-Key": key },
+      signal: AbortSignal.timeout(1e4)
+    });
   } catch {
     recordPdlMatch(false, "failed", "transport_error");
     return null;
@@ -4662,7 +4673,8 @@ async function lookupOrganization(name) {
         field_ids: ["identifier", "funding_total", "num_funding_rounds", "investor_identifiers", "acquirer_identifier"],
         query: [{ type: "predicate", field_id: "identifier", operator_id: "contains", values: [name] }],
         limit: 1
-      })
+      }),
+      signal: AbortSignal.timeout(12e3)
     });
   } catch {
     recordCall("crunchbase", "org-search", 0, `${meta} \xB7 transport_error`, "failed");
@@ -4769,7 +4781,10 @@ async function tokenByContract(chain, address) {
   const tier = key ? "subscription/keyed" : "keyless";
   let res;
   try {
-    res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers: headers4 });
+    res = await fetch(`${base}/coins/${platform}/contract/${address}`, {
+      headers: headers4,
+      signal: AbortSignal.timeout(1e4)
+    });
   } catch {
     recordCall("coingecko", "contract-lookup", 0, `${tier} \xB7 transport_error`, "failed");
     return null;
@@ -4862,7 +4877,8 @@ async function getToken() {
         "content-type": "application/x-www-form-urlencoded",
         "user-agent": "argus-dd/1.0"
       },
-      body: "grant_type=client_credentials"
+      body: "grant_type=client_credentials",
+      signal: AbortSignal.timeout(8e3)
     });
   } catch {
     recordRedditAttempt("oauth-token", "failed", "transport_error");
@@ -4900,7 +4916,8 @@ async function searchMentions(query) {
   let res;
   try {
     res = await fetch(`https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=15&t=year`, {
-      headers: { authorization: `Bearer ${token}`, "user-agent": "argus-dd/1.0" }
+      headers: { authorization: `Bearer ${token}`, "user-agent": "argus-dd/1.0" },
+      signal: AbortSignal.timeout(1e4)
     });
   } catch {
     recordRedditAttempt("search", "failed", "transport_error");
@@ -6848,9 +6865,22 @@ async function collectTrustGraph(ctx, current) {
     if (rawRows.length > GRAPH_LIMIT) throw new Error("authoritative graph read exceeded its exact row limit");
     const stored = parseGraphRows(rawRows);
     const ids = stored.map((row) => row.reportVersionId);
-    const versions = ids.length ? await readVersions(c, organizationId, ids) : /* @__PURE__ */ new Map();
-    const checks = ids.length ? await readChecks(c, organizationId, ids) : /* @__PURE__ */ new Map();
-    const activeVersions = ids.length ? await readActiveVersionIds(c, organizationId, ids) : /* @__PURE__ */ new Set();
+    let versions = /* @__PURE__ */ new Map();
+    let checks = /* @__PURE__ */ new Map();
+    let activeVersions = /* @__PURE__ */ new Set();
+    if (ids.length) {
+      const [versionResult, checkResult, activeResult] = await Promise.allSettled([
+        readVersions(c, organizationId, ids),
+        readChecks(c, organizationId, ids),
+        readActiveVersionIds(c, organizationId, ids)
+      ]);
+      if (versionResult.status === "rejected") throw versionResult.reason;
+      if (checkResult.status === "rejected") throw checkResult.reason;
+      if (activeResult.status === "rejected") throw activeResult.reason;
+      versions = versionResult.value;
+      checks = checkResult.value;
+      activeVersions = activeResult.value;
+    }
     const qualified = stored.map((row) => qualification(
       row,
       versions.get(row.reportVersionId),
@@ -7119,7 +7149,21 @@ async function coldIntake(ctx) {
   }
   if (!analystAvailable()) return;
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify\u2026", tone: "neutral" });
-  const claims = await extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
+  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
+  const claimsPromise = extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
+  const discoveryPromise = Promise.all([
+    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
+    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
+    // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
+    // domain or a project name — a big public project's roster lives off-X, and
+    // many project accounts put no plain domain in the bio.
+    domain || ctx.evidence.profile.display_name ? findTeamOnSite(domain, ctx.evidence.profile.display_name) : Promise.resolve([]),
+    // Read the project's own /team page directly (Grok's summary can miss it).
+    fetchTeamPage(teamDomain, ctx.evidence.profile.display_name)
+  ]);
+  const claims = await claimsPromise;
   if (claims) {
     const candidateRoles = [...new Set(asRoles(claims.roles))];
     for (const role of candidateRoles) {
@@ -7177,19 +7221,7 @@ async function coldIntake(ctx) {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"} \u2014 role candidates remain non-governing until independently verified.`, source: "claude", tone: "neutral" });
   }
   ctx.emit({ phase: "P0 \xB7 Intake", label: "Discover affiliations", detail: "Three angles in parallel: what this account is tied to, who has named them, and the team named in their own X posts\u2026", source: "grok", tone: "neutral" });
-  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
-  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
-  const [bySubject, people, siteTeam, pageTeam] = await Promise.all([
-    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
-    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
-    // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
-    // domain or a project name — a big public project's roster lives off-X, and
-    // many project accounts (e.g. @VulcanForged) put no plain domain in the bio.
-    domain || ctx.evidence.profile.display_name ? findTeamOnSite(domain, ctx.evidence.profile.display_name) : Promise.resolve([]),
-    // Read the project's own /team page directly (Grok's summary can miss it).
-    fetchTeamPage(teamDomain, ctx.evidence.profile.display_name)
-  ]);
+  const [bySubject, people, siteTeam, pageTeam] = await discoveryPromise;
   const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
   const norm2 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
@@ -7552,7 +7584,7 @@ async function adverseSignalsAndTooling(ctx) {
   })).filter((v) => v.handle && v.handle.toLowerCase() !== self).slice(0, 4);
   const associateTargets = evidence.associates.map((a) => ({ handle: a.associate_handle, relation: a.relation })).filter((a) => a.handle && a.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 4);
   ctx.emit({ phase: "Adverse", label: "Scam / rug sweep", detail: `Searching for rug, slow-rug, liquidity-pull, drain, and FUD signals across the subject${ticker ? `, $${ticker.replace(/^\$/, "")}` : ""}, ${projectTargets.length} project${projectTargets.length === 1 ? "" : "s"}, and ${associateTargets.length} associate${associateTargets.length === 1 ? "" : "s"}\u2026`, source: "grok", tone: "neutral" });
-  const [tooling, subjectSigs, projectSigs, assocSigs] = await Promise.all([
+  const [tooling, subjectSigs, projectSigs, assocSigs, ventureTeams] = await Promise.all([
     detectManipulationTooling(ctx.handle, evidence.profile.display_name),
     searchAdverseSignals(ctx.handle, subjectKind, {
       relationship_to_subject: "self",
@@ -7565,7 +7597,8 @@ async function adverseSignalsAndTooling(ctx) {
     Promise.all(associateTargets.map((a) => searchAdverseSignals(a.handle, "person", {
       relationship_to_subject: "associate",
       relationship_label: a.relation || "recorded associate"
-    })))
+    }))),
+    projectTargets.length >= 2 ? Promise.all(projectTargets.map((p) => findTeam(p.handle, p.name))) : Promise.resolve([])
   ]);
   if (tooling?.tools.length) {
     const list = tooling.tools.map((t) => `${t.name} (${t.kind.replace(/_/g, " ")})`).join(", ");
@@ -7625,11 +7658,10 @@ async function adverseSignalsAndTooling(ctx) {
     ctx.emit({ phase: "Adverse", label: "No adverse leads surfaced", detail: "The model search returned no candidate rug/scam/drain/FUD source URLs for follow-up; this is not proof that none exist.", source: "grok", tone: "neutral" });
   }
   if (projectTargets.length >= 2) {
-    const teams = await Promise.all(projectTargets.map((p) => findTeam(p.handle, p.name)));
     ctx.evidence.ventureTeams = projectTargets.map((p, i) => ({
       key: canonicalEntityKey({ handle: p.handle, name: p.name }),
       name: p.name,
-      people: (teams[i] ?? []).filter((m) => (m.handle || m.name) && m.handle?.replace(/^@/, "").toLowerCase() !== self).slice(0, 8).map((m) => ({ name: m.name, handle: m.handle, role: m.role })),
+      people: (ventureTeams[i] ?? []).filter((m) => (m.handle || m.name) && m.handle?.replace(/^@/, "").toLowerCase() !== self).slice(0, 8).map((m) => ({ name: m.name, handle: m.handle, role: m.role })),
       provider: "grok",
       evidence_origin: "model_lead",
       artifact_verified: false
@@ -7639,7 +7671,7 @@ async function adverseSignalsAndTooling(ctx) {
       ctx.emit({ phase: "Network", label: "Venture teams mapped", detail: `${total} people across ${ctx.evidence.ventureTeams.length} venture${ctx.evidence.ventureTeams.length === 1 ? "" : "s"} wired into the graph \u2014 subject \u2192 venture \u2192 the people behind it.`, source: "grok", tone: "good" });
     }
     const appearances = /* @__PURE__ */ new Map();
-    teams.forEach((team, i) => {
+    ventureTeams.forEach((team, i) => {
       for (const member of team) {
         if (!member.handle) continue;
         const key = member.handle.replace(/^@/, "").toLowerCase();
@@ -7899,6 +7931,24 @@ function downgradeFixtureEvidenceForLive(seed) {
   };
 }
 async function runAuditWithLedger(rawHandle, emit, options) {
+  const runtimeStartedAt = Date.now();
+  const startRuntimeStage = (stage) => {
+    const stageStartedAt = Date.now();
+    console.info("[audit-runtime]", JSON.stringify({
+      stage,
+      state: "started",
+      elapsedMs: stageStartedAt - runtimeStartedAt
+    }));
+    return stageStartedAt;
+  };
+  const finishRuntimeStage = (stage, stageStartedAt) => {
+    console.info("[audit-runtime]", JSON.stringify({
+      stage,
+      state: "complete",
+      stageMs: Date.now() - stageStartedAt,
+      elapsedMs: Date.now() - runtimeStartedAt
+    }));
+  };
   const fixture = findSubject(rawHandle);
   const seededEvidence = fixture ? toEvidence(fixture) : null;
   const liveSeedEvidence = seededEvidence ? downgradeFixtureEvidenceForLive(seededEvidence) : null;
@@ -7933,7 +7983,11 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     emit,
     recordCheck: (observation) => checkTracker.record(observation)
   };
-  if (!fixture) await coldIntake(ctx);
+  if (!fixture) {
+    const stageStartedAt = startRuntimeStage("cold-intake");
+    await coldIntake(ctx);
+    finishRuntimeStage("cold-intake", stageStartedAt);
+  }
   for (const a of ADAPTERS) {
     if (!a.available()) {
       checkTracker.provider(a.id, a.label, "unavailable", "provider is not configured");
@@ -7954,6 +8008,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       }
       continue;
     }
+    const stageStartedAt = startRuntimeStage(`adapter:${a.id}`);
     try {
       const before = attemptTotals();
       const result = await a.run(ctx);
@@ -7970,6 +8025,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       }
       emit({ phase: "Collect", label: `${a.label} error`, detail: String(e), tone: "warn" });
     }
+    finishRuntimeStage(`adapter:${a.id}`, stageStartedAt);
   }
   const trackedPass = (id, label, providers, work, onError) => {
     const before = attemptTotals(providers);
@@ -7987,6 +8043,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       onError(error);
     });
   };
+  const signalPassesStartedAt = startRuntimeStage("signal-passes");
   const signalPasses = [
     trackedPass("token-lifecycle", "Promoted-token lifecycle", ["dexscreener"], () => tokenLifecycle(ctx), (e) => {
       emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
@@ -8007,12 +8064,14 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
   }
   await Promise.all(signalPasses);
+  finishRuntimeStage("signal-passes", signalPassesStartedAt);
   evidence.roles = providerBackedRoles(evidence);
   if (evidence.roles.length) {
     emit({ phase: "P0 \xB7 Routing", label: "Classify roles", detail: `Provider-backed evidence routed to ${evidence.roles.join(", ")}.`, tone: "neutral" });
   } else {
     emit({ phase: "P0 \xB7 Routing", label: "Role unresolved", detail: "No deterministic or provider-corroborated role evidence was collected. Model role candidates remain leads; the report will publish INCOMPLETE.", tone: "warn" });
   }
+  const trustGraphStartedAt = startRuntimeStage("trust-graph");
   try {
     const provisional = assembleDossier(evidence, true);
     const graphResult = await collectTrustGraph(ctx, {
@@ -8037,6 +8096,8 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       provider: "argus-graph"
     });
     emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
+  } finally {
+    finishRuntimeStage("trust-graph", trustGraphStartedAt);
   }
   const profileForLlm = { ...evidence.profile };
   delete profileForLlm.identity_confidence;
@@ -8074,6 +8135,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
     providerRuns: checkTracker.providers().runs
   };
+  const analystStartedAt = startRuntimeStage("analyst");
   if (analystAvailable()) {
     emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions\u2026", tone: "neutral" });
     emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence\u2026", tone: "neutral" });
@@ -8120,6 +8182,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   } else {
     checkTracker.provider("claude-analyst", "Claude analyst", "unavailable", "analyst provider is not configured");
   }
+  finishRuntimeStage("analyst", analystStartedAt);
   if (!evidence.axes.length) {
     if (!evidence.headline) evidence.headline = "Investigation incomplete: not enough validated evidence to score every required axis.";
     emit({ phase: "Finalize", label: "Incomplete", detail: "Not enough validated evidence to score every required axis; publishing an incomplete report with no verdict score.", tone: "warn" });
@@ -8134,6 +8197,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   dossier.providerSnapshot = checkTracker.providers();
   dossier.cost = cost;
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches \u2248${cost.sources} sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
+  finishRuntimeStage("pipeline", runtimeStartedAt);
   return dossier;
 }
 function runAudit(rawHandle, emit, options) {

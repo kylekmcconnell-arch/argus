@@ -99,6 +99,8 @@ describe("X provider attempt accounting", () => {
   it("counts every Twitter HTTP retry and derives a partial operation status", async () => {
     vi.useFakeTimers();
     vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(json({ error: "temporary" }, 503))
       .mockResolvedValueOnce(json({ data: { tweets: [{ text: "hello" }] } }));
@@ -113,6 +115,8 @@ describe("X provider attempt accounting", () => {
 
     expect(captured.posts).toEqual(["hello"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(timeoutSpy.mock.calls).toEqual([[10_000], [10_000]]);
+    expect(fetchMock.mock.calls.every(([, init]) => init?.signal === signal)).toBe(true);
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "twitterapi",
       op: "user/last_tweets",

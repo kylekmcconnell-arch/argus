@@ -28,7 +28,10 @@ export async function enrichPerson(params: { profile?: string; name?: string; co
   qs.set("min_likelihood", params.company || params.profile ? "4" : "8");
   let res: Response;
   try {
-    res = await fetch(`${BASE}/person/enrich?${qs}`, { headers: { "X-Api-Key": key } });
+    res = await fetch(`${BASE}/person/enrich?${qs}`, {
+      headers: { "X-Api-Key": key },
+      signal: AbortSignal.timeout(10_000),
+    });
   } catch {
     recordPdlMatch(false, "failed", "transport_error");
     return null;
