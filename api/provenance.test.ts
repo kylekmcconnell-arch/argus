@@ -26,6 +26,14 @@ const founderAxes = (supportId: string): Record<string, TestAxisScore> => Object
 );
 
 describe("API scoring contract", () => {
+  it("keeps the provenance function inside the serverless API module boundary", () => {
+    const provenanceSource = readFileSync(new URL("./_provenance.ts", import.meta.url), "utf8");
+
+    expect(provenanceSource).not.toMatch(
+      /(?:from\s*|import\s*\()\s*["']\.\.\/src(?:\/|["'])/,
+    );
+  });
+
   it("stays synchronized with the canonical engine profiles", () => {
     const engineContract = Object.fromEntries(
       Object.entries(PROFILES).map(([role, profile]) => [role, profile.axes]),
