@@ -113,7 +113,9 @@ describe("DecisionBasis", () => {
 
     expect(container.textContent).toContain("Decision basis");
     expect(container.textContent).toContain("Founder");
-    expect(container.textContent).toContain("0/2 axes grounded · 1 mixed · 1 gap");
+    expect(container.textContent).toContain("1/2 axes evidence-backed · 0/2 fully grounded · 1 contested · 1 without support");
+    expect(container.textContent).toContain("Contested");
+    expect(container.textContent).toContain("Evidence-backed means qualifying support is cited");
 
     const axisButtons = [...container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')];
     expect(axisButtons).toHaveLength(2);

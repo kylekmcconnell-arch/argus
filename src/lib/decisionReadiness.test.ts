@@ -127,4 +127,23 @@ describe("deriveDecisionReadiness", () => {
       unknown: 0,
     });
   });
+
+  it("counts a confirmed bounded outcome as ready even when its note preserves partial candidate coverage", () => {
+    const result = deriveDecisionReadiness([{
+      label: "Portfolio track record",
+      status: "confirmed",
+      note: "6 relationships verified; bounded candidate coverage remained partial because 1 cited source fetch failed",
+      provider: "portfolio-web",
+      sourceCount: 6,
+    }]);
+
+    expect(result).toMatchObject({
+      status: "ready",
+      coveragePercent: 100,
+      applicable: 1,
+      successful: 1,
+      unresolved: 0,
+      providerUnavailable: 0,
+    });
+  });
 });

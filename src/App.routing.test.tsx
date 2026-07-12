@@ -683,6 +683,132 @@ describe("App routing safety", () => {
     expectNoRunnerStarted();
   });
 
+  it("uses the report kind encoded by a native Recent audits fallback link", async () => {
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind: "person",
+        ref: "typedfounder",
+        payload: { handle: "typedfounder" },
+        versionContext: { caseId: "case-typed-person", reportVersionId: "version-typed-person" },
+      },
+    });
+
+    const view = await renderApp("/?s=typedfounder&kind=person");
+    await vi.waitFor(() => expect(view.querySelector("[data-testid='stored-person-report']")).not.toBeNull());
+
+    expect(harness.fetchReportState).toHaveBeenCalledWith("typedfounder", "person");
+    expectNoRunnerStarted();
+  });
+
+  it.each([
+    {
+      kind: "token",
+      ref: "0x9191919191919191919191919191919191919191",
+      payload: { address: "0x9191919191919191919191919191919191919191", symbol: "DIRECT" },
+      testId: "stored-token-report",
+    },
+    {
+      kind: "investigation",
+      ref: "0x9292929292929292929292929292929292929292",
+      payload: { token: { address: "0x9292929292929292929292929292929292929292", symbol: "DIRECT" } },
+      testId: "stored-investigation-report",
+    },
+    {
+      kind: "site",
+      ref: "example.com",
+      payload: {
+        recon: {
+          retrieval: { url: "https://example.com", status: "rendered" },
+          title: "Example",
+          team: { state: "absent", names: [], note: "No team section found." },
+          socials: [],
+          funding: [],
+          tokenSignals: [],
+          findings: [],
+          identityLine: "No named team was established from the stored site evidence.",
+        },
+      },
+      testId: "recon-page",
+    },
+  ] as const)("keeps a native Recent audits $kind link on the exact read-only stored-report path", async ({ kind, ref, payload, testId }) => {
+    harness.fetchReportState.mockResolvedValue({
+      status: "open",
+      report: {
+        kind,
+        ref,
+        payload,
+        versionContext: { caseId: `case-${kind}`, reportVersionId: `version-${kind}` },
+      },
+    });
+
+    const view = await renderApp(`/?s=${encodeURIComponent(ref)}&kind=${kind}`);
+    await vi.waitFor(() => expect(view.querySelector(`[data-testid='${testId}']`)).not.toBeNull());
+
+    expect(harness.fetchReportState).toHaveBeenCalledWith(ref, kind);
+    expect(harness.resolveStoredCases).not.toHaveBeenCalled();
+    expect(harness.resolveTokenSubject).not.toHaveBeenCalled();
+    expectNoRunnerStarted();
+  });
+
+  it("shows durable resolution immediately while a recent report lookup is in flight", async () => {
+    const address = "0x1010101010101010101010101010101010101010";
+    let resolveLookup!: (value: Record<string, unknown>) => void;
+    harness.fetchReportState.mockReturnValue(new Promise<Record<string, unknown>>((resolve) => {
+      resolveLookup = resolve;
+    }));
+    harness.recentRef = address;
+    const view = await renderApp();
+
+    act(() => view.querySelector<HTMLButtonElement>("[data-testid='reopen-recent']")?.click());
+
+    await vi.waitFor(() => expect(view.textContent).toContain("Resolving the exact subject"));
+    expect(view.textContent).toContain("Checking durable cases");
+    expectNoRunnerStarted();
+
+    await act(async () => {
+      resolveLookup({
+        status: "open",
+        report: {
+          kind: "token",
+          ref: address,
+          payload: { address, symbol: "RECENT" },
+          versionContext: { caseId: "case-recent", reportVersionId: "version-recent" },
+        },
+      });
+      await Promise.resolve();
+    });
+    await settle();
+
+    expect(view.querySelector("[data-testid='stored-token-report']")).not.toBeNull();
+    expectNoRunnerStarted();
+  });
+
+  it("never turns a missing Recent audits row into a paid scan", async () => {
+    harness.recentRef = "0x2020202020202020202020202020202020202020";
+    harness.fetchReportState.mockResolvedValue({ status: "missing", report: null });
+    const view = await renderApp();
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='reopen-recent']")?.click());
+    await settle();
+
+    expect(view.textContent).toContain("No stored case exists yet");
+    expect(view.textContent).toContain("did not automatically start a collector");
+    expectNoRunnerStarted();
+  });
+
+  it("exits Recent audits resolution safely when the durable lookup rejects", async () => {
+    harness.recentRef = "0x3030303030303030303030303030303030303030";
+    harness.fetchReportState.mockRejectedValue(new Error("network failed before a response"));
+    const view = await renderApp();
+
+    await act(async () => view.querySelector<HTMLButtonElement>("[data-testid='reopen-recent']")?.click());
+    await settle();
+
+    expect(view.textContent).toContain("Stored case status is unavailable");
+    expectNoRunnerStarted();
+  });
+
   it("opens one exact immutable evidence version without consulting or launching the active case", async () => {
     const versionId = "00000000-0000-4000-8000-000000000201";
     const address = "0x1111111111111111111111111111111111111111";

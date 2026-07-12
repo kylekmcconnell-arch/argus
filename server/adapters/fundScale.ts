@@ -728,7 +728,12 @@ function clusterSupportedRows(rows: UnclusteredSupportedRow[]): SupportedRow[] {
     if (cluster) cluster.rows.push(row);
     else clusters.push({ base, rows: [row] });
   }
+
+  // Vehicle identity is part of the claim key. An unnumbered same-amount row
+  // remains separate: uniqueness inside a bounded discovery sample is not
+  // evidence that it describes the named vehicle.
   return clusters.flatMap((cluster) => {
+    cluster.rows.sort((left, right) => left.document.url.localeCompare(right.document.url));
     const claimKey = deterministicClaimId(cluster.base, cluster.rows);
     return cluster.rows.map((row) => ({ ...row, claimKey }));
   });
@@ -863,22 +868,25 @@ export async function collectFundScale(
     return true;
   };
 
-  const pressGroupCorroborated = (rows: SupportedRow[]): boolean => {
-    const pressRows = rows.filter((row) => baseRowEligibleForConfirmation(row)
-      && row.sourceClass === "independent_press"
-      && (isAumMetric(row.match.metric) || row.match.vehicleCorroboratable === true));
-    return pressRows.some((row, index) => pressRows.slice(index + 1).some((other) => {
-      const rowDomain = documentRegistrableDomain(row.document);
-      const otherDomain = documentRegistrableDomain(other.document);
-      const distinctDomains = Boolean(rowDomain && otherDomain && rowDomain !== otherDomain);
-      const distinctContent = /^[a-f0-9]{64}$/i.test(row.document.contentHash)
-        && /^[a-f0-9]{64}$/i.test(other.document.contentHash)
-        && row.document.contentHash.toLowerCase() !== other.document.contentHash.toLowerCase();
-      const rowExcerptHash = createHash("sha256").update(normalized(row.match.excerpt)).digest("hex");
-      const otherExcerptHash = createHash("sha256").update(normalized(other.match.excerpt)).digest("hex");
-      return distinctDomains && distinctContent && rowExcerptHash !== otherExcerptHash;
-    }));
+  const pressRowEligible = (row: SupportedRow): boolean => baseRowEligibleForConfirmation(row)
+    && row.sourceClass === "independent_press"
+    && (isAumMetric(row.match.metric) || row.match.vehicleCorroboratable === true);
+  const independentPressPair = (row: SupportedRow, other: SupportedRow): boolean => {
+    const rowDomain = documentRegistrableDomain(row.document);
+    const otherDomain = documentRegistrableDomain(other.document);
+    const distinctDomains = Boolean(rowDomain && otherDomain && rowDomain !== otherDomain);
+    const distinctContent = /^[a-f0-9]{64}$/i.test(row.document.contentHash)
+      && /^[a-f0-9]{64}$/i.test(other.document.contentHash)
+      && row.document.contentHash.toLowerCase() !== other.document.contentHash.toLowerCase();
+    const rowExcerptHash = createHash("sha256").update(normalized(row.match.excerpt)).digest("hex");
+    const otherExcerptHash = createHash("sha256").update(normalized(other.match.excerpt)).digest("hex");
+    return distinctDomains && distinctContent && rowExcerptHash !== otherExcerptHash;
   };
+  const pressRowCorroborated = (row: SupportedRow, rows: SupportedRow[]): boolean =>
+    pressRowEligible(row)
+    && rows.some((other) => other !== row && pressRowEligible(other) && independentPressPair(row, other));
+  const pressGroupCorroborated = (rows: SupportedRow[]): boolean =>
+    rows.some((row) => pressRowCorroborated(row, rows));
   const preliminaryPressConfirmation = new Map(
     [...groups].map(([claimKey, rows]) => [claimKey, pressGroupCorroborated(rows)]),
   );
@@ -951,14 +959,16 @@ export async function collectFundScale(
       || row.sourceClass === "public_primary"
       || row.sourceClass === "independent_press";
     const confirmationThreshold = row.sourceClass === "independent_press"
-      ? confirmation?.pressConfirmed
+      ? pressRowCorroborated(row, (groups.get(row.claimKey) ?? []).filter(rowEligibleForConfirmation))
       : confirmation?.confirmed;
     const sourceConfirmed = Boolean(confirmationThreshold && rowEligibleForConfirmation(row) && acceptedClass);
-    const basis: NonNullable<SourceArtifact["fundScaleBasis"]> = row.sourceClass === "public_primary"
+    const basis: SourceArtifact["fundScaleBasis"] = row.sourceClass === "public_primary"
       ? "regulatory"
       : row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor"
         ? "manager_reported"
-        : "press_corroborated";
+        : row.sourceClass === "independent_press" && sourceConfirmed
+          ? "press_corroborated"
+          : undefined;
     const unhashed: Omit<SourceArtifact, "contentHash"> = {
       kind: "fund_scale",
       provider: "fund-scale-web",
@@ -996,7 +1006,7 @@ export async function collectFundScale(
       ...(row.match.fundVehicle ? { fundVehicle: row.match.fundVehicle } : {}),
       fundScaleMetric: row.match.metric,
       fundAmountQualifier: row.match.qualifier,
-      fundScaleBasis: basis,
+      ...(basis ? { fundScaleBasis: basis } : {}),
       ...(row.match.asOf ? { fundScaleAsOf: row.match.asOf } : {}),
       ...(row.match.publishedAt ? { publishedAt: row.match.publishedAt } : {}),
       fundScaleTemporalState: row.match.temporalState,

@@ -55,7 +55,7 @@ describe("buildDecisionBasis", () => {
       },
     }), [support], 1);
 
-    expect(model).toMatchObject({ available: true, grounded: 1, mixed: 0, gaps: 0 });
+    expect(model).toMatchObject({ available: true, evidenceBacked: 1, grounded: 1, partial: 0, contested: 0, gaps: 0 });
     expect(model.rows[0]).toMatchObject({
       axis: "F2_track_record",
       status: "grounded",
@@ -65,7 +65,7 @@ describe("buildDecisionBasis", () => {
     });
   });
 
-  it("separates mixed evidence from explicit sanitized gaps", () => {
+  it("separates contested evidence, partial support, and explicit sanitized gaps", () => {
     const support = artifact("support-1", "F2_track_record");
     const counter = artifact("counter-1", "F2_track_record", { verification: "reported" });
     const model = buildDecisionBasis(report({
@@ -87,16 +87,26 @@ describe("buildDecisionBasis", () => {
         counterEvidenceRefs: [],
         gaps: ["Repository ownership was not resolved."],
       },
-    }), [support, counter], 1);
+      F5_governance_controls: {
+        score: 8,
+        weight: 12,
+        role: "FOUNDER",
+        rationale: "Support exists, but a gap remains.",
+        evidenceRefs: [artifact("support-2", "F5_governance_controls").artifactId],
+        counterEvidenceRefs: [],
+        gaps: ["Control rights remain unresolved."],
+      },
+    }), [support, counter, artifact("support-2", "F5_governance_controls")], 1);
 
-    expect(model).toMatchObject({ grounded: 0, mixed: 1, gaps: 1 });
+    expect(model).toMatchObject({ evidenceBacked: 2, grounded: 0, partial: 1, contested: 1, gaps: 1 });
     expect(model.rows[0]).toMatchObject({
-      status: "mixed",
+      status: "contested",
       support: [{ artifactId: support.artifactId }],
       counter: [{ artifactId: counter.artifactId }],
       gaps: ["Exit outcome remains unresolved."],
     });
     expect(model.rows[1]).toMatchObject({ status: "gap", gaps: ["Repository ownership was not resolved."] });
+    expect(model.rows[2]).toMatchObject({ status: "partial", gaps: ["Control rights remain unresolved."] });
   });
 
   it("excludes unsafe citations while preserving unavailable artifacts as explicit gaps", () => {

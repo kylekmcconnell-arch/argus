@@ -35,6 +35,7 @@ import { useArgusAuth } from "./auth-context";
 import type { CaseBriefTarget } from "./lib/caseBrief";
 import type { ReportPersistenceContext, ReportVersionContext } from "./lib/reportVersion";
 import { fetchReconWebTeam } from "./lib/reconSupplements";
+import { recentReportKind } from "./lib/recentReportRoute";
 
 // Product areas load on demand. The home/search shell stays immediate while
 // heavyweight reports, graph views, recon, and admin tooling become cached
@@ -228,14 +229,14 @@ function preferredStoredCase(
 // Deep links:
 //   ?s=<handle>    -> open the stored report for that subject (share links)
 //   ?live=<handle> -> resolve the person case before re-attaching or launching
-function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: string; openRef?: string; openKind?: ReportKind; openVersionId?: string } {
+function initialFromUrl(): { phase: Phase; dossier: Dossier | null; query: string; openRef?: string; openKind?: ReportKind; openVersionId?: string; openStoredOnly?: boolean } {
   if (typeof window === "undefined") return { phase: "idle", dossier: null, query: "" };
   const params = new URLSearchParams(window.location.search);
   const version = params.get("version");
   if (version) return { phase: "idle", dossier: null, query: "", openVersionId: version };
   const s = params.get("s");
-  // Resolved after mount via onOpenRecent (session cache -> stored report -> rescan).
-  if (s) return { phase: "idle", dossier: null, query: "", openRef: s };
+  // Resolved after mount via onOpenRecent (session cache -> stored report only).
+  if (s) return { phase: "idle", dossier: null, query: "", openRef: s, openKind: recentReportKind(params.get("kind")), openStoredOnly: true };
   const live = params.get("live");
   if (live) return { phase: "idle", dossier: null, query: "", openRef: live, openKind: "person" };
   const token = params.get("t");
@@ -691,13 +692,12 @@ export default function App() {
 
 
   // Clicking a recent audit SHOWS the report already produced (with a Rescan
-  // button), from: this session's cache → the persisted report on the backend
-  // (survives reload, and pulls up another analyst's actual report) → and only
-  // re-runs if we have neither.
+  // button), from: this session's cache → the persisted report on the backend.
+  // A recent-history click is read-only by default; only an explicit fresh-audit
+  // control may launch providers or spend quota.
   const onOpenRecent = useCallback(async (
     ref: string,
     requestedKind?: ReportKind,
-    allowLaunch = true,
   ) => {
     if (!closeCaseBriefForNavigation()) return;
     leaveEvidenceReview();
@@ -705,6 +705,9 @@ export default function App() {
     privRef.current = false;
     setPrivateMode(false);
     setCaseNotice(null);
+    setQuery(ref);
+    setResolutionUsesStoredCases(true);
+    setPhase("resolving");
     const cachedKind = requestedKind === "person" || requestedKind === "token" || requestedKind === "investigation" || requestedKind === "site"
       ? requestedKind
       : undefined;
@@ -712,7 +715,10 @@ export default function App() {
     // Case status is authoritative over background runs and in-memory caches.
     // Archived history remains discoverable, but no entry point may re-attach
     // or reopen it without an explicit analyst action.
-    const lookup = await fetchReportState(ref, requestedKind);
+    const lookup = await fetchReportState(ref, requestedKind).catch(() => ({
+      status: "unavailable" as const,
+      report: null,
+    }));
     if (requestId !== safeAuditRequestRef.current) return;
     if (lookup.status === "archived") {
       clearCachedRef(resultCache.current, ref);
@@ -817,16 +823,11 @@ export default function App() {
     }
     const c = sessionCached;
     if (c) { showCached(ref, c); return; }
-    if (!allowLaunch) {
-      setQuery(ref);
-      setCaseNotice({ reason: "missing", ref, kind: requestedKind });
-      setLiveError(null);
-      setPhase("notfound");
-      return;
-    }
-    if (requestedKind === "investigation") onInvestigate(ref);
-    else onAudit(ref);
-  }, [closeCaseBriefForNavigation, leaveEvidenceReview, onAudit, onInvestigate, showCached]);
+    setQuery(ref);
+    setCaseNotice({ reason: "missing", ref, kind: requestedKind });
+    setLiveError(null);
+    setPhase("notfound");
+  }, [closeCaseBriefForNavigation, leaveEvidenceReview, showCached]);
 
   const showAuditLaunchFailure = useCallback((
     ref: string,
@@ -1109,13 +1110,14 @@ export default function App() {
     if (!boot.openRef) return;
     const timer = window.setTimeout(() => {
       const ref = boot.openRef as string;
-      if (boot.openKind === "token") void onSafeAuditMode(ref, false, "token", false);
+      if (boot.openStoredOnly) void onOpenRecent(ref, boot.openKind);
+      else if (boot.openKind === "token") void onSafeAuditMode(ref, false, "token", false);
       else if (boot.openKind === "investigation") void onSafeAuditMode(ref, false, "investigation", false);
       else if (boot.openKind === "site") void onSafeAuditMode(ref, false, "token", false);
-      else void onOpenRecent(ref, boot.openKind, false);
+      else void onOpenRecent(ref, boot.openKind);
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [boot.openKind, boot.openRef, evidenceReviewVersionId, onOpenRecent, onSafeAuditMode, showCached]);
+  }, [boot.openKind, boot.openRef, boot.openStoredOnly, evidenceReviewVersionId, onOpenRecent, onSafeAuditMode, showCached]);
 
   const reset = useCallback(() => {
     if (!closeCaseBriefForNavigation()) return;

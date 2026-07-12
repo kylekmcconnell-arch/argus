@@ -60,6 +60,19 @@ export interface PortfolioCollectorDependencies {
   now?: () => Date;
 }
 
+// A source-backed track record is a bounded evidence outcome, not a claim that
+// every portfolio company has been enumerated. When a minority of candidate
+// paths fail, require both a real pattern (not one anecdote) and strong bounded
+// coverage before recording the check as confirmed. The adapter run remains
+// partial so the unresolved paths stay visible in provider provenance.
+const MIN_VERIFIED_RELATIONSHIPS_FOR_PARTIAL_OUTCOME = 3;
+const MIN_VERIFIED_DISPOSITION_PERCENT = 75;
+
+function hasRecordedPartialPortfolioOutcome(verified: number, incomplete: number): boolean {
+  if (verified < MIN_VERIFIED_RELATIONSHIPS_FOR_PARTIAL_OUTCOME || incomplete <= 0) return false;
+  return verified * 100 >= (verified + incomplete) * MIN_VERIFIED_DISPOSITION_PERCENT;
+}
+
 export interface PortfolioInvestorDomainProof {
   domain: string;
   sourceUrl: string;
@@ -975,10 +988,13 @@ export async function collectPortfolioRelationships(
   const reportedProjects = [...byProject.keys()].filter((project) => !confirmedProjects.has(project)).length;
   const incompleteDispositions = unattributedCandidates + sourceLessCandidates + failed;
   if (confirmedProjects.size > 0 && incompleteDispositions > 0) {
+    const recordedOutcome = hasRecordedPartialPortfolioOutcome(confirmedProjects.size, incompleteDispositions);
     ctx.recordCheck?.({
       id: "vc-portfolio-track-record",
-      status: "unavailable",
-      note: `${confirmedProjects.size} portfolio relationship${confirmedProjects.size === 1 ? " was" : "s were"} verified, but coverage remained incomplete: ${unattributedCandidates} candidate${unattributedCandidates === 1 ? "" : "s"} could not be safely attributed, ${sourceLessCandidates} had no inspectable source, and ${failed} cited source fetch${failed === 1 ? "" : "es"} failed`,
+      status: recordedOutcome ? "confirmed" : "unavailable",
+      note: recordedOutcome
+        ? `${confirmedProjects.size} unique portfolio relationships were verified from fetched first-party, primary, or independently corroborated sources; bounded candidate coverage remained partial: ${unattributedCandidates} could not be safely attributed, ${sourceLessCandidates} had no inspectable source, and ${failed} cited source fetch${failed === 1 ? "" : "es"} failed. Incomplete candidates were not used as verification`
+        : `${confirmedProjects.size} portfolio relationship${confirmedProjects.size === 1 ? " was" : "s were"} verified, but coverage remained too weak to record a track-record outcome: ${unattributedCandidates} candidate${unattributedCandidates === 1 ? "" : "s"} could not be safely attributed, ${sourceLessCandidates} had no inspectable source, and ${failed} cited source fetch${failed === 1 ? "" : "es"} failed`,
       provider: "portfolio-web",
       sourceCount: confirmedProjects.size,
     });

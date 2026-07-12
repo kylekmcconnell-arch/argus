@@ -734,6 +734,40 @@ describe("source-backed fund-scale collection", () => {
     expect(evidence.sourceArtifacts).toEqual([]);
   });
 
+  it("keeps an unnumbered same-amount secondary report separate without calling it press", async () => {
+    const { ctx, evidence } = context();
+    const sources = [
+      { url: "https://en.wikipedia.org/wiki/Paradigm_(company)" },
+      { url: "https://venturecapitalarchive.example/paradigm" },
+    ];
+    const result = await collectFundScale(ctx, {
+      discover: async () => [lead({ sources })],
+      fetchSource: async (url) => document({
+        url,
+        host: new URL(url).hostname,
+        contentHash: url.includes("wikipedia") ? "7".repeat(64) : "8".repeat(64),
+        text: url.includes("wikipedia")
+          ? '<meta property="article:published_time" content="2025-01-15"><p>Paradigm Fund I closed at $2.5 billion.</p>'
+          : '<meta property="article:published_time" content="2026-07-10"><p>Paradigm announced a $2.5 billion fund.</p>',
+      }),
+      resolveInvestorDomain: async () => undefined,
+      now: () => NOW,
+    });
+
+    expect(result.state).toBe("partial");
+    expect(evidence.sourceArtifacts).toHaveLength(2);
+    expect(new Set(evidence.sourceArtifacts.map((artifact) => artifact.fundScaleClaimId)).size).toBe(2);
+    expect(new Set(evidence.sourceArtifacts.map((artifact) => artifact.fundVehicle))).toEqual(new Set([
+      "Fund I",
+      "Unspecified Fund",
+    ]));
+    expect(new Set(evidence.sourceArtifacts.map((artifact) => artifact.sourceUrl))).toEqual(new Set(sources.map((source) => source.url)));
+    expect(evidence.sourceArtifacts.every((artifact) => artifact.match === "candidate")).toBe(true);
+    expect(evidence.sourceArtifacts.every((artifact) => artifact.sourceClass === "other_public")).toBe(true);
+    expect(evidence.sourceArtifacts.every((artifact) => artifact.fundScaleBasis === undefined)).toBe(true);
+    expect(evidence.sourceArtifacts.every((artifact) => !isStrictFundScaleArtifact(artifact, evidence.sourceArtifacts))).toBe(true);
+  });
+
   it("keeps one editorial report as a candidate", async () => {
     const { ctx, evidence } = context();
     await collectFundScale(ctx, {
@@ -752,6 +786,7 @@ describe("source-backed fund-scale collection", () => {
       match: "candidate",
       sourceClass: "independent_press",
     }));
+    expect(evidence.sourceArtifacts[0]?.fundScaleBasis).toBeUndefined();
   });
 
   it("does not mark a lone press row confirmed merely because first-party evidence shares its claim", async () => {
@@ -880,6 +915,34 @@ describe("source-backed fund-scale collection", () => {
     expect(evidence.sourceArtifacts.every((artifact) => artifact.match === "candidate")).toBe(true);
     expect(new Set(evidence.sourceArtifacts.map((artifact) => artifact.fundVehicle))).toEqual(new Set(["Fund I", "Fund III"]));
     expect(new Set(evidence.sourceArtifacts.map((artifact) => artifact.fundScaleClaimId)).size).toBe(2);
+  });
+
+  it("does not guess which named vehicle an unnumbered same-amount source describes", async () => {
+    const { ctx, evidence } = context();
+    const sources = [
+      { url: "https://techcrunch.com/paradigm-fund-i" },
+      { url: "https://reuters.com/technology/paradigm-fund-iii" },
+      { url: "https://en.wikipedia.org/wiki/Paradigm_(company)" },
+    ];
+    await collectFundScale(ctx, {
+      discover: async () => [lead({ sources })],
+      fetchSource: async (url) => document({
+        url,
+        host: new URL(url).hostname,
+        contentHash: url.includes("techcrunch") ? "1".repeat(64) : url.includes("reuters") ? "2".repeat(64) : "3".repeat(64),
+        text: url.includes("techcrunch")
+          ? "Paradigm Fund I closed at $400 million."
+          : url.includes("reuters")
+            ? "Paradigm Fund III closed at $400 million."
+            : "Paradigm announced a $400 million fund.",
+      }),
+      resolveInvestorDomain: async () => undefined,
+      now: () => NOW,
+    });
+
+    expect(evidence.sourceArtifacts).toHaveLength(3);
+    expect(evidence.sourceArtifacts.every((artifact) => artifact.match === "candidate")).toBe(true);
+    expect(new Set(evidence.sourceArtifacts.map((artifact) => artifact.fundScaleClaimId)).size).toBe(3);
   });
 
   it("keeps parallel strategy vehicles with the same number distinct", async () => {

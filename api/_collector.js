@@ -8295,6 +8295,12 @@ var PRESS_HOSTS = [
 var PROFILE_AFFILIATION_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
 var PROFILE_AFFILIATION_CLOCK_SKEW_MS = 5 * 60 * 1e3;
 var SENSITIVE_URL_PARAM3 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
+var MIN_VERIFIED_RELATIONSHIPS_FOR_PARTIAL_OUTCOME = 3;
+var MIN_VERIFIED_DISPOSITION_PERCENT = 75;
+function hasRecordedPartialPortfolioOutcome(verified, incomplete) {
+  if (verified < MIN_VERIFIED_RELATIONSHIPS_FOR_PARTIAL_OUTCOME || incomplete <= 0) return false;
+  return verified * 100 >= (verified + incomplete) * MIN_VERIFIED_DISPOSITION_PERCENT;
+}
 var clean = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
 var hostMatches2 = (host, expected) => {
   const left = host.replace(/^www\./i, "").toLowerCase();
@@ -8919,10 +8925,11 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
   const reportedProjects = [...byProject.keys()].filter((project) => !confirmedProjects.has(project)).length;
   const incompleteDispositions = unattributedCandidates + sourceLessCandidates + failed;
   if (confirmedProjects.size > 0 && incompleteDispositions > 0) {
+    const recordedOutcome = hasRecordedPartialPortfolioOutcome(confirmedProjects.size, incompleteDispositions);
     ctx.recordCheck?.({
       id: "vc-portfolio-track-record",
-      status: "unavailable",
-      note: `${confirmedProjects.size} portfolio relationship${confirmedProjects.size === 1 ? " was" : "s were"} verified, but coverage remained incomplete: ${unattributedCandidates} candidate${unattributedCandidates === 1 ? "" : "s"} could not be safely attributed, ${sourceLessCandidates} had no inspectable source, and ${failed} cited source fetch${failed === 1 ? "" : "es"} failed`,
+      status: recordedOutcome ? "confirmed" : "unavailable",
+      note: recordedOutcome ? `${confirmedProjects.size} unique portfolio relationships were verified from fetched first-party, primary, or independently corroborated sources; bounded candidate coverage remained partial: ${unattributedCandidates} could not be safely attributed, ${sourceLessCandidates} had no inspectable source, and ${failed} cited source fetch${failed === 1 ? "" : "es"} failed. Incomplete candidates were not used as verification` : `${confirmedProjects.size} portfolio relationship${confirmedProjects.size === 1 ? " was" : "s were"} verified, but coverage remained too weak to record a track-record outcome: ${unattributedCandidates} candidate${unattributedCandidates === 1 ? "" : "s"} could not be safely attributed, ${sourceLessCandidates} had no inspectable source, and ${failed} cited source fetch${failed === 1 ? "" : "es"} failed`,
       provider: "portfolio-web",
       sourceCount: confirmedProjects.size
     });
@@ -9439,6 +9446,7 @@ function clusterSupportedRows(rows) {
     else clusters.push({ base, rows: [row] });
   }
   return clusters.flatMap((cluster) => {
+    cluster.rows.sort((left, right) => left.document.url.localeCompare(right.document.url));
     const claimKey = deterministicClaimId(cluster.base, cluster.rows);
     return cluster.rows.map((row) => ({ ...row, claimKey }));
   });
@@ -9547,18 +9555,18 @@ async function collectFundScale(ctx, dependencies = {}) {
     if (row.entity.attribution === "affiliated_fund" && row.entity.attributionSourceKind !== "provider_profile") return false;
     return true;
   };
-  const pressGroupCorroborated = (rows) => {
-    const pressRows = rows.filter((row) => baseRowEligibleForConfirmation(row) && row.sourceClass === "independent_press" && (isAumMetric2(row.match.metric) || row.match.vehicleCorroboratable === true));
-    return pressRows.some((row, index) => pressRows.slice(index + 1).some((other) => {
-      const rowDomain = documentRegistrableDomain(row.document);
-      const otherDomain = documentRegistrableDomain(other.document);
-      const distinctDomains = Boolean(rowDomain && otherDomain && rowDomain !== otherDomain);
-      const distinctContent = /^[a-f0-9]{64}$/i.test(row.document.contentHash) && /^[a-f0-9]{64}$/i.test(other.document.contentHash) && row.document.contentHash.toLowerCase() !== other.document.contentHash.toLowerCase();
-      const rowExcerptHash = createHash8("sha256").update(normalized2(row.match.excerpt)).digest("hex");
-      const otherExcerptHash = createHash8("sha256").update(normalized2(other.match.excerpt)).digest("hex");
-      return distinctDomains && distinctContent && rowExcerptHash !== otherExcerptHash;
-    }));
+  const pressRowEligible = (row) => baseRowEligibleForConfirmation(row) && row.sourceClass === "independent_press" && (isAumMetric2(row.match.metric) || row.match.vehicleCorroboratable === true);
+  const independentPressPair = (row, other) => {
+    const rowDomain = documentRegistrableDomain(row.document);
+    const otherDomain = documentRegistrableDomain(other.document);
+    const distinctDomains = Boolean(rowDomain && otherDomain && rowDomain !== otherDomain);
+    const distinctContent = /^[a-f0-9]{64}$/i.test(row.document.contentHash) && /^[a-f0-9]{64}$/i.test(other.document.contentHash) && row.document.contentHash.toLowerCase() !== other.document.contentHash.toLowerCase();
+    const rowExcerptHash = createHash8("sha256").update(normalized2(row.match.excerpt)).digest("hex");
+    const otherExcerptHash = createHash8("sha256").update(normalized2(other.match.excerpt)).digest("hex");
+    return distinctDomains && distinctContent && rowExcerptHash !== otherExcerptHash;
   };
+  const pressRowCorroborated = (row, rows) => pressRowEligible(row) && rows.some((other) => other !== row && pressRowEligible(other) && independentPressPair(row, other));
+  const pressGroupCorroborated = (rows) => rows.some((row) => pressRowCorroborated(row, rows));
   const preliminaryPressConfirmation = new Map(
     [...groups].map(([claimKey, rows]) => [claimKey, pressGroupCorroborated(rows)])
   );
@@ -9597,9 +9605,9 @@ async function collectFundScale(ctx, dependencies = {}) {
   for (const row of supported) {
     const confirmation = confirmations.get(row.claimKey);
     const acceptedClass = row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor" || row.sourceClass === "public_primary" || row.sourceClass === "independent_press";
-    const confirmationThreshold = row.sourceClass === "independent_press" ? confirmation?.pressConfirmed : confirmation?.confirmed;
+    const confirmationThreshold = row.sourceClass === "independent_press" ? pressRowCorroborated(row, (groups.get(row.claimKey) ?? []).filter(rowEligibleForConfirmation)) : confirmation?.confirmed;
     const sourceConfirmed = Boolean(confirmationThreshold && rowEligibleForConfirmation(row) && acceptedClass);
-    const basis = row.sourceClass === "public_primary" ? "regulatory" : row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor" ? "manager_reported" : "press_corroborated";
+    const basis = row.sourceClass === "public_primary" ? "regulatory" : row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor" ? "manager_reported" : row.sourceClass === "independent_press" && sourceConfirmed ? "press_corroborated" : void 0;
     const unhashed = {
       kind: "fund_scale",
       provider: "fund-scale-web",
@@ -9633,7 +9641,7 @@ async function collectFundScale(ctx, dependencies = {}) {
       ...row.match.fundVehicle ? { fundVehicle: row.match.fundVehicle } : {},
       fundScaleMetric: row.match.metric,
       fundAmountQualifier: row.match.qualifier,
-      fundScaleBasis: basis,
+      ...basis ? { fundScaleBasis: basis } : {},
       ...row.match.asOf ? { fundScaleAsOf: row.match.asOf } : {},
       ...row.match.publishedAt ? { publishedAt: row.match.publishedAt } : {},
       fundScaleTemporalState: row.match.temporalState,

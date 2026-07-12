@@ -12,9 +12,10 @@ export interface DecisionBasisProps {
 }
 
 const STATUS_META: Record<DecisionBasisStatus, { label: string; color: string }> = {
-  grounded: { label: "Grounded", color: "var(--color-pass)" },
-  mixed: { label: "Mixed", color: "var(--color-caution)" },
-  gap: { label: "Gap", color: "var(--color-caution)" },
+  grounded: { label: "Fully grounded", color: "var(--color-pass)" },
+  partial: { label: "Partial", color: "var(--color-caution)" },
+  contested: { label: "Contested", color: "var(--color-avoid)" },
+  gap: { label: "No support", color: "var(--color-caution)" },
 };
 
 function safeExternalSource(value?: string): string | null {
@@ -49,7 +50,8 @@ function roleLabel(role?: string): string {
 
 function defaultAxis(rows: readonly DecisionBasisRow[]): string | null {
   return rows.find((row) => row.status === "gap")?.axis
-    ?? rows.find((row) => row.status === "mixed")?.axis
+    ?? rows.find((row) => row.status === "contested")?.axis
+    ?? rows.find((row) => row.status === "partial")?.axis
     ?? rows[0]?.axis
     ?? null;
 }
@@ -166,11 +168,16 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, onRescan }:
         <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Decision basis</h3>
         <span className="text-[12.5px] text-ink-faint">{roleLabel(model.role ?? undefined)}</span>
         <span className="mono ml-auto text-[11px] uppercase tracking-wide text-ink-faint">
-          {model.grounded}/{model.rows.length} axes grounded
-          {model.mixed ? ` · ${model.mixed} mixed` : ""}
-          {model.gaps ? ` · ${model.gaps} gap${model.gaps === 1 ? "" : "s"}` : ""}
+          {model.evidenceBacked}/{model.rows.length} axes evidence-backed
+          {` · ${model.grounded}/${model.rows.length} fully grounded`}
+          {model.partial ? ` · ${model.partial} partial` : ""}
+          {model.contested ? ` · ${model.contested} contested` : ""}
+          {model.gaps ? ` · ${model.gaps} without support` : ""}
         </span>
       </div>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+        Evidence-backed means qualifying support is cited. Fully grounded additionally requires no counter-evidence or unresolved gaps.
+      </p>
 
       {model.rows.length ? (
         <>

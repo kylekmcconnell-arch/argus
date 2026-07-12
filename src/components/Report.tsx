@@ -205,11 +205,23 @@ function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing:
             )}
           </div>
         </div>
-        <ScoreRing score={rr.score_total} verdict={rr.verdict} size={64} />
+        <div className="shrink-0 text-center">
+          <ScoreRing score={rr.score_total} verdict={rr.verdict} size={64} />
+          {!coverageReady && (
+            <span className="mono mt-0.5 block text-[9px] font-medium uppercase tracking-wide text-caution">
+              preliminary
+            </span>
+          )}
+        </div>
       </button>
 
       {open && axes.length > 0 && (
         <div className="overflow-hidden border-t border-line px-4 pb-3">
+          {!coverageReady && (
+            <p className="panel-inset mt-3 px-3 py-2 text-[11px] leading-relaxed text-caution" role="note">
+              Preliminary scored-axis breakdown. The final decision score is withheld until evidence coverage is complete.
+            </p>
+          )}
           <div className="divide-y divide-line/60">
             {axes.map(([k, a]) => (
               <AxisBar
@@ -233,9 +245,9 @@ function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing:
           )}
           <div className="mt-2 flex items-center justify-between px-1 text-[12.5px] text-ink-faint">
             <span>
-              raw {rr.raw_total} {rr.dox_bonus ? `+ ${rr.dox_bonus} bonus` : ""}
+              {coverageReady ? "raw" : "preliminary raw axis total"} {rr.raw_total} {rr.dox_bonus ? `+ ${rr.dox_bonus} bonus` : ""}
             </span>
-            <span className="mono">= {rr.score_total ?? "—"}{rr.cap_applied ? " (capped)" : ""}</span>
+            <span className="mono">= {coverageReady ? "" : "preliminary "}{rr.score_total ?? "—"}{rr.cap_applied ? " (capped)" : ""}</span>
           </div>
         </div>
       )}
@@ -570,6 +582,8 @@ function InvestorEvidenceLinks({
         ? source.investorDomainCapturedAt ?? source.capturedAt
       : source.capturedAt;
     const capturedLabel = compactSourceDate(capturedValue);
+    const publishedValue = role === "Scale source" ? source.publishedAt : undefined;
+    const publishedLabel = compactSourceDate(publishedValue);
     const descriptor = role === "Affiliation source"
       ? `${source.subjectName || "subject"} affiliation with ${source.investorEntityName || source.fundName || "fund"}`
       : role === "Fund domain source"
@@ -581,6 +595,8 @@ function InvestorEvidenceLinks({
       descriptor,
       capturedValue,
       capturedLabel,
+      publishedValue,
+      publishedLabel,
     }];
   });
 
@@ -589,7 +605,10 @@ function InvestorEvidenceLinks({
   }
 
   return references.map((reference) => {
-    const dateDescription = reference.capturedLabel ? `captured ${reference.capturedLabel}` : "capture date unavailable";
+    const dateDescription = [
+      reference.publishedLabel ? `source published ${reference.publishedLabel}` : null,
+      reference.capturedLabel ? `captured ${reference.capturedLabel}` : "capture date unavailable",
+    ].filter(Boolean).join("; ");
     return (
       <a
         key={`${role}:${reference.href}`}
@@ -604,6 +623,12 @@ function InvestorEvidenceLinks({
         <span className="max-w-full truncate" title={reference.descriptor}>{reference.descriptor}</span>
         <span aria-hidden="true">·</span>
         <span>{reference.hostAndPath}</span>
+        {reference.publishedLabel && reference.publishedValue && (
+          <>
+            <span aria-hidden="true">·</span>
+            <span className="text-ink-faint">source published <time dateTime={reference.publishedValue}>{reference.publishedLabel}</time></span>
+          </>
+        )}
         <span aria-hidden="true">·</span>
         {reference.capturedLabel && reference.capturedValue ? (
           <span className="text-ink-faint">captured <time dateTime={reference.capturedValue}>{reference.capturedLabel}</time></span>
@@ -617,16 +642,21 @@ function InvestorEvidenceLinks({
 
 function fundScaleTemporalLabel(source: SourceArtifact): string {
   const aum = source.fundScaleMetric === "regulatory_aum" || source.fundScaleMetric === "reported_aum";
-  // Publication time is not an AUM measurement date. AUM can say "as of"
-  // only when the fetched claim itself supplied fundScaleAsOf.
-  const asOf = compactSourceDate(aum ? source.fundScaleAsOf : source.fundScaleAsOf ?? source.publishedAt);
+  // Source publication and capture dates describe provenance, not the claim's
+  // measurement or close date. Only claim-local fundScaleAsOf belongs here.
+  const asOf = compactSourceDate(source.fundScaleAsOf);
   if (aum) {
     if (source.fundScaleTemporalState === "historical") return asOf ? `Historical AUM · As of ${asOf}` : "Historical AUM · as-of unavailable";
     return asOf ? `As of ${asOf}` : source.fundScaleTemporalState === "current" ? "Current AUM · as-of unavailable" : "AUM as-of unavailable";
   }
-  if (source.fundScaleTemporalState === "fixed_historical") return asOf ? `Fixed historical · ${asOf}` : "Fixed historical";
-  if (source.fundScaleTemporalState === "historical") return asOf ? `Historical · ${asOf}` : "Historical";
-  return asOf ? `As of ${asOf}` : "Period unavailable";
+  if (source.fundScaleTemporalState === "fixed_historical") {
+    const dateKind = source.fundScaleMetric === "first_close" || source.fundScaleMetric === "final_close"
+      ? "Fund close date"
+      : "Fund vehicle date";
+    return asOf ? `${dateKind} · ${asOf}` : `${dateKind} not stated`;
+  }
+  if (source.fundScaleTemporalState === "historical") return asOf ? `Historical claim · As of ${asOf}` : "Historical claim · date not stated";
+  return asOf ? `Claim date · ${asOf}` : "Claim date unavailable";
 }
 
 function formatFundScaleUsd(value?: number): string {
@@ -1021,9 +1051,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   };
   const webTeam = (dossier.webTeam ?? []).filter(groundedTeamMember).map(sanitizedGroundedTeamMember);
   const webTeamLeads = reportTeamLeads(dossier);
-  const groundedVentureNames = (evidence.ventures ?? [])
-    .filter((venture) => venture.evidence_origin !== "model_lead" && venture.artifact_verified === true)
-    .map((venture) => venture.project_name);
   const portfolioArtifactGroups = [...(f.sourceArtifacts ?? [])
     .filter((artifact) => artifact.kind === "portfolio_relationship" && artifact.projectName)
     .reduce((groups, artifact) => {
@@ -1087,11 +1114,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         profile: fundScaleProfile,
       }));
       const representative = strictSources[0] ?? group.sources[0];
+      const namedVehicle = (strictSources.length ? strictSources : group.sources)
+        .find((source) => source.fundVehicle && source.fundVehicle !== "Unspecified Fund")
+        ?.fundVehicle;
       return {
         ...group,
         subject: representative.subjectName || f.display_name || report.handle,
         investor: representative.investorEntityName || group.fundName,
-        fundVehicle: representative.fundVehicle,
+        fundVehicle: namedVehicle ?? representative.fundVehicle,
         basis: representative.fundScaleBasis,
         temporalLabel: fundScaleTemporalLabel(representative),
         confirmed: strictSources.length > 0,
@@ -1102,6 +1132,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .sort((left, right) => Number(right.confirmed) - Number(left.confirmed) || right.amountUsd - left.amountUsd);
   const verifiedFundScaleClaims = fundScaleArtifactGroups.filter((group) => group.confirmed);
   const reportedFundScaleClaims = fundScaleArtifactGroups.filter((group) => !group.confirmed);
+  const reportedFundScaleOverlapCount = (group: (typeof fundScaleArtifactGroups)[number]) =>
+    reportedFundScaleClaims.filter((candidate) =>
+      candidate.fundName.trim().toLowerCase() === group.fundName.trim().toLowerCase()
+      && candidate.amountUsd === group.amountUsd
+      && candidate.metric === group.metric
+      && candidate.attribution === group.attribution,
+    ).length;
   const portfolioLeads = f.portfolioLeads ?? [];
   const verifiedPortfolioProjectKeys = new Set(verifiedPortfolioProjects.map((project) => project.trim().toLowerCase()));
   const unmatchedPortfolioLeadCount = portfolioLeads.filter((lead) =>
@@ -1933,6 +1970,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                           context={`${group.fundVehicle || group.fundName} fund scale`}
                         />
                       </div>
+                      {!group.confirmed && reportedFundScaleOverlapCount(group) > 1 && (
+                        <p className="panel-inset mt-2 px-3 py-2 text-[11px] leading-relaxed text-ink-faint">
+                          Possible overlap: another reported claim names the same amount but a different or unspecified vehicle. ARGUS keeps them separate because the frozen evidence does not establish that they are the same fund.
+                        </p>
+                      )}
                     </article>
                   ))}
                   {(portfolioArtifactGroups.length > 0 || portfolioLeads.length > 0) && (
@@ -2185,13 +2227,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           {/* ask-the-report chat — grounded in this person's own evidence */}
           <div className="min-w-0 lg:col-span-2">
-            <AskReport subject={report.handle} context={[
-              f.headline,
-              `roles: ${roles.join(", ")}`,
-              showTrustGraphSupplemental && !versionContext && connections.length ? `already connected to: ${connections.map((c) => c.other).join(", ")}` : "",
-              groundedVentureNames.length ? `ventures: ${groundedVentureNames.join(", ")}` : "",
-              (webTeam ?? []).length ? `team/associates: ${webTeam.map((p) => p.name).join(", ")}` : "",
-            ].filter(Boolean).join(" | ")} />
+            <AskReport
+              subject={report.handle}
+              reportVersionId={evidenceReportVersionId}
+            />
           </div>
 
           {/* analyst augmentation — add a piece the scan missed (verified before publish) */}

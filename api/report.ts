@@ -434,7 +434,7 @@ async function loadVersionContext(
   return { ...metadata, checks };
 }
 
-async function loadExactVersionReport(
+export async function loadExactVersionReport(
   credentials: ServiceCredentials,
   organizationId: string,
   reportVersionId: string,

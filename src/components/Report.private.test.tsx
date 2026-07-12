@@ -250,6 +250,55 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("INCOMPLETE");
     expect(container.textContent).toContain("PRELIMINARY MODEL SIGNAL · PASS 100/100");
     expect(container.textContent).toContain("score withheld");
+    expect(container.textContent).toContain("Preliminary scored-axis breakdown");
+    expect(container.textContent).toContain("final decision score is withheld");
+    expect(container.textContent).toContain("preliminary raw axis total");
+    expect(container.textContent).toContain("= preliminary 100");
+  });
+
+  it("binds report chat to the exact frozen version without sending client-authored evidence", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const reportVersionId = "1d4b3030-de29-4633-a281-beb9672c4a00";
+    const dossier = {
+      ...base,
+      sourceArtifacts: [{
+        kind: "portfolio_relationship" as const,
+        provider: "portfolio-web" as const,
+        title: "Official portfolio relationship",
+        sourceUrl: "https://example.com/portfolio",
+        investorDomainSourceUrl: "https://x.com/examplefund",
+        attributionSourceUrl: "https://x.com/examplepartner",
+        capturedAt: "2026-07-12T04:00:00.000Z",
+        contentHash: "a".repeat(64),
+        match: "relationship_confirmed" as const,
+      }],
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000101",
+        reportVersionId,
+        version: 10,
+        completenessState: "partial" as const,
+        attestationState: "server_collected" as const,
+        methodologyVersion: "person-v1",
+        createdAt: "2026-07-12T04:00:00.000Z",
+        checks: [
+          { checkId: "identity", label: "Identity", status: "confirmed" as const, provider: "twitterapi", sourceCount: 1 },
+          { checkId: "portfolio", label: "Portfolio track record", status: "confirmed" as const, provider: "portfolio-web", sourceCount: 6 },
+          { checkId: "fund-scale", label: "Fund scale", status: "confirmed" as const, provider: "fund-scale-web", sourceCount: 1 },
+          { checkId: "press", label: "Press coverage", status: "unavailable" as const, provider: "google-news", note: "one cited page failed" },
+        ],
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const props = harness.askReport.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect(props.reportVersionId).toBe(reportVersionId);
+    expect(props.subject).toBe(base.report.handle);
+    expect(props).not.toHaveProperty("context");
+    expect(props).not.toHaveProperty("citations");
+    expect(props).not.toHaveProperty("readiness");
   });
 
   it("renders frozen off-chain artifacts with capture metadata and only safe source links", () => {
@@ -362,6 +411,8 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("reported AUM");
     expect(container.textContent).toContain("manager reported");
     expect(container.textContent).toContain("As of Jun 30, 2026");
+    expect(container.textContent).toContain("source published Jun 30, 2026");
+    expect(container.textContent).toContain("captured Jul 11, 2026");
     expect(container.textContent).toContain("fund scale verified");
     expect(container.textContent).toContain("Nova Capital → invested in Acme Protocol");
     expect(container.textContent).toContain("direct investment verified");
@@ -487,7 +538,9 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Mara Voss → affiliated with Paradigm");
     expect(container.textContent).toContain("Mara Voss → affiliated with Paradigm → invested in Acme Protocol");
     expect(container.textContent).toContain("Paradigm Fund III");
-    expect(container.textContent).toContain("Fixed historical · Jul 1, 2026");
+    expect(container.textContent).toContain("Fund close date · Jul 1, 2026");
+    expect(container.textContent).toContain("source published Jul 1, 2026");
+    expect(container.textContent).not.toContain("Fixed historical");
     expect(container.textContent).toContain("fund scale verified · not personal capital");
     expect(container.textContent).toContain("fund investment verified · not attributed personally");
     const longStatus = [...container.querySelectorAll(".chip")]
@@ -501,6 +554,83 @@ describe("decision-safe person report presentation", () => {
     expect(container.querySelector('a[href="https://reuters.com/markets/paradigm-fund-iii"][aria-label*="Open scale source"][aria-label*="reuters.com/markets/paradigm-fund-iii"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://ft.com/content/paradigm-fund-iii"][aria-label*="Open scale source"][aria-label*="ft.com/content/paradigm-fund-iii"]')).not.toBeNull();
     expect(container.querySelector('a[href="https://paradigm.xyz/portfolio/acme"][aria-label*="Open deal source"][aria-label*="paradigm.xyz/portfolio/acme"]')).not.toBeNull();
+  });
+
+  it("keeps named and unnumbered same-amount claims separate without overstating the source basis", () => {
+    const base = buildReport(SUBJECTS[2]);
+    const dossier = {
+      ...base,
+      sourceArtifacts: [{
+        kind: "fund_scale" as const,
+        provider: "fund-scale-web" as const,
+        title: "Secondary directory reports Paradigm fund size",
+        excerpt: "Paradigm announced a $2.5 billion fund.",
+        sourceUrl: "https://venturecapitalarchive.example/paradigm",
+        capturedAt: "2026-07-11T14:00:00.000Z",
+        publishedAt: "2026-07-10T00:00:00.000Z",
+        sourceContentHash: "9".repeat(64),
+        contentHash: "a".repeat(64),
+        match: "candidate" as const,
+        subjectName: "Nova Capital",
+        subjectHandle: "@nova_capital",
+        investorEntityName: "Paradigm",
+        attribution: "direct_subject" as const,
+        sourceClass: "other_public" as const,
+        fundName: "Paradigm",
+        fundSizeUsd: 2_500_000_000,
+        fundVehicle: "Unspecified Fund",
+        fundScaleMetric: "fund_vehicle" as const,
+        fundAmountQualifier: "exact" as const,
+        fundScaleTemporalState: "fixed_historical" as const,
+        fundScaleSourceCount: 0,
+        fundScaleClaimId: "paradigm-unspecified-2-5b",
+      }, {
+        kind: "fund_scale" as const,
+        provider: "fund-scale-web" as const,
+        title: "Wikipedia reports Paradigm Fund I size",
+        excerpt: "Paradigm Fund I closed at $2.5 billion.",
+        sourceUrl: "https://en.wikipedia.org/wiki/Paradigm_(company)",
+        capturedAt: "2026-07-11T14:01:00.000Z",
+        publishedAt: "2025-01-15T00:00:00.000Z",
+        sourceContentHash: "b".repeat(64),
+        contentHash: "c".repeat(64),
+        match: "candidate" as const,
+        subjectName: "Nova Capital",
+        subjectHandle: "@nova_capital",
+        investorEntityName: "Paradigm",
+        attribution: "direct_subject" as const,
+        sourceClass: "other_public" as const,
+        fundName: "Paradigm",
+        fundSizeUsd: 2_500_000_000,
+        fundVehicle: "Fund I",
+        fundScaleMetric: "fund_vehicle" as const,
+        fundAmountQualifier: "exact" as const,
+        fundScaleTemporalState: "fixed_historical" as const,
+        fundScaleSourceCount: 0,
+        fundScaleClaimId: "paradigm-fund-i-2-5b",
+      }],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const investorHeading = [...container.querySelectorAll("h2")]
+      .find((heading) => heading.textContent === "Investor evidence");
+    const investorSection = investorHeading?.closest("section");
+    expect(investorSection?.textContent).toContain("2 reported-only scale claims");
+    expect(investorSection?.querySelectorAll("article")).toHaveLength(2);
+    expect(investorSection?.textContent).toContain("Fund I");
+    expect(investorSection?.textContent).toContain("Unspecified Fund");
+    expect(investorSection?.textContent).toContain("Possible overlap");
+    expect(investorSection?.textContent).toContain("keeps them separate");
+    expect(investorSection?.textContent).toContain("Fund vehicle date not stated");
+    expect(investorSection?.textContent).toContain("source published Jul 10, 2026");
+    expect(investorSection?.textContent).toContain("source published Jan 15, 2025");
+    expect(investorSection?.textContent).toContain("captured Jul 11, 2026");
+    expect(investorSection?.textContent).not.toContain("press corroborated");
+    expect(investorSection?.textContent).not.toContain("Fixed historical");
+    expect(investorSection?.querySelectorAll('a[aria-label*="Open scale source"]')).toHaveLength(2);
   });
 
   it("does not style or label a nominally confirmed fund-size payload as verified when the strict gate rejects it", () => {

@@ -1,7 +1,7 @@
 import type { AxisEvidenceRecord } from "../data/evidence";
 import type { AxisScore, RoleReport } from "../engine";
 
-export type DecisionBasisStatus = "grounded" | "mixed" | "gap";
+export type DecisionBasisStatus = "grounded" | "partial" | "contested" | "gap";
 
 export interface DecisionBasisRow {
   axis: string;
@@ -19,8 +19,10 @@ export interface DecisionBasisModel {
   available: boolean;
   role: string | null;
   rows: DecisionBasisRow[];
+  evidenceBacked: number;
   grounded: number;
-  mixed: number;
+  partial: number;
+  contested: number;
   gaps: number;
 }
 
@@ -28,8 +30,10 @@ const EMPTY_MODEL: DecisionBasisModel = {
   available: false,
   role: null,
   rows: [],
+  evidenceBacked: 0,
   grounded: 0,
-  mixed: 0,
+  partial: 0,
+  contested: 0,
   gaps: 0,
 };
 
@@ -143,7 +147,8 @@ function statusFor(
   gaps: readonly string[],
 ): DecisionBasisStatus {
   if (support.length > 0 && counter.length === 0 && gapArtifacts.length === 0 && gaps.length === 0) return "grounded";
-  if (support.length > 0 || counter.length > 0) return "mixed";
+  if (counter.length > 0) return "contested";
+  if (support.length > 0) return "partial";
   return "gap";
 }
 
@@ -183,8 +188,10 @@ export function buildDecisionBasis(
     available: true,
     role: roleReport.role,
     rows,
+    evidenceBacked: rows.filter((row) => row.support.length > 0).length,
     grounded: rows.filter((row) => row.status === "grounded").length,
-    mixed: rows.filter((row) => row.status === "mixed").length,
+    partial: rows.filter((row) => row.status === "partial").length,
+    contested: rows.filter((row) => row.status === "contested").length,
     gaps: rows.filter((row) => row.status === "gap").length,
   };
 }
