@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ANALYST_EVIDENCE_MAX_CHARS,
+  RECORD_VERDICT_INPUT_SCHEMA,
   analyzeSubject,
   buildAnalystEvidencePacket,
   buildScoringEvidencePacket,
@@ -56,8 +57,10 @@ const validAxis = (axis: string, score: number, ref: string) => ({
   axis,
   score,
   rationale: "Evidence-backed rationale",
-  evidenceRefs: [ref],
+  primaryEvidenceRef: ref,
+  additionalEvidenceRefs: [] as string[],
   counterEvidenceRefs: [] as string[],
+  coverageRefs: [] as string[],
   gaps: [] as string[],
 });
 
@@ -66,6 +69,52 @@ describe("analyst verdict integrity", () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+  });
+
+  it("keeps the strict verdict grammar shallow, invariant, and fully required", () => {
+    const metrics = {
+      objects: 0,
+      properties: 0,
+      arrays: 0,
+      enums: 0,
+      optional: 0,
+      unions: 0,
+    };
+    const inspect = (value: unknown) => {
+      if (!value || typeof value !== "object") return;
+      if (Array.isArray(value)) {
+        value.forEach(inspect);
+        return;
+      }
+      const record = value as Record<string, unknown>;
+      if (record.type === "object") {
+        metrics.objects += 1;
+        expect(record.additionalProperties).toBe(false);
+        const properties = record.properties as Record<string, unknown>;
+        const required = Array.isArray(record.required) ? record.required as string[] : [];
+        metrics.properties += Object.keys(properties).length;
+        metrics.optional += Object.keys(properties).filter((key) => !required.includes(key)).length;
+      }
+      if (record.type === "array") metrics.arrays += 1;
+      if (Array.isArray(record.type)) metrics.unions += 1;
+      if (Array.isArray(record.enum)) metrics.enums += 1;
+      if (Array.isArray(record.anyOf) || Array.isArray(record.oneOf)) metrics.unions += 1;
+      Object.values(record).forEach(inspect);
+    };
+    inspect(RECORD_VERDICT_INPUT_SCHEMA);
+
+    const structuralSchema = JSON.stringify(RECORD_VERDICT_INPUT_SCHEMA, (key, value) =>
+      key === "description" ? undefined : value);
+    expect(Buffer.byteLength(JSON.stringify(RECORD_VERDICT_INPUT_SCHEMA))).toBeLessThan(2_048);
+    expect(Buffer.byteLength(structuralSchema)).toBeLessThan(1_000);
+    expect(metrics).toEqual({
+      objects: 2,
+      properties: 11,
+      arrays: 5,
+      enums: 0,
+      optional: 0,
+      unions: 0,
+    });
   });
 
   it("accepts exactly one finite, in-range score per requested axis", () => {
@@ -266,14 +315,16 @@ describe("analyst verdict integrity", () => {
   });
 
   it.each([
-    { label: "missing support refs", patch: { evidenceRefs: undefined } },
-    { label: "empty support refs", patch: { evidenceRefs: [] } },
+    { label: "missing primary support ref", patch: { primaryEvidenceRef: undefined } },
+    { label: "missing additional support refs", patch: { additionalEvidenceRefs: undefined } },
     { label: "missing counter refs", patch: { counterEvidenceRefs: undefined } },
+    { label: "missing coverage refs", patch: { coverageRefs: undefined } },
     { label: "missing gaps", patch: { gaps: undefined } },
-    { label: "unknown ref", patch: { evidenceRefs: [`art_v1_${"9".repeat(64)}`] } },
-    { label: "duplicate ref", patch: { evidenceRefs: [F1_REF, F1_REF] } },
-    { label: "axis-ineligible ref", patch: { evidenceRefs: [F2_REF] } },
-    { label: "support/counter overlap", patch: { evidenceRefs: [F1_REF], counterEvidenceRefs: [F1_REF] } },
+    { label: "unknown ref", patch: { primaryEvidenceRef: `art_v1_${"9".repeat(64)}` } },
+    { label: "duplicate ref", patch: { additionalEvidenceRefs: [F1_REF] } },
+    { label: "axis-ineligible ref", patch: { primaryEvidenceRef: F2_REF } },
+    { label: "support/counter overlap", patch: { counterEvidenceRefs: [F1_REF] } },
+    { label: "undeclared array-row field", patch: { ignoredEvidenceRefs: [F1_REF] } },
     { label: "blank rationale", patch: { rationale: "   " } },
   ])("rejects $label on a scored axis", ({ patch }) => {
     const axes = [
@@ -313,7 +364,7 @@ describe("analyst verdict integrity", () => {
           validAxis("F1_identity_verifiability", 10, F1_REF),
           {
             ...validAxis("F2_track_record", 8, F2_REF),
-            evidenceRefs: [F2_REF, coverageRef],
+            coverageRefs: [coverageRef],
             gaps: ["One track-record provider did not return a result."],
           },
         ],
@@ -327,6 +378,54 @@ describe("analyst verdict integrity", () => {
       });
     },
   );
+
+  it("accepts every documented array boundary and rejects one item beyond each limit", () => {
+    const axis = "F1_identity_verifiability";
+    const artifact = (index: number, verification: AxisEvidenceRecord["verification"]) =>
+      axisArtifact(`art_v1_${index.toString(16).padStart(64, "0")}`, [axis], verification);
+    const support = Array.from({ length: 9 }, (_, index) => artifact(100 + index, "verified"));
+    const counter = Array.from({ length: 9 }, (_, index) => artifact(200 + index, "reported"));
+    const coverage = Array.from({ length: 5 }, (_, index) =>
+      artifact(300 + index, index % 2 === 0 ? "unavailable" : "checked_empty"));
+    const evidence = [...support, ...counter, ...coverage];
+    const row = {
+      axis,
+      score: 10,
+      rationale: "Evidence-backed rationale at every documented boundary.",
+      primaryEvidenceRef: support[0].artifactId,
+      additionalEvidenceRefs: support.slice(1, 8).map(({ artifactId }) => artifactId),
+      counterEvidenceRefs: counter.slice(0, 8).map(({ artifactId }) => artifactId),
+      coverageRefs: coverage.slice(0, 4).map(({ artifactId }) => artifactId),
+      gaps: Array.from({ length: 6 }, (_, index) => `Material gap ${index + 1}.`),
+    };
+    const payload = (axisRow: typeof row) => ({
+      axes: [axisRow],
+      headline: "Boundary-valid result",
+      identity_note: "Identity resolved",
+    });
+    const singleAxisCatalog: AnalystAxis[] = [{ axis, weight: 12, role: "FOUNDER" }];
+
+    const accepted = validateAnalystVerdict(payload(row), singleAxisCatalog, evidence);
+    expect(accepted?.axes[0]).toMatchObject({
+      evidenceRefs: [
+        support[0].artifactId,
+        ...support.slice(1, 8).map(({ artifactId }) => artifactId),
+        ...coverage.slice(0, 4).map(({ artifactId }) => artifactId),
+      ],
+      counterEvidenceRefs: counter.slice(0, 8).map(({ artifactId }) => artifactId),
+      gaps: row.gaps,
+    });
+
+    const overLimitRows = [
+      { ...row, additionalEvidenceRefs: support.slice(1, 9).map(({ artifactId }) => artifactId) },
+      { ...row, counterEvidenceRefs: counter.map(({ artifactId }) => artifactId) },
+      { ...row, coverageRefs: coverage.map(({ artifactId }) => artifactId) },
+      { ...row, gaps: Array.from({ length: 7 }, (_, index) => `Material gap ${index + 1}.`) },
+    ];
+    for (const overLimitRow of overLimitRows) {
+      expect(validateAnalystVerdict(payload(overLimitRow), singleAxisCatalog, evidence)).toBeNull();
+    }
+  });
 
   it("rejects coverage-only artifacts as counter-evidence", () => {
     const axes = [
@@ -1038,24 +1137,28 @@ describe("analyst verdict integrity", () => {
       const input = request.tool_choice.name === "record_contradictions"
         ? { contradictions: [] }
         : {
-            axes: {
-              F2_track_record: {
+            axes: [
+              {
+                axis: "F2_track_record",
                 score: 20,
                 rationale: "documented history",
                 primaryEvidenceRef: aliasFor("F2_track_record"),
                 additionalEvidenceRefs: [],
                 counterEvidenceRefs: [],
+                coverageRefs: [],
                 gaps: [],
               },
-              F1_identity_verifiability: {
+              {
+                axis: "F1_identity_verifiability",
                 score: 10,
                 rationale: "named identity",
                 primaryEvidenceRef: aliasFor("F1_identity_verifiability"),
                 additionalEvidenceRefs: [],
                 counterEvidenceRefs: [],
+                coverageRefs: [],
                 gaps: [],
               },
-            },
+            ],
             headline: "Evidence-backed result",
             identity_note: "Identity resolved",
           };
@@ -1081,13 +1184,11 @@ describe("analyst verdict integrity", () => {
           properties: {
             axes: {
               type: string;
-              properties: Record<string, {
-                properties: Record<string, { enum?: number[] | string[]; items?: { enum?: string[] } }>;
+              items: {
+                properties: Record<string, { type: string; items?: { type: string } }>;
                 required: string[];
                 additionalProperties: boolean;
-              }>;
-              required: string[];
-              additionalProperties: boolean;
+              };
             };
           };
         };
@@ -1111,26 +1212,21 @@ describe("analyst verdict integrity", () => {
     expect(verdictRequest.max_tokens).toBe(6000);
     expect(verdictRequest.tool_choice.disable_parallel_tool_use).toBe(true);
     expect(verdictTool.strict).toBe(true);
-    expect(axesSchema.type).toBe("object");
-    expect(axesSchema.required).toEqual(catalog.map((axis) => axis.axis));
-    expect(axesSchema.additionalProperties).toBe(false);
-    expect(Object.keys(axesSchema.properties)).toEqual(catalog.map((axis) => axis.axis));
-    expect(axesSchema.properties.F1_identity_verifiability.properties.score.enum).toEqual(
-      Array.from({ length: 13 }, (_, score) => score),
-    );
-    expect(axesSchema.properties.F1_identity_verifiability.required).toEqual(expect.arrayContaining([
+    expect(verdictTool.input_schema).toEqual(RECORD_VERDICT_INPUT_SCHEMA);
+    expect(axesSchema.type).toBe("array");
+    expect(axesSchema.items.additionalProperties).toBe(false);
+    expect(axesSchema.items.required).toEqual(expect.arrayContaining([
+      "axis",
+      "score",
       "primaryEvidenceRef",
       "additionalEvidenceRefs",
       "counterEvidenceRefs",
+      "coverageRefs",
       "gaps",
     ]));
-    const expectedF1Aliases = scorerCatalog.flatMap((artifact, index) =>
-      artifact.verification !== "unavailable"
-      && artifact.verification !== "checked_empty"
-      && artifact.eligibleAxes.includes("F1_identity_verifiability")
-        ? [`e${String(index + 1).padStart(3, "0")}`]
-        : []);
-    expect(axesSchema.properties.F1_identity_verifiability.properties.primaryEvidenceRef.enum).toEqual(expectedF1Aliases);
+    expect(axesSchema.items.properties.score.type).toBe("integer");
+    expect(JSON.stringify(verdictTool.input_schema)).not.toContain("F1_identity_verifiability");
+    expect(JSON.stringify(verdictTool.input_schema)).not.toMatch(/e\d{3}/);
     expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
     expect(verdict?.axes.map((axis) => axis.evidenceRefs)).toEqual([
       [refFor("F1_identity_verifiability")],
@@ -1235,14 +1331,16 @@ describe("analyst verdict integrity", () => {
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       requestBody = String(init?.body);
       const request = JSON.parse(requestBody) as { tool_choice: { name: string } };
-      const axes = Object.fromEntries(productionCatalog.map(({ axis, weight }) => [axis, {
+      const axes = productionCatalog.map(({ axis, weight }) => ({
+        axis,
         score: Math.floor(weight * 0.7),
         rationale: `Evidence-backed rationale for ${axis}`,
         primaryEvidenceRef: aliasFor(axis),
         additionalEvidenceRefs: [],
         counterEvidenceRefs: [],
+        coverageRefs: [],
         gaps: [],
-      }]));
+      }));
       return new Response(JSON.stringify({
         content: [{
           type: "tool_use",
@@ -1272,13 +1370,12 @@ describe("analyst verdict integrity", () => {
         input_schema: {
           properties: {
             axes: {
-              properties: Record<string, {
-                properties: { score: { enum: number[] }; primaryEvidenceRef: { enum: string[] } };
+              type: string;
+              items: {
+                properties: Record<string, { type: string }>;
                 required: string[];
                 additionalProperties: boolean;
-              }>;
-              required: string[];
-              additionalProperties: boolean;
+              };
             };
           };
           required: string[];
@@ -1293,21 +1390,120 @@ describe("analyst verdict integrity", () => {
     expect(scorerCatalog.length).toBeGreaterThanOrEqual(20);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(requestBody.length).toBeLessThan(100_000);
-    expect(JSON.stringify(tool.input_schema).length).toBeLessThan(30_000);
+    expect(JSON.stringify(tool.input_schema).length).toBeLessThan(2_048);
     expect(tool.strict).toBe(true);
+    expect(tool.input_schema).toEqual(RECORD_VERDICT_INPUT_SCHEMA);
     expect(tool.input_schema.required).toEqual(["axes", "headline", "identity_note"]);
     expect(tool.input_schema.additionalProperties).toBe(false);
-    expect(axesSchema.required).toEqual(productionCatalog.map(({ axis }) => axis));
-    expect(Object.keys(axesSchema.properties)).toEqual(axesSchema.required);
-    expect(axesSchema.additionalProperties).toBe(false);
-    for (const { axis, weight } of productionCatalog) {
-      expect(axesSchema.properties[axis].additionalProperties).toBe(false);
-      expect(axesSchema.properties[axis].properties.score.enum).toEqual(
-        Array.from({ length: weight + 1 }, (_, score) => score),
-      );
-      expect(axesSchema.properties[axis].properties.primaryEvidenceRef.enum.length).toBeGreaterThan(0);
-    }
+    expect(axesSchema.type).toBe("array");
+    expect(axesSchema.items.required).toEqual(Object.keys(axesSchema.items.properties));
+    expect(axesSchema.items.additionalProperties).toBe(false);
+    expect(axesSchema.items.properties.score.type).toBe("integer");
+    expect(JSON.stringify(tool.input_schema)).not.toContain("enum");
+    expect(JSON.stringify(tool.input_schema)).not.toMatch(/e\d{3}/);
+    expect(JSON.stringify(tool.input_schema)).not.toContain("F1_identity_verifiability");
     expect(verdict?.axes.map(({ axis }) => axis)).toEqual(productionCatalog.map(({ axis }) => axis));
+  });
+
+  it("keeps the invariant grammar and exact validator contract across all 34 methodology axes", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const allRoles = Object.values(SubjectClass);
+    const allAxes: AnalystAxis[] = allRoles.flatMap((role) =>
+      Object.entries(getProfile(role).axes).map(([axis, weight]) => ({ axis, weight, role })),
+    );
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder, investor, adviser, promoter, agency operator, and community contributor",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{
+        project_name: "Verified Venture",
+        role: "founder, investor, adviser, and agency client",
+        outcome: "Active",
+        artifact_verified: true,
+      }],
+      testimonials: [{
+        claimed_endorser_handle: "@verified_backer",
+        claimed_relationship: "repeat backer and advisory counterparty",
+        artifact_verified: true,
+      }],
+      advised: [{
+        project_name: "Verified Advisory Project",
+        claimed_role: "advisor",
+        artifact_verified: true,
+      }],
+      promotions: [{
+        ticker: "$TEST",
+        chain: "ethereum",
+        artifact_verified: true,
+      }],
+      team: [{
+        name: "Named Teammate",
+        role: "CTO",
+        linkedin: "https://linkedin.com/in/named-teammate",
+        artifact_verified: true,
+      }],
+      recentActivity: [{
+        provider: "twitterapi",
+        text: "Documented product, portfolio, promotional, advisory, agency, and community activity",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+      }],
+      clientEngagements: [{
+        client: "Verified Client",
+        service: "growth and engineering",
+        artifact_verified: true,
+      }],
+    }, allAxes);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const aliasFor = (axis: string) => {
+      const index = scorerCatalog.findIndex((artifact) =>
+        artifact.verification !== "unavailable"
+        && artifact.verification !== "checked_empty"
+        && artifact.eligibleAxes.includes(axis));
+      expect(index).toBeGreaterThanOrEqual(0);
+      return `e${String(index + 1).padStart(3, "0")}`;
+    };
+    let requestSchema: unknown;
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as {
+        tool_choice: { name: string };
+        tools: Array<{ input_schema: unknown }>;
+      };
+      requestSchema = request.tools[0].input_schema;
+      return new Response(JSON.stringify({
+        content: [{
+          type: "tool_use",
+          name: request.tool_choice.name,
+          input: {
+            axes: allAxes.map(({ axis, weight }) => ({
+              axis,
+              score: Math.floor(weight * 0.7),
+              rationale: `Evidence-backed rationale for ${axis}`,
+              primaryEvidenceRef: aliasFor(axis),
+              additionalEvidenceRefs: [],
+              counterEvidenceRefs: [],
+              coverageRefs: [],
+              gaps: [],
+            })),
+            headline: "Evidence-backed all-role result",
+            identity_note: "Identity resolved",
+          },
+        }],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 8_000, output_tokens: 4_000 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const verdict = await analyzeSubject("@subject", allRoles, allAxes, evidenceJson);
+
+    expect(allAxes).toHaveLength(34);
+    expect(requestSchema).toEqual(RECORD_VERDICT_INPUT_SCHEMA);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(verdict?.axes.map(({ axis }) => axis)).toEqual(allAxes.map(({ axis }) => axis));
   });
 
   it("fails before the provider call when the scorer packet has no valid frozen catalog", async () => {
@@ -1342,7 +1538,7 @@ describe("analyst verdict integrity", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("makes one bounded semantic repair attempt after a schema-valid payload fails lineage checks", async () => {
+  it("makes one bounded semantic repair attempt after a schema-valid array omits an axis", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
@@ -1367,32 +1563,31 @@ describe("analyst verdict integrity", () => {
         && artifact.eligibleAxes.includes(axis));
       return `e${String(index + 1).padStart(3, "0")}`;
     };
-    const keyedAxis = (axis: string, score: number) => ({
+    const strictAxis = (axis: string, score: number) => ({
+      axis,
       score,
       rationale: "Evidence-backed rationale",
       primaryEvidenceRef: aliasFor(axis),
       additionalEvidenceRefs: [],
       counterEvidenceRefs: [],
+      coverageRefs: [],
       gaps: [],
     });
     let attempt = 0;
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       attempt += 1;
       const request = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }>; tool_choice: { name: string } };
-      const f1 = keyedAxis("F1_identity_verifiability", 10);
+      const f1 = strictAxis("F1_identity_verifiability", 10);
       const input = {
-        axes: {
-          F1_identity_verifiability: attempt === 1
-            ? { ...f1, additionalEvidenceRefs: [f1.primaryEvidenceRef] }
-            : f1,
-          F2_track_record: keyedAxis("F2_track_record", 20),
-        },
+        axes: attempt === 1
+          ? [f1]
+          : [f1, strictAxis("F2_track_record", 20)],
         headline: "Evidence-backed result",
         identity_note: "Identity resolved",
       };
       if (attempt === 2) {
         expect(request.messages[0].content).toContain(
-          "duplicate-evidence-reference:F1_identity_verifiability",
+          "axis-count",
         );
       }
       return new Response(JSON.stringify({
@@ -1436,24 +1631,28 @@ describe("analyst verdict integrity", () => {
         type: "tool_use",
         name: "record_verdict",
         input: {
-          axes: {
-            F1_identity_verifiability: {
+          axes: [
+            {
+              axis: "F1_identity_verifiability",
               score: 10,
               rationale: "named identity",
               primaryEvidenceRef: f1Alias,
               additionalEvidenceRefs: [f1Alias],
               counterEvidenceRefs: [],
+              coverageRefs: [],
               gaps: [],
             },
-            F2_track_record: {
+            {
+              axis: "F2_track_record",
               score: 20,
               rationale: "documented history",
               primaryEvidenceRef: aliasFor("F2_track_record"),
               additionalEvidenceRefs: [],
               counterEvidenceRefs: [],
+              coverageRefs: [],
               gaps: [],
             },
-          },
+          ],
           headline: "Evidence-backed result",
           identity_note: "Identity resolved",
         },
@@ -1526,24 +1725,28 @@ describe("analyst verdict integrity", () => {
     };
     const f1Alias = aliasFor("F1_identity_verifiability");
     const invalidInput = {
-      axes: {
-        F1_identity_verifiability: {
+      axes: [
+        {
+          axis: "F1_identity_verifiability",
           score: 10,
           rationale: "named identity",
           primaryEvidenceRef: f1Alias,
           additionalEvidenceRefs: [f1Alias],
           counterEvidenceRefs: [],
+          coverageRefs: [],
           gaps: [],
         },
-        F2_track_record: {
+        {
+          axis: "F2_track_record",
           score: 20,
           rationale: "documented history",
           primaryEvidenceRef: aliasFor("F2_track_record"),
           additionalEvidenceRefs: [],
           counterEvidenceRefs: [],
+          coverageRefs: [],
           gaps: [],
         },
-      },
+      ],
       headline: "Evidence-backed result",
       identity_note: "Identity resolved",
     };
@@ -1649,6 +1852,39 @@ describe("Claude attempt accounting", () => {
       usd: 0,
       meta: expect.stringContaining("http_503"),
     }));
+  });
+
+  it("classifies an Anthropic grammar compilation rejection", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      type: "error",
+      error: {
+        type: "invalid_request_error",
+        message: "Schema is too complex for compilation.",
+      },
+    }), { status: 400, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const infoSpy = vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const captured = await withCostLedger(async () => {
+      const result = await structured<{ ok: boolean }>("system", "user", tool);
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "claude",
+      op: "record_test",
+      failed: 1,
+      status: "failed",
+      meta: expect.stringContaining("schema_too_complex"),
+    }));
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[agent-call]",
+      expect.stringContaining('"failure":"schema_too_complex"'),
+    );
   });
 
   it("bounds the Anthropic request at 60 seconds by default", async () => {
