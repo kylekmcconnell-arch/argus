@@ -5,6 +5,7 @@
 
 import type { Adapter, CollectContext } from "./types";
 import { recordCall } from "../cost";
+import { SubjectClass } from "../../src/engine";
 
 const BASE = "https://api.dexscreener.com";
 const isRecord = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
@@ -194,6 +195,9 @@ export const dexscreenerAdapter: Adapter = {
   label: "DexScreener",
   available: () => true, // keyless
   async run(ctx: CollectContext) {
+    if (ctx.evidence.roles.includes(SubjectClass.PROJECT) && !ctx.evidence.roles.includes(SubjectClass.KOL)) {
+      return { state: "skipped" as const, attempts: 0, detail: "project-account token mentions are not KOL promotions" };
+    }
     const promos = ctx.evidence.promotions.filter((p) => p.contract_address);
     if (!promos.length) return;
     ctx.emit({ phase: "On-chain", label: "DEX liquidity scan", detail: `Resolving ${promos.length} promoted token(s) on DexScreener…`, tone: "neutral" });

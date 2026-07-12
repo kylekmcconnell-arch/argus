@@ -7,6 +7,7 @@ import {
   buildScoringEvidencePacket,
   extractScoringEvidenceCatalog,
   inspectAnalystScoringPreflight,
+  normalizeAnalystCitationEligibility,
   normalizeAnalystSupportCounterOverlap,
   scanContradictions,
   structured,
@@ -300,6 +301,94 @@ describe("analyst verdict integrity", () => {
     expect(rejection).toHaveBeenLastCalledWith("root-extra-field");
   });
 
+  it("rejects an unresolved-identity narrative when the frozen project packet contains a grounded named team", () => {
+    const projectAxes: AnalystAxis[] = [
+      { axis: "P1_team_and_identity", weight: 16, role: "PROJECT" },
+    ];
+    const frozen = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      team: [{
+        name: "Named Co-Founder",
+        handle: "@namedfounder",
+        role: "co-founder",
+        source: "official project documentation",
+        sourceUrl: "https://docs.example.com/team/founders",
+        provider: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }],
+    }, projectAxes));
+    const teamArtifact = frozen.find((artifact) => artifact.section === "team")!;
+    expect(teamArtifact.sourceUrl).toBe("https://docs.example.com/team/founders");
+    const rejection = vi.fn();
+
+    expect(validateAnalystVerdict({
+      axes: [validAxis("P1_team_and_identity", 13, teamArtifact.artifactId)],
+      headline: "The product is active, but real-world team identity remains unresolved.",
+      identity_note: "The public team is named in official documentation.",
+    }, projectAxes, frozen, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("grounded-team-described-as-unresolved");
+
+    rejection.mockClear();
+    expect(validateAnalystVerdict({
+      axes: [{
+        ...validAxis("P1_team_and_identity", 13, teamArtifact.artifactId),
+        rationale: "The product is active, but no named leadership is publicly surfaced.",
+        gaps: ["Named founders or executives are not surfaced in the evidence packet."],
+      }],
+      headline: "A named public team operates the active project.",
+      identity_note: "Identity is resolved through the named co-founder in official project documentation.",
+    }, projectAxes, frozen, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("grounded-team-described-as-unresolved");
+
+    rejection.mockClear();
+    expect(validateAnalystVerdict({
+      axes: [validAxis("P1_team_and_identity", 13, teamArtifact.artifactId)],
+      headline: "Strong execution is held back by absent named leadership disclosure.",
+      identity_note: "Identity is resolved through the named co-founder in official project documentation.",
+    }, projectAxes, frozen, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("grounded-team-described-as-unresolved");
+
+    rejection.mockClear();
+    expect(validateAnalystVerdict({
+      axes: [{
+        ...validAxis("P1_team_and_identity", 13, teamArtifact.artifactId),
+        rationale: "Named founders or executives are not enumerated in the collected evidence.",
+        gaps: ["The score is tempered by the absence of named founders in the evidence packet."],
+      }],
+      headline: "A named public team operates the active project.",
+      identity_note: "Identity is resolved through Meow and Siong in first-party sources.",
+    }, projectAxes, frozen, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("grounded-team-described-as-unresolved");
+
+    rejection.mockClear();
+    expect(validateAnalystVerdict({
+      axes: [{
+        ...validAxis("P1_team_and_identity", 13, teamArtifact.artifactId),
+        gaps: ["Named founder or CEO with verifiable public profile not confirmed in evidence packet"],
+      }],
+      headline: "A named public team operates the active project.",
+      identity_note: "Identity is resolved through Meow and Siong in first-party sources.",
+    }, projectAxes, frozen, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("grounded-team-described-as-unresolved");
+
+    rejection.mockClear();
+    expect(validateAnalystVerdict({
+      axes: [{
+        ...validAxis("P1_team_and_identity", 13, teamArtifact.artifactId),
+        gaps: ["Named founders or CEO/CTO identities are not surfaced in the structured team array; only 2 generic team identities confirmed"],
+      }],
+      headline: "A named public team operates the active project.",
+      identity_note: "Identity is resolved through Meow and Siong in first-party sources.",
+    }, projectAxes, frozen, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("grounded-team-described-as-unresolved");
+
+    expect(validateAnalystVerdict({
+      axes: [validAxis("P1_team_and_identity", 13, teamArtifact.artifactId)],
+      headline: "Identity is resolved through a named public team, while tokenomics remain unknown.",
+      identity_note: "Identity is resolved through the named co-founder in official project documentation.",
+    }, projectAxes, frozen)).not.toBeNull();
+  });
+
   it.each([
     {
       label: "missing axis",
@@ -414,6 +503,51 @@ describe("analyst verdict integrity", () => {
 
     expect(normalized).toBe(raw);
     expect(validateAnalystVerdict(normalized, catalog, validationCatalog)).toBeNull();
+  });
+
+  it("drops cross-axis extras when eligible substantive support already remains", () => {
+    const raw = {
+      axes: [
+        {
+          ...validAxis("F1_identity_verifiability", 9, F1_REF),
+          additionalEvidenceRefs: [F2_REF],
+          coverageRefs: [F2_UNAVAILABLE_REF],
+        },
+        validAxis("F2_track_record", 20, F2_REF),
+      ],
+      headline: "Valid support remains after cross-axis cleanup.",
+      identity_note: "Identity is supported.",
+    };
+
+    const normalized = normalizeAnalystCitationEligibility(raw, validationCatalog);
+    const result = validateAnalystVerdict(normalized, catalog, validationCatalog);
+
+    expect(normalized).not.toBe(raw);
+    expect(result?.axes[0]).toMatchObject({ evidenceRefs: [F1_REF], counterEvidenceRefs: [] });
+  });
+
+  it("promotes an already-selected eligible additional citation when the primary belongs to another axis", () => {
+    const alternateF1Ref = `art_v1_${"6".repeat(64)}`;
+    const evidenceCatalog = [
+      ...validationCatalog,
+      axisArtifact(alternateF1Ref, ["F1_identity_verifiability"], "verified"),
+    ];
+    const raw = {
+      axes: [
+        {
+          ...validAxis("F1_identity_verifiability", 9, F2_REF),
+          additionalEvidenceRefs: [alternateF1Ref],
+        },
+        validAxis("F2_track_record", 20, F2_REF),
+      ],
+      headline: "Eligible selected support is promoted.",
+      identity_note: "Identity is supported.",
+    };
+
+    const normalized = normalizeAnalystCitationEligibility(raw, evidenceCatalog);
+    const result = validateAnalystVerdict(normalized, catalog, evidenceCatalog);
+
+    expect(result?.axes[0]).toMatchObject({ evidenceRefs: [alternateF1Ref] });
   });
 
   it.each([F2_UNAVAILABLE_REF, F2_CHECKED_EMPTY_REF])(
@@ -936,6 +1070,81 @@ describe("analyst verdict integrity", () => {
       requestedAxisCount: 14,
       missingSubstantiveAxes: [],
     });
+  });
+
+  it("retains the named project team when a large packet also has a generic confirmed team check", () => {
+    const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const fatNote = (label: string, index: number) => `${label} ${index} ${"x".repeat(300)}`;
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@project",
+        display_name: "Project",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      team: [
+        {
+          name: "Meow",
+          handle: "@weremeow",
+          role: "co-founder of Project",
+          provider: "team-page",
+          sourceUrl: "https://docs.example.com/tokenomics",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+        },
+        {
+          name: "Siong",
+          handle: "@sssionggg",
+          role: "core cofounder",
+          provider: "team-page",
+          sourceUrl: "https://forum.example.com/founders",
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+        },
+      ],
+      recentActivity: Array.from({ length: 12 }, (_, index) => ({
+        provider: "twitterapi",
+        text: fatNote("Recent project activity", index),
+      })),
+      notableFollowers: Array.from({ length: 16 }, (_, index) => ({
+        handle: `@follower${index}`,
+        note: fatNote("Notable relationship", index),
+      })),
+      checkOutcomes: [
+        {
+          checkId: "project-team-identity",
+          status: "confirmed",
+          provider: "team-page/post-scan",
+          note: "Project identity resolved through two independently collected team records.",
+        },
+        ...Array.from({ length: 19 }, (_, index) => ({
+          checkId: index % 2 === 0 ? "news-press" : "identity-continuity",
+          status: "unavailable",
+          provider: `coverage-provider-${index}`,
+          note: fatNote("Coverage detail", index),
+        })),
+      ],
+      sourceArtifacts: Array.from({ length: 24 }, (_, index) => ({
+        kind: "press",
+        provider: "google-news",
+        title: `Independent project source ${index}`,
+        excerpt: fatNote("Independent project evidence", index),
+        sourceUrl: `https://news.example/project-${index}`,
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        contentHash: (index + 1).toString(16).padStart(64, "0"),
+        match: "exact_name",
+      })),
+    }, axes);
+    const parsed = JSON.parse(packet) as { team: Array<{ name: string; handle?: string }> };
+    const frozen = extractScoringEvidenceCatalog(packet);
+
+    expect(packet.length).toBeLessThanOrEqual(ANALYST_EVIDENCE_MAX_CHARS);
+    expect(parsed.team).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: "Meow", handle: "@weremeow" }),
+      expect.objectContaining({ name: "Siong", handle: "@sssionggg" }),
+    ]));
+    expect(frozen.filter((artifact) => artifact.section === "team")).toHaveLength(2);
   });
 
   it("preserves a lower-priority covered axis before applying the 24-row source cap", () => {
@@ -1619,6 +1828,82 @@ describe("analyst verdict integrity", () => {
       headline: "Invalid cross-domain citation",
       identity_note: "Identity unresolved",
     }, axes, frozen)).toBeNull();
+  });
+
+  it("freezes official token-market evidence without overstating product or transparency coverage", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "P3_token_conduct", weight: 20, role: "PROJECT" },
+      { axis: "P5_traction_and_liveness", weight: 14, role: "PROJECT" },
+    ];
+    const packet = buildScoringEvidencePacket({
+      projectToken: {
+        verified: true,
+        verification: "official_x",
+        name: "Jupiter",
+        symbol: "JUP",
+        coingeckoId: "jupiter-exchange-solana",
+        rank: 89,
+        address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+        chain: "solana",
+        officialX: "@JupiterExchange",
+        sourceUrl: "https://www.coingecko.com/en/coins/jupiter-exchange-solana",
+        capturedAt: "2026-07-12T17:00:00.000Z",
+        providers: ["coingecko", "dexscreener", "geckoterminal"],
+        priceUsd: 0.42,
+        marketCapUsd: 620_000_000,
+        history: {
+          points: Array.from({ length: 90 }, (_, index) => 0.3 + index / 1_000),
+          first: 0.3,
+          last: 0.389,
+          peak: 0.42,
+          changePct: 29.666,
+          drawdownPct: -7.38,
+          timeframe: "day",
+          poolAddress: "jup-usdc-pool",
+        },
+      },
+    }, axes);
+    const parsed = JSON.parse(packet);
+    const tokenArtifact = extractScoringEvidenceCatalog(packet).find((artifact) => artifact.section === "projectToken");
+
+    expect(parsed.projectToken).toMatchObject({
+      verified: true,
+      symbol: "JUP",
+      history: { first: 0.3, last: 0.389, timeframe: "day" },
+    });
+    expect(parsed.projectToken.history).not.toHaveProperty("points");
+    expect(tokenArtifact).toMatchObject({
+      provider: "coingecko/dexscreener/geckoterminal",
+      verification: "verified",
+      scope: "direct_subject",
+      eligibleAxes: axes.map(({ axis }) => axis),
+    });
+  });
+
+  it("attributes an identity-only project-token snapshot to CoinGecko alone", () => {
+    const axes: AnalystAxis[] = [{ axis: "P3_token_conduct", weight: 20, role: "PROJECT" }];
+    const packet = buildScoringEvidencePacket({
+      projectToken: {
+        verified: true,
+        verification: "official_x",
+        name: "Jupiter",
+        symbol: "JUP",
+        coingeckoId: "jupiter-exchange-solana",
+        rank: 89,
+        address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+        chain: "solana",
+        officialX: "@JupiterExchange",
+        sourceUrl: "https://www.coingecko.com/en/coins/jupiter-exchange-solana",
+        capturedAt: "2026-07-12T17:00:00.000Z",
+        providers: ["coingecko"],
+      },
+    }, axes);
+
+    expect(extractScoringEvidenceCatalog(packet)).toContainEqual(expect.objectContaining({
+      section: "projectToken",
+      provider: "coingecko",
+      eligibleAxes: ["P3_token_conduct"],
+    }));
   });
 
   it("does not turn an unresolved placeholder profile into observed identity evidence", () => {
@@ -2451,7 +2736,7 @@ describe("analyst verdict integrity", () => {
     expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
   });
 
-  it("repairs a coverage-only primary citation using the authoritative per-axis allowlist", async () => {
+  it("promotes already-selected substantive support when the primary is coverage-only", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
@@ -2508,17 +2793,6 @@ describe("analyst verdict integrity", () => {
         messages: Array<{ content: string }>;
         tool_choice: { name: string };
       };
-      if (attempt === 2) {
-        expect(request.messages[0].content).toContain(
-          "non-substantive-support:F1_identity_verifiability",
-        );
-        expect(request.messages[0].content).toContain(
-          `For F1_identity_verifiability, choose exactly one primary from the substantive aliases ${f1Support}`,
-        );
-        expect(request.messages[0].content).toContain(
-          `Return coverageRefs as zero to four distinct values chosen only from ${f1Coverage}`,
-        );
-      }
       const f1 = attempt === 1
         ? {
             ...axisRow("F1_identity_verifiability", 10, f1Coverage),
@@ -2548,12 +2822,11 @@ describe("analyst verdict integrity", () => {
 
     const verdict = await analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson);
 
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     const artifactIdForAlias = (alias: string) =>
       scorerCatalog[Number.parseInt(alias.slice(1), 10) - 1].artifactId;
     expect(verdict?.axes[0].evidenceRefs).toEqual([
       artifactIdForAlias(f1Support),
-      artifactIdForAlias(f1Coverage),
     ]);
     expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
   });

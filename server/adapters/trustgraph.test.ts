@@ -21,6 +21,14 @@ const CHECK_IDS = [
   "ofac-sanctions-name",
   "trust-graph-connections",
 ] as const;
+const PROJECT_CHECK_IDS = [
+  "project-token-identity",
+  "project-product-substance",
+  "project-team-identity",
+  "project-backing-partners",
+  "project-traction-liveness",
+  "project-transparency",
+] as const;
 
 const json = (value: unknown, count: string) => new Response(JSON.stringify(value), {
   status: 200,
@@ -30,7 +38,7 @@ const json = (value: unknown, count: string) => new Response(JSON.stringify(valu
   },
 });
 
-function fixture(options: { active?: boolean; stale?: boolean; missingCheck?: boolean; graphCount?: string; verdict?: string } = {}) {
+function fixture(options: { active?: boolean; stale?: boolean; missingCheck?: boolean; currentCheckContract?: boolean; graphCount?: string; verdict?: string } = {}) {
   const active = options.active ?? true;
   const graphRow = {
     handle: "@failed",
@@ -58,7 +66,8 @@ function fixture(options: { active?: boolean; stale?: boolean; missingCheck?: bo
       }], "0-0/1"));
     }
     if (url.includes("/check_runs?")) {
-      const checkIds = options.missingCheck ? CHECK_IDS.slice(0, -1) : CHECK_IDS;
+      const contract = options.currentCheckContract ? [...CHECK_IDS, ...PROJECT_CHECK_IDS] : [...CHECK_IDS];
+      const checkIds = options.missingCheck ? contract.slice(0, -1) : contract;
       const checks = checkIds.map((checkId) => ({
         check_id: checkId,
         report_version_id: REPORT_VERSION_ID,
@@ -169,6 +178,18 @@ describe("frozen trust-graph collector", () => {
     expect(artifact).not.toHaveProperty("sourceUrl");
     const graphRead = decodeURIComponent(String(fetchMock.mock.calls[0][0]));
     expect(graphRead).not.toContain("select=handle,aliases,verdict");
+  });
+
+  it("accepts the exact current checklist contract with project diligence rows", async () => {
+    vi.stubEnv("SUPABASE_URL", "https://database.example");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "sb_secret_test");
+    vi.stubGlobal("fetch", fixture({ currentCheckContract: true }));
+    const { ctx, current } = context();
+
+    const captured = await collectWithLedger(ctx, current);
+
+    expect(captured.result).toMatchObject({ state: "executed" });
+    expect(ctx.evidence.trustGraphScreen).toMatchObject({ status: "risk", qualifiedContributionCount: 1 });
   });
 
   it("keeps shared portfolio companies navigable but out of adverse trust qualification", async () => {

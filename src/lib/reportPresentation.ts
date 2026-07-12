@@ -4,14 +4,23 @@ export interface PublicReportPresentation {
   rawVerdict: string;
   displayVerdict: string;
   resultLabel: "VERDICT" | "RISK SIGNAL" | "DECISION READINESS";
-  readinessLabel: "EVIDENCE COVERAGE COMPLETE" | "INVESTIGATION INCOMPLETE" | "INVESTIGATION FAILED" | "DECISION OUTPUT INCOMPLETE";
+  readinessLabel: "EVIDENCE COVERAGE COMPLETE" | "ASSESSMENT PROVISIONAL" | "INVESTIGATION INCOMPLETE" | "INVESTIGATION FAILED" | "DECISION OUTPUT INCOMPLETE";
   coverageLabel: "COMPLETE COVERAGE" | "PARTIAL COVERAGE" | "FAILED COVERAGE";
   color: string;
   primaryScore: string;
-  scoreLabel: "SCORE" | "MODEL SCORE" | null;
+  scoreLabel: "SCORE" | "PROVISIONAL SCORE" | "MODEL SCORE" | null;
   secondarySignal: string | null;
   note: string;
   final: boolean;
+}
+
+export interface PublicReportReadinessSummary {
+  status: "ready" | "provisional" | "incomplete";
+  coveragePercent: number;
+  roleCount: number;
+  decisionAxisTotal: number | null;
+  evidenceBackedAxes: number | null;
+  neededEvidenceSummary: string;
 }
 
 const VERDICT_COLORS: Readonly<Record<string, string>> = Object.freeze({
@@ -122,6 +131,36 @@ function scoreMatchesVerdict(verdict: string, score: string): boolean {
   return false;
 }
 
+function strictNonNegativeInteger(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+function cleanNeededEvidenceSummary(value: unknown): string {
+  return typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, 500) : "";
+}
+
+function qualifiesForProvisionalPass(
+  rawVerdict: string,
+  score: string,
+  readiness: PublicReportReadinessSummary | undefined,
+): readiness is PublicReportReadinessSummary {
+  if (!readiness || rawVerdict !== "PASS" || !scoreMatchesVerdict(rawVerdict, score)) return false;
+  const coveragePercent = strictNonNegativeInteger(readiness.coveragePercent);
+  const roleCount = strictNonNegativeInteger(readiness.roleCount);
+  const decisionAxisTotal = strictNonNegativeInteger(readiness.decisionAxisTotal);
+  const evidenceBackedAxes = strictNonNegativeInteger(readiness.evidenceBackedAxes);
+  return readiness.status === "provisional"
+    && coveragePercent !== null
+    && coveragePercent >= 70
+    && coveragePercent < 100
+    && roleCount !== null
+    && roleCount > 0
+    && decisionAxisTotal !== null
+    && decisionAxisTotal > 0
+    && evidenceBackedAxes === decisionAxisTotal
+    && Boolean(cleanNeededEvidenceSummary(readiness.neededEvidenceSummary));
+}
+
 /**
  * One fail-closed presentation contract for every public ARGUS surface.
  *
@@ -136,6 +175,7 @@ export function presentPublicReport(input: {
   completeness: unknown;
   attestation?: unknown;
   checks?: readonly unknown[];
+  readiness?: PublicReportReadinessSummary;
 }): PublicReportPresentation {
   const rawVerdict = normalizedVerdict(input.verdict);
   const completeness = coverageQualifiedCompleteness({
@@ -157,6 +197,24 @@ export function presentPublicReport(input: {
       : "INVESTIGATION INCOMPLETE";
 
   if (completeness !== "complete") {
+    if (completeness === "partial" && qualifiesForProvisionalPass(rawVerdict, score, input.readiness)) {
+      const axisTotal = input.readiness.decisionAxisTotal;
+      const neededEvidenceSummary = cleanNeededEvidenceSummary(input.readiness.neededEvidenceSummary);
+      return Object.freeze({
+        rawVerdict,
+        displayVerdict: "PROVISIONAL",
+        resultLabel: "DECISION READINESS",
+        readinessLabel: "ASSESSMENT PROVISIONAL",
+        coverageLabel,
+        color: VERDICT_COLORS.PROVISIONAL,
+        primaryScore: score,
+        scoreLabel: "PROVISIONAL SCORE",
+        secondarySignal: "PASS SIGNAL",
+        note: `All ${axisTotal} governing axes have frozen evidence support. ${neededEvidenceSummary} Final clearance remains withheld.`,
+        final: false,
+      });
+    }
+
     if (adverse) {
       const consistentScore = scoreMatchesVerdict(rawVerdict, score) ? score : "";
       return Object.freeze({

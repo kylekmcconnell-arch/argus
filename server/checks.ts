@@ -20,8 +20,9 @@ interface CheckDefinition {
   id: PersonCheckId;
   label: string;
   defaultNote: string;
-  role?: "KOL" | "INVESTOR";
+  role?: "KOL" | "INVESTOR" | "PROJECT";
   requiresResolvedRealName?: boolean;
+  requiresPersonRole?: boolean;
 }
 
 export interface PersonCheckScope {
@@ -30,11 +31,17 @@ export interface PersonCheckScope {
 
 const CHECKS: readonly CheckDefinition[] = [
   { id: "identity-resolution", label: "Identity resolution", defaultNote: "no completed server-side identity resolution was recorded" },
-  { id: "profile-photo-authenticity", label: "Profile-photo integrity", defaultNote: "server collector did not run a profile-photo integrity screen" },
+  { id: "profile-photo-authenticity", label: "Profile-photo integrity", defaultNote: "server collector did not run a profile-photo integrity screen", requiresPersonRole: true },
   { id: "code-footprint-github", label: "Code footprint (GitHub)", defaultNote: "no completed GitHub resolution was recorded" },
   { id: "identity-continuity", label: "Identity continuity", defaultNote: "no completed handle-history result was recorded" },
   { id: "affiliations-associates", label: "Affiliations & associates", defaultNote: "no corroborated affiliation collection outcome was recorded" },
   { id: "promoted-token-performance", label: "Promoted-token performance", defaultNote: "no completed promoted-token market result was recorded", role: "KOL" },
+  { id: "project-token-identity", label: "Canonical project token", defaultNote: "no official token identity was bound to this project account", role: "PROJECT" },
+  { id: "project-product-substance", label: "Product and website substance", defaultNote: "no frozen first-party product or website outcome was recorded", role: "PROJECT" },
+  { id: "project-team-identity", label: "Project team identity", defaultNote: "no first-party team identity outcome was recorded", role: "PROJECT" },
+  { id: "project-backing-partners", label: "Backing and partners", defaultNote: "no source-backed project backing or partnership outcome was recorded", role: "PROJECT" },
+  { id: "project-traction-liveness", label: "Traction and liveness", defaultNote: "no frozen product, market, or activity-liveness outcome was recorded", role: "PROJECT" },
+  { id: "project-transparency", label: "Transparency and disclosures", defaultNote: "no frozen token, audit, docs, or disclosure outcome was recorded", role: "PROJECT" },
   { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR" },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
   { id: "us-legal-history", label: "US legal history", defaultNote: "server collector did not run a legal-history check", requiresResolvedRealName: true },
@@ -44,6 +51,25 @@ const CHECKS: readonly CheckDefinition[] = [
 
 /** Stable persisted checklist contract used to qualify immutable reports. */
 export const PERSON_CHECK_IDS: readonly PersonCheckId[] = Object.freeze(CHECKS.map((check) => check.id));
+
+/**
+ * The checklist contract that was frozen into reports before project-specific
+ * diligence was added. Trust-graph qualification accepts this exact historical
+ * shape or the exact current shape, never a partially populated hybrid.
+ */
+export const LEGACY_PERSON_CHECK_IDS: readonly PersonCheckId[] = Object.freeze([
+  "identity-resolution",
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "affiliations-associates",
+  "promoted-token-performance",
+  "vc-portfolio-track-record",
+  "news-press",
+  "us-legal-history",
+  "ofac-sanctions-name",
+  "trust-graph-connections",
+]);
 
 const STATUS_PRIORITY: Record<CheckStatus, number> = {
   "not-applicable": 0,
@@ -107,13 +133,14 @@ export class PersonCheckTracker {
 
   snapshot(roles: readonly string[], scope: PersonCheckScope = {}): ScanCheck[] {
     const heldRoles = new Set(roles);
+    const projectOnly = heldRoles.size === 1 && heldRoles.has("PROJECT");
     return CHECKS.map((definition) => {
       if (definition.role && !heldRoles.has(definition.role)) {
         return Object.freeze({
           checkId: definition.id,
           label: definition.label,
           status: "not-applicable" as const,
-          note: definition.role === "KOL" ? "not a KOL" : "not a fund/investor",
+          note: definition.role === "KOL" ? "not a KOL" : definition.role === "PROJECT" ? "not a project account" : "not a fund/investor",
         });
       }
       if (definition.requiresResolvedRealName && scope.resolvedRealName === false) {
@@ -122,6 +149,14 @@ export class PersonCheckTracker {
           label: definition.label,
           status: "not-applicable" as const,
           note: "requires a resolved real-person name",
+        });
+      }
+      if (definition.requiresPersonRole && projectOnly) {
+        return Object.freeze({
+          checkId: definition.id,
+          label: definition.label,
+          status: "not-applicable" as const,
+          note: "not applicable to a project-only brand account",
         });
       }
 

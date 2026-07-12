@@ -39,6 +39,52 @@ describe("provider-backed project routing", () => {
     expect(providerBackedRoles(resolvedProjectProfile(bio))).toContain(SubjectClass.PROJECT);
   });
 
+  it("routes a slogan-only account as PROJECT when its canonical token matches the official X account", () => {
+    const evidence = resolvedProjectProfile("Just use crypto, Just use Jupiter", null);
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Jupiter",
+      symbol: "JUP",
+      coingeckoId: "jupiter-exchange-solana",
+      rank: 89,
+      address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+      chain: "solana",
+      officialX: "@JupiterExchange",
+      sourceUrl: "https://www.coingecko.com/en/coins/jupiter-exchange-solana",
+      capturedAt: "2026-07-12T17:00:00.000Z",
+    };
+
+    const roles = providerBackedRoles(evidence);
+    expect(roles).toEqual([SubjectClass.PROJECT]);
+    expect(axisCatalog(roles).map(({ axis }) => axis)).toEqual([
+      "P1_team_and_identity",
+      "P2_product_substance",
+      "P3_token_conduct",
+      "P4_backing_and_partners",
+      "P5_traction_and_liveness",
+      "P6_transparency_integrity",
+    ]);
+  });
+
+  it("does not route a non-verified token candidate by name alone", () => {
+    const evidence = resolvedProjectProfile("Just use crypto", null);
+    evidence.projectToken = {
+      verified: false,
+      verification: "official_x",
+      name: "Copycat Jupiter",
+      symbol: "JUP",
+      coingeckoId: "copycat-jupiter",
+      rank: null,
+      address: "So11111111111111111111111111111111111111112",
+      chain: "solana",
+      sourceUrl: "https://www.coingecko.com/en/coins/copycat-jupiter",
+      capturedAt: "2026-07-12T17:00:00.000Z",
+    } as unknown as NonNullable<typeof evidence.projectToken>;
+
+    expect(providerBackedRoles(evidence)).not.toContain(SubjectClass.PROJECT);
+  });
+
   it("does not let a model-only PROJECT candidate select a methodology", () => {
     const evidence = emptyEvidence("@model_project");
     evidence.findings.push({

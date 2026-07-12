@@ -53,6 +53,7 @@ import { resolveForHandle } from "./adapters/wallet";
 import { collectTrustGraph } from "./adapters/trustgraph";
 import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
+import { collectProjectTokenIdentity } from "./adapters/projectToken";
 
 const ADAPTERS: Adapter[] = [
   xAdapter,
@@ -140,11 +141,7 @@ function asRoles(roles: string[]): SubjectClass[] {
   return out;
 }
 
-// Cold handle: resolve the profile, pull recent posts, and extract self-claims
-// so the verification adapters have something to check. Without this an unknown
-// subject has no ventures/endorsements/advisory seats to verify.
-async function coldIntake(ctx: CollectContext) {
-  let siteUrl: string | undefined;
+async function resolveProfile(ctx: CollectContext): Promise<void> {
   const prof = await xProfile(ctx.handle);
   if (prof) {
     ctx.evidence.profile.profile_collection_state = "resolved";
@@ -160,7 +157,6 @@ async function coldIntake(ctx: CollectContext) {
     ctx.evidence.profile.bio = prof.bio ?? "";
     const profileWebsite = canonicalPublicProfileWebsite(prof.website) ?? undefined;
     ctx.evidence.profile.website = profileWebsite;
-    siteUrl = profileWebsite;
     if (prof.followers != null) ctx.evidence.profile.followers = fmtFollowers(prof.followers);
     if (prof.createdAt) {
       const d = new Date(prof.createdAt);
@@ -175,6 +171,48 @@ async function coldIntake(ctx: CollectContext) {
     // followers" — discovery below can still proceed.
     ctx.emit({ phase: "P0 · Intake", label: "Profile unavailable", detail: "twitterapi.io has no record of this handle (not in their index). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
   }
+}
+
+async function collectProjectSiteSubstance(ctx: CollectContext, domain: string): Promise<void> {
+  if (!domain) return;
+  const site = await checkSiteSubstance(domain).catch(() => null);
+  if (!site) return;
+  ctx.evidence.profile.website = site.url;
+  ctx.recordCheck?.({
+    id: "project-product-substance",
+    status: site.status === "coming_soon" || site.status === "unreachable" ? "finding" : "confirmed",
+    note: `${domain}: ${site.detail}`,
+    provider: "site-fetch",
+    sourceCount: 1,
+  });
+  if (site.status === "coming_soon" || site.status === "unreachable") {
+    const notLive = site.status === "unreachable" ? "does not resolve" : "is not live yet";
+    ctx.evidence.findings.push({
+      finding_type: "SiteNotLive",
+      claim: `The project's own website (${domain}) ${notLive}: ${site.detail}. No live product surface despite the account promoting a token.`,
+      source_url: site.url,
+      source_date: "",
+      source_author: "site-fetch",
+      verification_status: "Verified",
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+    ctx.emit({ phase: "P2 · Substance", label: "Website not live", detail: `${domain} ${notLive}: ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
+  } else if (site.status === "client_rendered") {
+    ctx.emit({ phase: "P2 · Substance", label: "Website live (app)", detail: `${domain} serves a client-rendered app; ${site.detail}.`, source: "site-fetch", tone: "neutral" });
+  } else {
+    ctx.emit({ phase: "P2 · Substance", label: "Website live", detail: `${domain} is a live site: ${site.detail}.`, source: "site-fetch", tone: "good" });
+  }
+}
+
+// Cold handle: resolve the profile, pull recent posts, and extract self-claims
+// so the verification adapters have something to check. Without this an unknown
+// subject has no ventures/endorsements/advisory seats to verify.
+async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
+  if (!profileAlreadyResolved) await resolveProfile(ctx);
+  const siteUrl = canonicalPublicProfileWebsite(ctx.evidence.profile.website) ?? undefined;
 
   // Handle-change history: a rebrand to escape a burned reputation is a real
   // flag, and the old handles let us search the subject's history under them.
@@ -219,14 +257,19 @@ async function coldIntake(ctx: CollectContext) {
     ctx.emit({ phase: "P0 · Intake", label: "Wallet resolved", detail: `${foundWallets.length} wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}… (${w.chain}, ${w.source.includes("Farcaster") ? "Farcaster" : "self-disclosed"})`).join(", ")}. Running on-chain forensics.`, source: "find-wallet", tone: "good" });
   }
 
+  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  // Site liveness is deterministic and should not disappear when the language
+  // model is unavailable. Running token identity first means slogan-only project
+  // accounts can supply their verified CoinGecko homepage here.
+  await collectProjectSiteSubstance(ctx, domain);
+
   if (!analystAvailable()) return;
   ctx.emit({ phase: "P0 · Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify…", tone: "neutral" });
   // Claim extraction and affiliation/team discovery read the same frozen intake
   // inputs and do not depend on one another. Start both provider waves together,
   // but continue to apply claims first below so venture/testimonial merge order and
   // every evidence/provenance decision remain identical to the serial pipeline.
-  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
-  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   // When no domain is in the bio, guess one from the handle so we can still fetch
   // the project's own team page (handle "VulcanForged" -> vulcanforged.com, whose
   // docs.* /team is the canonical roster). Failed guesses just fetch nothing.
@@ -234,7 +277,12 @@ async function coldIntake(ctx: CollectContext) {
   const claimsPromise = extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
   const discoveryPromise = Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
-    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
+    // Team announcements are usually old, high-signal posts. `posts` is the
+    // claim-targeted full-history corpus; `recentActivity` intentionally keeps
+    // only the newest originals for cadence and tone. Passing the latter here
+    // silently discarded the historical founder/team posts we had already paid
+    // twitterapi.io to retrieve.
+    findTeam(ctx.handle, ctx.evidence.profile.display_name, posts),
     // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
     // domain or a project name — a big public project's roster lives off-X, and
     // many project accounts put no plain domain in the bio.
@@ -323,7 +371,7 @@ async function coldIntake(ctx: CollectContext) {
   // own X content, and a deterministic post role-word scan (founder/CEO/CTO...).
   // Named-only people are KEPT here (a real name + role is signal even with no
   // handle to audit) — this is what a plain handle audit used to drop.
-  const postRoleTeam = scanPostsForRoles(ctx.evidence.recentActivity);
+  const postRoleTeam = scanPostsForRoles(posts, ctx.evidence.profile.display_name);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
   // MERGE duplicates instead of dropping them: the team page gives the
   // authoritative name+role but no links; Grok gives the same person WITH their
@@ -386,10 +434,16 @@ async function coldIntake(ctx: CollectContext) {
         existing.projects_evidence_origin = t.projects_evidence_origin;
       }
       if (t.artifact_verified === true && existing.artifact_verified !== true) {
+        // Promote only the facts the deterministic record actually established.
+        // Keeping a model-discovered role while merely swapping its provenance
+        // to deterministic could turn a generic team mention into an asserted
+        // founder title. The verified row owns the governing role and evidence.
+        existing.role = t.role;
         existing.evidence_origin = "deterministic";
         existing.artifact_verified = true;
         existing.provider = t.provider;
         existing.source = t.source ?? existing.source;
+        existing.sourceUrl = t.sourceUrl ?? existing.sourceUrl;
         existing.evidence = t.evidence ?? existing.evidence;
       }
       continue;
@@ -401,6 +455,7 @@ async function coldIntake(ctx: CollectContext) {
       linkedin: t.linkedin,
       evidence: t.evidence,
       source: t.source ?? "X content",
+      sourceUrl: t.sourceUrl,
       projects: t.projects,
       evidence_origin: t.evidence_origin,
       artifact_verified: t.artifact_verified,
@@ -490,6 +545,13 @@ async function coldIntake(ctx: CollectContext) {
         provider: "team-page/post-scan",
         sourceCount: backedTeam.length,
       });
+      ctx.recordCheck?.({
+        id: "project-team-identity",
+        status: "confirmed",
+        note: `${backedTeam.length} project team identit${backedTeam.length === 1 ? "y" : "ies"} backed by first-party team or account evidence`,
+        provider: "team-page/post-scan",
+        sourceCount: backedTeam.length,
+      });
     }
     if (cur !== "SuspectedImpersonation") {
       const target = leaderWithLinkedin ? "Confirmed" : leaders.length || backedTeam.length >= 2 ? "Probable" : null;
@@ -508,37 +570,13 @@ async function coldIntake(ctx: CollectContext) {
       }
     }
   } else if (domain) {
+    ctx.recordCheck?.({
+      id: "project-team-identity",
+      status: "checked-empty",
+      note: "the official site and project account were checked, but no named team member was attributable",
+      provider: "team-page/post-scan",
+    });
     ctx.emit({ phase: "P1 · Team", label: "No named team", detail: `Dug ${domain} and the account's posts; no individual team members could be attributed. For a project raising money, an unnamed team is itself a flag.`, source: "team-search", tone: "warn" });
-  }
-
-  // ── Site substance: is the project's OWN website actually a live product, or
-  //    still a coming-soon / waitlist page? Only run on a REAL resolved domain
-  //    (never a handle-guess) so a failed guess can't false-flag "unreachable".
-  if (domain) {
-    const site = await checkSiteSubstance(domain).catch(() => null);
-    if (site) {
-      ctx.evidence.profile.website = site.url;
-      if (site.status === "coming_soon" || site.status === "unreachable") {
-        const notLive = site.status === "unreachable" ? "does not resolve" : "is not live yet";
-        ctx.evidence.findings.push({
-          finding_type: "SiteNotLive",
-          claim: `The project's own website (${domain}) ${notLive}: ${site.detail}. No live product surface despite the account promoting a token.`,
-          source_url: site.url,
-          source_date: "",
-          source_author: "site-fetch",
-          verification_status: "Verified",
-          independent_source_count: 1,
-          polarity: -1,
-          evidence_origin: "deterministic",
-          artifact_verified: true,
-        });
-        ctx.emit({ phase: "P2 · Substance", label: "Website not live", detail: `${domain} ${notLive}: ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
-      } else if (site.status === "client_rendered") {
-        ctx.emit({ phase: "P2 · Substance", label: "Website live (app)", detail: `${domain} serves a client-rendered app; ${site.detail}.`, source: "site-fetch", tone: "neutral" });
-      } else {
-        ctx.emit({ phase: "P2 · Substance", label: "Website live", detail: `${domain} is a live site: ${site.detail}.`, source: "site-fetch", tone: "good" });
-      }
-    }
   }
 
   // People named in the account's X content, routed by kind:
@@ -709,7 +747,78 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
     roles.add(SubjectClass.AGENCY);
   }
+  if (evidence.projectToken?.verified === true) {
+    roles.add(SubjectClass.PROJECT);
+  }
+  // A fund's brand account can use project-like language, but its governing
+  // methodology remains INVESTOR unless it also ships a separately verified
+  // product/token under the exact audited identity.
+  if (roles.has(SubjectClass.INVESTOR) && !evidence.projectToken?.verified) {
+    roles.delete(SubjectClass.PROJECT);
+  }
   return [...roles];
+}
+
+const PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
+const PROJECT_BACKING_PROVIDERS = new Set(["team-page", "twitterapi"]);
+
+/**
+ * Record the project-check outcomes that core collection can defend today.
+ * This deliberately does not turn model search, notable followers, or a
+ * generic "partner" title into evidence of project backing. Transparency stays
+ * unavailable until a dedicated first-party disclosure collector is wired.
+ */
+export function collectProjectCoreEvidenceOutcomes(ctx: CollectContext): {
+  state: "partial" | "skipped";
+  detail: string;
+} {
+  if (!ctx.evidence.roles.includes(SubjectClass.PROJECT)) {
+    return { state: "skipped", detail: "not a provider-backed project role" };
+  }
+
+  const verifiedBackers = (ctx.evidence.webTeam ?? [])
+    .slice(0, 32)
+    .filter((member) =>
+      member.artifact_verified === true
+      && member.evidence_origin !== "model_lead"
+      && !!member.provider
+      && PROJECT_BACKING_PROVIDERS.has(member.provider)
+      && PROJECT_BACKING_ROLE.test(member.role),
+    );
+
+  if (verifiedBackers.length) {
+    const providers = [...new Set(verifiedBackers.map((member) => member.provider!))];
+    ctx.recordCheck?.({
+      id: "project-backing-partners",
+      status: "confirmed",
+      note: `${verifiedBackers.length} named advisor, backer, or investor record${verifiedBackers.length === 1 ? " was" : "s were"} verified from first-party project team or account evidence; funding terms and institutional investment were not inferred`,
+      provider: providers.join("/"),
+      sourceCount: verifiedBackers.length,
+    });
+  } else {
+    ctx.recordCheck?.({
+      id: "project-backing-partners",
+      status: "checked-empty",
+      note: "bounded scan of up to 32 frozen first-party team and account records found no verified financial backer, investor, or advisor; product partnerships require separate source verification, and model-only leads were excluded",
+      provider: "project-core-evidence",
+    });
+  }
+
+  // Canonical token identity is not a transparency attestation. Core collection
+  // currently freezes neither first-party tokenomics/governance documents nor a
+  // directly fetched audit report, so an empty evidence bag cannot honestly mean
+  // that those disclosures were checked and absent.
+  ctx.recordCheck?.({
+    id: "project-transparency",
+    status: "unavailable",
+    note: "no bounded first-party tokenomics, governance, or direct audit-report collector ran; canonical token identity alone does not establish transparency",
+    provider: "project-disclosure-collector",
+  });
+
+  return {
+    state: "partial",
+    detail: `bounded frozen-evidence scan completed with ${verifiedBackers.length} verified backing record${verifiedBackers.length === 1 ? "" : "s"}; the project-disclosure collector is not wired`,
+  };
 }
 
 // ── Phase 3.5: adverse-signal sweep, manipulation-tooling flag, cross-project
@@ -734,7 +843,10 @@ export function adverseSignalToFinding(sig: AdverseSignal): Finding {
     source_url: sig.source_url ?? "",
     source_date: "",
     source_author: sig.source,
-    verification_status: hasCandidateArtifact ? "Reported" : "Rumor",
+    // A model-returned URL is a candidate to fetch, not a verified report about
+    // the subject. Keep the trust label honest until a deterministic collector
+    // retrieves the page and confirms that it supports the claim.
+    verification_status: "Rumor",
     independent_source_count: hasCandidateArtifact ? 1 : 0,
     polarity: -1,
     evidence_origin: "model_lead" as const,
@@ -980,6 +1092,13 @@ async function postCadence(ctx: CollectContext) {
   const posts = await getRecentPostsMeta(ctx.handle);
   const report = analyzeCadence(posts, Date.now());
   if (!report) return;
+  ctx.recordCheck?.({
+    id: "project-traction-liveness",
+    status: report.silent || report.decaying ? "finding" : "confirmed",
+    note: report.summary,
+    provider: "twitterapi.io",
+    sourceCount: posts.length,
+  });
   if (report.silent || report.decaying) {
     ctx.evidence.findings.push({
       finding_type: "CadenceDecay",
@@ -1243,10 +1362,34 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     recordCheck: (observation) => checkTracker.record(observation),
   };
 
-  // cold handle: resolve profile + extract self-claims before verification
+  const projectTokenPass = async () => {
+    const providers = ["coingecko", "dexscreener", "geckoterminal"] as const;
+    const before = attemptTotals(providers);
+    try {
+      const result = await collectProjectTokenIdentity(ctx);
+      const attempts = attemptDelta(before, attemptTotals(providers));
+      const state = adapterRunState(result, attempts);
+      checkTracker.provider(
+        "project-token",
+        "Canonical project token",
+        state,
+        result.detail ?? `${attempts.total} provider attempt${attempts.total === 1 ? "" : "s"} observed`,
+      );
+    } catch (error) {
+      checkTracker.provider("project-token", "Canonical project token", "failed", String(error));
+      emit({ phase: "Token", label: "Project token resolution error", detail: String(error), tone: "warn" });
+    }
+  };
+
+  // Resolve the provider-backed profile, then bind an official token before the
+  // rest of intake. This lets a slogan-only project account inherit its exact
+  // CoinGecko homepage before team, product, docs, and site discovery begin.
   if (!fixture) {
     const stageStartedAt = startRuntimeStage("cold-intake");
-    await coldIntake(ctx);
+    await resolveProfile(ctx);
+    await projectTokenPass();
+    evidence.roles = providerBackedRoles(evidence);
+    await coldIntake(ctx, true);
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
 
@@ -1283,6 +1426,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       emit({ phase: "Collect", label: `${a.label} error`, detail: String(e), tone: "warn" });
     }
     finishRuntimeStage(`adapter:${a.id}`, stageStartedAt);
+  }
+  if (fixture) {
+    await projectTokenPass();
+    evidence.roles = providerBackedRoles(evidence);
   }
 
   // Post-discovery signal passes, all before the analyst so their findings feed
@@ -1344,6 +1491,26 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     emit({ phase: "P0 · Routing", label: "Classify roles", detail: `Provider-backed evidence routed to ${evidence.roles.join(", ")}.`, tone: "neutral" });
   } else {
     emit({ phase: "P0 · Routing", label: "Role unresolved", detail: "No deterministic or provider-corroborated role evidence was collected. Model role candidates remain leads; the report will publish INCOMPLETE.", tone: "warn" });
+  }
+
+  // Project backing is a bounded read over already-frozen first-party evidence.
+  // Transparency remains explicitly unavailable until a first-party docs/audit
+  // collector exists; an official token binding is not allowed to complete it.
+  try {
+    const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx);
+    checkTracker.provider(
+      "project-core-outcomes",
+      "Project backing and disclosure evidence",
+      projectOutcomes.state,
+      projectOutcomes.detail,
+    );
+  } catch (error) {
+    const detail = `Project core evidence outcome scan failed: ${String(error)}`;
+    checkTracker.provider("project-core-outcomes", "Project backing and disclosure evidence", "failed", detail);
+    if (evidence.roles.includes(SubjectClass.PROJECT)) {
+      checkTracker.record({ id: "project-backing-partners", status: "unavailable", note: detail, provider: "project-core-evidence" });
+      checkTracker.record({ id: "project-transparency", status: "unavailable", note: detail, provider: "project-disclosure-collector" });
+    }
   }
 
   // Portfolio completion is source-agnostic. Crunchbase may enrich a company,
@@ -1459,6 +1626,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       role: p.role,
       linkedin: p.identity_link_evidence_origin === "model_lead" ? undefined : p.linkedin,
       source: p.source,
+      sourceUrl: p.sourceUrl,
       evidence: p.evidence,
       otherProjects: p.projects_evidence_origin === "model_lead" ? undefined : p.projects,
       provider: p.provider,
@@ -1472,6 +1640,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     sourceArtifacts: evidence.sourceArtifacts,
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
+    projectToken: evidence.projectToken,
     checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
     providerRuns: checkTracker.providers().runs,
   };

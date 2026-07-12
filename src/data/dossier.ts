@@ -17,6 +17,7 @@ import type {
   SourceArtifact,
   AxisEvidenceRecord,
   ProfileAuthenticityResult,
+  ProjectTokenSnapshot,
   TrustGraphScreen,
 } from "./evidence";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
@@ -82,6 +83,8 @@ export interface Dossier {
   sourceArtifacts?: SourceArtifact[];
   profileAuthenticity?: ProfileAuthenticityResult;
   trustGraphScreen?: TrustGraphScreen;
+  /** Verified project-owned token plus frozen market/chart context. */
+  projectToken?: ProjectTokenSnapshot;
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
@@ -286,6 +289,13 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     sourceArtifacts: ev.sourceArtifacts,
     profileAuthenticity: ev.profileAuthenticity,
     trustGraphScreen: ev.trustGraphScreen,
+    projectToken: ev.projectToken ? {
+      ...ev.projectToken,
+      ...(ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {}),
+      ...(ev.projectToken.history ? {
+        history: { ...ev.projectToken.history, points: [...ev.projectToken.history.points] },
+      } : {}),
+    } : undefined,
     report,
     graph,
     founderSummary: ev.roles.includes(SubjectClass.FOUNDER) ? a.founderSummary() : undefined,

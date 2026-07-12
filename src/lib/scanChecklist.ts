@@ -235,6 +235,18 @@ export function personChecks(opts: {
     ? { label: "Portfolio track record", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` }
     : { label: "Portfolio track record", status: "not-applicable", note: "not a fund/investor" });
 
+  const projectChecks: ScanCheck[] = [
+    { label: "Canonical project token", status: "unknown", note: outcomeNotRecorded },
+    { label: "Product and website substance", status: "unknown", note: outcomeNotRecorded },
+    { label: "Project team identity", status: "unknown", note: outcomeNotRecorded },
+    { label: "Backing and partners", status: "unknown", note: outcomeNotRecorded },
+    { label: "Traction and liveness", status: "unknown", note: outcomeNotRecorded },
+    { label: "Transparency and disclosures", status: "unknown", note: outcomeNotRecorded },
+  ];
+  checks.push(...projectChecks.map((check) => roles.includes("PROJECT")
+    ? check
+    : { ...check, status: "not-applicable" as const, note: "not a project account" }));
+
   checks.push({ label: "News & press", status: "unknown", note: outcomeNotRecorded });
   checks.push(resolved && realName
     ? { label: "US legal history", status: "unknown", note: `eligible by resolved name; ${outcomeNotRecorded}` }

@@ -20,7 +20,7 @@ vi.mock("./PfpCheck", () => ({ PfpCheck: () => { harness.livePanel("pfp"); retur
 vi.mock("./PersonGithub", () => ({ PersonGithub: (props: Record<string, unknown>) => { harness.livePanel("person-github", props); return null; } }));
 vi.mock("./VcReport", () => ({ VcReport: () => { harness.livePanel("vc"); return null; } }));
 vi.mock("./KolReport", () => ({ KolReport: () => { harness.livePanel("kol"); return null; } }));
-vi.mock("./ProjectIntel", () => ({ ProjectIntel: () => { harness.livePanel("project-intel"); return null; } }));
+vi.mock("./ProjectIntel", () => ({ ProjectIntel: (props: Record<string, unknown>) => { harness.livePanel("project-intel", props); return null; } }));
 vi.mock("./NewsSection", () => ({ NewsSection: () => { harness.livePanel("news"); return null; } }));
 vi.mock("./IdentitySweep", () => ({ IdentitySweep: (props: Record<string, unknown>) => { harness.livePanel("identity-sweep", props); return null; } }));
 vi.mock("./AddInfo", () => ({ AddInfo: () => { harness.livePanel("add-info"); return null; } }));
@@ -237,6 +237,81 @@ describe("private person report evidence boundary", () => {
 });
 
 describe("decision-safe person report presentation", () => {
+  it("keeps verified project-token fundamentals above an incomplete decision state", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      display_name: "Jupiter",
+      bio: "Just use crypto, Just use Jupiter",
+      website: "https://jup.ag/",
+      completeness_state: "partial" as const,
+      projectToken: {
+        verified: true as const,
+        verification: "official_x" as const,
+        name: "Jupiter",
+        symbol: "JUP",
+        coingeckoId: "jupiter-exchange-solana",
+        rank: 89,
+        address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+        chain: "solana",
+        officialX: "@JupiterExchange",
+        sourceUrl: "https://www.coingecko.com/en/coins/jupiter-exchange-solana",
+        capturedAt: "2026-07-12T22:37:00.000Z",
+        priceUsd: 0.2,
+        marketCapUsd: 620_000_000,
+        liquidityUsd: 18_000_000,
+        history: {
+          points: [0.18, 0.21, 0.2],
+          first: 0.18,
+          last: 0.2,
+          peak: 0.21,
+          changePct: 11.1,
+          drawdownPct: -4.8,
+          timeframe: "day" as const,
+          poolAddress: "jup-usdc",
+        },
+      },
+      report: {
+        ...base.report,
+        roles: ["PROJECT"],
+        role_reports: [],
+        governing_role: "PROJECT",
+        governing_score: null,
+        composite_verdict: "INCOMPLETE" as const,
+      },
+    } as unknown as Dossier;
+
+    act(() => root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />));
+
+    const tokenSection = container.querySelector("#project-token");
+    const decisionSummary = container.querySelector("#decision-summary");
+    expect(tokenSection).not.toBeNull();
+    expect(decisionSummary).not.toBeNull();
+    expect(tokenSection?.textContent).toContain("$JUP");
+    expect(tokenSection?.textContent).toContain("$620.0M");
+    expect(tokenSection?.querySelector("svg polygon")).not.toBeNull();
+    expect(tokenSection!.compareDocumentPosition(decisionSummary!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("uses the stored project website for project intelligence when the bio has no domain", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      bio: "Just use crypto, Just use Jupiter",
+      website: "https://jup.ag/",
+      persistence: {
+        state: "persisted" as const,
+        reportVersionId: "00000000-0000-4000-8000-000000000250",
+        panelCostToken: "signed-panel-capability",
+      },
+      report: { ...base.report, roles: ["PROJECT"], governing_role: "PROJECT" },
+    } as unknown as Dossier;
+
+    act(() => root.render(<Report dossier={dossier} onReset={() => {}} />));
+
+    expect(harness.livePanel.mock.calls.find(([name]) => name === "project-intel")?.[1]).toEqual({ domain: "jup.ag" });
+  });
+
   it("presents an unrouted project attempt as collected intelligence, never decision-ready", () => {
     const base = buildReport(SUBJECTS[1]);
     const dossier = {
@@ -383,6 +458,82 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("final decision score is withheld");
     expect(container.textContent).toContain("preliminary raw axis total");
     expect(container.textContent).toContain("= preliminary 100");
+    const decisionResult = container.querySelector<HTMLElement>('[aria-label="Decision readiness result"]');
+    expect(decisionResult?.classList.contains("max-sm:grid")).toBe(true);
+    const preliminarySignal = [...container.querySelectorAll<HTMLElement>(".chip")]
+      .find((chip) => chip.textContent?.includes("PRELIMINARY MODEL SIGNAL"));
+    expect(preliminarySignal?.classList.contains("chip-wrap")).toBe(true);
+  });
+
+  it("shows a supported 71 PASS signal as provisional while three evidence checks remain open", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
+    const catalog = Object.keys(governing.axes).map((axis, index) => {
+      const hash = "abcdef"[index]!.repeat(64);
+      return {
+        artifactId: `art_v1_${hash}`,
+        kind: "axis_evidence" as const,
+        provider: "frozen-provider",
+        operation: "project-diligence",
+        section: "governing-axis",
+        title: `${axis} supporting artifact`,
+        contentHash: hash,
+        eligibleAxes: [axis],
+        verification: "verified" as const,
+        scope: "direct_subject" as const,
+      };
+    });
+    const axes = Object.fromEntries(Object.entries(governing.axes).map(([axis, score], index) => [
+      axis,
+      { ...score, evidenceRefs: [catalog[index]!.artifactId] },
+    ]));
+    const checks = Array.from({ length: 13 }, (_, index) => ({
+      checkId: `check-${index + 1}`,
+      label: `Evidence check ${index + 1}`,
+      status: index < 10 ? "confirmed" as const : "unknown" as const,
+      provider: "frozen-provider",
+      sourceCount: index < 10 ? 1 : 0,
+    }));
+    const dossier = {
+      ...base,
+      axisCitationVersion: 1 as const,
+      axisEvidenceCatalog: catalog,
+      completeness_state: "partial" as const,
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000301",
+        reportVersionId: "00000000-0000-4000-8000-000000000302",
+        version: 1,
+        completenessState: "partial" as const,
+        attestationState: "server_collected" as const,
+        methodologyVersion: "project-v1",
+        createdAt: "2026-07-12T22:00:00.000Z",
+        checks,
+      },
+      report: {
+        ...base.report,
+        governing_score: 71,
+        composite_verdict: "PASS" as const,
+        role_reports: base.report.role_reports.map((role) => role.role === governing.role
+          ? { ...role, raw_total: 71, score_total: 71, verdict: "PASS", axes }
+          : role),
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect([...container.querySelectorAll(".display")].some((node) => node.textContent?.trim() === "PROVISIONAL")).toBe(true);
+    expect(container.textContent).toContain("provisional score");
+    expect(container.textContent).toContain("PASS SIGNAL");
+    expect(container.textContent).toContain("Decision coverage76%");
+    expect(container.textContent).toContain("Recorded outcomes10 / 13");
+    expect(container.textContent).toContain("Evidence-backed axes6 / 6");
+    expect(container.textContent).toContain("Unresolved checks3");
+    expect(container.textContent).toContain("Final clearance remains withheld");
+    expect(container.textContent).toContain("Evidence-backed scored-axis breakdown");
+    expect(container.textContent).toContain("= provisional 71");
+    expect(container.textContent).not.toContain("score withheld");
   });
 
   it("binds report chat to the exact frozen version without sending client-authored evidence", () => {

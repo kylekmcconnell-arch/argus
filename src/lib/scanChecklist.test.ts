@@ -196,5 +196,21 @@ describe("personChecks", () => {
     expect(byLabel(checks, "Identity resolution")).toMatchObject({ status: "unknown" });
     expect(byLabel(checks, "Promoted-token performance")).toMatchObject({ status: "not-applicable" });
     expect(byLabel(checks, "Portfolio track record")).toMatchObject({ status: "not-applicable" });
+    expect(byLabel(checks, "Canonical project token")).toMatchObject({ status: "not-applicable" });
+  });
+
+  it("exposes the six project diligence lanes when PROJECT is held", () => {
+    const checks = personChecks({ roles: ["PROJECT"], hasAssociates: false });
+
+    for (const label of [
+      "Canonical project token",
+      "Product and website substance",
+      "Project team identity",
+      "Backing and partners",
+      "Traction and liveness",
+      "Transparency and disclosures",
+    ]) {
+      expect(byLabel(checks, label)).toMatchObject({ status: "unknown" });
+    }
   });
 });

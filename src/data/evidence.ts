@@ -109,6 +109,48 @@ export interface TraceStep {
   tone: "neutral" | "good" | "warn" | "bad";
 }
 
+/**
+ * Canonical token identity and market context for a project/organization
+ * account. This is separate from `promotions`: a project's own token is part of
+ * its capital and product surface, not a KOL-style call.
+ *
+ * The collector may freeze this record only when CoinGecko's official X handle
+ * matches the audited account or its official homepage matches the
+ * provider-returned profile website. A name or ticker match alone is never
+ * enough.
+ */
+export interface ProjectTokenSnapshot {
+  verified: true;
+  verification: "official_x" | "official_domain";
+  name: string;
+  symbol: string;
+  coingeckoId: string;
+  rank: number | null;
+  address: string;
+  chain: string;
+  homepage?: string;
+  officialX?: string;
+  sourceUrl: string;
+  capturedAt: string;
+  providers?: Array<"coingecko" | "dexscreener" | "geckoterminal">;
+  priceUsd?: number;
+  marketCapUsd?: number;
+  fdvUsd?: number;
+  volume24hUsd?: number;
+  liquidityUsd?: number;
+  pairAddress?: string;
+  history?: {
+    points: number[];
+    first: number;
+    last: number;
+    peak: number;
+    changePct: number;
+    drawdownPct: number;
+    timeframe: "day" | "hour";
+    poolAddress: string;
+  };
+}
+
 // A provider artifact frozen into the report that was available to the analyst
 // before scoring. These records are deliberately neutral about identity: a
 // court-caption or sanctions-name match is a lead tied to a source, not proof
@@ -258,6 +300,8 @@ export interface WebTeamMember {
   linkedin?: string;
   evidence?: string;
   source: string; // where it came from: web/LinkedIn search, post role-scan, X content
+  /** Exact fetched page that directly supports the person's project role. */
+  sourceUrl?: string;
   projects?: { name: string; role?: string }[]; // their OTHER projects (serial-founder web)
   /** Discovery-only model rows stay visible but are excluded from governing scoring. */
   evidence_origin?: EvidenceOrigin;
@@ -301,6 +345,8 @@ export interface CollectedEvidence {
   portfolioLeads?: PortfolioLead[]; // cited discovery candidates; never governing evidence
   profileAuthenticity?: ProfileAuthenticityResult;
   trustGraphScreen?: TrustGraphScreen;
+  /** Verified project-owned token identity and frozen market snapshot. */
+  projectToken?: ProjectTokenSnapshot;
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to

@@ -18,7 +18,7 @@ describe("adverse finding entity attribution", () => {
     expect(adverseSignalToFinding(signal)).toMatchObject({
       finding_type: "AdverseLead",
       claim: "@venture_account (scam accusation lead): A complaint page names the venture.",
-      verification_status: "Reported",
+      verification_status: "Rumor",
       evidence_origin: "model_lead",
       artifact_verified: false,
       finding_scope: {

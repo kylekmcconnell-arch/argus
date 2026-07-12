@@ -938,6 +938,15 @@ function personChecks(opts) {
   checks.push(hasAssociates ? { label: "Affiliations & associates", status: "confirmed", note: "associate records present in the dossier" } : { label: "Affiliations & associates", status: "unknown", note: "no collection outcome recorded; an empty dossier is not a confirmed clean result" });
   checks.push(roles.includes("KOL") ? { label: "Promoted-token performance", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` } : { label: "Promoted-token performance", status: "not-applicable", note: "not a KOL" });
   checks.push(roles.includes("INVESTOR") ? { label: "Portfolio track record", status: "unknown", note: `eligible by role; ${outcomeNotRecorded}` } : { label: "Portfolio track record", status: "not-applicable", note: "not a fund/investor" });
+  const projectChecks = [
+    { label: "Canonical project token", status: "unknown", note: outcomeNotRecorded },
+    { label: "Product and website substance", status: "unknown", note: outcomeNotRecorded },
+    { label: "Project team identity", status: "unknown", note: outcomeNotRecorded },
+    { label: "Backing and partners", status: "unknown", note: outcomeNotRecorded },
+    { label: "Traction and liveness", status: "unknown", note: outcomeNotRecorded },
+    { label: "Transparency and disclosures", status: "unknown", note: outcomeNotRecorded }
+  ];
+  checks.push(...projectChecks.map((check) => roles.includes("PROJECT") ? check : { ...check, status: "not-applicable", note: "not a project account" }));
   checks.push({ label: "News & press", status: "unknown", note: outcomeNotRecorded });
   checks.push(resolved && realName ? { label: "US legal history", status: "unknown", note: `eligible by resolved name; ${outcomeNotRecorded}` } : { label: "US legal history", status: "not-applicable", note: "needs a resolved real name" });
   checks.push(resolved && realName ? { label: "OFAC sanctions (name)", status: "unknown", note: `eligible by resolved name; ${outcomeNotRecorded}` } : { label: "OFAC sanctions (name)", status: "not-applicable", note: "needs a resolved real name" });

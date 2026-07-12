@@ -45,6 +45,7 @@ import { KolReport } from "./KolReport";
 import { NewsSection } from "./NewsSection";
 import { VcReport } from "./VcReport";
 import { ProjectIntel } from "./ProjectIntel";
+import { ProjectTokenCard } from "./ProjectTokenCard";
 import { changeReportLifecycle } from "../lib/reports";
 import { ServiceAlert } from "./ServiceAlert";
 import { LegalScreen } from "./LegalScreen";
@@ -215,11 +216,15 @@ function AxisBar({
 
 /* ── role card ────────────────────────────────────────────────────── */
 
-function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing: boolean; coverageReady: boolean }) {
+type RoleScoreState = "final" | "provisional" | "incomplete";
+
+function RoleCard({ rr, governing, scoreState }: { rr: RoleReport; governing: boolean; scoreState: RoleScoreState }) {
   const [open, setOpen] = useState(governing);
   const m = verdictMeta(rr.verdict);
   const role = ROLE_META[rr.role as SubjectClass];
   const axes = Object.entries(rr.axes);
+  const coverageReady = scoreState === "final";
+  const provisional = scoreState === "provisional";
 
   return (
     <Card className={governing ? "ring-1" : ""} >
@@ -241,7 +246,9 @@ function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing:
           <div className="mt-1 flex items-center gap-2">
             <VerdictPill verdict={rr.verdict} />
             {!coverageReady && rr.verdict === "PASS" && (
-              <span className="mono text-[11px] font-medium uppercase tracking-wide text-caution">scored axes only</span>
+              <span className="mono text-[11px] font-medium uppercase tracking-wide text-caution">
+                {provisional ? "provisional score" : "scored axes only"}
+              </span>
             )}
             {rr.cap_applied && (
               <span className="mono text-[11px] font-medium text-avoid">
@@ -254,7 +261,7 @@ function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing:
           <ScoreRing score={rr.score_total} verdict={rr.verdict} size={64} />
           {!coverageReady && (
             <span className="mono mt-0.5 block text-[9px] font-medium uppercase tracking-wide text-caution">
-              preliminary
+              {provisional ? "provisional" : "preliminary"}
             </span>
           )}
         </div>
@@ -264,7 +271,9 @@ function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing:
         <div className="overflow-hidden border-t border-line px-4 pb-3">
           {!coverageReady && (
             <p className="panel-inset mt-3 px-3 py-2 text-[11px] leading-relaxed text-caution" role="note">
-              Preliminary scored-axis breakdown. The final decision score is withheld until evidence coverage is complete.
+              {provisional
+                ? "Evidence-backed scored-axis breakdown. The score is provisional and final clearance remains withheld until the open evidence checks are resolved."
+                : "Preliminary scored-axis breakdown. The final decision score is withheld until evidence coverage is complete."}
             </p>
           )}
           <div className="divide-y divide-line/60">
@@ -290,9 +299,9 @@ function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing:
           )}
           <div className="mt-2 flex items-center justify-between px-1 text-[12.5px] text-ink-faint">
             <span>
-              {coverageReady ? "raw" : "preliminary raw axis total"} {rr.raw_total} {rr.dox_bonus ? `+ ${rr.dox_bonus} bonus` : ""}
+              {coverageReady ? "raw" : provisional ? "provisional raw axis total" : "preliminary raw axis total"} {rr.raw_total} {rr.dox_bonus ? `+ ${rr.dox_bonus} bonus` : ""}
             </span>
-            <span className="mono">= {coverageReady ? "" : "preliminary "}{rr.score_total ?? "N/A"}{rr.cap_applied ? " (capped)" : ""}</span>
+            <span className="mono">= {coverageReady ? "" : provisional ? "provisional " : "preliminary "}{rr.score_total ?? "N/A"}{rr.cap_applied ? " (capped)" : ""}</span>
           </div>
         </div>
       )}
@@ -1258,6 +1267,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     verdict: report.composite_verdict,
     score: report.governing_score,
     completeness: presentationCompleteness,
+    readiness: {
+      status: readiness.status,
+      coveragePercent: readiness.coveragePercent,
+      roleCount: roles.length,
+      decisionAxisTotal: readiness.decisionAxisTotal,
+      evidenceBackedAxes: readiness.evidenceBackedAxes,
+      neededEvidenceSummary: readiness.unresolved > 0
+        ? `${readiness.unresolved} of ${readiness.applicable} applicable evidence checks remain open.`
+        : "No open evidence checks remain.",
+    },
   });
   const readinessTitle = legacyCoverageNotCaptured ? "Coverage not captured" : readiness.title;
   const readinessGuidance = legacyCoverageNotCaptured
@@ -1266,10 +1285,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const presentedVerdict = presentation.displayVerdict === "UNVERIFIABLE"
     ? "UNVERIFIABLE_IDENTITY"
     : presentation.displayVerdict;
+  const roleScoreState: RoleScoreState = presentation.final
+    ? "final"
+    : presentation.displayVerdict === "PROVISIONAL"
+      ? "provisional"
+      : "incomplete";
   const m = verdictMeta(presentedVerdict);
   const verdictTextClass = presentedVerdict === "PASS"
     ? "text-pass"
-    : presentedVerdict === "CAUTION"
+    : presentedVerdict === "CAUTION" || presentedVerdict === "PROVISIONAL"
       ? "text-caution"
       : presentedVerdict === "FAIL"
         ? "text-fail"
@@ -1559,6 +1583,24 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   ].filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index).slice(0, 8);
 
   const unscoredIntelNarrative: ReportCanvasNarrativeItem[] = [
+    ...(f.projectToken ? [{
+      id: "intel-project-token",
+      title: `$${f.projectToken.symbol} is the verified project token.`,
+      detail: [
+        f.projectToken.rank != null ? `CoinGecko rank #${f.projectToken.rank}` : null,
+        f.projectToken.marketCapUsd != null ? `market cap $${Math.round(f.projectToken.marketCapUsd).toLocaleString()}` : null,
+        f.projectToken.chain,
+      ].filter(Boolean).join(" · "),
+      provenance: `Canonical token · verified via ${f.projectToken.verification === "official_x" ? "official X" : "official domain"}`,
+      href: "#project-token" as `#${string}`,
+    }] : []),
+    ...(f.sourceArtifacts ?? []).map((artifact, index) => ({
+      id: `intel-artifact-${artifact.contentHash || index}`,
+      title: artifact.title,
+      detail: artifact.excerpt,
+      provenance: `${artifact.provider} · ${artifact.match.replace(/_/g, " ")}`,
+      href: "#evidence-ledger" as `#${string}`,
+    })),
     ...publishableSubjectFindings.map((finding, index) => ({
       id: `intel-finding-${index}`,
       title: finding.claim,
@@ -1568,22 +1610,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         : "Verified finding · excluded because the scoring pass did not complete",
       href: "#publishable-findings" as `#${string}`,
     })),
-    ...investigativeLeads.map((lead, index) => ({
-      id: `intel-lead-${index}`,
-      title: lead.claim,
-      detail: "Investigative lead requiring target and source verification.",
-      provenance: `${lead.verification_status} lead · outside the score`,
-      href: "#investigative-leads" as `#${string}`,
-    })),
-    ...(f.sourceArtifacts ?? []).map((artifact, index) => ({
-      id: `intel-artifact-${artifact.contentHash || index}`,
-      title: artifact.title,
-      detail: artifact.excerpt,
-      provenance: `${artifact.provider} · ${artifact.match.replace(/_/g, " ")}`,
-      href: "#evidence-ledger" as `#${string}`,
-    })),
   ].filter((item, index, items) => items.findIndex((candidate) => candidate.title === item.title) === index).slice(0, 8);
-  const visibleIntelligenceCount = (f.sourceArtifacts?.length ?? 0)
+  const visibleIntelligenceCount = (f.projectToken ? 1 : 0)
+    + (f.sourceArtifacts?.length ?? 0)
     + publishableSubjectFindings.length
     + investigativeLeads.length;
 
@@ -1821,8 +1850,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </dl>
           </div>
 
-          <div className="order-2 flex flex-wrap items-center gap-5 border-t border-line/60 px-5 py-5">
-            <div className="shrink-0 text-center">
+          <div
+            className="order-2 flex flex-wrap items-center gap-5 border-t border-line/60 px-5 py-5 max-sm:grid max-sm:items-start max-sm:gap-4"
+            aria-label="Decision readiness result"
+          >
+            <div className="shrink-0 text-center max-sm:flex max-sm:items-center max-sm:gap-3 max-sm:text-left">
               <ScoreRing score={presentation.primaryScore ? report.governing_score : null} verdict={presentedVerdict} size={92} />
               <div className="mono mt-1 text-[11px] uppercase tracking-wider text-ink-faint">
                 {presentation.scoreLabel?.toLowerCase() ?? "score withheld"}
@@ -1834,10 +1866,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <span className={`display text-[44px] uppercase leading-none max-sm:text-[32px] ${verdictTextClass}`}>
                   {m.label}
                 </span>
-                {presentation.secondarySignal && <span className="chip tint-caution">{presentation.secondarySignal}</span>}
-                <span className={`chip ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`}>
-                  {readiness.status === "ready" ? "decision-ready" : readiness.status}
-                </span>
+                {presentation.secondarySignal && <span className="chip chip-wrap tint-caution">{presentation.secondarySignal}</span>}
+                {presentation.displayVerdict !== "PROVISIONAL" && (
+                  <span className={`chip ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`}>
+                    {readiness.status === "ready" ? "decision-ready" : readiness.status}
+                  </span>
+                )}
                 {report.governing_role && (
                   <span className="mono text-[11px] text-ink-dim">
                     governed by {ROLE_META[report.governing_role as SubjectClass].label.toLowerCase()}
@@ -1926,6 +1960,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             sticky={false}
             items={[
               { href: "#decision-summary", label: "Summary", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
+              ...(f.projectToken ? [{ href: "#project-token" as const, label: "Token", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
               { href: "#decision-basis", label: "Claims", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
               { href: "#identity-evidence", label: "Identity", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
               ...(visibleIntelligenceCount > 0 ? [{ href: "#evidence-ledger" as const, label: "Evidence", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount }] : []),
@@ -1934,6 +1969,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             ]}
           />
         </div>
+
+        {f.projectToken && (
+          <div className="pb-5">
+            <ProjectTokenCard
+              token={f.projectToken}
+              showCurrentIntelligence={showCurrentIntelligence}
+              onAudit={onAudit}
+            />
+          </div>
+        )}
 
         <div id="decision-summary" className="grid scroll-mt-28 gap-4 py-5 lg:grid-cols-[minmax(0,1fr)_19rem]">
           {decisionFrameworkUnavailable && (
@@ -2269,11 +2314,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               const others = report.role_reports.filter((rr) => rr.role !== report.governing_role);
               return (
                 <div className="space-y-3">
-                  {gov && <RoleCard key={gov.role} rr={gov} governing coverageReady={presentation.final} />}
+                  {gov && <RoleCard key={gov.role} rr={gov} governing scoreState={roleScoreState} />}
                   {others.length > 0 && (
                     <div className="grid gap-3 sm:grid-cols-2">
                       {others.map((rr) => (
-                        <RoleCard key={rr.role} rr={rr} governing={false} coverageReady={presentation.final} />
+                        <RoleCard key={rr.role} rr={rr} governing={false} scoreState={roleScoreState} />
                       ))}
                     </div>
                   )}
@@ -2619,7 +2664,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           {(() => {
             // PROJECT accounts: domain age + audit-claim check from the bio link.
-            const dom = (f.bio.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1] ?? "").toLowerCase();
+            const dom = (() => {
+              try {
+                return f.website ? new URL(f.website).hostname.replace(/^www\./i, "").toLowerCase() : "";
+              } catch {
+                return (f.bio.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1] ?? "").toLowerCase();
+              }
+            })();
             return showCurrentIntelligence && roles.some((r) => r === "PROJECT") && dom ? (
               <div className="min-w-0 lg:col-span-2">
                 <Section title="Project intelligence" kicker="domain age + claimed security audits; an established brand on a fresh domain is a contradiction">

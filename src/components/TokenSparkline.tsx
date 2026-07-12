@@ -16,18 +16,28 @@ function line(points: number[], w: number, h: number, pad = 1): string {
     .join(" ");
 }
 
-export function TokenSparkline({ address, chain, pairAddress, compact, hidePct }: { address: string; chain: string; pairAddress?: string; compact?: boolean; hidePct?: boolean }) {
-  const [hist, setHist] = useState<PriceHistory | null>(null);
-  const [state, setState] = useState<"loading" | "ok" | "none">("loading");
+export function TokenSparkline({ address, chain, pairAddress, compact, hidePct, history }: { address: string; chain: string; pairAddress?: string; compact?: boolean; hidePct?: boolean; history?: PriceHistory }) {
+  const [liveHistory, setLiveHistory] = useState<PriceHistory | null>(null);
+  const [liveState, setLiveState] = useState<"loading" | "ok" | "none">("loading");
   const ran = useRef(false);
 
   useEffect(() => {
+    if (history) return;
     if (ran.current) return;
     ran.current = true;
+    let active = true;
     fetchPriceHistory(address, chain, pairAddress)
-      .then((h) => { setHist(h); setState(h ? "ok" : "none"); })
-      .catch(() => setState("none"));
-  }, [address, chain, pairAddress]);
+      .then((h) => {
+        if (!active) return;
+        setLiveHistory(h);
+        setLiveState(h ? "ok" : "none");
+      })
+      .catch(() => { if (active) setLiveState("none"); });
+    return () => { active = false; };
+  }, [address, chain, history, pairAddress]);
+
+  const hist = history ?? liveHistory;
+  const state = history ? "ok" : liveState;
 
   if (state === "none") return compact ? <span className="text-[11px] text-ink-faint">no chart</span> : <div className="text-[12.5px] text-ink-faint">No historical price data indexed for this pool.</div>;
   if (state === "loading" || !hist) {
@@ -54,7 +64,7 @@ export function TokenSparkline({ address, chain, pairAddress, compact, hidePct }
   const poly = line(hist.points, w, h, 3);
   return (
     <div>
-      <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none" style={{ height: 120 }}>
+      <svg viewBox={`0 0 ${w} ${h}`} className="w-full" preserveAspectRatio="none" style={{ height: 120 }} role="img" aria-label={`${hist.timeframe} token price history`}>
         <defs>
           <linearGradient id={gid} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" stopColor={color} stopOpacity="0.22" />

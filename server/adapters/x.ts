@@ -314,7 +314,14 @@ export async function getRecentPostsMeta(handle: string, limit = 40): Promise<Po
 const num = (...v: any[]): number | undefined => { for (const x of v) if (typeof x === "number") return x; return undefined; };
 interface CorpusPost { text: string; at: number | null; views: number; likes: number; isReply: boolean; isRt: boolean; }
 
-const KW_IDENTITY = ["founder", "co-founder", "cofounder", "CEO", "CTO", "advisor", '"I built"', '"we built"', '"joined as"', "founded"];
+const KW_IDENTITY = [
+  "founder", "co-founder", "cofounder", "CEO", "CTO", "advisor",
+  '"I built"', '"we built"', '"joined as"', "founded",
+  // Project accounts often disclose public operators as a roster rather than
+  // repeating formal titles. These retrieval terms feed the strict project-
+  // owned role grammar below; they do not establish team membership by alone.
+  '"our team"', '"team member"', '"members of"', '"core team"',
+];
 const KW_LAUNCH = ["launching", "presale", "mint", "airdrop", "raised", "seed", "IDO", '"CA:"', "tokenomics", "whitelist"];
 const KW_ENDORSE = ["backed", "investors", "partnership", "gem", "100x", '"proud to"'];
 // A KOL's actual product is the CALL: without these, the corpus (tuned to founder
@@ -808,7 +815,7 @@ export async function discoverByMentions(handle: string, name?: string, oldHandl
 // posts (team intros, "meet the team", role announcements like "welcome @x as
 // our CTO") and in posts that tag them, long before any of it reaches a website.
 // This mines that content for team members the site/bio never listed.
-export interface TeamMember { name: string; handle?: string; role: string; evidence?: string; kind: "team" | "advisor"; linkedin?: string; source?: string; projects?: { name: string; role?: string }[] }
+export interface TeamMember { name: string; handle?: string; role: string; evidence?: string; kind: "team" | "advisor"; linkedin?: string; source?: string; sourceUrl?: string; projects?: { name: string; role?: string }[] }
 
 export async function findTeam(handle: string, name: string | undefined, posts: string[] = []): Promise<TeamMember[]> {
   const h = handle.replace(/^@/, "");
@@ -881,29 +888,49 @@ export async function enrichTeamIdentities(
 // Deterministic supplement: scan the account's OWN posts for role words (founder,
 // CEO, CTO, "our dev", advisor...) and the name or @handle sitting next to them.
 // Catches team the LLM search misses, straight from the project's own language.
-const ROLE_RE = /\b(co-?founders?|founders?|ceo|cto|coo|cfo|cmo|chief\s+\w+\s+officer|lead\s+(?:dev|developer|engineer)|core\s+(?:dev|team)|head\s+of\s+\w+|advisors?|our\s+(?:founder|ceo|cto|coo|team|dev|lead))\b/i;
-export function scanPostsForRoles(posts: string[]): TeamMember[] {
+const ROLE_SOURCE = "co-?founders?|founders?|ceo|cto|coo|cfo|cmo|chief\\s+\\w+\\s+officer|lead\\s+(?:dev|developer|engineer)|core\\s+(?:dev|team)|head\\s+of\\s+\\w+|advisors?|team\\s+members?|our\\s+(?:founder|ceo|cto|coo|team|dev|lead)";
+const regexEscape = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+export function scanPostsForRoles(posts: string[], projectName?: string): TeamMember[] {
   const out: TeamMember[] = [];
   const seen = new Set<string>();
   const add = (m: TeamMember) => { const k = (m.handle ?? m.name).toLowerCase(); if (seen.has(k)) return; seen.add(k); out.push(m); };
-  for (const raw of posts.slice(0, 25)) {
+  const project = projectName?.trim() ? regexEscape(projectName.trim()) : "";
+  const roleIsProjectOwned = (post: string, index: number, length: number, role: string): boolean => {
+    const window = post.slice(Math.max(0, index - 56), Math.min(post.length, index + length + 56));
+    const r = regexEscape(role).replace(/\\ /g, "\\s+");
+    const owner = project ? `(?:our|${project})` : "our";
+    return new RegExp(`\\b${owner}\\s+(?:own\\s+|core\\s+)?${r}\\b|\\b${r}\\s+(?:at|for)\\s+${owner}\\b`, "i").test(window);
+  };
+  for (const raw of posts.slice(0, 80)) {
     const p = String(raw ?? "");
-    const rm = p.match(ROLE_RE);
-    if (!rm) continue;
-    const role = rm[0].toLowerCase().replace(/^our\s+/, "");
-    const kind: "team" | "advisor" = /advisor/i.test(role) ? "advisor" : "team";
-    // @handle sitting in the same post as a role word
-    for (const hm of p.matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
-      add({ name: "@" + hm[1], handle: "@" + hm[1], role, kind, evidence: `role word "${role}" in the account's own post`, source: "post role-scan" });
+    // Bind a role only to the adjacent handle. The previous scan found one role
+    // anywhere in a long post and assigned it to every @mention, which could
+    // turn a guest founder or product account into the audited project's team.
+    // A model may keep broader candidates as leads; governing evidence requires
+    // this narrow, deterministic grammar or a fetched first-party document.
+    const before = new RegExp(`@([A-Za-z0-9_]{2,30})[^@\\n.!?]{0,32}\\b(${ROLE_SOURCE})\\b`, "gi");
+    for (const match of p.matchAll(before)) {
+      const role = match[2].toLowerCase().replace(/^our\s+/, "");
+      if (!roleIsProjectOwned(p, match.index, match[0].length, role)) continue;
+      const kind: "team" | "advisor" = /advisor/i.test(role) ? "advisor" : "team";
+      add({ name: `@${match[1]}`, handle: `@${match[1]}`, role, kind, evidence: `the official account placed @${match[1]} next to the role "${role}"`, source: "post role-scan" });
     }
-    // "Firstname Lastname" adjacent to a role word (best effort, capitalized pair).
-    // Exactly two capture groups (name-before-role | name-after-role) so indexing
-    // stays predictable.
-    const RW = "co-?founders?|founders?|ceo|cto|coo|cfo|cmo|advisors?";
-    const nm = p.match(new RegExp(`([A-Z][a-z]+\\s+[A-Z][a-z]+)[^.\\n]{0,18}\\b(?:${RW})\\b|\\b(?:${RW})\\b[^.\\n]{0,12}([A-Z][a-z]+\\s+[A-Z][a-z]+)`, "i"));
-    const name = nm ? (nm[1] || nm[2]) : undefined;
-    if (name && /^[A-Z][a-z]+\s+[A-Z][a-z]+$/.test(name)) {
-      add({ name, role, kind, evidence: `named next to the role word "${role}" in the account's own post`, source: "post role-scan" });
+    const after = new RegExp(`\\b(${ROLE_SOURCE})\\b(?!\\s+of\\b)[^@\\n.!?]{0,24}@([A-Za-z0-9_]{2,30})`, "gi");
+    for (const match of p.matchAll(after)) {
+      const role = match[1].toLowerCase().replace(/^our\s+/, "");
+      if (!roleIsProjectOwned(p, match.index, match[0].length, role)) continue;
+      const kind: "team" | "advisor" = /advisor/i.test(role) ? "advisor" : "team";
+      add({ name: `@${match[2]}`, handle: `@${match[2]}`, role, kind, evidence: `the official account placed the role "${role}" next to @${match[2]}`, source: "post role-scan" });
+    }
+    // Project accounts often identify several people as "members of the team"
+    // in one phrase. Capture the bounded handle list immediately before it.
+    const roster = new RegExp(`((?:@[A-Za-z0-9_]{2,30}[\\s,]*(?:and\\s+)?){1,4})(?:and\\s+other\\s+)?members?\\s+of\\s+(?:the\\s+)?[^\\n.!?]{0,32}?team\\b`, "gi");
+    for (const match of p.matchAll(roster)) {
+      const rosterOwner = project ? new RegExp(`members?\\s+of\\s+(?:the\\s+)?(?:our|${project})\\s+team\\b`, "i") : /members?\s+of\s+(?:the\s+)?our\s+team\b/i;
+      if (!rosterOwner.test(match[0])) continue;
+      for (const handle of match[1].matchAll(/@([A-Za-z0-9_]{2,30})/g)) {
+        add({ name: `@${handle[1]}`, handle: `@${handle[1]}`, role: "team member", kind: "team", evidence: `the official account named @${handle[1]} as a project team member`, source: "post role-scan" });
+      }
     }
   }
   return out.slice(0, 12);

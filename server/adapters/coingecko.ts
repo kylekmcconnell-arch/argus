@@ -4,6 +4,7 @@
 import type { Adapter, CollectContext } from "./types";
 import { recordCall } from "../cost";
 import { env } from "../config";
+import { SubjectClass } from "../../src/engine";
 
 const PRO = "https://pro-api.coingecko.com/api/v3";
 const PUBLIC = "https://api.coingecko.com/api/v3";
@@ -78,6 +79,9 @@ export const coingeckoAdapter: Adapter = {
   label: "CoinGecko",
   available: () => true, // public endpoint works without key (rate limited)
   async run(ctx: CollectContext) {
+    if (ctx.evidence.roles.includes(SubjectClass.PROJECT) && !ctx.evidence.roles.includes(SubjectClass.KOL)) {
+      return { state: "skipped" as const, attempts: 0, detail: "project-account token mentions are not KOL promotions" };
+    }
     const promos = ctx.evidence.promotions.filter((p) => p.contract_address && p.chain);
     if (!promos.length) return;
     ctx.emit({ phase: "On-chain", label: "Market data", detail: "Cross-referencing promoted tokens against CoinGecko (source of record)…", tone: "neutral" });

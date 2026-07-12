@@ -14,6 +14,7 @@ export const VERDICT_META: Record<string, VerdictMeta> = {
   FAIL: { label: "FAIL", color: "var(--color-fail)", glow: "rgba(234,88,12,0.08)", blurb: "Does not clear the bar. 0–39." },
   AVOID: { label: "AVOID", color: "var(--color-avoid)", glow: "rgba(220,38,38,0.09)", blurb: "A disqualifying finding caps the score." },
   UNVERIFIABLE_IDENTITY: { label: "UNVERIFIABLE", color: "var(--color-unverifiable)", glow: "rgba(124,58,237,0.08)", blurb: "Suspected impersonation blocks a verdict." },
+  PROVISIONAL: { label: "PROVISIONAL", color: "var(--color-caution)", glow: "rgba(217,119,6,0.08)", blurb: "Evidence-backed signal with open diligence checks." },
   INCOMPLETE: { label: "INCOMPLETE", color: "var(--color-ink-faint)", glow: "transparent", blurb: "Not enough evidence recorded." },
 };
 

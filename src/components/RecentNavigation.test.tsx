@@ -111,6 +111,7 @@ describe("Recent report controls", () => {
     const sidebarLink = [...container.querySelectorAll<HTMLAnchorElement>("aside a")]
       .find((link) => link.textContent?.includes("@gakonst") && link.textContent.includes("handle"));
     expect(sidebarLink).toBeDefined();
+    expect(sidebarLink?.textContent).toContain("handle · 83 · provisional");
     expect(sidebarLink?.getAttribute("href")).toBe("?s=gakonst&kind=person");
     await act(async () => sidebarLink?.click());
     expect(onOpenRecent).toHaveBeenLastCalledWith("gakonst", "person");

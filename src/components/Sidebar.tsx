@@ -28,7 +28,7 @@ import { useArgusAuth } from "../auth-context";
 import { ArgusMark } from "./ArgusMark";
 import { verdictMeta } from "../lib/verdict";
 import { getWatchlist } from "../lib/watchlist";
-import { mergedLog, presentedAuditVerdict, subscribeLog, type LogEntry } from "../lib/auditlog";
+import { auditReadinessLabel, mergedLog, subscribeLog, type LogEntry } from "../lib/auditlog";
 import { activeRuns, subscribeRuns } from "../lib/runner";
 import { activeScans, subscribeScans } from "../lib/activescans";
 import { activeScanRuns, subscribeScanRuns } from "../lib/scanrunner";
@@ -404,8 +404,8 @@ export function Sidebar({
           recent.map((e) => {
             const ref = e.ref ?? e.query;
             const kind = e.flags?.some((flag) => flag.toLowerCase() === "investigation") ? "investigation" : e.kind;
-            const displayedVerdict = presentedAuditVerdict(e);
-            const vm = displayedVerdict ? verdictMeta(displayedVerdict) : null;
+            const readinessLabel = auditReadinessLabel(e);
+            const vm = readinessLabel ? verdictMeta(readinessLabel) : null;
             const active = activeHandle === ref || activeHandle === e.query;
             const avatar = (e.query.replace(/^[@$]/, "").replace(/^https?:\/\//, "")[0] ?? "?").toUpperCase();
             return (
@@ -427,7 +427,7 @@ export function Sidebar({
                 <span className="min-w-0 flex-1">
                   <span className="mono block truncate text-[12.5px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
                   <span className="block truncate text-[11px] text-ink-faint">
-                    {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}{displayedVerdict === "INCOMPLETE" ? " · incomplete" : ""}
+                    {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}{readinessLabel === "PROVISIONAL" ? " · provisional" : readinessLabel === "INCOMPLETE" ? " · incomplete" : ""}
                     {e.contributor && e.contributor !== me && e.contributor !== "anonymous" && (
                       <span className="text-signal-lift"> · {e.contributor}</span>
                     )}

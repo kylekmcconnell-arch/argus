@@ -401,6 +401,12 @@ const ARTIFACT_ID = /^art_v1_[a-f0-9]{64}$/;
 const COVERAGE_ONLY_VERIFICATIONS = new Set<AxisEvidenceRecord["verification"]>(["checked_empty", "unavailable"]);
 const isSubstantiveArtifact = (artifact: AxisEvidenceRecord | undefined): artifact is AxisEvidenceRecord =>
   !!artifact && !COVERAGE_ONLY_VERIFICATIONS.has(artifact.verification);
+const UNRESOLVED_TEAM_IDENTITY_CLAIM = /(?:\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:remains?|is|are|was|were|appears?)\s+(?:still\s+)?(?:unresolved|unnamed|anonymous|unknown|incomplete|absent|missing)\b)|(?:\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:could\s+not\s+be|has\s+not\s+been|have\s+not\s+been)\s+(?:identified|named|resolved|verified|confirmed|corroborated|surfaced|disclosed|enumerated)\b)|(?:\b(?:unresolved|unnamed|anonymous|unknown|incomplete|absent|missing)\b(?:\s+[\w-]+){0,7}\s+\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\b(?:no|absent|absence\s+of|without|missing|lacks?)\s+(?:\w+\s+){0,6}(?:named\s+)?(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\babsence\s+of\s+named\s+(?:founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\b(?:named\s+)?(?:founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:(?:is|are|was|were)\s+)?not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b)/i;
+const describesGroundedTeamAsUnresolved = (value: string): boolean => {
+  if (UNRESOLVED_TEAM_IDENTITY_CLAIM.test(value)) return true;
+  const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  return /\bnamed\s+(?:founders?|co\s+founders?|leaders?|leadership|team|executives?|ceo)(?:\s+\w+){0,12}\s+not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b/.test(normalized);
+};
 
 // Claude can occasionally place the same substantive citation on both sides
 // of an axis despite the strict prompt. Preserve the conservative meaning of
@@ -465,6 +471,91 @@ export function normalizeAnalystSupportCounterOverlap(
   return value;
 }
 
+// Claude can also append a real citation from the wrong axis. Removing that
+// cross-axis reference is safe when the same row already contains at least one
+// substantive citation that is eligible for the requested axis. We never add a
+// citation the model did not choose; when no eligible support remains, strict
+// validation still rejects the row and the repair pass must try again.
+export function normalizeAnalystCitationEligibility(
+  value: unknown,
+  evidenceCatalog: AxisEvidenceRecord[],
+): unknown {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+  const root = value as Record<string, unknown>;
+  const aliasToArtifact = new Map<string, AxisEvidenceRecord>();
+  evidenceCatalog.forEach((artifact, index) => {
+    aliasToArtifact.set(artifact.artifactId, artifact);
+    aliasToArtifact.set(`e${String(index + 1).padStart(3, "0")}`, artifact);
+  });
+  const artifactFor = (ref: unknown): AxisEvidenceRecord | undefined => {
+    if (typeof ref !== "string") return undefined;
+    const key = /^e\d+$/i.test(ref) ? ref.toLowerCase() : ref;
+    return aliasToArtifact.get(key);
+  };
+  const eligibleValues = (
+    values: unknown[],
+    axis: string,
+    substantive: boolean,
+  ): string[] => {
+    return values.flatMap((value) => {
+      if (typeof value !== "string") return [];
+      const artifact = artifactFor(value);
+      if (
+        !artifact
+        || !artifact.eligibleAxes.includes(axis)
+        || isSubstantiveArtifact(artifact) !== substantive
+      ) return [];
+      return [value];
+    });
+  };
+  const normalizeRow = (candidate: unknown, axisHint?: string): unknown => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return candidate;
+    const row = candidate as Record<string, unknown>;
+    const axis = typeof row.axis === "string" ? row.axis : axisHint;
+    if (
+      !axis
+      || typeof row.primaryEvidenceRef !== "string"
+      || !Array.isArray(row.additionalEvidenceRefs)
+      || !Array.isArray(row.counterEvidenceRefs)
+      || !Array.isArray(row.coverageRefs)
+    ) return candidate;
+    const support = eligibleValues([row.primaryEvidenceRef, ...row.additionalEvidenceRefs], axis, true);
+    if (!support.length) return candidate;
+    const supportIds = new Set(support.map((ref) => artifactFor(ref)!.artifactId));
+    const counter = eligibleValues(row.counterEvidenceRefs, axis, true)
+      .filter((ref) => !supportIds.has(artifactFor(ref)!.artifactId));
+    const coverage = eligibleValues(row.coverageRefs, axis, false);
+    const changed = support[0] !== row.primaryEvidenceRef
+      || support.length - 1 !== row.additionalEvidenceRefs.length
+      || counter.length !== row.counterEvidenceRefs.length
+      || coverage.length !== row.coverageRefs.length;
+    return changed ? {
+      ...row,
+      primaryEvidenceRef: support[0],
+      additionalEvidenceRefs: support.slice(1),
+      counterEvidenceRefs: counter,
+      coverageRefs: coverage,
+    } : candidate;
+  };
+
+  if (Array.isArray(root.axes)) {
+    const rawAxes = root.axes;
+    const axes = rawAxes.map((row) => normalizeRow(row));
+    return axes.some((axis, index) => axis !== rawAxes[index]) ? { ...root, axes } : value;
+  }
+  if (root.axes && typeof root.axes === "object" && !Array.isArray(root.axes)) {
+    const entries = Object.entries(root.axes as Record<string, unknown>);
+    let changed = false;
+    const axes = Object.fromEntries(entries.map(([axis, row]) => {
+      const normalized = normalizeRow(row, axis);
+      changed ||= normalized !== row;
+      return [axis, normalized];
+    }));
+    return changed ? { ...root, axes } : value;
+  }
+  return value;
+}
+
 // Tool schemas constrain the shape Claude is asked to return, but provider
 // responses are still untrusted input. An analyst result is usable only when it
 // contains one (and only one) finite, in-range score for every requested axis.
@@ -509,6 +600,28 @@ export function validateAnalystVerdict(
       || !Array.isArray(artifact.eligibleAxes)
     ) return reject("invalid-evidence-catalog");
     artifacts.set(artifact.artifactId, artifact);
+  }
+
+  // This is a semantic invariant, not a writing preference. A scorer packet can
+  // contain a content-addressed, governing team artifact while the model still
+  // repeats a stale "identity unresolved" narrative from an unavailable person
+  // lookup. Do not publish that internal contradiction. The repair pass receives
+  // the rejection reason and must describe the named public team accurately.
+  const hasGroundedProjectTeam = expected.has("P1_team_and_identity")
+    && evidenceCatalog.some((artifact) =>
+      artifact.eligibleAxes.includes("P1_team_and_identity")
+      && isSubstantiveArtifact(artifact)
+      && (artifact.section === "team"
+        || (artifact.section === "checkOutcomes"
+          && artifact.operation === "checkOutcomes:project-team-identity")));
+  const axisNarrative = JSON.stringify(raw.axes ?? "");
+  if (
+    hasGroundedProjectTeam
+    && (describesGroundedTeamAsUnresolved(headline)
+      || describesGroundedTeamAsUnresolved(identityNote)
+      || describesGroundedTeamAsUnresolved(axisNarrative))
+  ) {
+    return reject("grounded-team-described-as-unresolved");
   }
 
   const artifactIdByAlias = new Map(
@@ -740,6 +853,32 @@ const compactScoringProfile = (value: unknown): Record<string, unknown> | undefi
     : prioritized;
 };
 
+const compactProjectToken = (value: unknown): Record<string, unknown> | undefined => {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const row = value as Record<string, unknown>;
+  const history = row.history && typeof row.history === "object" && !Array.isArray(row.history)
+    ? row.history as Record<string, unknown>
+    : undefined;
+  // The frozen OHLCV points belong in the investigator UI, not in the language
+  // model packet. Preserve the market and trend summary while keeping the
+  // scoring prompt small and deterministic.
+  return {
+    ...Object.fromEntries(Object.entries(row).flatMap(([key, item]) => {
+      if (key === "history") return [];
+      const compacted = compactObject(item, 1);
+      return compacted === undefined ? [] : [[key, compacted]];
+    })),
+    ...(history ? {
+      history: Object.fromEntries([
+        "first", "last", "peak", "changePct", "drawdownPct", "timeframe", "poolAddress",
+      ].flatMap((key) => {
+        const compacted = compactObject(history[key], 2);
+        return compacted === undefined ? [] : [[key, compacted]];
+      })),
+    } : {}),
+  };
+};
+
 const SOURCE_ARTIFACT_FIELDS = [
   "kind", "provider", "title", "sourceUrl", "capturedAt", "contentHash", "sourceContentHash",
   "publishedAt", "excerpt", "match", "coverageState", "relationship", "subjectName", "subjectHandle",
@@ -918,6 +1057,9 @@ const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
     "AG1_identity_legitimacy", "AG3_service_integrity", "AG4_reputation_fud", "AD1_identity_verifiability", "AD3_relationship_corroboration",
     "AD4_advisory_conduct", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation",
   ],
+  projectToken: [
+    "P3_token_conduct", "P5_traction_and_liveness",
+  ],
   // Findings are routed by exact finding_type below. A section-wide allowlist
   // made unrelated facts (for example, token collapse) eligible for identity.
   findings: [],
@@ -994,6 +1136,12 @@ const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
   "affiliations-associates": ["F2_track_record", "F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I4_testimonial_corroboration", "AD3_relationship_corroboration", "ME2_role_authenticity"],
   "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
+  "project-token-identity": ["P3_token_conduct"],
+  "project-product-substance": ["P2_product_substance", "P5_traction_and_liveness"],
+  "project-team-identity": ["P1_team_and_identity"],
+  "project-backing-partners": ["P4_backing_and_partners"],
+  "project-traction-liveness": ["P5_traction_and_liveness"],
+  "project-transparency": ["P3_token_conduct", "P6_transparency_integrity"],
   "vc-portfolio-track-record": ["I2_portfolio_quality"],
   "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
@@ -1098,9 +1246,20 @@ const eligibleAxesFor = (
 ): string[] => {
   const checkId = typeof value.checkId === "string" ? value.checkId : typeof value.check_id === "string" ? value.check_id : "";
   const findingType = typeof value.finding_type === "string" ? value.finding_type : "";
+  const projectTokenAxes = section === "projectToken"
+    ? [
+        "P3_token_conduct",
+        ...([value.marketCapUsd, value.volume24hUsd, value.liquidityUsd].some((metric) =>
+          typeof metric === "number" && Number.isFinite(metric) && metric > 0)
+          ? ["P5_traction_and_liveness"]
+          : []),
+      ]
+    : [];
   const eligible = section === "profile" && value.profile_collection_state !== "resolved"
     ? []
-    : section === "findings"
+    : section === "projectToken"
+      ? projectTokenAxes
+      : section === "findings"
       ? FINDING_AXIS_ELIGIBILITY[findingType] ?? []
     : section === "checkOutcomes" && checkId
     ? CHECK_AXIS_ELIGIBILITY[checkId] ?? []
@@ -1227,10 +1386,16 @@ const verificationFor = (
     if (qualifiedConnections.length > 0) return "verified";
     return "unavailable";
   }
+  if (section === "projectToken") {
+    return record.verified === true
+      && (record.verification === "official_x" || record.verification === "official_domain")
+      ? "verified"
+      : "unavailable";
+  }
   return "observed";
 };
 
-const DIRECT_SECTIONS = new Set(["profile", "profileAuthenticity", "findings", "wallets", "promotions", "recentActivity"]);
+const DIRECT_SECTIONS = new Set(["profile", "profileAuthenticity", "projectToken", "findings", "wallets", "promotions", "recentActivity"]);
 
 const providerFor = (section: string, payload: Record<string, unknown>): string => {
   const declared = recordText(payload, ["provider"], 100);
@@ -1238,6 +1403,13 @@ const providerFor = (section: string, payload: Record<string, unknown>): string 
   if (section === "profile") {
     const profileProvider = recordText(payload, ["profile_provider"], 100);
     if (profileProvider) return profileProvider;
+  }
+  if (section === "projectToken") {
+    const observed = Array.isArray(payload.providers)
+      ? payload.providers.filter((value): value is string =>
+          value === "coingecko" || value === "dexscreener" || value === "geckoterminal")
+      : [];
+    return observed.length ? [...new Set(observed)].join("/") : "coingecko";
   }
   const attributed = recordText(payload, ["source_author", "source"], 100);
   if (attributed) return attributed;
@@ -1296,7 +1468,7 @@ const makeAxisArtifact = (
   };
 };
 
-const SCORING_SINGLE_SECTIONS = ["profile", "profileAuthenticity", "trustGraphScreen"] as const;
+const SCORING_SINGLE_SECTIONS = ["profile", "profileAuthenticity", "trustGraphScreen", "projectToken"] as const;
 const SCORING_ARRAY_SECTIONS = [
   "findings", "ventures", "testimonials", "advised", "promotions", "wallets", "team",
   "notableFollowers", "recentActivity", "sourceArtifacts", "checkOutcomes",
@@ -1532,6 +1704,9 @@ function serializeAnalystEvidencePacket(
     profile: compactScoringProfile(input.profile),
     profileAuthenticity: compactProfileAuthenticity(input.profileAuthenticity),
     trustGraphScreen: compactTrustGraphScreen(input.trustGraphScreen),
+    projectToken: input.projectToken && typeof input.projectToken === "object" && !Array.isArray(input.projectToken)
+      ? compactProjectToken(input.projectToken)
+      : undefined,
     // Findings stay ahead of descriptive context in the budget. This prevents a
     // long social corpus from hiding the material facts that govern a verdict.
     findings,
@@ -1597,13 +1772,13 @@ function serializeAnalystEvidencePacket(
     "advised",
     "testimonials",
     "ventures",
-    "team",
     "providerRuns",
     "associates",
     "clientEngagements",
     "ventureTeams",
     "checkOutcomes",
     "sourceArtifacts",
+    "team",
   ];
   const render = () => options.axisCatalog
     ? renderScoringPacket(packet, options.axisCatalog)
@@ -1678,7 +1853,11 @@ function serializeAnalystEvidencePacket(
     }
   }
   let json = JSON.stringify(render());
-  const protectedEvidenceSections = new Set(["checkOutcomes", "sourceArtifacts"]);
+  // Named team rows are the human-readable identity proof behind the generic
+  // project-team check outcome. Keep them through the first pruning pass so a
+  // bounded packet cannot retain "2 team records confirmed" while dropping
+  // the actual founder names those records established.
+  const protectedEvidenceSections = new Set(["checkOutcomes", "sourceArtifacts", "team"]);
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
     if (!removeOneFrom(pruneOrder, (section) => !protectedEvidenceSections.has(section))) break;
     json = JSON.stringify(render());
@@ -1916,7 +2095,9 @@ export async function analyzeSubject(
     `run on behalf of a publicly named team is NORMAL and is NOT an anonymity red ` +
     `flag: do not score identity/backing axes as if the operators were anonymous, ` +
     `and do NOT write a headline that calls the founder identity "unresolved", ` +
-    `"unnamed", or "anonymous" when named leaders are present. Only treat identity ` +
+    `"unnamed", or "anonymous" when named leaders are present. The same applies ` +
+    `to identity notes, axis rationales, and gap lines: a licensed identity-provider ` +
+    `miss does not erase first-party founder evidence. Only treat identity ` +
     `as unresolved when the evidence genuinely names no one behind the project.\n\n` +
     `PROFILE PHOTO RULE: profileAuthenticity is a visual-integrity triage screen, ` +
     `not identity proof. A real-looking photo never establishes who operates the ` +
@@ -1981,8 +2162,9 @@ export async function analyzeSubject(
   );
   let rejectionReason = "unknown";
   let normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog);
+  normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
   if (normalizedRaw !== raw) {
-    console.info("[agent] normalized support/counter overlap with counter-evidence precedence");
+    console.info("[agent] normalized analyst citation placement before strict validation");
   }
   let validated = validateAnalystVerdict(
     normalizedRaw,
@@ -2007,7 +2189,9 @@ export async function analyzeSubject(
     const rejectedAxis = axisNames.find((axis) => rejectionReason.endsWith(`:${axis}`));
     const coverageLimitMatch = rejectionReason.match(/^coverage-reference-limit-observed-(\d+)-max-4:/);
     const supportCounterOverlap = rejectionReason.startsWith("support-counter-overlap:");
-    const rejectedAxisHint = rejectedAxis
+    const rejectedAxisHint = rejectionReason === "grounded-team-described-as-unresolved"
+      ? " The frozen packet contains substantive named-team artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge the public team. Do not claim there is no, absent, unnamed, unresolved, anonymous, unknown, or undisclosed project founder, operator, executive, leader, or team. Keep a failed licensed-identity-provider lookup separate from the first-party founder evidence; it does not erase the named team."
+      : rejectedAxis
       ? coverageLimitMatch
         ? ` The prior ${rejectedAxis} coverageRefs contained ${coverageLimitMatch[1]} aliases; ` +
           `the maximum is 4. Return no more than these four preferred aliases: ` +
@@ -2042,8 +2226,9 @@ export async function analyzeSubject(
     );
     rejectionReason = "unknown";
     normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog);
+    normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
     if (normalizedRaw !== raw) {
-      console.info("[agent] normalized repaired support/counter overlap with counter-evidence precedence");
+      console.info("[agent] normalized repaired citation placement before strict validation");
     }
     validated = validateAnalystVerdict(
       normalizedRaw,

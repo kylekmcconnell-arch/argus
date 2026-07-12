@@ -6,7 +6,17 @@ import {
   publicReportDescription,
   publicReportTitle,
   publicScoreLabel,
+  type PublicReportReadinessSummary,
 } from "./reportPresentation";
+
+const provisionalReadiness: PublicReportReadinessSummary = {
+  status: "provisional",
+  coveragePercent: 76,
+  roleCount: 1,
+  decisionAxisTotal: 6,
+  evidenceBackedAxes: 6,
+  neededEvidenceSummary: "3 of 13 applicable evidence checks remain open.",
+};
 
 describe("public report presentation policy", () => {
   it("never presents an incomplete positive report as final PASS", () => {
@@ -20,6 +30,70 @@ describe("public report presentation policy", () => {
       coverageLabel: "PARTIAL COVERAGE",
       primaryScore: "",
       secondarySignal: "PRELIMINARY MODEL SIGNAL · PASS 94/100",
+      final: false,
+    });
+  });
+
+  it("presents a fully supported PASS as provisional when only non-axis evidence checks remain open", () => {
+    const presentation = presentPublicReport({
+      verdict: "PASS",
+      score: 71,
+      completeness: "partial",
+      readiness: provisionalReadiness,
+    });
+
+    expect(presentation).toMatchObject({
+      rawVerdict: "PASS",
+      displayVerdict: "PROVISIONAL",
+      resultLabel: "DECISION READINESS",
+      readinessLabel: "ASSESSMENT PROVISIONAL",
+      coverageLabel: "PARTIAL COVERAGE",
+      primaryScore: "71",
+      scoreLabel: "PROVISIONAL SCORE",
+      secondarySignal: "PASS SIGNAL",
+      final: false,
+    });
+    expect(presentation.note).toContain("All 6 governing axes have frozen evidence support");
+    expect(presentation.note).toContain("3 of 13 applicable evidence checks remain open");
+    expect(presentation.note).toContain("Final clearance remains withheld");
+    expect(publicReportTitle("@jupiterexchange", presentation)).toBe(
+      "@jupiterexchange · PROVISIONAL · 71/100 · assessment provisional · ARGUS",
+    );
+  });
+
+  it.each([
+    ["readiness is incomplete", { status: "incomplete" }],
+    ["coverage is below 70%", { coveragePercent: 69 }],
+    ["routing did not resolve a role", { roleCount: 0 }],
+    ["scoring returned zero axes", { decisionAxisTotal: 0, evidenceBackedAxes: 0 }],
+    ["one governing axis lacks support", { evidenceBackedAxes: 5 }],
+    ["the evidence-gap summary is absent", { neededEvidenceSummary: "" }],
+    ["the coverage claim is internally inconsistent", { coveragePercent: 100 }],
+  ])("fails closed instead of presenting provisional when %s", (_case, override) => {
+    const presentation = presentPublicReport({
+      verdict: "PASS",
+      score: 71,
+      completeness: "partial",
+      readiness: { ...provisionalReadiness, ...override } as PublicReportReadinessSummary,
+    });
+
+    expect(presentation).toMatchObject({
+      displayVerdict: "INCOMPLETE",
+      primaryScore: "",
+      scoreLabel: null,
+      final: false,
+    });
+  });
+
+  it("fails closed when a provisional PASS score does not match the PASS band", () => {
+    expect(presentPublicReport({
+      verdict: "PASS",
+      score: 69,
+      completeness: "partial",
+      readiness: provisionalReadiness,
+    })).toMatchObject({
+      displayVerdict: "INCOMPLETE",
+      primaryScore: "",
       final: false,
     });
   });

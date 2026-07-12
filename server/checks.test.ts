@@ -83,6 +83,61 @@ describe("PersonCheckTracker", () => {
     }
     expect(byId(tracker, ["FOUNDER"], "promoted-token-performance")?.status).toBe("not-applicable");
     expect(byId(tracker, ["FOUNDER"], "vc-portfolio-track-record")?.status).toBe("not-applicable");
+    expect(byId(tracker, ["FOUNDER"], "project-token-identity")?.status).toBe("not-applicable");
+  });
+
+  it("uses project-specific coverage instead of treating the person checklist as complete", () => {
+    const tracker = new PersonCheckTracker();
+    for (const id of [
+      "identity-resolution",
+      "profile-photo-authenticity",
+      "code-footprint-github",
+      "identity-continuity",
+      "affiliations-associates",
+      "news-press",
+      "trust-graph-connections",
+      "project-token-identity",
+    ] as const) {
+      tracker.record({ id, status: "confirmed", note: `${id} completed`, provider: "test-provider" });
+    }
+
+    const checks = tracker.snapshot(["PROJECT"], { resolvedRealName: false });
+    expect(byId(tracker, ["PROJECT"], "project-token-identity")?.status).toBe("confirmed");
+    for (const id of [
+      "project-product-substance",
+      "project-team-identity",
+      "project-backing-partners",
+      "project-traction-liveness",
+      "project-transparency",
+    ]) {
+      expect(checks.find((check) => check.checkId === id)?.status).toBe("unknown");
+    }
+    expect(deriveDecisionReadiness(checks).status).not.toBe("ready");
+  });
+
+  it("keeps profile-photo integrity out of scope for a project-only brand account", () => {
+    const tracker = new PersonCheckTracker();
+    tracker.record({
+      id: "profile-photo-authenticity",
+      status: "confirmed",
+      note: "a profile image outcome was recorded before project routing completed",
+      provider: "profile-photo",
+    });
+
+    expect(byId(tracker, ["PROJECT"], "profile-photo-authenticity")).toMatchObject({
+      status: "not-applicable",
+      note: "not applicable to a project-only brand account",
+    });
+  });
+
+  it("keeps profile-photo integrity applicable when a project account also has a person role", () => {
+    const tracker = new PersonCheckTracker();
+
+    expect(byId(tracker, ["PROJECT", "FOUNDER"], "profile-photo-authenticity")).toMatchObject({
+      status: "unknown",
+      note: "server collector did not run a profile-photo integrity screen",
+    });
+    expect(byId(tracker, ["FOUNDER"], "profile-photo-authenticity")?.status).toBe("unknown");
   });
 
   it("records a genuinely unavailable provider without calling it successful", () => {
