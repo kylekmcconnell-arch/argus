@@ -37,14 +37,12 @@ import { DecisionBasis } from "./DecisionBasis";
 
 function VerdictPill({ verdict, size = "sm" }: { verdict: string; size?: "sm" | "lg" }) {
   const m = verdictMeta(verdict);
+  const fail = verdict === "FAIL";
   return (
     <span
-      className={`mono inline-flex items-center gap-1.5 rounded-full border font-semibold tracking-wider ${
-        size === "lg" ? "px-3 py-1 text-[13px]" : "px-2 py-0.5 text-[11px]"
-      }`}
-      style={{ borderColor: m.color, color: m.color, background: m.glow }}
+      className={`verdict-pill ${size === "lg" ? "verdict-pill-lg" : ""} ${fail ? "tint-fail" : "tint-var"}`}
+      style={fail ? undefined : ({ "--tint": m.color } as React.CSSProperties)}
     >
-      <span className="h-1.5 w-1.5 rounded-full" style={{ background: m.color }} />
       {m.label}
     </span>
   );
@@ -76,7 +74,7 @@ function ScoreRing({ score, verdict, size = 86 }: { score: number | null; verdic
         <span className="mono text-[22px] font-semibold leading-none tabular" style={{ color: m.color }}>
           {score == null ? "—" : score}
         </span>
-        <span className="mono text-[9px] text-ink-faint">/ 100</span>
+        <span className="mono text-[10px] text-ink-faint">/ 100</span>
       </div>
     </div>
   );
@@ -86,8 +84,8 @@ function Section({ title, kicker, children }: { title: string; kicker?: string; 
   return (
     <section className="mt-5">
       <div className="mb-2.5 flex items-baseline gap-2">
-        <h2 className="text-[13px] font-semibold tracking-tight text-ink">{title}</h2>
-        {kicker && <span className="text-[11.5px] text-ink-faint">{kicker}</span>}
+        <h2 className="text-[13.5px] font-semibold tracking-tight text-ink">{title}</h2>
+        {kicker && <span className="text-[12.5px] text-ink-faint">{kicker}</span>}
       </div>
       {children}
     </section>
@@ -96,7 +94,7 @@ function Section({ title, kicker, children }: { title: string; kicker?: string; 
 
 function Card({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`rounded-xl border border-line bg-panel/70 ${className}`}>{children}</div>
+    <div className={`panel ${className}`}>{children}</div>
   );
 }
 
@@ -106,7 +104,7 @@ function CopyAddr({ text }: { text: string }) {
   return (
     <button
       onClick={() => navigator.clipboard?.writeText(text).then(() => { setDone(true); setTimeout(() => setDone(false), 1200); })}
-      className="shrink-0 text-[10.5px] text-ink-faint transition hover:text-ink"
+      className="shrink-0 text-[11px] text-ink-faint transition hover:text-ink"
       title="Copy full address"
     >
       {done ? "copied" : "copy"}
@@ -152,11 +150,11 @@ function AxisBar({
           style={{ background: weak ? "var(--color-caution)" : color, width: `${ratio * 100}%`, transition: "width 0.7s ease-out" }}
         />
       </div>
-      {rationale && <p className="mt-1.5 text-[12px] leading-snug text-ink-faint">{rationale}</p>}
+      {rationale && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-faint">{rationale}</p>}
       {evidenceRefs && (
         <a
           href={`#decision-basis-${axis}`}
-          className="mt-1.5 inline-flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 rounded-md text-[11.5px] text-signal underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+          className="mt-1.5 inline-flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 rounded-md text-[12.5px] text-signal underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
         >
           <span>{evidenceRefs.length} evidence {evidenceRefs.length === 1 ? "artifact" : "artifacts"}</span>
           {(counterEvidenceRefs?.length ?? 0) > 0 && <span className="text-caution">{counterEvidenceRefs!.length} counter</span>}
@@ -183,27 +181,23 @@ function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing:
         aria-expanded={open}
         className="flex w-full cursor-pointer items-center gap-3 p-4 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
         onClick={() => setOpen((o) => !o)}
-        style={governing ? { boxShadow: `inset 0 0 0 1px ${m.color}40` } : undefined}
+        style={governing ? { boxShadow: `inset 0 0 0 1px color-mix(in oklab, ${m.color} 36%, transparent)` } : undefined}
       >
-        <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-line-2 bg-panel text-[15px]" style={{ color: m.color }}>
+        <span className="flex h-9 w-9 items-center justify-center rounded-lg border border-line-2 bg-panel-2 text-[15px]" style={{ color: m.color }}>
           {role.glyph}
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <span className="text-[13.5px] font-medium text-ink">{role.label}</span>
-            {governing && (
-              <span className="mono rounded border border-line px-1 py-0.5 text-[9px] uppercase tracking-wider text-ink-faint">
-                governs
-              </span>
-            )}
+            {governing && <span className="chip">governs</span>}
           </div>
-          <div className="mt-0.5 flex items-center gap-2">
+          <div className="mt-1 flex items-center gap-2">
             <VerdictPill verdict={rr.verdict} />
             {!coverageReady && rr.verdict === "PASS" && (
-              <span className="mono text-[9.5px] uppercase tracking-wide text-caution">scored axes only</span>
+              <span className="mono text-[11px] font-medium uppercase tracking-wide text-caution">scored axes only</span>
             )}
             {rr.cap_applied && (
-              <span className="mono text-[10.5px]" style={{ color: "var(--color-avoid)" }}>
+              <span className="mono text-[11px] font-medium text-avoid">
                 cap · {capLabel(rr.cap_applied)}
               </span>
             )}
@@ -230,12 +224,12 @@ function RoleCard({ rr, governing, coverageReady }: { rr: RoleReport; governing:
             ))}
           </div>
           {rr.dox_bonus > 0 && (
-            <div className="mt-2 flex items-center justify-between rounded-lg border border-line bg-panel-2/40 px-3 py-2 text-[12px]">
+            <div className="panel-inset mt-2 flex items-center justify-between px-3 py-2 text-[12.5px]">
               <span className="text-ink-dim">Disclosure bonus (identity verified)</span>
               <span className="mono text-pass">+{rr.dox_bonus}</span>
             </div>
           )}
-          <div className="mt-2 flex items-center justify-between px-1 text-[11.5px] text-ink-faint">
+          <div className="mt-2 flex items-center justify-between px-1 text-[12.5px] text-ink-faint">
             <span>
               raw {rr.raw_total} {rr.dox_bonus ? `+ ${rr.dox_bonus} bonus` : ""}
             </span>
@@ -269,7 +263,7 @@ function CorroborationTable({
 }) {
   return (
     <Card className="overflow-hidden">
-      <div className="grid grid-cols-[1.4fr_1fr_auto] gap-2 border-b border-line px-4 py-2 text-[10.5px] uppercase tracking-wider text-ink-faint">
+      <div className="grid grid-cols-[1.4fr_1fr_auto] gap-2 border-b border-line px-4 py-2 eyebrow">
         <span>Claimed endorser</span>
         <span>Public signal</span>
         <span className="text-right">Verdict</span>
@@ -281,7 +275,7 @@ function CorroborationTable({
               <div className="mono truncate text-[12.5px] text-ink">{r.who}</div>
               {r.rel && <div className="text-[11px] text-ink-faint">claims: {r.rel}</div>}
             </div>
-            <div className="text-[11.5px] text-ink-dim">
+            <div className="text-[12.5px] text-ink-dim">
               <span className={r.follows ? "text-ink-dim" : "text-ink-faint line-through/0"}>
                 {r.follows ? "follows" : "no follow"}
               </span>
@@ -376,7 +370,7 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
                 style={{ background: f.polarity > 0 ? "var(--color-pass)" : "var(--color-avoid)" }}
               />
               <div className="min-w-0 flex-1">
-                <p className="text-[13px] leading-snug text-ink">{f.claim}</p>
+                <p className="text-[13.5px] leading-snug text-ink">{f.claim}</p>
                 <div role="group" aria-label="Evidence provenance" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-ink-faint">
                   <span className="inline-flex items-center gap-1.5 rounded border border-line px-1.5 py-0.5">
                     <span>Status</span>
@@ -403,7 +397,7 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
                     rel="noopener noreferrer"
                     aria-label={`Open evidence source for finding ${i + 1} in a new tab: ${f.claim}`}
                     title={source.href}
-                    className="mono mt-2 inline-flex max-w-full items-center gap-1.5 text-[11px] text-signal-dim underline-offset-2 hover:text-signal hover:underline"
+                    className="link-ext mono mt-2 inline-flex max-w-full items-center gap-1.5 text-[11px]"
                   >
                     <span className="shrink-0 text-ink-faint">Source</span>
                     <span className="truncate">{source.label}</span>
@@ -450,12 +444,12 @@ function InvestigativeLeadsLedger({ leads, subject }: {
         return (
           <Card key={`${target}:${lead.claim}:${index}`} className="p-3.5">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="mono rounded border border-caution/50 bg-caution/5 px-1.5 py-0.5 text-[9.5px] uppercase tracking-wider text-caution">
+              <span className="chip tint-caution">
                 {relationship}
               </span>
               <span className="mono text-[11px] text-ink">{target}</span>
-              {scope?.relationship_label && <span className="text-[10.5px] text-ink-faint">· {scope.relationship_label}</span>}
-              <span className="mono ml-auto text-[9.5px] uppercase tracking-wide text-ink-faint">{attributionStatus}</span>
+              {scope?.relationship_label && <span className="text-[11px] text-ink-faint">· {scope.relationship_label}</span>}
+              <span className="chip ml-auto">{attributionStatus}</span>
             </div>
             <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{lead.claim}</p>
             <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
@@ -470,7 +464,7 @@ function InvestigativeLeadsLedger({ leads, subject }: {
                 rel="noopener noreferrer"
                 aria-label={`Open candidate source for investigative lead ${index + 1}: ${lead.claim}`}
                 title={source.href}
-                className="mono mt-2 inline-flex max-w-full items-center gap-1.5 text-[11px] text-signal-dim underline-offset-2 hover:text-signal hover:underline"
+                className="link-ext mono mt-2 inline-flex max-w-full items-center gap-1.5 text-[11px]"
               >
                 <span className="shrink-0 text-ink-faint">{verifiedAboutTarget ? "Verified target source" : "Candidate source"}</span>
                 <span className="truncate">{source.label}</span>
@@ -562,7 +556,7 @@ function ExactVersionLink({ reportVersionId, version, label = "Open exact report
       href={exactReportPath(reportVersionId)}
       target="_blank"
       rel="noopener noreferrer"
-      className="mono text-[10.5px] text-signal-dim underline-offset-2 hover:text-signal hover:underline"
+      className="link-ext mono text-[11px]"
     >
       {label}{version != null ? ` v${version}` : ""}
     </a>
@@ -612,37 +606,37 @@ function FrozenProfileAuthenticityPanel({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-[13.5px] font-medium text-ink">{PROFILE_CLASSIFICATION_LABEL[result.classification]}</span>
-              <span className="mono rounded border px-1.5 py-0.5 text-[9.5px] font-semibold tracking-wide" style={{ borderColor: `${tone}66`, color: tone }}>
+              <span className="chip tint-var" style={{ "--tint": tone } as React.CSSProperties}>
                 {stateLabel}
               </span>
-              {confidence != null && <span className="mono text-[10px] text-ink-faint">{confidence}% model confidence</span>}
+              {confidence != null && <span className="mono text-[11px] text-ink-faint">{confidence}% model confidence</span>}
             </div>
-            <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">{result.note}</p>
+            <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{result.note}</p>
             <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
               This screen can surface synthetic, stock-like, or public-figure image leads. It cannot prove image ownership, identity, or web-wide reuse.
             </p>
             {result.tells.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1.5" aria-label="Visible profile-image indicators">
                 {result.tells.map((tell) => (
-                  <span key={tell} className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">{tell}</span>
+                  <span key={tell} className="chip">{tell}</span>
                 ))}
               </div>
             )}
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 pt-3 text-[10.5px] text-ink-faint">
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 pt-3 text-[11px] text-ink-faint">
           {capturedAt && <span>Captured <time dateTime={result.capturedAt}>{capturedAt}</time></span>}
           <span className="mono" title={imageHash ?? undefined}>Source image SHA-256 {imageHash ? `${imageHash.slice(0, 12)}…` : "unavailable"}</span>
           {artifactHash && <span className="mono" title={artifactHash}>Artifact {artifactHash.slice(0, 12)}…</span>}
           {source && (
-            <a href={source.href} target="_blank" rel="noopener noreferrer" className="mono text-signal-dim underline-offset-2 hover:text-signal hover:underline">
+            <a href={source.href} target="_blank" rel="noopener noreferrer" className="link-ext mono">
               Open image source
             </a>
           )}
           <ExactVersionLink reportVersionId={reportVersionId} version={version} />
         </div>
         {imageHash && (
-          <p className="mt-2 text-[10.5px] leading-relaxed text-ink-faint">
+          <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
             {frozenImageData
               ? "The preview uses the exact image bytes retained with this report; the source-image hash verifies them."
               : source
@@ -682,10 +676,10 @@ function FrozenTrustGraphPanel({
       <Card className="overflow-hidden">
         <div className="p-4">
           <div className="flex flex-wrap items-center gap-2">
-            <span className="mono rounded border px-2 py-0.5 text-[10px] font-semibold tracking-wide" style={{ borderColor: `${tone}66`, color: tone }}>
+            <span className="chip tint-var" style={{ "--tint": tone } as React.CSSProperties}>
               {stateLabel}
             </span>
-            {screen.severity && risk && <span className="mono text-[10px] uppercase text-ink-faint">{screen.severity} policy tier</span>}
+            {screen.severity && risk && <span className="mono text-[11px] uppercase text-ink-faint">{screen.severity} policy tier</span>}
           </div>
           <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{screen.line}</p>
           <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
@@ -693,16 +687,16 @@ function FrozenTrustGraphPanel({
           </p>
 
           <dl className="mt-3 grid gap-2 sm:grid-cols-3">
-            <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
-              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Qualified reports</dt>
-              <dd className="mono mt-0.5 text-[14px] font-semibold text-ink">{screen.qualifiedContributionCount} / {screen.contributionCount}</dd>
+            <div className="stat-tile">
+              <dt className="stat-label">Qualified reports</dt>
+              <dd className="stat-value mt-0.5 font-semibold">{screen.qualifiedContributionCount} / {screen.contributionCount}</dd>
             </div>
-            <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
-              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Connections surfaced</dt>
-              <dd className="mono mt-0.5 text-[14px] font-semibold text-ink">{screen.connections.length}</dd>
+            <div className="stat-tile">
+              <dt className="stat-label">Connections surfaced</dt>
+              <dd className="stat-value mt-0.5 font-semibold">{screen.connections.length}</dd>
             </div>
-            <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
-              <dt className="text-[9.5px] uppercase tracking-wider text-ink-faint">Graph snapshot</dt>
+            <div className="stat-tile">
+              <dt className="stat-label">Graph snapshot</dt>
               <dd className="mono mt-0.5 truncate text-[11px] text-ink-dim" title={graphHash ?? undefined}>{graphHash ? `${graphHash.slice(0, 16)}…` : "hash unavailable"}</dd>
             </div>
           </dl>
@@ -711,25 +705,20 @@ function FrozenTrustGraphPanel({
         {screen.connections.length > 0 && (
           <div className="divide-y divide-line/60 border-t border-line/60">
             {screen.connections.map((connection) => {
-              const verdict = connection.otherVerdict ? verdictMeta(connection.otherVerdict) : null;
               return (
                 <article key={`${connection.other}:${connection.otherReportVersionId ?? "unversioned"}`} className="px-4 py-3.5">
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="mono text-[12.5px] font-medium text-ink">{connection.other}</span>
-                    {verdict && (
-                      <span className="mono rounded px-1.5 py-0.5 text-[9.5px] font-semibold" style={{ background: verdict.glow, color: verdict.color }}>
-                        {verdict.label}
-                      </span>
-                    )}
-                    <span className="mono rounded border border-line px-1.5 py-0.5 text-[9px] uppercase tracking-wide text-ink-faint">
+                    {connection.otherVerdict && <VerdictPill verdict={connection.otherVerdict} />}
+                    <span className={`chip ${connection.qualified ? "tint-pass" : ""}`}>
                       {connection.qualified ? "decision-qualified snapshot" : "context only"}
                     </span>
-                    {connection.direct && <span className="text-[10px] text-ink-faint">directly surfaced</span>}
+                    {connection.direct && <span className="text-[11px] text-ink-faint">directly surfaced</span>}
                     <span className="ml-auto">
                       <ExactVersionLink reportVersionId={connection.otherReportVersionId} label="Open exact connected report" />
                     </span>
                   </div>
-                  <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-ink-faint">
+                  <div className="mt-1.5 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ink-faint">
                     {connection.otherAttestation && <span>{connection.otherAttestation.replace(/_/g, " ")}</span>}
                     {connection.otherCompleteness && <span>{connection.otherCompleteness} coverage</span>}
                     {!connection.otherReportVersionId && <span>Exact report version unavailable</span>}
@@ -737,8 +726,8 @@ function FrozenTrustGraphPanel({
                   {connection.ties.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Frozen ties to ${connection.other}`}>
                       {connection.ties.map((tie) => (
-                        <span key={`${tie.key}:${tie.strength}`} className="rounded border border-line bg-void/35 px-2 py-1 text-[10.5px] text-ink-dim" title={[...tie.subjectEdgeTypes, ...tie.otherEdgeTypes].join(" · ")}>
-                          <span className="mono mr-1 text-[9px] uppercase text-ink-faint">{tie.strength}</span>
+                        <span key={`${tie.key}:${tie.strength}`} className="chip normal-case" title={[...tie.subjectEdgeTypes, ...tie.otherEdgeTypes].join(" · ")}>
+                          <span className="uppercase text-ink-faint">{tie.strength}</span>
                           {tie.label}
                         </span>
                       ))}
@@ -750,7 +739,7 @@ function FrozenTrustGraphPanel({
           </div>
         )}
 
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 px-4 py-3 text-[10.5px] text-ink-faint">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-t border-line/60 px-4 py-3 text-[11px] text-ink-faint">
           {capturedAt && <span>Captured <time dateTime={screen.capturedAt}>{capturedAt}</time></span>}
           <span className="mono" title={graphHash ?? undefined}>Graph snapshot SHA-256 {graphHash ? `${graphHash.slice(0, 12)}…` : "unavailable"}</span>
           <ExactVersionLink reportVersionId={reportVersionId} version={version} />
@@ -792,17 +781,17 @@ function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }
           return (
             <article id={`source-${artifact.contentHash}`} key={`${artifact.provider}:${artifact.contentHash}:${index}`} className="scroll-mt-24 px-4 py-3.5">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide text-ink-dim">
+                <span className="chip">
                   {SOURCE_KIND_LABEL[artifact.kind]}
                 </span>
-                <span className="mono text-[10px] uppercase tracking-wide text-ink-faint">{artifact.provider}</span>
-                <span className="mono rounded border px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide" style={{ borderColor: `${matchColor}66`, color: matchColor }}>
+                <span className="mono text-[11px] uppercase tracking-wide text-ink-faint">{artifact.provider}</span>
+                <span className="chip tint-var" style={{ "--tint": matchColor } as React.CSSProperties}>
                   {SOURCE_MATCH_LABEL[artifact.match]}
                 </span>
               </div>
-              <h3 className="mt-2 text-[13px] font-medium leading-snug text-ink">{artifact.title}</h3>
-              {artifact.excerpt && <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">{artifact.excerpt}</p>}
-              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[10.5px] text-ink-faint">
+              <h3 className="mt-2 text-[13.5px] font-medium leading-snug text-ink">{artifact.title}</h3>
+              {artifact.excerpt && <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{artifact.excerpt}</p>}
+              <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-faint">
                 {publishedAt && <span>Published <time dateTime={artifact.publishedAt}>{publishedAt}</time></span>}
                 {capturedAt && <span>Captured <time dateTime={artifact.capturedAt}>{capturedAt}</time></span>}
                 <span className="mono" title={hash ?? undefined}>SHA-256 {hash ? `${hash.slice(0, 12)}…` : "unavailable"}</span>
@@ -813,7 +802,7 @@ function FrozenSourceLedger({ artifacts }: { artifacts: FrozenSourceArtifact[] }
                   href={source.href}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="mono mt-2 inline-flex max-w-full items-center gap-1.5 text-[11px] text-signal-dim underline-offset-2 hover:text-signal hover:underline"
+                  className="link-ext mono mt-2 inline-flex max-w-full items-center gap-1.5 text-[11px]"
                   aria-label={`Open frozen ${SOURCE_KIND_LABEL[artifact.kind].toLowerCase()} source in a new tab: ${artifact.title}`}
                 >
                   <span className="shrink-0 text-ink-faint">Open source</span>
@@ -1090,27 +1079,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       {/* top bar */}
       <header className="sticky top-0 z-20 border-b border-line bg-void/85 backdrop-blur">
         <div className="mx-auto flex max-w-5xl items-center gap-3 px-5 py-3">
-          <button onClick={onReset} className="flex items-center gap-1.5 text-[13px] text-ink-dim transition hover:text-ink">
+          <button onClick={onReset} className="flex items-center gap-1.5 text-[13.5px] text-ink-dim transition hover:text-ink">
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 18l-6-6 6-6" /></svg>
             Audits
           </button>
           <span className="mono text-[11px] text-ink-faint">/ {report.audit_id}</span>
           <span
-            className="mono rounded border px-1.5 py-0.5 text-[10px] tracking-wider"
-            style={
-              versionContext || !f.live
-                ? { borderColor: "var(--color-line-2)", color: "var(--color-ink-faint)" }
-                : f.live
-                ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" }
-                : { borderColor: "var(--color-line-2)", color: "var(--color-ink-faint)" }
-            }
+            className={`chip ${!versionContext && f.live ? "tint-signal" : ""}`}
             title={versionContext ? `Frozen immutable report version ${versionContext.version}` : f.live ? "Collected live from data providers" : "Curated dossier (no provider keys configured)"}
           >
             {versionContext ? `SNAPSHOT v${versionContext.version}` : f.live ? "● LIVE SCAN" : "CURATED"}
           </span>
           <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
             {onRescan && (
-              <button onClick={onRescan} title="Run this audit again, fresh" className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
+              <button onClick={onRescan} title="Run this audit again, fresh" className="flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-[12.5px] tint-signal transition">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5" /></svg>
                 Rescan
               </button>
@@ -1120,7 +1102,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 type="button"
                 onClick={onOpenBrief}
                 title="Open the analyst decision brief anchored to this exact person case"
-                className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] font-medium text-ink transition hover:border-signal hover:text-signal"
+                className="btn-secondary px-3 py-1.5 text-[12.5px] font-medium"
               >
                 Case brief
               </button>
@@ -1131,34 +1113,34 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 disabled={shareState === "creating"}
                 aria-live="polite"
                 title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"}
-                className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:cursor-wait disabled:opacity-60"
+                className="btn-secondary px-3 py-1.5 text-[12.5px] disabled:cursor-wait disabled:opacity-60"
               >
                 {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied ✓" : shareState === "error" ? "Share failed · retry" : "Share"}
               </button>
             )}
             {canMutateWorkspace && (
-              <button onClick={watch} className="rounded-lg border px-3 py-1.5 text-[12.5px] transition" style={watched ? { borderColor: "var(--color-signal)", color: "var(--color-signal)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}>
+              <button onClick={watch} className={`rounded-lg border px-3 py-1.5 text-[12.5px] transition ${watched ? "tint-signal" : "btn-secondary"}`}>
                 {watched ? "★ Watching" : "☆ Watch"}
               </button>
             )}
             <button
               onClick={onReset}
-              className="rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+              className="btn-secondary px-3 py-1.5 text-[12.5px]"
             >
               New audit
             </button>
             {canArchive && (
               <details className="relative">
-                <summary className="list-none cursor-pointer rounded-lg border border-line px-3 py-1.5 text-[12.5px] text-ink-faint transition hover:border-line-2 hover:text-ink [&::-webkit-details-marker]:hidden">
+                <summary className="btn-secondary list-none cursor-pointer px-3 py-1.5 text-[12.5px] [&::-webkit-details-marker]:hidden">
                   More
                 </summary>
-                <div className="absolute right-0 top-full z-30 mt-1.5 w-56 rounded-xl border border-line bg-panel p-1.5 shadow-xl">
+                <div className="panel absolute right-0 top-full z-30 mt-1.5 w-56 p-1.5 shadow-xl">
                   <button
                     type="button"
                     onClick={() => void archive()}
                     disabled={archiveState === "archiving"}
                     title="Remove this case from active work while preserving its immutable evidence and history"
-                    className="w-full rounded-lg px-3 py-2 text-left text-[12px] text-ink-dim transition hover:bg-signal/10 hover:text-signal disabled:cursor-wait disabled:opacity-60"
+                    className="w-full rounded-lg px-3 py-2 text-left text-[12.5px] text-ink-dim transition hover:bg-signal/10 hover:text-signal disabled:cursor-wait disabled:opacity-60"
                   >
                     {archiveState === "archiving" ? "Archiving case…" : archiveState === "error" ? "Archive failed · retry" : "Archive case"}
                   </button>
@@ -1187,12 +1169,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         )}
         {persistencePending && (
-          <div className="mt-4 rounded-xl border border-line bg-panel px-4 py-3 text-[11.5px] text-ink-dim" role="status">
+          <div className="panel mt-4 px-4 py-3 text-[12.5px] text-ink-dim" role="status">
             Saving the immutable audit before post-scan intelligence runs…
           </div>
         )}
         {(persistenceFailed || persistenceMissingCapability) && (
-          <div className="mt-4 rounded-xl border border-caution/40 bg-caution/5 px-4 py-3 text-[11.5px] text-caution" role="alert">
+          <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
             Post-scan intelligence is paused because this audit is not safely bound to an immutable version. Rescan before spending on supplemental providers.
           </div>
         )}
@@ -1201,12 +1183,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         <div className="mt-6 flex flex-wrap items-start gap-4">
           <Avatar src={f.avatar_url || xAvatar(f.handle)} letter={f.avatar} size={56} rounded="rounded-2xl" letterClass="text-2xl" />
           <div className="min-w-0 flex-1">
-            <div className="flex flex-wrap items-center gap-2">
-              <h1 className="text-[19px] font-semibold tracking-tight text-ink">{f.display_name}</h1>
-              <span className="mono text-[13px] text-ink-faint">{f.handle}</span>
+            <div className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
+              <h1 className="display-sm text-[24px] leading-tight text-ink">{f.display_name}</h1>
+              <span className="mono text-[13.5px] text-ink-faint">{f.handle}</span>
             </div>
-            <p className="mt-1 max-w-2xl text-[13px] leading-relaxed text-ink-dim">{f.bio}</p>
-            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[11.5px] text-ink-faint">
+            <p className="mt-1 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">{f.bio}</p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-ink-faint">
               <span><span className="text-ink-dim">{f.followers}</span> followers</span>
               <span>joined {f.joined}</span>
               {typeof f.days_since_post === "number" && (
@@ -1217,7 +1199,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               )}
               <span className="flex items-center gap-1.5">
                 {roles.map((r) => (
-                  <span key={r} className="rounded border border-line px-1.5 py-0.5 text-ink-dim">
+                  <span key={r} className="chip">
                     {ROLE_META[r].glyph} {ROLE_META[r].label}
                   </span>
                 ))}
@@ -1235,15 +1217,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       href={`https://x.com/${n.handle}`}
                       target="_blank"
                       rel="noreferrer"
-                      className="mono rounded-md border px-1.5 py-0.5 text-[10.5px] transition hover:text-ink"
-                      style={big ? { borderColor: "var(--color-pass)", color: "var(--color-pass)" } : { borderColor: "var(--color-line)", color: "var(--color-ink-dim)" }}
+                      className={`chip normal-case tracking-normal transition hover:text-ink ${big ? "tint-pass" : ""}`}
                       title={`${n.label} · ${n.size} followers`}
                     >
-                      @{n.handle} <span className="text-ink-faint">{n.size}{n.label && n.label !== "high reach" ? ` · ${n.label}` : ""}</span>
+                      @{n.handle} <span className="opacity-70">{n.size}{n.label && n.label !== "high reach" ? ` · ${n.label}` : ""}</span>
                     </a>
                   );
                 })}
-                {f.notableFollowers.length > 10 && <span className="text-[10.5px] text-ink-faint">+{f.notableFollowers.length - 10} more</span>}
+                {f.notableFollowers.length > 10 && <span className="text-[11px] text-ink-faint">+{f.notableFollowers.length - 10} more</span>}
               </div>
             )}
           </div>
@@ -1251,30 +1232,28 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
         {/* verdict hero */}
         <div
-          className="relative mt-6 overflow-hidden rounded-2xl border bg-panel p-6 soft-shadow"
-          style={{ borderColor: `${m.color}55` }}
+          className="relative mt-6 overflow-hidden rounded-2xl border bg-panel soft-shadow"
+          style={{ borderColor: `color-mix(in oklab, ${m.color} 42%, transparent)` }}
         >
-          <div className="absolute right-0 top-0 h-full w-1/2" style={{ background: `radial-gradient(400px 200px at 100% 0%, ${m.glow}, transparent 70%)` }} />
-          <div className="relative flex flex-wrap items-center gap-6">
+          <div className="absolute right-0 top-0 h-full w-1/2" style={{ background: `radial-gradient(400px 200px at 100% 0%, color-mix(in oklab, ${m.color} 13%, transparent), transparent 70%)` }} />
+          <div className="relative flex flex-wrap items-center gap-6 p-6 pb-5">
             <div className="shrink-0 text-center">
-              <ScoreRing score={presentation.primaryScore ? report.governing_score : null} verdict={presentedVerdict} size={96} />
-              <div className="mono mt-1 text-[9.5px] uppercase tracking-wider text-ink-faint">
+              <ScoreRing score={presentation.primaryScore ? report.governing_score : null} verdict={presentedVerdict} size={104} />
+              <div className="mono mt-1.5 text-[11px] uppercase tracking-wider text-ink-dim">
                 {presentation.scoreLabel?.toLowerCase() ?? "score withheld"}
               </div>
             </div>
             <div className="min-w-0 flex-1">
-              <div className="mb-1 text-[11px] uppercase tracking-[0.2em] text-ink-faint">{presentation.resultLabel}</div>
-              <div className="flex flex-wrap items-center gap-3">
-                <span className="text-[34px] font-bold leading-none tracking-tight" style={{ color: m.color }}>
+              <div className="eyebrow mb-1.5">{presentation.resultLabel}</div>
+              <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+                <span className="display text-[44px] uppercase leading-none max-md:text-[32px]" style={{ color: m.color }}>
                   {m.label}
                 </span>
                 {presentation.secondarySignal && (
-                  <span className="mono rounded border px-2 py-1 text-[10px] uppercase tracking-wide" style={{ borderColor: "var(--color-caution)", color: "var(--color-caution)" }}>
-                    {presentation.secondarySignal}
-                  </span>
+                  <span className="chip tint-caution">{presentation.secondarySignal}</span>
                 )}
                 {report.governing_role && (
-                  <span className="mono mt-1 text-[12px] text-ink-faint">
+                  <span className="mono text-[11px] text-ink-dim">
                     governed by {ROLE_META[report.governing_role as SubjectClass].label.toLowerCase()}
                   </span>
                 )}
@@ -1283,20 +1262,24 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 {presentation.final ? f.headline : legacyCoverageNotCaptured ? readinessGuidance : presentation.note}
               </p>
               {!presentation.final && f.headline && (
-                <p className="mt-2 max-w-xl text-[11.5px] leading-relaxed text-ink-faint">
+                <p className="mt-2 max-w-xl text-[12.5px] leading-relaxed text-ink-faint">
                   <span className="text-ink-dim">Stored scored-evidence summary — not clearance:</span> {f.headline}
                 </p>
               )}
               {report.cap_applied && (
-                <div className="mt-3 inline-flex items-center gap-2 rounded-lg border px-2.5 py-1 text-[12px]" style={{ borderColor: "var(--color-avoid)", color: "var(--color-avoid)" }}>
-                  <span>▲</span> Hard cap · {capLabel(report.cap_applied)}
+                <div className="chip tint-avoid mt-3 font-medium">
+                  ▲ Hard cap · {capLabel(report.cap_applied)}
                 </div>
               )}
             </div>
           </div>
-          <div className="relative mt-5 border-t border-line/70 pt-4" aria-label="Due-diligence readiness">
+          <div
+            className="finding tint-var relative px-6 py-4"
+            style={{ "--tint": readinessColor } as React.CSSProperties}
+            aria-label="Due-diligence readiness"
+          >
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <span className="mono text-[10.5px] uppercase tracking-[0.16em]" style={{ color: readinessColor }}>
+              <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">
                 {readinessTitle}
               </span>
               <span className="text-[11px] text-ink-faint">
@@ -1311,7 +1294,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               )}
             </div>
             {versionContext && (
-              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-ink-faint" aria-label="Immutable report version metadata">
+              <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-ink-faint" aria-label="Immutable report version metadata">
                 <span className="mono uppercase tracking-wide">{versionContext.completenessState} version</span>
                 {attestationLabel && <span>{attestationLabel}</span>}
                 {capturedLabel && <span>captured {capturedLabel}</span>}
@@ -1320,16 +1303,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             )}
             {legacyCoverageNotCaptured ? (
               <>
-                <div className="mt-3 flex flex-wrap items-center gap-3 rounded-xl border border-caution/35 bg-caution/5 px-4 py-3">
+                <div className="panel-inset mt-3 flex flex-wrap items-center gap-3 px-4 py-3">
                   <div className="min-w-0 flex-1">
-                    <div className="text-[12px] font-medium text-ink">Frozen coverage unavailable</div>
-                    <p className="mt-1 max-w-2xl text-[11.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
+                    <div className="text-[12.5px] font-medium text-ink">Frozen coverage unavailable</div>
+                    <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
                   </div>
                   {onRescan && (
                     <button
                       type="button"
                       onClick={onRescan}
-                      className="mono min-h-11 shrink-0 rounded-lg border border-signal px-3 py-2 text-[11px] font-medium text-signal transition hover:bg-signal/10 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
+                      className="btn-chip tint-signal min-h-11 shrink-0 font-medium"
                     >
                       Rescan to capture coverage
                     </button>
@@ -1346,17 +1329,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             ) : (
               <>
                 <dl className="mt-3 grid gap-2 sm:grid-cols-3">
-                  <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
-                    <dt className="text-[10px] uppercase tracking-wider text-ink-faint">Evidence coverage</dt>
-                    <dd className="mono mt-0.5 text-[16px] font-semibold text-ink">{readiness.coveragePercent}%</dd>
+                  <div className="stat-tile">
+                    <dt className="stat-label">Evidence coverage</dt>
+                    <dd className="stat-value mt-0.5 font-semibold">{readiness.coveragePercent}%</dd>
                   </div>
-                  <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
-                    <dt className="text-[10px] uppercase tracking-wider text-ink-faint">Recorded outcomes</dt>
-                    <dd className="mono mt-0.5 text-[16px] font-semibold text-ink">{readiness.successful} / {readiness.applicable}</dd>
+                  <div className="stat-tile">
+                    <dt className="stat-label">Recorded outcomes</dt>
+                    <dd className="stat-value mt-0.5 font-semibold">{readiness.successful} / {readiness.applicable}</dd>
                   </div>
-                  <div className="rounded-lg border border-line/70 bg-void/35 px-3 py-2">
-                    <dt className="text-[10px] uppercase tracking-wider text-ink-faint">Unresolved checks</dt>
-                    <dd className="mono mt-0.5 text-[16px] font-semibold" style={{ color: readiness.unresolved ? readinessColor : "var(--color-ink)" }}>{readiness.unresolved}</dd>
+                  <div className="stat-tile">
+                    <dt className="stat-label">Unresolved checks</dt>
+                    <dd className="stat-value mt-0.5 font-semibold" style={{ color: readiness.unresolved ? readinessColor : "var(--color-ink)" }}>{readiness.unresolved}</dd>
                   </div>
                 </dl>
                 <div className="mt-3">
@@ -1368,7 +1351,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   />
                 </div>
                 {presentation.final && (
-                  <p className="mt-3 text-[11.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
+                  <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
                 )}
               </>
             )}
@@ -1395,7 +1378,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {report.governing_role !== "KOL" && webTeam && webTeam.length > 0 ? (
           <div className="mt-3">
             <div className="mb-1.5 flex flex-wrap items-center gap-2">
-              <span className="mono rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: "var(--color-line-2)", color: "var(--color-ink-dim)" }}>{report.identity_confidence}</span>
+              <span className="chip normal-case">{report.identity_confidence}</span>
               <span className="text-[11px] text-ink-faint">identity resolved through the named team · click a handle to audit them</span>
             </div>
             <Card className="divide-y divide-line/60">
@@ -1403,32 +1386,32 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <div key={i} className="px-4 py-2.5 text-[12.5px]">
                   <div className="flex items-start justify-between gap-3">
                     <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                      <Avatar src={personAvatar(p.handle, p.linkedin)} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[9px]" />
+                      <Avatar src={personAvatar(p.handle, p.linkedin)} letter={(p.name.replace(/^@/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
                       <span className="text-ink">{p.name}</span>
                       {p.handle && <span className="mono text-[11px] text-ink-faint">{p.handle}</span>}
-                      <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-dim">{p.role}</span>
+                      <span className="chip shrink-0">{p.role}</span>
                       {p.linkedin && (
-                        <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                        <a href={`https://${p.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                       )}
-                      {p.evidence && <span className="text-[10.5px] text-ink-faint">· {p.evidence}</span>}
-                      <span className="text-[9.5px] text-ink-faint">({p.source})</span>
+                      {p.evidence && <span className="text-[11px] text-ink-faint">· {p.evidence}</span>}
+                      <span className="text-[11px] text-ink-faint">({p.source})</span>
                     </span>
                     {p.handle && onAudit ? (
-                      <button onClick={() => onAudit(p.handle!)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>audit →</button>
+                      <button onClick={() => onAudit(p.handle!)} className="btn-chip tint-signal shrink-0">audit →</button>
                     ) : (
-                      <span className="mono shrink-0 text-[10.5px] text-ink-faint">named only</span>
+                      <span className="mono shrink-0 text-[11px] text-ink-faint">named only</span>
                     )}
                   </div>
                   {p.projects && p.projects.length > 0 && (
-                    <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-[26px] text-[10.5px] text-ink-faint">
+                    <div className="mt-1 flex flex-wrap items-center gap-1.5 pl-[26px] text-[11px] text-ink-faint">
                       <span>also:</span>
                       {p.projects.map((pr, j) => (
                         onOpenProject ? (
-                          <button key={j} onClick={() => onOpenProject(pr.name, undefined, panelCostToken)} title="Dig everyone on this project" className="rounded border border-line px-1.5 py-0.5 text-ink-dim transition hover:border-signal-dim hover:text-signal-dim">
+                          <button key={j} onClick={() => onOpenProject(pr.name, undefined, panelCostToken)} title="Dig everyone on this project" className="btn-chip tint-signal normal-case">
                             {pr.name}{pr.role ? <span className="text-ink-faint"> · {pr.role}</span> : null}
                           </button>
                         ) : (
-                          <span key={j} className="rounded border border-line px-1.5 py-0.5 text-ink-dim">{pr.name}{pr.role ? ` · ${pr.role}` : ""}</span>
+                          <span key={j} className="chip normal-case">{pr.name}{pr.role ? ` · ${pr.role}` : ""}</span>
                         )
                       ))}
                     </div>
@@ -1437,20 +1420,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               ))}
             </Card>
             {f.prior_handles && f.prior_handles.length > 0 && (
-              <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: "var(--color-caution)" }}>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-caution">
                 ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
               </p>
             )}
           </div>
         ) : (
-          <div className="mt-3 flex items-start gap-3 rounded-xl border border-line bg-panel/40 px-4 py-3">
-            <span className="mono mt-0.5 rounded border px-1.5 py-0.5 text-[10.5px]" style={{ borderColor: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-line-2)", color: report.identity_confidence === "SuspectedImpersonation" ? "var(--color-unverifiable)" : "var(--color-ink-dim)" }}>
+          <div className="panel mt-3 flex items-start gap-3 px-4 py-3">
+            <span className={`chip normal-case mt-0.5 ${report.identity_confidence === "SuspectedImpersonation" ? "tint-unverifiable" : ""}`}>
               {report.identity_confidence}
             </span>
             <div className="min-w-0">
               <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.identity_note}</p>
               {f.prior_handles && f.prior_handles.length > 0 && (
-                <p className="mt-1.5 text-[12px] leading-relaxed" style={{ color: "var(--color-caution)" }}>
+                <p className="mt-1.5 text-[12.5px] leading-relaxed text-caution">
                   ▲ Rebrand: previously {f.prior_handles.map((h) => `@${h}`).join(", ")}. A handle change can be a fresh-start move to shed an old reputation.
                 </p>
               )}
@@ -1461,23 +1444,23 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {webTeamLeads.length > 0 && (
           <div className="mt-3">
             <div className="mb-1.5 flex flex-wrap items-center gap-2">
-              <span className="mono rounded border border-caution/45 px-1.5 py-0.5 text-[10.5px] text-caution">Investigative team candidates</span>
+              <span className="chip tint-caution">Investigative team candidates</span>
               <span className="text-[11px] text-ink-faint">unverified leads · not identity proof · not scored or sent to report chat</span>
             </div>
             <Card className="divide-y divide-line/60 border-caution/25">
               {webTeamLeads.map((member, index) => (
-                <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-[12px]">
+                <div key={`${member.name}:${member.role}:${member.source}:${index}`} className="flex flex-wrap items-center gap-x-2 gap-y-1 px-4 py-2.5 text-[12.5px]">
                   <span className="font-medium text-ink-dim">{member.name}</span>
-                  <span className="mono rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-faint">{member.role}</span>
-                  {member.handle && <span className="mono text-[10.5px] text-caution">candidate {member.handle}</span>}
-                  {member.linkedin && <span className="text-[10.5px] text-ink-faint">LinkedIn candidate recorded</span>}
-                  <span className="text-[10px] text-ink-faint">{member.provider ?? member.source}</span>
-                  {member.evidence && <span className="min-w-full text-[10.5px] leading-relaxed text-ink-faint">{member.evidence}</span>}
+                  <span className="chip">{member.role}</span>
+                  {member.handle && <span className="mono text-[11px] text-caution">candidate {member.handle}</span>}
+                  {member.linkedin && <span className="text-[11px] text-ink-faint">LinkedIn candidate recorded</span>}
+                  <span className="text-[11px] text-ink-faint">{member.provider ?? member.source}</span>
+                  {member.evidence && <span className="min-w-full text-[11px] leading-relaxed text-ink-faint">{member.evidence}</span>}
                   {member.handle && onAudit && (
                     <button
                       type="button"
                       onClick={() => onAudit(member.handle!)}
-                      className="mono ml-auto min-h-11 rounded-md border border-caution/45 px-2.5 py-1 text-[10.5px] text-caution transition hover:bg-caution/5 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-caution"
+                      className="btn-chip tint-caution ml-auto min-h-11"
                     >
                       verify →
                     </button>
@@ -1496,12 +1479,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 const sc = c.severity === "high" ? "var(--color-avoid)" : c.severity === "medium" ? "var(--color-caution)" : "var(--color-ink-faint)";
                 return (
                   <div key={i} className="flex items-start gap-2.5 px-4 py-3">
-                    <span className="mono mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] uppercase" style={{ background: `${sc}1a`, color: sc }}>{c.severity}</span>
+                    <span className="chip tint-var mt-0.5 shrink-0" style={{ "--tint": sc } as React.CSSProperties}>{c.severity}</span>
                     <div className="min-w-0 text-[12.5px] leading-snug">
                       <span className="text-ink">{c.claim}</span>
                       <span className="text-ink-faint"> — but </span>
                       <span className="text-ink-dim">{c.conflict}</span>
-                      {c.confidence === "low" && <span className="ml-1.5 text-[10.5px] text-ink-faint">(low confidence)</span>}
+                      {c.confidence === "low" && <span className="ml-1.5 text-[11px] text-ink-faint">(low confidence)</span>}
                     </div>
                   </div>
                 );
@@ -1538,11 +1521,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 return (
                   <div key={c.other} className="flex items-start justify-between gap-3 px-4 py-2.5">
                     <div className="flex min-w-0 items-start gap-2">
-                      <Avatar src={/^@[A-Za-z0-9_]{2,30}$/.test(c.other) ? xAvatar(c.other) : null} letter={(c.other.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[9px]" />
+                      <Avatar src={/^@[A-Za-z0-9_]{2,30}$/.test(c.other) ? xAvatar(c.other) : null} letter={(c.other.replace(/^[@$]/, "")[0] ?? "?").toUpperCase()} size={20} rounded="rounded-full" letterClass="text-[10px]" />
                       <div className="min-w-0">
                       <span className="mono text-[12.5px] text-ink">{c.other}</span>
-                      {vm && <span className="mono ml-2 text-[10px]" style={{ color: vm.color }}>{vm.label}</span>}
-                      <div className="mt-0.5 text-[11.5px] leading-snug text-ink-dim">
+                      {vm && <span className={`verdict-pill ml-2 ${c.otherVerdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={c.otherVerdict === "FAIL" ? undefined : ({ "--tint": vm.color } as React.CSSProperties)}>{vm.label}</span>}
+                      <div className="mt-0.5 text-[12.5px] leading-snug text-ink-dim">
                         {c.direct && <span>directly linked{c.ties.length > 0 ? " · " : ""}</span>}
                         {c.ties.length > 0 && (
                           <span>via {c.ties.map((t, ti) => (
@@ -1560,7 +1543,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       </div>
                     </div>
                     {onAudit && (
-                      <button onClick={() => onAudit(c.other)} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>open →</button>
+                      <button onClick={() => onAudit(c.other)} className="btn-chip tint-signal shrink-0">open →</button>
                     )}
                   </div>
                 );
@@ -1607,15 +1590,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       return (
                         <div key={i} className="px-4 py-2.5 text-[12.5px]">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] uppercase tracking-wide text-ink-faint">
+                            <span className="chip shrink-0">
                               {w.chain === "solana" ? "SOL" : "EVM"}
                             </span>
-                            <a href={explorer(w)} target="_blank" rel="noreferrer" className="mono truncate text-signal underline-offset-2 hover:underline">{shortAddr(w.address)}</a>
+                            <a href={explorer(w)} target="_blank" rel="noreferrer" className="mono link-ext truncate">{shortAddr(w.address)}</a>
                             <CopyAddr text={w.address} />
                             {w.link_evidence_url && (
-                              <a href={w.link_evidence_url} target="_blank" rel="noreferrer" className="shrink-0 text-[10.5px] text-signal-dim hover:underline">proof</a>
+                              <a href={w.link_evidence_url} target="_blank" rel="noreferrer" className="link-ext shrink-0 text-[11px]">proof</a>
                             )}
-                            <span className="mono ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[9.5px]" style={{ color: t.color, border: `1px solid ${t.color}40` }}>
+                            <span className="chip tint-var ml-auto shrink-0" style={{ "--tint": t.color } as React.CSSProperties}>
                               {t.label}
                             </span>
                           </div>
@@ -1627,10 +1610,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                           {(flags.length > 0 || w.positive_signals) && (
                             <div className="mt-1.5 flex flex-wrap gap-1">
                               {flags.map((fl) => (
-                                <span key={fl} className="mono rounded border border-avoid/40 px-1 py-0.5 text-[9.5px] text-avoid">{fl}</span>
+                                <span key={fl} className="chip tint-avoid">{fl}</span>
                               ))}
                               {w.positive_signals && (
-                                <span className="mono rounded border border-pass/40 px-1 py-0.5 text-[9.5px] text-pass">{w.positive_signals}</span>
+                                <span className="chip tint-pass">{w.positive_signals}</span>
                               )}
                             </div>
                           )}
@@ -1660,15 +1643,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                         ) : (
                           <span className="truncate text-ink">{v.project_name}</span>
                         )}
-                        <span className="mono shrink-0 rounded border border-line px-1 py-0.5 text-[9.5px] text-ink-dim">{v.role}</span>
+                        <span className="chip shrink-0">{v.role}</span>
                         {v.period && <span className="shrink-0 text-[11px] text-ink-faint">{v.period}</span>}
                         {v.evidence_url && (
-                          <a href={v.evidence_url} target="_blank" rel="noreferrer" className="shrink-0 text-[10.5px] text-signal-dim hover:underline">source</a>
+                          <a href={v.evidence_url} target="_blank" rel="noreferrer" className="link-ext shrink-0 text-[11px]">source</a>
                         )}
-                        <span
-                          className="mono ml-auto shrink-0 text-[10px]"
-                          style={{ color: corroborated ? "var(--color-pass)" : "var(--color-ink-faint)" }}
-                        >
+                        <span className={`mono ml-auto shrink-0 text-[11px] ${corroborated ? "text-pass" : "text-ink-faint"}`}>
                           {corroborated ? "corroborated" : isLead ? "lead" : ""}
                         </span>
                       </div>
@@ -1693,12 +1673,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <Card className="p-4">
                   <div className="flex items-center gap-4">
                     <div>
-                      <div className="text-[11px] uppercase tracking-wider text-ink-faint">Pattern</div>
+                      <div className="eyebrow">Pattern</div>
                       <div className="mono text-[15px] font-medium text-ink">{founderSummary.pattern}</div>
                     </div>
                     <div className="h-8 w-px bg-line" />
                     <div>
-                      <div className="text-[11px] uppercase tracking-wider text-ink-faint">Repeat backing</div>
+                      <div className="eyebrow">Repeat backing</div>
                       <div
                         className="mono text-[15px] font-medium"
                         style={{
@@ -1715,7 +1695,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     </div>
                   </div>
                   {founderSummary.repeat_backing.repeat_backers.length > 0 && (
-                    <p className="mt-2 text-[12px] text-ink-faint">
+                    <p className="mt-2 text-[12.5px] text-ink-faint">
                       Returning backers: <span className="text-ink-dim">{founderSummary.repeat_backing.repeat_backers.join(", ")}</span>
                     </p>
                   )}
@@ -1736,12 +1716,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       />
                       <span className="text-[12.5px] text-ink">{p.project_name}</span>
                       {p.paid_or_allocated && (
-                        <span className="mono rounded border border-line px-1 py-0.5 text-[9.5px] text-caution">allocation</span>
+                        <span className="chip tint-caution">allocation</span>
                       )}
-                      <span className="mono ml-auto text-[11.5px]" style={{ color: p.project_outcome === "Rug" ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>
+                      <span className="mono ml-auto text-[11px]" style={{ color: p.project_outcome === "Rug" ? "var(--color-avoid)" : "var(--color-ink-dim)" }}>
                         {p.project_outcome}
                       </span>
-                      <span className="mono text-[10.5px]" style={{ color: TV_TONE[p.corroboration_verdict ?? "Unconfirmed"] }}>
+                      <span className="mono text-[11px]" style={{ color: TV_TONE[p.corroboration_verdict ?? "Unconfirmed"] }}>
                         {TV_SHORT[p.corroboration_verdict ?? "Unconfirmed"]}
                       </span>
                     </div>
@@ -1868,8 +1848,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         )}
 
         {/* methodology footer */}
-        <div className="mt-8 rounded-xl border border-line bg-panel/40 p-5">
-          <div className="mb-2 flex items-center gap-2 text-[12px] text-ink-dim">
+        <div className="panel mt-8 p-5">
+          <div className="mb-2 flex items-center gap-2 text-[12.5px] text-ink-dim">
             <ArgusMark size={16} /> How this verdict was reached
           </div>
           <p className="text-[12.5px] leading-relaxed text-ink-faint">

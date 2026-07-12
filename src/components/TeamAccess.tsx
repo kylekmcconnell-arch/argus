@@ -168,13 +168,13 @@ export function TeamAccess() {
   };
 
   return (
-    <section className="mt-6 overflow-hidden rounded-xl border border-line bg-panel" aria-labelledby="workspace-access-title">
+    <section className="panel mt-6 overflow-hidden" aria-labelledby="workspace-access-title">
       <div className="border-b border-line px-5 py-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <h2 id="workspace-access-title" className="text-[15px] font-medium text-ink">Workspace access</h2>
-              <span className="mono rounded bg-signal/10 px-1.5 py-0.5 text-[9.5px] uppercase tracking-wide text-signal">owner only</span>
+              <span className="chip tint-signal">owner only</span>
             </div>
             <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">
               Invite verified investigators, set their authority, or suspend access without deleting their work.
@@ -184,7 +184,7 @@ export function TeamAccess() {
             type="button"
             onClick={() => void load()}
             disabled={loading}
-            className="mono rounded-md border border-line px-2.5 py-1 text-[10.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:opacity-50"
+            className="btn-chip disabled:opacity-50"
           >
             {loading ? "checking…" : "refresh"}
           </button>
@@ -200,7 +200,7 @@ export function TeamAccess() {
             value={email}
             onChange={(event) => setEmail(event.target.value)}
             placeholder="partner@company.com"
-            className="mono min-w-0 rounded-lg border border-line bg-void px-3 py-2 text-[12px] text-ink outline-none transition placeholder:text-ink-faint focus:border-signal/60"
+            className="field mono min-w-0 px-3 py-2 text-[12.5px]"
           />
           <label className="sr-only" htmlFor="member-display-name">Display name</label>
           <input
@@ -209,7 +209,7 @@ export function TeamAccess() {
             onChange={(event) => setDisplayName(event.target.value)}
             placeholder="Display name"
             maxLength={80}
-            className="min-w-0 rounded-lg border border-line bg-void px-3 py-2 text-[12px] text-ink outline-none transition placeholder:text-ink-faint focus:border-signal/60"
+            className="field min-w-0 px-3 py-2 text-[12.5px]"
           />
           <label className="sr-only" htmlFor="member-role">Role</label>
           <select
@@ -217,7 +217,7 @@ export function TeamAccess() {
             value={role}
             onChange={(event) => setRole(event.target.value as ArgusRole)}
             title={ROLE_COPY[role]}
-            className="mono rounded-lg border border-line bg-void px-2.5 py-2 text-[11px] text-ink outline-none focus:border-signal/60"
+            className="field mono px-2.5 py-2 text-[12.5px]"
           >
             <option value="analyst">Analyst</option>
             <option value="viewer">Viewer</option>
@@ -226,37 +226,37 @@ export function TeamAccess() {
           <button
             type="submit"
             disabled={inviting || !email.trim()}
-            className="btn-primary whitespace-nowrap px-4 py-2 text-[12px] font-medium disabled:opacity-50"
+            className="btn-primary whitespace-nowrap px-4 py-2 text-[12.5px] font-medium"
           >
             {inviting ? "Inviting…" : "Invite"}
           </button>
         </form>
-        <p className="mt-1.5 text-[10.5px] text-ink-faint">{ROLE_COPY[role]}. New accounts receive a secure Supabase invitation.</p>
-        {notice && <div role="status" className="mt-3 rounded-lg border border-signal/30 bg-signal/5 px-3 py-2 text-[11.5px] text-signal">{notice}</div>}
-        {error && <div role="alert" className="mt-3 rounded-lg border border-avoid/30 bg-avoid/5 px-3 py-2 text-[11.5px] text-avoid">{error}</div>}
+        <p className="mt-1.5 text-[11px] text-ink-faint">{ROLE_COPY[role]}. New accounts receive a secure Supabase invitation.</p>
+        {notice && <div role="status" className="tint-pass mt-3 rounded-lg border px-3 py-2 text-[12.5px]">{notice}</div>}
+        {error && <div role="alert" className="tint-avoid mt-3 rounded-lg border px-3 py-2 text-[12.5px]">{error}</div>}
       </div>
 
       <div aria-live="polite">
         {loading && members.length === 0 ? (
-          <div className="px-5 py-6 text-[12px] text-ink-faint">Loading verified workspace members…</div>
+          <div className="px-5 py-6 text-[12.5px] text-ink-faint">Loading verified workspace members…</div>
         ) : members.length === 0 ? (
-          <div className="px-5 py-6 text-[12px] text-ink-faint">No workspace members have been provisioned.</div>
+          <div className="px-5 py-6 text-[12.5px] text-ink-faint">No workspace members have been provisioned.</div>
         ) : members.map((member) => {
           const isSelf = member.userId === auth.user.id;
           const pending = updatingUserId === member.userId;
           return (
             <div key={member.userId} className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5 last:border-0">
-              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-void text-[11px] font-medium text-ink-dim">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] font-medium text-signal">
                 {(member.displayName[0] || member.email[0] || "?").toUpperCase()}
               </span>
               <span className="min-w-[180px] flex-1">
                 <span className="flex flex-wrap items-center gap-1.5 text-[12.5px] text-ink">
                   {member.displayName}
-                  {isSelf && <span className="mono text-[9px] uppercase text-signal-dim">you</span>}
-                  {!member.active && <span className="mono rounded bg-avoid/10 px-1 py-0.5 text-[8.5px] uppercase text-avoid">disabled</span>}
+                  {isSelf && <span className="chip tint-signal">you</span>}
+                  {!member.active && <span className="chip tint-avoid">disabled</span>}
                 </span>
-                <span className="mono mt-0.5 block text-[10.5px] text-ink-faint">{member.email}</span>
-                <span className="mt-0.5 block text-[10px] text-ink-faint">
+                <span className="mono mt-0.5 block text-[11px] text-ink-faint">{member.email}</span>
+                <span className="mt-0.5 block text-[11px] text-ink-faint">
                   {member.emailVerified ? "verified" : "invitation pending"} · {relativeTime(member.lastSignInAt)}
                 </span>
               </span>
@@ -266,7 +266,7 @@ export function TeamAccess() {
                 disabled={pending || isSelf}
                 onChange={(event) => void updateMember(member, { role: event.target.value as ArgusRole })}
                 title={isSelf ? "Another owner must change your access." : ROLE_COPY[member.role]}
-                className="mono rounded-md border border-line bg-void px-2 py-1.5 text-[10.5px] text-ink-dim outline-none transition focus:border-signal/60 disabled:cursor-not-allowed disabled:opacity-55"
+                className="field mono px-2 py-1.5 text-[11px] disabled:cursor-not-allowed disabled:opacity-55"
               >
                 <option value="owner">Owner</option>
                 <option value="analyst">Analyst</option>
@@ -276,7 +276,7 @@ export function TeamAccess() {
                 type="button"
                 disabled={pending || isSelf}
                 onClick={() => void updateMember(member, { active: !member.active })}
-                className="mono min-w-[70px] rounded-md border border-line px-2 py-1.5 text-[10.5px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:cursor-not-allowed disabled:opacity-45"
+                className="btn-chip min-w-[70px] justify-center disabled:cursor-not-allowed disabled:opacity-45"
               >
                 {pending ? "saving…" : member.active ? "disable" : "restore"}
               </button>
@@ -290,7 +290,7 @@ export function TeamAccess() {
           <summary className="cursor-pointer text-[11px] font-medium text-ink-dim">Recent access activity</summary>
           <div className="mt-2 space-y-1.5">
             {events.slice(0, 8).map((event) => (
-              <div key={event.id} className="flex flex-wrap items-baseline gap-x-1.5 text-[10.5px] text-ink-faint">
+              <div key={event.id} className="flex flex-wrap items-baseline gap-x-1.5 text-[11px] text-ink-faint">
                 <span className="mono text-ink-dim">{event.actorEmail || "system"}</span>
                 <span>{EVENT_COPY[event.type] || "updated"}</span>
                 <span className="mono text-ink-dim">{event.targetEmail}</span>

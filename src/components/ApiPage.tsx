@@ -18,30 +18,30 @@ function Block({ code }: { code: string }) {
   return (
     <div className="relative mt-2 rounded-lg border border-line bg-panel-2/50">
       <div className="absolute right-2 top-2"><Copy text={code} /></div>
-      <pre className="thin-scroll mono overflow-x-auto p-3 pr-16 text-[12px] leading-relaxed text-ink-dim">{code}</pre>
+      <pre className="thin-scroll mono overflow-x-auto p-3 pr-16 text-[12.5px] leading-relaxed text-ink-dim">{code}</pre>
     </div>
   );
 }
 
 function Endpoint({ method, path, desc, params, curl, response }: { method: string; path: string; desc: string; params: [string, string][]; curl: string; response: string }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="panel p-4">
       <div className="flex items-center gap-2">
-        <span className="mono rounded border border-line px-1.5 py-0.5 text-[11px] font-semibold text-pass">{method}</span>
-        <span className="mono text-[13px] text-ink">{path}</span>
+        <span className="chip tint-pass">{method}</span>
+        <span className="mono text-[13.5px] text-ink">{path}</span>
       </div>
-      <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">{desc}</p>
+      <p className="mt-2 text-[13.5px] leading-relaxed text-ink-dim">{desc}</p>
       <div className="mt-3 space-y-1">
         {params.map(([k, v]) => (
-          <div key={k} className="flex gap-2 text-[12px]">
+          <div key={k} className="flex gap-2 text-[12.5px]">
             <span className="mono shrink-0 text-ink">{k}</span>
             <span className="text-ink-faint">{v}</span>
           </div>
         ))}
       </div>
-      <div className="mt-3 text-[11px] uppercase tracking-wider text-ink-faint">Request</div>
+      <div className="eyebrow mt-3">Request</div>
       <Block code={curl} />
-      <div className="mt-3 text-[11px] uppercase tracking-wider text-ink-faint">Response</div>
+      <div className="eyebrow mt-3">Response</div>
       <Block code={response} />
     </div>
   );
@@ -50,13 +50,13 @@ function Endpoint({ method, path, desc, params, curl, response }: { method: stri
 export function ApiPage() {
   return (
     <div className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="text-[28px] font-medium tracking-[-0.02em] text-ink">API</h1>
-      <p className="mt-2 max-w-2xl text-[14.5px] leading-relaxed text-ink-dim">
+      <h1 className="display-sm text-[24px] text-ink">API</h1>
+      <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         Programmatic access to ARGUS for funds, launchpads, and internal bots. Every investigation endpoint
         requires an active analyst account and a Supabase access token. Send it as a Bearer token; workspace
         membership and daily investigation limits are enforced server-side.
       </p>
-      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-ink-faint">
+      <div className="mt-4 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12.5px] text-ink-faint">
         <span>Base URL <span className="mono text-ink-dim">{BASE}</span></span>
         <span>· Bearer auth required</span>
         <span>· private responses are not shared-cached</span>
@@ -127,32 +127,32 @@ data: { ...full dossier... }`}
       </div>
 
       {/* spec */}
-      <div className="mt-6 flex flex-wrap items-center gap-3 rounded-xl border border-line bg-panel p-4">
+      <div className="panel mt-6 flex flex-wrap items-center gap-3 p-4">
         <div className="min-w-0 flex-1">
-          <div className="text-[13px] font-medium text-ink">OpenAPI 3.1 spec</div>
+          <div className="text-[13.5px] font-medium text-ink">OpenAPI 3.1 spec</div>
           <div className="mt-0.5 text-[12.5px] text-ink-faint">Import into Postman or Swagger, or generate a typed client with openapi-generator.</div>
         </div>
-        <a href={`${BASE}/api/v1/openapi.json`} target="_blank" rel="noreferrer" className="mono shrink-0 rounded-lg border border-line px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink">/api/v1/openapi.json ↗</a>
+        <a href={`${BASE}/api/v1/openapi.json`} target="_blank" rel="noreferrer" className="link-ext mono shrink-0 text-[12.5px]">/api/v1/openapi.json</a>
       </div>
 
       {/* recipes */}
-      <h2 className="mt-7 text-[14px] font-semibold tracking-tight text-ink">Recipes</h2>
+      <h2 className="mt-7 text-[13.5px] font-semibold tracking-tight text-ink">Recipes</h2>
       <div className="mt-2 space-y-4">
         <div>
-          <div className="text-[12px] text-ink-dim">JavaScript — flag a token before you ape</div>
+          <div className="text-[12.5px] text-ink-dim">JavaScript — flag a token before you ape</div>
           <Block code={`const a = await (await fetch(\n  "${BASE}/api/v1/token?address=" + addr,\n  { headers: { Authorization: "Bearer " + ARGUS_ACCESS_TOKEN } }\n)).json();\nif (a.verdict === "AVOID" || a.verdict === "FAIL")\n  alert(\`⚠ $\{a.symbol}: $\{a.headline}\`);`} />
         </div>
         <div>
-          <div className="text-[12px] text-ink-dim">Python</div>
+          <div className="text-[12.5px] text-ink-dim">Python</div>
           <Block code={`import os, requests\na = requests.get("${BASE}/api/v1/token",\n  params={"address": addr},\n  headers={"Authorization": "Bearer " + os.environ["ARGUS_ACCESS_TOKEN"]}).json()\nprint(a["verdict"], a["score"], a["headline"])`} />
         </div>
         <div>
-          <div className="text-[12px] text-ink-dim">Telegram bot — reply with a verdict on any contract</div>
+          <div className="text-[12.5px] text-ink-dim">Telegram bot — reply with a verdict on any contract</div>
           <Block code={`bot.onText(/^\\/audit (.+)/, async (msg, m) => {\n  const a = await (await fetch(\n    "${BASE}/api/v1/token?address=" + m[1],\n    { headers: { Authorization: "Bearer " + process.env.ARGUS_ACCESS_TOKEN } }\n  )).json();\n  bot.sendMessage(msg.chat.id,\n    \`$\{a.symbol}: $\{a.verdict} $\{a.score}/100\\n$\{a.headline}\`);\n});`} />
         </div>
       </div>
 
-      <div className="mt-6 rounded-xl border border-line bg-panel/40 p-4 text-[12.5px] leading-relaxed text-ink-faint">
+      <div className="panel mt-6 p-4 text-[12.5px] leading-relaxed text-ink-faint">
         <span className="text-ink-dim">Next API milestone:</span> revocable service-account keys, per-key scopes, usage plans,
         signed webhooks, and watchlist drift events. Interactive session tokens are the secure access path today.
       </div>

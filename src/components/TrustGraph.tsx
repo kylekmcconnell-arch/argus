@@ -113,7 +113,7 @@ export function TrustGraph({
   });
 
   const zoomed = view.k !== 1 || view.x !== 0 || view.y !== 0;
-  const labelSize = dense ? 7.5 : 8.5;
+  const labelSize = 9;
   const labelTrunc = dense ? 13 : 16;
 
   const onWheel = (e: React.WheelEvent) => {
@@ -175,7 +175,7 @@ export function TrustGraph({
                 {/* per-spoke labels drown at scale: show them all only when sparse,
                     otherwise only on the hovered spoke */}
                 {p.edge && (!dense || focused) && (
-                  <text x={(cx + p.x) / 2} y={(cy + p.y) / 2 - 3} textAnchor="middle" className="mono" fontSize="7.5" fill={focused ? "var(--color-ink-dim)" : "var(--color-ink-faint)"}>
+                  <text x={(cx + p.x) / 2} y={(cy + p.y) / 2 - 3} textAnchor="middle" className="mono" fontSize="9" fill={focused ? "var(--color-ink-dim)" : "var(--color-ink-faint)"}>
                     {EDGE_LABEL[p.edge.type] ?? p.edge.type.toLowerCase()}
                   </text>
                 )}
@@ -238,7 +238,7 @@ export function TrustGraph({
         </g>
       </svg>
 
-      <div className="pointer-events-none absolute bottom-1.5 left-2 text-[10px] text-ink-faint">scroll to zoom · drag to pan{dense ? " · hover a node for its link" : ""}</div>
+      <div className="pointer-events-none absolute bottom-1.5 left-2 text-[11px] text-ink-faint">scroll to zoom · drag to pan{dense ? " · hover a node for its link" : ""}</div>
       {zoomed && (
         // span, not <button>: this graph also renders inside clickable card
         // buttons (GraphPage "By subject"), and nested buttons are invalid HTML.
@@ -247,7 +247,7 @@ export function TrustGraph({
           tabIndex={0}
           onClick={(e) => { e.stopPropagation(); setView({ x: 0, y: 0, k: 1 }); }}
           onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setView({ x: 0, y: 0, k: 1 }); } }}
-          className="mono absolute right-2 top-2 cursor-pointer rounded-md border border-line bg-panel px-2 py-0.5 text-[10.5px] text-ink-dim transition hover:text-ink"
+          className="btn-chip absolute right-2 top-2 cursor-pointer bg-panel"
         >
           reset view
         </span>

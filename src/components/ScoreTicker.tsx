@@ -24,22 +24,22 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
           : e.kind,
       )}
       title={presentedVerdict === "INCOMPLETE" ? "Open the report — positive score is not cleared because evidence coverage is incomplete" : "Open the full report"}
-      className="group flex w-[260px] shrink-0 items-center gap-2.5 rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:bg-panel/80 soft-shadow"
+      className="group panel flex w-[260px] shrink-0 items-center gap-2.5 p-3 text-left transition hover:border-line-2 hover:bg-panel/80 soft-shadow"
     >
       {img ? (
-        <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-lg border border-line object-cover" />
+        <img src={img} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-md border border-line bg-panel-2 object-cover" />
       ) : (
-        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-line bg-void text-[13px] text-signal">{letter}</span>
+        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[13.5px] text-signal">{letter}</span>
       )}
       <span className="min-w-0 flex-1">
-        <span className="mono block truncate text-[12px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
-        <span className="block truncate text-[9.5px] text-ink-faint">
+        <span className="mono block truncate text-[12.5px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
+        <span className="block truncate text-[11px] text-ink-faint">
           {e.kind}{e.contributor && e.contributor !== me && e.contributor !== "anonymous" ? ` · ${e.contributor}` : ""}
         </span>
       </span>
-      <span className="mono shrink-0 text-right leading-none" style={{ color }}>
-        <span className="block text-[19px] font-semibold tabular">{e.score ?? "—"}</span>
-        <span className="block text-[8px] tracking-wider">{presentedLabel ?? ""}</span>
+      <span className="flex shrink-0 flex-col items-end gap-1 leading-none">
+        <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{e.score ?? "—"}</span>
+        {presentedLabel && <span className="chip tint-var" style={{ ["--tint" as string]: color }}>{presentedLabel}</span>}
       </span>
     </button>
   );
@@ -67,7 +67,7 @@ export function ScoreTicker({
   return (
     <div className="relative z-10 border-b border-line/60 px-6 py-3.5">
       <div className="mx-auto max-w-5xl">
-        <div className="mb-2 text-[10.5px] uppercase tracking-[0.16em] text-ink-faint">{label}</div>
+        <div className="eyebrow mb-2">{label}</div>
         {scores.length >= 5 ? (
           // Two identical copies, each with a trailing gap, make the -50% loop seamless.
           <div className="overflow-hidden pb-1" style={{ maskImage: "linear-gradient(90deg, transparent, black 3%, black 97%, transparent)", WebkitMaskImage: "linear-gradient(90deg, transparent, black 3%, black 97%, transparent)" }}>

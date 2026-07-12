@@ -71,9 +71,9 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
   const BM: Record<string, string> = { solana: "sol", ethereum: "eth", base: "base", bsc: "bsc", polygon: "poly", arbitrum: "arbi", avalanche: "avax", fantom: "ftm" };
   const bubbleUrl = BM[chain] ? `https://app.bubblemaps.io/${BM[chain]}/token/${mint}` : null;
   const bubbleLink = bubbleUrl ? (
-    <a href={bubbleUrl} target="_blank" rel="noreferrer" className="mono inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[10px] text-ink-dim transition hover:border-signal hover:text-signal" title="Open the interactive holder bubble map on Bubblemaps">
+    <a href={bubbleUrl} target="_blank" rel="noreferrer" className="link-ext mono inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-[11px]" title="Open the interactive holder bubble map on Bubblemaps">
       <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8"><circle cx="7" cy="8" r="3.5" /><circle cx="17" cy="15" r="2.5" /><circle cx="16" cy="6" r="1.6" /></svg>
-      bubble map ↗
+      bubble map
     </a>
   ) : null;
 
@@ -116,21 +116,14 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
   if (loading) {
     return (
       <div className="overflow-hidden rounded-xl border border-signal/35 bg-signal/[0.06] p-4">
-        <style>{`
-          @keyframes wc-scan { 0%{transform:translateX(-120%)} 100%{transform:translateX(360%)} }
-          .wc-scan-bar{ animation: wc-scan 1.3s cubic-bezier(.4,0,.2,1) infinite }
-          @media (prefers-reduced-motion: reduce){ .wc-scan-bar{ animation:none } }
-        `}</style>
         <div className="flex items-center gap-2.5">
           <LinkIcon live />
           <div className="min-w-0 flex-1">
             <div className="text-[12.5px] font-medium text-signal-lift">{STAGES[stage]}</div>
-            <div className="mono mt-0.5 text-[10px] text-ink-faint">clustering the top holders · reading the chain · up to ~50s</div>
+            <div className="mono mt-0.5 text-[11px] text-ink-faint">clustering the top holders · reading the chain · up to ~50s</div>
           </div>
         </div>
-        <div className="mt-2.5 h-1 w-full overflow-hidden rounded-full bg-line/60">
-          <div className="wc-scan-bar h-full w-1/3 rounded-full" style={{ background: "linear-gradient(90deg, transparent, var(--color-signal), transparent)" }} />
-        </div>
+        <div className="scan-bar mt-2.5" />
       </div>
     );
   }
@@ -138,13 +131,13 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
   // ── CTA ──
   if (!data && panelCostToken) {
     return (
-      <div className="rounded-xl border border-line bg-panel p-4">
+      <div className="panel p-4">
         <button onClick={run} className="group flex w-full items-center justify-between gap-3 rounded-lg border border-signal/40 bg-signal/[0.08] px-3.5 py-2.5 text-left transition hover:border-signal hover:bg-signal/[0.14]">
           <span className="flex items-center gap-2.5">
             <LinkIcon />
             <span>
               <span className="block text-[13px] font-semibold text-signal-lift">Cluster the holders</span>
-              <span className="block text-[10.5px] text-ink-dim">how many of the top wallets are secretly one hand?</span>
+              <span className="block text-[11px] text-ink-dim">how many of the top wallets are secretly one hand?</span>
             </span>
           </span>
           <span className="mono shrink-0 rounded-md border border-signal/50 px-2 py-1 text-[11px] text-signal transition group-hover:bg-signal group-hover:text-white">cluster →</span>
@@ -163,11 +156,11 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
   const color = TONE[tone as keyof typeof TONE];
 
   return (
-    <div className="rounded-xl border p-4" style={{ borderColor: tone === "good" ? "var(--color-line)" : `${color}55`, background: tone === "good" ? "var(--color-panel)" : `${color}0d` }}>
+    <div className={`panel p-4 ${tone === "good" ? "" : "tint-var"}`} style={tone === "good" ? undefined : ({ "--tint": color } as React.CSSProperties)}>
       <div className="flex items-center gap-2">
         <LinkIcon />
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Wallet clustering</span>
-        {data.walletsAnalyzed != null && <span className="mono text-[10px] text-ink-faint">{data.walletsAnalyzed} wallets analyzed</span>}
+        <span className="eyebrow">Wallet clustering</span>
+        {data.walletsAnalyzed != null && <span className="mono text-[11px] text-ink-faint">{data.walletsAnalyzed} wallets analyzed</span>}
         <span className="ml-auto">{bubbleLink}</span>
       </div>
 
@@ -186,25 +179,25 @@ export function WalletClusters({ mint, chain, symbol, panelCostToken, record = t
       {clusters.length > 0 && (
         <div className="mt-3 space-y-2.5 border-t border-line pt-2.5">
           {clusters.map((c, i) => (
-            <div key={i} className="rounded-lg border px-2.5 py-2" style={{ borderColor: `${color}44`, background: `${color}0a` }}>
+            <div key={i} className="tint-var rounded-md border px-2.5 py-2" style={{ "--tint": color } as React.CSSProperties}>
               <div className="flex flex-wrap items-center gap-2 text-[11.5px]">
                 <span className="mono font-semibold" style={{ color }}>{c.size} wallets = 1 operator</span>
-                <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${color}1a`, color }}>{c.combinedPct.toFixed(1)}% of supply combined</span>
-                {c.includesCreator && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: "var(--color-avoid)1a", color: "var(--color-avoid)" }}>incl. creator</span>}
+                <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}><span>{c.combinedPct.toFixed(1)}% of supply combined</span></span>
+                {c.includesCreator && <span className="chip tint-avoid">incl. creator</span>}
                 {c.sharedFunders.length > 0 && (
-                  <span className="inline-flex items-center gap-1 text-[10px] text-ink-faint">seeded by <ArkhamName address={c.sharedFunders[0]} chain={chain} labels={arkham} fallback={shortAddr(c.sharedFunders[0])} className="text-[10px]" /></span>
+                  <span className="inline-flex items-center gap-1 text-[11px] text-ink-faint">seeded by <ArkhamName address={c.sharedFunders[0]} chain={chain} labels={arkham} fallback={shortAddr(c.sharedFunders[0])} className="text-[11px]" /></span>
                 )}
               </div>
               <div className="mt-1.5 flex flex-wrap gap-1">
                 {c.wallets.map((w) => (
-                  <span key={w.address} title={`${w.address} · ${w.pct.toFixed(2)}%`} className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[10px]">
-                    {w.isCreator ? "★" : ""}<ArkhamName address={w.address} chain={chain} labels={arkham} fallback={shortAddr(w.address)} className="text-[10px] text-ink" /><span className="text-ink-faint">{w.pct.toFixed(1)}%</span>
+                  <span key={w.address} title={`${w.address} · ${w.pct.toFixed(2)}%`} className="inline-flex items-center gap-1 rounded border border-line px-1.5 py-0.5 text-[11px]">
+                    {w.isCreator ? "★" : ""}<ArkhamName address={w.address} chain={chain} labels={arkham} fallback={shortAddr(w.address)} className="text-[11px] text-ink" /><span className="text-ink-faint">{w.pct.toFixed(1)}%</span>
                   </span>
                 ))}
               </div>
             </div>
           ))}
-          <p className="text-[10px] text-ink-faint">Linked by a shared funder or a direct SOL transfer — the two signals that mean one hand controls wallets a holder chart shows as separate.</p>
+          <p className="text-[11px] text-ink-faint">Linked by a shared funder or a direct SOL transfer — the two signals that mean one hand controls wallets a holder chart shows as separate.</p>
         </div>
       )}
     </div>

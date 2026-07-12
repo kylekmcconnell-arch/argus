@@ -33,8 +33,8 @@ export function ProjectResearch({
   return (
     <div className="space-y-3">
       {newsQuery && (
-        <div className="rounded-xl border border-line bg-panel p-4">
-          <div className="mb-2 text-[10.5px] uppercase tracking-wider text-ink-faint">News &amp; press</div>
+        <div className="panel p-4">
+          <div className="eyebrow mb-2">News &amp; press</div>
           <NewsSection query={newsQuery} handle={newsHandle ?? undefined} />
         </div>
       )}

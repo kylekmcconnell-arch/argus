@@ -29,9 +29,9 @@ export function TokenSparkline({ address, chain, pairAddress, compact, hidePct }
       .catch(() => setState("none"));
   }, [address, chain, pairAddress]);
 
-  if (state === "none") return compact ? <span className="text-[10px] text-ink-faint">no chart</span> : <div className="text-[11.5px] text-ink-faint">No historical price data indexed for this pool.</div>;
+  if (state === "none") return compact ? <span className="text-[11px] text-ink-faint">no chart</span> : <div className="text-[12.5px] text-ink-faint">No historical price data indexed for this pool.</div>;
   if (state === "loading" || !hist) {
-    return compact ? <span className="text-[10px] text-ink-faint">…</span> : <div className="h-24 animate-pulse rounded-lg bg-line/40" />;
+    return compact ? <span className="text-[11px] text-ink-faint">…</span> : <div className="h-24 animate-pulse rounded-lg bg-line/40" />;
   }
 
   const up = hist.changePct >= 0;
@@ -45,7 +45,7 @@ export function TokenSparkline({ address, chain, pairAddress, compact, hidePct }
         <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="shrink-0" role="img" aria-label="price shape">
           <polyline points={line(hist.points, w, h)} fill="none" stroke={color} strokeWidth="1.3" strokeLinejoin="round" strokeLinecap="round" />
         </svg>
-        {!hidePct && <span className="mono text-[10.5px]" style={{ color }}>{pct(hist.changePct)}</span>}
+        {!hidePct && <span className="mono text-[11px]" style={{ color }}>{pct(hist.changePct)}</span>}
       </span>
     );
   }

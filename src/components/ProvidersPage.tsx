@@ -46,13 +46,13 @@ function ProviderRow({ p }: { p: Provider }) {
       <span className="flex items-center gap-2">
         <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: dotColor(p) }} />
         <span className="text-[13.5px] font-medium text-ink">{p.label}</span>
-        <span className="mono rounded border border-line px-1 py-0.5 text-[9px] uppercase tracking-wide text-ink-faint">{TIER_LABEL[p.tier] ?? p.tier}</span>
+        <span className="chip chip-sm">{TIER_LABEL[p.tier] ?? p.tier}</span>
       </span>
-      <span className="min-w-0 flex-1 text-[12px] text-ink-dim">{p.powers}</span>
+      <span className="min-w-0 flex-1 text-[12.5px] text-ink-dim">{p.powers}</span>
       <span className="flex items-center gap-2">
-        {p.usage && <span className="mono text-[10.5px] text-signal-dim">{p.usage}</span>}
+        {p.usage && <span className="mono text-[11px] text-signal-dim">{p.usage}</span>}
         <span className="mono text-[11px]" style={{ color: status.color }}>{status.text}</span>
-        <a href={`https://${p.source.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="mono text-[10.5px] text-ink-faint underline-offset-2 hover:text-ink hover:underline">{p.source} ↗</a>
+        <a href={`https://${p.source.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext mono text-[11px]">{p.source}</a>
       </span>
     </div>
   );
@@ -124,18 +124,18 @@ export function ProvidersPage() {
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">
-      <h1 className="text-[26px] font-medium tracking-[-0.02em] text-ink">Providers &amp; keys</h1>
-      <p className="mt-1.5 max-w-2xl text-[14px] leading-relaxed text-ink-dim">
+      <h1 className="display-sm text-[24px] text-ink">Providers &amp; keys</h1>
+      <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         What ARGUS is plugged into. Shows configured or not (never a secret), what each key powers, where to top up,
         and live usage where the provider exposes it.
       </p>
       {missing.length > 0 && (
-        <div className="mt-4 rounded-lg border border-caution/40 bg-caution/5 px-3 py-2 text-[12.5px] text-caution">
+        <div className="tint-caution mt-4 rounded-lg border px-3 py-2 text-[12.5px]">
           {missing.length} required provider{missing.length === 1 ? "" : "s"} not configured: {missing.map((m) => m.label).join(", ")}.
         </div>
       )}
 
-      <div className="mt-5 divide-y divide-line/60 overflow-hidden rounded-xl border border-line bg-panel">
+      <div className="panel mt-5 divide-y divide-line/60 overflow-hidden">
         {/* keyed / optional / infra — the ones with a key to manage */}
         {providers.map((p) => <ProviderRow key={p.label} p={p} />)}
 
@@ -144,8 +144,8 @@ export function ProvidersPage() {
         {/* the bar: one labeled divider, then keyless sources as identical rows */}
         {keyless.length > 0 && (
           <div className="flex items-center gap-2 bg-void/40 px-4 py-2">
-            <span className="text-[10px] uppercase tracking-[0.18em] text-ink-faint">Keyless · always on, no key required</span>
-            <span className="mono ml-auto text-[10.5px] text-ink-faint">{keyless.length} sources</span>
+            <span className="eyebrow">Keyless · always on, no key required</span>
+            <span className="mono ml-auto text-[11px] text-ink-faint">{keyless.length} sources</span>
           </div>
         )}
         {keyless.map((p) => <ProviderRow key={p.label} p={p} />)}
@@ -154,13 +154,13 @@ export function ProvidersPage() {
       <section className="mt-6" aria-labelledby="provider-usage-title">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 id="provider-usage-title" className="text-[16px] font-medium text-ink">Immutable usage trail</h2>
-            <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-ink-dim">
+            <h2 id="provider-usage-title" className="text-[15px] font-medium text-ink">Immutable usage trail</h2>
+            <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">
               Each recorded report-bound provider request becomes an immutable event. Transport retries reuse that event; fresh panel runs append against the exact report version.
             </p>
           </div>
           {usage && (
-            <div className="mono flex flex-wrap items-center gap-1.5 text-[10.5px] text-ink-faint">
+            <div className="mono flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint">
               <span className="rounded border border-line px-1.5 py-0.5">all recorded history</span>
               <span className="rounded border border-line px-1.5 py-0.5">{usage.totals.eventCount} {usage.totals.eventCount === 1 ? "event" : "events"}</span>
               <span className="rounded border border-line px-1.5 py-0.5">{usage.totals.calls} calls</span>
@@ -169,18 +169,18 @@ export function ProvidersPage() {
           )}
         </div>
 
-        <div className="mt-3 overflow-hidden rounded-xl border border-line bg-panel">
+        <div className="panel mt-3 overflow-hidden">
           {!usage && !usageError && (
-            <div className="px-4 py-6 text-center text-[12px] text-ink-faint">loading immutable provider events…</div>
+            <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">loading immutable provider events…</div>
           )}
           {usageError && (
-            <div className="border-caution/30 bg-caution/5 px-4 py-3 text-[12px] text-caution" role="alert">{usageError}</div>
+            <div className="tint-caution px-4 py-3 text-[12.5px]" role="alert">{usageError}</div>
           )}
           {usage && usage.events.length === 0 && (
-            <div className="px-4 py-6 text-center text-[12px] text-ink-faint">No report-bound provider events have been recorded yet.</div>
+            <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">No report-bound provider events have been recorded yet.</div>
           )}
           {usage && usage.events.length > 0 && (
-            <div className="border-b border-line/60 bg-void/30 px-4 py-2 text-[10px] uppercase tracking-[0.16em] text-ink-faint">
+            <div className="eyebrow border-b border-line/60 bg-void/30 px-4 py-2">
               Latest {usage.window.eventCount} of {usage.totals.eventCount} recorded events
             </div>
           )}
@@ -190,25 +190,25 @@ export function ProvidersPage() {
               <span className="min-w-[150px] flex-1">
                 <span className="flex flex-wrap items-center gap-1.5">
                   <span className="text-[12.5px] font-medium text-ink">{event.provider}</span>
-                  <span className="mono rounded border border-line px-1 py-0.5 text-[9px] text-ink-faint">{shortOperation(event.operation)}</span>
-                  <span className="mono text-[9.5px]" style={{ color: STATUS_COLOR[event.status] ?? "var(--color-ink-faint)" }}>{event.status}</span>
+                  <span className="chip chip-sm">{shortOperation(event.operation)}</span>
+                  <span className="chip tint-var" style={{ "--tint": STATUS_COLOR[event.status] ?? "var(--color-ink-faint)" } as React.CSSProperties}>{event.status}</span>
                 </span>
-                <span className="mt-0.5 block text-[10.5px] text-ink-faint">
+                <span className="mt-0.5 block text-[11px] text-ink-faint">
                   {event.report ? `${event.report.label} · ${event.report.kind} snapshot v${event.report.version}` : "exact report version"}
                   {` · ${event.actor}`}
                 </span>
-                {event.meta && <span className="mt-0.5 block truncate text-[10px] text-ink-faint" title={event.meta}>{event.meta}</span>}
+                {event.meta && <span className="mt-0.5 block truncate text-[11px] text-ink-faint" title={event.meta}>{event.meta}</span>}
               </span>
-              <span className="mono shrink-0 text-right text-[10.5px] text-ink-faint">
+              <span className="mono shrink-0 text-right text-[11px] text-ink-faint">
                 <span className="block">×{event.calls} · {eventCost(event)}</span>
-                <time dateTime={event.createdAt} className="mt-0.5 block text-[9.5px]">{eventTime(event.createdAt)}</time>
+                <time dateTime={event.createdAt} className="mt-0.5 block text-[11px]">{eventTime(event.createdAt)}</time>
               </span>
             </div>
           ))}
         </div>
       </section>
 
-      {data?.note && <p className="mt-5 text-[11.5px] leading-relaxed text-ink-faint">{data.note}</p>}
+      {data?.note && <p className="mt-5 text-[12.5px] leading-relaxed text-ink-faint">{data.note}</p>}
     </div>
   );
 }

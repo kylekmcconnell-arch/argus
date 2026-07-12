@@ -64,20 +64,21 @@ export function SecondOpinion({ dossier, panelCostToken }: { dossier: TokenDossi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dossier.address, panelCostToken]);
 
-  if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[11.5px] text-ink-faint">stress-testing the verdict…</div>;
+  if (state === "loading") return <div className="panel p-4 text-[12.5px] text-ink-faint">stress-testing the verdict…</div>;
   if (!data || data.available === false || (!data.summary && !(data.challenges ?? []).length)) return null;
 
   const rec = REC[data.recommendation ?? "uphold"] ?? REC.uphold;
   const challenges = data.challenges ?? [];
   const harsh = challenges.filter((c) => c.direction === "too_harsh");
   const lenient = challenges.filter((c) => c.direction === "too_lenient");
+  const flagged = data.recommendation !== "uphold";
 
   return (
-    <div className="rounded-xl border p-4" style={{ borderColor: data.recommendation === "uphold" ? "var(--color-line)" : `${rec.color}55`, background: data.recommendation === "uphold" ? "var(--color-panel)" : `${rec.color}0d` }}>
+    <div className={`panel p-4 ${flagged ? "tint-var" : ""}`} style={flagged ? ({ "--tint": rec.color } as React.CSSProperties) : undefined}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Adversarial review</span>
-        <span className="mono rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: `${rec.color}1a`, color: rec.color }}>{rec.label}</span>
-        {data.confidence && <span className="mono ml-auto text-[10px] text-ink-faint">{data.confidence} confidence</span>}
+        <span className="eyebrow">Adversarial review</span>
+        <span className="chip tint-var" style={{ "--tint": rec.color } as React.CSSProperties}>{rec.label}</span>
+        {data.confidence && <span className="mono ml-auto text-[11px] text-ink-dim">{data.confidence} confidence</span>}
       </div>
 
       {data.summary && <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">{data.summary}</p>}
@@ -85,14 +86,14 @@ export function SecondOpinion({ dossier, panelCostToken }: { dossier: TokenDossi
       <div className="mt-2.5 grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         {harsh.length > 0 && (
           <div>
-            <div className="text-[10px] uppercase tracking-wide" style={{ color: "var(--color-caution)" }}>Why it might be too harsh</div>
-            <ul className="mt-1 space-y-1">{harsh.map((c, i) => <li key={i} className="flex gap-1.5 text-[11.5px] leading-snug text-ink-dim"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full" style={{ background: "var(--color-caution)" }} />{c.point}</li>)}</ul>
+            <div className="eyebrow text-caution">Why it might be too harsh</div>
+            <ul className="mt-1 space-y-1">{harsh.map((c, i) => <li key={i} className="flex gap-1.5 text-[12.5px] leading-snug text-ink-dim"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-caution" />{c.point}</li>)}</ul>
           </div>
         )}
         {lenient.length > 0 && (
           <div>
-            <div className="text-[10px] uppercase tracking-wide" style={{ color: "var(--color-avoid)" }}>Why it might be too lenient</div>
-            <ul className="mt-1 space-y-1">{lenient.map((c, i) => <li key={i} className="flex gap-1.5 text-[11.5px] leading-snug text-ink-dim"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full" style={{ background: "var(--color-avoid)" }} />{c.point}</li>)}</ul>
+            <div className="eyebrow text-avoid">Why it might be too lenient</div>
+            <ul className="mt-1 space-y-1">{lenient.map((c, i) => <li key={i} className="flex gap-1.5 text-[12.5px] leading-snug text-ink-dim"><span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-avoid" />{c.point}</li>)}</ul>
           </div>
         )}
       </div>

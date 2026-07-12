@@ -43,8 +43,12 @@ const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(
 
 function VerdictPill({ verdict, score }: { verdict: string; score: number | null }) {
   const m = verdictMeta(verdict);
+  const fail = verdict === "FAIL";
   return (
-    <span className="mono rounded-full px-2 py-0.5 text-[11px] font-semibold tracking-wider" style={{ color: m.color, background: m.glow, border: `1px solid ${m.color}55` }}>
+    <span
+      className={`verdict-pill ${fail ? "tint-fail" : "tint-var"}`}
+      style={fail ? undefined : ({ "--tint": m.color } as React.CSSProperties)}
+    >
       {m.label}{typeof score === "number" ? ` ${score}` : ""}
     </span>
   );
@@ -52,8 +56,8 @@ function VerdictPill({ verdict, score }: { verdict: string; score: number | null
 
 function Card({ title, children, accent }: { title: string; children: React.ReactNode; accent?: string }) {
   return (
-    <div className="rounded-xl border bg-panel p-4" style={{ borderColor: accent ? accent + "55" : "var(--color-line)" }}>
-      <div className="mb-2 text-[11px] uppercase tracking-wider text-ink-faint">{title}</div>
+    <div className="panel p-4" style={accent ? { borderColor: accent + "55" } : undefined}>
+      <div className="eyebrow mb-2">{title}</div>
       {children}
     </div>
   );
@@ -290,12 +294,12 @@ export function InvestigationReport({
           </div>
         )}
         {persistencePending && (
-          <div className="mt-4 rounded-xl border border-line bg-panel px-4 py-3 text-[11.5px] text-ink-dim" role="status">
+          <div className="mt-4 panel px-4 py-3 text-[12.5px] text-ink-dim" role="status">
             Saving the immutable investigation before post-scan intelligence runs…
           </div>
         )}
         {(persistenceFailed || persistenceMissingCapability) && (
-          <div className="mt-4 rounded-xl border border-caution/40 bg-caution/5 px-4 py-3 text-[11.5px] text-caution" role="alert">
+          <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
             Post-scan intelligence is paused because this investigation could not be saved. Rescan before spending on supplemental providers.
           </div>
         )}
@@ -304,59 +308,59 @@ export function InvestigationReport({
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-3">
             {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-lg border border-line object-cover" />}
-            <h1 className="text-[24px] font-medium tracking-[-0.02em] text-ink">{`Investigation · $${token.symbol}`}</h1>
+            <h1 className="display-sm text-[24px] text-ink">{`Investigation · $${token.symbol}`}</h1>
           </div>
           {/* Two DISTINCT scores, labelled so it's obvious what each grades. */}
           <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-2">
             <span className="flex items-center gap-1.5">
-              <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Token risk</span>
+              <span className="eyebrow">Token risk</span>
               <VerdictPill verdict={presentedTokenVerdict} score={positiveVerdictNeedsQualification ? null : token.score} />
             </span>
             {projectAccount && (
               <span className="flex items-center gap-1.5">
-                <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Project account</span>
+                <span className="eyebrow">Project account</span>
                 <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
               </span>
             )}
           </div>
           <div
-            className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border bg-panel/70 px-3 py-2.5"
-            style={{ borderColor: `${readinessColor}55` }}
+            className="finding tint-var mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5"
+            style={{ "--tint": readinessColor } as React.CSSProperties}
           >
-            <span className="mono rounded border px-1.5 py-0.5 text-[9.5px] uppercase tracking-wider" style={{ borderColor: `${readinessColor}66`, color: readinessColor }}>
+            <span className="chip tint-var" style={{ "--tint": readinessColor } as React.CSSProperties}>
               {readiness.status}
             </span>
-            <span className="text-[12px] font-medium text-ink">{readiness.title}</span>
-            <span className="mono text-[10.5px] text-ink-faint">
+            <span className="text-[12.5px] font-medium text-ink">{readiness.title}</span>
+            <span className="mono text-[11px] text-ink-faint">
               {readiness.successful}/{readiness.applicable} outcomes · {readiness.coveragePercent}% coverage
             </span>
             {positiveVerdictNeedsQualification && (
-              <span className="mono text-[10.5px]" style={{ color: preliminaryTokenMeta.color }}>
+              <span className="mono text-[11px]" style={{ color: preliminaryTokenMeta.color }}>
                 preliminary model signal · {preliminaryTokenMeta.label} {token.score ?? "—"}
               </span>
             )}
             {projectAccount && projectReadiness && (
-              <span className="mono text-[10.5px] text-ink-faint">
+              <span className="mono text-[11px] text-ink-faint">
                 project account · {projectReadiness.status} · {projectReadiness.successful}/{projectReadiness.applicable} outcomes
               </span>
             )}
-            <a href="#investigation-methodology" className="mono ml-auto text-[10.5px] text-signal-dim underline-offset-2 hover:text-signal hover:underline">
+            <a href="#investigation-methodology" className="ml-auto text-[11px] text-signal-dim underline-offset-2 hover:text-signal hover:underline">
               Review checks
             </a>
             <p className="w-full text-[11px] leading-snug text-ink-faint">{readiness.guidance}</p>
           </div>
           {/* Lead with the TEAM when we know it — don't declare "no team" when it's named below. */}
           {teamPeople.length > 0 ? (
-            <p className="mt-3 max-w-3xl text-[14px] font-medium leading-relaxed text-ink">
+            <p className="mt-3 max-w-3xl text-[13.5px] font-medium leading-relaxed text-ink">
               Built by {teamPeople.slice(0, 3).map((p) => p.name).filter(Boolean).join(", ")}{teamPeople.length > 3 ? ` +${teamPeople.length - 3} more` : ""}{projectX ? ` · project account ${projectX}` : ""} — full team below.
             </p>
           ) : (
-            <p className="mt-3 max-w-3xl text-[14px] font-medium leading-relaxed text-ink">{inv.founderNote}</p>
+            <p className="mt-3 max-w-3xl text-[13.5px] font-medium leading-relaxed text-ink">{inv.founderNote}</p>
           )}
           {/* What the project actually IS — CoinGecko's own blurb, else the project's X bio. */}
           {(() => {
             const blurb = token.cg?.description || projectAccount?.bio || null;
-            return blurb ? <p className="mt-2 max-w-3xl text-[13px] leading-relaxed text-ink-dim">{blurb}</p> : null;
+            return blurb ? <p className="mt-2 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim">{blurb}</p> : null;
           })()}
           {/* official website + socials */}
           <ProjectLinks
@@ -372,11 +376,11 @@ export function InvestigationReport({
           {/* on-chain */}
           <Card title="On-chain" accent={tm.color}>
             <div className="flex items-center justify-between">
-              <span className="mono text-[14px] text-ink">{`$${token.symbol}`}</span>
+              <span className="mono text-[13.5px] text-ink">{`$${token.symbol}`}</span>
               <VerdictPill verdict={presentedTokenVerdict} score={positiveVerdictNeedsQualification ? null : token.score} />
             </div>
             <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">{token.headline}</p>
-            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11.5px] text-ink-faint">
+            <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
               <span>liq <span className="mono text-ink-dim">{money(token.liquidityUsd)}</span></span>
               <span>mc <span className="mono text-ink-dim">{money(token.mcap)}</span></span>
               <span>chain <span className="mono text-ink-dim capitalize">{token.chain}</span></span>
@@ -392,16 +396,16 @@ export function InvestigationReport({
               <div className="mt-2 flex flex-wrap items-center gap-1 border-t border-line/60 pt-2">
                 <span className="text-[11px] text-ink-faint">listed on</span>
                 {token.cg.cexNames.slice(0, 8).map((n) => (
-                  <span key={n} className="mono rounded px-1.5 py-0.5 text-[10.5px]" style={{ background: "rgba(22,163,74,0.10)", color: "var(--color-pass)" }}>{n}</span>
+                  <span key={n} className="chip tint-pass normal-case tracking-normal">{n}</span>
                 ))}
-                {token.cg.cexCount > 8 && <span className="text-[10px] text-ink-faint">+{token.cg.cexCount - 8} more</span>}
+                {token.cg.cexCount > 8 && <span className="text-[11px] text-ink-faint">+{token.cg.cexCount - 8} more</span>}
               </div>
             ) : token.cg && !token.cg.listed ? (
               <div className="mt-2 border-t border-line/60 pt-2 text-[11px] text-ink-faint">Not on CoinGecko · no centralized-exchange listings (DEX-only).</div>
             ) : token.cg && token.cg.cexCount === 0 ? (
               <div className="mt-2 border-t border-line/60 pt-2 text-[11px] text-ink-faint">No centralized-exchange listings (DEX-only).</div>
             ) : null}
-            <button onClick={onOpenToken} className="mono mt-3 rounded-lg border border-line px-2.5 py-1 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink">full on-chain report →</button>
+            <button onClick={onOpenToken} className="btn-chip tint-signal mt-3">full on-chain report →</button>
           </Card>
 
           {/* the people behind it (summary; the full team is its own section below) */}
@@ -411,7 +415,7 @@ export function InvestigationReport({
                 <p className="text-[12.5px] leading-relaxed text-ink-dim">
                   {teamPeople.length} {teamPeople.length === 1 ? "person is" : "people are"} publicly tied to this project: {teamPeople.slice(0, 4).map((p) => p.name).filter(Boolean).join(", ")}{teamPeople.length > 4 ? ", …" : ""}.
                 </p>
-                <p className="mt-1.5 text-[11.5px] text-ink-faint">Full roster with roles &amp; links in the Team section below.</p>
+                <p className="mt-1.5 text-[12.5px] text-ink-faint">Full roster with roles &amp; links in the Team section below.</p>
               </>
             ) : (
               <p className="text-[12.5px] leading-relaxed text-ink-dim">{recon ? recon.identityLine : inv.founderNote}</p>
@@ -419,25 +423,25 @@ export function InvestigationReport({
 
             {/* project account — explicitly NOT a founder */}
             <div className="mt-2.5 border-t border-line/60 pt-2.5">
-              <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Project account (not a founder)</div>
+              <div className="eyebrow">Project account (not a founder)</div>
               {projectX ? (
                 <div className="mt-1 flex items-center justify-between gap-2">
                   <span className="mono text-[12.5px] text-ink">{projectX}</span>
                   {projectAccount ? (
                     <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
                   ) : (
-                    <button onClick={() => auditFounder(projectX)} disabled={spent >= MAX_FOUNDER_AUDITS} className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40" style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}>
+                    <button onClick={() => auditFounder(projectX)} disabled={spent >= MAX_FOUNDER_AUDITS} className="btn-chip tint-signal shrink-0 disabled:opacity-40">
                       {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "audit →"}
                     </button>
                   )}
                 </div>
               ) : (
-                <p className="mt-1 text-[12px] text-ink-faint">No X account linked to this token.</p>
+                <p className="mt-1 text-[12.5px] text-ink-faint">No X account linked to this token.</p>
               )}
             </div>
 
             {token.deployer && (
-              <div className="mt-2.5 border-t border-line/60 pt-2.5 text-[11.5px] text-ink-faint">
+              <div className="mt-2.5 border-t border-line/60 pt-2.5 text-[11px] text-ink-faint">
                 <div>
                   Deployed by <ArkhamName address={token.deployer} chain={token.chain} labels={arkham} fallback={shortAddr(token.deployer)} className="text-ink-dim" />
                   {deployerTrail?.walletAgeDays != null && <> · wallet <span className="text-ink-dim">{deployerTrail.walletAgeDays}d</span> old</>}
@@ -446,14 +450,14 @@ export function InvestigationReport({
                 {deployerTrail?.chain && deployerTrail.chain.length > 0 ? (
                   <div className="mt-1.5 flex flex-wrap items-center gap-1">
                     <span className="text-ink-faint">money trail</span>
-                    <span className="mono rounded bg-panel-2 px-1 py-0.5 text-ink-dim">{shortAddr(token.deployer)}</span>
+                    <span className="chip normal-case tracking-normal">{shortAddr(token.deployer)}</span>
                     {deployerTrail.chain.map((h, i) => (
                       <span key={i} className="flex items-center gap-1">
                         <span className="text-ink-faint">←</span>
                         {h.label ? (
-                          <span className="mono rounded px-1.5 py-0.5" style={{ background: "rgba(22,163,74,0.12)", color: "var(--color-pass)" }}>{h.label}</span>
+                          <span className="chip tint-pass normal-case tracking-normal">{h.label}</span>
                         ) : (
-                          <span className="mono rounded bg-panel-2 px-1 py-0.5 text-ink-dim">{shortAddr(h.to)}</span>
+                          <span className="chip normal-case tracking-normal">{shortAddr(h.to)}</span>
                         )}
                       </span>
                     ))}
@@ -463,14 +467,14 @@ export function InvestigationReport({
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
                     <span>funded by</span>
                     {deployerTrail.funder.label ? (
-                      <span className="mono rounded px-1.5 py-0.5" style={{ background: "rgba(22,163,74,0.10)", color: "var(--color-pass)" }}>{deployerTrail.funder.label}</span>
+                      <span className="chip tint-pass normal-case tracking-normal">{deployerTrail.funder.label}</span>
                     ) : (
                       <ArkhamName address={deployerTrail.funder.address} chain={token.chain} labels={arkham} fallback={shortAddr(deployerTrail.funder.address)} className="text-ink-dim" />
                     )}
                   </div>
                 ) : null}
                 {deployerTrail?.serialDeployer && (
-                  <span className="mono mt-1 inline-block rounded px-1.5 py-0.5" style={{ background: "rgba(220,38,38,0.12)", color: "var(--color-avoid)" }}>serial deployer · {deployerTrail.tokensCreated}+ tokens</span>
+                  <span className="chip tint-avoid mt-1">serial deployer · {deployerTrail.tokensCreated}+ tokens</span>
                 )}
                 {deployerTrail && <div className="mt-1 leading-snug">{deployerTrail.note}</div>}
                 {!deployerTrail && <div className="mt-0.5">deployer wallet, no identity verification available.</div>}
@@ -485,7 +489,7 @@ export function InvestigationReport({
             <Card title="Team · from X content, the site, and web/LinkedIn">
               {teamPeople.length > 0 && (
                 <div>
-                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Team & founders ({teamPeople.length}) · click to run a full audit</div>
+                  <div className="eyebrow">Team & founders ({teamPeople.length}) · click to run a full audit</div>
                   <div className="mt-1.5 space-y-1.5">
                     {teamPeople.map((m) => (
                       <div key={m.handle ?? m.name} className="flex items-center justify-between gap-2">
@@ -493,23 +497,22 @@ export function InvestigationReport({
                           <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                           <span className="text-[12.5px] text-ink">{m.name}</span>
                           {m.handle && m.handle.replace(/^@/, "").toLowerCase() !== m.name.toLowerCase() && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
-                          {m.role && <span className="text-[10.5px] text-ink-faint">{m.role}</span>}
+                          {m.role && <span className="text-[11px] text-ink-faint">{m.role}</span>}
                           {m.linkedin && (
-                            <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">LinkedIn ↗</a>
+                            <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                           )}
-                          <span className="rounded px-1 text-[9.5px] text-ink-faint" style={{ background: "var(--color-line)" }}>{m.source}</span>
+                          <span className="chip normal-case tracking-normal">{m.source}</span>
                         </span>
                         {m.handle ? (
                           <button
                             onClick={() => auditFounder(m.handle!)}
                             disabled={spent >= MAX_FOUNDER_AUDITS}
-                            className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40"
-                            style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
+                            className="btn-chip tint-signal shrink-0 disabled:opacity-40"
                           >
                             {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "audit →"}
                           </button>
                         ) : (
-                          <span className="mono shrink-0 text-[10.5px] text-ink-faint">no handle</span>
+                          <span className="mono shrink-0 text-[11px] text-ink-faint">no handle</span>
                         )}
                       </div>
                     ))}
@@ -518,7 +521,7 @@ export function InvestigationReport({
               )}
               {advisors.length > 0 && (
                 <div className={teamPeople.length > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}>
-                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Advisors / backers ({advisors.length}) · claimed, corroborated</div>
+                  <div className="eyebrow">Advisors / backers ({advisors.length}) · claimed, corroborated</div>
                   <div className="mt-1.5 space-y-1.5">
                     {advisors.map((a) => {
                       const c = advisorChip(a.corroboration_verdict);
@@ -527,15 +530,14 @@ export function InvestigationReport({
                           <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                             <Avatar src={a.claimed_endorser_handle ? xAvatar(a.claimed_endorser_handle) : null} letter={initial(a.claimed_endorser_handle ?? "?")} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                             <span className="mono text-[12.5px] text-ink">{a.claimed_endorser_handle}</span>
-                            <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${c.color}1a`, color: c.color }}>{c.label}</span>
-                            {a.follows_subject === false && <span className="text-[10px] text-ink-faint">does not follow project</span>}
+                            <span className="chip tint-var" style={{ "--tint": c.color } as React.CSSProperties}>{c.label}</span>
+                            {a.follows_subject === false && <span className="text-[11px] text-ink-dim">does not follow project</span>}
                           </span>
                           {a.claimed_endorser_handle && (
                             <button
                               onClick={() => auditFounder(a.claimed_endorser_handle!)}
                               disabled={spent >= MAX_FOUNDER_AUDITS}
-                              className="mono shrink-0 rounded-md border px-2 py-0.5 text-[11px] transition disabled:opacity-40"
-                              style={{ borderColor: "var(--color-signal)", color: "var(--color-signal)" }}
+                              className="btn-chip tint-signal shrink-0 disabled:opacity-40"
                             >
                               {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "background →"}
                             </button>
@@ -544,7 +546,7 @@ export function InvestigationReport({
                       );
                     })}
                   </div>
-                  <p className="mt-2 text-[11px] leading-snug text-ink-faint">A claimed advisor who does not follow or has never acknowledged the project is a classic fake-name-drop signal.</p>
+                  <p className="mt-2 text-[12.5px] leading-snug text-ink-faint">A claimed advisor who does not follow or has never acknowledged the project is a classic fake-name-drop signal.</p>
                 </div>
               )}
             </Card>
@@ -603,19 +605,19 @@ export function InvestigationReport({
                 <span className="ml-auto text-[11px] text-ink-faint">{projectAccount.followers} followers · joined {projectAccount.joined}</span>
               </div>
               {/* why the score landed where it did */}
-              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11.5px] text-ink-faint">
+              <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
                 <span>governed by <span className="text-ink-dim">{String(projectAccount.report.governing_role).toLowerCase()}</span></span>
-                {projectAccount.report.cap_applied && <span className="mono rounded px-1.5 py-0.5" style={{ background: "var(--color-avoid)18", color: "var(--color-avoid)" }}>cap · {String(projectAccount.report.cap_applied).replace(/_/g, " ")}</span>}
-                <button onClick={onOpenProjectAccount} className="mono ml-auto rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-dim transition hover:border-line-2 hover:text-ink">why this score · full report →</button>
+                {projectAccount.report.cap_applied && <span className="chip tint-avoid">cap · {String(projectAccount.report.cap_applied).replace(/_/g, " ")}</span>}
+                <button onClick={onOpenProjectAccount} className="btn-chip tint-signal ml-auto">why this score · full report →</button>
               </div>
               {projectAccount.bio && <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">{projectAccount.bio}</p>}
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink">{projectAccount.headline}</p>
               {projectAccount.evidence.ventures.length > 0 && (
                 <div className="mt-2 border-t border-line/60 pt-2">
-                  <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Claimed ventures (unverified — Crunchbase/PDL off)</div>
+                  <div className="eyebrow">Claimed ventures (unverified — Crunchbase/PDL off)</div>
                   <div className="mt-1 flex flex-wrap gap-1.5">
                     {projectAccount.evidence.ventures.slice(0, 6).map((v, i) => (
-                      <span key={i} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim">{v.project_name}</span>
+                      <span key={i} className="chip normal-case tracking-normal">{v.project_name}</span>
                     ))}
                   </div>
                 </div>
@@ -630,7 +632,7 @@ export function InvestigationReport({
         </div>
         {projectAccount && projectChecks.length > 0 && (
           <div className="mt-3">
-            <div className="mb-1.5 text-[10.5px] uppercase tracking-wider text-ink-faint">Project-account evidence coverage</div>
+            <div className="eyebrow mb-1.5">Project-account evidence coverage</div>
             <MethodologyChecklist id="investigation-project-methodology" checks={projectChecks} />
           </div>
         )}
@@ -665,7 +667,7 @@ export function InvestigationReport({
           </div>
         )}
 
-        <div className="mt-4 rounded-xl border border-line bg-panel/40 p-4 text-[12px] leading-relaxed text-ink-faint">
+        <div className="mt-4 panel p-4 text-[12.5px] leading-relaxed text-ink-faint">
           <span className="text-ink-dim">How to read this:</span> the token and site recon run keyless and free; the project account is backgrounded automatically (one live people-audit). Per-founder deep-dives are one-click and capped at {MAX_FOUNDER_AUDITS} per investigation to bound cost. ARGUS never invents a founder: names without a verified handle are shown but not audited, and a project account is never treated as a person behind the project.
         </div>
       </div>

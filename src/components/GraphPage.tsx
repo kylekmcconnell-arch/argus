@@ -60,19 +60,19 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
     <div className="mx-auto max-w-5xl px-6 py-10">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-[26px] font-medium tracking-[-0.02em] text-ink">Trust graph</h1>
-          <p className="mt-1.5 max-w-2xl text-[14px] text-ink-dim">
+          <h1 className="display-sm text-[24px] text-ink">Trust graph</h1>
+          <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
             Every audit is a star map on its own. Merged, they compound: an entity in two investigations
             becomes a bridge, a wallet tied to several rugs becomes a serial actor, and a cluster of flagged
             subjects sharing one hidden hub becomes a cabal. None of that shows in a single report.
           </p>
         </div>
-        <div className="flex shrink-0 rounded-lg border border-line bg-panel p-0.5 text-[12px]">
+        <div className="flex shrink-0 rounded-lg border border-line bg-panel p-1">
           {(["network", "subject"] as const).map((m) => (
             <button
               key={m}
               onClick={() => setMode(m)}
-              className={`mono rounded-md px-2.5 py-1 transition ${mode === m ? "bg-panel-2 text-ink soft-shadow" : "text-ink-dim hover:text-ink"}`}
+              className={`mono rounded-md px-3 py-1.5 text-[11px] transition ${mode === m ? "tint-signal" : "text-ink-faint hover:text-ink-dim"}`}
             >
               {m === "network" ? "Network" : "By subject"}
             </button>
@@ -81,7 +81,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
       </div>
 
       {/* legend */}
-      <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[11.5px] text-ink-faint">
+      <div className="mt-5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] text-ink-faint">
         {[
           ["var(--color-signal)", "subject"],
           ["var(--color-pass)", "exit / acknowledged"],
@@ -102,7 +102,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             <button
               onClick={() => setActiveCat(null)}
-              className={`mono rounded-full border px-2.5 py-1 text-[11.5px] transition ${!activeCat ? "border-signal text-signal" : "border-line text-ink-dim hover:text-ink"}`}
+              className={`mono rounded-md border px-2.5 py-1 text-[11px] transition ${!activeCat ? "tint-signal" : "border-line text-ink-dim hover:text-ink"}`}
             >
               All
             </button>
@@ -114,7 +114,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
                 <button
                   key={c.key}
                   onClick={() => setActiveCat(active ? null : c.key)}
-                  className={`mono rounded-full border px-2.5 py-1 text-[11.5px] transition ${active ? "border-signal text-signal" : "border-line text-ink-dim hover:text-ink"}`}
+                  className={`mono rounded-md border px-2.5 py-1 text-[11px] transition ${active ? "tint-signal" : "border-line text-ink-dim hover:text-ink"}`}
                 >
                   {c.label} <span className="text-ink-faint">{n}</span>
                 </button>
@@ -123,11 +123,11 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
           </div>
 
           {mine.length > 0 && (
-            <div className="mt-3 flex flex-wrap items-center gap-3 rounded-lg border border-line bg-panel px-3 py-2 text-[12px]">
+            <div className="panel mt-3 flex flex-wrap items-center gap-3 px-3 py-2 text-[12.5px]">
               <span className="mono text-ink-faint">{mine.length} audited subject{mine.length === 1 ? "" : "s"} in the graph (yours + shared)</span>
               <button
                 onClick={() => { clearContributions(); setMine([]); }}
-                className="mono ml-auto rounded-md border border-line px-2 py-0.5 text-[11px] text-ink-faint transition hover:text-ink"
+                className="btn-chip ml-auto"
               >
                 clear local cache
               </button>
@@ -143,10 +143,10 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
               {CATEGORIES.map((c) => {
                 const list = buckets.get(c.key) ?? [];
                 return (
-                  <div key={c.key} className="rounded-xl border border-line bg-panel p-3.5">
+                  <div key={c.key} className="panel p-3.5">
                     <div className="flex items-baseline justify-between">
                       <span className="text-[12.5px] font-semibold text-ink">{c.label}</span>
-                      <span className="mono text-[10.5px] text-ink-faint">{list.length}</span>
+                      <span className="mono text-[11px] text-ink-faint">{list.length}</span>
                     </div>
                     {list.length ? (
                       <div className="mt-2 space-y-1">
@@ -158,12 +158,12 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
                               onClick={() => onOpen(e.ref ?? e.query)}
                               className="group flex w-full items-center justify-between gap-2 rounded-md px-1.5 py-1 text-left transition hover:bg-panel-2"
                             >
-                              <span className="mono truncate text-[11.5px] text-ink-dim group-hover:text-ink">{e.query}</span>
+                              <span className="mono truncate text-[11px] text-ink-dim group-hover:text-ink">{e.query}</span>
                               <span className="mono shrink-0 text-[11px] tabular" style={{ color: m?.color ?? "var(--color-ink-faint)" }}>{e.score ?? "—"}</span>
                             </button>
                           );
                         })}
-                        {list.length > 8 && <div className="mono px-1.5 text-[10px] text-ink-faint">+{list.length - 8} more</div>}
+                        {list.length > 8 && <div className="mono px-1.5 text-[11px] text-ink-faint">+{list.length - 8} more</div>}
                       </div>
                     ) : (
                       <p className="mt-2 text-[11px] text-ink-faint">None audited yet.</p>
@@ -193,7 +193,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
             />
           </div>
 
-          <p className="mt-4 text-[12px] leading-relaxed text-ink-faint">
+          <p className="mt-4 text-[12.5px] leading-relaxed text-ink-faint">
             The graph is persistent and shared: every audit (yours and your co-analysts') writes its entities
             back, so the next investigation inherits everything already known. The graph gets sharper with use,
             the cost of a clean front does not.
@@ -202,7 +202,7 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
       ) : (
         <div className="mt-5 grid gap-3 lg:grid-cols-2">
           {mine.length === 0 && (
-            <p className="text-[13px] text-ink-faint">No audited subjects yet — run an audit and its star map lands here.</p>
+            <p className="empty-state lg:col-span-2">No audited subjects yet — run an audit and its star map lands here.</p>
           )}
           {mine.map((c) => {
             const m = verdictMeta(c.verdict ?? "INCOMPLETE");
@@ -210,13 +210,13 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
               <button
                 key={c.handle}
                 onClick={() => onOpen(c.handle)}
-                className="group rounded-xl border border-line bg-panel p-3 text-left transition hover:border-line-2 hover:shadow-sm"
+                className="panel group p-3 text-left transition hover:border-line-2 soft-shadow"
               >
                 <div className="mb-1 flex items-center gap-2 px-1">
                   <span className="mono text-[12.5px] text-ink">{c.handle}</span>
                   <span
-                    className="mono ml-auto rounded-full border px-2 py-0.5 text-[10.5px] font-semibold tracking-wider"
-                    style={{ borderColor: m.color, color: m.color, background: m.glow }}
+                    className={`verdict-pill ml-auto ${c.verdict === "FAIL" ? "tint-fail" : "tint-var"}`}
+                    style={c.verdict === "FAIL" ? undefined : ({ "--tint": m.color } as React.CSSProperties)}
                   >
                     {m.label}
                   </span>
@@ -236,7 +236,7 @@ function Cabals({ net }: { net: ReturnType<typeof buildNetwork> }) {
   const strong = cabals.some((c) => !c.holderOnly);
   const color = strong ? "var(--color-avoid)" : "var(--color-caution)";
   return (
-    <div className="rounded-xl border p-4" style={{ borderColor: cabals.length ? color : "var(--color-line)", background: cabals.length ? (strong ? "rgba(220,38,38,0.04)" : "rgba(217,119,6,0.04)") : "var(--color-panel)" }}>
+    <div className={`panel p-4 ${cabals.length ? "tint-var" : ""}`} style={cabals.length ? ({ "--tint": color } as React.CSSProperties) : undefined}>
       <div className="flex items-center gap-1.5 text-[12.5px] font-semibold" style={{ color: cabals.length ? color : "var(--color-ink)" }}>
         <span className="h-2 w-2 rounded-full" style={{ background: cabals.length ? color : "var(--color-line-2)" }} />
         {cabals.length ? `Linked cluster${cabals.length > 1 ? "s" : ""} detected` : "Cabal detection"}
@@ -255,7 +255,7 @@ function Cabals({ net }: { net: ReturnType<typeof buildNetwork> }) {
                   {v.key}
                 </span>
               ))}
-              {cabal.via.length > 10 && <span className="text-[10px] text-ink-faint">+{cabal.via.length - 10} more</span>}
+              {cabal.via.length > 10 && <span className="text-[11px] text-ink-faint">+{cabal.via.length - 10} more</span>}
             </div>
           </div>
         ))
@@ -275,7 +275,7 @@ function Intel({
   title: string; subtitle: string; items: { key: string; detail: string }[]; empty: string; tone: string;
 }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="panel p-4">
       <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-ink">
         <span className="h-2 w-2 rounded-full" style={{ background: tone }} />
         {title}
@@ -285,13 +285,13 @@ function Intel({
         <div className="mt-2.5 space-y-1.5">
           {items.map((it) => (
             <div key={it.key} className="flex items-center justify-between gap-2">
-              <span className="mono truncate text-[12px] text-ink-dim">{it.key}</span>
-              <span className="mono shrink-0 text-[10.5px] text-ink-faint">{it.detail}</span>
+              <span className="mono truncate text-[12.5px] text-ink-dim">{it.key}</span>
+              <span className="mono shrink-0 text-[11px] text-ink-faint">{it.detail}</span>
             </div>
           ))}
         </div>
       ) : (
-        <p className="mt-2 text-[12px] text-ink-faint">{empty}</p>
+        <p className="mt-2 text-[12.5px] text-ink-faint">{empty}</p>
       )}
     </div>
   );

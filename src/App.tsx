@@ -68,7 +68,7 @@ const WatchlistPage = lazy(() => import("./components/WatchlistPage").then((modu
 function RouteLoading() {
   return (
     <div className="flex min-h-[55vh] items-center justify-center" role="status" aria-live="polite">
-      <span className="flex items-center gap-2 text-[12px] text-ink-faint">
+      <span className="flex items-center gap-2 text-[12.5px] text-ink-faint">
         <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal" />
         Loading investigation workspace…
       </span>
@@ -97,7 +97,7 @@ function CaseBriefLoadingDialog() {
       className="fixed inset-0 z-[100] m-0 ml-auto h-[100dvh] max-h-none w-full max-w-[760px] border-0 border-l border-line bg-void p-0 text-ink shadow-2xl backdrop:bg-black/75"
     >
       <div className="flex h-full items-center justify-center" role="status" aria-live="polite">
-        <span className="flex items-center gap-2 text-[12px] text-ink-dim">
+        <span className="flex items-center gap-2 text-[12.5px] text-ink-dim">
           <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal" />
           Opening case brief…
         </span>
@@ -1178,7 +1178,7 @@ export default function App() {
     <AppShell onNav={onNav} onAudit={onSafeAudit} onOpenRecent={onOpenRecent} activeHandle={activeHandle} view={view}>
       <Suspense fallback={<RouteLoading />}>
       {evidenceReviewVersionId && phase !== "idle" && phase !== "notfound" && (
-        <div className="mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border border-signal/35 bg-signal/5 px-4 py-3 text-[11.5px] text-ink-dim">
+        <div className="tint-signal mx-auto mt-4 flex max-w-5xl flex-wrap items-center gap-2 rounded-xl border px-4 py-3 text-[12.5px]">
           <span className="font-medium text-signal">Immutable evidence review</span>
           <span className="mono break-all">version {evidenceReviewVersionId}</span>
           <span>Opened in a separate tab so the Case Brief draft remains intact.</span>
@@ -1268,8 +1268,8 @@ export default function App() {
         <div className="relative flex min-h-[60vh] flex-col items-center justify-center px-6 text-center" role="status" aria-live="polite">
           <div className="grid-bg absolute inset-0 -z-10" />
           <span className="h-2 w-2 animate-pulse rounded-full bg-signal" />
-          <h2 className="mt-4 text-xl font-medium tracking-tight text-ink">Resolving the exact subject</h2>
-          <p className="mt-2 max-w-md text-[13px] leading-relaxed text-ink-dim">
+          <h2 className="mt-4 display-sm text-[18px] text-ink">Resolving the exact subject</h2>
+          <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
             Checking durable cases and canonical contract identity before any collector or paid investigation can start.
           </p>
         </div>
@@ -1278,9 +1278,9 @@ export default function App() {
       {phase === "token-choice" && (
         <div className="relative mx-auto flex min-h-full w-full max-w-3xl flex-col px-6 py-16">
           <div className="grid-bg absolute inset-0 -z-10" />
-          <div className="mono text-[11px] uppercase tracking-[0.18em] text-signal">Exact contract required</div>
-          <h2 className="mt-2 text-2xl font-medium tracking-tight text-ink">Choose the token you meant</h2>
-          <p className="mt-2 max-w-2xl text-[14px] leading-relaxed text-ink-dim">
+          <div className="eyebrow text-signal">Exact contract required</div>
+          <h2 className="mt-2 display-sm text-[24px] text-ink">Choose the token you meant</h2>
+          <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
             More than one contract uses this ticker. ARGUS will never guess based on liquidity or popularity. Select the exact chain and address before any investigation starts.
           </p>
           <div className="mt-6 grid gap-3">
@@ -1288,17 +1288,17 @@ export default function App() {
               <button
                 key={`${candidate.chain}:${candidate.canonicalRef}`}
                 onClick={() => { void openOrLaunchTokenCandidate(candidate, tokenChoicePrivate, tokenChoiceMode); }}
-                className="rounded-xl border border-line bg-panel p-4 text-left transition hover:border-line-2"
+                className="panel p-4 text-left transition hover:border-line-2"
                 aria-label={`Investigate ${candidate.symbol || candidate.name || "token"} on ${candidate.chain} at ${candidate.canonicalRef}`}
               >
                 <span className="flex flex-wrap items-center justify-between gap-2">
                   <span className="text-[15px] font-medium text-ink">
                     {candidate.symbol ? `$${candidate.symbol}` : candidate.name || "Unnamed token"}
                     {candidate.name && candidate.name.toLowerCase() !== candidate.symbol.toLowerCase() && (
-                      <span className="ml-2 text-[12px] font-normal text-ink-dim">{candidate.name}</span>
+                      <span className="ml-2 text-[12.5px] font-normal text-ink-dim">{candidate.name}</span>
                     )}
                   </span>
-                  <span className="mono rounded border border-line px-2 py-0.5 text-[10px] uppercase text-ink-faint">{candidate.chain}</span>
+                  <span className="chip">{candidate.chain}</span>
                 </span>
                 <span className="mono mt-2 block break-all text-[11px] text-ink-dim">{candidate.canonicalRef}</span>
                 <span className="mt-2 block text-[11px] text-ink-faint">
@@ -1309,7 +1309,7 @@ export default function App() {
               </button>
             ))}
           </div>
-          <button onClick={reset} className="mt-6 self-start text-[13px] text-ink-dim hover:text-ink">Back to home</button>
+          <button onClick={reset} className="mt-6 self-start text-[13.5px] text-ink-dim hover:text-ink">Back to home</button>
         </div>
       )}
 
@@ -1318,8 +1318,8 @@ export default function App() {
           <div className="grid-bg absolute inset-0 -z-10" />
           {caseNotice ? (
             <>
-              <div className="mono max-w-md break-all text-[13px] text-signal">{caseNotice.ref}</div>
-              <h2 className="mt-3 text-2xl font-medium tracking-tight text-ink">
+              <div className="mono max-w-md break-all text-[13.5px] text-signal">{caseNotice.ref}</div>
+              <h2 className="mt-3 display-sm text-[24px] text-ink">
                 {caseNotice.reason === "archived"
                   ? "This case is archived"
                   : caseNotice.reason === "missing"
@@ -1332,7 +1332,7 @@ export default function App() {
                       ? "More than one stored case matches"
                       : "Stored case status is unavailable"}
               </h2>
-              <p className="mt-2 max-w-md text-[14px] leading-relaxed text-ink-dim">
+              <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
                 {caseNotice.reason === "archived"
                   ? "Its immutable reports, evidence, audit history, and trust-graph intelligence are preserved. ARGUS did not start a new scan."
                   : caseNotice.reason === "missing"
@@ -1358,7 +1358,7 @@ export default function App() {
                     else if (caseNotice.reason === "case-ambiguous") setPhase("dossiers");
                     else reset();
                   }}
-                  className="btn-primary px-5 py-2.5 text-[13px] font-medium"
+                  className="btn-primary px-5 py-2.5 text-[13.5px] font-medium"
                 >
                   {caseNotice.reason === "archived"
                     ? "Go to report library"
@@ -1380,7 +1380,7 @@ export default function App() {
                       if (archived.kind === "investigation") onInvestigate(archived.ref, privRef.current, true);
                       else onAudit(archived.ref, privRef.current, true);
                     }}
-                    className="rounded-lg border border-line px-5 py-2.5 text-[13px] text-ink-dim transition hover:border-line-2 hover:text-ink"
+                    className="rounded-lg border border-line px-5 py-2.5 text-[13.5px] text-ink-dim transition hover:border-line-2 hover:text-ink"
                   >
                     {caseNotice.reason === "archived" ? "Start fresh scan and reopen" : "Start a new scan"}
                   </button>
@@ -1389,49 +1389,49 @@ export default function App() {
             </>
           ) : resolveInput(query).kind === "token" ? (
             <>
-              <div className="mono max-w-md break-all text-[13px] text-signal">{query}</div>
-              <h2 className="mt-3 text-2xl font-medium tracking-tight text-ink">Couldn't resolve that token</h2>
-              <p className="mt-2 max-w-md text-[14px] leading-relaxed text-ink-dim">
+              <div className="mono max-w-md break-all text-[13.5px] text-signal">{query}</div>
+              <h2 className="mt-3 display-sm text-[24px] text-ink">Couldn't resolve that token</h2>
+              <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
                 No DEX pair was found for this contract. It may be brand-new, unlisted, illiquid, or on a chain
                 ARGUS doesn't index yet. Double-check the address, or try one of the live samples on the home screen.
               </p>
             </>
           ) : liveError ? (
             <>
-              <div className="mono text-[13px] text-signal">@{query.replace(/^@/, "")}</div>
-              <h2 className="mt-3 text-2xl font-medium tracking-tight text-ink">The live audit didn't finish</h2>
-              <p className="mt-2 max-w-md text-[14px] leading-relaxed text-ink-dim">
+              <div className="mono text-[13.5px] text-signal">@{query.replace(/^@/, "")}</div>
+              <h2 className="mt-3 display-sm text-[24px] text-ink">The live audit didn't finish</h2>
+              <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
                 ARGUS collected against this handle but the run ended before a report was assembled — usually a
                 timeout on a very large account, or a dropped connection. Nothing was saved. Retrying often
                 clears it, since slow providers are cached on the second pass.
               </p>
-              <div className="mono mt-3 max-w-md break-words rounded-lg border border-line/60 bg-panel/50 px-3 py-2 text-[11px] text-ink-faint">
+              <div className="mono panel-inset mt-3 max-w-md break-words px-3 py-2 text-[12.5px] text-ink-dim">
                 {liveError}
               </div>
               <div className="mt-6 flex items-center gap-3">
-                <button onClick={() => onAudit(query, privRef.current)} className="btn-primary px-5 py-2.5 text-[13px] font-medium">
+                <button onClick={() => onAudit(query, privRef.current)} className="btn-primary px-5 py-2.5 text-[13.5px] font-medium">
                   Retry audit
                 </button>
-                <button onClick={reset} className="text-[13px] text-ink-dim hover:text-ink">
+                <button onClick={reset} className="text-[13.5px] text-ink-dim hover:text-ink">
                   Back to home
                 </button>
               </div>
             </>
           ) : (
             <>
-              <div className="mono text-[13px] text-signal">@{query.replace(/^@/, "")}</div>
-              <h2 className="mt-3 text-2xl font-medium tracking-tight text-ink">No live dossier yet</h2>
-              <p className="mt-2 max-w-md text-[14px] leading-relaxed text-ink-dim">
+              <div className="mono text-[13.5px] text-signal">@{query.replace(/^@/, "")}</div>
+              <h2 className="mt-3 display-sm text-[24px] text-ink">No live dossier yet</h2>
+              <p className="mt-2 max-w-md text-[13.5px] leading-relaxed text-ink-dim">
                 This demo ships with curated worked audits. With provider keys configured, ARGUS resolves any
                 handle on demand. Pick a dossier from the rail, or paste a token contract for a live audit.
               </p>
-              <button onClick={reset} className="btn-primary mt-6 px-5 py-2.5 text-[13px] font-medium">
+              <button onClick={reset} className="btn-primary mt-6 px-5 py-2.5 text-[13.5px] font-medium">
                 Back to home
               </button>
             </>
           )}
           {!caseNotice && resolveInput(query).kind === "token" && (
-            <button onClick={reset} className="btn-primary mt-6 px-5 py-2.5 text-[13px] font-medium">
+            <button onClick={reset} className="btn-primary mt-6 px-5 py-2.5 text-[13.5px] font-medium">
               Back to home
             </button>
           )}

@@ -63,7 +63,7 @@ export function SiteInfra({ domain, record, onAudit }: { domain: string; record:
   // Nothing pivotable at all — a quiet, honest one-liner beats an empty panel.
   if (!fps.length && !siblings.length && !neighbors.length) {
     return (
-      <div className="mt-3 rounded-xl border border-line bg-panel px-4 py-2.5 text-[11.5px] text-ink-faint">
+      <div className="mt-3 panel px-4 py-2.5 text-[12.5px] text-ink-faint">
         No shared web infrastructure surfaced — no third-party analytics IDs, co-registered domains, or hosting neighbours to link this site to another operator.
       </div>
     );
@@ -71,23 +71,23 @@ export function SiteInfra({ domain, record, onAudit }: { domain: string; record:
 
   const hard = fps.some((f) => HARD.has(f.kind));
   return (
-    <div className="mt-3 rounded-xl border border-line bg-panel p-4">
+    <div className="mt-3 panel p-4">
       <div className="flex flex-wrap items-center gap-2">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><circle cx="5" cy="19" r="2.5" /><circle cx="19" cy="19" r="2.5" /><path d="M12 15v-2M9.5 14l-3 3M14.5 14l3 3" /></svg>
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">Infrastructure links</span>
-        {hard && <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: "var(--color-signal)1a", color: "var(--color-signal)" }}>shared operator ID</span>}
+        <span className="eyebrow">Infrastructure links</span>
+        {hard && <span className="chip tint-signal">shared operator ID</span>}
       </div>
-      <p className="mt-1.5 text-[11.5px] leading-relaxed text-ink-dim">
+      <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
         Web prints that tie this site to other operations. A shared analytics or monetization ID is a hard operator link; a co-registered domain or shared host is a lead. These bridge automatically to any other site ARGUS audits that carries the same print.
       </p>
 
       {/* analytics / monetization IDs — the strongest off-chain operator tie */}
       {fps.length > 0 && (
         <div className="mt-3">
-          <div className="text-[10px] uppercase tracking-wider text-ink-faint">Analytics &amp; monetization</div>
+          <div className="eyebrow">Analytics &amp; monetization</div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {fps.map((f) => (
-              <span key={f.kind + f.id} className="mono rounded-md border px-1.5 py-0.5 text-[11px]" style={{ borderColor: HARD.has(f.kind) ? "var(--color-signal)66" : "var(--color-line)", color: "var(--color-ink-dim)" }}>
+              <span key={f.kind + f.id} className={`mono rounded-md border px-1.5 py-0.5 text-[11px] text-ink-dim ${HARD.has(f.kind) ? "border-signal/40" : "border-line"}`}>
                 <span className="text-ink-faint">{f.label}</span> {f.id}
               </span>
             ))}
@@ -98,10 +98,10 @@ export function SiteInfra({ domain, record, onAudit }: { domain: string; record:
       {/* co-registered sibling domains from Certificate Transparency */}
       {siblings.length > 0 && (
         <div className="mt-3">
-          <div className="text-[10px] uppercase tracking-wider text-ink-faint">Co-registered domains · CT logs</div>
+          <div className="eyebrow">Co-registered domains · CT logs</div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {siblings.map((s) => (
-              <button key={s} onClick={() => onAudit?.(s)} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim transition hover:text-ink hover:border-line-2">{s} →</button>
+              <button key={s} onClick={() => onAudit?.(s)} className="btn-chip">{s} →</button>
             ))}
           </div>
         </div>
@@ -110,18 +110,18 @@ export function SiteInfra({ domain, record, onAudit }: { domain: string; record:
       {/* hosting: IP / ASN, and neighbours when it isn't a shared CDN */}
       {h?.ip && (
         <div className="mt-3">
-          <div className="text-[10px] uppercase tracking-wider text-ink-faint">Hosting</div>
+          <div className="eyebrow">Hosting</div>
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px]">
             <span className="mono rounded-md border border-line px-1.5 py-0.5 text-ink-dim"><span className="text-ink-faint">IP</span> {h.ip}</span>
             {h.asn && <span className="mono rounded-md border border-line px-1.5 py-0.5 text-ink-dim">{h.asn}</span>}
-            {h.cdn && <span className="text-[10.5px] text-ink-faint">behind a shared CDN — neighbours not meaningful</span>}
+            {h.cdn && <span className="text-[11px] text-ink-faint">behind a shared CDN — neighbours not meaningful</span>}
           </div>
           {neighbors.length > 0 && (
             <div className="mt-1.5">
-              <div className="text-[9.5px] text-ink-faint">Other sites on this dedicated IP:</div>
+              <div className="text-[11px] text-ink-faint">Other sites on this dedicated IP:</div>
               <div className="mt-1 flex flex-wrap gap-1.5">
                 {neighbors.map((n) => (
-                  <button key={n} onClick={() => onAudit?.(n)} className="mono rounded-md border border-line px-1.5 py-0.5 text-[11px] text-ink-dim transition hover:text-ink hover:border-line-2">{n} →</button>
+                  <button key={n} onClick={() => onAudit?.(n)} className="btn-chip">{n} →</button>
                 ))}
               </div>
             </div>
@@ -130,7 +130,7 @@ export function SiteInfra({ domain, record, onAudit }: { domain: string; record:
       )}
 
       {(favicon || (data.subdomainCount ?? 0) > 0) && (
-        <div className="mt-3 border-t border-line/60 pt-2 text-[10px] text-ink-faint">
+        <div className="mt-3 border-t border-line/60 pt-2 text-[11px] text-ink-faint">
           {favicon && <span className="mono">favicon {favicon.id}</span>}
           {favicon && (data.subdomainCount ?? 0) > 0 && <span> · </span>}
           {(data.subdomainCount ?? 0) > 0 && <span>{data.subdomainCount} subdomains in CT logs</span>}

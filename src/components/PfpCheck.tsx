@@ -98,7 +98,7 @@ export function PfpCheck({ handle, brand, panelCostToken }: { handle: string; br
     : data?.note;
 
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="panel p-4">
       <div className="flex items-center gap-3">
         {available && (data?.imageData || data?.imageUrl) && (
           // Prefer the inline data URI (the exact bytes the classifier saw);
@@ -106,33 +106,33 @@ export function PfpCheck({ handle, brand, panelCostToken }: { handle: string; br
           <img src={data.imageData ?? data.imageUrl} alt="" referrerPolicy="no-referrer" className="h-11 w-11 shrink-0 rounded-lg border border-line bg-void object-cover" />
         )}
         <div className="min-w-0 flex-1">
-          <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Profile-photo integrity screen</div>
+          <div className="text-[12.5px] text-ink-dim">Profile-photo integrity screen</div>
           {loading ? (
-            <div className="mt-1 text-[12px] text-ink-faint">analyzing the photo…</div>
+            <div className="mt-1 text-[12.5px] text-ink-faint">analyzing the photo…</div>
           ) : (
             <div className="mt-0.5 flex flex-wrap items-center gap-2">
-              <span className="text-[13.5px] font-medium" style={{ color: flag ? "var(--color-avoid)" : "var(--color-ink)" }}>{label}</span>
-              {available && typeof data?.confidence === "number" && <span className="mono text-[10px] text-ink-faint">{Math.round(data.confidence * 100)}%</span>}
+              <span className={`text-[13.5px] font-medium ${flag ? "text-avoid" : "text-ink"}`}>{label}</span>
+              {available && typeof data?.confidence === "number" && <span className="mono text-[11px] text-ink-faint">{Math.round(data.confidence * 100)}%</span>}
               {data?.available === false && (
-                <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">unavailable · no conclusion</span>
+                <span className="chip">unavailable · no conclusion</span>
               )}
               {flag && (
-                <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: "rgba(240,97,109,.12)", color: "var(--color-avoid)" }}>
+                <span className="chip tint-avoid">
                   review lead · verify independently
                 </span>
               )}
               {brandLogo && (
-                <span className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">expected for a project account</span>
+                <span className="chip">expected for a project account</span>
               )}
             </div>
           )}
         </div>
       </div>
-      {!loading && note && <div className={`mt-2 text-[12px] leading-relaxed ${flag ? "text-avoid" : "text-ink-dim"}`}>{note}</div>}
+      {!loading && note && <div className={`mt-2 text-[12.5px] leading-relaxed ${flag ? "text-avoid" : "text-ink-dim"}`}>{note}</div>}
       {!loading && tells.length > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
           {tells.map((t, i) => (
-            <span key={i} className="mono rounded border border-line px-1.5 py-0.5 text-[9.5px] text-ink-faint">{t}</span>
+            <span key={i} className="chip">{t}</span>
           ))}
         </div>
       )}

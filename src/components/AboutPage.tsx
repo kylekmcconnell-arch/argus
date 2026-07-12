@@ -37,7 +37,7 @@ const PHASES: { n: number; title: string; steps: [string, Status][] }[] = [
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <section className="mt-6">
-      <h2 className="text-[14px] font-semibold tracking-tight text-ink">{title}</h2>
+      <h2 className="text-[13.5px] font-semibold tracking-tight text-ink">{title}</h2>
       <div className="mt-2 text-[13.5px] leading-relaxed text-ink-dim">{children}</div>
     </section>
   );
@@ -45,8 +45,8 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Card({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
-      <div className="text-[13px] font-medium text-ink">{title}</div>
+    <div className="panel p-4">
+      <div className="text-[13.5px] font-medium text-ink">{title}</div>
       <div className="mt-1 text-[12.5px] leading-relaxed text-ink-faint">{body}</div>
     </div>
   );
@@ -58,8 +58,8 @@ export function AboutPage({ onStart }: { onStart: () => void }) {
       <div className="mb-5">
         <ArgusMark size={36} />
       </div>
-      <h1 className="text-[28px] font-medium tracking-[-0.02em] text-ink">How ARGUS works</h1>
-      <p className="mt-2 max-w-2xl text-[14.5px] leading-relaxed text-ink-dim">
+      <h1 className="display-sm text-[24px] text-ink">How ARGUS works</h1>
+      <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         ARGUS is the hundred-eyed giant of crypto due-diligence. It audits two things forensically: the
         <span className="text-ink"> people</span> in a deal and the <span className="text-ink">tokens</span> on-chain.
         A strong story never papers over a disqualifying fact.
@@ -104,18 +104,18 @@ export function AboutPage({ onStart }: { onStart: () => void }) {
         live and keyless, versus what is on the roadmap (web crawl, code forensics, and agent steps
         unlock with provider keys).
         <div className="mt-3 flex items-center gap-4 text-[11px] text-ink-faint">
-          {([["live", "var(--color-pass)"], ["partial", "var(--color-caution)"], ["planned", "var(--color-line-2)"]] as const).map(([l, c]) => (
-            <span key={l} className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full" style={{ background: c }} />{l}</span>
+          {([["live", "bg-pass"], ["partial", "bg-caution"], ["planned", "bg-line-2"]] as const).map(([l, c]) => (
+            <span key={l} className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${c}`} />{l}</span>
           ))}
         </div>
         <div className="mt-3 space-y-2">
           {PHASES.map((p) => (
-            <div key={p.n} className="rounded-xl border border-line bg-panel p-3.5">
-              <div className="mb-2 text-[12px] font-semibold text-ink">Phase {p.n} · {p.title}</div>
+            <div key={p.n} className="panel p-3.5">
+              <div className="mb-2 text-[12.5px] font-semibold text-ink">Phase {p.n} · {p.title}</div>
               <div className="space-y-1">
                 {p.steps.map(([label, status], i) => (
                   <div key={i} className="flex items-center gap-2 text-[12.5px] text-ink-dim">
-                    <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: status === "live" ? "var(--color-pass)" : status === "partial" ? "var(--color-caution)" : "var(--color-line-2)" }} />
+                    <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${status === "live" ? "bg-pass" : status === "partial" ? "bg-caution" : "bg-line-2"}`} />
                     {label}
                   </div>
                 ))}
@@ -126,7 +126,7 @@ export function AboutPage({ onStart }: { onStart: () => void }) {
       </Section>
 
       <div className="mt-8 flex items-center gap-3">
-        <button onClick={onStart} className="btn-primary px-5 py-2.5 text-[13px] font-medium">Start an audit</button>
+        <button onClick={onStart} className="btn-primary px-5 py-2.5 text-[13.5px] font-medium">Start an audit</button>
         <span className="text-[12.5px] text-ink-faint">API-only acquisition · evidence-disciplined · reproducible</span>
       </div>
     </div>

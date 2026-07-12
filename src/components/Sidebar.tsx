@@ -24,12 +24,12 @@ function AuditAvatar({ src, letter }: { src: string | null; letter: string }) {
         loading="lazy"
         referrerPolicy="no-referrer"
         onError={() => setFailed(true)}
-        className="h-6 w-6 shrink-0 rounded-md border border-line bg-panel object-cover"
+        className="h-6 w-6 shrink-0 rounded-md border border-line bg-panel-2 object-cover"
       />
     );
   }
   return (
-    <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel text-[11px] text-signal">
+    <span className="mono flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal">
       {letter}
     </span>
   );
@@ -52,8 +52,7 @@ function recentAudits(max: number): LogEntry[] {
 
 const KIND_LABEL: Record<LogEntry["kind"], string> = { person: "handle", token: "token", site: "site" };
 
-// Left rail, origami.chat style: light zinc-100, logo at top, nav, a recent-audits
-// list, account at the bottom.
+// Left rail: brand, grouped nav, a recent-audits live feed, account block.
 
 function Icon({ d }: { d: string }) {
   return (
@@ -88,16 +87,26 @@ function NavItem({ icon, label, active, onClick, badge }: { icon: keyof typeof I
   return (
     <button
       onClick={onClick}
-      className={`flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13.5px] transition ${
-        active ? "bg-panel text-ink soft-shadow" : "text-ink-dim hover:bg-panel/70 hover:text-ink"
+      className={`relative flex w-full items-center gap-2.5 rounded-md px-2.5 py-[5.5px] text-[13.5px] transition ${
+        active ? "bg-signal/[0.09] text-ink" : "text-ink-dim hover:bg-panel/70 hover:text-ink"
       }`}
     >
+      {active && <span className="absolute left-0 top-1/2 h-4 w-[2px] -translate-y-1/2 rounded-full bg-signal" aria-hidden />}
       <span className={active ? "text-signal" : "text-ink-faint"}>
         <Icon d={ICONS[icon]} />
       </span>
       {label}
       {badge ? <span className="mono ml-auto rounded-full bg-signal/15 px-1.5 text-[10px] text-signal-dim">{badge}</span> : null}
     </button>
+  );
+}
+
+// Group label inside the rail: quieter than .eyebrow (the rail repeats it often).
+function NavGroup({ label }: { label: string }) {
+  return (
+    <div className="mono px-2.5 pb-1 pt-3.5 text-[10px] uppercase tracking-[0.14em] text-ink-faint/80">
+      {label}
+    </div>
   );
 }
 
@@ -110,7 +119,7 @@ function ThemeToggle() {
     setTheme(next);
   };
   return (
-    <button onClick={toggle} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13.5px] text-ink-dim transition hover:bg-panel/70 hover:text-ink">
+    <button onClick={toggle} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-[5.5px] text-[13.5px] text-ink-dim transition hover:bg-panel/70 hover:text-ink">
       <span className="text-ink-faint">
         {theme === "dark" ? (
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" /></svg>
@@ -131,10 +140,10 @@ function AnalystBadge() {
   const initial = (name[0] || "?").toUpperCase();
   return (
     <div className="mt-1 flex items-center gap-2.5 rounded-md px-2.5 py-1.5">
-      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-signal text-[12px] font-semibold text-white">{initial}</span>
+      <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-signal text-[12.5px] font-semibold text-white">{initial}</span>
       <div className="min-w-0 flex-1">
-        <div className="truncate text-[13px] text-ink">{name}</div>
-        <div className="truncate text-[11px] text-ink-faint">{auth.role} · verified</div>
+        <div className="truncate text-[13.5px] text-ink">{name}</div>
+        <div className="truncate text-[11px] text-ink-dim">{auth.role} · verified</div>
       </div>
       <button
         type="button"
@@ -210,24 +219,26 @@ export function Sidebar({
       }`}
     >
       {/* brand */}
-      <button onClick={() => nav("idle")} className="flex items-center gap-2.5 px-4 py-4">
+      <button onClick={() => nav("idle")} className="flex items-center gap-2.5 px-4 pb-3 pt-4">
         <ArgusMark size={26} />
-        <span className="text-[15px] font-semibold tracking-tight text-ink">ARGUS</span>
-        <span className="mono ml-auto rounded border border-line bg-panel px-1.5 py-0.5 text-[10px] text-ink-faint">v2.2</span>
+        <span className="display text-[15px] tracking-[0.02em] text-ink">ARGUS</span>
+        <span className="chip ml-auto">v2.2</span>
       </button>
 
       {/* nav */}
-      <nav className="space-y-0.5 px-2.5 pt-1">
+      <nav className="space-y-px px-2.5">
         <NavItem icon="home" label="Home" active={view === "idle"} onClick={() => nav("idle")} />
         <NavItem icon="radar" label="Radar" active={view === "radar"} onClick={() => nav("radar")} />
         <NavItem icon="trending" label="Trending" active={view === "trending"} onClick={() => nav("trending")} />
         <NavItem icon="recon" label="Site recon" active={view === "recon"} onClick={() => nav("recon")} />
         <NavItem icon="wallet" label="Find wallet" active={view === "find"} onClick={() => nav("find")} />
+        <NavGroup label="Directories" />
         <NavItem icon="gallery" label="Dossiers" active={view === "dossiers"} onClick={() => nav("dossiers")} />
         <NavItem icon="founder" label="Founders" active={view === "founders"} onClick={() => nav("founders")} />
         <NavItem icon="project" label="Projects" active={view === "projects"} onClick={() => nav("projects")} />
         <NavItem icon="kol" label="KOLs" active={view === "kols"} onClick={() => nav("kols")} />
         <NavItem icon="vc" label="VCs" active={view === "vcs"} onClick={() => nav("vcs")} />
+        <NavGroup label="Signals" />
         <NavItem icon="graph" label="Trust graph" active={view === "graph"} onClick={() => nav("graph")} />
         <NavItem icon="watch" label="Watchlist" active={view === "watchlist"} onClick={() => nav("watchlist")} badge={getWatchlist().length || undefined} />
         <NavItem icon="bell" label="Alerts" active={view === "alerts"} onClick={() => nav("alerts")} />
@@ -235,7 +246,7 @@ export function Sidebar({
       </nav>
 
       {/* recent audits */}
-      <div className="mt-5 px-4 text-[10.5px] font-medium uppercase tracking-[0.16em] text-ink-faint">
+      <div className="eyebrow mt-4 px-4">
         Recent audits
       </div>
       <div className="mt-1.5 space-y-0.5 overflow-y-auto px-2.5 thin-scroll">
@@ -252,13 +263,13 @@ export function Sidebar({
               title="Generating — click to watch. Keeps running if you navigate away."
               className={`group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition ${active ? "bg-panel soft-shadow" : "hover:bg-panel/70"}`}
             >
-              <span className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line bg-void text-[12px] text-signal">
+              <span className="mono relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal">
                 {avatar}
                 <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-signal ring-2 ring-sidebar" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="mono block truncate text-[12.5px] text-ink">{r.handle}</span>
-                <span className="block truncate text-[10px] text-signal-dim">generating… {r.pct}%</span>
+                <span className="mono block truncate text-[11px] text-signal-dim">generating… {r.pct}%</span>
                 <span className="mt-1 block h-[3px] w-full overflow-hidden rounded-full bg-line">
                   <span className="block h-full rounded-full bg-signal transition-[width] duration-500" style={{ width: `${Math.max(6, r.pct)}%` }} />
                 </span>
@@ -277,13 +288,13 @@ export function Sidebar({
               title={`Scanning ${s.label} (${s.kind})…`}
               className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left transition hover:bg-panel/70"
             >
-              <span className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-md border border-line bg-void text-[12px] text-signal">
+              <span className="mono relative flex h-6 w-6 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] text-signal">
                 {avatar}
                 <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-signal ring-2 ring-sidebar" />
               </span>
               <span className="min-w-0 flex-1">
                 <span className="mono block truncate text-[12.5px] text-ink">{s.label}</span>
-                <span className="block truncate text-[10px] text-signal-dim">scanning… {s.pct}%</span>
+                <span className="mono block truncate text-[11px] text-signal-dim">scanning… {s.pct}%</span>
                 <span className="mt-1 block h-[3px] w-full overflow-hidden rounded-full bg-line">
                   <span className="block h-full rounded-full bg-signal transition-[width] duration-500" style={{ width: `${Math.max(6, s.pct)}%` }} />
                 </span>
@@ -292,7 +303,7 @@ export function Sidebar({
           );
         })}
         {recent.length === 0 && running.length === 0 && scans.length === 0 ? (
-          <div className="px-2 py-1.5 text-[11.5px] leading-snug text-ink-faint">
+          <div className="px-2 py-1.5 text-[11px] leading-snug text-ink-faint">
             Nothing yet. Audit a handle, token, or site and it lands here.
           </div>
         ) : (
@@ -316,7 +327,7 @@ export function Sidebar({
                 <AuditAvatar src={auditImage(e)} letter={avatar} />
                 <span className="min-w-0 flex-1">
                   <span className="mono block truncate text-[12.5px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
-                  <span className="block truncate text-[10px] text-ink-faint">
+                  <span className="block truncate text-[11px] text-ink-faint">
                     {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}{displayedVerdict === "INCOMPLETE" ? " · incomplete" : ""}
                     {e.contributor && e.contributor !== me && e.contributor !== "anonymous" && (
                       <span className="text-signal-dim"> · {e.contributor}</span>
@@ -331,7 +342,7 @@ export function Sidebar({
       </div>
 
       {/* account */}
-      <div className="mt-auto border-t border-line px-2.5 py-3">
+      <div className="mt-auto border-t border-line px-2.5 py-2.5">
         <NavItem icon="key" label="Providers" active={view === "providers"} onClick={() => nav("providers")} />
         <NavItem icon="changelog" label="Changelog" active={view === "changelog"} onClick={() => nav("changelog")} />
         <NavItem icon="code" label="API" active={view === "api"} onClick={() => nav("api")} />

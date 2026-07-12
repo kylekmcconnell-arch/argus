@@ -35,20 +35,20 @@ export function SanctionsScreen({ addresses, chain }: { addresses: { address: st
 
   if (hits.length) {
     return (
-      <div className="rounded-xl border p-4" style={{ borderColor: "var(--color-avoid)", background: "rgba(220,38,38,0.08)" }}>
-        <div className="flex items-center gap-2 text-[13.5px] font-semibold" style={{ color: "var(--color-avoid)" }}>
+      <div className="finding tint-avoid p-4">
+        <div className="flex items-center gap-2 text-[13.5px] font-semibold text-avoid">
           <span className="text-[15px]">⛔</span>
           OFAC-sanctioned wallet{hits.length === 1 ? "" : "s"} — do not interact
         </div>
-        <p className="mt-1.5 text-[12px] leading-relaxed text-ink-dim">
+        <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
           {hits.length} of this token's key wallets {hits.length === 1 ? "is" : "are"} on the US Treasury OFAC sanctions list. Transacting with a sanctioned address is a legal violation, not just a risk.
         </p>
         <div className="mt-2 space-y-1">
           {hits.map((a) => (
-            <div key={a} className="flex items-center gap-2 text-[12px]">
-              <a href={explorerAddr(a, chain)} target="_blank" rel="noreferrer" className="mono font-medium hover:underline" style={{ color: "var(--color-avoid)" }}>{shortAddr(a)}</a>
+            <div key={a} className="flex items-center gap-2 text-[12.5px]">
+              <a href={explorerAddr(a, chain)} target="_blank" rel="noreferrer" className="link-ext mono font-medium text-avoid">{shortAddr(a)}</a>
               <span className="text-[11px] text-ink-faint">{roleOf.get(a.toLowerCase()) ?? "wallet"}</span>
-              <span className="mono rounded px-1.5 py-0.5 text-[9.5px]" style={{ background: "rgba(220,38,38,.14)", color: "var(--color-avoid)" }}>OFAC SDN</span>
+              <span className="chip tint-avoid">OFAC SDN</span>
             </div>
           ))}
         </div>
@@ -58,8 +58,8 @@ export function SanctionsScreen({ addresses, chain }: { addresses: { address: st
 
   // Clean — a quiet line confirming the check ran (diligence users want to see it did).
   return (
-    <div className="rounded-xl border border-line bg-panel px-4 py-2.5">
-      <div className="flex items-center gap-2 text-[11.5px] text-ink-faint">
+    <div className="panel px-4 py-2.5">
+      <div className="flex items-center gap-2 text-[12.5px] text-ink-faint">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-pass)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 12l2 2 4-4" /><circle cx="12" cy="12" r="9" /></svg>
         <span><span className="text-ink-dim">{data.checked}</span> key wallet{data.checked === 1 ? "" : "s"} screened against the OFAC sanctions list — none sanctioned.</span>
       </div>

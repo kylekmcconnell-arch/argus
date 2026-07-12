@@ -23,21 +23,21 @@ export function Unknowns({ dossier }: { dossier: TokenDossier }) {
   const items = gaps(dossier);
   if (!items.length) return null;
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="panel p-4">
       <div className="flex items-center gap-2">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-faint)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M9.1 9a3 3 0 0 1 5.8 1c0 2-3 2.5-3 3.5" /><path d="M12 17h.01" /></svg>
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">What we couldn't verify</span>
-        <span className="mono ml-auto text-[10px] text-ink-faint">{items.length} gap{items.length === 1 ? "" : "s"}</span>
+        <span className="eyebrow">What we couldn't verify</span>
+        <span className="mono ml-auto text-[11px] text-ink-faint">{items.length} gap{items.length === 1 ? "" : "s"}</span>
       </div>
       <ul className="mt-2 space-y-1.5">
         {items.map((t, i) => (
-          <li key={i} className="flex gap-2 text-[12px] leading-relaxed text-ink-dim">
+          <li key={i} className="flex gap-2 text-[12.5px] leading-relaxed text-ink-dim">
             <span className="mt-1.5 h-1 w-1 shrink-0 rounded-full bg-ink-faint" />
             <span>{t}</span>
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-[10.5px] leading-snug text-ink-faint">These are gaps in coverage, not findings against the token — but a scan you can't complete is itself a reason for caution.</p>
+      <p className="mt-2 text-[11px] leading-snug text-ink-faint">These are gaps in coverage, not findings against the token — but a scan you can't complete is itself a reason for caution.</p>
     </div>
   );
 }

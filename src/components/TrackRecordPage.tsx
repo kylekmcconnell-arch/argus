@@ -5,10 +5,11 @@ import { verdictMeta } from "../lib/verdict";
 
 function Pill({ verdict }: { verdict: string }) {
   const m = verdictMeta(verdict);
+  const fail = verdict === "FAIL";
   return (
     <span
-      className="mono rounded px-1.5 py-0.5 text-[10.5px] font-semibold"
-      style={{ color: m.color, background: m.glow, border: `1px solid ${m.color}33` }}
+      className={`verdict-pill ${fail ? "tint-fail" : "tint-var"}`}
+      style={fail ? undefined : ({ "--tint": m.color } as React.CSSProperties)}
     >
       {verdict}
     </span>
@@ -17,10 +18,10 @@ function Pill({ verdict }: { verdict: string }) {
 
 function Stat({ label, value, sub, tone }: { label: string; value: string; sub: string; tone: string }) {
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
-      <div className="text-[11px] uppercase tracking-wider text-ink-faint">{label}</div>
-      <div className="mono mt-1 text-[30px] font-semibold leading-none tabular" style={{ color: tone }}>{value}</div>
-      <div className="mt-1.5 text-[12px] leading-snug text-ink-faint">{sub}</div>
+    <div className="stat-tile">
+      <div className="stat-label">{label}</div>
+      <div className="stat-value mt-0.5 font-semibold" style={{ color: tone }}>{value}</div>
+      <div className="mt-1.5 text-[12.5px] leading-snug text-ink-faint">{sub}</div>
     </div>
   );
 }
@@ -61,8 +62,8 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
     <div className="mx-auto max-w-3xl px-6 py-12">
       <div className="flex items-start justify-between gap-4">
         <div>
-          <h1 className="text-[28px] font-medium tracking-[-0.02em] text-ink">Track record</h1>
-          <p className="mt-2 max-w-2xl text-[14.5px] leading-relaxed text-ink-dim">
+          <h1 className="display-sm text-[24px] text-ink">Track record</h1>
+          <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
             ARGUS run live, in your browser, over a labeled set of real tokens. Nothing here is precomputed
             or hand-tuned. Two honest questions: does it stay quiet on known-good tokens, and does it catch
             dangerous on-chain power even when the name is reputable?
@@ -71,7 +72,7 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
         <button
           onClick={run}
           disabled={running}
-          className="mono shrink-0 rounded-lg border border-line bg-panel px-3 py-1.5 text-[12px] text-ink-dim transition hover:border-line-2 hover:text-ink disabled:opacity-50"
+          className="btn-chip tint-signal shrink-0 disabled:opacity-50"
         >
           {running ? `running ${done}/${CORPUS.length}` : "re-run"}
         </button>
@@ -107,8 +108,8 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
       )}
 
       {/* results table */}
-      <div className="mt-6 overflow-hidden rounded-xl border border-line bg-panel">
-        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-line px-4 py-2 text-[10.5px] uppercase tracking-wider text-ink-faint">
+      <div className="panel mt-6 overflow-hidden">
+        <div className="grid grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-line px-4 py-2 eyebrow">
           <span>Token</span>
           <span>What drove the verdict</span>
           <span className="text-right">Verdict</span>
@@ -122,13 +123,8 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
               className="grid w-full grid-cols-[auto_1fr_auto] items-center gap-3 border-b border-line px-4 py-3 text-left transition last:border-0 hover:bg-panel/40"
             >
               <span className="flex items-center gap-2">
-                <span className="mono text-[13px] font-medium text-ink">{t.symbol}</span>
-                <span
-                  className="rounded-full px-1.5 py-0.5 text-[9.5px] font-medium"
-                  style={t.bucket === "established"
-                    ? { color: pass, background: "rgba(22,163,74,0.08)" }
-                    : { color: "var(--color-caution)", background: "rgba(217,119,6,0.08)" }}
-                >
+                <span className="mono text-[13.5px] font-medium text-ink">{t.symbol}</span>
+                <span className={`chip ${t.bucket === "established" ? "tint-pass" : "tint-caution"}`}>
                   {t.bucket === "established" ? "fixed-supply" : "mintable gov"}
                 </span>
               </span>
@@ -138,12 +134,12 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
               <span className="flex items-center justify-end gap-2">
                 {r?.status === "ok" && <span className="mono text-[11px] tabular text-ink-faint">{r.score}</span>}
                 {r ? (
-                  r.status === "ok" ? <Pill verdict={r.verdict} /> : <span className="mono text-[10.5px] text-ink-faint">{r.error === "unresolved" ? "no pair" : "error"}</span>
+                  r.status === "ok" ? <Pill verdict={r.verdict} /> : <span className="mono text-[11px] text-ink-faint">{r.error === "unresolved" ? "no pair" : "error"}</span>
                 ) : (
                   <span className="h-3 w-3 animate-pulse rounded-full bg-line" />
                 )}
                 {r && (
-                  <span className="w-3 text-[12px]" style={{ color: r.correct ? pass : fail }}>{r.correct ? "✓" : "✗"}</span>
+                  <span className={`w-3 text-[12.5px] ${r.correct ? "text-pass" : "text-fail"}`}>{r.correct ? "✓" : "✗"}</span>
                 )}
               </span>
             </button>
@@ -153,7 +149,7 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
 
       {/* the honest point about the governance bucket */}
       {okResults.length > 0 && (
-        <div className="mt-4 rounded-xl border border-line bg-panel/40 p-4 text-[13px] leading-relaxed text-ink-dim">
+        <div className="panel mt-4 p-4 text-[13.5px] leading-relaxed text-ink-dim">
           <span className="font-medium text-ink">Power, not reputation.</span> MKR, CRV and ENS are blue chips a
           name-based checker waves straight through. ARGUS flags them anyway, because their contracts retain a live
           mint authority: the supply can still be expanded by whoever controls them. That is a fact about the
@@ -162,8 +158,8 @@ export function TrackRecordPage({ onAudit }: { onAudit?: (addr: string) => void 
       )}
 
       {/* methodology + limitations: scrupulously honest */}
-      <h2 className="mt-7 text-[14px] font-semibold tracking-tight text-ink">How to read this</h2>
-      <ul className="mt-2 space-y-2 text-[13px] leading-relaxed text-ink-dim">
+      <h2 className="mt-7 text-[13.5px] font-semibold tracking-tight text-ink">How to read this</h2>
+      <ul className="mt-2 space-y-2 text-[13.5px] leading-relaxed text-ink-dim">
         <li>
           <span className="text-ink">Measured, not asserted.</span> Every row is a live audit against DexScreener,
           GoPlus and honeypot.is at the moment you loaded this page. The counts above are computed from those

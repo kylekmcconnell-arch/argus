@@ -1,63 +1,70 @@
 @import "tailwindcss";
 
-/* ARGUS — "crypto intelligence": deep navy canvas, a royal-blue signal, the
-   dotted-eye mark. DARK is the default (the @theme values); LIGHT is a runtime
-   override on :root[data-theme="light"]. Token NAMES never change, so every
-   component flips automatically between modes. */
+/* ARGUS — a forensic instrument. Cold near-black operations room, one electric
+   royal-blue signal, verdicts that read like stamped findings. DARK is the
+   default (the @theme values); LIGHT is a runtime override on
+   :root[data-theme="light"]. Token NAMES never change — every component flips
+   automatically.
+
+   This file also defines the component idioms (.panel, .eyebrow, .chip,
+   .verdict-pill, .finding, .btn-x, .stat-tile, .tint-x) that DESIGN.md makes
+   binding. One concept, one idiom — never restyle these concepts inline.
+
+   Deliberately off-stock palette: no value here is a default Tailwind hex. */
 @theme {
-  --color-void: #0a1322; /* app background — deep navy */
-  --color-panel: #111d31; /* cards */
-  --color-panel-2: #16243b; /* inset / subtle */
-  --color-sidebar: #0c1726; /* left rail */
-  --color-line: #1d2c43; /* hairline border */
-  --color-line-2: #2a3c57; /* stronger border */
-  --color-ink: #eaf0f8; /* primary text (near-white) */
-  --color-ink-dim: #9aabc2; /* secondary text */
-  --color-ink-faint: #7689a2; /* tertiary text · AA on dark panels */
+  --color-void: #080d18; /* app background — cold near-black */
+  --color-panel: #0e1729; /* cards */
+  --color-panel-2: #15213a; /* raised / inset */
+  --color-sidebar: #0a1120; /* left rail */
+  --color-line: #1d2b47; /* hairline border */
+  --color-line-2: #2e4166; /* stronger border */
+  --color-ink: #eef2f9; /* primary text */
+  --color-ink-dim: #a6b4cc; /* secondary text */
+  --color-ink-faint: #8294af; /* tertiary text · AA on dark panels */
 
-  --color-signal: #3b82f6; /* royal-blue accent (the iris) */
-  --color-signal-dim: #2563eb;
-  --color-accent-tint: #0e1c31; /* subtle blue-tinted bar */
+  --color-signal: #4272ff; /* electric royal blue (the iris) */
+  --color-signal-dim: #2e56e6;
+  --color-accent-tint: #0c1830; /* subtle blue-tinted wash */
 
-  --color-pass: #22c55e;
-  --color-caution: #f59e0b;
-  --color-fail: #fb7185;
-  --color-avoid: #ef4444;
-  --color-unverifiable: #a78bfa;
+  --color-pass: #2dbd6e; /* jade — confirmed good */
+  --color-caution: #eda320; /* goldenrod — warn / partial */
+  --color-fail: #e0588f; /* cool magenta-rose — failed verdict score */
+  --color-avoid: #e5484d; /* alarm red — disqualifying */
+  --color-unverifiable: #9d86f7;
 
-  --font-sans: "Sora", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-sans: "Archivo", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --font-mono: "Geist Mono", "SF Mono", ui-monospace, "JetBrains Mono", monospace;
 }
 
 :root {
   --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 10px 34px -18px rgba(0, 0, 0, 0.65);
-  --select: rgba(59, 130, 246, 0.26);
+  --select: rgba(66, 114, 255, 0.28);
 }
 
 /* LIGHT mode — the alternate. */
 :root[data-theme="light"] {
   --color-void: #ffffff;
   --color-panel: #ffffff;
-  --color-panel-2: #f4f7fb;
-  --color-sidebar: #f2f6fc;
-  --color-line: #e3e9f1;
-  --color-line-2: #cfd8e6;
-  --color-ink: #0a1322;
-  --color-ink-dim: #44566f;
-  --color-ink-faint: #66758a; /* tertiary text · AA on white */
+  --color-panel-2: #f2f5fa;
+  --color-sidebar: #f1f5fb;
+  --color-line: #e1e7f0;
+  --color-line-2: #c7d2e3;
+  --color-ink: #0a1120;
+  --color-ink-dim: #43556f;
+  --color-ink-faint: #5f7189;
 
-  --color-signal: #2563eb;
-  --color-signal-dim: #1d4ed8;
-  --color-accent-tint: #eef4fe;
+  --color-signal: #2050e0;
+  --color-signal-dim: #1a43c8;
+  --color-accent-tint: #edf3fe;
 
-  --color-pass: #15803d;
-  --color-caution: #b45309;
-  --color-fail: #c2410c;
-  --color-avoid: #dc2626;
-  --color-unverifiable: #7c3aed;
+  --color-pass: #107f42;
+  --color-caution: #96650a;
+  --color-fail: #c0266d;
+  --color-avoid: #d92d20;
+  --color-unverifiable: #6d38d8;
 
   --shadow: 0 1px 2px rgba(9, 9, 11, 0.04), 0 8px 30px -16px rgba(9, 9, 11, 0.12);
-  --select: rgba(37, 99, 235, 0.16);
+  --select: rgba(32, 80, 224, 0.16);
 }
 
 @layer base {
@@ -77,17 +84,37 @@
   ::selection {
     background: var(--select);
   }
+  /* Keyboard a11y: ONE global focus treatment — a two-layer ring that stays
+     visible on any surface (signal outline + void gap). Components must not
+     hand-roll their own focus outlines. */
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 2px var(--color-void);
+  }
 }
 
-/* faint origami paper grid for empty canvases */
-.grid-bg {
-  background-image:
-    linear-gradient(var(--color-line) 1px, transparent 1px),
-    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
-  background-size: 46px 46px;
-  -webkit-mask-image: radial-gradient(800px 460px at 50% 30%, #000 0%, transparent 78%);
-  mask-image: radial-gradient(800px 460px at 50% 30%, #000 0%, transparent 78%);
-  opacity: 0.5;
+@layer components {
+/* ───────────────────────── typography ───────────────────────── */
+
+/* The brand voice: Archivo drawn wide. Only at display sizes — wordmark,
+   32/44px subject names, hero questions, verdict words (verdict words are
+   always uppercase). */
+.display {
+  font-family: var(--font-sans);
+  font-variation-settings: "wdth" 125;
+  font-stretch: 125%;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+/* Gentler width for 18–24px mixed-case page titles (full-width reads stretched
+   below ~32px). */
+.display-sm {
+  font-family: var(--font-sans);
+  font-variation-settings: "wdth" 110;
+  font-stretch: 110%;
+  font-weight: 620;
+  letter-spacing: -0.01em;
 }
 
 .mono {
@@ -98,11 +125,159 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* blue primary button — the brand accent */
+/* The ONE section-header treatment. */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: var(--color-ink-faint);
+}
+
+/* ───────────────────────── surfaces ─────────────────────────
+   Rhythm rule: .panel is the ONLY bordered container. Interior structure is
+   ledger-style — borderless zones + hairline dividers — not nested boxes. */
+
+.panel {
+  border-radius: 12px;
+  border: 1px solid color-mix(in oklab, var(--color-line) 72%, transparent);
+  background: var(--color-panel);
+}
+/* Borderless interior zone (a wash, not a box). */
+.panel-inset {
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--color-void) 42%, transparent);
+}
+:root[data-theme="light"] .panel-inset {
+  background: color-mix(in oklab, var(--color-panel-2) 75%, transparent);
+}
+
+.soft-shadow {
+  box-shadow: var(--shadow);
+}
+
+/* Atmospheric glow for hero canvases. Sits on the void. */
+.atmosphere {
+  background:
+    radial-gradient(1100px 480px at 68% -12%, color-mix(in oklab, var(--color-signal) 7%, transparent), transparent 68%),
+    var(--color-void);
+}
+
+/* faint paper grid for empty canvases */
+.grid-bg {
+  background-image:
+    linear-gradient(var(--color-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+  background-size: 46px 46px;
+  -webkit-mask-image: radial-gradient(800px 460px at 50% 30%, #000 0%, transparent 78%);
+  mask-image: radial-gradient(800px 460px at 50% 30%, #000 0%, transparent 78%);
+  opacity: 0.5;
+}
+
+/* ───────────────────────── tints ─────────────────────────
+   Theme-safe tinted surfaces. These replace BOTH the broken
+   "var(--color-x)14" string-alpha hack and hardcoded rgba() literals.
+   Text is mixed toward ink so every pair holds AA in both themes.
+   Dynamic colors: className="tint-var" + style={{ "--tint": expr }} —
+   the ONE permitted style-prop pattern for color. */
+.tint-pass         { --tint: var(--color-pass); }
+.tint-caution      { --tint: var(--color-caution); }
+.tint-avoid        { --tint: var(--color-avoid); }
+.tint-fail         { --tint: var(--color-fail); }
+.tint-signal       { --tint: var(--color-signal); }
+.tint-unverifiable { --tint: var(--color-unverifiable); }
+.tint-neutral      { --tint: var(--color-ink-faint); }
+
+.tint-pass, .tint-caution, .tint-avoid, .tint-fail, .tint-signal,
+.tint-unverifiable, .tint-neutral, .tint-var {
+  background: color-mix(in oklab, var(--tint) 9%, transparent);
+  border-color: color-mix(in oklab, var(--tint) 34%, transparent);
+  color: color-mix(in oklab, var(--tint) 76%, var(--color-ink));
+}
+/* Stronger variant for row-level banners/bands. */
+.tint-strong {
+  background: color-mix(in oklab, var(--tint) 14%, transparent);
+  border-color: color-mix(in oklab, var(--tint) 48%, transparent);
+}
+
+/* A stamped finding: the ONE grid-breaking idiom, reserved for decision-
+   critical rows (sanctions hits, risk paths, hard-cap findings, readiness
+   bands). Square corners, a 2px rail in the semantic color, tint wash. */
+.finding {
+  position: relative;
+  border-left: 2px solid var(--tint, var(--color-ink-faint));
+  background: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 8%, transparent);
+  color: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 76%, var(--color-ink));
+}
+
+/* ───────────────────────── chips & verdicts ─────────────────────────
+   Composition is cascade-safe: idiom classes consume var(--tint, neutral) so
+   they work with or without a tint class, regardless of source order. */
+
+/* The ONE badge geometry. 11px — semantic metadata is never smaller. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-radius: 5px;
+  border: 1px solid color-mix(in oklab, var(--tint, var(--color-ink-faint)) 30%, transparent);
+  background: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 8%, transparent);
+  padding: 1.5px 6px;
+  color: color-mix(in oklab, var(--tint, var(--color-ink-dim)) 76%, var(--color-ink));
+  white-space: nowrap;
+}
+/* Non-semantic footnote chip (counts, versions). NEVER pair with a tint. */
+.chip-sm {
+  font-size: 10px;
+  padding: 1px 5px;
+}
+
+/* The ONE verdict treatment (PASS/FAIL/CAUTION/AVOID/…): dot + stamped word.
+   fail gets a hollow dot so fail-vs-avoid survives small sizes and CVD. */
+.verdict-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-radius: 6px;
+  border: 1px solid color-mix(in oklab, var(--tint, var(--color-ink-faint)) 42%, transparent);
+  background: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 10%, transparent);
+  color: color-mix(in oklab, var(--tint, var(--color-ink-faint)) 78%, var(--color-ink));
+  padding: 3px 9px;
+  white-space: nowrap;
+}
+.verdict-pill::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: currentColor;
+  flex: none;
+}
+.verdict-pill.tint-fail::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1.5px currentColor;
+}
+.verdict-pill-lg {
+  font-size: 13.5px;
+  padding: 5px 12px;
+  border-radius: 8px;
+}
+
+/* ───────────────────────── controls ───────────────────────── */
+
 .btn-primary {
   background: var(--color-signal);
   color: #ffffff;
-  border-radius: 6px;
+  border-radius: 8px;
   transition: filter 0.15s ease, transform 0.05s ease;
 }
 .btn-primary:hover {
@@ -110,6 +285,130 @@
 }
 .btn-primary:active {
   transform: scale(0.985);
+}
+.btn-primary:disabled {
+  opacity: 0.4;
+}
+
+.btn-secondary {
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  color: var(--color-ink-dim);
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.btn-secondary:hover {
+  border-color: var(--color-line-2);
+  color: var(--color-ink);
+}
+
+.btn-ghost {
+  color: var(--color-ink-dim);
+  transition: color 0.15s ease;
+}
+.btn-ghost:hover {
+  color: var(--color-ink);
+}
+
+/* Row-level mono CTA ("trace →", "audit →", "run panel →"). Tint it when it
+   runs a scan/panel or pivots to a new audit: `btn-chip tint-signal`. */
+.btn-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  border: 1px solid color-mix(in oklab, var(--tint, var(--color-line-2)) 45%, transparent);
+  border-radius: 6px;
+  padding: 2px 8px;
+  color: color-mix(in oklab, var(--tint, var(--color-ink-dim)) 76%, var(--color-ink));
+  background: transparent;
+  white-space: nowrap;
+  transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+}
+.btn-chip:hover {
+  border-color: color-mix(in oklab, var(--tint, var(--color-line-2)) 70%, transparent);
+  background: color-mix(in oklab, var(--tint, var(--color-line-2)) 12%, transparent);
+  color: color-mix(in oklab, var(--tint, var(--color-ink)) 80%, var(--color-ink));
+}
+
+/* The ONE text input. (No outline:none — the global :focus-visible ring
+   handles keyboard focus; the border shift is the pointer affordance.) */
+.field {
+  background: color-mix(in oklab, var(--color-void) 60%, transparent);
+  border: 1px solid var(--color-line);
+  border-radius: 8px;
+  color: var(--color-ink);
+  transition: border-color 0.15s ease;
+}
+.field::placeholder {
+  color: var(--color-ink-faint);
+}
+.field:focus {
+  border-color: var(--color-signal);
+}
+:root[data-theme="light"] .field {
+  background: #ffffff;
+}
+
+/* ───────────────────────── data display ───────────────────────── */
+
+/* The ONE stat tile: label above value, borderless wash (ledger rhythm). */
+.stat-tile {
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--color-void) 42%, transparent);
+  padding: 8px 12px;
+}
+:root[data-theme="light"] .stat-tile {
+  background: color-mix(in oklab, var(--color-panel-2) 75%, transparent);
+}
+.stat-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--color-ink-faint);
+}
+.stat-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  color: var(--color-ink);
+}
+
+/* External-link affordance: one idiom, arrow included. */
+.link-ext {
+  color: color-mix(in oklab, var(--color-signal) 78%, var(--color-ink));
+  text-underline-offset: 2px;
+}
+.link-ext:hover {
+  text-decoration: underline;
+}
+.link-ext::after {
+  content: "↗";
+  font-size: 0.85em;
+  margin-left: 3px;
+  opacity: 0.75;
+}
+
+.empty-state {
+  border-radius: 12px;
+  border: 1px dashed var(--color-line-2);
+  padding: 32px 24px;
+  text-align: center;
+  font-size: 12.5px;
+  color: var(--color-ink-faint);
+}
+}
+
+/* ───────────────────────── motion ───────────────────────── */
+
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.rise-in {
+  animation: rise-in 0.24s ease-out both;
 }
 
 .scan-line {
@@ -138,8 +437,27 @@
   animation: sweep 1.4s ease-in-out infinite;
 }
 
-.soft-shadow {
-  box-shadow: var(--shadow);
+/* Shared scan-progress bar for loading panels (WalletClusters/OperatorNetwork/
+   FunderSweep previously each shipped a private copy of these keyframes). */
+@keyframes scan-bar {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(320%); }
+}
+.scan-bar {
+  position: relative;
+  overflow: hidden;
+  height: 3px;
+  border-radius: 9999px;
+  background: var(--color-line);
+}
+.scan-bar::after {
+  content: "";
+  position: absolute;
+  inset-block: 0;
+  width: 30%;
+  border-radius: 9999px;
+  background: var(--color-signal);
+  animation: scan-bar 1.3s ease-in-out infinite;
 }
 
 .thin-scroll::-webkit-scrollbar { width: 7px; height: 7px; }
@@ -157,6 +475,11 @@
   will-change: transform;
 }
 .scores-marquee:hover { animation-play-state: paused; }
+
 @media (prefers-reduced-motion: reduce) {
   .scores-marquee { animation: none; }
+  .rise-in { animation: none; }
+  .sweep { animation: none; }
+  .scan-bar::after { animation: none; width: 100%; opacity: 0.4; }
+  .pulse-ring::after { animation: none; opacity: 0; }
 }

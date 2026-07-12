@@ -100,23 +100,23 @@ export function OnchainReality({ promotions, wallets, symbolHints, onAudit }: { 
   const sweepWallet = subject?.deployer;
 
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
+    <div className="panel p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[10.5px] uppercase tracking-wider text-ink-faint">On-chain reality check</span>
+        <span className="eyebrow">On-chain reality check</span>
         {state === "loading" && <span className="text-[11px] text-ink-faint">tracing the promoted token on-chain…</span>}
       </div>
 
       {tok && (
         <div className="mt-2 flex flex-wrap items-center gap-2 text-[12.5px]">
           <button onClick={() => onAudit?.(tok.address)} className="mono text-ink underline-offset-2 hover:text-signal-dim hover:underline">{subject?.label}</button>
-          {m && <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: `${m.color}1a`, color: m.color }}>{tok.verdict}{tok.score != null ? ` ${tok.score}` : ""}</span>}
+          {m && <span className={`verdict-pill ${tok.verdict === "FAIL" ? "tint-fail" : "tint-var"}`} style={tok.verdict === "FAIL" ? undefined : ({ "--tint": m.color } as React.CSSProperties)}>{tok.verdict}{tok.score != null ? ` ${tok.score}` : ""}</span>}
           {typeof tok.liquidityUsd === "number" && <span className="text-[11px] text-ink-faint">liquidity ${Math.round(tok.liquidityUsd).toLocaleString()}</span>}
-          <span className="text-[10.5px] text-ink-faint">· the token this account promotes</span>
+          <span className="text-[11px] text-ink-faint">· the token this account promotes</span>
         </div>
       )}
 
       {subject?.deployer && (
-        <div className="mt-2 text-[12px] text-ink-dim">
+        <div className="mt-2 text-[12.5px] text-ink-dim">
           Deployer <span className="mono text-ink">{shortAddr(subject.deployer)}</span>
           {trail?.walletAgeDays != null && <> · wallet {trail.walletAgeDays}d old</>}
           {trail?.tokensCreated != null && (
@@ -129,7 +129,7 @@ export function OnchainReality({ promotions, wallets, symbolHints, onAudit }: { 
       {sweepWallet && <FunderSweep wallet={sweepWallet} onAudit={onAudit} />}
 
       {state === "done" && !tok && !subject?.deployer && (
-        <div className="mt-1.5 text-[12px] text-ink-faint">The promoted token could not be resolved on-chain (thin, unlisted, or non-Solana).</div>
+        <div className="mt-1.5 text-[12.5px] text-ink-faint">The promoted token could not be resolved on-chain (thin, unlisted, or non-Solana).</div>
       )}
     </div>
   );

@@ -28,28 +28,28 @@ export function ProjectIntel({ domain }: { domain: string }) {
       .catch(() => setState("none"));
   }, [domain]);
 
-  if (state === "loading") return <div className="rounded-xl border border-line bg-panel p-4 text-[12px] text-ink-faint">checking domain age + audit claims…</div>;
+  if (state === "loading") return <div className="panel p-4 text-[12.5px] text-ink-faint">checking domain age + audit claims…</div>;
   if (state === "none" || !d) return null;
 
   const youngDomain = (d.domain?.ageMonths ?? 99) < 3 && !!d.domain?.registered;
   const fakeAudit = (d.audits ?? []).some((a) => !a.proof);
 
   return (
-    <div className="rounded-xl border border-line bg-panel p-4">
-      <div className="text-[10.5px] uppercase tracking-wider text-ink-faint">Project intelligence</div>
+    <div className="panel p-4">
+      <div className="eyebrow">Project intelligence</div>
 
       {/* domain age */}
       <div className="mt-2">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[12.5px] font-medium text-ink">Domain</span>
-          <span className="mono text-[11.5px] text-ink-faint">{d.host}</span>
+          <span className="mono text-[11px] text-ink-faint">{d.host}</span>
           {d.domain?.registered && (
-            <span className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: youngDomain ? "rgba(220,38,38,.14)" : "rgba(22,163,74,.12)", color: youngDomain ? "var(--color-avoid)" : "var(--color-pass)" }}>
+            <span className={`chip ${youngDomain ? "tint-avoid" : "tint-pass"}`}>
               {d.domain.ageMonths}mo old
             </span>
           )}
         </div>
-        <p className={`mt-1 text-[12px] leading-relaxed ${youngDomain ? "text-avoid" : "text-ink-dim"}`}>{d.domainNote}</p>
+        <p className={`mt-1 text-[12.5px] leading-relaxed ${youngDomain ? "text-avoid" : "text-ink-dim"}`}>{d.domainNote}</p>
       </div>
 
       {/* claimed audits */}
@@ -57,16 +57,16 @@ export function ProjectIntel({ domain }: { domain: string }) {
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-[12.5px] font-medium text-ink">Security audits</span>
           {(d.audits ?? []).map((a) => (
-            <span key={a.auditor} className="mono rounded px-1.5 py-0.5 text-[10px]" style={{ background: a.proof ? "rgba(22,163,74,.12)" : "rgba(220,38,38,.14)", color: a.proof ? "var(--color-pass)" : "var(--color-avoid)" }} title={a.proof ? "report link found" : "no linkable report"}>
+            <span key={a.auditor} className={`chip ${a.proof ? "tint-pass" : "tint-avoid"}`} title={a.proof ? "report link found" : "no linkable report"}>
               {a.auditor}{a.proof ? " ✓" : " ⚠"}
             </span>
           ))}
         </div>
-        <p className={`mt-1 text-[12px] leading-relaxed ${fakeAudit ? "text-avoid" : "text-ink-dim"}`}>{d.auditNote}</p>
+        <p className={`mt-1 text-[12.5px] leading-relaxed ${fakeAudit ? "text-avoid" : "text-ink-dim"}`}>{d.auditNote}</p>
         {(d.audits ?? []).some((a) => a.proof) && (
           <div className="mt-1.5 flex flex-wrap gap-2">
             {(d.audits ?? []).filter((a) => a.proof).map((a) => (
-              <a key={a.auditor} href={a.proof!} target="_blank" rel="noreferrer" className="text-[10.5px] text-signal-dim underline-offset-2 hover:underline">{a.auditor} report ↗</a>
+              <a key={a.auditor} href={a.proof!} target="_blank" rel="noreferrer" className="link-ext text-[11px]">{a.auditor} report</a>
             ))}
           </div>
         )}
