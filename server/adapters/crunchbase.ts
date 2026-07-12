@@ -23,6 +23,7 @@ export async function lookupOrganization(name: string) {
         query: [{ type: "predicate", field_id: "identifier", operator_id: "contains", values: [name] }],
         limit: 1,
       }),
+      signal: AbortSignal.timeout(12_000),
     });
   } catch {
     recordCall("crunchbase", "org-search", 0, `${meta} · transport_error`, "failed");

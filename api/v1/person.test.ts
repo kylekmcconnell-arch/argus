@@ -27,7 +27,8 @@ vi.mock("../audit.js", () => ({
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
 import { resolveInput, runAudit } from "../_collector.js";
 import { persistServerDossier } from "../audit.js";
-import handler from "./person";
+import handler, { config } from "./person";
+import { DEEP_INVESTIGATION_MAX_DURATION_SECONDS } from "../../src/lib/investigationRuntime";
 
 const AUTH_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -97,5 +98,11 @@ describe("v1 person input guard", () => {
       { organizationId: AUTH_ORGANIZATION_ID },
     );
     expect(persistServerDossier).not.toHaveBeenCalled();
+  });
+});
+
+describe("v1 person runtime budget", () => {
+  it("matches the deep-investigation route ceiling", () => {
+    expect(config).toEqual({ maxDuration: DEEP_INVESTIGATION_MAX_DURATION_SECONDS });
   });
 });

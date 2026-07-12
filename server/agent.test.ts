@@ -993,6 +993,34 @@ describe("Claude attempt accounting", () => {
     }));
   });
 
+  it("bounds the Anthropic request at 60 seconds by default", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
+    const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const captured = await withCostLedger(async () => {
+      const result = await structured<{ ok: boolean }>("system", "user", tool);
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBeNull();
+    expect(timeoutSpy).toHaveBeenCalledWith(60_000);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signal }),
+    );
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "claude",
+      op: "record_test",
+      failed: 1,
+      status: "failed",
+      meta: expect.stringContaining("transport_error"),
+    }));
+  });
+
   it("records billed usage as partial when the required tool result is missing", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({

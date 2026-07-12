@@ -565,9 +565,25 @@ export async function collectTrustGraph(
     if (rawRows.length > GRAPH_LIMIT) throw new Error("authoritative graph read exceeded its exact row limit");
     const stored = parseGraphRows(rawRows);
     const ids = stored.map((row) => row.reportVersionId);
-    const versions = ids.length ? await readVersions(c, organizationId, ids) : new Map<string, VersionRow>();
-    const checks = ids.length ? await readChecks(c, organizationId, ids) : new Map<string, CheckRow[]>();
-    const activeVersions = ids.length ? await readActiveVersionIds(c, organizationId, ids) : new Set<string>();
+    let versions = new Map<string, VersionRow>();
+    let checks = new Map<string, CheckRow[]>();
+    let activeVersions = new Set<string>();
+    if (ids.length) {
+      // These qualification reads are independent, but the provider ledger must
+      // observe every physical attempt before the dossier snapshots cost. Await
+      // all three even when one fails, then fail closed with the first rejection.
+      const [versionResult, checkResult, activeResult] = await Promise.allSettled([
+        readVersions(c, organizationId, ids),
+        readChecks(c, organizationId, ids),
+        readActiveVersionIds(c, organizationId, ids),
+      ]);
+      if (versionResult.status === "rejected") throw versionResult.reason;
+      if (checkResult.status === "rejected") throw checkResult.reason;
+      if (activeResult.status === "rejected") throw activeResult.reason;
+      versions = versionResult.value;
+      checks = checkResult.value;
+      activeVersions = activeResult.value;
+    }
     const qualified = stored.map((row) => qualification(
       row,
       versions.get(row.reportVersionId)!,

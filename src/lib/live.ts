@@ -3,6 +3,7 @@
 
 import type { TraceStep } from "../data/evidence";
 import type { Dossier } from "../data/dossier";
+import { AUDIT_STREAM_INACTIVITY_TIMEOUT_MS } from "./investigationRuntime";
 
 export interface ProviderStatus {
   id: string;
@@ -48,22 +49,27 @@ export interface LiveHandlers {
 // stream (function duration cap, network drop) without ever sending a `done` or
 // `error` event; without guarding for that the UI hangs on "working…" forever.
 // We track whether a terminal handler has fired, surface an error if the stream
-// closes early, and run a watchdog just past the function's own 120s ceiling.
+// closes early, and use an inactivity watchdog that resets on every streamed
+// chunk. This catches a dead connection without imposing a second, shorter total
+// duration cap than the server route.
 export function streamAudit(handle: string, priv: boolean, h: LiveHandlers): () => void {
   const ctrl = new AbortController();
   let settled = false;
+  let watchdog: ReturnType<typeof setTimeout> | undefined;
   const settle = (fn: () => void) => {
     if (settled) return;
     settled = true;
+    if (watchdog) clearTimeout(watchdog);
     fn();
   };
-  // Just past the server's maxDuration (180s): if nothing finalized, fail loud.
-  // Must exceed the server ceiling, or a legitimately slow (but succeeding) audit
-  // gets killed client-side and dead-ends even though the server saved it.
-  const watchdog = setTimeout(() => {
-    settle(() => h.onError("timed out: the audit took too long and did not finish"));
-    ctrl.abort();
-  }, 195000);
+  const armWatchdog = () => {
+    if (watchdog) clearTimeout(watchdog);
+    watchdog = setTimeout(() => {
+      settle(() => h.onError("timed out: the audit stream stopped responding"));
+      ctrl.abort();
+    }, AUDIT_STREAM_INACTIVITY_TIMEOUT_MS);
+  };
+  armWatchdog();
 
   (async () => {
     try {
@@ -75,12 +81,14 @@ export function streamAudit(handle: string, priv: boolean, h: LiveHandlers): () 
         settle(() => h.onError("backend error"));
         return;
       }
+      armWatchdog();
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
       for (;;) {
         const { done, value } = await reader.read();
         if (done) break;
+        armWatchdog();
         buf += decoder.decode(value, { stream: true });
         const chunks = buf.split("\n\n");
         buf = chunks.pop() ?? "";
@@ -100,12 +108,12 @@ export function streamAudit(handle: string, priv: boolean, h: LiveHandlers): () 
     } catch (e) {
       if ((e as Error).name !== "AbortError") settle(() => h.onError(String(e)));
     } finally {
-      clearTimeout(watchdog);
+      if (watchdog) clearTimeout(watchdog);
     }
   })();
 
   return () => {
-    clearTimeout(watchdog);
+    if (watchdog) clearTimeout(watchdog);
     ctrl.abort();
   };
 }

@@ -30,6 +30,7 @@ async function getToken(): Promise<string | null> {
         "user-agent": "argus-dd/1.0",
       },
       body: "grant_type=client_credentials",
+      signal: AbortSignal.timeout(8_000),
     });
   } catch {
     recordRedditAttempt("oauth-token", "failed", "transport_error");
@@ -70,6 +71,7 @@ export async function searchMentions(query: string): Promise<{ title: string; su
   try {
     res = await fetch(`https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=15&t=year`, {
       headers: { authorization: `Bearer ${token}`, "user-agent": "argus-dd/1.0" },
+      signal: AbortSignal.timeout(10_000),
     });
   } catch {
     recordRedditAttempt("search", "failed", "transport_error");

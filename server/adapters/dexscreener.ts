@@ -27,7 +27,9 @@ export interface DexTokenSnapshot {
 export async function lookupToken(address: string): Promise<DexTokenSnapshot | null> {
   let res: Response;
   try {
-    res = await fetch(`${BASE}/latest/dex/tokens/${address}`);
+    res = await fetch(`${BASE}/latest/dex/tokens/${address}`, {
+      signal: AbortSignal.timeout(8_000),
+    });
   } catch {
     recordDex("token-pairs", "failed", "transport_error");
     return null;
@@ -102,7 +104,9 @@ export async function detectTokenLifecycle(ticker: string, knownAddress?: string
   if (!sym) return null;
   let res: Response;
   try {
-    res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`);
+    res = await fetch(`${BASE}/latest/dex/search?q=${encodeURIComponent(sym)}`, {
+      signal: AbortSignal.timeout(8_000),
+    });
   } catch {
     recordDex("token-search", "failed", "transport_error");
     return null;

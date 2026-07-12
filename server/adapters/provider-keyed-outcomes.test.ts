@@ -15,10 +15,13 @@ describe("keyed provider adapter outcome accounting", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it("records one failed CoinGecko attempt after a transport error", async () => {
     vi.stubEnv("COINGECKO_API_KEY", "coingecko-key");
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     const fetchMock = vi.fn().mockRejectedValue(new Error("network down"));
     vi.stubGlobal("fetch", fetchMock);
     const captured = await withCostLedger(async () => ({
@@ -27,6 +30,11 @@ describe("keyed provider adapter outcome accounting", () => {
     }));
     expect(captured.result).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(10_000);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signal }),
+    );
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "coingecko", op: "contract-lookup", calls: 1,
       succeeded: 0, partial: 0, failed: 1, status: "failed",
@@ -36,6 +44,8 @@ describe("keyed provider adapter outcome accounting", () => {
 
   it("records a valid empty Crunchbase search as succeeded", async () => {
     vi.stubEnv("CRUNCHBASE_API_KEY", "crunchbase-key");
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     const fetchMock = vi.fn().mockResolvedValue(json({ entities: [] }));
     vi.stubGlobal("fetch", fetchMock);
     const captured = await withCostLedger(async () => ({
@@ -44,6 +54,11 @@ describe("keyed provider adapter outcome accounting", () => {
     }));
     expect(captured.result).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(timeoutSpy).toHaveBeenCalledWith(12_000);
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ signal }),
+    );
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "crunchbase", calls: 1, succeeded: 1, failed: 0, status: "succeeded",
       meta: expect.stringContaining("no_match"),
@@ -51,6 +66,8 @@ describe("keyed provider adapter outcome accounting", () => {
   });
 
   it("records each DexScreener fetch once across empty and unreadable results", async () => {
+    const signal = new AbortController().signal;
+    const timeoutSpy = vi.spyOn(AbortSignal, "timeout").mockReturnValue(signal);
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(json({ pairs: [] }))
       .mockResolvedValueOnce(new Response("not-json", { status: 200 }));
@@ -63,6 +80,8 @@ describe("keyed provider adapter outcome accounting", () => {
     expect(captured.token).toEqual({ address: "mint" });
     expect(captured.lifecycle).toBeNull();
     expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(timeoutSpy.mock.calls).toEqual([[8_000], [8_000]]);
+    expect(fetchMock.mock.calls.every(([, init]) => init?.signal === signal)).toBe(true);
     expect(captured.cost.calls).toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: "dexscreener", op: "token-pairs", calls: 1, succeeded: 1, status: "succeeded" }),
       expect.objectContaining({ provider: "dexscreener", op: "token-search", calls: 1, failed: 1, status: "failed" }),

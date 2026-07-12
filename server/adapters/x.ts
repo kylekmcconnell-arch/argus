@@ -110,7 +110,10 @@ async function twFetch(url: string, key: string, tries = 2): Promise<Response | 
   for (let i = 0; i < tries; i++) {
     let res: Response;
     try {
-      res = await fetch(url, { headers: { "x-api-key": key } });
+      res = await fetch(url, {
+        headers: { "x-api-key": key },
+        signal: AbortSignal.timeout(10_000),
+      });
     } catch {
       recordTwitterapi(op, "failed", "transport_error");
       if (i + 1 >= tries) return null;

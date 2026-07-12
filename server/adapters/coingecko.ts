@@ -27,7 +27,10 @@ export async function tokenByContract(chain: string, address: string) {
   const tier = key ? "subscription/keyed" : "keyless";
   let res: Response;
   try {
-    res = await fetch(`${base}/coins/${platform}/contract/${address}`, { headers });
+    res = await fetch(`${base}/coins/${platform}/contract/${address}`, {
+      headers,
+      signal: AbortSignal.timeout(10_000),
+    });
   } catch {
     recordCall("coingecko", "contract-lookup", 0, `${tier} · transport_error`, "failed");
     return null;

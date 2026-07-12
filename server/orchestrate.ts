@@ -208,7 +208,31 @@ async function coldIntake(ctx: CollectContext) {
 
   if (!analystAvailable()) return;
   ctx.emit({ phase: "P0 · Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify…", tone: "neutral" });
-  const claims = await extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
+  // Claim extraction and affiliation/team discovery read the same frozen intake
+  // inputs and do not depend on one another. Start both provider waves together,
+  // but continue to apply claims first below so venture/testimonial merge order and
+  // every evidence/provenance decision remain identical to the serial pipeline.
+  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+  // When no domain is in the bio, guess one from the handle so we can still fetch
+  // the project's own team page (handle "VulcanForged" -> vulcanforged.com, whose
+  // docs.* /team is the canonical roster). Failed guesses just fetch nothing.
+  const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
+  const claimsPromise = extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
+  const discoveryPromise = Promise.all([
+    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
+    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
+    // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
+    // domain or a project name — a big public project's roster lives off-X, and
+    // many project accounts put no plain domain in the bio.
+    domain || ctx.evidence.profile.display_name
+      ? findTeamOnSite(domain, ctx.evidence.profile.display_name)
+      : Promise.resolve([] as TeamMember[]),
+    // Read the project's own /team page directly (Grok's summary can miss it).
+    fetchTeamPage(teamDomain, ctx.evidence.profile.display_name),
+  ]);
+
+  const claims = await claimsPromise;
   if (claims) {
     const candidateRoles = [...new Set(asRoles(claims.roles))];
     for (const role of candidateRoles) {
@@ -278,26 +302,9 @@ async function coldIntake(ctx: CollectContext) {
   // mines THIS account's posts for the people behind it (the project-account case).
   // The project's own website (from its X bio link, or a domain in the bio text)
   // is where the team page actually lives — mine it like Site recon would.
-  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
-  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  // When no domain is in the bio, guess one from the handle so we can still fetch
-  // the project's own team page (handle "VulcanForged" -> vulcanforged.com, whose
-  // docs.* /team is the canonical roster). Failed guesses just fetch nothing.
-  const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
   // discoverAffiliations now covers the reverse-mention angle too (was a second
   // Grok search call — merged to halve intake search spend).
-  const [bySubject, people, siteTeam, pageTeam] = await Promise.all([
-    discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
-    findTeam(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.recentActivity),
-    // Run the deeper web/LinkedIn/press team search whenever we have EITHER a
-    // domain or a project name — a big public project's roster lives off-X, and
-    // many project accounts (e.g. @VulcanForged) put no plain domain in the bio.
-    domain || ctx.evidence.profile.display_name
-      ? findTeamOnSite(domain, ctx.evidence.profile.display_name)
-      : Promise.resolve([] as TeamMember[]),
-    // Read the project's own /team page directly (Grok's summary can miss it).
-    fetchTeamPage(teamDomain, ctx.evidence.profile.display_name),
-  ]);
+  const [bySubject, people, siteTeam, pageTeam] = await discoveryPromise;
 
   // Auto-pivot team: merge everyone found across the website search, the account's
   // own X content, and a deterministic post role-word scan (founder/CEO/CTO...).
@@ -739,7 +746,7 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
 
   // All searches + the tooling probe run concurrently and time-boxed, so the
   // whole sweep costs one slow call, not the sum.
-  const [tooling, subjectSigs, projectSigs, assocSigs] = await Promise.all([
+  const [tooling, subjectSigs, projectSigs, assocSigs, ventureTeams] = await Promise.all([
     detectManipulationTooling(ctx.handle, evidence.profile.display_name),
     searchAdverseSignals(ctx.handle, subjectKind, {
       relationship_to_subject: "self",
@@ -753,6 +760,9 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
       relationship_to_subject: "associate",
       relationship_label: a.relation || "recorded associate",
     }))),
+    projectTargets.length >= 2
+      ? Promise.all(projectTargets.map((p) => findTeam(p.handle!, p.name)))
+      : Promise.resolve([] as TeamMember[][]),
   ]);
 
   // 1. Manipulation-tooling discovery. Grok can surface the page, but cannot
@@ -821,7 +831,6 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
   //    find people who recur across projects. A person wired into multiple of the
   //    subject's ventures is the internal co-occurrence the playbook looks for.
   if (projectTargets.length >= 2) {
-    const teams = await Promise.all(projectTargets.map((p) => findTeam(p.handle!, p.name)));
     // Feed the FULL second hop into the graph: subject → venture → each of its
     // people. These teams were already fetched for the Venn below; wiring them as
     // venture→person edges (keyed canonically) is what turns the graph from a
@@ -831,7 +840,7 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
     ctx.evidence.ventureTeams = projectTargets.map((p, i) => ({
       key: canonicalEntityKey({ handle: p.handle, name: p.name }),
       name: p.name,
-      people: (teams[i] ?? [])
+      people: (ventureTeams[i] ?? [])
         .filter((m) => (m.handle || m.name) && m.handle?.replace(/^@/, "").toLowerCase() !== self)
         .slice(0, 8)
         .map((m) => ({ name: m.name, handle: m.handle, role: m.role })),
@@ -844,7 +853,7 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
       ctx.emit({ phase: "Network", label: "Venture teams mapped", detail: `${total} people across ${ctx.evidence.ventureTeams.length} venture${ctx.evidence.ventureTeams.length === 1 ? "" : "s"} wired into the graph — subject → venture → the people behind it.`, source: "grok", tone: "good" });
     }
     const appearances = new Map<string, { name: string; projects: Set<string> }>();
-    teams.forEach((team, i) => {
+    ventureTeams.forEach((team, i) => {
       for (const member of team) {
         if (!member.handle) continue;
         const key = member.handle.replace(/^@/, "").toLowerCase();
@@ -1138,6 +1147,24 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
 }
 
 async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { organizationId?: string }): Promise<Dossier | null> {
+  const runtimeStartedAt = Date.now();
+  const startRuntimeStage = (stage: string) => {
+    const stageStartedAt = Date.now();
+    console.info("[audit-runtime]", JSON.stringify({
+      stage,
+      state: "started",
+      elapsedMs: stageStartedAt - runtimeStartedAt,
+    }));
+    return stageStartedAt;
+  };
+  const finishRuntimeStage = (stage: string, stageStartedAt: number) => {
+    console.info("[audit-runtime]", JSON.stringify({
+      stage,
+      state: "complete",
+      stageMs: Date.now() - stageStartedAt,
+      elapsedMs: Date.now() - runtimeStartedAt,
+    }));
+  };
   const fixture = findSubject(rawHandle);
   const seededEvidence = fixture ? toEvidence(fixture) : null;
   const liveSeedEvidence = seededEvidence ? downgradeFixtureEvidenceForLive(seededEvidence) : null;
@@ -1183,7 +1210,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
   };
 
   // cold handle: resolve profile + extract self-claims before verification
-  if (!fixture) await coldIntake(ctx);
+  if (!fixture) {
+    const stageStartedAt = startRuntimeStage("cold-intake");
+    await coldIntake(ctx);
+    finishRuntimeStage("cold-intake", stageStartedAt);
+  }
 
   // run each available adapter
   for (const a of ADAPTERS) {
@@ -1206,6 +1237,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
       }
       continue;
     }
+    const stageStartedAt = startRuntimeStage(`adapter:${a.id}`);
     try {
       const before = attemptTotals();
       const result = await a.run(ctx);
@@ -1225,6 +1257,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
       }
       emit({ phase: "Collect", label: `${a.label} error`, detail: String(e), tone: "warn" });
     }
+    finishRuntimeStage(`adapter:${a.id}`, stageStartedAt);
   }
 
   // Post-discovery signal passes, all before the analyst so their findings feed
@@ -1255,6 +1288,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
       onError(error);
     });
   };
+  const signalPassesStartedAt = startRuntimeStage("signal-passes");
   const signalPasses: Promise<void>[] = [
     trackedPass("token-lifecycle", "Promoted-token lifecycle", ["dexscreener"], () => tokenLifecycle(ctx), (e) => {
       emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
@@ -1275,6 +1309,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
     checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
   }
   await Promise.all(signalPasses);
+  finishRuntimeStage("signal-passes", signalPassesStartedAt);
 
   // Route only from provider-backed profile/career evidence. Model-extracted
   // role candidates remain investigator-visible leads and can never select the
@@ -1291,6 +1326,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
   // server-collected report versions to carry verdict text or govern a cap.
   // The provisional dossier is used only to materialize today's graph; its
   // score/verdict is deliberately omitted from the contribution.
+  const trustGraphStartedAt = startRuntimeStage("trust-graph");
   try {
     const provisional = assembleDossier(evidence, true);
     const graphResult = await collectTrustGraph(ctx, {
@@ -1315,6 +1351,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
       provider: "argus-graph",
     });
     emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
+  } finally {
+    finishRuntimeStage("trust-graph", trustGraphStartedAt);
   }
 
   // Strip ARGUS's OWN analysis fields (identity_confidence/identity_note) from
@@ -1359,6 +1397,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
 
   // ── Phase 4 contradiction scan + axis scoring, run CONCURRENTLY (both read the
   //    same evidence) so the extra Claude call doesn't extend the critical path. ──
+  const analystStartedAt = startRuntimeStage("analyst");
   if (analystAvailable()) {
     emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions…", tone: "neutral" });
     emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence…", tone: "neutral" });
@@ -1418,6 +1457,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
   } else {
     checkTracker.provider("claude-analyst", "Claude analyst", "unavailable", "analyst provider is not configured");
   }
+  finishRuntimeStage("analyst", analystStartedAt);
 
   // A report with no complete axis set is still a useful, honest artifact. The
   // engine emits INCOMPLETE with null totals instead of turning missing data into
@@ -1438,6 +1478,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: { org
   // Attach what this run actually spent, so the report library can show it.
   dossier.cost = cost;
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches ≈${cost.sources} sources · Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
+  finishRuntimeStage("pipeline", runtimeStartedAt);
   return dossier;
 }
 
