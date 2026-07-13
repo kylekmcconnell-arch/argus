@@ -840,18 +840,21 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
   const subjectHandle = normHandle(ctx.handle);
   const citedPersonHandle = (fact: BasicFact): string | undefined => {
     const handles = new Set<string>();
+    const escapedName = fact.value.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!escapedName) return undefined;
+    const nameThenHandle = new RegExp(
+      `${escapedName}\\s*(?:\\(\\s*|\\[\\s*)?@([A-Za-z0-9_]{2,30})\\b`,
+      "gi",
+    );
+    const handleThenName = new RegExp(
+      `@([A-Za-z0-9_]{2,30})\\s*(?:\\(\\s*|\\[\\s*)${escapedName}\\b`,
+      "gi",
+    );
     for (const source of fact.sources) {
-      try {
-        const parsed = new URL(source.url);
-        if (/^(?:x|twitter)\.com$/i.test(parsed.hostname.replace(/^www\./, ""))) {
-          const candidate = normHandle(parsed.pathname.split("/").filter(Boolean)[0] ?? "");
-          if (/^[a-z0-9_]{2,30}$/.test(candidate)) handles.add(candidate);
-        }
-      } catch {
-        // Source URLs were already validated by the collector. Ignore any
-        // malformed legacy row instead of inventing an identity link.
+      for (const match of source.excerpt.matchAll(nameThenHandle)) {
+        handles.add(normHandle(match[1]));
       }
-      for (const match of source.excerpt.matchAll(/@([A-Za-z0-9_]{2,30})\b/g)) {
+      for (const match of source.excerpt.matchAll(handleThenName)) {
         handles.add(normHandle(match[1]));
       }
     }

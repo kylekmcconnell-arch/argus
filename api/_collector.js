@@ -12427,16 +12427,21 @@ function projectVerifiedBasicFacts(ctx) {
   const subjectHandle = normHandle(ctx.handle);
   const citedPersonHandle = (fact) => {
     const handles = /* @__PURE__ */ new Set();
+    const escapedName = fact.value.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (!escapedName) return void 0;
+    const nameThenHandle = new RegExp(
+      `${escapedName}\\s*(?:\\(\\s*|\\[\\s*)?@([A-Za-z0-9_]{2,30})\\b`,
+      "gi"
+    );
+    const handleThenName = new RegExp(
+      `@([A-Za-z0-9_]{2,30})\\s*(?:\\(\\s*|\\[\\s*)${escapedName}\\b`,
+      "gi"
+    );
     for (const source2 of fact.sources) {
-      try {
-        const parsed = new URL(source2.url);
-        if (/^(?:x|twitter)\.com$/i.test(parsed.hostname.replace(/^www\./, ""))) {
-          const candidate = normHandle(parsed.pathname.split("/").filter(Boolean)[0] ?? "");
-          if (/^[a-z0-9_]{2,30}$/.test(candidate)) handles.add(candidate);
-        }
-      } catch {
+      for (const match of source2.excerpt.matchAll(nameThenHandle)) {
+        handles.add(normHandle(match[1]));
       }
-      for (const match of source2.excerpt.matchAll(/@([A-Za-z0-9_]{2,30})\b/g)) {
+      for (const match of source2.excerpt.matchAll(handleThenName)) {
         handles.add(normHandle(match[1]));
       }
     }

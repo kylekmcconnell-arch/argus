@@ -258,6 +258,43 @@ describe("provider-backed project routing", () => {
     }));
   });
 
+  it("does not attach another co-founder's handle to a verified founder fact", () => {
+    const evidence = resolvedProjectProfile("the Solana protocol", "https://project.example");
+    evidence.roles = [SubjectClass.PROJECT];
+    const alice = basicFact("founder", "Alice", "Co-founder");
+    alice.sources[0] = {
+      ...alice.sources[0],
+      url: "https://project.example/team",
+      excerpt: "Alice and @bob co-founded Project Example.",
+    };
+    evidence.basicFacts = [alice];
+    evidence.webTeam = [{
+      name: "Bob",
+      handle: "@bob",
+      role: "Co-founder",
+      source: "Official team page",
+      sourceUrl: "https://project.example/team",
+      evidence: "Bob is a co-founder.",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "team-page",
+      identity_link_evidence_origin: "deterministic",
+    }];
+    const ctx: CollectContext = {
+      handle: "@project",
+      evidence,
+      emit: () => undefined,
+    };
+
+    projectVerifiedBasicFacts(ctx);
+
+    expect(evidence.webTeam).toHaveLength(2);
+    expect(evidence.webTeam).toContainEqual(expect.objectContaining({ name: "Bob", handle: "@bob" }));
+    const aliceMember = evidence.webTeam.find((member) => member.name === "Alice");
+    expect(aliceMember).toBeDefined();
+    expect(aliceMember?.handle).toBeUndefined();
+  });
+
   it.each([
     ["no official site", null, "twitterapi", "2026-07-12T14:00:00.000Z"],
     ["untrusted profile provider", "https://world.xyz/", "model", "2026-07-12T14:00:00.000Z"],
