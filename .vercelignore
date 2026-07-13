@@ -5,10 +5,13 @@
 .git/
 .vercel/
 node_modules/
+node_modules*/
 dist/
 logs/
 *.log
 .DS_Store
+.claude/
+engine_reference/
 
 # Tests are CI inputs, not serverless endpoints or production assets.
 **/*.test.ts
