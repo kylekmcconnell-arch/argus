@@ -33,7 +33,7 @@ describe("stored report version context", () => {
       {
         check_id: "identity-resolution",
         state: "complete",
-        metadata: { label: "Identity resolution", status: "finding", note: "probable confidence", order: 0 },
+        metadata: { label: "Identity resolution", status: "finding", note: "probable confidence", decisionCritical: true, order: 0 },
       },
       {
         check_id: "vc-track-record",
@@ -44,13 +44,13 @@ describe("stored report version context", () => {
         check_id: "associates",
         state: "complete",
         stale_at: "2026-07-10T11:59:59.000Z",
-        metadata: { label: "Affiliations & associates", status: "confirmed", order: 1 },
+        metadata: { label: "Affiliations & associates", status: "confirmed", decisionCritical: false, order: 1 },
       },
     ], now);
 
     expect(checks).toEqual([
-      { checkId: "identity-resolution", label: "Identity resolution", status: "finding", note: "probable confidence" },
-      { checkId: "associates", label: "Affiliations & associates", status: "stale" },
+      { checkId: "identity-resolution", label: "Identity resolution", status: "finding", note: "probable confidence", decisionCritical: true },
+      { checkId: "associates", label: "Affiliations & associates", status: "stale", decisionCritical: false },
       { checkId: "news-and-press", label: "News & press", status: "unknown" },
       { checkId: "vc-track-record", label: "VC portfolio track record", status: "not-applicable" },
     ]);

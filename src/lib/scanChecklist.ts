@@ -16,6 +16,16 @@ export interface ScanCheck {
   label: string;
   status: CheckStatus;
   note?: string;
+  /**
+   * Whether this outcome answers a decision-critical diligence question.
+   *
+   * Provider diagnostics and enrichment paths still belong in the methodology
+   * ledger, but they must not be allowed to make an otherwise answered case
+   * look incomplete. Older frozen reports omit this field; for those reports
+   * every applicable check remains decision-critical for backwards
+   * compatibility.
+   */
+  decisionCritical?: boolean;
   // Frozen server-collected checks carry stable provenance fields. They remain
   // optional so older fixtures and locally derived token checklists continue to
   // deserialize without a migration.
@@ -23,6 +33,19 @@ export interface ScanCheck {
   provider?: string;
   sourceCount?: number;
   completedAt?: string;
+}
+
+/**
+ * Select the checks that govern the public decision-readiness label.
+ *
+ * A new checklist snapshot marks every row explicitly. A legacy snapshot has
+ * no markers at all and therefore keeps its historical all-check semantics.
+ */
+export function decisionCriticalChecks(checks: readonly ScanCheck[]): readonly ScanCheck[] {
+  const hasExplicitCriticality = checks.some((check) => check.decisionCritical !== undefined);
+  return hasExplicitCriticality
+    ? checks.filter((check) => check.decisionCritical === true)
+    : checks;
 }
 
 export interface CoverageSummary {

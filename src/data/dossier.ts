@@ -22,6 +22,7 @@ import type {
   TrustGraphScreen,
   BasicFact,
   BasicFactLead,
+  BasicFactQuestionLedgerEntry,
   BasicFactSource,
 } from "./evidence";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
@@ -30,6 +31,7 @@ import type { ScanCheck } from "../lib/scanChecklist";
 export type DossierBasicFactSource = BasicFactSource;
 export type DossierBasicFact = BasicFact;
 export type DossierBasicFactLead = BasicFactLead;
+export type DossierBasicFactQuestion = BasicFactQuestionLedgerEntry;
 
 export interface Dossier {
   handle: string;
@@ -99,6 +101,8 @@ export interface Dossier {
   basicFacts?: DossierBasicFact[];
   /** Model-discovered candidates that remain unverified and unscored. */
   basicFactLeads?: DossierBasicFactLead[];
+  /** Frozen role-aware research questions, verified answers, and explicit gaps. */
+  basicFactQuestionLedger?: DossierBasicFactQuestion[];
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
@@ -328,6 +332,13 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       basicFactLeads: ev.basicFactLeads.map((lead) => ({
         ...lead,
         ...(lead.candidateUrls ? { candidateUrls: [...lead.candidateUrls] } : {}),
+      })),
+    } : {}),
+    ...(ev.basicFactQuestionLedger?.length ? {
+      basicFactQuestionLedger: ev.basicFactQuestionLedger.map((entry) => ({
+        ...entry,
+        answerRefs: [...entry.answerRefs],
+        providerRuns: entry.providerRuns.map((run) => ({ ...run })),
       })),
     } : {}),
     report,

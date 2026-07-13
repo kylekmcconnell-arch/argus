@@ -163,6 +163,44 @@ describe("public report presentation policy", () => {
     })).toBe("complete");
   });
 
+  it("lets only explicitly decision-critical checks govern completeness", () => {
+    expect(coverageQualifiedCompleteness({
+      completeness: "complete",
+      attestation: "server_collected",
+      checks: [
+        { status: "confirmed", decisionCritical: true },
+        { status: "unavailable", decisionCritical: false },
+      ],
+    })).toBe("complete");
+    expect(coverageQualifiedCompleteness({
+      completeness: "complete",
+      attestation: "server_collected",
+      checks: [
+        { status: "unknown", decisionCritical: true },
+        { status: "confirmed", decisionCritical: false },
+      ],
+    })).toBe("partial");
+  });
+
+  it("reads decision criticality from stored check metadata and preserves legacy semantics", () => {
+    expect(coverageQualifiedCompleteness({
+      completeness: "complete",
+      attestation: "server_collected",
+      checks: [
+        { state: "complete", metadata: { decisionCritical: true } },
+        { state: "not_run", metadata: { decisionCritical: false } },
+      ],
+    })).toBe("complete");
+    expect(coverageQualifiedCompleteness({
+      completeness: "complete",
+      attestation: "server_collected",
+      checks: [
+        { state: "complete" },
+        { state: "not_run" },
+      ],
+    })).toBe("partial");
+  });
+
   it("fails closed when a complete verdict conflicts with its score band", () => {
     expect(presentPublicReport({ verdict: "PASS", score: 1, completeness: "complete" })).toMatchObject({
       displayVerdict: "INCOMPLETE",

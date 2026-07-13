@@ -658,6 +658,9 @@ function collectCheckRuns(rawChecks: unknown, context: ProvenanceContext): JsonR
       ? Math.max(0, Math.floor(check.sourceCount))
       : 0;
     const completedAt = timestampValue(check.completedAt);
+    const decisionCritical = typeof check.decisionCritical === "boolean"
+      ? check.decisionCritical
+      : undefined;
     rows.push({
       organization_id: context.organizationId,
       report_version_id: context.reportVersionId,
@@ -674,6 +677,7 @@ function collectCheckRuns(rawChecks: unknown, context: ProvenanceContext): JsonR
         status,
         note: textValue(check, ["note"], 500),
         notApplicable: status === "not-applicable",
+        ...(decisionCritical !== undefined ? { decisionCritical } : {}),
         completedAt,
         order,
       },

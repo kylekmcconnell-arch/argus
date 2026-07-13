@@ -72,6 +72,15 @@ function checkIsStale(check: Record<string, unknown>, nowMs: number): boolean {
   return Number.isFinite(deadlineMs) && deadlineMs <= nowMs;
 }
 
+function checkDecisionCriticality(value: unknown): boolean | undefined {
+  const check = checkRecord(value);
+  const metadata = checkRecord(check.metadata);
+  const criticality = typeof check.decisionCritical === "boolean"
+    ? check.decisionCritical
+    : metadata.decisionCritical;
+  return typeof criticality === "boolean" ? criticality : undefined;
+}
+
 /** Cross-check a stored completeness claim against its frozen check outcomes. */
 export function coverageQualifiedCompleteness(input: {
   completeness: unknown;
@@ -85,7 +94,11 @@ export function coverageQualifiedCompleteness(input: {
   }
   if (input.checks === undefined) return completeness;
 
-  const applicable = input.checks.filter((value) => {
+  const hasExplicitCriticality = input.checks.some((value) => checkDecisionCriticality(value) !== undefined);
+  const governingChecks = hasExplicitCriticality
+    ? input.checks.filter((value) => checkDecisionCriticality(value) === true)
+    : input.checks;
+  const applicable = governingChecks.filter((value) => {
     const check = checkRecord(value);
     const metadata = checkRecord(check.metadata);
     return check.status !== "not-applicable"

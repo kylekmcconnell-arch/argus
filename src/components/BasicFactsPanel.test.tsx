@@ -149,6 +149,186 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).not.toContain("Who founded it?");
   });
 
+  it("uses founder decision questions instead of a project questionnaire", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          audience="founder"
+          fillRequired
+          facts={[
+            {
+              predicate: "official_identity",
+              value: "Brian Armstrong",
+              status: "verified",
+              sources: [{ url: "https://www.coinbase.com/about", relation: "supports" }],
+            },
+            {
+              predicate: "current_role",
+              value: "Co-founder, Chair and CEO of Coinbase",
+              status: "corroborated",
+              sources: [{ url: "https://investor.coinbase.com/governance/default.aspx", relation: "supports" }],
+            },
+          ]}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("Who is this person?");
+    expect(container.textContent).toContain("What do they lead or control today?");
+    expect(container.textContent).toContain("What legal or regulatory events actually name them?");
+    expect(container.textContent).toContain("2 confirmed");
+    expect(container.textContent).toContain("10 questions");
+    expect(container.textContent).not.toContain("Which networks does it run on?");
+    expect(container.textContent).not.toContain("When did the product launch?");
+  });
+
+  it("shows direct legal attribution, status, and entity as compact founder metadata", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          audience="founder"
+          facts={[{
+            factId: "legal-brian-resolved",
+            predicate: "legal_regulatory_event",
+            value: "A shareholder action was dismissed.",
+            eventStatus: "dismissed",
+            attributedEntity: "Brian Armstrong",
+            attributionScope: "direct_subject",
+            status: "verified",
+            sources: [{ url: "https://example.com/court-order", relation: "supports" }],
+          }]}
+        />,
+      );
+    });
+
+    const metadata = container.querySelector('[aria-label="Legal event details"]');
+    expect(metadata).not.toBeNull();
+    expect(metadata?.querySelectorAll('[role="listitem"]')).toHaveLength(3);
+    expect(metadata?.textContent).toContain("Attributed to Brian Armstrong");
+    expect(metadata?.textContent).toContain("Status: Dismissed");
+    expect(metadata?.textContent).toContain("Directly attributed");
+  });
+
+  it.each(["founder", "person"] as const)(
+    "clearly labels related-company legal context on %s reports",
+    (audience) => {
+      act(() => {
+        root.render(
+          <BasicFactsPanel
+            audience={audience}
+            facts={[{
+              factId: `legal-coinbase-${audience}`,
+              predicate: "legal_regulatory_event",
+              value: "Coinbase settled a regulatory action.",
+              eventStatus: "settled",
+              attributedEntity: "Coinbase, Inc.",
+              attributionScope: "related_entity",
+              status: "verified",
+              sources: [{ url: "https://example.com/regulator-order", relation: "supports" }],
+            }]}
+          />,
+        );
+      });
+
+      const metadata = container.querySelector('[aria-label="Legal event details"]');
+      expect(metadata?.textContent).toContain("Attributed to Coinbase, Inc.");
+      expect(metadata?.textContent).toContain("Status: Settled");
+      expect(metadata?.textContent).toContain("Related entity, not this person");
+      expect(metadata?.textContent).not.toContain("Directly attributed");
+    },
+  );
+
+  it("keeps conflicting legal statuses in separate visible cards", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          audience="person"
+          facts={[
+            {
+              factId: "legal-pending",
+              predicate: "legal_regulatory_event",
+              value: "A regulatory action was reported.",
+              eventStatus: "pending",
+              attributedEntity: "Founder Name",
+              attributionScope: "direct_subject",
+              status: "conflicted",
+              sources: [{ url: "https://example.com/pending", relation: "supports" }],
+            },
+            {
+              factId: "legal-closed",
+              predicate: "legal_regulatory_event",
+              value: "A regulatory action was reported.",
+              eventStatus: "closed",
+              attributedEntity: "Founder Name",
+              attributionScope: "direct_subject",
+              status: "conflicted",
+              sources: [{ url: "https://example.com/closed", relation: "contradicts" }],
+            },
+          ]}
+        />,
+      );
+    });
+
+    expect(container.querySelectorAll('[aria-label="Conflicted basic facts"] li')).toHaveLength(2);
+    const details = [...container.querySelectorAll<HTMLElement>('[aria-label="Legal event details"]')];
+    expect(details).toHaveLength(2);
+    expect(details.map((detail) => detail.textContent)).toEqual(expect.arrayContaining([
+      expect.stringContaining("Status: Pending"),
+      expect.stringContaining("Status: Closed"),
+    ]));
+  });
+
+  it("shows a completed no-token outcome separately from a verified public security", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          audience="founder"
+          fillRequired
+          facts={[{
+            predicate: "public_security",
+            value: "NASDAQ: COIN",
+            status: "verified",
+            sources: [{ url: "https://www.sec.gov/Archives/edgar/data/1679788/", relation: "supports" }],
+          }]}
+          questionLedger={[
+            { predicate: "public_security", status: "answered", providerRuns: [{ state: "succeeded" }] },
+            { predicate: "official_token", status: "unanswered", providerRuns: [{ state: "completed_empty" }] },
+          ]}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("NASDAQ: COIN");
+    expect(container.textContent).toContain("No verified official crypto token was found in this snapshot.");
+    expect(container.textContent).toContain("1 checked, none found");
+    expect(container.textContent).toContain("10 questions");
+    expect(container.querySelector('[aria-label="Completed empty basic-fact searches"]')?.textContent)
+      .toContain("Is an official crypto token tied to a venture they control?");
+    expect(container.querySelector('[aria-label="Unresolved basic facts"]')?.textContent)
+      .not.toContain("Is an official crypto token tied to a venture they control?");
+  });
+
+  it("preserves separate completed-empty outcomes when neither asset class is verified", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          audience="founder"
+          fillRequired
+          questionLedger={[
+            { predicate: "public_security", status: "unanswered", providerRuns: [{ state: "succeeded" }] },
+            { predicate: "official_token", status: "unanswered", providerRuns: [{ state: "completed_empty" }] },
+          ]}
+        />,
+      );
+    });
+
+    const emptySearches = container.querySelector('[aria-label="Completed empty basic-fact searches"]');
+    expect(emptySearches?.textContent).toContain("No verified public security was found in this snapshot.");
+    expect(emptySearches?.textContent).toContain("No verified official crypto token was found in this snapshot.");
+    expect(container.textContent).toContain("2 checked, none found");
+    expect(container.textContent).not.toContain("Foundational answers are still being verified");
+  });
+
   it("combines repeatable answers without turning multiple founders into a conflict", () => {
     act(() => {
       root.render(

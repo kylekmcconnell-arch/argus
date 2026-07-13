@@ -5,6 +5,18 @@ import {
   Warning,
 } from "@phosphor-icons/react";
 import { canonicalBasicFactComparisonValue } from "../data/evidence";
+import {
+  basicFactQuestionOutcome,
+  basicFactQuestionFor,
+  basicFactQuestionsFor,
+  canonicalBasicFactPredicate,
+  explicitEmptyBasicFactAnswer,
+  supportsExplicitEmptyBasicFact,
+  type BasicFactQuestionOutcomeInput,
+  type BasicFactsAudience,
+} from "../lib/basicFactQuestions";
+
+export type { BasicFactsAudience } from "../lib/basicFactQuestions";
 
 export type BasicFactStatus =
   | "verified"
@@ -12,6 +24,7 @@ export type BasicFactStatus =
   | "conflicted"
   | "lead"
   | "unresolved"
+  | "checked_empty"
   | "not_applicable";
 
 export interface BasicFactSourceView {
@@ -29,6 +42,9 @@ export interface BasicFactView {
   value?: unknown;
   normalizedValue?: unknown;
   qualifier?: string;
+  eventStatus?: string;
+  attributedEntity?: string;
+  attributionScope?: "direct_subject" | "related_entity";
   status: BasicFactStatus;
   critical?: boolean;
   sources?: BasicFactSourceView[];
@@ -43,52 +59,6 @@ export interface BasicFactLeadView {
   candidateUrls?: string[];
   provider?: string;
 }
-
-const REQUIRED_QUESTIONS = [
-  ["official_identity", "What is the project's official identity?"],
-  ["product", "What does the project actually do?"],
-  ["founder", "Who founded it?"],
-  ["executive", "Who operates it today?"],
-  ["founded", "When was it founded?"],
-  ["launched", "When did the product launch?"],
-  ["official_token", "Does it have an official token?"],
-  ["network", "Which networks does it run on?"],
-  ["legal_entity", "Which legal entity is responsible?"],
-  ["funding", "How much funding has it raised?"],
-  ["investor", "Who funded it?"],
-  ["governance", "Who controls governance and the treasury?"],
-  ["audit", "Has the code been independently audited?"],
-  ["repository", "Where is the source code maintained?"],
-  ["traction", "Is there evidence of real usage?"],
-] as const;
-
-const QUESTION_BY_PREDICATE = new Map<string, string>(REQUIRED_QUESTIONS);
-
-const PREDICATE_ALIASES: Record<string, string> = {
-  identity: "official_identity",
-  founders: "founder",
-  cofounders: "founder",
-  co_founders: "founder",
-  team: "executive",
-  leadership: "executive",
-  core_team: "executive",
-  token: "official_token",
-  tokeneconomics: "official_token",
-  tokenomics: "official_token",
-  launch_date: "launched",
-  launch: "launched",
-  founding_date: "founded",
-  incorporation: "legal_entity",
-  company: "legal_entity",
-  investors: "investor",
-  fundraising: "funding",
-  security_audits: "audit",
-  audits: "audit",
-  github: "repository",
-  repositories: "repository",
-  usage: "traction",
-  adoption: "traction",
-};
 
 // Most project facts are naturally atomic and repeatable (one founder per row,
 // one repository per row). Differing values are only a contradiction for facts
@@ -105,23 +75,9 @@ const STATUS_META: Record<Exclude<BasicFactStatus, "lead">, { label: string; cla
   corroborated: { label: "Corroborated", className: "tint-pass text-pass" },
   conflicted: { label: "Conflicted", className: "tint-avoid text-avoid" },
   unresolved: { label: "Unresolved", className: "tint-caution text-caution" },
+  checked_empty: { label: "Checked, none found", className: "tint-neutral text-ink-dim" },
   not_applicable: { label: "Not applicable", className: "tint-neutral text-ink-faint" },
 };
-
-function canonicalPredicate(value: string): string {
-  const normalized = value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
-  return PREDICATE_ALIASES[normalized] ?? normalized;
-}
-
-function humanize(value: string): string {
-  const canonical = canonicalPredicate(value);
-  return canonical.replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
-}
-
-function questionFor(predicate: string): string {
-  const canonical = canonicalPredicate(predicate);
-  return QUESTION_BY_PREDICATE.get(canonical) ?? humanize(canonical);
-}
 
 function displayValue(value: unknown): string {
   if (typeof value === "string") return value.trim();
@@ -180,6 +136,9 @@ function sourceLabel(source: BasicFactSourceView, url: string): string {
 
 function answerFor(fact: BasicFactView): string {
   if (fact.status === "not_applicable") return "Not applicable to this subject.";
+  if (fact.status === "checked_empty") {
+    return displayValue(fact.value) || explicitEmptyBasicFactAnswer(fact.predicate);
+  }
   if (fact.status === "unresolved") return "No verified answer was found in this snapshot.";
   const value = displayValue(fact.value) || displayValue(fact.normalizedValue);
   const qualifier = fact.qualifier?.trim();
@@ -190,6 +149,59 @@ function answerFor(fact: BasicFactView): string {
     ? "Sources disagree and no governing answer was selected."
     : "A source was verified, but the answer could not be summarized.";
   return answer;
+}
+
+function compactMetadataValue(value?: string): string {
+  const normalized = value?.trim().replace(/[_-]+/g, " ").replace(/\s+/g, " ");
+  return normalized ? normalized.replace(/^./, (letter) => letter.toUpperCase()) : "";
+}
+
+function legalAttributionScopeLabel(
+  scope: BasicFactView["attributionScope"],
+  audience: BasicFactsAudience,
+): string {
+  if (scope === "direct_subject") return "Directly attributed";
+  if (scope !== "related_entity") return "";
+  if (audience === "founder" || audience === "person") return "Related entity, not this person";
+  if (audience === "project") return "Related entity, not this project";
+  return "Related entity, not this investor";
+}
+
+function LegalEventMetadata({
+  fact,
+  audience,
+}: {
+  fact: BasicFactView;
+  audience: BasicFactsAudience;
+}) {
+  if (canonicalBasicFactPredicate(fact.predicate) !== "legal_regulatory_event") return null;
+  const attributedEntity = fact.attributedEntity?.trim();
+  const eventStatus = compactMetadataValue(fact.eventStatus);
+  const scopeLabel = legalAttributionScopeLabel(fact.attributionScope, audience);
+  if (!attributedEntity && !eventStatus && !scopeLabel) return null;
+
+  return (
+    <div className="mt-2 flex flex-wrap gap-1.5" role="list" aria-label="Legal event details">
+      {attributedEntity && (
+        <span className="chip tint-neutral max-w-full normal-case tracking-normal text-ink-dim" role="listitem">
+          <span className="truncate">Attributed to {attributedEntity}</span>
+        </span>
+      )}
+      {eventStatus && (
+        <span className="chip tint-neutral normal-case tracking-normal text-ink-dim" role="listitem">
+          Status: {eventStatus}
+        </span>
+      )}
+      {scopeLabel && (
+        <span
+          className={`chip normal-case tracking-normal ${fact.attributionScope === "related_entity" ? "tint-caution text-caution" : "tint-signal text-signal-lift"}`}
+          role="listitem"
+        >
+          {scopeLabel}
+        </span>
+      )}
+    </div>
+  );
 }
 
 function dedupeSources(sources: readonly BasicFactSourceView[]): BasicFactSourceView[] {
@@ -204,14 +216,30 @@ function dedupeSources(sources: readonly BasicFactSourceView[]): BasicFactSource
   });
 }
 
-function factRows(facts: readonly BasicFactView[], fillRequired: boolean): BasicFactView[] {
+function factRowKey(fact: BasicFactView, predicate: string): string {
+  if (predicate !== "legal_regulatory_event") return predicate;
+  const eventIdentity = [
+    canonicalBasicFactComparisonValue(predicate, displayValue(fact.normalizedValue) || displayValue(fact.value)),
+    fact.attributedEntity?.trim().toLowerCase() ?? "",
+    fact.eventStatus?.trim().toLowerCase() ?? "",
+  ].join("::");
+  return `${predicate}::${eventIdentity}`;
+}
+
+function factRows(
+  facts: readonly BasicFactView[],
+  fillRequired: boolean,
+  audience: BasicFactsAudience,
+  questionLedger: readonly BasicFactQuestionOutcomeInput[],
+): BasicFactView[] {
   const rows = new Map<string, BasicFactView>();
   for (const fact of facts) {
     if (!fact?.predicate || fact.status === "lead") continue;
-    const predicate = canonicalPredicate(fact.predicate);
-    const existing = rows.get(predicate);
+    const predicate = canonicalBasicFactPredicate(fact.predicate);
+    const rowKey = factRowKey(fact, predicate);
+    const existing = rows.get(rowKey);
     if (!existing) {
-      rows.set(predicate, { ...fact, predicate, sources: dedupeSources(fact.sources ?? []) });
+      rows.set(rowKey, { ...fact, predicate, sources: dedupeSources(fact.sources ?? []) });
       continue;
     }
     const sourceRows = dedupeSources([...(existing.sources ?? []), ...(fact.sources ?? [])]);
@@ -229,8 +257,10 @@ function factRows(facts: readonly BasicFactView[], fillRequired: boolean): Basic
           ? "verified"
           : existing.status === "unresolved" || fact.status === "unresolved"
             ? "unresolved"
-            : "not_applicable";
-    rows.set(predicate, {
+            : existing.status === "checked_empty" || fact.status === "checked_empty"
+              ? "checked_empty"
+              : "not_applicable";
+    rows.set(rowKey, {
       ...existing,
       ...(fact.status === "conflicted" ? fact : {}),
       predicate,
@@ -242,18 +272,28 @@ function factRows(facts: readonly BasicFactView[], fillRequired: boolean): Basic
   }
 
   if (fillRequired) {
-    for (const [predicate] of REQUIRED_QUESTIONS) {
-      if (!rows.has(predicate)) {
-        rows.set(predicate, { predicate, status: "unresolved", critical: true, sources: [] });
+    for (const [predicate] of basicFactQuestionsFor(audience)) {
+      if (![...rows.values()].some((fact) => fact.predicate === predicate)) {
+        const ledgerEntry = questionLedger.find((entry) =>
+          canonicalBasicFactPredicate(entry.predicate) === predicate);
+        const completedEmpty = supportsExplicitEmptyBasicFact(predicate)
+          && basicFactQuestionOutcome(ledgerEntry) === "checked_empty";
+        rows.set(predicate, {
+          predicate,
+          status: completedEmpty ? "checked_empty" : "unresolved",
+          ...(completedEmpty ? { value: explicitEmptyBasicFactAnswer(predicate) } : {}),
+          critical: true,
+          sources: [],
+        });
       }
     }
   }
 
-  const requiredOrder = new Map<string, number>(REQUIRED_QUESTIONS.map(([predicate], index) => [predicate, index]));
+  const requiredOrder = new Map<string, number>(basicFactQuestionsFor(audience).map(([predicate], index) => [predicate, index]));
   return [...rows.values()].sort((left, right) => {
     const leftOrder = requiredOrder.get(left.predicate) ?? Number.MAX_SAFE_INTEGER;
     const rightOrder = requiredOrder.get(right.predicate) ?? Number.MAX_SAFE_INTEGER;
-    return leftOrder - rightOrder || questionFor(left.predicate).localeCompare(questionFor(right.predicate));
+    return leftOrder - rightOrder || basicFactQuestionFor(left.predicate, audience).localeCompare(basicFactQuestionFor(right.predicate, audience));
   });
 }
 
@@ -271,7 +311,7 @@ function leadRows(facts: readonly BasicFactView[], leads: readonly BasicFactLead
   const seen = new Set<string>();
   return rows.filter((lead) => {
     if (!lead?.predicate) return false;
-    const key = `${canonicalPredicate(lead.predicate)}:${displayValue(lead.value).toLowerCase()}`;
+    const key = `${canonicalBasicFactPredicate(lead.predicate)}:${displayValue(lead.value).toLowerCase()}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -283,21 +323,27 @@ export function BasicFactsPanel({
   facts = [],
   leads = [],
   fillRequired = false,
+  audience = "project",
+  questionLedger = [],
 }: {
   id?: string;
   facts?: readonly BasicFactView[];
   leads?: readonly BasicFactLeadView[];
   fillRequired?: boolean;
+  audience?: BasicFactsAudience;
+  questionLedger?: readonly BasicFactQuestionOutcomeInput[];
 }) {
-  const rows = factRows(facts, fillRequired);
+  const rows = factRows(facts, fillRequired, audience, questionLedger);
   const discoveryLeads = leadRows(facts, leads);
   if (!rows.length && !discoveryLeads.length) return null;
 
   const answered = rows.filter((fact) => fact.status === "verified" || fact.status === "corroborated").length;
+  const checkedEmpty = rows.filter((fact) => fact.status === "checked_empty").length;
   const conflicted = rows.filter((fact) => fact.status === "conflicted").length;
   const unresolved = rows.filter((fact) => fact.status === "unresolved").length;
   const applicable = rows.filter((fact) => fact.status !== "not_applicable").length;
   const answeredRows = rows.filter((fact) => fact.status === "verified" || fact.status === "corroborated");
+  const checkedEmptyRows = rows.filter((fact) => fact.status === "checked_empty");
   const conflictedRows = rows.filter((fact) => fact.status === "conflicted");
   const unresolvedRows = rows.filter((fact) => fact.status === "unresolved");
 
@@ -307,9 +353,9 @@ export function BasicFactsPanel({
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="eyebrow text-signal-lift">Core diligence</p>
-            <h2 id={`${id}-title`} className="mt-1 text-[19px] font-semibold tracking-tight text-ink">Basic facts</h2>
+            <h2 id={`${id}-title`} className="mt-1 text-[19px] font-semibold tracking-tight text-ink">What you need to know</h2>
             <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-              The basic questions an investor should never have to research twice. Answers count only when a fetched source supports them.
+              Positive answers link to fetched sources. Completed searches also preserve an explicit no-verified-result outcome.
             </p>
           </div>
           <div className="panel-inset flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-[11px]" aria-label="Basic facts coverage">
@@ -317,12 +363,13 @@ export function BasicFactsPanel({
               <CheckCircle aria-hidden="true" size={14} weight="fill" />
               {answered} confirmed
             </span>
+            {checkedEmpty > 0 && <span className="text-ink-dim">{checkedEmpty} checked, none found</span>}
             {conflicted > 0 && <span className="text-avoid">{conflicted} conflicted</span>}
             {unresolved > 0 && <span className="text-ink-faint">{unresolved} still to verify</span>}
           </div>
         </div>
         <div className="mt-3 h-1 overflow-hidden rounded-full bg-line/70" aria-hidden="true">
-          <div className="h-full rounded-full bg-pass transition-[width]" style={{ width: `${applicable ? (answered / applicable) * 100 : 0}%` }} />
+          <div className="h-full rounded-full bg-pass transition-[width]" style={{ width: `${applicable ? ((answered + checkedEmpty) / applicable) * 100 : 0}%` }} />
         </div>
       </header>
 
@@ -335,7 +382,7 @@ export function BasicFactsPanel({
               <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset min-w-0 px-3.5 py-3.5">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
-                    <p className="text-[10.5px] leading-relaxed text-ink-faint">{questionFor(fact.predicate)}</p>
+                    <p className="text-[10.5px] leading-relaxed text-ink-faint">{basicFactQuestionFor(fact.predicate, audience)}</p>
                     <p className="mt-1 text-[15px] font-medium leading-snug text-ink">{answerFor(fact)}</p>
                   </div>
                   <span className={`chip shrink-0 normal-case tracking-normal ${meta.className}`}>
@@ -343,8 +390,9 @@ export function BasicFactsPanel({
                     {meta.label}
                   </span>
                 </div>
+                  <LegalEventMetadata fact={fact} audience={audience} />
                   {sources.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${questionFor(fact.predicate)}`}>
+                    <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${basicFactQuestionFor(fact.predicate, audience)}`}>
                       {sources.slice(0, 4).map((source, sourceIndex) => {
                         const url = safeHttpUrl(source.url)!;
                         const contradicts = source.relation === "contradicts";
@@ -368,7 +416,7 @@ export function BasicFactsPanel({
             );
           })}
         </ul>
-      ) : (
+      ) : checkedEmptyRows.length === 0 ? (
         <div className="px-4 py-5 sm:px-5">
           <div className="panel-inset flex items-start gap-3 px-3.5 py-3.5">
             <MagnifyingGlass aria-hidden="true" size={18} weight="bold" className="mt-0.5 shrink-0 text-caution" />
@@ -379,6 +427,35 @@ export function BasicFactsPanel({
               </p>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {checkedEmptyRows.length > 0 && (
+        <div className="border-t border-line/60 bg-panel-2/30 px-4 py-4 sm:px-5" aria-label="Completed empty basic-fact searches">
+          <div className="flex items-start gap-2.5">
+            <CheckCircle aria-hidden="true" size={18} weight="fill" className="mt-0.5 shrink-0 text-ink-dim" />
+            <div>
+              <h3 className="text-[13px] font-semibold text-ink">Asset questions checked separately</h3>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
+                These are completed no-result searches, not inferred assets or blanket clearance.
+              </p>
+            </div>
+          </div>
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+            {checkedEmptyRows.map((fact, index) => (
+              <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset min-w-0 px-3.5 py-3.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10.5px] leading-relaxed text-ink-faint">{basicFactQuestionFor(fact.predicate, audience)}</p>
+                    <p className="mt-1 text-[13px] font-medium leading-snug text-ink-dim">{answerFor(fact)}</p>
+                  </div>
+                  <span className={`chip shrink-0 normal-case tracking-normal ${STATUS_META.checked_empty.className}`}>
+                    {STATUS_META.checked_empty.label}
+                  </span>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -396,10 +473,11 @@ export function BasicFactsPanel({
               const sources = dedupeSources(fact.sources ?? []);
               return (
                 <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset px-3 py-2.5">
-                  <p className="text-[10.5px] text-ink-faint">{questionFor(fact.predicate)}</p>
+                  <p className="text-[10.5px] text-ink-faint">{basicFactQuestionFor(fact.predicate, audience)}</p>
                   <p className="mt-1 text-[12.5px] leading-relaxed text-avoid">{answerFor(fact)}</p>
+                  <LegalEventMetadata fact={fact} audience={audience} />
                   {sources.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${questionFor(fact.predicate)}`}>
+                    <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${basicFactQuestionFor(fact.predicate, audience)}`}>
                       {sources.slice(0, 4).map((source, sourceIndex) => {
                         const url = safeHttpUrl(source.url)!;
                         const contradicts = source.relation === "contradicts";
@@ -436,7 +514,7 @@ export function BasicFactsPanel({
             {unresolvedRows.map((fact, index) => (
               <li key={fact.factId || `${fact.predicate}:${index}`} className="flex items-start gap-2 text-[11.5px] leading-relaxed text-ink-dim">
                 <MagnifyingGlass aria-hidden="true" size={13} weight="bold" className="mt-0.5 shrink-0 text-caution" />
-                {questionFor(fact.predicate)}
+                {basicFactQuestionFor(fact.predicate, audience)}
               </li>
             ))}
           </ul>
@@ -467,7 +545,7 @@ export function BasicFactsPanel({
                 <li key={`${lead.predicate}:${displayValue(lead.value)}:${index}`} className="panel-inset px-3 py-2.5">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="text-[10px] uppercase tracking-[0.11em] text-ink-faint">{questionFor(lead.predicate)}</p>
+                      <p className="text-[10px] uppercase tracking-[0.11em] text-ink-faint">{basicFactQuestionFor(lead.predicate, audience)}</p>
                       <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{leadAnswer || "Candidate answer not recorded"}</p>
                     </div>
                     <span className="chip tint-caution shrink-0 normal-case tracking-normal">{lead.provider || "AI"} lead</span>

@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import { emptyEvidence, type BasicFactLead } from "../../src/data/evidence";
+import { SubjectClass, VentureOutcome } from "../../src/engine";
 import type { PublicTextDocument, PublicTextResult } from "../publicWeb";
 import type { CollectContext } from "./types";
 import {
   collectBasicFacts,
+  basicFactsResearchQuestions,
   discoverBasicFactLeads,
   parseBasicFactLeads,
   verifyBasicFactLead,
@@ -40,6 +42,7 @@ function context(website: string | undefined = "https://jup.ag") {
   evidence.profile.display_name = "Jupiter";
   evidence.profile.resolved_name = "Jupiter";
   evidence.profile.website = website;
+  evidence.roles = [SubjectClass.PROJECT];
   const ctx: CollectContext = {
     handle: "@JupiterExchange",
     evidence,
@@ -57,9 +60,9 @@ const fetchDocuments = (documents: Record<string, PublicTextDocument>) =>
 describe("basic-facts lead parsing", () => {
   it("asks discovery to copy only source-stated traction reporting periods", async () => {
     const { ctx } = context();
-    let requestBody: Record<string, unknown> | undefined;
+    const requestBodies: Record<string, unknown>[] = [];
     const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
-      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
       return new Response(JSON.stringify({
         content: [{ type: "text", text: '{"facts":[]}' }],
         stop_reason: "end_turn",
@@ -73,12 +76,68 @@ describe("basic-facts lead parsing", () => {
       cacheWrite: async () => undefined,
     });
 
-    const messages = requestBody?.messages as Array<{ content?: string }> | undefined;
-    expect(messages?.[0]?.content).toContain(
+    expect(requestBodies).toHaveLength(3);
+    const prompts = requestBodies.map((body) =>
+      ((body.messages as Array<{ content?: string }> | undefined)?.[0]?.content ?? ""));
+    expect(prompts.every((prompt) => prompt.includes(
       "copy the source's exact as-of date or reporting period into qualifier",
-    );
-    expect(messages?.[0]?.content).toContain("Never infer, normalize, or invent a date");
-    expect(messages?.[0]?.content).toContain("traction as-of/reporting period present in exact_excerpt");
+    ))).toBe(true);
+    expect(prompts.every((prompt) => prompt.includes("Never infer, normalize, or invent a date"))).toBe(true);
+    expect(prompts.every((prompt) => prompt.includes("traction as-of/reporting period present in exact_excerpt"))).toBe(true);
+    expect(prompts.join("\n")).toContain("[project.founder]");
+    expect(prompts.join("\n")).toContain("[project.official_token]");
+    expect(prompts.join("\n")).toContain("publicly traded equity or debt security");
+    expect(prompts.join("\n")).toContain("attributed_entity and event_status");
+  });
+
+  it("uses different question ledgers for projects, founders, and investors", () => {
+    const { ctx } = context();
+    const project = basicFactsResearchQuestions(ctx);
+    expect(project.map((question) => question.id)).toEqual(expect.arrayContaining([
+      "project.founder",
+      "project.product",
+      "project.official_token",
+    ]));
+    expect(project.some((question) => question.id === "project.current_role")).toBe(false);
+    expect(project.filter((question) => question.critical).map((question) => question.id)).toEqual(expect.arrayContaining([
+      "project.launched",
+      "project.network",
+      "project.funding",
+      "project.repository",
+      "project.traction",
+      "project.legal_entity",
+      "project.governance",
+      "project.audit",
+    ]));
+
+    ctx.evidence.roles = [SubjectClass.FOUNDER];
+    const founder = basicFactsResearchQuestions(ctx);
+    expect(founder.map((question) => question.id)).toEqual(expect.arrayContaining([
+      "person.current_role",
+      "person.prior_role",
+      "person.education",
+      "person.exit",
+      "person.track_record",
+      "person.official_token",
+      "person.public_security",
+      "person.legal_regulatory_event",
+      "person.control",
+      "person.conflict_of_interest",
+    ]));
+    expect(founder.find((question) => question.id === "person.founder")?.critical).toBe(true);
+    expect(founder.find((question) => question.id === "person.track_record")?.critical).toBe(true);
+
+    ctx.evidence.roles = [SubjectClass.INVESTOR, SubjectClass.FOUNDER];
+    const investor = basicFactsResearchQuestions(ctx);
+    expect(investor.map((question) => question.id)).toEqual(expect.arrayContaining([
+      "investor.current_role",
+      "investor.founder",
+      "investor.investor",
+      "investor.track_record",
+      "investor.legal_regulatory_event",
+    ]));
+    expect(investor.find((question) => question.id === "investor.investor")?.critical).toBe(true);
+    expect(investor.find((question) => question.id === "investor.founder")?.critical).toBe(true);
   });
 
   it.each([
@@ -92,6 +151,35 @@ describe("basic-facts lead parsing", () => {
         value,
         exact_excerpt: `Jupiter was founded by ${value}.`,
         source_url: "https://jup.ag/about",
+      }],
+    }))).toEqual([]);
+  });
+
+  it("keeps a legitimate combined title as one current-role relationship", () => {
+    expect(parseBasicFactLeads(JSON.stringify({
+      facts: [{
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "Chair and CEO at Coinbase",
+        exact_excerpt: "Brian Armstrong is Chair and CEO at Coinbase.",
+        source_url: "https://www.coinbase.com/about",
+      }],
+    }))).toEqual([
+      expect.objectContaining({
+        predicate: "current_role",
+        value: "Chair and CEO at Coinbase",
+      }),
+    ]);
+  });
+
+  it("rejects legal-event leads without exact entity and status fields", () => {
+    expect(parseBasicFactLeads(JSON.stringify({
+      facts: [{
+        subject: "Hayden Adams",
+        predicate: "legal_regulatory_event",
+        value: "CFTC settlement",
+        exact_excerpt: "Uniswap Labs settled a CFTC matter.",
+        source_url: "https://www.cftc.gov/example",
       }],
     }))).toEqual([]);
   });
@@ -133,8 +221,38 @@ describe("basic-facts lead parsing", () => {
     }));
   });
 
-  it("keeps required due-diligence categories when more than 16 facts are returned", () => {
-    const founders = Array.from({ length: 16 }, (_, index) => ({
+  it("binds each model answer to a matching role-aware question", () => {
+    const { ctx } = context();
+    const questions = basicFactsResearchQuestions(ctx).filter((question) =>
+      ["project.founder", "project.official_token"].includes(question.id));
+    const parsed = parseBasicFactLeads(JSON.stringify({
+      facts: [
+        {
+          question_id: "project.founder",
+          subject: "Jupiter",
+          predicate: "founder",
+          value: "Meow",
+          exact_excerpt: "Jupiter was founded by Meow.",
+          source_url: "https://jup.ag/about",
+        },
+        {
+          question_id: "project.official_token",
+          subject: "Jupiter",
+          predicate: "founder",
+          value: "Wrong predicate",
+          exact_excerpt: "Jupiter was founded by Wrong predicate.",
+          source_url: "https://jup.ag/wrong",
+        },
+      ],
+    }), "Jupiter", "claude-web-search", questions);
+
+    expect(parsed).toEqual([
+      expect.objectContaining({ questionId: "project.founder", predicate: "founder", value: "Meow" }),
+    ]);
+  });
+
+  it("keeps required due-diligence categories when more than 28 facts are returned", () => {
+    const founders = Array.from({ length: 28 }, (_, index) => ({
       subject: "Jupiter",
       predicate: "founder",
       value: `Founder ${index + 1}`,
@@ -158,9 +276,9 @@ describe("basic-facts lead parsing", () => {
 
     const parsed = parseBasicFactLeads(JSON.stringify({ facts: [...founders, ...required] }));
 
-    expect(parsed).toHaveLength(16);
+    expect(parsed).toHaveLength(28);
     expect(parsed?.map((fact) => fact.predicate)).toEqual([
-      ...Array.from({ length: 10 }, () => "founder"),
+      ...Array.from({ length: 22 }, () => "founder"),
       "product",
       "tokenomics",
       "vesting",
@@ -186,6 +304,157 @@ describe("basic-facts source verification", () => {
     }));
     expect(evidence.basicFactLeads).toEqual([]);
     expect(evidence.basicFacts).toEqual([]);
+    expect(evidence.basicFactQuestionLedger?.every((entry) =>
+      entry.providerRuns[0]?.state === "completed_empty")).toBe(true);
+  });
+
+  it("repairs only critical questions that remain unanswered after source verification", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const primaryUrl = "https://alice.example/about";
+    const repairUrl = "https://alice.example/work";
+    let repairQuestions: readonly { id: string; critical: boolean }[] = [];
+
+    const result = await collectBasicFacts(ctx, {
+      discover: async () => [lead({
+        subject: "Alice",
+        predicate: "current_role",
+        value: "CEO at Acme",
+        questionId: "person.current_role",
+        excerpt: "Alice currently serves as CEO at Acme.",
+        sourceUrl: primaryUrl,
+      })],
+      repair: async (_repairContext, questions) => {
+        repairQuestions = questions;
+        return [lead({
+          subject: "Alice",
+          predicate: "founder",
+          value: "Acme",
+          questionId: "person.founder",
+          excerpt: "Alice founded Acme.",
+          sourceUrl: repairUrl,
+          provider: "grok",
+        })];
+      },
+      fetchSource: fetchDocuments({
+        [primaryUrl]: document({
+          url: primaryUrl,
+          host: "alice.example",
+          text: "<html><body><p>Alice currently serves as CEO at Acme.</p></body></html>",
+          contentHash: "b".repeat(64),
+        }),
+        [repairUrl]: document({
+          url: repairUrl,
+          host: "alice.example",
+          text: "<html><body><p>Alice founded Acme.</p></body></html>",
+          contentHash: "c".repeat(64),
+        }),
+      }),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ state: "executed" }));
+    expect(repairQuestions.length).toBeGreaterThan(0);
+    expect(repairQuestions.every((question) => question.critical)).toBe(true);
+    expect(repairQuestions.map((question) => question.id)).toContain("person.founder");
+    expect(repairQuestions.map((question) => question.id)).not.toContain("person.current_role");
+    expect(evidence.basicFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ predicate: "current_role", value: "CEO at Acme", questionId: "person.current_role" }),
+      expect.objectContaining({ predicate: "founder", value: "Acme", questionId: "person.founder" }),
+    ]));
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.current_role"))
+      .toEqual(expect.objectContaining({ status: "answered", providerRuns: [expect.objectContaining({ phase: "primary" })] }));
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.founder"))
+      .toEqual(expect.objectContaining({
+        status: "answered",
+        providerRuns: [
+          expect.objectContaining({ phase: "primary" }),
+          expect.objectContaining({ phase: "repair", state: "succeeded" }),
+        ],
+      }));
+  });
+
+  it("does not let a thin Jupiter pass suppress repair of obvious project facts", async () => {
+    const { ctx } = context();
+    const primary = [
+      lead({
+        predicate: "official_identity",
+        value: "Jupiter",
+        questionId: "project.official_identity",
+        excerpt: "Jupiter is the official Solana exchange project.",
+        sourceUrl: "https://jup.ag/identity",
+      }),
+      lead({ questionId: "project.founder" }),
+      lead({
+        predicate: "executive",
+        value: "Siong Ong",
+        questionId: "project.executive",
+        excerpt: "Jupiter CEO Siong Ong leads the exchange project.",
+        sourceUrl: "https://jup.ag/executive",
+      }),
+      lead({
+        predicate: "product",
+        value: "Jupiter Swap",
+        questionId: "project.product",
+        excerpt: "Jupiter Swap is Jupiter's live exchange product.",
+        sourceUrl: "https://jup.ag/product",
+      }),
+      lead({
+        predicate: "official_token",
+        value: "JUP",
+        questionId: "project.official_token",
+        excerpt: "Jupiter's official token is JUP.",
+        sourceUrl: "https://jup.ag/token",
+      }),
+    ];
+    const repairIds: string[] = [];
+    await collectBasicFacts(ctx, {
+      discover: async () => primary,
+      repair: async (_repairContext, questions) => {
+        repairIds.push(...questions.map((question) => question.id));
+        return [];
+      },
+      fetchSource: fetchDocuments(Object.fromEntries(primary.map((fact, index) => [
+        fact.sourceUrl,
+        document({
+          url: fact.sourceUrl,
+          text: `<html><body><p>${fact.excerpt}</p></body></html>`,
+          contentHash: String(index + 1).repeat(64),
+        }),
+      ]))),
+    });
+
+    expect(repairIds).toEqual(expect.arrayContaining([
+      "project.launched",
+      "project.network",
+      "project.funding",
+      "project.repository",
+      "project.traction",
+      "project.legal_entity",
+      "project.governance",
+      "project.audit",
+    ]));
+  });
+
+  it("does not turn a failed provider pass into an explicit empty result", async () => {
+    const { ctx, evidence } = context();
+    const result = await collectBasicFacts(ctx, {
+      discover: async () => ({
+        provider: "claude-web-search",
+        state: "failed",
+        leads: [],
+        attempts: 1,
+        completedBatches: 0,
+        failedBatches: 3,
+      }),
+      fetchSource: vi.fn(),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ state: "failed" }));
+    expect(result).not.toHaveProperty("explicitEmptyChecks");
+    expect(evidence.basicFactQuestionLedger?.every((entry) =>
+      entry.providerRuns[0]?.state === "failed")).toBe(true);
   });
 
   it("promotes an exact first-party source to verified", async () => {
@@ -324,7 +593,7 @@ describe("basic-facts source verification", () => {
     });
 
     expect(result).toEqual(expect.objectContaining({ state: "executed" }));
-    expect(fetchSource).toHaveBeenCalledTimes(24);
+    expect(fetchSource).toHaveBeenCalledTimes(32);
     required.forEach((fact) => expect(fetchSource).toHaveBeenCalledWith(fact.sourceUrl));
     expect(evidence.basicFacts?.map((fact) => fact.predicate)).toEqual([
       "product",
@@ -397,6 +666,235 @@ describe("basic-facts source verification", () => {
 
     expect(supported).toEqual(expect.objectContaining({ qualifier: "Q2 2026" }));
     expect(invented).not.toHaveProperty("qualifier");
+  });
+
+  it("preserves legal-event status and attribution only when the fetched passage states both", () => {
+    const supported = verifyBasicFactLead(
+      lead({
+        subject: "Acme",
+        predicate: "legal_regulatory_event",
+        value: "SEC settlement",
+        questionId: "project.legal_regulatory_event",
+        eventStatus: "resolved",
+        attributedEntity: "Acme",
+        excerpt: "Acme entered an SEC settlement, and the matter is resolved.",
+        sourceUrl: "https://acme.example/legal",
+      }),
+      document({
+        url: "https://acme.example/legal",
+        host: "acme.example",
+        text: "<html><body><p>Acme entered an SEC settlement, and the matter is resolved.</p></body></html>",
+      }),
+      ["Acme"],
+      "@acme",
+      ["acme.example"],
+    );
+    const inventedStatus = verifyBasicFactLead(
+      lead({
+        subject: "Acme",
+        predicate: "legal_regulatory_event",
+        value: "SEC settlement",
+        eventStatus: "dismissed",
+        attributedEntity: "Acme",
+        excerpt: "Acme entered an SEC settlement, and the matter is resolved.",
+        sourceUrl: "https://acme.example/legal",
+      }),
+      document({
+        url: "https://acme.example/legal",
+        host: "acme.example",
+        text: "<html><body><p>Acme entered an SEC settlement, and the matter is resolved.</p></body></html>",
+      }),
+      ["Acme"],
+      "@acme",
+      ["acme.example"],
+    );
+
+    expect(supported).toEqual(expect.objectContaining({
+      questionId: "project.legal_regulatory_event",
+      eventStatus: "resolved",
+      attributedEntity: "Acme",
+      attributionScope: "direct_subject",
+    }));
+    expect(inventedStatus).toBeNull();
+  });
+
+  it("keeps a company legal event that mentions the founder as related-entity context", () => {
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Hayden Adams",
+        predicate: "legal_regulatory_event",
+        value: "CFTC settlement",
+        eventStatus: "settled",
+        attributedEntity: "Uniswap Labs",
+        excerpt: "Uniswap Labs, founded by Hayden Adams, settled the CFTC settlement.",
+        sourceUrl: "https://www.cftc.gov/uniswap-labs",
+      }),
+      document({
+        url: "https://www.cftc.gov/uniswap-labs",
+        host: "www.cftc.gov",
+        text: "<html><body><p>Uniswap Labs, founded by Hayden Adams, settled the CFTC settlement.</p></body></html>",
+      }),
+      ["Hayden Adams", "@haydenadams"],
+      "@haydenadams",
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      status: "verified",
+      attributedEntity: "Uniswap Labs",
+      eventStatus: "settled",
+      attributionScope: "related_entity",
+    }));
+  });
+
+  it("keeps conflicting statuses for the same attributed legal event separate and conflicted", async () => {
+    const { ctx, evidence } = context("https://hayden.example");
+    evidence.profile.display_name = "Hayden Adams";
+    evidence.profile.resolved_name = "Hayden Adams";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const pendingUrl = "https://www.cftc.gov/hayden-pending";
+    const closedUrl = "https://www.sec.gov/hayden-closed";
+    await collectBasicFacts(ctx, {
+      discover: async () => [
+        lead({
+          subject: "Hayden Adams",
+          predicate: "legal_regulatory_event",
+          value: "CFTC investigation",
+          questionId: "person.legal_regulatory_event",
+          eventStatus: "pending",
+          attributedEntity: "Hayden Adams",
+          excerpt: "Hayden Adams CFTC investigation is pending.",
+          sourceUrl: pendingUrl,
+        }),
+        lead({
+          subject: "Hayden Adams",
+          predicate: "legal_regulatory_event",
+          value: "CFTC investigation",
+          questionId: "person.legal_regulatory_event",
+          eventStatus: "closed",
+          attributedEntity: "Hayden Adams",
+          excerpt: "Hayden Adams CFTC investigation is closed.",
+          sourceUrl: closedUrl,
+        }),
+      ],
+      fetchSource: fetchDocuments({
+        [pendingUrl]: document({
+          url: pendingUrl,
+          host: "www.cftc.gov",
+          text: "<html><body><p>Hayden Adams CFTC investigation is pending.</p></body></html>",
+          contentHash: "d".repeat(64),
+        }),
+        [closedUrl]: document({
+          url: closedUrl,
+          host: "www.sec.gov",
+          text: "<html><body><p>Hayden Adams CFTC investigation is closed.</p></body></html>",
+          contentHash: "e".repeat(64),
+        }),
+      }),
+    });
+
+    const events = evidence.basicFacts?.filter((fact) => fact.predicate === "legal_regulatory_event") ?? [];
+    expect(events).toHaveLength(2);
+    expect(new Set(events.map((fact) => fact.factId)).size).toBe(2);
+    expect(events.map((fact) => fact.eventStatus).sort()).toEqual(["closed", "pending"]);
+    expect(events.every((fact) => fact.status === "conflicted")).toBe(true);
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.legal_regulatory_event"))
+      .toEqual(expect.objectContaining({ status: "unanswered", answerRefs: [] }));
+  });
+
+  it("accepts a verified venture's first-party page as official counterparty evidence", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.MEMBER];
+    evidence.ventures.push({
+      project_name: "Acme",
+      domain: "acme.example",
+      role: "Advisor",
+      period: "2020 to 2022",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://acme.example/team",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const sourceUrl = "https://acme.example/team";
+    const result = await collectBasicFacts(ctx, {
+      discover: async () => [lead({
+        subject: "Alice",
+        predicate: "prior_role",
+        value: "Advisor at Acme",
+        questionId: "person.prior_role",
+        excerpt: "Alice previously served as Advisor at Acme.",
+        sourceUrl,
+      })],
+      fetchSource: fetchDocuments({
+        [sourceUrl]: document({
+          url: sourceUrl,
+          host: "acme.example",
+          text: "<html><body><p>Alice previously served as Advisor at Acme.</p></body></html>",
+        }),
+      }),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ state: "executed" }));
+    expect(evidence.basicFacts).toEqual([
+      expect.objectContaining({
+        predicate: "prior_role",
+        status: "verified",
+        sources: [expect.objectContaining({ sourceClass: "official_counterparty" })],
+      }),
+    ]);
+  });
+
+  it("treats an exact regulator passage as primary legal evidence", () => {
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Acme",
+        predicate: "legal_regulatory_event",
+        value: "SEC settlement",
+        eventStatus: "settled",
+        attributedEntity: "Acme",
+        excerpt: "The SEC announced that Acme settled the SEC settlement.",
+        sourceUrl: "https://www.sec.gov/newsroom/acme",
+      }),
+      document({
+        url: "https://www.sec.gov/newsroom/acme",
+        host: "www.sec.gov",
+        text: "<html><body><p>The SEC announced that Acme settled the SEC settlement.</p></body></html>",
+      }),
+      ["Acme"],
+      "@acme",
+      ["acme.example"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      status: "verified",
+      eventStatus: "settled",
+      attributedEntity: "Acme",
+      sources: [expect.objectContaining({ sourceClass: "regulatory_or_onchain" })],
+    }));
+  });
+
+  it("does not transfer a company-only legal event to its founder", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Alice",
+        predicate: "legal_regulatory_event",
+        value: "SEC settlement",
+        eventStatus: "settled",
+        attributedEntity: "Alice",
+        excerpt: "Acme entered an SEC settlement.",
+        sourceUrl: "https://www.sec.gov/newsroom/acme",
+      }),
+      document({
+        url: "https://www.sec.gov/newsroom/acme",
+        host: "www.sec.gov",
+        text: "<html><body><p>Acme entered an SEC settlement.</p></body></html>",
+      }),
+      ["Alice"],
+      "@alice",
+      ["alice.example"],
+    )).toBeNull();
   });
 
   it("accepts common chain wording on a fetched official page", () => {

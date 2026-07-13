@@ -32,11 +32,12 @@ import { PersonCheckTracker, type ProviderRunState } from "./checks";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
 import { fetchTeamPage } from "./adapters/teampage";
-import { checkSiteSubstance } from "./adapters/sitecheck";
+import { checkSiteSubstance, type SiteSubstance } from "./adapters/sitecheck";
 import { detectTokenLifecycle } from "./adapters/dexscreener";
 import { analyzeCadence } from "../src/lib/cadence";
 import { canonicalOfficialWebsite, canonicalPublicProfileWebsite } from "../src/lib/fundScaleEvidence";
 import { personChecks } from "../src/lib/scanChecklist";
+import { basicFactQuestionOutcome } from "../src/lib/basicFactQuestions";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
   DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
@@ -224,23 +225,58 @@ async function resolveProfile(ctx: CollectContext): Promise<void> {
   }
 }
 
-async function collectProjectSiteSubstance(ctx: CollectContext, domain: string): Promise<void> {
-  if (!domain) return;
-  const site = await checkSiteSubstance(domain).catch(() => null);
-  if (!site) return;
+export function applySiteSubstanceOutcome(
+  ctx: CollectContext,
+  domain: string,
+  site: SiteSubstance,
+): void {
   ctx.evidence.profile.website = site.url;
-  ctx.recordCheck?.({
-    id: "project-product-substance",
-    status: site.status === "coming_soon" || site.status === "unreachable" ? "finding" : "confirmed",
-    note: `${domain}: ${site.detail}`,
-    provider: "site-fetch",
-    sourceCount: 1,
-  });
-  if (site.status === "coming_soon" || site.status === "unreachable") {
-    const notLive = site.status === "unreachable" ? "does not resolve" : "is not live yet";
+  const isProject = ctx.evidence.roles.includes(SubjectClass.PROJECT);
+  const verifiedProjectToken = ctx.evidence.projectToken?.verified === true
+    ? ctx.evidence.projectToken
+    : undefined;
+  const verifiedNotLive = site.status === "coming_soon"
+    && (site.reason === "coming_soon" || site.reason === "parked");
+
+  // A personal profile URL is not automatically the website of a project the
+  // person founded, advised, or invested in. Preserve the observed page state,
+  // but do not create project counter-evidence without a project route.
+  if (!isProject) {
+    ctx.emit({
+      phase: "P2 · Substance",
+      label: verifiedNotLive
+        ? "Profile website is not launched"
+        : site.status === "coming_soon"
+          ? "Profile website check unavailable"
+          : "Profile website checked",
+      detail: verifiedNotLive
+        ? `${domain} serves a verified coming-soon or parked page. This personal-profile URL is not treated as project counter-evidence.`
+        : site.status === "coming_soon"
+          ? `${domain} returned an ungrounded coming-soon label. No profile or project-liveness conclusion was drawn.`
+        : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this person profile.`,
+      source: "site-fetch",
+      tone: "neutral",
+    });
+    return;
+  }
+
+  // SiteNotLive is reserved for direct, served-page evidence. Access blocks,
+  // HTTP errors, and DNS/transport failures are collection gaps, never adverse
+  // evidence about whether the product exists.
+  if (verifiedNotLive) {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "finding",
+      note: `${domain}: ${site.detail}`,
+      provider: "site-fetch",
+      sourceCount: 1,
+    });
+    const tokenContext = verifiedProjectToken
+      ? ` No live product surface despite the account promoting the verified $${verifiedProjectToken.symbol} project token.`
+      : " No live product surface was verified.";
     ctx.evidence.findings.push({
       finding_type: "SiteNotLive",
-      claim: `The project's own website (${domain}) ${notLive}: ${site.detail}. No live product surface despite the account promoting a token.`,
+      claim: `The project's own website (${domain}) is not live yet: ${site.detail}.${tokenContext}`,
       source_url: site.url,
       source_date: "",
       source_author: "site-fetch",
@@ -250,12 +286,74 @@ async function collectProjectSiteSubstance(ctx: CollectContext, domain: string):
       evidence_origin: "deterministic",
       artifact_verified: true,
     });
-    ctx.emit({ phase: "P2 · Substance", label: "Website not live", detail: `${domain} ${notLive}: ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
-  } else if (site.status === "client_rendered") {
+    ctx.emit({
+      phase: "P2 · Substance",
+      label: "Website not live",
+      detail: verifiedProjectToken
+        ? `${domain} is a verified coming-soon or parked page: ${site.detail}. The account promotes the verified $${verifiedProjectToken.symbol} project token, so this is product-substance counter-evidence.`
+        : `${domain} is a verified coming-soon or parked page: ${site.detail}. This is product-substance counter-evidence, but no token-promotion claim was inferred.`,
+      source: "site-fetch",
+      tone: "bad",
+    });
+    return;
+  }
+
+  // Defensive boundary for callers or persisted adapter payloads that claim a
+  // coming-soon status without the direct marker attribution introduced above.
+  // Absence is itself a claim, so an ungrounded label stays a neutral gap.
+  if (site.status === "coming_soon") {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "unavailable",
+      note: `${domain}: coming-soon classification lacked a verified served-page marker`,
+      provider: "site-fetch",
+    });
+    ctx.emit({
+      phase: "P2 · Substance",
+      label: "Website check unavailable",
+      detail: `${domain}: a coming-soon label was returned without direct served-page evidence. No liveness conclusion was drawn.`,
+      source: "site-fetch",
+      tone: "neutral",
+    });
+    return;
+  }
+
+  if (site.status === "access_blocked" || site.status === "unavailable" || site.status === "unreachable") {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "unavailable",
+      note: `${domain}: ${site.detail}; no adverse site-liveness conclusion was drawn`,
+      provider: "site-fetch",
+    });
+    ctx.emit({
+      phase: "P2 · Substance",
+      label: "Website check unavailable",
+      detail: `${domain}: ${site.detail}. This is a neutral provider gap, not evidence that the website or product is offline.`,
+      source: "site-fetch",
+      tone: "neutral",
+    });
+    return;
+  }
+
+  ctx.recordCheck?.({
+    id: "project-product-substance",
+    status: "confirmed",
+    note: `${domain}: ${site.detail}`,
+    provider: "site-fetch",
+    sourceCount: 1,
+  });
+  if (site.status === "client_rendered") {
     ctx.emit({ phase: "P2 · Substance", label: "Website live (app)", detail: `${domain} serves a client-rendered app; ${site.detail}.`, source: "site-fetch", tone: "neutral" });
   } else {
     ctx.emit({ phase: "P2 · Substance", label: "Website live", detail: `${domain} is a live site: ${site.detail}.`, source: "site-fetch", tone: "good" });
   }
+}
+
+async function collectProjectSiteSubstance(ctx: CollectContext, domain: string): Promise<void> {
+  if (!domain) return;
+  const site = await checkSiteSubstance(domain).catch(() => null);
+  if (!site) return;
+  applySiteSubstanceOutcome(ctx, domain, site);
 }
 
 // Cold handle: resolve the profile, pull recent posts, and extract self-claims
@@ -934,6 +1032,163 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
       note: `${traction.length} concrete traction or usage metric${traction.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
       provider: "basic-facts-web",
       sourceCount: traction.reduce((total, fact) => total + fact.sources.length, 0),
+    });
+  }
+}
+
+type FounderDecisionCheckId =
+  | "founder-identity-authority"
+  | "founder-company-relationships"
+  | "founder-track-record"
+  | "founder-control-conflicts"
+  | "founder-legal-regulatory"
+  | "founder-asset-distinction";
+
+interface FounderDecisionQuestionGroup {
+  id: FounderDecisionCheckId;
+  predicates: readonly string[];
+  answerMode: "all" | "any";
+  answeredNote: string;
+  emptyNote: string;
+}
+
+const FOUNDER_DECISION_QUESTION_GROUPS: readonly FounderDecisionQuestionGroup[] = [
+  {
+    id: "founder-identity-authority",
+    predicates: ["official_identity", "current_role"],
+    answerMode: "all",
+    answeredNote: "identity and current decision-making role are both tied to verified evidence",
+    emptyNote: "the source search completed without verifying both identity and current authority",
+  },
+  {
+    id: "founder-company-relationships",
+    predicates: ["founder", "current_role"],
+    answerMode: "all",
+    answeredNote: "founded companies and current operating relationships are tied to verified evidence",
+    emptyNote: "the source search completed without verifying both founded companies and current operating relationships",
+  },
+  {
+    id: "founder-track-record",
+    predicates: ["track_record", "exit", "prior_role"],
+    answerMode: "any",
+    answeredNote: "at least one prior role, venture outcome, or exit is tied to verified evidence",
+    emptyNote: "the source search completed without a publishable prior role, venture outcome, or exit",
+  },
+  {
+    id: "founder-control-conflicts",
+    predicates: ["control", "conflict_of_interest", "governance"],
+    answerMode: "any",
+    answeredNote: "at least one control, governance, or conflict disclosure is tied to verified evidence",
+    emptyNote: "the source search completed without a publishable control or conflict disclosure; this is a gap, not a clean screen",
+  },
+  {
+    id: "founder-legal-regulatory",
+    predicates: ["legal_regulatory_event"],
+    answerMode: "any",
+    answeredNote: "a material legal or regulatory event is tied to its explicitly named subject and stated status",
+    emptyNote: "the source search completed without a verified event explicitly naming this person; this is not legal clearance",
+  },
+  {
+    id: "founder-asset-distinction",
+    predicates: ["public_security", "official_token"],
+    answerMode: "all",
+    answeredNote: "public-security and official-token questions have separate verified or completed-empty outcomes",
+    emptyNote: "the source search completed separately for public securities and official crypto tokens; no asset was inferred",
+  },
+] as const;
+
+/**
+ * Convert the role-aware question ledger into six investor-facing founder
+ * outcomes. A completed empty search records the gap without claiming the
+ * answer is negative; provider failures remain unavailable.
+ */
+export function collectFounderDecisionQuestionOutcomes(ctx: CollectContext): void {
+  if (!ctx.evidence.roles.includes(SubjectClass.FOUNDER)) return;
+  const ledger = ctx.evidence.basicFactQuestionLedger ?? [];
+  if (!ledger.length) return;
+  const verifiedFacts = (ctx.evidence.basicFacts ?? []).filter((fact) =>
+    fact.artifact_verified === true
+    && (fact.status === "verified" || fact.status === "corroborated"),
+  );
+
+  for (const group of FOUNDER_DECISION_QUESTION_GROUPS) {
+    const entries = group.predicates
+      .map((predicate) => ledger.find((entry) => entry.predicate === predicate))
+      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
+    if (!entries.length) continue;
+    const ledgerAnswered = group.answerMode === "all"
+      ? group.predicates.every((predicate) => entries.some((entry) => entry.predicate === predicate && entry.status === "answered"))
+      : entries.some((entry) => entry.status === "answered");
+    const facts = verifiedFacts.filter((fact) =>
+      group.predicates.includes(fact.predicate)
+      && (group.id !== "founder-legal-regulatory" || fact.attributionScope === "direct_subject"));
+    if (group.id === "founder-asset-distinction") {
+      const assetOutcomes = group.predicates.map((predicate) => {
+        const entry = entries.find((candidate) => candidate.predicate === predicate);
+        const fact = facts.find((candidate) => candidate.predicate === predicate);
+        const outcome = fact
+          ? "verified" as const
+          : entry?.status === "unanswered" && basicFactQuestionOutcome(entry) === "checked_empty"
+            ? "checked_empty" as const
+            : "unresolved" as const;
+        const label = predicate === "public_security" ? "Public security" : "Official crypto token";
+        return {
+          predicate,
+          outcome,
+          note: outcome === "verified"
+            ? `${label}: ${fact!.value} verified`
+            : outcome === "checked_empty"
+              ? `${label}: completed search found no verified asset`
+              : `${label}: unresolved`,
+        };
+      });
+      const unresolvedAssets = assetOutcomes.filter((outcome) => outcome.outcome === "unresolved");
+      const sourceCount = facts.reduce((count, fact) => count + fact.sources.length, 0);
+      ctx.recordCheck?.({
+        id: group.id,
+        status: unresolvedAssets.length
+          ? "unavailable"
+          : facts.length
+            ? "confirmed"
+            : "checked-empty",
+        note: `${assetOutcomes.map((outcome) => outcome.note).join("; ")}. ${unresolvedAssets.length
+          ? "Both asset questions must have separate outcomes before this distinction is complete."
+          : "Stock and token were evaluated separately; no asset was inferred from the other category."}`,
+        provider: "basic-facts-question-ledger",
+        sourceCount,
+      });
+      continue;
+    }
+    // The ledger can contain useful related-company legal context, but only an
+    // event attributed exactly to the audited person may close or govern the
+    // founder's legal question.
+    const answered = ledgerAnswered
+      && (group.id !== "founder-legal-regulatory" || facts.length > 0);
+    const completedSearch = entries.every((entry) => entry.providerRuns.some((run) =>
+      run.state === "succeeded" || run.state === "completed_empty",
+    ));
+    if (answered) {
+      const hasAttributedConcern = facts.some((fact) =>
+        fact.predicate === "legal_regulatory_event" || fact.predicate === "conflict_of_interest",
+      );
+      ctx.recordCheck?.({
+        id: group.id,
+        status: hasAttributedConcern ? "finding" : "confirmed",
+        note: group.answeredNote,
+        provider: "basic-facts-question-ledger",
+        sourceCount: facts.reduce((count, fact) => count + fact.sources.length, 0),
+      });
+      continue;
+    }
+
+    ctx.recordCheck?.({
+      id: group.id,
+      status: completedSearch ? "checked-empty" : "unavailable",
+      note: completedSearch
+        ? group.emptyNote
+        : `${group.emptyNote}; one or more targeted search passes were partial, failed, or unavailable`,
+      provider: "basic-facts-question-ledger",
+      sourceCount: 0,
     });
   }
 }
@@ -1689,6 +1944,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       }
       continue;
     }
+    // Identity and career adapters run before Basic Facts and may establish a
+    // founder or investor role that was not explicit in the original X bio.
+    // Refresh the trusted role set so the research model receives the correct
+    // role-aware question set and critical-gap repair plan.
+    if (a.id === "basic-facts") evidence.roles = providerBackedRoles(evidence);
     const stageStartedAt = startRuntimeStage(`adapter:${a.id}`);
     try {
       const before = attemptTotals();
@@ -1777,6 +2037,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   } else {
     emit({ phase: "P0 · Routing", label: "Role unresolved", detail: "No deterministic or provider-corroborated role evidence was collected. Model role candidates remain leads; the report will publish INCOMPLETE.", tone: "warn" });
   }
+  collectFounderDecisionQuestionOutcomes(ctx);
 
   // Project backing and disclosure outcomes are bounded reads over already
   // frozen first-party evidence. An official token binding alone is never

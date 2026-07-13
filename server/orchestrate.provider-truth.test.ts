@@ -217,8 +217,14 @@ describe("orchestrator provider execution truth", () => {
       const request = JSON.parse(String(init?.body)) as { tool_choice?: { name?: string } };
       return request.tool_choice?.name ? [request.tool_choice.name] : [];
     });
+    const anthropicBodies = fetchMock.mock.calls.flatMap(([input, init]) =>
+      String(input).includes("api.anthropic.com") ? [String(init?.body ?? "")] : [],
+    );
     const analystRun = dossier?.providerSnapshot?.runs.find((run) => run.id === "claude-analyst");
 
+    expect(anthropicBodies.some((body) =>
+      body.includes("Which investments are explicitly attributed to this person"),
+    )).toBe(true);
     expect(anthropicTools).toContain("record_contradictions");
     expect(anthropicTools).not.toContain("record_verdict");
     expect(dossier?.report.composite_verdict).toBe("INCOMPLETE");

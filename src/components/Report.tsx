@@ -36,7 +36,7 @@ import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
 import { MethodologyChecklist } from "./MethodologyChecklist";
-import { personChecks } from "../lib/scanChecklist";
+import { decisionCriticalChecks, personChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
@@ -69,6 +69,13 @@ import {
   type BasicFactLeadView,
   type BasicFactView,
 } from "./BasicFactsPanel";
+import {
+  basicFactQuestionOutcome,
+  basicFactQuestionFor,
+  basicFactQuestionsFor,
+  canonicalBasicFactPredicate,
+  supportsExplicitEmptyBasicFact,
+} from "../lib/basicFactQuestions";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -1288,9 +1295,25 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const roles = report.roles as SubjectClass[];
   const basicFacts: BasicFactView[] = f.basicFacts ?? [];
   const basicFactLeads: BasicFactLeadView[] = f.basicFactLeads ?? [];
-  const showBasicFacts = roles.includes(SubjectClass.PROJECT)
-    || basicFacts.length > 0
-    || basicFactLeads.length > 0;
+  const ledgerAudience = f.basicFactQuestionLedger?.[0]?.audience;
+  const basicFactsAudience = ledgerAudience === "project"
+    ? "project" as const
+    : ledgerAudience === "investor"
+      ? "investor" as const
+      : ledgerAudience === "person"
+        ? roles.includes(SubjectClass.FOUNDER) ? "founder" as const : "person" as const
+        : roles.includes(SubjectClass.PROJECT)
+          ? "project" as const
+          : roles.includes(SubjectClass.INVESTOR)
+            ? "investor" as const
+            : roles.includes(SubjectClass.FOUNDER)
+              ? "founder" as const
+              : "person" as const;
+  const basicFactResearchAttempted = basicFacts.length > 0
+    || basicFactLeads.length > 0
+    || (f.basicFactQuestionLedger?.length ?? 0) > 0;
+  const fillDecisionFacts = basicFactsAudience !== "person" && basicFactResearchAttempted;
+  const showBasicFacts = basicFactResearchAttempted;
   const governingRoleReport = report.role_reports.find((rr) => rr.role === report.governing_role)
     ?? report.role_reports[0];
   const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
@@ -1545,7 +1568,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       : presentedVerdict === "FAIL" || presentedVerdict === "AVOID"
         ? "avoid"
         : "signal";
-  const unresolvedChecks = diligenceChecks.filter((check) =>
+  const unresolvedChecks = decisionCriticalChecks(diligenceChecks).filter((check) =>
     check.status === "unknown" || check.status === "unavailable" || check.status === "stale",
   );
   const investorOpenChecks = unresolvedChecks.filter((check) => {
@@ -1573,11 +1596,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         counterCount: axis.counter.length,
         questionCount,
       });
+      const conciseRationale = axis.rationale.replace(/\s+/g, " ").trim();
+      const firstSentence = conciseRationale.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() ?? conciseRationale;
+      const summary = firstSentence.length > 220
+        ? `${firstSentence.slice(0, 217).trimEnd()}…`
+        : firstSentence;
       return {
         id: `support-${axis.axis}`,
-        title: axis.rationale,
-        detail: `${diligenceAreaLabel(axis.axis)} · ${strength}`,
-        provenance: `${axis.support.length} ${axis.support.length === 1 ? "source" : "sources"} reviewed`,
+        title: diligenceAreaLabel(axis.axis),
+        detail: summary,
+        provenance: `${strength} · ${axis.support.length} ${axis.support.length === 1 ? "source" : "sources"} reviewed`,
         href: axisHref(axis.axis),
       };
     });
@@ -1643,7 +1671,53 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const verdictNarrative = favorableVerdict ? supportNarrative : adverseVerdictNarrative;
   const countervailingNarrative = favorableVerdict ? confidenceLimits : supportNarrative;
 
-  const verificationNext: ReportCanvasNarrativeItem[] = [
+  const axisVerificationQuestions: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows.flatMap((axis) => [
+    ...axis.gaps.map((gap, index) => ({
+      id: `verify-axis-${axis.axis}-${index}`,
+      title: gap,
+      detail: `Closing this would strengthen ${diligenceAreaLabel(axis.axis).toLowerCase()}.`,
+      provenance: "Open decision question",
+      href: axisHref(axis.axis),
+    })),
+    ...axis.gapArtifacts.map((artifact, index) => ({
+      id: `verify-axis-artifact-${axis.axis}-${index}`,
+      title: artifact.title,
+      detail: artifact.excerpt || `Source coverage is incomplete for ${diligenceAreaLabel(axis.axis).toLowerCase()}.`,
+      provenance: "Source gap",
+      href: axisHref(axis.axis),
+    })),
+  ]);
+  const resolvedBasicFactPredicates = new Set([
+    ...basicFacts
+      .filter((fact) => fact.status === "verified" || fact.status === "corroborated" || fact.status === "not_applicable")
+      .map((fact) => canonicalBasicFactPredicate(fact.predicate)),
+    ...(f.basicFactQuestionLedger ?? [])
+      .filter((entry) => supportsExplicitEmptyBasicFact(entry.predicate)
+        && basicFactQuestionOutcome(entry) === "checked_empty")
+      .map((entry) => canonicalBasicFactPredicate(entry.predicate)),
+  ]);
+  const conflictedBasicFactPredicates = new Set(basicFacts
+    .filter((fact) => fact.status === "conflicted" || fact.status === "unresolved")
+    .map((fact) => canonicalBasicFactPredicate(fact.predicate)));
+  const basicFactVerificationQuestions: ReportCanvasNarrativeItem[] = fillDecisionFacts
+    ? basicFactQuestionsFor(basicFactsAudience)
+      .filter(([predicate]) => !resolvedBasicFactPredicates.has(predicate) || conflictedBasicFactPredicates.has(predicate))
+      .map(([predicate]) => ({
+        id: `verify-basic-${predicate}`,
+        title: basicFactQuestionFor(predicate, basicFactsAudience),
+        detail: "No clean, source-backed answer is frozen in this report yet.",
+        provenance: "Decision fact still open",
+        href: "#basic-facts" as `#${string}`,
+      }))
+    : [];
+  const checkVerificationQuestions: ReportCanvasNarrativeItem[] = investorOpenChecks.map((check, index) => ({
+    id: `verify-${check.checkId ?? index}`,
+    title: check.label,
+    detail: check.note,
+    provenance: "Coverage question",
+    href: "#scan-methodology" as `#${string}`,
+  }));
+  const allVerificationQuestions: ReportCanvasNarrativeItem[] = [
     ...(routingUnresolved ? [{
       id: "verify-subject-routing",
       title: "Resolve whether this account represents a project, organization, token, or person",
@@ -1658,14 +1732,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       provenance: "Decision review incomplete",
       href: "#decision-basis" as `#${string}`,
     }] : []),
-    ...investorOpenChecks.map((check, index) => ({
-      id: `verify-${check.checkId ?? index}`,
-      title: check.label,
-      detail: check.note,
-      provenance: "Needs verification",
-      href: "#scan-methodology" as `#${string}`,
-    })),
-  ].filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index).slice(0, 8);
+    ...axisVerificationQuestions,
+    ...basicFactVerificationQuestions,
+    ...checkVerificationQuestions,
+  ].filter((item, index, items) => {
+    const key = item.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ");
+    return items.findIndex((candidate) =>
+      candidate.title.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ") === key,
+    ) === index;
+  });
+  const verificationNext = allVerificationQuestions.slice(0, 8);
+  const decisionQuestionCount = allVerificationQuestions.length;
 
   const unscoredIntelNarrative: ReportCanvasNarrativeItem[] = [
     ...(f.projectToken ? [{
@@ -1767,6 +1844,27 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     ...(providerCapturedLabel ? [{ id: "provider-captured", label: `Provider evidence captured ${providerCapturedLabel}`, meta: `${f.providerSnapshot?.runs.length ?? 0} provider runs recorded` }] : []),
     ...(finalizedLabel ? [{ id: "report-finalized", label: `Scoring finalized ${finalizedLabel}`, meta: report.audit_id }] : []),
   ];
+  const verifiedDecisionFactCount = basicFacts.filter((fact) =>
+    fact.status === "verified" || fact.status === "corroborated",
+  ).length;
+  const citedDecisionSourceKeys = new Set([
+    ...decisionBasisSummary.rows.flatMap((axis) => [...axis.support, ...axis.counter]
+      .map((artifact) => artifact.artifactId)),
+    ...basicFacts.flatMap((fact) => (fact.sources ?? [])
+      .map((source) => source.url)
+      .filter((url): url is string => Boolean(url))),
+  ]);
+  const conflictSignalCount = visibleContradictions.length
+    + decisionBasisSummary.rows.filter((axis) => axis.counter.length > 0).length
+    + basicFacts.filter((fact) => fact.status === "conflicted").length;
+  const relationshipRecordCount = connections.length + webTeam.length + (evidence.associates?.length ?? 0);
+  const argusEdgeMetrics = [
+    { label: "Verified facts", value: verifiedDecisionFactCount, detail: "source-backed answers" },
+    { label: "Decision sources", value: citedDecisionSourceKeys.size, detail: "bound to the verdict" },
+    { label: "Conflicts tested", value: conflictSignalCount, detail: "not averaged away" },
+    { label: "Relationship records", value: relationshipRecordCount, detail: "people and graph links" },
+    { label: "Open questions", value: decisionQuestionCount, detail: "ranked for follow-up" },
+  ] as const;
 
   return (
     <div className="relative min-h-full pb-24">
@@ -2049,7 +2147,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   </div>
                   <div className="stat-tile">
                     <dt className="stat-label">Questions remaining</dt>
-                    <dd className={`stat-value mt-0.5 font-semibold ${readiness.unresolved ? "text-caution" : "text-ink"}`}>{readiness.unresolved}</dd>
+                    <dd className={`stat-value mt-0.5 font-semibold ${decisionQuestionCount ? "text-caution" : "text-ink"}`}>{decisionQuestionCount}</dd>
                   </div>
                 </dl>
                 <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
@@ -2066,7 +2164,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               ...(f.projectToken ? [{ href: "#project-token" as const, label: "Token", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
               ...(showBasicFacts ? [{
                 href: "#basic-facts" as const,
-                label: "Basics",
+                label: "Key facts",
                 icon: <CheckCircle aria-hidden="true" size={15} weight="bold" />,
                 count: new Set(basicFacts
                   .filter((fact) => fact.status === "verified" || fact.status === "corroborated")
@@ -2131,14 +2229,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           <div className="panel px-5">
             <ReportCanvasNarrativeSection
               id="verdict-rationale"
-              title={decisionFrameworkUnavailable ? "Collected intelligence that did not enter a score" : "Why ARGUS reaches this verdict"}
+              title={decisionFrameworkUnavailable ? "What ARGUS found before the decision failed" : favorableVerdict ? "The investment case" : "Why this is risky"}
               description={decisionFrameworkUnavailable
                 ? routingUnresolved
                   ? "Verified artifacts and investigative leads stay visible while subject routing is unresolved. Leads remain explicitly unscored."
                   : "Verified artifacts and investigative leads stay visible even though the scoring pass was incomplete. Leads remain explicitly unscored."
                 : favorableVerdict
-                  ? "Only decision areas with saved supporting citations appear here."
-                  : "Disqualifying findings, conflicting sources, weak areas, and unanswered questions that drive this result appear here."}
+                  ? "The strongest source-backed reasons this result holds up."
+                  : "The findings, conflicts, and weak areas driving the result."}
               tone={decisionNarrativeTone}
               items={decisionFrameworkUnavailable ? unscoredIntelNarrative : verdictNarrative}
               emptyCopy={decisionFrameworkUnavailable
@@ -2151,7 +2249,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             />
             <ReportCanvasNarrativeSection
               id="confidence-limits"
-              title={decisionFrameworkUnavailable ? "Why ARGUS withheld a verdict" : favorableVerdict ? "What limits confidence" : "What evidence pulls the other way"}
+              title={decisionFrameworkUnavailable ? "Why ARGUS withheld a verdict" : favorableVerdict ? "What could break the thesis" : "What argues against the risk case"}
               description={decisionFrameworkUnavailable
                 ? routingUnresolved
                   ? "ARGUS needs to confirm what this subject is before it can apply the right review standard."
@@ -2172,13 +2270,33 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <ReportCanvasNarrativeSection
               id="verification-next"
               title="What the investor should verify next"
-              description="These follow-ups come directly from frozen checks without a completed, current outcome."
+              description="The highest-impact unanswered facts and evidence gaps in this frozen report."
               tone="signal"
               items={verificationNext}
               emptyCopy={legacyCoverageNotCaptured
                 ? "This snapshot has no frozen check-level outcomes. Rescan to establish a current verification plan."
-                : "No additional verification question was recorded. Review the underlying evidence and any findings before making an investment decision."}
+                : "No unresolved decision question was recorded. Review the cited evidence and any findings before making an investment decision."}
             />
+            <section className="border-t border-line/60 py-5" aria-label="What ARGUS adds beyond a generic web summary">
+              <div className="flex flex-wrap items-baseline justify-between gap-2">
+                <div>
+                  <p className="eyebrow text-signal-lift">The ARGUS edge</p>
+                  <h2 className="mt-1 text-[17px] font-semibold tracking-tight text-ink">Evidence a generic answer cannot safely fake</h2>
+                </div>
+                <span className="mono text-[10.5px] uppercase tracking-[0.12em] text-ink-faint">
+                  frozen · reproducible · attributable
+                </span>
+              </div>
+              <dl className="mt-3 grid gap-2 sm:grid-cols-2 xl:grid-cols-5">
+                {argusEdgeMetrics.map((metric) => (
+                  <div key={metric.label} className="panel-inset px-3 py-3">
+                    <dt className="text-[10.5px] text-ink-faint">{metric.label}</dt>
+                    <dd className="mono mt-1 text-[20px] font-semibold text-ink">{metric.value}</dd>
+                    <dd className="mt-1 text-[10.5px] leading-snug text-ink-faint">{metric.detail}</dd>
+                  </div>
+                ))}
+              </dl>
+            </section>
           </div>
 
           <aside className="space-y-3" aria-label="Decision summary rail">
@@ -2192,9 +2310,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             <ReportCanvasRailCard
               title="Open questions"
               tone="caution"
-              count={`${verificationNext.length}`}
+              count={`${decisionQuestionCount}`}
               items={openQuestionRail}
-              emptyCopy="No unresolved investor questions were recorded."
+              emptyCopy="No unresolved decision questions were recorded."
               footer={verificationNext.length > 0 ? <a href="#verification-next" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">See what still needs checking</a> : undefined}
             />
             <ReportCanvasRailCard
@@ -2208,6 +2326,18 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </aside>
         </div>
 
+        {showBasicFacts && (
+          <div className="mt-5">
+            <BasicFactsPanel
+              facts={basicFacts}
+              leads={basicFactLeads}
+              fillRequired={fillDecisionFacts}
+              audience={basicFactsAudience}
+              questionLedger={f.basicFactQuestionLedger}
+            />
+          </div>
+        )}
+
         <div id="decision-basis" className="scroll-mt-28">
           <DecisionBasis
             roleReport={governingRoleReport}
@@ -2217,16 +2347,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             onRescan={onRescan}
           />
         </div>
-
-        {showBasicFacts && (
-          <div className="mt-5">
-            <BasicFactsPanel
-              facts={basicFacts}
-              leads={basicFactLeads}
-              fillRequired={roles.includes(SubjectClass.PROJECT) || Boolean(f.projectToken)}
-            />
-          </div>
-        )}
 
         <div id="identity-evidence" className="scroll-mt-28">
         {/* Supplemental live checks are deliberately separated from the frozen

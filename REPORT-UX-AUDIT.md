@@ -9,6 +9,25 @@ ARGUS already looks and feels like a serious investigation product. Its largest 
 
 A score can summarize the evidence that exists. It cannot substitute for evidence that was never collected. Positive verdicts therefore need a separate due-diligence readiness gate.
 
+## 2026-07-13 decision standard, implementation in validation
+
+The report must read like a sharp investment memo before it reads like a data
+sheet. The opening layer is now organized around three questions:
+
+1. What is the source-backed investment case?
+2. What could break that thesis?
+3. What should the investor verify next?
+
+The summary also exposes the ARGUS advantage over a generic web answer:
+verified decision facts, cited decision sources, conflicts tested,
+relationship records, ranked open questions, and an immutable evidence
+snapshot. Detailed axes, providers, source excerpts, hashes, and methodology
+remain available as the audit layer beneath the brief.
+
+One count governs open questions across the header, summary, and report rail.
+Axis gaps, unresolved decision facts, and incomplete critical checks can no
+longer produce a visible body of questions beneath a headline that says zero.
+
 ## Flow health
 
 1. **Home entry — healthy with caveats**

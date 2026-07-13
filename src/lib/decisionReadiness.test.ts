@@ -147,6 +147,37 @@ describe("deriveDecisionReadiness", () => {
     });
   });
 
+  it("lets explicit decision questions govern readiness while preserving provider diagnostics", () => {
+    const result = deriveDecisionReadiness([
+      { label: "Verified identity and authority", status: "confirmed", decisionCritical: true },
+      { label: "Track record", status: "confirmed", decisionCritical: true },
+      { label: "Optional company database", status: "unavailable", decisionCritical: false },
+      { label: "Profile image enrichment", status: "unknown", decisionCritical: false },
+    ]);
+
+    expect(result).toMatchObject({
+      status: "ready",
+      coveragePercent: 100,
+      total: 2,
+      applicable: 2,
+      successful: 2,
+      unresolved: 0,
+      providerUnavailable: 0,
+    });
+  });
+
+  it("keeps all-check readiness semantics for legacy snapshots without criticality markers", () => {
+    const result = deriveDecisionReadiness(checks(["confirmed", "unavailable"]));
+
+    expect(result).toMatchObject({
+      status: "incomplete",
+      coveragePercent: 50,
+      applicable: 2,
+      successful: 1,
+      providerUnavailable: 1,
+    });
+  });
+
   it("never calls a zero-role, zero-axis report decision-ready", () => {
     const result = deriveDecisionReadiness(
       checks(["confirmed", "finding", "checked-empty"]),

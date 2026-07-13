@@ -418,7 +418,7 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Scoring output incomplete");
     expect(container.textContent).toContain("ARGUS resolved this subject to Project, but the scoring pass did not complete");
     expect(container.textContent).toContain("Review coverage0%");
-    expect(container.textContent).toContain("Collected intelligence that did not enter a score");
+    expect(container.textContent).toContain("What ARGUS found before the decision failed");
     expect(container.textContent).toContain("Complete the Project scoring pass");
     expect(container.textContent).not.toContain("Project routing unresolved");
     expect(container.textContent).not.toContain("Resolve whether this account represents a project");
@@ -438,7 +438,7 @@ describe("decision-safe person report presentation", () => {
     const verdictDrivers = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
     const counterweight = container.querySelector('section[aria-labelledby="confidence-limits-title"]')?.textContent ?? "";
     expect(verdictDrivers).toMatch(/hard cap governs|needs more verification/i);
-    expect(counterweight).toContain("What evidence pulls the other way");
+    expect(counterweight).toContain("What argues against the risk case");
   });
 
   it("translates internal axis and provider language into an investor-readable summary", () => {
@@ -473,6 +473,13 @@ describe("decision-safe person report presentation", () => {
         label: "Transparency and disclosures",
         status: "unknown" as const,
         provider: "project-disclosure-collector",
+        decisionCritical: true,
+      }, {
+        checkId: "optional-enrichment",
+        label: "Optional social enrichment",
+        status: "unavailable" as const,
+        provider: "optional-provider",
+        decisionCritical: false,
       }],
       report: {
         ...base.report,
@@ -505,6 +512,7 @@ describe("decision-safe person report presentation", () => {
     expect(diligenceRail).not.toContain("counter");
     expect(diligenceRail).not.toContain("gaps");
     expect(openQuestionsRail).toContain("Transparency and disclosures");
+    expect(openQuestionsRail).not.toContain("Optional social enrichment");
     expect(openQuestionsRail).not.toContain("Crunchbase");
     expect(openQuestionsRail).not.toContain("Reddit");
     expect(container.textContent).toContain("See all evidence");

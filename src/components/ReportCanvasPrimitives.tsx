@@ -116,7 +116,7 @@ export function ReportCanvasNarrativeSection({
       </div>
 
       {items.length ? (
-        <ul className="mt-3 space-y-1.5 pl-11" aria-label={title}>
+        <ul className="mt-3 grid gap-2 pl-11 md:grid-cols-2" aria-label={title}>
           {items.map((item) => (
             <li key={item.id} className="panel-inset px-3 py-2.5">
               <div className="flex items-start gap-2.5">

@@ -434,7 +434,7 @@ export function InvestigationReport({
             items={[
               { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
-              ...(showProjectBasicFacts ? [{ href: "#investigation-basic-facts" as const, label: "Basics", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
+              ...(showProjectBasicFacts ? [{ href: "#investigation-basic-facts" as const, label: "Key facts", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
               { href: "#investigation-evidence", label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
               ...((teamPeople.length > 0 || advisors.length > 0) ? [{ href: "#investigation-team" as const, label: "Team", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
               ...(invGraph && invGraph.nodes.length > 1 ? [{ href: "#investigation-relationships" as const, label: "Relationships", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),

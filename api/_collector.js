@@ -1170,6 +1170,13 @@ function assembleDossier(ev, live) {
         ...lead.candidateUrls ? { candidateUrls: [...lead.candidateUrls] } : {}
       }))
     } : {},
+    ...ev.basicFactQuestionLedger?.length ? {
+      basicFactQuestionLedger: ev.basicFactQuestionLedger.map((entry) => ({
+        ...entry,
+        answerRefs: [...entry.answerRefs],
+        providerRuns: entry.providerRuns.map((run) => ({ ...run }))
+      }))
+    } : {},
     report,
     graph,
     founderSummary: ev.roles.includes("FOUNDER" /* FOUNDER */) ? a.founderSummary() : void 0,
@@ -1459,7 +1466,8 @@ function emptyEvidence(handle) {
     sourceArtifacts: [],
     portfolioLeads: [],
     basicFacts: [],
-    basicFactLeads: []
+    basicFactLeads: [],
+    basicFactQuestionLedger: []
   };
 }
 
@@ -3265,6 +3273,12 @@ var CHECK_AXIS_ELIGIBILITY = {
   "project-backing-partners": ["P4_backing_and_partners"],
   "project-traction-liveness": ["P5_traction_and_liveness"],
   "project-transparency": ["P3_token_conduct", "P6_transparency_integrity"],
+  "founder-identity-authority": ["F1_identity_verifiability"],
+  "founder-company-relationships": ["F2_track_record", "F3_repeat_backing", "F6_network_quality"],
+  "founder-track-record": ["F2_track_record", "F3_repeat_backing", "F4_build_substance"],
+  "founder-control-conflicts": ["F5_reputation_integrity"],
+  "founder-legal-regulatory": ["F5_reputation_integrity"],
+  "founder-asset-distinction": ["F4_build_substance", "F5_reputation_integrity"],
   "vc-portfolio-track-record": ["I2_portfolio_quality"],
   "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
@@ -4226,6 +4240,10 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
 }
 
 // src/lib/scanChecklist.ts
+function decisionCriticalChecks(checks) {
+  const hasExplicitCriticality = checks.some((check) => check.decisionCritical !== void 0);
+  return hasExplicitCriticality ? checks.filter((check) => check.decisionCritical === true) : checks;
+}
 var SUCCESSFUL = /* @__PURE__ */ new Set(["confirmed", "finding", "checked-empty"]);
 var UNKNOWN_OR_FAILED = /* @__PURE__ */ new Set(["unknown", "unavailable", "stale"]);
 function summarizeChecks(checks) {
@@ -4276,19 +4294,35 @@ function personChecks(opts) {
 
 // server/checks.ts
 var CHECKS = [
-  { id: "identity-resolution", label: "Identity resolution", defaultNote: "no completed server-side identity resolution was recorded" },
+  {
+    id: "identity-resolution",
+    label: "Identity resolution",
+    defaultNote: "no completed server-side identity resolution was recorded",
+    criticalFor: ["KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"]
+  },
   { id: "profile-photo-authenticity", label: "Profile-photo integrity", defaultNote: "server collector did not run a profile-photo integrity screen", requiresPersonRole: true },
   { id: "code-footprint-github", label: "Code footprint (GitHub)", defaultNote: "no completed GitHub resolution was recorded" },
   { id: "identity-continuity", label: "Identity continuity", defaultNote: "no completed handle-history result was recorded" },
-  { id: "affiliations-associates", label: "Affiliations & associates", defaultNote: "no corroborated affiliation collection outcome was recorded" },
-  { id: "promoted-token-performance", label: "Promoted-token performance", defaultNote: "no completed promoted-token market result was recorded", role: "KOL" },
-  { id: "project-token-identity", label: "Canonical project token", defaultNote: "no official token identity was bound to this project account", role: "PROJECT" },
-  { id: "project-product-substance", label: "Product and website substance", defaultNote: "no frozen first-party product or website outcome was recorded", role: "PROJECT" },
-  { id: "project-team-identity", label: "Project team identity", defaultNote: "no first-party team identity outcome was recorded", role: "PROJECT" },
-  { id: "project-backing-partners", label: "Backing and partners", defaultNote: "no source-backed project backing or partnership outcome was recorded", role: "PROJECT" },
-  { id: "project-traction-liveness", label: "Traction and liveness", defaultNote: "no frozen product, market, or activity-liveness outcome was recorded", role: "PROJECT" },
-  { id: "project-transparency", label: "Transparency and disclosures", defaultNote: "no frozen token, audit, docs, or disclosure outcome was recorded", role: "PROJECT" },
-  { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR" },
+  {
+    id: "affiliations-associates",
+    label: "Affiliations & associates",
+    defaultNote: "no corroborated affiliation collection outcome was recorded",
+    criticalFor: ["KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"]
+  },
+  { id: "promoted-token-performance", label: "Promoted-token performance", defaultNote: "no completed promoted-token market result was recorded", role: "KOL", criticalFor: ["KOL"] },
+  { id: "project-token-identity", label: "Canonical project token", defaultNote: "no official token identity was bound to this project account", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "project-product-substance", label: "Product and website substance", defaultNote: "no frozen first-party product or website outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "project-team-identity", label: "Project team identity", defaultNote: "no first-party team identity outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "project-backing-partners", label: "Backing and partners", defaultNote: "no source-backed project backing or partnership outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "project-traction-liveness", label: "Traction and liveness", defaultNote: "no frozen product, market, or activity-liveness outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "project-transparency", label: "Transparency and disclosures", defaultNote: "no frozen token, audit, docs, or disclosure outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "founder-identity-authority", label: "Verified identity and current authority", defaultNote: "the founder's identity and current decision-making role were not both verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "founder-company-relationships", label: "Companies, co-founders, and current roles", defaultNote: "the founder's material company and co-founder relationships were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "founder-track-record", label: "Track record and outcomes", defaultNote: "prior roles, exits, and venture outcomes were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "founder-control-conflicts", label: "Control and conflicts", defaultNote: "governance control, ownership, and material conflicts were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "founder-legal-regulatory", label: "Legal and regulatory history", defaultNote: "material legal or regulatory events and their attribution were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "founder-asset-distinction", label: "Related assets and security/token distinction", defaultNote: "related public securities, native tokens, and other assets were not clearly distinguished", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR", criticalFor: ["INVESTOR"] },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
   { id: "us-legal-history", label: "US legal history", defaultNote: "server collector did not run a legal-history check", requiresResolvedRealName: true },
   { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check", requiresResolvedRealName: true },
@@ -4302,6 +4336,25 @@ var LEGACY_PERSON_CHECK_IDS = Object.freeze([
   "identity-continuity",
   "affiliations-associates",
   "promoted-token-performance",
+  "vc-portfolio-track-record",
+  "news-press",
+  "us-legal-history",
+  "ofac-sanctions-name",
+  "trust-graph-connections"
+]);
+var PROJECT_DILIGENCE_PERSON_CHECK_IDS = Object.freeze([
+  "identity-resolution",
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "affiliations-associates",
+  "promoted-token-performance",
+  "project-token-identity",
+  "project-product-substance",
+  "project-team-identity",
+  "project-backing-partners",
+  "project-traction-liveness",
+  "project-transparency",
   "vc-portfolio-track-record",
   "news-press",
   "us-legal-history",
@@ -4362,12 +4415,22 @@ var PersonCheckTracker = class {
     const heldRoles = new Set(roles);
     const projectOnly = heldRoles.size === 1 && heldRoles.has("PROJECT");
     return CHECKS.map((definition) => {
+      const decisionCritical = Boolean(
+        definition.criticalFor?.some((criticalRole) => heldRoles.has(criticalRole))
+      );
       if (definition.role && !heldRoles.has(definition.role)) {
+        const roleNote = {
+          FOUNDER: "not a founder",
+          KOL: "not a KOL",
+          INVESTOR: "not a fund/investor",
+          PROJECT: "not a project account"
+        };
         return Object.freeze({
           checkId: definition.id,
           label: definition.label,
           status: "not-applicable",
-          note: definition.role === "KOL" ? "not a KOL" : definition.role === "PROJECT" ? "not a project account" : "not a fund/investor"
+          note: roleNote[definition.role],
+          decisionCritical: false
         });
       }
       if (definition.requiresResolvedRealName && scope.resolvedRealName === false) {
@@ -4375,7 +4438,8 @@ var PersonCheckTracker = class {
           checkId: definition.id,
           label: definition.label,
           status: "not-applicable",
-          note: "requires a resolved real-person name"
+          note: "requires a resolved real-person name",
+          decisionCritical
         });
       }
       if (definition.requiresPersonRole && projectOnly) {
@@ -4383,7 +4447,8 @@ var PersonCheckTracker = class {
           checkId: definition.id,
           label: definition.label,
           status: "not-applicable",
-          note: "not applicable to a project-only brand account"
+          note: "not applicable to a project-only brand account",
+          decisionCritical: false
         });
       }
       const observations = this.observations.get(definition.id) ?? [];
@@ -4392,7 +4457,8 @@ var PersonCheckTracker = class {
           checkId: definition.id,
           label: definition.label,
           status: "unknown",
-          note: definition.defaultNote
+          note: definition.defaultNote,
+          decisionCritical
         });
       }
       const strongest = observations.reduce(
@@ -4407,6 +4473,7 @@ var PersonCheckTracker = class {
         label: definition.label,
         status: strongest.status,
         note: notes.slice(0, 3).join(" \xB7 ") || strongest.note,
+        decisionCritical,
         provider: providers.join(","),
         ...sourceCount > 0 ? { sourceCount } : {},
         ...completedAt ? { completedAt } : {}
@@ -4414,7 +4481,7 @@ var PersonCheckTracker = class {
     });
   }
   completeness(roles, scope = {}) {
-    const summary = summarizeChecks(this.snapshot(roles, scope));
+    const summary = summarizeChecks(decisionCriticalChecks(this.snapshot(roles, scope)));
     return summary.inScope > 0 && summary.successful === summary.inScope ? "complete" : "partial";
   }
   providers() {
@@ -5928,77 +5995,218 @@ async function fetchTeamPage(domain, projectName2) {
 
 // server/adapters/sitecheck.ts
 var COMING = /coming[\s_-]*soon|under[\s_-]*construction|launching[\s_-]*soon|join[\s_-]*(the[\s_-]*)?waitlist|\bwaitlist\b|early[\s_-]*access|get[\s_-]*notified|notify[\s_-]*me|be[\s_-]*the[\s_-]*first|request[\s_-]*access|sign[\s_-]*up[\s_-]*for[\s_-]*(early[\s_-]*)?access/i;
+var HARD_COMING = /coming[\s_-]*soon|under[\s_-]*construction|launching[\s_-]*soon/i;
 var PARKED = /this[\s_-]*domain[\s_-]*is[\s_-]*for[\s_-]*sale|buy[\s_-]*this[\s_-]*domain|hugedomains|sedoparking|parkingcrew|domain[\s_-]*(is[\s_-]*)?parked/i;
 var PRODUCT = /\b(docs|whitepaper|dashboard|pricing|features|roadmap|marketplace|explorer|portfolio|order\s*book|connect\s*wallet|launch\s*app|sign\s*in|log\s*in|deposit|withdraw|governance|staking)\b/i;
+var ANTI_BOT = /cf-chl-|challenge-platform|just a moment(?:\.{3})?|checking (?:your )?browser(?: before accessing)?|verify (?:that )?you are human|captcha-delivery|_pxcaptcha|perimeterx|datadome|incapsula|akamai bot manager|bot verification/i;
+var DNS_CODES = /* @__PURE__ */ new Set(["ENOTFOUND", "EAI_AGAIN", "EAI_FAIL", "ENODATA", "ENONAME"]);
 function stripText(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
+}
+function errorCode(error) {
+  let current = error;
+  for (let depth = 0; depth < 4 && current && typeof current === "object"; depth += 1) {
+    const candidate = current;
+    if (typeof candidate.code === "string") return candidate.code.toUpperCase();
+    current = candidate.cause;
+  }
+  return void 0;
+}
+function hostname(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url;
+  }
+}
+function isAntiBotResponse(response, body) {
+  const mitigation = response.headers.get("cf-mitigated") ?? "";
+  const challenge = response.headers.get("x-datadome") ?? response.headers.get("x-captcha") ?? "";
+  return /challenge|captcha/i.test(`${mitigation} ${challenge}`) || ANTI_BOT.test(body);
 }
 async function get(url, opts) {
   let response;
   try {
-    response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,application/javascript" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
-  } catch {
-    recordCall("site-fetch", "substance", 0, "transport_error", "failed");
-    return null;
-  }
-  if (!response.ok) {
-    recordCall("site-fetch", "substance", 0, `http_${response.status}`, "failed");
-    return null;
-  }
-  if ((opts?.requireHtml ?? true) && !/html/i.test(response.headers.get("content-type") ?? "")) {
-    recordCall("site-fetch", "substance", 0, "unexpected_content_type", "partial");
-    return null;
+    response = await fetch(url, {
+      headers: {
+        "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)",
+        accept: "text/html,application/javascript"
+      },
+      redirect: "follow",
+      signal: AbortSignal.timeout(8e3)
+    });
+  } catch (error) {
+    const dns = DNS_CODES.has(errorCode(error) ?? "");
+    recordCall("site-fetch", "substance", 0, dns ? "dns_error" : "transport_error", "failed");
+    return {
+      kind: "failure",
+      url,
+      status: "unreachable",
+      reason: dns ? "dns" : "transport",
+      detail: dns ? `DNS resolution failed for ${hostname(url)}` : `the request to ${hostname(url)} failed at the transport layer`
+    };
   }
   let html;
   try {
     html = await response.text();
   } catch {
     recordCall("site-fetch", "substance", 0, "response_text_error", "failed");
-    return null;
+    return {
+      kind: "failure",
+      url: response.url || url,
+      status: "unavailable",
+      reason: "content",
+      detail: `HTTP ${response.status} responded, but its body could not be read`
+    };
+  }
+  const finalUrl = response.url || url;
+  if (response.status === 401 || response.status === 403 || response.status === 429) {
+    recordCall("site-fetch", "substance", 0, `http_${response.status}_access_blocked`, "partial");
+    return {
+      kind: "failure",
+      url: finalUrl,
+      status: "access_blocked",
+      reason: "http_access",
+      detail: response.status === 429 ? "the site rate-limited the automated liveness request (HTTP 429)" : `the site denied the automated liveness request (HTTP ${response.status})`
+    };
+  }
+  if (isAntiBotResponse(response, html)) {
+    recordCall("site-fetch", "substance", 0, `anti_bot_http_${response.status}`, "partial");
+    return {
+      kind: "failure",
+      url: finalUrl,
+      status: "access_blocked",
+      reason: "anti_bot",
+      detail: `the site served an anti-bot challenge instead of its homepage (HTTP ${response.status})`
+    };
+  }
+  if (!response.ok) {
+    recordCall("site-fetch", "substance", 0, `http_${response.status}`, "failed");
+    return {
+      kind: "failure",
+      url: finalUrl,
+      status: "unavailable",
+      reason: "http",
+      detail: `the liveness request returned HTTP ${response.status}; this does not prove the site is offline`
+    };
+  }
+  if ((opts?.requireHtml ?? true) && !/html/i.test(response.headers.get("content-type") ?? "")) {
+    recordCall("site-fetch", "substance", 0, "unexpected_content_type", "partial");
+    return {
+      kind: "failure",
+      url: finalUrl,
+      status: "unavailable",
+      reason: "content",
+      detail: `the homepage returned ${response.headers.get("content-type") || "an unknown content type"}, not HTML`
+    };
   }
   if (!html.trim()) {
     recordCall("site-fetch", "substance", 0, "empty_body", "partial");
-    return null;
+    return {
+      kind: "failure",
+      url: finalUrl,
+      status: "unavailable",
+      reason: "content",
+      detail: "the homepage returned an empty body; no liveness conclusion can be drawn"
+    };
   }
   recordCall("site-fetch", "substance", 0, void 0, "succeeded");
-  return { url: response.url || url, html };
+  return { kind: "page", url: finalUrl, html };
+}
+function failedSiteResult(domain, failures) {
+  const blocked = failures.find((failure) => failure.status === "access_blocked");
+  if (blocked) return { url: blocked.url, status: blocked.status, reason: blocked.reason, detail: blocked.detail };
+  const unavailable = failures.find((failure) => failure.status === "unavailable");
+  if (unavailable) {
+    return { url: unavailable.url, status: unavailable.status, reason: unavailable.reason, detail: unavailable.detail };
+  }
+  const reasons = new Set(failures.map((failure) => failure.reason));
+  const reason = reasons.has("dns") && reasons.has("transport") ? "dns_and_transport" : reasons.has("dns") ? "dns" : "transport";
+  return {
+    url: `https://${domain}`,
+    status: "unreachable",
+    reason,
+    detail: reason === "dns" ? `DNS resolution failed for ${domain}` : reason === "dns_and_transport" ? `DNS resolution and transport attempts both failed for ${domain}` : `transport requests failed for ${domain}`
+  };
 }
 function bundleUrls(html, base) {
   const out = [];
   const re = /<script[^>]+src=["']([^"']+)["']/gi;
-  let m;
-  while ((m = re.exec(html)) && out.length < 3) {
-    const src = m[1];
+  let match;
+  while ((match = re.exec(html)) && out.length < 3) {
+    const src = match[1];
     if (/\.js(\?|$)/i.test(src) && !/googletagmanager|gtag|analytics|hotjar|intercom|segment|cdn\.jsdelivr|unpkg/i.test(src)) {
       try {
-        out.push(new URL(src, base).href);
+        const resolved = new URL(src, base);
+        if (resolved.origin === new URL(base).origin) out.push(resolved.href);
       } catch {
       }
     }
   }
   return out;
 }
+function metaContent(html, name) {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const nameFirst = html.match(new RegExp(`<meta[^>]+name=["']${escaped}["'][^>]+content=["']([^"']+)["']`, "i"))?.[1];
+  if (nameFirst) return nameFirst;
+  return html.match(new RegExp(`<meta[^>]+content=["']([^"']+)["'][^>]+name=["']${escaped}["']`, "i"))?.[1] ?? "";
+}
 async function checkSiteSubstance(domain) {
   const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase().trim();
   if (!d || !/\.[a-z]{2,}$/i.test(d)) return null;
-  const page = await get(`https://${d}`) || await get(`https://www.${d}`);
-  if (!page) return { url: `https://${d}`, status: "unreachable", detail: "the site does not resolve or returns no page" };
-  const meta = page.html.match(/<meta[^>]+name=["']description["'][^>]+content=["']([^"']+)["']/i)?.[1] ?? "";
+  const candidates = d.startsWith("www.") ? [`https://${d}`, `https://${d.slice(4)}`] : [`https://${d}`, `https://www.${d}`];
+  const failures = [];
+  let page;
+  for (const candidate of candidates) {
+    const result = await get(candidate);
+    if (result.kind === "page") {
+      page = result;
+      break;
+    }
+    failures.push(result);
+  }
+  if (!page) return failedSiteResult(d, failures);
+  const meta = metaContent(page.html, "description");
+  const title = page.html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1].replace(/\s+/g, " ").trim() ?? "";
   const body = stripText(page.html);
-  if (PARKED.test(page.html)) return { url: page.url, status: "coming_soon", detail: "the domain is parked / for sale, not a live project site" };
-  if (COMING.test(body) || COMING.test(meta)) return { url: page.url, status: "coming_soon", detail: `the homepage is a coming-soon / waitlist page${meta ? ` ("${meta.slice(0, 80)}")` : ""}` };
-  if (body.length >= 400 && PRODUCT.test(body)) return { url: page.url, status: "live", detail: `live site${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
+  const hasSubstantialProductSurface = body.length >= 400 && PRODUCT.test(body);
+  if (PARKED.test(page.html)) {
+    return {
+      url: page.url,
+      status: "coming_soon",
+      reason: "parked",
+      detail: "the served homepage is a registrar parking or domain-for-sale page"
+    };
+  }
+  const hardComingMarker = HARD_COMING.test(`${title} ${meta}`);
+  const comingOnlySurface = COMING.test(`${title} ${meta} ${body}`) && !hasSubstantialProductSurface;
+  if (hardComingMarker || comingOnlySurface) {
+    const excerpt = [title, meta].find((value) => COMING.test(value)) || body.match(COMING)?.[0] || "coming-soon marker";
+    return {
+      url: page.url,
+      status: "coming_soon",
+      reason: "coming_soon",
+      detail: `the served homepage explicitly presents a coming-soon or waitlist surface ("${excerpt.slice(0, 80)}")`
+    };
+  }
+  if (hasSubstantialProductSurface) {
+    return { url: page.url, status: "live", detail: `live site${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
+  }
   const isShell = /id=["'](root|__next|app|__nuxt)["']/i.test(page.html) || /<script[^>]+type=["']module["']/i.test(page.html);
   if (isShell && body.length < 300) {
-    for (const b of bundleUrls(page.html, page.url)) {
-      const js = await get(b, { requireHtml: false }).catch(() => null);
-      const text2 = js?.html ?? "";
-      if (!text2) continue;
-      if (COMING.test(text2) || /ComingSoon|Waitlist|EarlyAccess|UnderConstruction/i.test(text2)) {
-        return { url: page.url, status: "coming_soon", detail: `the live site is a coming-soon / waitlist page (client-rendered${meta ? `, "${meta.slice(0, 60)}"` : ""})` };
+    let bundleHint = false;
+    for (const bundle of bundleUrls(page.html, page.url)) {
+      const js = await get(bundle, { requireHtml: false }).catch(() => null);
+      if (!js || js.kind !== "page") continue;
+      if (COMING.test(js.html) || /ComingSoon|Waitlist|EarlyAccess|UnderConstruction/i.test(js.html)) {
+        bundleHint = true;
       }
     }
-    return { url: page.url, status: "client_rendered", detail: `client-rendered app; static read couldn't confirm a live product surface${meta ? ` ("${meta.slice(0, 80)}")` : ""}` };
+    return {
+      url: page.url,
+      status: "client_rendered",
+      detail: bundleHint ? "client-rendered app; its bundle contains an unrendered coming-soon string, which is not treated as homepage liveness evidence" : `client-rendered app; static read could not confirm a product surface${meta ? ` ("${meta.slice(0, 80)}")` : ""}`
+    };
   }
   return { url: page.url, status: "live", detail: `site is up${meta ? `: "${meta.slice(0, 80)}"` : ""}` };
 }
@@ -6198,6 +6406,72 @@ function analyzeCadence(posts, now) {
   const summary = silent ? `Silent ${Math.round(daysSinceLast)}d (typical gap ~${medianGapDays.toFixed(1)}d): went quiet.` : decaying ? `Cadence thinning: recent gaps ~${recentMedian.toFixed(1)}d vs ~${olderMedian.toFixed(1)}d earlier.` : `Posting steady (~${medianGapDays.toFixed(1)}d gap, last post ${Math.round(daysSinceLast)}d ago).`;
   return { postsAnalyzed: times.length, daysSinceLast, medianGapDays, recentGapDays, decaying, silent, summary };
 }
+
+// src/lib/basicFactQuestions.ts
+function basicFactQuestionOutcome(entry) {
+  if (!entry) return "unresolved";
+  if (entry.status === "answered") return "answered";
+  return entry.providerRuns.some((run) => run.state === "succeeded" || run.state === "completed_empty") ? "checked_empty" : "unresolved";
+}
+var PROJECT_QUESTIONS = [
+  ["official_identity", "What is the project's official identity?"],
+  ["product", "What does the project actually do?"],
+  ["founder", "Who founded it?"],
+  ["executive", "Who operates it today?"],
+  ["founded", "When was it founded?"],
+  ["launched", "When did the product launch?"],
+  ["official_token", "Does it have an official token?"],
+  ["network", "Which networks does it run on?"],
+  ["legal_entity", "Which legal entity is responsible?"],
+  ["funding", "How much funding has it raised?"],
+  ["investor", "Who funded it?"],
+  ["governance", "Who controls governance and the treasury?"],
+  ["audit", "Has the code been independently audited?"],
+  ["repository", "Where is the source code maintained?"],
+  ["traction", "Is there evidence of real usage?"]
+];
+var FOUNDER_QUESTIONS = [
+  ["official_identity", "Who is this person?"],
+  ["current_role", "What do they lead or control today?"],
+  ["founder", "Which companies or projects did they found?"],
+  ["prior_role", "What did they do before?"],
+  ["track_record", "What outcomes prove their track record?"],
+  ["exit", "What exits or failures are verified?"],
+  ["control", "What ownership, voting, or treasury control do they hold?"],
+  ["conflict_of_interest", "What material conflicts are disclosed?"],
+  ["legal_regulatory_event", "What legal or regulatory events actually name them?"],
+  ["public_security", "Is a related asset a public security?"],
+  ["official_token", "Is an official crypto token tied to a venture they control?"],
+  ["education", "What education or credentials are verified?"]
+];
+var INVESTOR_QUESTIONS = [
+  ["official_identity", "Who is this investor?"],
+  ["current_role", "Which firm and fund do they represent today?"],
+  ["investor", "Which investments are directly attributed to them?"],
+  ["track_record", "What realized outcomes prove their track record?"],
+  ["exit", "Which portfolio exits are verified?"],
+  ["legal_entity", "Which legal entity manages the fund?"],
+  ["control", "What board, voting, or investment control do they hold?"],
+  ["conflict_of_interest", "What material conflicts are disclosed?"],
+  ["legal_regulatory_event", "What legal or regulatory events name them or their firm?"],
+  ["public_security", "Is a related asset a public security?"],
+  ["official_token", "Is a crypto token directly tied to a venture they control?"]
+];
+var PERSON_QUESTIONS = [
+  ["official_identity", "Who is this person?"],
+  ["current_role", "What do they do today?"],
+  ["prior_role", "What did they do before?"],
+  ["founder", "What have they founded?"],
+  ["track_record", "What outcomes are verified?"],
+  ["legal_regulatory_event", "What material legal or regulatory events name them?"],
+  ["official_token", "Is an official token tied to them?"]
+];
+var QUESTION_MAPS = {
+  project: new Map(PROJECT_QUESTIONS),
+  founder: new Map(FOUNDER_QUESTIONS),
+  investor: new Map(INVESTOR_QUESTIONS),
+  person: new Map(PERSON_QUESTIONS)
+};
 
 // server/adapters/peopledatalabs.ts
 var BASE2 = "https://api.peopledatalabs.com/v5";
@@ -7040,7 +7314,7 @@ function isPublicIpAddress(address) {
   }
   return false;
 }
-var defaultLookup = async (hostname) => dnsLookup(hostname, { all: true, verbatim: true });
+var defaultLookup = async (hostname2) => dnsLookup(hostname2, { all: true, verbatim: true });
 var normalizedHostname = (value) => value.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
 async function validatedPublicTarget(raw, base, lookup = defaultLookup) {
   let url;
@@ -7052,10 +7326,10 @@ async function validatedPublicTarget(raw, base, lookup = defaultLookup) {
   if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password) return null;
   if (url.port && !(url.protocol === "https:" && url.port === "443" || url.protocol === "http:" && url.port === "80")) return null;
   if ([...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM2.test(key))) return null;
-  const hostname = normalizedHostname(url.hostname);
-  if (!hostname || isIP(hostname) || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) return null;
+  const hostname2 = normalizedHostname(url.hostname);
+  if (!hostname2 || isIP(hostname2) || hostname2 === "localhost" || hostname2.endsWith(".localhost") || hostname2.endsWith(".local") || hostname2.endsWith(".internal")) return null;
   try {
-    const resolved = await lookup(hostname);
+    const resolved = await lookup(hostname2);
     if (!resolved.length) return null;
     const addresses = resolved.map((entry) => ({
       address: entry.address,
@@ -7066,15 +7340,15 @@ async function validatedPublicTarget(raw, base, lookup = defaultLookup) {
     url.hash = "";
     return {
       url,
-      hostname,
+      hostname: hostname2,
       addresses: Object.freeze(addresses.map((entry) => Object.freeze({ ...entry })))
     };
   } catch {
     return null;
   }
 }
-var pinnedLookupFor = (target) => (hostname, options, callback) => {
-  const requestedHost = normalizedHostname(hostname);
+var pinnedLookupFor = (target) => (hostname2, options, callback) => {
+  const requestedHost = normalizedHostname(hostname2);
   if (requestedHost !== target.hostname) {
     const error = new Error("socket lookup hostname differed from validated target");
     error.code = "EACCES";
@@ -7200,24 +7474,35 @@ async function fetchPublicText(raw, dependencies = {}) {
 
 // server/adapters/basicFacts.ts
 var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
-var MAX_SEARCH_USES = 4;
-var MAX_LEADS = 16;
-var MAX_SOURCES = 24;
+var PRIMARY_SEARCH_USES_PER_BATCH = 3;
+var REPAIR_SEARCH_USES = 4;
+var MAX_LEADS = 28;
+var MAX_SOURCES = 32;
 var DISCOVERY_TIMEOUT_MS = 5e4;
+var RESEARCH_CACHE_VERSION = "v4";
 var SENSITIVE_URL_PARAM3 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 var PREDICATES = /* @__PURE__ */ new Set([
+  "official_identity",
+  "current_role",
+  "prior_role",
+  "education",
   "founder",
   "executive",
   "founded",
   "launched",
+  "exit",
+  "track_record",
   "official_token",
+  "public_security",
   "funding",
   "investor",
   "product",
   "network",
   "legal_entity",
-  "official_identity",
+  "legal_regulatory_event",
   "governance",
+  "control",
+  "conflict_of_interest",
   "tokenomics",
   "vesting",
   "treasury",
@@ -7227,23 +7512,32 @@ var PREDICATES = /* @__PURE__ */ new Set([
 ]);
 var CRITICAL_PREDICATES = /* @__PURE__ */ new Set([
   "official_identity",
+  "current_role",
   "product",
   "founder",
   "executive",
+  "track_record",
   "official_token"
 ]);
 var LEAD_COVERAGE_CATEGORIES = [
+  ["official_identity"],
+  ["current_role", "prior_role"],
+  ["education"],
   ["founder"],
   ["executive"],
   ["product"],
-  ["official_identity", "legal_entity"],
+  ["exit", "track_record"],
+  ["legal_entity"],
   ["official_token"],
+  ["public_security"],
   ["tokenomics"],
   ["vesting"],
   ["treasury"],
   ["audit"],
   ["traction"],
   ["governance"],
+  ["control", "conflict_of_interest"],
+  ["legal_regulatory_event"],
   ["repository"],
   ["funding", "investor"],
   ["network"],
@@ -7260,6 +7554,92 @@ function selectBasicFactLeads(leads) {
     selected.add(index);
   }
   return leads.filter((_lead, index) => selected.has(index)).slice(0, MAX_LEADS);
+}
+var PROJECT_QUESTIONS2 = [
+  { batch: "identity", predicate: "official_identity", question: "What exact project or company does this account represent?", critical: true },
+  { batch: "identity", predicate: "founder", question: "Who founded or co-founded the project? Return one person per answer.", critical: true },
+  { batch: "identity", predicate: "executive", question: "Who currently leads or operates the project? Return one person and role per answer.", critical: true },
+  { batch: "identity", predicate: "founded", question: "When was the project founded?" },
+  { batch: "track_record", predicate: "product", question: "What live products or services does the project provide?", critical: true },
+  { batch: "track_record", predicate: "launched", question: "When did its product, protocol, or mainnet launch?", critical: true },
+  { batch: "track_record", predicate: "official_token", question: "What is the project's official crypto token, if any?", critical: true },
+  { batch: "track_record", predicate: "public_security", question: "Does the organization have a publicly traded equity or debt security distinct from any crypto token?" },
+  { batch: "track_record", predicate: "network", question: "Which blockchain networks or chains does it run on?", critical: true },
+  { batch: "track_record", predicate: "funding", question: "What source-backed funding rounds or amounts has it raised?", critical: true },
+  { batch: "track_record", predicate: "investor", question: "Which named investors or backers are source-backed? Return one per answer." },
+  { batch: "track_record", predicate: "repository", question: "Where is the official source code maintained?", critical: true },
+  { batch: "track_record", predicate: "traction", question: "What concrete, dated usage, revenue, volume, users, fees, TVL, or adoption metrics are public?", critical: true },
+  { batch: "structure_risk", predicate: "legal_entity", question: "Which legal entity is responsible for the project?", critical: true },
+  { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events are publicly documented, who are they attributed to, and what is each event's current stated status?" },
+  { batch: "structure_risk", predicate: "governance", question: "What formal governance process is documented?", critical: true },
+  { batch: "structure_risk", predicate: "control", question: "Who has practical control through ownership, boards, voting power, admin keys, multisigs, or treasury authority?" },
+  { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit related-party arrangements or conflicts of interest are disclosed?" },
+  { batch: "structure_risk", predicate: "tokenomics", question: "What token allocation or supply disclosures are published?" },
+  { batch: "structure_risk", predicate: "vesting", question: "What vesting, lockup, or unlock schedule is published?" },
+  { batch: "structure_risk", predicate: "treasury", question: "What treasury assets, reports, wallets, or controls are disclosed?" },
+  { batch: "structure_risk", predicate: "audit", question: "Which independent security audits or reviews are published?", critical: true }
+];
+var PERSON_QUESTIONS2 = [
+  { batch: "identity", predicate: "official_identity", question: "What is this person's source-backed public identity?", critical: true },
+  { batch: "identity", predicate: "current_role", question: "What roles does this person currently hold? Return one role and organization per answer.", critical: true },
+  { batch: "identity", predicate: "prior_role", question: "What material prior roles did this person hold? Return one role and organization per answer." },
+  { batch: "identity", predicate: "education", question: "What education or credentials are explicitly documented? Return one institution or credential per answer." },
+  { batch: "identity", predicate: "founder", question: "Which companies or projects did this person found or co-found? Return one venture per answer." },
+  { batch: "identity", predicate: "executive", question: "Which executive roles are source-backed? Return one role and organization per answer." },
+  { batch: "track_record", predicate: "founded", question: "When were the person's principal ventures founded? Return one dated venture per answer." },
+  { batch: "track_record", predicate: "product", question: "What products or protocols did this person materially build or lead? Return one per answer." },
+  { batch: "track_record", predicate: "exit", question: "What acquisitions, IPOs, sales, shutdowns, or other venture exits are source-backed? Return one event per answer." },
+  { batch: "track_record", predicate: "track_record", question: "What concrete operating or investment outcomes establish this person's track record? Return one measurable outcome per answer." },
+  { batch: "structure_risk", predicate: "official_token", question: "Which crypto token is officially tied to a venture this person controls, if any? Do not report public-company stock here." },
+  { batch: "structure_risk", predicate: "public_security", question: "Which publicly traded equity or debt security is tied to a company this person controls, if any? Do not report a crypto token here." },
+  { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events explicitly name this person, and what is each event's stated status? Never transfer a company-only event to the person." },
+  { batch: "structure_risk", predicate: "governance", question: "What formal governance roles does this person hold?" },
+  { batch: "structure_risk", predicate: "control", question: "What ownership, voting, board, admin-key, multisig, or treasury control is explicitly attributed to this person?" },
+  { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit conflicts of interest or related-party arrangements are attributed to this person?" }
+];
+var INVESTOR_QUESTIONS2 = [
+  { batch: "identity", predicate: "official_identity", question: "What is this investor's source-backed public identity?", critical: true },
+  { batch: "identity", predicate: "current_role", question: "What investment role and firm does this person currently hold?", critical: true },
+  { batch: "identity", predicate: "prior_role", question: "What material prior investing or operating roles did this person hold?" },
+  { batch: "identity", predicate: "education", question: "What education or professional credentials are explicitly documented?" },
+  { batch: "identity", predicate: "founder", question: "Which companies, funds, or projects did this person found or co-found? Return one per answer." },
+  { batch: "identity", predicate: "executive", question: "Which material operating or executive roles are source-backed? Return one role and organization per answer." },
+  { batch: "track_record", predicate: "investor", question: "Which investments are explicitly attributed to this person rather than merely to an affiliated fund? Return one per answer.", critical: true },
+  { batch: "track_record", predicate: "funding", question: "Which rounds did this person or their currently affiliated fund publicly lead or join? Return one per answer." },
+  { batch: "track_record", predicate: "founded", question: "When were the person's principal companies, funds, or projects founded?" },
+  { batch: "track_record", predicate: "product", question: "What products, protocols, or investment platforms did this person materially build or lead?" },
+  { batch: "track_record", predicate: "exit", question: "Which portfolio exits or realized outcomes are source-backed and correctly attributed?" },
+  { batch: "track_record", predicate: "track_record", question: "What concrete fund, portfolio, or operating outcomes establish this investor's track record?", critical: true },
+  { batch: "structure_risk", predicate: "public_security", question: "Which publicly traded security is directly relevant to this investor or controlled company, if any?" },
+  { batch: "structure_risk", predicate: "official_token", question: "Which official crypto token is directly tied to a venture this investor controls, if any? Do not treat a stock ticker as a token." },
+  { batch: "structure_risk", predicate: "legal_entity", question: "Which legal entity employs the investor or manages the disclosed fund?" },
+  { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events explicitly name this investor or their firm, with exact attribution and current stated status?" },
+  { batch: "structure_risk", predicate: "governance", question: "What formal board, governance, or voting roles are documented?" },
+  { batch: "structure_risk", predicate: "control", question: "What ownership, board, voting, or investment-committee control is explicitly documented?" },
+  { batch: "structure_risk", predicate: "conflict_of_interest", question: "What explicit related-party arrangements or conflicts of interest are disclosed?" }
+];
+var FOUNDER_REPAIR_PREDICATES = new Set(
+  PERSON_QUESTIONS2.map((question) => question.predicate)
+);
+function researchAudience(ctx) {
+  if (ctx.evidence.roles.some((role) => String(role) === "PROJECT")) return "project";
+  if (ctx.evidence.roles.some((role) => String(role) === "INVESTOR")) return "investor";
+  return "person";
+}
+function basicFactsResearchQuestions(ctx) {
+  const audience = researchAudience(ctx);
+  const templates = audience === "project" ? PROJECT_QUESTIONS2 : audience === "investor" ? INVESTOR_QUESTIONS2 : PERSON_QUESTIONS2;
+  const founderSubject = ctx.evidence.roles.some((role) => String(role) === "FOUNDER");
+  return templates.map((template) => ({
+    id: `${audience}.${template.predicate}`,
+    audience,
+    batch: template.batch,
+    predicate: template.predicate,
+    question: template.question,
+    critical: Boolean(
+      template.critical || audience !== "project" && founderSubject && FOUNDER_REPAIR_PREDICATES.has(template.predicate)
+    )
+  }));
 }
 var clean = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
 var normalize = (value) => value.normalize("NFKC").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim();
@@ -7294,15 +7674,24 @@ function parsePayload(text2) {
   }
 }
 function isAtomicValue(predicate, value) {
-  if (/[;\n]|\s(?:and|&)\s/i.test(value)) return false;
+  if (/[;\n]/.test(value)) return false;
+  if (/\s(?:and|&)\s/i.test(value) && predicate !== "current_role" && predicate !== "prior_role") return false;
   if (["founder", "executive", "investor"].includes(predicate) && value.includes(",")) return false;
   return true;
 }
-function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-search") {
+function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-search", questions = []) {
   const payload = parsePayload(text2);
   if (!payload || !Array.isArray(payload.facts)) return null;
   const leads = [];
   const seen = /* @__PURE__ */ new Set();
+  const questionById = new Map(questions.map((question) => [question.id, question]));
+  const questionsByPredicate = /* @__PURE__ */ new Map();
+  for (const question of questions) {
+    questionsByPredicate.set(question.predicate, [
+      ...questionsByPredicate.get(question.predicate) ?? [],
+      question
+    ]);
+  }
   for (const raw of payload.facts) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
     const row = raw;
@@ -7313,7 +7702,16 @@ function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-sear
     const sourceUrl = safeCandidateUrl(row.source_url ?? row.sourceUrl);
     if (!predicate || !PREDICATES.has(predicate) || !subject || !value || !excerpt || !sourceUrl) continue;
     if (!isAtomicValue(predicate, value)) continue;
+    const suppliedQuestionId = clean(row.question_id ?? row.questionId, 100);
+    const suppliedQuestion = suppliedQuestionId ? questionById.get(suppliedQuestionId) : void 0;
+    if (questions.length && suppliedQuestionId && !suppliedQuestion) continue;
+    if (questions.length && !questionsByPredicate.get(predicate)?.length) continue;
+    if (suppliedQuestion && suppliedQuestion.predicate !== predicate) continue;
+    const inferredQuestion = suppliedQuestion ?? (questionsByPredicate.get(predicate)?.length === 1 ? questionsByPredicate.get(predicate)?.[0] : void 0);
     const qualifier = clean(row.qualifier, 120);
+    const eventStatus = clean(row.event_status ?? row.eventStatus, 160);
+    const attributedEntity = clean(row.attributed_entity ?? row.attributedEntity, 200);
+    if (predicate === "legal_regulatory_event" && (!eventStatus || !attributedEntity)) continue;
     const sourceTitle = clean(row.source_title ?? row.sourceTitle, 240);
     const rawCandidateUrls = row.candidate_urls ?? row.candidateUrls;
     const candidateUrls2 = Array.isArray(rawCandidateUrls) ? [...new Set(rawCandidateUrls.flatMap((candidate) => {
@@ -7328,6 +7726,9 @@ function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-sear
       predicate,
       value,
       ...qualifier ? { qualifier } : {},
+      ...inferredQuestion ? { questionId: inferredQuestion.id } : {},
+      ...eventStatus ? { eventStatus } : {},
+      ...attributedEntity ? { attributedEntity } : {},
       excerpt,
       sourceUrl,
       ...sourceTitle ? { sourceTitle } : {},
@@ -7352,36 +7753,47 @@ function subjectAliases(ctx) {
   ].filter((value) => Boolean(value?.trim()));
   return [...new Set(aliases.map((value) => value.trim()))];
 }
-function discoveryPrompt(ctx) {
+function discoveryPrompt(ctx, questions, phase = "primary") {
   const profile = ctx.evidence.profile;
+  const audience = questions[0]?.audience ?? researchAudience(ctx);
+  const questionLedger2 = questions.map(
+    (question, index) => `${index + 1}. [${question.id}] (${question.predicate}${question.critical ? ", decision-critical" : ""}) ${question.question}`
+  ).join("\n");
   return [
-    `Research foundational due-diligence facts for ${subjectName(ctx)} (${ctx.handle}).`,
+    `${phase === "repair" ? "Repair the remaining verified-evidence gaps" : "Research foundational due-diligence facts"} for ${subjectName(ctx)} (${ctx.handle}).`,
+    `Research audience: ${audience}. Answer only the targeted questions below; do not pad the response with adjacent facts.`,
     profile.website ? `Known official website: ${profile.website}` : "",
     profile.bio ? `Profile bio: ${profile.bio.slice(0, 800)}` : "",
-    "Find facts a competent analyst must not miss: official identity, every named founder and executive, founding and launch dates, official token, funding and named investors, core products, network/chain, legal entity, governance, tokenomics and allocation, vesting and unlock schedules, treasury disclosures, security audits, source repositories, and concrete traction metrics.",
+    "Targeted question ledger:",
+    questionLedger2,
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
+    "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
+    "Set question_id to the exact bracketed question ID. The predicate must match that question.",
     "Each exact_excerpt must be a verbatim one-to-three sentence passage that itself explicitly contains the subject identity, the claimed value, and language proving the predicate.",
     "For traction facts, copy the source's exact as-of date or reporting period into qualifier, preferably an explicit date phrase, only when that phrase appears in exact_excerpt. Never infer, normalize, or invent a date. Omit qualifier when the source does not state a period.",
+    "Keep an official crypto token separate from a publicly traded equity or debt security. Never put stock in official_token and never put a crypto token in public_security.",
+    "For legal_regulatory_event, include attributed_entity and event_status only when the exact excerpt states them. Never attribute a company-only event to a founder or employee.",
+    "Keep formal governance, practical control, and explicit conflicts of interest separate. Do not infer control or a conflict from a job title alone.",
     "For candidate_urls, include up to three additional public pages that explicitly state the same atomic fact. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url.",
     "Do not infer. A search answer is only a lead; ARGUS will fetch and verify every URL independently.",
     "Return JSON only in this exact shape:",
-    '{"facts":[{"subject":"...","predicate":"founder|executive|founded|launched|official_token|funding|investor|product|network|legal_entity|official_identity|governance|tokenomics|vesting|treasury|audit|repository|traction","value":"one atomic value","qualifier":"optional verbatim role, metric label, or traction as-of/reporting period present in exact_excerpt","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}'
+    `{"facts":[{"question_id":"${questions[0]?.id ?? `${audience}.official_identity`}","subject":"...","predicate":"${questions.map((question) => question.predicate).join("|")}","value":"one atomic value","qualifier":"optional verbatim role, metric label, or traction as-of/reporting period present in exact_excerpt","event_status":"optional, exact source wording","attributed_entity":"optional, exact source wording","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}`
   ].filter(Boolean).join("\n");
 }
 function responseText(response) {
   return (response.content ?? []).filter((block) => block.type === "text" && typeof block.text === "string").map((block) => block.text).join("\n");
 }
-function claudeRequestBody(prompt, assistantContent) {
+function claudeRequestBody(prompt, assistantContent, maxSearchUses = PRIMARY_SEARCH_USES_PER_BATCH) {
   return {
     model: ANALYST_MODEL,
     max_tokens: 3e3,
     system: "You are ARGUS's basic-facts research scout. Search broadly, cite precisely, and return only the requested JSON. Never treat your own answer as verified evidence.",
     messages: assistantContent ? [{ role: "user", content: prompt }, { role: "assistant", content: assistantContent }] : [{ role: "user", content: prompt }],
-    tools: [{ type: "web_search_20250305", name: "web_search", max_uses: MAX_SEARCH_USES }]
+    tools: [{ type: "web_search_20250305", name: "web_search", max_uses: maxSearchUses }]
   };
 }
-async function callClaudeSearch(prompt, request, assistantContent) {
+async function callClaudeSearch(prompt, request, assistantContent, maxSearchUses = PRIMARY_SEARCH_USES_PER_BATCH) {
   let response;
   try {
     response = await request(ANTHROPIC_URL2, {
@@ -7391,7 +7803,7 @@ async function callClaudeSearch(prompt, request, assistantContent) {
         "anthropic-version": "2023-06-01",
         "content-type": "application/json"
       },
-      body: JSON.stringify(claudeRequestBody(prompt, assistantContent)),
+      body: JSON.stringify(claudeRequestBody(prompt, assistantContent, maxSearchUses)),
       signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS)
     });
   } catch (error) {
@@ -7418,38 +7830,124 @@ async function callClaudeSearch(prompt, request, assistantContent) {
   );
   return data;
 }
-async function discoverBasicFactLeads(ctx, dependencies = {}) {
-  if (!env("ANTHROPIC_API_KEY") && !dependencies.request) return null;
+function aggregateDiscovery(provider, batches) {
+  const leads = selectBasicFactLeads(batches.flatMap((batch) => batch.leads));
+  const failedBatches = batches.filter((batch) => batch.state === "failed" || batch.state === "partial").length;
+  const completedBatches = batches.filter((batch) => batch.state === "succeeded" || batch.state === "completed_empty").length;
+  const state = failedBatches ? leads.length || completedBatches ? "partial" : "failed" : leads.length ? "succeeded" : "completed_empty";
+  return {
+    provider,
+    state,
+    leads,
+    attempts: batches.reduce((sum, batch) => sum + batch.attempts, 0),
+    completedBatches,
+    failedBatches,
+    batchStates: Object.fromEntries(batches.map((batch) => [batch.batch, batch.state])),
+    detail: batches.map((batch) => batch.detail).filter(Boolean).join("; ") || void 0
+  };
+}
+function questionsByBatch(questions) {
+  const batches = ["identity", "track_record", "structure_risk"];
+  return batches.flatMap((batch) => {
+    const selected = questions.filter((question) => question.batch === batch);
+    return selected.length ? [[batch, selected]] : [];
+  });
+}
+async function discoverBasicFactLeadsDetailed(ctx, dependencies = {}, questions = basicFactsResearchQuestions(ctx), phase = "primary") {
+  if (!env("ANTHROPIC_API_KEY") && !dependencies.request) {
+    return { provider: "claude-web-search", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "Claude search is not configured" };
+  }
   const canonicalSubject = subjectName(ctx);
-  const cacheKey = `basic-facts:v3:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
   const cacheRead = dependencies.cacheRead ?? ((key) => cacheGet(key, { operation: "basic-facts-hit", meta: "24h Claude web-search cache" }));
   const cacheWrite = dependencies.cacheWrite ?? cacheSet;
-  const cached = await cacheRead(cacheKey);
-  if (cached) return parseBasicFactLeads(cached, canonicalSubject, "claude-web-search");
   const request = dependencies.request ?? fetch;
-  const prompt = discoveryPrompt(ctx);
-  let response = await callClaudeSearch(prompt, request);
-  if (!response) return null;
-  if (response.stop_reason === "pause_turn" && response.content?.length) {
-    response = await callClaudeSearch(prompt, request, response.content);
-    if (!response) return null;
-  }
-  const text2 = responseText(response);
-  if (!text2) return null;
-  const parsed = parseBasicFactLeads(text2, canonicalSubject, "claude-web-search");
-  if (parsed) void cacheWrite(cacheKey, text2);
-  return parsed;
+  const audience = questions[0]?.audience ?? researchAudience(ctx);
+  const grouped = questionsByBatch(questions);
+  const batches = await Promise.all(grouped.map(async ([batch, batchQuestions]) => {
+    const questionFingerprint = createHash4("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
+    const cacheKey = `basic-facts:${RESEARCH_CACHE_VERSION}:claude:${audience}:${phase}:${batch}:${questionFingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
+    const cached = await cacheRead(cacheKey);
+    if (cached) {
+      const parsed2 = parseBasicFactLeads(cached, canonicalSubject, "claude-web-search", batchQuestions);
+      if (parsed2) return {
+        batch,
+        state: parsed2.length ? "succeeded" : "completed_empty",
+        leads: parsed2,
+        attempts: 0,
+        detail: `${batch}:cache_${parsed2.length ? "hit" : "empty"}`
+      };
+    }
+    const prompt = discoveryPrompt(ctx, batchQuestions, phase);
+    const maxSearchUses = phase === "repair" ? REPAIR_SEARCH_USES : PRIMARY_SEARCH_USES_PER_BATCH;
+    let attempts = 1;
+    let response = await callClaudeSearch(prompt, request, void 0, maxSearchUses);
+    if (!response) return { batch, state: "failed", leads: [], attempts, detail: `${batch}:request_failed` };
+    if (response.stop_reason === "pause_turn" && response.content?.length) {
+      attempts += 1;
+      response = await callClaudeSearch(prompt, request, response.content, maxSearchUses);
+      if (!response) return { batch, state: "failed", leads: [], attempts, detail: `${batch}:continuation_failed` };
+    }
+    const text2 = responseText(response);
+    if (!text2) return { batch, state: "partial", leads: [], attempts, detail: `${batch}:empty_output` };
+    const parsed = parseBasicFactLeads(text2, canonicalSubject, "claude-web-search", batchQuestions);
+    if (!parsed) return { batch, state: "partial", leads: [], attempts, detail: `${batch}:invalid_json` };
+    void cacheWrite(cacheKey, text2);
+    return {
+      batch,
+      state: parsed.length ? "succeeded" : "completed_empty",
+      leads: parsed,
+      attempts,
+      detail: `${batch}:${parsed.length ? `${parsed.length}_leads` : "completed_empty"}`
+    };
+  }));
+  return aggregateDiscovery("claude-web-search", batches);
 }
-async function discoverWithFallback(ctx) {
-  const claude = await discoverBasicFactLeads(ctx);
-  if (claude?.length) return claude;
-  if (!env("XAI_API_KEY")) return claude;
-  const text2 = await grokSearch(
-    "You are ARGUS's basic-facts research scout. Use live web search. Return only the requested JSON. All output remains an unverified lead.",
-    discoveryPrompt(ctx),
-    { maxToolCalls: MAX_SEARCH_USES, cacheKey: `basic-facts-grok:v3:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}` }
-  );
-  return text2 ? parseBasicFactLeads(text2, subjectName(ctx), "grok") : claude;
+async function discoverGrokQuestions(ctx, questions, phase) {
+  if (!env("XAI_API_KEY")) {
+    return { provider: "grok", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "Grok search is not configured" };
+  }
+  const audience = questions[0]?.audience ?? researchAudience(ctx);
+  const grouped = questionsByBatch(questions);
+  const batches = await Promise.all(grouped.map(async ([batch, batchQuestions]) => {
+    const fingerprint = createHash4("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
+    const text2 = await grokSearch(
+      "You are ARGUS's basic-facts research scout. Use live web search. Return only the requested JSON. Every answer remains an unverified lead until ARGUS fetches and verifies the exact source passage.",
+      discoveryPrompt(ctx, batchQuestions, phase),
+      {
+        maxToolCalls: phase === "repair" ? REPAIR_SEARCH_USES : PRIMARY_SEARCH_USES_PER_BATCH,
+        cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grok:${audience}:${phase}:${batch}:${fingerprint}:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}`
+      }
+    );
+    if (!text2) return { batch, state: "failed", leads: [], attempts: 1, detail: `${batch}:request_failed` };
+    const parsed = parseBasicFactLeads(text2, subjectName(ctx), "grok", batchQuestions);
+    if (!parsed) return { batch, state: "partial", leads: [], attempts: 1, detail: `${batch}:invalid_json` };
+    return {
+      batch,
+      state: parsed.length ? "succeeded" : "completed_empty",
+      leads: parsed,
+      attempts: 1,
+      detail: `${batch}:${parsed.length ? `${parsed.length}_leads` : "completed_empty"}`
+    };
+  }));
+  return aggregateDiscovery("grok", batches);
+}
+async function discoverPrimary(ctx, questions) {
+  if (env("ANTHROPIC_API_KEY")) return discoverBasicFactLeadsDetailed(ctx, {}, questions, "primary");
+  return discoverGrokQuestions(ctx, questions, "primary");
+}
+async function discoverRepair(ctx, questions, primaryProvider) {
+  if (!questions.length) {
+    return { provider: "none", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "no critical gaps" };
+  }
+  if (primaryProvider === "claude-web-search" && env("XAI_API_KEY")) {
+    return discoverGrokQuestions(ctx, questions, "repair");
+  }
+  if (primaryProvider === "grok" && env("ANTHROPIC_API_KEY")) {
+    return discoverBasicFactLeadsDetailed(ctx, {}, questions, "repair");
+  }
+  if (env("ANTHROPIC_API_KEY")) return discoverBasicFactLeadsDetailed(ctx, {}, questions, "repair");
+  if (env("XAI_API_KEY")) return discoverGrokQuestions(ctx, questions, "repair");
+  return { provider: "none", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "no repair search provider configured" };
 }
 function decodeHtmlEntities(value) {
   const named = { amp: "&", apos: "'", gt: ">", lt: "<", nbsp: " ", quot: '"' };
@@ -7464,18 +7962,27 @@ function documentText(document) {
   return normalize(decodeHtmlEntities(document.text.replace(/<(?:script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|svg)>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<br\s*\/?\s*>|<\/(?:p|div|section|article|li|h[1-6]|tr|td|th|main|header|footer|blockquote)>/gi, ". ").replace(/<[^>]+>/g, " ")));
 }
 var PREDICATE_PATTERNS = {
+  official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company|person|entrepreneur|investor)\b/i,
+  current_role: /\b(?:currently|serves as|works as|is (?:the |an? )?(?:founder|co[- ]?founder|chief|ceo|cto|coo|cfo|president|partner|principal|director|head|lead|chair|member)|current role)\b/i,
+  prior_role: /\b(?:formerly|previously|prior to|served as|was (?:the |an? )?(?:founder|co[- ]?founder|chief|ceo|cto|coo|cfo|president|partner|principal|director|head|lead|chair|member)|prior role)\b/i,
+  education: /\b(?:graduated|degree|studied|attended|education|university|college|school|bachelor|master(?:'s)?|mba|phd|doctorate)\b/i,
   founder: /\b(?:co[- ]?founders?|founders?|co[- ]?founded|founded(?:\s+by)?)\b/i,
   executive: /\b(?:chief executive officer|chief technology officer|chief operating officer|chief financial officer|ceo|cto|coo|cfo|president|executive|director|head of|lead)\b/i,
   founded: /\b(?:founded|established|formed|incorporated)\b/i,
   launched: /\b(?:launched|went live|debuted|released|introduced)\b/i,
+  exit: /\b(?:acquired|acquisition|bought by|sold to|sale of|exited|exit|ipo|public offering|shut down|closed)\b/i,
+  track_record: /\b(?:track record|outcome|returned|return|revenue|users?|volume|assets under management|aum|portfolio|built|grew|scaled|founded|invested)\b/i,
   official_token: /\b(?:official token|governance token|native token|utility token|token|ticker|symbol)\b/i,
+  public_security: /\b(?:publicly traded|listed (?:on|company)|stock|shares?|equity|debt security|bond|nasdaq|nyse|ticker symbol|initial public offering|ipo)\b/i,
   funding: /\b(?:raised|raises|funding|financing|fundraise|round|capital)\b/i,
   investor: /\b(?:invested|investment|investor|backed|backing|led the round|participated in)\b/i,
   product: /\b(?:product|platform|protocol|service|aggregator|exchange|marketplace|wallet|application|app)\b/i,
   network: /\b(?:blockchain|network|chain|mainnet|built on|deployed on|runs on|(?:on|for)\s+(?:the\s+)?(?:ethereum|solana|polygon|arbitrum|optimism|avalanche|base|bnb(?:\s+chain)?|bitcoin|cosmos|sui|aptos|near|tron|ton|polkadot|cardano))\b/i,
   legal_entity: /\b(?:legal entity|company|corporation|incorporated|foundation|limited|ltd\.?|inc\.?|llc|labs)\b/i,
-  official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company)\b/i,
+  legal_regulatory_event: /\b(?:lawsuit|litigation|sued|complaint|settlement|settled|judgment|investigation|enforcement|regulator|regulatory|sec|cftc|doj|ftc|charges?|indictment|dismissed|pending|resolved)\b/i,
   governance: /\b(?:governance|governed|dao|proposal|vote|voting|council|multisig|multi-sig)\b/i,
+  control: /\b(?:controls?|ownership|owner|voting power|board seat|director|admin keys?|multisig|multi-sig|signatory|treasury authority)\b/i,
+  conflict_of_interest: /\b(?:conflict of interest|related[- ]party|self[- ]dealing|financial interest|disclosed interest|recusal|recused)\b/i,
   tokenomics: /\b(?:tokenomics|token allocation|token distribution|allocation|distribution|emissions?|circulating supply|total supply|max(?:imum)? supply)\b/i,
   vesting: /\b(?:vesting|vested|unlock(?:s|ed|ing)?|cliff|lockup|lock-up|release schedule)\b/i,
   treasury: /\b(?:treasury|reserves?|treasury wallet|treasury report|multisig|multi-sig)\b/i,
@@ -7570,29 +8077,67 @@ var sameOfficialDomain = (host, officialHosts) => {
     return candidate === configured || candidate.endsWith(`.${configured}`);
   });
 };
-function factId(subjectKey, predicate, value) {
+var REGULATORY_HOSTS = [
+  "sec.gov",
+  "justice.gov",
+  "cftc.gov",
+  "ftc.gov",
+  "finra.org",
+  "fca.org.uk",
+  "esma.europa.eu"
+];
+var regulatorySourceSupports = (host, predicate) => ["legal_regulatory_event", "public_security", "legal_entity"].includes(predicate) && sameOfficialDomain(host, REGULATORY_HOSTS);
+var exactEntityKey = (value) => looseTokens(value).join(" ");
+var attributionScopeFor = (attributedEntity, aliases) => {
+  const attributedKey = exactEntityKey(attributedEntity);
+  return attributedKey && aliases.some((alias) => exactEntityKey(alias) === attributedKey) ? "direct_subject" : "related_entity";
+};
+function factId(subjectKey, predicate, value, legalIdentity = "") {
   const normalizedValue = canonicalBasicFactComparisonValue(predicate, searchable(value));
-  return `basic_v1_${createHash4("sha256").update(`${subjectKey.toLowerCase()}::${predicate}::${normalizedValue}`).digest("hex")}`;
+  const identity = `${subjectKey.toLowerCase()}::${predicate}::${normalizedValue}${legalIdentity ? `::${legalIdentity}` : ""}`;
+  return `basic_v1_${createHash4("sha256").update(identity).digest("hex")}`;
 }
-function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject, officialHosts = []) {
+function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject, officialHosts = [], officialCounterpartyHosts = []) {
   const page = documentText(document);
   if (!isAtomicValue(lead.predicate, lead.value)) return null;
+  if (lead.predicate === "legal_regulatory_event" && (!lead.eventStatus || !lead.attributedEntity)) return null;
   const excerpt = supportingSourcePassage(page, lead, aliases);
   if (!excerpt) return null;
   const official = sameOfficialDomain(document.host, officialHosts);
+  const counterpartyPredicate = (/* @__PURE__ */ new Set([
+    "current_role",
+    "prior_role",
+    "founder",
+    "executive",
+    "founded",
+    "product",
+    "exit",
+    "track_record",
+    "funding",
+    "investor",
+    "legal_entity",
+    "governance"
+  ])).has(lead.predicate);
+  const officialCounterparty = !official && counterpartyPredicate && sameOfficialDomain(document.host, officialCounterpartyHosts);
+  const regulatory = !official && !officialCounterparty && regulatorySourceSupports(document.host, lead.predicate);
   const supportedQualifier = lead.qualifier && looseContainsPhrase(excerpt, lead.qualifier) ? lead.qualifier : void 0;
+  const supportedEventStatus = lead.eventStatus && looseContainsPhrase(excerpt, lead.eventStatus) ? lead.eventStatus : void 0;
+  const supportedAttributedEntity = lead.attributedEntity && looseContainsPhrase(excerpt, lead.attributedEntity) ? lead.attributedEntity : void 0;
+  if (lead.predicate === "legal_regulatory_event" && (!supportedEventStatus || !supportedAttributedEntity)) return null;
+  const attributionScope = supportedAttributedEntity ? attributionScopeFor(supportedAttributedEntity, aliases) : void 0;
+  const legalIdentity = lead.predicate === "legal_regulatory_event" ? `${searchable(supportedAttributedEntity)}::${searchable(supportedEventStatus)}` : "";
   return {
-    factId: factId(subjectKey, lead.predicate, lead.value),
+    factId: factId(subjectKey, lead.predicate, lead.value, legalIdentity),
     subjectKey,
     predicate: lead.predicate,
     value: lead.value,
     normalizedValue: canonicalBasicFactComparisonValue(lead.predicate, searchable(lead.value)),
-    status: official ? "verified" : "lead",
+    status: official || officialCounterparty || regulatory ? "verified" : "lead",
     critical: CRITICAL_PREDICATES.has(lead.predicate),
     sources: [{
       url: document.url,
       ...lead.sourceTitle ? { title: lead.sourceTitle } : {},
-      sourceClass: official ? "official_subject" : "independent_press",
+      sourceClass: official ? "official_subject" : officialCounterparty ? "official_counterparty" : regulatory ? "regulatory_or_onchain" : "independent_press",
       relation: "supports",
       excerpt,
       contentHash: document.contentHash,
@@ -7601,6 +8146,10 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
       artifactVerified: true
     }],
     ...supportedQualifier ? { qualifier: supportedQualifier } : {},
+    ...lead.questionId ? { questionId: lead.questionId } : {},
+    ...supportedEventStatus ? { eventStatus: supportedEventStatus } : {},
+    ...supportedAttributedEntity ? { attributedEntity: supportedAttributedEntity } : {},
+    ...attributionScope ? { attributionScope } : {},
     evidence_origin: "deterministic",
     artifact_verified: true,
     provider: "public-web",
@@ -7608,12 +8157,24 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
   };
 }
 var MULTI_VALUE_PREDICATES = /* @__PURE__ */ new Set([
+  "current_role",
+  "prior_role",
+  "education",
   "founder",
   "executive",
+  "founded",
+  "launched",
+  "exit",
+  "track_record",
   "product",
   "funding",
   "investor",
   "governance",
+  "public_security",
+  "legal_entity",
+  "legal_regulatory_event",
+  "control",
+  "conflict_of_interest",
   "tokenomics",
   "vesting",
   "treasury",
@@ -7624,14 +8185,15 @@ var MULTI_VALUE_PREDICATES = /* @__PURE__ */ new Set([
 function resolveBasicFactCandidates(candidates) {
   const grouped = /* @__PURE__ */ new Map();
   for (const candidate of candidates) {
-    const key = `${candidate.predicate}::${candidate.normalizedValue}`;
+    const legalIdentity = candidate.predicate === "legal_regulatory_event" ? `::${searchable(candidate.attributedEntity ?? "")}::${searchable(candidate.eventStatus ?? "")}` : "";
+    const key = `${candidate.predicate}::${candidate.normalizedValue}${legalIdentity}`;
     const rows = grouped.get(key) ?? [];
     rows.push(candidate);
     grouped.set(key, rows);
   }
   const resolved = [...grouped.values()].flatMap((rows) => {
     const sources = [...new Map(rows.flatMap((row) => row.sources).map((source2) => [source2.url, source2])).values()];
-    const official = sources.some((source2) => source2.sourceClass === "official_subject");
+    const official = sources.some((source2) => source2.sourceClass === "official_subject" || source2.sourceClass === "official_counterparty" || source2.sourceClass === "regulatory_or_onchain");
     const independentHosts = new Set(sources.filter((source2) => source2.sourceClass === "independent_press").map((source2) => new URL(source2.url).hostname.replace(/^www\./, "")));
     if (!official && independentHosts.size < 2) return [];
     return [{
@@ -7644,6 +8206,17 @@ function resolveBasicFactCandidates(candidates) {
   for (const predicate of singletonPredicates) {
     const values = resolved.filter((fact) => fact.predicate === predicate);
     if (values.length > 1) values.forEach((fact) => {
+      fact.status = "conflicted";
+    });
+  }
+  const legalEvents = /* @__PURE__ */ new Map();
+  for (const fact of resolved.filter((candidate) => candidate.predicate === "legal_regulatory_event")) {
+    const key = `${fact.normalizedValue}::${searchable(fact.attributedEntity ?? "")}`;
+    legalEvents.set(key, [...legalEvents.get(key) ?? [], fact]);
+  }
+  for (const rows of legalEvents.values()) {
+    const statuses = new Set(rows.map((fact) => searchable(fact.eventStatus ?? "")).filter(Boolean));
+    if (statuses.size > 1) rows.forEach((fact) => {
       fact.status = "conflicted";
     });
   }
@@ -7660,7 +8233,7 @@ function teamSourceCandidates(ctx, lead) {
     return [{ url, ...title ? { title } : {} }];
   });
 }
-function verificationLeadVariants(ctx, leads, officialHosts) {
+function verificationLeadVariants(ctx, leads, officialHosts, officialCounterpartyHosts = []) {
   const variants = [];
   const seen = /* @__PURE__ */ new Set();
   const add = (lead, value, title, primary) => {
@@ -7671,7 +8244,8 @@ function verificationLeadVariants(ctx, leads, officialHosts) {
     seen.add(key);
     let official = false;
     try {
-      official = sameOfficialDomain(new URL(sourceUrl).hostname, officialHosts);
+      const host = new URL(sourceUrl).hostname;
+      official = sameOfficialDomain(host, officialHosts) || sameOfficialDomain(host, officialCounterpartyHosts);
     } catch {
     }
     const variantLead = { ...lead, sourceUrl };
@@ -7689,8 +8263,118 @@ function verificationLeadVariants(ctx, leads, officialHosts) {
   }
   return variants.sort((left, right) => left.priority - right.priority);
 }
+function normalizeDiscoveryOutput(output) {
+  if (output && !Array.isArray(output)) return { ...output, leads: selectBasicFactLeads(output.leads) };
+  if (output === null) {
+    return { provider: "test", state: "failed", leads: [], attempts: 1, completedBatches: 0, failedBatches: 1 };
+  }
+  const leads = selectBasicFactLeads(output);
+  return {
+    provider: "test",
+    state: leads.length ? "succeeded" : "completed_empty",
+    leads,
+    attempts: 1,
+    completedBatches: 1,
+    failedBatches: 0
+  };
+}
+function mergeLeads(primary, repair) {
+  const seen = /* @__PURE__ */ new Set();
+  const merged = [...repair, ...primary].filter((lead) => {
+    const key = `${lead.predicate}::${searchable(lead.value)}::${lead.sourceUrl}::${searchable(lead.excerpt)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+  return selectBasicFactLeads(merged);
+}
+function verifiedCounterpartyHosts(ctx) {
+  return [...new Set(ctx.evidence.ventures.flatMap((venture) => {
+    if (venture.artifact_verified !== true || venture.evidence_origin === "model_lead" || !venture.domain?.trim()) return [];
+    const candidate = venture.domain.includes("://") ? venture.domain : `https://${venture.domain}`;
+    const safe = safeCandidateUrl(candidate);
+    if (!safe) return [];
+    try {
+      return [new URL(safe).hostname];
+    } catch {
+      return [];
+    }
+  }))];
+}
+function deterministicQuestionAnswerRefs(ctx, question, facts) {
+  const refs = facts.filter((fact) => (fact.status === "verified" || fact.status === "corroborated") && (fact.questionId === question.id || fact.predicate === question.predicate) && !(question.audience === "person" && fact.predicate === "legal_regulatory_event" && fact.attributionScope !== "direct_subject")).map((fact) => fact.factId);
+  const add = (ref) => {
+    if (!refs.includes(ref)) refs.push(ref);
+  };
+  if (question.predicate === "official_identity" && ctx.evidence.profile.profile_collection_state === "resolved" && (ctx.evidence.profile.resolved_name?.trim() || ctx.evidence.profile.display_name.trim())) add(`profile:${ctx.evidence.profile.profile_provider ?? "provider"}:${ctx.handle.toLowerCase()}`);
+  if (question.predicate === "official_token" && ctx.evidence.projectToken?.verified) {
+    add(`project-token:${ctx.evidence.projectToken.coingeckoId}`);
+  }
+  const verifiedTeam = (ctx.evidence.webTeam ?? []).filter((member) => member.artifact_verified === true && member.evidence_origin !== "model_lead");
+  if (question.audience === "project" && question.predicate === "founder") {
+    verifiedTeam.filter((member) => /\b(?:co[- ]?)?founder\b/i.test(member.role)).forEach((member) => add(`team:${personKey(member.name)}:founder`));
+  }
+  if (question.audience === "project" && question.predicate === "executive") {
+    verifiedTeam.filter((member) => PREDICATE_PATTERNS.executive.test(member.role)).forEach((member) => add(`team:${personKey(member.name)}:executive`));
+  }
+  const ventures = ctx.evidence.ventures.filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
+  if (question.predicate === "current_role") {
+    ventures.filter((venture) => venture.outcome === "Active" && /\b(?:present|current|now|ongoing)\b/i.test(venture.period)).forEach((venture) => add(`venture:${searchable(venture.project_name)}:current_role`));
+  }
+  if (question.predicate === "founder") {
+    ventures.filter((venture) => /\b(?:co[- ]?)?founder\b/i.test(venture.role)).forEach((venture) => add(`venture:${searchable(venture.project_name)}:founder`));
+  }
+  if (question.predicate === "investor") {
+    ventures.filter((venture) => /\b(?:investor|partner|principal|venture|capital|\bgp\b)\b/i.test(venture.role)).forEach((venture) => add(`venture:${searchable(venture.project_name)}:investor`));
+  }
+  if (question.predicate === "track_record") {
+    ventures.filter((venture) => [
+      "IPO",
+      "Acquisition",
+      "Acquihire",
+      "OrderlyWindDown",
+      "Failure",
+      "SilentShutdown",
+      "Rug",
+      "Exploit"
+    ].includes(String(venture.outcome))).forEach((venture) => add(`venture:${searchable(venture.project_name)}:${searchable(String(venture.outcome))}`));
+  }
+  if (question.predicate === "exit") {
+    ventures.filter((venture) => ["IPO", "Acquisition", "Acquihire"].includes(String(venture.outcome))).forEach((venture) => add(`venture:${searchable(venture.project_name)}:${searchable(String(venture.outcome))}`));
+  }
+  return refs;
+}
+function questionLedger(ctx, questions, facts, primary, repair, repairQuestionIds) {
+  return questions.map((question) => {
+    const answerRefs = deterministicQuestionAnswerRefs(ctx, question, facts);
+    const providerRuns = [{
+      phase: "primary",
+      provider: primary.provider,
+      state: primary.batchStates?.[question.batch] ?? primary.state
+    }];
+    if (repairQuestionIds.has(question.id)) {
+      providerRuns.push({
+        phase: "repair",
+        provider: repair.provider,
+        state: repair.batchStates?.[question.batch] ?? repair.batchStates?.repair ?? repair.state
+      });
+    }
+    return {
+      questionId: question.id,
+      audience: question.audience,
+      batch: question.batch,
+      predicate: question.predicate,
+      question: question.question,
+      critical: question.critical,
+      status: answerRefs.length ? "answered" : "unanswered",
+      answerRefs,
+      providerRuns
+    };
+  });
+}
 async function collectBasicFacts(ctx, dependencies = {}) {
-  const discover = dependencies.discover ?? discoverWithFallback;
+  const questions = basicFactsResearchQuestions(ctx);
+  const discover = dependencies.discover ?? discoverPrimary;
   const fetchSource = dependencies.fetchSource ?? fetchPublicText;
   if (!dependencies.discover && !env("ANTHROPIC_API_KEY") && !env("XAI_API_KEY")) {
     return { state: "skipped", detail: "basic-facts web research is not configured" };
@@ -7702,18 +8386,10 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     source: env("ANTHROPIC_API_KEY") ? "Claude web search \xB7 public source verification" : "Grok web search \xB7 public source verification",
     tone: "neutral"
   });
-  const leads = await discover(ctx);
-  if (!leads) return { state: "failed", detail: "basic-facts discovery failed" };
-  const boundedLeads = selectBasicFactLeads(leads);
-  ctx.evidence.basicFactLeads = boundedLeads.map((lead) => ({ ...lead }));
-  if (!boundedLeads.length) {
-    ctx.evidence.basicFacts = [];
-    return {
-      state: "partial",
-      detail: "search completed with no source-linked basic-fact candidates",
-      explicitEmptyChecks: ["project-transparency"]
-    };
-  }
+  const primary = normalizeDiscoveryOutput(await discover(ctx, questions));
+  const primaryLeads = selectBasicFactLeads(primary.leads);
+  ctx.evidence.basicFactLeads = primaryLeads.map((lead) => ({ ...lead }));
+  ctx.evidence.basicFacts = [];
   const aliases = subjectAliases(ctx);
   const officialHosts = [ctx.evidence.profile.website].filter((value) => Boolean(value)).flatMap((value) => {
     try {
@@ -7722,6 +8398,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
       return [];
     }
   });
+  const officialCounterpartyHosts = verifiedCounterpartyHosts(ctx);
   const sourceByUrl = /* @__PURE__ */ new Map();
   const fetchOnce = (url) => {
     const key = new URL(url).toString();
@@ -7743,31 +8420,80 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     sourceByUrl.set(key, pending);
     return pending;
   };
-  const variants = verificationLeadVariants(ctx, boundedLeads, officialHosts);
-  const primarySources = boundedLeads.flatMap((lead) => {
-    const sourceUrl = safeCandidateUrl(lead.sourceUrl);
-    return sourceUrl ? [sourceUrl] : [];
-  });
-  const allowedSources = new Set([.../* @__PURE__ */ new Set([
-    ...primarySources,
-    // Variants are already sorted by official-domain and primary/candidate
-    // priority, so the remaining source slots retain deterministic quality.
-    ...variants.map(({ lead }) => lead.sourceUrl)
-  ])].slice(0, MAX_SOURCES));
-  const verified = (await Promise.all(variants.filter(({ lead }) => allowedSources.has(lead.sourceUrl)).map(async ({ lead }) => {
-    const result = await fetchOnce(lead.sourceUrl);
-    return result.status === "ok" ? verifyBasicFactLead(lead, result, aliases, ctx.handle, officialHosts) : null;
-  }))).filter((fact) => fact !== null);
+  const verifyLeads = async (leads, sourceLimit) => {
+    const variants = verificationLeadVariants(ctx, leads, officialHosts, officialCounterpartyHosts);
+    const primarySources = leads.flatMap((lead) => {
+      const sourceUrl = safeCandidateUrl(lead.sourceUrl);
+      return sourceUrl ? [sourceUrl] : [];
+    });
+    const allowedSources = new Set([.../* @__PURE__ */ new Set([
+      ...primarySources,
+      ...variants.map(({ lead }) => lead.sourceUrl)
+    ])].slice(0, sourceLimit));
+    return (await Promise.all(variants.filter(({ lead }) => allowedSources.has(lead.sourceUrl)).map(async ({ lead }) => {
+      const result = await fetchOnce(lead.sourceUrl);
+      return result.status === "ok" ? verifyBasicFactLead(lead, result, aliases, ctx.handle, officialHosts, officialCounterpartyHosts) : null;
+    }))).filter((fact) => fact !== null);
+  };
+  const primaryVerified = await verifyLeads(primaryLeads, MAX_SOURCES);
+  const primaryFacts = resolveBasicFactCandidates(primaryVerified);
+  const missingCritical = questions.filter((question) => question.critical && deterministicQuestionAnswerRefs(ctx, question, primaryFacts).length === 0);
+  let repair = {
+    provider: "none",
+    state: "skipped",
+    leads: [],
+    attempts: 0,
+    completedBatches: 0,
+    failedBatches: 0,
+    detail: missingCritical.length ? "repair provider not configured" : "no critical gaps"
+  };
+  if (missingCritical.length && (dependencies.repair || !dependencies.discover)) {
+    const output = dependencies.repair ? await dependencies.repair(ctx, missingCritical) : await discoverRepair(ctx, missingCritical, primary.provider);
+    repair = normalizeDiscoveryOutput(output);
+  }
+  const repairLeads = selectBasicFactLeads(repair.leads);
+  const repairVerified = await verifyLeads(repairLeads, Math.min(12, MAX_SOURCES));
+  const allLeads = mergeLeads(primaryLeads, repairLeads);
+  const verified = [...primaryVerified, ...repairVerified];
+  ctx.evidence.basicFactLeads = allLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = resolveBasicFactCandidates(verified);
+  const repairQuestionIds = new Set(missingCritical.map((question) => question.id));
+  ctx.evidence.basicFactQuestionLedger = questionLedger(
+    ctx,
+    questions,
+    ctx.evidence.basicFacts,
+    primary,
+    repair,
+    repairQuestionIds
+  );
   const sourceVerifiedLeadCount = new Set(verified.map((fact) => `${fact.predicate}::${fact.normalizedValue}`)).size;
+  const unansweredCritical = ctx.evidence.basicFactQuestionLedger.filter((entry) => entry.critical && entry.status === "unanswered").length;
   ctx.emit({
     phase: "P0 \xB7 Intake",
     label: ctx.evidence.basicFacts.length ? "Basic facts verified" : "Basic facts need review",
-    detail: `${sourceVerifiedLeadCount}/${boundedLeads.length} leads matched subject, value, and predicate language in fetched source text; ${ctx.evidence.basicFacts.length} met the first-party or two-source publication threshold.`,
+    detail: `${sourceVerifiedLeadCount}/${allLeads.length} leads matched subject, value, and predicate language in fetched source text; ${ctx.evidence.basicFacts.length} met the first-party or two-source publication threshold; ${unansweredCritical} critical question${unansweredCritical === 1 ? "" : "s"} remain open.`,
     source: "public-web",
     tone: ctx.evidence.basicFacts.length ? "good" : "warn"
   });
-  return ctx.evidence.basicFacts.length ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified \xB7 ${boundedLeads.length} leads` } : { state: "partial", detail: `${boundedLeads.length} leads \xB7 0 passed source verification` };
+  const attempts = primary.attempts + repair.attempts;
+  const providerDetail = `primary ${primary.provider}:${primary.state}; repair ${repair.provider}:${repair.state}`;
+  if (!allLeads.length) {
+    const completedEmpty = primary.state === "completed_empty" && (repair.state === "completed_empty" || repair.state === "skipped");
+    if (completedEmpty) {
+      return {
+        state: "partial",
+        detail: `search completed with no source-linked basic-fact candidates \xB7 ${providerDetail}`,
+        attempts,
+        ...researchAudience(ctx) === "project" ? { explicitEmptyChecks: ["project-transparency"] } : {}
+      };
+    }
+    return {
+      state: primary.state === "failed" && ["failed", "skipped"].includes(repair.state) ? "failed" : "partial",
+      detail: `basic-facts discovery produced no usable leads \xB7 ${providerDetail}`,
+      attempts
+    };
+  }
+  return ctx.evidence.basicFacts.length ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified \xB7 ${allLeads.length} leads \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts } : { state: "partial", detail: `${allLeads.length} leads \xB7 0 passed source verification \xB7 ${unansweredCritical} critical gaps \xB7 ${providerDetail}`, attempts };
 }
 var basicFactsAdapter = {
   id: "basic-facts",
@@ -8961,6 +9687,12 @@ function checkIsStale(check, nowMs) {
   const deadlineMs = Date.parse(deadline);
   return Number.isFinite(deadlineMs) && deadlineMs <= nowMs;
 }
+function checkDecisionCriticality(value) {
+  const check = checkRecord(value);
+  const metadata = checkRecord(check.metadata);
+  const criticality = typeof check.decisionCritical === "boolean" ? check.decisionCritical : metadata.decisionCritical;
+  return typeof criticality === "boolean" ? criticality : void 0;
+}
 function coverageQualifiedCompleteness(input) {
   const completeness = normalizedCompleteness(input.completeness);
   if (completeness === "failed") return "failed";
@@ -8968,7 +9700,9 @@ function coverageQualifiedCompleteness(input) {
     return "partial";
   }
   if (input.checks === void 0) return completeness;
-  const applicable = input.checks.filter((value) => {
+  const hasExplicitCriticality = input.checks.some((value) => checkDecisionCriticality(value) !== void 0);
+  const governingChecks = hasExplicitCriticality ? input.checks.filter((value) => checkDecisionCriticality(value) === true) : input.checks;
+  const applicable = governingChecks.filter((value) => {
     const check = checkRecord(value);
     const metadata = checkRecord(check.metadata);
     return check.status !== "not-applicable" && check.state !== "not-applicable" && check.notApplicable !== true && metadata.notApplicable !== true;
@@ -9162,6 +9896,7 @@ var HARD_TIE_KEY = /^(?:code:|email:|wallet:|funder:|mint:|token:|ga:|gtm:|adsen
 var EXPECTED_PERSON_CHECK_IDS = new Set(PERSON_CHECK_IDS);
 var ACCEPTED_CHECK_CONTRACTS = [
   new Set(LEGACY_PERSON_CHECK_IDS),
+  new Set(PROJECT_DILIGENCE_PERSON_CHECK_IDS),
   EXPECTED_PERSON_CHECK_IDS
 ];
 var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -11930,23 +12665,33 @@ async function resolveProfile(ctx) {
     ctx.emit({ phase: "P0 \xB7 Intake", label: "Profile unavailable", detail: "twitterapi.io has no record of this handle (not in their index). Continuing with web/X discovery.", source: "twitterapi.io", tone: "warn" });
   }
 }
-async function collectProjectSiteSubstance(ctx, domain) {
-  if (!domain) return;
-  const site = await checkSiteSubstance(domain).catch(() => null);
-  if (!site) return;
+function applySiteSubstanceOutcome(ctx, domain, site) {
   ctx.evidence.profile.website = site.url;
-  ctx.recordCheck?.({
-    id: "project-product-substance",
-    status: site.status === "coming_soon" || site.status === "unreachable" ? "finding" : "confirmed",
-    note: `${domain}: ${site.detail}`,
-    provider: "site-fetch",
-    sourceCount: 1
-  });
-  if (site.status === "coming_soon" || site.status === "unreachable") {
-    const notLive = site.status === "unreachable" ? "does not resolve" : "is not live yet";
+  const isProject = ctx.evidence.roles.includes("PROJECT" /* PROJECT */);
+  const verifiedProjectToken = ctx.evidence.projectToken?.verified === true ? ctx.evidence.projectToken : void 0;
+  const verifiedNotLive = site.status === "coming_soon" && (site.reason === "coming_soon" || site.reason === "parked");
+  if (!isProject) {
+    ctx.emit({
+      phase: "P2 \xB7 Substance",
+      label: verifiedNotLive ? "Profile website is not launched" : site.status === "coming_soon" ? "Profile website check unavailable" : "Profile website checked",
+      detail: verifiedNotLive ? `${domain} serves a verified coming-soon or parked page. This personal-profile URL is not treated as project counter-evidence.` : site.status === "coming_soon" ? `${domain} returned an ungrounded coming-soon label. No profile or project-liveness conclusion was drawn.` : `${domain}: ${site.detail}. No project-liveness conclusion was drawn for this person profile.`,
+      source: "site-fetch",
+      tone: "neutral"
+    });
+    return;
+  }
+  if (verifiedNotLive) {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "finding",
+      note: `${domain}: ${site.detail}`,
+      provider: "site-fetch",
+      sourceCount: 1
+    });
+    const tokenContext = verifiedProjectToken ? ` No live product surface despite the account promoting the verified $${verifiedProjectToken.symbol} project token.` : " No live product surface was verified.";
     ctx.evidence.findings.push({
       finding_type: "SiteNotLive",
-      claim: `The project's own website (${domain}) ${notLive}: ${site.detail}. No live product surface despite the account promoting a token.`,
+      claim: `The project's own website (${domain}) is not live yet: ${site.detail}.${tokenContext}`,
       source_url: site.url,
       source_date: "",
       source_author: "site-fetch",
@@ -11956,12 +12701,65 @@ async function collectProjectSiteSubstance(ctx, domain) {
       evidence_origin: "deterministic",
       artifact_verified: true
     });
-    ctx.emit({ phase: "P2 \xB7 Substance", label: "Website not live", detail: `${domain} ${notLive}: ${site.detail}. A project promoting a token with no live site is early/unshipped; weigh against product-substance claims.`, source: "site-fetch", tone: "bad" });
-  } else if (site.status === "client_rendered") {
+    ctx.emit({
+      phase: "P2 \xB7 Substance",
+      label: "Website not live",
+      detail: verifiedProjectToken ? `${domain} is a verified coming-soon or parked page: ${site.detail}. The account promotes the verified $${verifiedProjectToken.symbol} project token, so this is product-substance counter-evidence.` : `${domain} is a verified coming-soon or parked page: ${site.detail}. This is product-substance counter-evidence, but no token-promotion claim was inferred.`,
+      source: "site-fetch",
+      tone: "bad"
+    });
+    return;
+  }
+  if (site.status === "coming_soon") {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "unavailable",
+      note: `${domain}: coming-soon classification lacked a verified served-page marker`,
+      provider: "site-fetch"
+    });
+    ctx.emit({
+      phase: "P2 \xB7 Substance",
+      label: "Website check unavailable",
+      detail: `${domain}: a coming-soon label was returned without direct served-page evidence. No liveness conclusion was drawn.`,
+      source: "site-fetch",
+      tone: "neutral"
+    });
+    return;
+  }
+  if (site.status === "access_blocked" || site.status === "unavailable" || site.status === "unreachable") {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "unavailable",
+      note: `${domain}: ${site.detail}; no adverse site-liveness conclusion was drawn`,
+      provider: "site-fetch"
+    });
+    ctx.emit({
+      phase: "P2 \xB7 Substance",
+      label: "Website check unavailable",
+      detail: `${domain}: ${site.detail}. This is a neutral provider gap, not evidence that the website or product is offline.`,
+      source: "site-fetch",
+      tone: "neutral"
+    });
+    return;
+  }
+  ctx.recordCheck?.({
+    id: "project-product-substance",
+    status: "confirmed",
+    note: `${domain}: ${site.detail}`,
+    provider: "site-fetch",
+    sourceCount: 1
+  });
+  if (site.status === "client_rendered") {
     ctx.emit({ phase: "P2 \xB7 Substance", label: "Website live (app)", detail: `${domain} serves a client-rendered app; ${site.detail}.`, source: "site-fetch", tone: "neutral" });
   } else {
     ctx.emit({ phase: "P2 \xB7 Substance", label: "Website live", detail: `${domain} is a live site: ${site.detail}.`, source: "site-fetch", tone: "good" });
   }
+}
+async function collectProjectSiteSubstance(ctx, domain) {
+  if (!domain) return;
+  const site = await checkSiteSubstance(domain).catch(() => null);
+  if (!site) return;
+  applySiteSubstanceOutcome(ctx, domain, site);
 }
 async function coldIntake(ctx, profileAlreadyResolved = false) {
   if (!profileAlreadyResolved) await resolveProfile(ctx);
@@ -12513,6 +13311,111 @@ function projectVerifiedBasicFacts(ctx) {
       note: `${traction.length} concrete traction or usage metric${traction.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
       provider: "basic-facts-web",
       sourceCount: traction.reduce((total, fact) => total + fact.sources.length, 0)
+    });
+  }
+}
+var FOUNDER_DECISION_QUESTION_GROUPS = [
+  {
+    id: "founder-identity-authority",
+    predicates: ["official_identity", "current_role"],
+    answerMode: "all",
+    answeredNote: "identity and current decision-making role are both tied to verified evidence",
+    emptyNote: "the source search completed without verifying both identity and current authority"
+  },
+  {
+    id: "founder-company-relationships",
+    predicates: ["founder", "current_role"],
+    answerMode: "all",
+    answeredNote: "founded companies and current operating relationships are tied to verified evidence",
+    emptyNote: "the source search completed without verifying both founded companies and current operating relationships"
+  },
+  {
+    id: "founder-track-record",
+    predicates: ["track_record", "exit", "prior_role"],
+    answerMode: "any",
+    answeredNote: "at least one prior role, venture outcome, or exit is tied to verified evidence",
+    emptyNote: "the source search completed without a publishable prior role, venture outcome, or exit"
+  },
+  {
+    id: "founder-control-conflicts",
+    predicates: ["control", "conflict_of_interest", "governance"],
+    answerMode: "any",
+    answeredNote: "at least one control, governance, or conflict disclosure is tied to verified evidence",
+    emptyNote: "the source search completed without a publishable control or conflict disclosure; this is a gap, not a clean screen"
+  },
+  {
+    id: "founder-legal-regulatory",
+    predicates: ["legal_regulatory_event"],
+    answerMode: "any",
+    answeredNote: "a material legal or regulatory event is tied to its explicitly named subject and stated status",
+    emptyNote: "the source search completed without a verified event explicitly naming this person; this is not legal clearance"
+  },
+  {
+    id: "founder-asset-distinction",
+    predicates: ["public_security", "official_token"],
+    answerMode: "all",
+    answeredNote: "public-security and official-token questions have separate verified or completed-empty outcomes",
+    emptyNote: "the source search completed separately for public securities and official crypto tokens; no asset was inferred"
+  }
+];
+function collectFounderDecisionQuestionOutcomes(ctx) {
+  if (!ctx.evidence.roles.includes("FOUNDER" /* FOUNDER */)) return;
+  const ledger = ctx.evidence.basicFactQuestionLedger ?? [];
+  if (!ledger.length) return;
+  const verifiedFacts = (ctx.evidence.basicFacts ?? []).filter(
+    (fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")
+  );
+  for (const group of FOUNDER_DECISION_QUESTION_GROUPS) {
+    const entries = group.predicates.map((predicate) => ledger.find((entry) => entry.predicate === predicate)).filter((entry) => Boolean(entry));
+    if (!entries.length) continue;
+    const ledgerAnswered = group.answerMode === "all" ? group.predicates.every((predicate) => entries.some((entry) => entry.predicate === predicate && entry.status === "answered")) : entries.some((entry) => entry.status === "answered");
+    const facts = verifiedFacts.filter((fact) => group.predicates.includes(fact.predicate) && (group.id !== "founder-legal-regulatory" || fact.attributionScope === "direct_subject"));
+    if (group.id === "founder-asset-distinction") {
+      const assetOutcomes = group.predicates.map((predicate) => {
+        const entry = entries.find((candidate) => candidate.predicate === predicate);
+        const fact = facts.find((candidate) => candidate.predicate === predicate);
+        const outcome = fact ? "verified" : entry?.status === "unanswered" && basicFactQuestionOutcome(entry) === "checked_empty" ? "checked_empty" : "unresolved";
+        const label = predicate === "public_security" ? "Public security" : "Official crypto token";
+        return {
+          predicate,
+          outcome,
+          note: outcome === "verified" ? `${label}: ${fact.value} verified` : outcome === "checked_empty" ? `${label}: completed search found no verified asset` : `${label}: unresolved`
+        };
+      });
+      const unresolvedAssets = assetOutcomes.filter((outcome) => outcome.outcome === "unresolved");
+      const sourceCount = facts.reduce((count, fact) => count + fact.sources.length, 0);
+      ctx.recordCheck?.({
+        id: group.id,
+        status: unresolvedAssets.length ? "unavailable" : facts.length ? "confirmed" : "checked-empty",
+        note: `${assetOutcomes.map((outcome) => outcome.note).join("; ")}. ${unresolvedAssets.length ? "Both asset questions must have separate outcomes before this distinction is complete." : "Stock and token were evaluated separately; no asset was inferred from the other category."}`,
+        provider: "basic-facts-question-ledger",
+        sourceCount
+      });
+      continue;
+    }
+    const answered = ledgerAnswered && (group.id !== "founder-legal-regulatory" || facts.length > 0);
+    const completedSearch = entries.every((entry) => entry.providerRuns.some(
+      (run) => run.state === "succeeded" || run.state === "completed_empty"
+    ));
+    if (answered) {
+      const hasAttributedConcern = facts.some(
+        (fact) => fact.predicate === "legal_regulatory_event" || fact.predicate === "conflict_of_interest"
+      );
+      ctx.recordCheck?.({
+        id: group.id,
+        status: hasAttributedConcern ? "finding" : "confirmed",
+        note: group.answeredNote,
+        provider: "basic-facts-question-ledger",
+        sourceCount: facts.reduce((count, fact) => count + fact.sources.length, 0)
+      });
+      continue;
+    }
+    ctx.recordCheck?.({
+      id: group.id,
+      status: completedSearch ? "checked-empty" : "unavailable",
+      note: completedSearch ? group.emptyNote : `${group.emptyNote}; one or more targeted search passes were partial, failed, or unavailable`,
+      provider: "basic-facts-question-ledger",
+      sourceCount: 0
     });
   }
 }
@@ -13111,6 +14014,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       }
       continue;
     }
+    if (a.id === "basic-facts") evidence.roles = providerBackedRoles(evidence);
     const stageStartedAt = startRuntimeStage(`adapter:${a.id}`);
     try {
       const before = attemptTotals();
@@ -13179,6 +14083,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   } else {
     emit({ phase: "P0 \xB7 Routing", label: "Role unresolved", detail: "No deterministic or provider-corroborated role evidence was collected. Model role candidates remain leads; the report will publish INCOMPLETE.", tone: "warn" });
   }
+  collectFounderDecisionQuestionOutcomes(ctx);
   try {
     const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx, {
       transparencySearchExplicitlyEmpty: adapterResults.get("basic-facts")?.explicitEmptyChecks?.includes("project-transparency") === true
@@ -14116,7 +15021,7 @@ var TICKER = /^\$[A-Za-z0-9][A-Za-z0-9._-]{0,19}$/;
 var HTTP_URL = /^https?:\/\//i;
 var DOMAIN = /^([a-z0-9-]+\.)+[a-z]{2,24}(\/\S*)?$/i;
 var NAME_SERVICE = /\.(eth|sol|crypto|nft|bnb|x|lens)$/i;
-var approvedHost = (hostname, root) => hostname === root || hostname.endsWith(`.${root}`);
+var approvedHost = (hostname2, root) => hostname2 === root || hostname2.endsWith(`.${root}`);
 function inputUrl(value) {
   const candidate = HTTP_URL.test(value) ? value : /^(?:[a-z0-9-]+\.)*(?:x\.com|twitter\.com|dexscreener\.com)\//i.test(value) ? `https://${value}` : null;
   if (!candidate) return null;
@@ -14129,9 +15034,9 @@ function inputUrl(value) {
 function resolveInput(raw) {
   const s = raw.trim();
   const parsedUrl = inputUrl(s);
-  const hostname = parsedUrl?.hostname.toLowerCase() ?? "";
-  const isDexUrl = !!parsedUrl && approvedHost(hostname, "dexscreener.com");
-  const isXUrl = !!parsedUrl && (approvedHost(hostname, "x.com") || approvedHost(hostname, "twitter.com"));
+  const hostname2 = parsedUrl?.hostname.toLowerCase() ?? "";
+  const isDexUrl = !!parsedUrl && approvedHost(hostname2, "dexscreener.com");
+  const isXUrl = !!parsedUrl && (approvedHost(hostname2, "x.com") || approvedHost(hostname2, "twitter.com"));
   const dexPath = isDexUrl ? parsedUrl.pathname.match(/^\/([a-z0-9]+)\/([a-zA-Z0-9]+)(?:\/|$)/i) : null;
   if (dexPath && parsedUrl) return { kind: "token", ref: parsedUrl.href, via: "dexscreener" };
   if (TICKER.test(s)) return { kind: "token", ref: s, via: "ticker" };

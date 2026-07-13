@@ -1,4 +1,4 @@
-import { summarizeChecks, type ScanCheck } from "./scanChecklist";
+import { decisionCriticalChecks, summarizeChecks, type ScanCheck } from "./scanChecklist";
 
 /**
  * Coverage below this floor is too thin to describe an assessment as
@@ -61,7 +61,8 @@ export function deriveDecisionReadiness(
   checks: readonly ScanCheck[],
   context: DecisionReadinessContext = {},
 ): DecisionReadiness {
-  const coverage = summarizeChecks(checks);
+  const readinessChecks = decisionCriticalChecks(checks);
+  const coverage = summarizeChecks(readinessChecks);
   const applicable = coverage.inScope;
   const successful = coverage.successful;
   const decisionAxisTotal = typeof context.decisionAxisTotal === "number"

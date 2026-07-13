@@ -310,17 +310,26 @@ export interface TrustGraphScreen {
 
 export type BasicFactPredicate =
   | "official_identity"
+  | "current_role"
+  | "prior_role"
+  | "education"
   | "product"
   | "founder"
   | "executive"
   | "founded"
   | "launched"
+  | "exit"
+  | "track_record"
   | "official_token"
+  | "public_security"
   | "network"
   | "legal_entity"
+  | "legal_regulatory_event"
   | "funding"
   | "investor"
   | "governance"
+  | "control"
+  | "conflict_of_interest"
   | "tokenomics"
   | "vesting"
   | "treasury"
@@ -372,6 +381,14 @@ export interface BasicFact {
   critical: boolean;
   sources: BasicFactSource[];
   qualifier?: string;
+  /** Stable role-aware research question that produced the verified answer. */
+  questionId?: string;
+  /** Preserved only when the fetched passage states the event status verbatim. */
+  eventStatus?: string;
+  /** Exact person, project, or legal entity to which the source attributes an event. */
+  attributedEntity?: string;
+  /** Whether that exact attributed entity is the audited subject or only related context. */
+  attributionScope?: "direct_subject" | "related_entity";
   evidence_origin: "deterministic";
   artifact_verified: true;
   provider: "public-web";
@@ -384,6 +401,12 @@ export interface BasicFactLead {
   predicate: BasicFactPredicate;
   value: string;
   qualifier?: string;
+  /** Stable role-aware research question this candidate attempts to answer. */
+  questionId?: string;
+  /** Model-suggested event status; never survives unless the fetched passage states it. */
+  eventStatus?: string;
+  /** Model-suggested attribution; never survives unless the fetched passage states it. */
+  attributedEntity?: string;
   excerpt: string;
   sourceUrl: string;
   sourceTitle?: string;
@@ -391,6 +414,25 @@ export interface BasicFactLead {
   evidence_origin: "model_lead";
   artifact_verified: false;
   provider: "claude-web-search" | "grok";
+}
+
+export interface BasicFactQuestionLedgerEntry {
+  /** Stable role-aware question identifier, for example `person.current_role`. */
+  questionId: string;
+  audience: "person" | "project" | "investor";
+  batch: "identity" | "track_record" | "structure_risk";
+  predicate: BasicFactPredicate;
+  question: string;
+  critical: boolean;
+  status: "answered" | "unanswered";
+  /** Content-addressed facts or deterministic collector records that answer it. */
+  answerRefs: string[];
+  /** Providers/search passes asked this exact question, without implying success. */
+  providerRuns: Array<{
+    phase: "primary" | "repair";
+    provider: "claude-web-search" | "grok" | "test" | "none";
+    state: "succeeded" | "partial" | "completed_empty" | "failed" | "skipped";
+  }>;
 }
 
 // A person behind the project, dug from the website (web/LinkedIn), the account's
@@ -456,6 +498,8 @@ export interface CollectedEvidence {
   basicFacts?: BasicFact[];
   /** Search-model suggestions retained separately until source verification succeeds. */
   basicFactLeads?: BasicFactLead[];
+  /** Role-specific questions and their verified answer/gap state for this scan. */
+  basicFactQuestionLedger?: BasicFactQuestionLedgerEntry[];
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to
@@ -496,5 +540,6 @@ export function emptyEvidence(handle: string): CollectedEvidence {
     portfolioLeads: [],
     basicFacts: [],
     basicFactLeads: [],
+    basicFactQuestionLedger: [],
   };
 }

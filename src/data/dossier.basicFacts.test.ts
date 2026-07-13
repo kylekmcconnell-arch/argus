@@ -48,6 +48,21 @@ describe("assembleDossier basic facts", () => {
     evidence.roles = [SubjectClass.PROJECT];
     evidence.basicFacts = facts;
     evidence.basicFactLeads = leads;
+    evidence.basicFactQuestionLedger = [{
+      questionId: "project.founder",
+      audience: "project",
+      batch: "identity",
+      predicate: "founder",
+      question: "Who founded the project?",
+      critical: true,
+      status: "answered",
+      answerRefs: ["founder-meow"],
+      providerRuns: [{
+        phase: "primary",
+        provider: "claude-web-search",
+        state: "succeeded",
+      }],
+    }];
 
     const dossier = assembleDossier(evidence, true);
 
@@ -56,5 +71,11 @@ describe("assembleDossier basic facts", () => {
     expect(dossier.basicFacts).not.toBe(facts);
     expect(dossier.basicFacts?.[0]?.sources).not.toBe(facts[0].sources);
     expect(dossier.basicFactLeads?.[0]?.candidateUrls).not.toBe(leads[0].candidateUrls);
+    expect(dossier.basicFactQuestionLedger).toEqual(evidence.basicFactQuestionLedger);
+    expect(dossier.basicFactQuestionLedger).not.toBe(evidence.basicFactQuestionLedger);
+    expect(dossier.basicFactQuestionLedger?.[0]?.answerRefs)
+      .not.toBe(evidence.basicFactQuestionLedger?.[0]?.answerRefs);
+    expect(dossier.basicFactQuestionLedger?.[0]?.providerRuns)
+      .not.toBe(evidence.basicFactQuestionLedger?.[0]?.providerRuns);
   });
 });

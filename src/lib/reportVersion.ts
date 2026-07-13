@@ -132,6 +132,9 @@ export function mapStoredCheckRuns(
         ? Math.max(0, Math.floor(run.source_count))
         : undefined;
       const completedAt = text(run.finished_at) || text(metadata.completedAt) || undefined;
+      const decisionCritical = typeof metadata.decisionCritical === "boolean"
+        ? metadata.decisionCritical
+        : undefined;
       const storedNote = text(metadata.note);
       const failureDetail = text(run.error_detail);
       const failureCode = text(run.error_code);
@@ -144,6 +147,7 @@ export function mapStoredCheckRuns(
           label,
           status,
           ...(note ? { note } : {}),
+          ...(decisionCritical !== undefined ? { decisionCritical } : {}),
           ...(checkId ? { checkId } : {}),
           ...(provider ? { provider } : {}),
           ...(sourceCount != null ? { sourceCount } : {}),

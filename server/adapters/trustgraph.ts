@@ -15,7 +15,11 @@ import {
 } from "../../src/graph/network";
 import { env } from "../config";
 import { recordCall } from "../cost";
-import { LEGACY_PERSON_CHECK_IDS, PERSON_CHECK_IDS } from "../checks";
+import {
+  LEGACY_PERSON_CHECK_IDS,
+  PERSON_CHECK_IDS,
+  PROJECT_DILIGENCE_PERSON_CHECK_IDS,
+} from "../checks";
 import type { AdapterRunResult, CollectContext } from "./types";
 
 const GRAPH_LIMIT = 1_000;
@@ -32,6 +36,7 @@ const HARD_TIE_KEY = /^(?:code:|email:|wallet:|funder:|mint:|token:|ga:|gtm:|ads
 const EXPECTED_PERSON_CHECK_IDS = new Set<string>(PERSON_CHECK_IDS);
 const ACCEPTED_CHECK_CONTRACTS = [
   new Set<string>(LEGACY_PERSON_CHECK_IDS),
+  new Set<string>(PROJECT_DILIGENCE_PERSON_CHECK_IDS),
   EXPECTED_PERSON_CHECK_IDS,
 ] as const;
 

@@ -165,8 +165,8 @@ describe("PersonCheckTracker", () => {
 
     expect(readiness).toMatchObject({
       status: "ready",
-      successful: 12,
-      applicable: 12,
+      successful: 6,
+      applicable: 6,
       coveragePercent: 100,
       unresolved: 0,
     });
@@ -296,7 +296,7 @@ describe("PersonCheckTracker", () => {
     expect(tracker.completeness(["FOUNDER"])).toBe("partial");
   });
 
-  it("lets the frozen off-chain tranche raise a resolved founder to provisional coverage", () => {
+  it("does not mistake completed provider tranches for answered founder questions", () => {
     const tracker = new PersonCheckTracker();
     for (const id of [
       "identity-resolution",
@@ -311,21 +311,18 @@ describe("PersonCheckTracker", () => {
     }
 
     const readiness = deriveDecisionReadiness(tracker.snapshot(["FOUNDER"], { resolvedRealName: true }));
-    expect(readiness).toMatchObject({ status: "provisional", successful: 7, applicable: 9, coveragePercent: 77 });
+    expect(readiness).toMatchObject({ status: "incomplete", successful: 0, applicable: 6, coveragePercent: 0 });
   });
 
-  it("reaches decision-ready coverage only after profile and trust-graph outcomes are frozen too", () => {
+  it("reaches decision-ready founder coverage from investor questions, not optional provider bookkeeping", () => {
     const tracker = new PersonCheckTracker();
     for (const id of [
-      "identity-resolution",
-      "profile-photo-authenticity",
-      "code-footprint-github",
-      "identity-continuity",
-      "affiliations-associates",
-      "news-press",
-      "us-legal-history",
-      "ofac-sanctions-name",
-      "trust-graph-connections",
+      "founder-identity-authority",
+      "founder-company-relationships",
+      "founder-track-record",
+      "founder-control-conflicts",
+      "founder-legal-regulatory",
+      "founder-asset-distinction",
     ] as const) {
       tracker.record({ id, status: "checked-empty", note: `${id} completed`, provider: "test-provider" });
     }
@@ -333,7 +330,9 @@ describe("PersonCheckTracker", () => {
     const checks = tracker.snapshot(["FOUNDER"], { resolvedRealName: true });
     const readiness = deriveDecisionReadiness(checks);
 
-    expect(readiness).toMatchObject({ status: "ready", successful: 9, applicable: 9, coveragePercent: 100 });
+    expect(readiness).toMatchObject({ status: "ready", successful: 6, applicable: 6, coveragePercent: 100 });
     expect(tracker.completeness(["FOUNDER"], { resolvedRealName: true })).toBe("complete");
+    expect(byId(tracker, ["FOUNDER"], "profile-photo-authenticity")?.decisionCritical).toBe(false);
+    expect(byId(tracker, ["FOUNDER"], "trust-graph-connections")?.decisionCritical).toBe(false);
   });
 });

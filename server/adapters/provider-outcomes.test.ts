@@ -33,7 +33,7 @@ describe("keyless adapter attempt accounting", () => {
       cost: getCost(),
     }));
 
-    expect(captured.result?.status).toBe("unreachable");
+    expect(captured.result?.status).toBe("unavailable");
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "site-fetch",
@@ -58,7 +58,7 @@ describe("keyless adapter attempt accounting", () => {
       cost: getCost(),
     }));
 
-    expect(captured.result?.status).toBe("coming_soon");
+    expect(captured.result?.status).toBe("client_rendered");
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "site-fetch", op: "substance", calls: 2, succeeded: 2, partial: 0, failed: 0,

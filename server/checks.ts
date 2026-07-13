@@ -1,4 +1,9 @@
-import { summarizeChecks, type CheckStatus, type ScanCheck } from "../src/lib/scanChecklist";
+import {
+  decisionCriticalChecks,
+  summarizeChecks,
+  type CheckStatus,
+  type ScanCheck,
+} from "../src/lib/scanChecklist";
 import type { CheckObservation, PersonCheckId } from "./adapters/types";
 
 export type ProviderRunState = "executed" | "partial" | "failed" | "unavailable" | "skipped";
@@ -20,7 +25,9 @@ interface CheckDefinition {
   id: PersonCheckId;
   label: string;
   defaultNote: string;
-  role?: "KOL" | "INVESTOR" | "PROJECT";
+  role?: "FOUNDER" | "KOL" | "INVESTOR" | "PROJECT";
+  /** Roles for which this row answers a decision question, not just provider coverage. */
+  criticalFor?: readonly string[];
   requiresResolvedRealName?: boolean;
   requiresPersonRole?: boolean;
 }
@@ -30,19 +37,35 @@ export interface PersonCheckScope {
 }
 
 const CHECKS: readonly CheckDefinition[] = [
-  { id: "identity-resolution", label: "Identity resolution", defaultNote: "no completed server-side identity resolution was recorded" },
+  {
+    id: "identity-resolution",
+    label: "Identity resolution",
+    defaultNote: "no completed server-side identity resolution was recorded",
+    criticalFor: ["KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"],
+  },
   { id: "profile-photo-authenticity", label: "Profile-photo integrity", defaultNote: "server collector did not run a profile-photo integrity screen", requiresPersonRole: true },
   { id: "code-footprint-github", label: "Code footprint (GitHub)", defaultNote: "no completed GitHub resolution was recorded" },
   { id: "identity-continuity", label: "Identity continuity", defaultNote: "no completed handle-history result was recorded" },
-  { id: "affiliations-associates", label: "Affiliations & associates", defaultNote: "no corroborated affiliation collection outcome was recorded" },
-  { id: "promoted-token-performance", label: "Promoted-token performance", defaultNote: "no completed promoted-token market result was recorded", role: "KOL" },
-  { id: "project-token-identity", label: "Canonical project token", defaultNote: "no official token identity was bound to this project account", role: "PROJECT" },
-  { id: "project-product-substance", label: "Product and website substance", defaultNote: "no frozen first-party product or website outcome was recorded", role: "PROJECT" },
-  { id: "project-team-identity", label: "Project team identity", defaultNote: "no first-party team identity outcome was recorded", role: "PROJECT" },
-  { id: "project-backing-partners", label: "Backing and partners", defaultNote: "no source-backed project backing or partnership outcome was recorded", role: "PROJECT" },
-  { id: "project-traction-liveness", label: "Traction and liveness", defaultNote: "no frozen product, market, or activity-liveness outcome was recorded", role: "PROJECT" },
-  { id: "project-transparency", label: "Transparency and disclosures", defaultNote: "no frozen token, audit, docs, or disclosure outcome was recorded", role: "PROJECT" },
-  { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR" },
+  {
+    id: "affiliations-associates",
+    label: "Affiliations & associates",
+    defaultNote: "no corroborated affiliation collection outcome was recorded",
+    criticalFor: ["KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"],
+  },
+  { id: "promoted-token-performance", label: "Promoted-token performance", defaultNote: "no completed promoted-token market result was recorded", role: "KOL", criticalFor: ["KOL"] },
+  { id: "project-token-identity", label: "Canonical project token", defaultNote: "no official token identity was bound to this project account", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "project-product-substance", label: "Product and website substance", defaultNote: "no frozen first-party product or website outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "project-team-identity", label: "Project team identity", defaultNote: "no first-party team identity outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "project-backing-partners", label: "Backing and partners", defaultNote: "no source-backed project backing or partnership outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "project-traction-liveness", label: "Traction and liveness", defaultNote: "no frozen product, market, or activity-liveness outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "project-transparency", label: "Transparency and disclosures", defaultNote: "no frozen token, audit, docs, or disclosure outcome was recorded", role: "PROJECT", criticalFor: ["PROJECT"] },
+  { id: "founder-identity-authority", label: "Verified identity and current authority", defaultNote: "the founder's identity and current decision-making role were not both verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "founder-company-relationships", label: "Companies, co-founders, and current roles", defaultNote: "the founder's material company and co-founder relationships were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "founder-track-record", label: "Track record and outcomes", defaultNote: "prior roles, exits, and venture outcomes were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "founder-control-conflicts", label: "Control and conflicts", defaultNote: "governance control, ownership, and material conflicts were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "founder-legal-regulatory", label: "Legal and regulatory history", defaultNote: "material legal or regulatory events and their attribution were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "founder-asset-distinction", label: "Related assets and security/token distinction", defaultNote: "related public securities, native tokens, and other assets were not clearly distinguished", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR", criticalFor: ["INVESTOR"] },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
   { id: "us-legal-history", label: "US legal history", defaultNote: "server collector did not run a legal-history check", requiresResolvedRealName: true },
   { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check", requiresResolvedRealName: true },
@@ -64,6 +87,27 @@ export const LEGACY_PERSON_CHECK_IDS: readonly PersonCheckId[] = Object.freeze([
   "identity-continuity",
   "affiliations-associates",
   "promoted-token-performance",
+  "vc-portfolio-track-record",
+  "news-press",
+  "us-legal-history",
+  "ofac-sanctions-name",
+  "trust-graph-connections",
+]);
+
+/** Exact checklist frozen after project diligence shipped and before founder questions. */
+export const PROJECT_DILIGENCE_PERSON_CHECK_IDS: readonly PersonCheckId[] = Object.freeze([
+  "identity-resolution",
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "affiliations-associates",
+  "promoted-token-performance",
+  "project-token-identity",
+  "project-product-substance",
+  "project-team-identity",
+  "project-backing-partners",
+  "project-traction-liveness",
+  "project-transparency",
   "vc-portfolio-track-record",
   "news-press",
   "us-legal-history",
@@ -135,12 +179,22 @@ export class PersonCheckTracker {
     const heldRoles = new Set(roles);
     const projectOnly = heldRoles.size === 1 && heldRoles.has("PROJECT");
     return CHECKS.map((definition) => {
+      const decisionCritical = Boolean(
+        definition.criticalFor?.some((criticalRole) => heldRoles.has(criticalRole)),
+      );
       if (definition.role && !heldRoles.has(definition.role)) {
+        const roleNote: Record<NonNullable<CheckDefinition["role"]>, string> = {
+          FOUNDER: "not a founder",
+          KOL: "not a KOL",
+          INVESTOR: "not a fund/investor",
+          PROJECT: "not a project account",
+        };
         return Object.freeze({
           checkId: definition.id,
           label: definition.label,
           status: "not-applicable" as const,
-          note: definition.role === "KOL" ? "not a KOL" : definition.role === "PROJECT" ? "not a project account" : "not a fund/investor",
+          note: roleNote[definition.role],
+          decisionCritical: false,
         });
       }
       if (definition.requiresResolvedRealName && scope.resolvedRealName === false) {
@@ -149,6 +203,7 @@ export class PersonCheckTracker {
           label: definition.label,
           status: "not-applicable" as const,
           note: "requires a resolved real-person name",
+          decisionCritical,
         });
       }
       if (definition.requiresPersonRole && projectOnly) {
@@ -157,6 +212,7 @@ export class PersonCheckTracker {
           label: definition.label,
           status: "not-applicable" as const,
           note: "not applicable to a project-only brand account",
+          decisionCritical: false,
         });
       }
 
@@ -167,6 +223,7 @@ export class PersonCheckTracker {
           label: definition.label,
           status: "unknown" as const,
           note: definition.defaultNote,
+          decisionCritical,
         });
       }
 
@@ -188,6 +245,7 @@ export class PersonCheckTracker {
         label: definition.label,
         status: strongest.status,
         note: notes.slice(0, 3).join(" · ") || strongest.note,
+        decisionCritical,
         provider: providers.join(","),
         ...(sourceCount > 0 ? { sourceCount } : {}),
         ...(completedAt ? { completedAt } : {}),
@@ -196,7 +254,7 @@ export class PersonCheckTracker {
   }
 
   completeness(roles: readonly string[], scope: PersonCheckScope = {}): "complete" | "partial" {
-    const summary = summarizeChecks(this.snapshot(roles, scope));
+    const summary = summarizeChecks(decisionCriticalChecks(this.snapshot(roles, scope)));
     return summary.inScope > 0 && summary.successful === summary.inScope
       ? "complete"
       : "partial";

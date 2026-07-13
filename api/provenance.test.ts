@@ -116,6 +116,7 @@ describe("frozen source artifact provenance", () => {
         checkId: "identity-resolution",
         label: "Identity resolution",
         status: "confirmed",
+        decisionCritical: true,
         provider: "github",
         sourceCount: 1,
       }],
@@ -168,6 +169,13 @@ describe("frozen source artifact provenance", () => {
     });
     expect(Object.keys(evidenceRows[1]).sort()).toEqual(Object.keys(evidenceRows[0]).sort());
 
+    const checkRows = JSON.parse(String((fetchMock.mock.calls[1][1] as RequestInit).body));
+    expect(checkRows).toHaveLength(1);
+    expect(checkRows[0]).toMatchObject({
+      check_id: "identity-resolution",
+      metadata: { decisionCritical: true },
+    });
+
     const axisRows = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body));
     expect(axisRows).toHaveLength(7);
     expect(axisRows).toEqual(expect.arrayContaining([
@@ -186,6 +194,71 @@ describe("frozen source artifact provenance", () => {
         ordinal: 0,
       }),
     ]));
+  });
+
+  it.each([
+    {
+      label: "a scalar counterEligibleAxes value",
+      counterEligibleAxes: "F1_identity_verifiability",
+      verification: "verified",
+    },
+    {
+      label: "an empty counterEligibleAxes array",
+      counterEligibleAxes: [],
+      verification: "verified",
+    },
+    {
+      label: "duplicate counterEligibleAxes",
+      counterEligibleAxes: ["F1_identity_verifiability", "F1_identity_verifiability"],
+      verification: "verified",
+    },
+    {
+      label: "a counter axis outside eligibleAxes",
+      counterEligibleAxes: ["P1_team_and_identity"],
+      verification: "verified",
+    },
+    {
+      label: "counter eligibility on non-verified evidence",
+      counterEligibleAxes: ["F1_identity_verifiability"],
+      verification: "reported",
+    },
+  ])("rejects $label before any provenance write", async ({ counterEligibleAxes, verification }) => {
+    const artifactId = `art_v1_${"a".repeat(64)}`;
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(persistProvenance(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        reportVersionId: "00000000-0000-4000-8000-000000000022",
+        attestationState: "server_collected",
+      },
+      {
+        axisCitationVersion: 1,
+        axisEvidenceCatalog: [{
+          artifactId,
+          contentHash: "a".repeat(64),
+          kind: "axis_evidence",
+          provider: "test-provider",
+          operation: "counter-contract-test",
+          section: "findings",
+          title: "Counter-evidence contract candidate",
+          eligibleAxes: Object.keys(FOUNDER_WEIGHTS),
+          verification,
+          counterEligibleAxes,
+          scope: "direct_subject",
+        }],
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 75,
+          roles: [SubjectClass.FOUNDER],
+          role_reports: [{ role: SubjectClass.FOUNDER, axes: founderAxes(artifactId) }],
+        },
+      },
+      [],
+    )).rejects.toThrow(/counterEligibleAxes|counter eligibility/);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("requires and re-enforces frozen PROJECT strength bands at persistence", async () => {
@@ -1134,6 +1207,11 @@ describe("axis evidence migration contract (static SQL assertions only)", () => 
     new URL("../supabase/migrations/20260712015647_require_scoring_role_set.sql", import.meta.url),
     "utf8",
   );
+  const counterEligibilitySql = readFileSync(
+    new URL("../supabase/migrations/20260713115507_accept_counter_eligible_axes.sql", import.meta.url),
+    "utf8",
+  );
+  const provenanceSource = readFileSync(new URL("./_provenance.ts", import.meta.url), "utf8");
 
   it("declares tenant-safe lineage tables, RLS, and immutable certification", () => {
     expect(sql).toContain("create table public.report_axis_evidence");
@@ -1177,6 +1255,54 @@ describe("axis evidence migration contract (static SQL assertions only)", () => 
     expect(sql).toContain("pg_catalog.string_agg(catalog_artifact::text");
     expect(sql).toContain("verification' in ('unavailable', 'checked_empty')");
     expect(sql).toContain("absence evidence cannot be used as counter-evidence");
+  });
+
+  it("keeps the API and final SQL artifact-key contracts synchronized", () => {
+    const apiKeyBlock = provenanceSource.match(
+      /const CATALOG_ARTIFACT_KEYS = new Set\(\[([\s\S]*?)\]\);/,
+    )?.[1];
+    const sqlKeyBlock = counterEligibilitySql.match(
+      /artifact\.item - array\[([\s\S]*?)\]::text\[\]/,
+    )?.[1];
+    expect(apiKeyBlock).toBeDefined();
+    expect(sqlKeyBlock).toBeDefined();
+
+    const apiKeys = [...(apiKeyBlock ?? "").matchAll(/"([^"]+)"/g)]
+      .map((match) => match[1])
+      .sort();
+    const sqlKeys = [...(sqlKeyBlock ?? "").matchAll(/'([^']+)'/g)]
+      .map((match) => match[1])
+      .sort();
+
+    expect(sqlKeys).toEqual(apiKeys);
+    expect(sqlKeys).toContain("counterEligibleAxes");
+  });
+
+  it("validates and freezes optional counter eligibility identically at the SQL boundary", () => {
+    expect(counterEligibilitySql).toContain(
+      "pg_catalog.jsonb_typeof(artifact.item -> 'counterEligibleAxes') <> 'array'",
+    );
+    expect(counterEligibilitySql).toContain(
+      "pg_catalog.jsonb_array_length(artifact.item -> 'counterEligibleAxes') not between 1 and 80",
+    );
+    expect(counterEligibilitySql).toContain(
+      "pg_catalog.jsonb_array_elements(artifact.item -> 'counterEligibleAxes') counter_axis(item)",
+    );
+    expect(counterEligibilitySql).toContain(
+      "pg_catalog.count(distinct counter_axis.item)",
+    );
+    expect(counterEligibilitySql).toContain(
+      "where not (artifact.item -> 'eligibleAxes' ? counter_axis.item)",
+    );
+    expect(counterEligibilitySql).toContain(
+      "artifact.item ->> 'verification' <> 'verified'",
+    );
+    expect(counterEligibilitySql.match(
+      /case when artifact\.item \? 'counterEligibleAxes'/g,
+    )).toHaveLength(2);
+    expect(counterEligibilitySql).toContain(
+      "'catalogArtifact', normalized.catalog_artifact",
+    );
   });
 
   it("adds a forward database gate requiring substantive support on every scored axis", () => {
