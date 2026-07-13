@@ -704,12 +704,23 @@ async function upsertRows(
   }
 }
 
-export async function persistProvenance(
-  credentials: ServiceCredentials,
+interface BoundProvenanceRows {
+  evidenceItems: JsonRecord[];
+  checkRuns: JsonRecord[];
+  axisEvidence: JsonRecord[];
+}
+
+export interface PreparedProvenanceRows {
+  evidenceItems: Array<Record<string, unknown>>;
+  checkRuns: Array<Record<string, unknown>>;
+  axisEvidence: Array<Record<string, unknown>>;
+}
+
+function collectProvenanceRows(
   context: ProvenanceContext,
   payload: unknown,
   checks: unknown,
-): Promise<void> {
+): BoundProvenanceRows {
   const payloadRecord = asRecord(payload);
   const hasLineageVersion = payloadRecord?.axisCitationVersion !== undefined;
   const report = asRecord(payloadRecord?.report);
@@ -734,18 +745,146 @@ export async function persistProvenance(
   const strict = hasLineageVersion
     ? collectStrictLineage(payloadRecord!, context)
     : null;
-  const evidenceRows = strict?.evidenceRows ?? collectEvidence(payload, context);
-  const checkRows = collectCheckRuns(checks, context);
+  const evidenceItems = strict?.evidenceRows ?? collectEvidence(payload, context);
+  const checkRuns = collectCheckRuns(checks, context);
+  if (Array.isArray(checks) && (checks.length > 250 || checkRuns.length !== checks.length)) {
+    throw new Error("invalid check run materialization: every frozen check must have one unique row");
+  }
+  if (
+    Array.isArray(payloadRecord?.checkRuns)
+    && (!Array.isArray(checks) || payloadRecord.checkRuns.length !== checkRuns.length)
+  ) {
+    throw new Error("invalid check run materialization: payload and child rows differ");
+  }
+  return {
+    evidenceItems,
+    checkRuns,
+    axisEvidence: strict?.axisRows ?? [],
+  };
+}
+
+const unbindProvenanceRow = (row: JsonRecord): JsonRecord => {
+  const {
+    organization_id: _organizationId,
+    report_version_id: _reportVersionId,
+    attestation_state: _attestationState,
+    ...unbound
+  } = row;
+  return unbound;
+};
+
+/**
+ * Validate and normalize the complete child bundle before the first database
+ * write. Tenant/version bindings are deliberately omitted from the returned
+ * rows; the transactional RPC supplies those authoritative values itself.
+ */
+export function prepareProvenanceRows(
+  context: Omit<ProvenanceContext, "reportVersionId">,
+  payload: unknown,
+  checks: unknown,
+): PreparedProvenanceRows {
+  const rows = collectProvenanceRows(
+    { ...context, reportVersionId: "00000000-0000-0000-0000-000000000000" },
+    payload,
+    checks,
+  );
+  return {
+    evidenceItems: rows.evidenceItems.map(unbindProvenanceRow),
+    checkRuns: rows.checkRuns.map(unbindProvenanceRow),
+    axisEvidence: rows.axisEvidence.map(unbindProvenanceRow),
+  };
+}
+
+export interface PersistReportVersionBundleInput {
+  organizationId: string;
+  kind: "person" | "token" | "investigation" | "site";
+  canonicalRef: string;
+  query: string;
+  createdBy: string;
+  payload: unknown;
+  checks: unknown;
+  runId: string | null;
+  attestationState: ProvenanceContext["attestationState"];
+  verdict: string | null;
+  score: number | null;
+  completenessState: "complete" | "partial" | "failed";
+  methodologyVersion: string | null;
+  providerSnapshot: unknown;
+  cost: unknown;
+}
+
+/** Persist the immutable parent and every frozen provenance child atomically. */
+export async function persistReportVersionBundle(
+  credentials: ServiceCredentials,
+  input: PersistReportVersionBundleInput,
+): Promise<string> {
+  // This can throw on malformed scorer lineage. Because it runs before fetch,
+  // no parent report_versions row can be stranded by local validation.
+  const provenance = prepareProvenanceRows(
+    { organizationId: input.organizationId, attestationState: input.attestationState },
+    input.payload,
+    input.checks,
+  );
+  const response = await fetch(`${credentials.url}/rest/v1/rpc/persist_report_version_bundle`, {
+    method: "POST",
+    headers: serviceHeaders(credentials.key),
+    body: JSON.stringify({
+      p_organization_id: input.organizationId,
+      p_kind: input.kind,
+      p_canonical_ref: input.canonicalRef,
+      p_query: input.query,
+      p_created_by: input.createdBy,
+      p_payload: input.payload,
+      p_run_id: input.runId,
+      p_attestation_state: input.attestationState,
+      p_verdict: input.verdict,
+      p_score: input.score,
+      p_completeness_state: input.completenessState,
+      p_methodology_version: input.methodologyVersion,
+      p_provider_snapshot: input.providerSnapshot,
+      p_cost: input.cost,
+      p_evidence_items: provenance.evidenceItems,
+      p_check_runs: provenance.checkRuns,
+      p_axis_evidence: provenance.axisEvidence,
+    }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  if (!response.ok) {
+    throw new Error(`immutable report bundle write failed (${response.status}): ${(await response.text()).slice(0, 240)}`);
+  }
+  const result = await response.json() as unknown;
+  const row = Array.isArray(result) ? asRecord(result[0]) : null;
+  const reportVersionId = typeof row?.report_version_id === "string"
+    ? row.report_version_id
+    : "";
+  if (!reportVersionId) throw new Error("immutable report bundle write returned no id");
+  if (
+    row?.evidence_count !== provenance.evidenceItems.length
+    || row?.check_count !== provenance.checkRuns.length
+    || row?.axis_evidence_count !== provenance.axisEvidence.length
+  ) {
+    throw new Error("immutable report bundle returned inconsistent child counts");
+  }
+  return reportVersionId;
+}
+
+export async function persistProvenance(
+  credentials: ServiceCredentials,
+  context: ProvenanceContext,
+  payload: unknown,
+  checks: unknown,
+): Promise<void> {
+  const rows = collectProvenanceRows(context, payload, checks);
   await Promise.all([
-    upsertRows(credentials, "evidence_items", "report_version_id,evidence_key", evidenceRows),
-    upsertRows(credentials, "check_runs", "report_version_id,check_id", checkRows),
+    upsertRows(credentials, "evidence_items", "report_version_id,evidence_key", rows.evidenceItems),
+    upsertRows(credentials, "check_runs", "report_version_id,check_id", rows.checkRuns),
   ]);
-  if (strict) {
+  if (rows.axisEvidence.length) {
     await upsertRows(
       credentials,
       "report_axis_evidence",
       "report_version_id,role,axis_id,relation,ordinal",
-      strict.axisRows,
+      rows.axisEvidence,
     );
   }
 }

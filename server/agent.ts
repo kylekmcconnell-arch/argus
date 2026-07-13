@@ -436,6 +436,47 @@ const COVERAGE_ONLY_VERIFICATIONS = new Set<AxisEvidenceRecord["verification"]>(
 const isSubstantiveArtifact = (artifact: AxisEvidenceRecord | undefined): artifact is AxisEvidenceRecord =>
   !!artifact && !COVERAGE_ONLY_VERIFICATIONS.has(artifact.verification);
 
+// Coverage-only artifacts are frozen investigator context, not positive proof.
+// Link one to an axis only when the analyst wrote an explicit, semantically
+// related gap. This keeps a clear sanctions screen, a provider miss, or another
+// absence record from silently becoming affirmative support while preserving
+// the artifact itself in the immutable evidence catalog.
+const GAP_MATCH_STOP_WORDS = new Set([
+  "about", "after", "again", "against", "available", "because", "before",
+  "being", "check", "checked", "collection", "could", "coverage", "evidence",
+  "failed", "failure", "found", "from", "incomplete", "material", "missing",
+  "provider", "record", "result", "returned", "screen", "search", "source",
+  "still", "through", "unavailable", "unknown", "unresolved", "without",
+]);
+
+const gapMatchTerms = (value: string): Set<string> => new Set(
+  value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .map((term) => term.trim())
+    .filter((term) => term.length >= 5 && !GAP_MATCH_STOP_WORDS.has(term)),
+);
+
+function coverageArtifactMatchesGap(
+  artifact: AxisEvidenceRecord | undefined,
+  gaps: readonly string[],
+): boolean {
+  if (!artifact || gaps.length === 0) return false;
+  const artifactTerms = gapMatchTerms([
+    artifact.provider,
+    artifact.operation,
+    artifact.section,
+    artifact.title,
+    artifact.excerpt ?? "",
+  ].join(" "));
+  if (artifactTerms.size === 0) return false;
+  return gaps.some((gap) => {
+    const terms = gapMatchTerms(gap);
+    return [...terms].some((term) => artifactTerms.has(term));
+  });
+}
+
 const isVerifiedCounterArtifact = (
   artifact: AxisEvidenceRecord | undefined,
   axis: string,
@@ -797,26 +838,26 @@ export function validateAnalystVerdict(
     if (!coverage) return reject(`coverage-reference-shape:${row.axis}`);
     const supportRefs = [primary, ...additional];
     const coverageRefs = coverage;
-    const evidenceRefs = [...supportRefs, ...coverageRefs];
-    if (new Set(evidenceRefs).size !== evidenceRefs.length) {
+    const allSelectedEvidenceRefs = [...supportRefs, ...coverageRefs];
+    if (new Set(allSelectedEvidenceRefs).size !== allSelectedEvidenceRefs.length) {
       return reject(`duplicate-evidence-reference:${row.axis}`);
     }
     const counterEvidenceRefs = validRefs(row.counterEvidenceRefs, 0, 8);
     const gaps = validGaps(row.gaps);
-    if (evidenceRefs.length > 12 || !counterEvidenceRefs || !gaps) {
+    if (allSelectedEvidenceRefs.length > 12 || !counterEvidenceRefs || !gaps) {
       return reject(`axis-arrays-invalid:${row.axis}`);
     }
-    if (counterEvidenceRefs.some((ref) => evidenceRefs.includes(ref))) {
+    if (counterEvidenceRefs.some((ref) => allSelectedEvidenceRefs.includes(ref))) {
       return reject(`support-counter-overlap:${row.axis}`);
     }
-    const everyRefEligible = [...evidenceRefs, ...counterEvidenceRefs].every((ref) => {
+    const everyRefEligible = [...allSelectedEvidenceRefs, ...counterEvidenceRefs].every((ref) => {
       const artifact = artifacts.get(ref);
       return artifact?.eligibleAxes.includes(row.axis as string);
     });
     if (!everyRefEligible) return reject(`axis-ineligible-reference:${row.axis}`);
     // Coverage records preserve exact gap lineage but cannot satisfy support by
     // themselves. Every scored axis must also cite substantive evidence.
-    if (!evidenceRefs.some((ref) => isSubstantiveArtifact(artifacts.get(ref)))) {
+    if (!supportRefs.some((ref) => isSubstantiveArtifact(artifacts.get(ref)))) {
       return reject(`missing-substantive-support:${row.axis}`);
     }
     if (!supportRefs.every((ref) => isSubstantiveArtifact(artifacts.get(ref)))) {
@@ -830,6 +871,12 @@ export function validateAnalystVerdict(
     if (hasUnavailableCoverage && gaps.length === 0) {
       return reject(`coverage-without-gap:${row.axis}`);
     }
+    const linkedCoverageRefs = coverageRefs.filter((ref) =>
+      coverageArtifactMatchesGap(artifacts.get(ref), gaps));
+    // Unlinked coverage remains in axisEvidenceCatalog for the investigator,
+    // but never enters positive evidenceRefs. Strict persistence therefore sees
+    // absence evidence only when the analyst also supplied a matching gap.
+    const evidenceRefs = [...supportRefs, ...linkedCoverageRefs];
     if (!counterEvidenceRefs.every((ref) => isSubstantiveArtifact(artifacts.get(ref)))) {
       return reject(`non-substantive-counter-reference:${row.axis}`);
     }

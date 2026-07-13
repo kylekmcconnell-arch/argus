@@ -10,11 +10,15 @@ import {
 
 const CRITICAL = new Set<BasicFactPredicate>([
   "official_identity",
+  "current_role",
   "product",
   "founder",
   "executive",
   "official_token",
 ]);
+
+const FOUNDER_ROLE = /\b(?:co[- ]?)?founder\b|\bcreator\b/i;
+const CURRENT_AUTHORITY_ROLE = /\b(?:co[- ]?)?founder\b|\b(?:chief\s+executive\s+officer|ceo|chair(?:man|woman)?|president|owner|managing\s+partner|general\s+partner|director|head|lead)\b/i;
 
 const normalizeValue = (value: string): string => value
   .normalize("NFKC")
@@ -50,6 +54,182 @@ function isOfficialUrl(url: string, host: string | null): boolean {
   } catch {
     return false;
   }
+}
+
+function safePublicUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    if ((url.protocol !== "https:" && url.protocol !== "http:") || url.username || url.password) return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+function containsPhrase(text: string, phrase: string): boolean {
+  const phraseValue = (value: string) => normalizeValue(value).replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  const haystack = ` ${phraseValue(text)} `;
+  const needle = phraseValue(phrase);
+  return Boolean(needle) && haystack.includes(` ${needle} `);
+}
+
+function sourceHost(url: string): string | null {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+const VENTURE_HOST_STOP_WORDS = new Set([
+  "company", "foundation", "global", "group", "holdings", "labs", "limited",
+  "network", "project", "protocol", "technologies", "technology", "the",
+]);
+
+function hostIdentifiesVenture(host: string, projectName: string): boolean {
+  const labels = host.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
+  const tokens = normalizeValue(projectName)
+    .replace(/[^a-z0-9]+/g, " ")
+    .split(/\s+/)
+    .filter((token) => token.length >= 4 && !VENTURE_HOST_STOP_WORDS.has(token));
+  return tokens.some((token) => labels.includes(token));
+}
+
+function verifiedVentureHosts(venture: CollectedEvidence["ventures"][number]): string[] {
+  const hosts: string[] = [];
+  const domain = safePublicUrl(venture.domain?.includes("://") ? venture.domain : venture.domain ? `https://${venture.domain}` : null);
+  const domainHost = domain ? sourceHost(domain) : null;
+  if (domainHost) hosts.push(domainHost);
+  const evidenceUrl = safePublicUrl(venture.evidence_url);
+  const evidenceHost = evidenceUrl ? sourceHost(evidenceUrl) : null;
+  if (evidenceHost && hostIdentifiesVenture(evidenceHost, venture.project_name)) hosts.push(evidenceHost);
+  return [...new Set(hosts)];
+}
+
+function sourceMatchesVenture(
+  candidate: BasicFactSource,
+  venture: CollectedEvidence["ventures"][number],
+): boolean {
+  const host = sourceHost(candidate.url);
+  if (!host) return false;
+  if (venture.domain) {
+    const ventureUrl = safePublicUrl(venture.domain.includes("://") ? venture.domain : `https://${venture.domain}`);
+    const ventureHost = ventureUrl ? sourceHost(ventureUrl) : null;
+    if (ventureHost && (host === ventureHost || host.endsWith(`.${ventureHost}`))) return true;
+  }
+  return verifiedVentureHosts(venture).some((ventureHost) =>
+    host === ventureHost || host.endsWith(`.${ventureHost}`));
+}
+
+const MATERIAL_AUTHORITY_ROLES: Array<{ claimed: RegExp; supportedPattern: string }> = [
+  { claimed: /\b(?:co[- ]?)?founder\b|\bcreator\b/i, supportedPattern: "(?:co[- ]?founder|founder|creator)" },
+  { claimed: /\b(?:chief\s+executive\s+officer|ceo)\b/i, supportedPattern: "(?:chief\\s+executive\\s+officer|ceo)" },
+  { claimed: /\bchair(?:man|woman|person)?\b/i, supportedPattern: "chair(?:man|woman|person)?" },
+  { claimed: /\bpresident\b/i, supportedPattern: "president" },
+  { claimed: /\bowner\b/i, supportedPattern: "owner" },
+  { claimed: /\bmanaging\s+partner\b/i, supportedPattern: "managing\\s+partner" },
+  { claimed: /\bgeneral\s+partner\b/i, supportedPattern: "general\\s+partner" },
+  { claimed: /\bdirector\b/i, supportedPattern: "director" },
+  { claimed: /\bhead\b/i, supportedPattern: "head" },
+  { claimed: /\blead\b/i, supportedPattern: "lead" },
+];
+
+function passageBindsSpecificAuthorityRole(
+  passage: string,
+  aliases: readonly string[],
+  venture: CollectedEvidence["ventures"][number],
+  rolePattern: string,
+): boolean {
+  const venturePattern = escapePattern(venture.project_name.trim()).replace(/\s+/g, "\\s+");
+  const anyAuthorityRole = "(?:co[- ]?founder|founder|creator|chief\\s+executive\\s+officer|ceo|chair(?:man|woman|person)?|president|owner|managing\\s+partner|general\\s+partner|director|head|lead)";
+  const roleConnector = `(?:(?:${anyAuthorityRole})\\s*(?:,|&|and)\\s*|(?:has\\s+served|serves?|served|serving)\\s+(?:as\\s+)?(?:(?:the|a|an|our)\\s+)?)`;
+  return aliases.some((alias) => {
+    const aliasPattern = escapePattern(alias).replace(/\s+/g, "\\s+");
+    const subjectFirst = new RegExp(
+      `\\b${aliasPattern}\\b\\s*(?:,\\s*)?`
+      + `(?:(?:is|was|remains|became|serves?|served|serving|has\\s+served|currently\\s+serves?)\\s+(?:as\\s+)?(?:(?:the|a|an|our)\\s+)?)?`
+      + `(?:${venturePattern}\\s+)?(?:${roleConnector}){0,4}\\b${rolePattern}\\b`,
+      "i",
+    );
+    const titleFirst = new RegExp(
+      `\\b${rolePattern}\\s+(?:of|at)\\s+${venturePattern}\\s*,?\\s*${aliasPattern}\\b`,
+      "i",
+    );
+    const foundedBy = /founder|creator/.test(rolePattern)
+      && new RegExp(`\\b${venturePattern}\\s+(?:was\\s+)?(?:co[- ]?founded|founded|created)\\s+by\\s+${aliasPattern}\\b`, "i").test(passage);
+    return subjectFirst.test(passage) || titleFirst.test(passage) || foundedBy;
+  });
+}
+
+function currentRoleIsFullySupported(
+  sources: readonly BasicFactSource[],
+  venture: CollectedEvidence["ventures"][number],
+  aliases: readonly string[],
+): boolean {
+  const claimedRoles = MATERIAL_AUTHORITY_ROLES.filter(({ claimed }) => claimed.test(venture.role));
+  if (!claimedRoles.length) return false;
+  return claimedRoles.every(({ supportedPattern }) => sources.some((candidate) => {
+    const sourceScopeMatches = sourceMatchesVenture(candidate, venture);
+    return boundedSourcePassages(candidate.excerpt).some((passage) =>
+      passageBindsSpecificAuthorityRole(passage, aliases, venture, supportedPattern)
+      && (containsPhrase(passage, venture.project_name) || sourceScopeMatches));
+  }));
+}
+
+function sourceMentionsSubject(candidate: BasicFactSource, aliases: readonly string[]): boolean {
+  return aliases.some((alias) => containsPhrase(candidate.excerpt, alias));
+}
+
+function escapePattern(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function boundedSourcePassages(value: string): string[] {
+  return value
+    .split(/(?<=[.!?;])\s+|[\n|]+/)
+    .map((passage) => passage.trim())
+    .filter(Boolean);
+}
+
+function passageBindsSubjectRole(
+  passage: string,
+  aliases: readonly string[],
+  venture: CollectedEvidence["ventures"][number],
+  predicate: "founder" | "current_role",
+): boolean {
+  const venturePattern = escapePattern(venture.project_name.trim()).replace(/\s+/g, "\\s+");
+  return aliases.some((alias) => {
+    const aliasPattern = escapePattern(alias).replace(/\s+/g, "\\s+");
+    if (predicate === "founder") {
+      const founderRole = "(?:co[- ]?founder|founder|creator)";
+      return new RegExp(
+        `(?:\\b${aliasPattern}\\b\\s*(?:,\\s*)?(?:(?:is|was|remains|became|serves?|served|serving|has\\s+served)\\s+(?:as\\s+)?(?:(?:the|a|an|our)\\s+)?)?(?:${venturePattern}\\s+)?${founderRole}\\b)`
+        + `|(?:\\b${aliasPattern}\\b\\s+(?:co[- ]?founded|founded|created)\\s+(?:${venturePattern})\\b)`
+        + `|(?:\\b(?:${venturePattern}\\s+)?(?:co[- ]?founded|founded|created)\\s+by\\s+${aliasPattern}\\b)`,
+        "i",
+      ).test(passage);
+    }
+    const authorityRole = "(?:co[- ]?founder|founder|chief\\s+executive\\s+officer|ceo|chair(?:man|woman|person)?|president|owner|managing\\s+partner|general\\s+partner|director|head|lead)";
+    return new RegExp(
+      `(?:\\b${aliasPattern}\\b\\s*(?:,\\s*)?(?:(?:is|was|remains|became|serves?|served|serving|has\\s+served|currently\\s+serves?)\\s+(?:as\\s+)?(?:(?:the|a|an|our)\\s+)?)?(?:${venturePattern}\\s+)?${authorityRole}\\b)`
+      + `|(?:\\b${authorityRole}\\s+(?:of|at)\\s+${venturePattern}\\s*,?\\s*${aliasPattern}\\b)`,
+      "i",
+    ).test(passage);
+  });
+}
+
+function sourceSupportsRelationship(
+  candidate: BasicFactSource,
+  venture: CollectedEvidence["ventures"][number],
+  aliases: readonly string[],
+  predicate: "founder" | "current_role",
+): boolean {
+  if (!sourceMentionsSubject(candidate, aliases)) return false;
+  const sourceScopeMatches = sourceMatchesVenture(candidate, venture);
+  return boundedSourcePassages(candidate.excerpt).some((passage) =>
+    passageBindsSubjectRole(passage, aliases, venture, predicate)
+    && (containsPhrase(passage, venture.project_name) || sourceScopeMatches));
 }
 
 function source(input: {
@@ -92,6 +272,89 @@ function makeFact(
   };
 }
 
+function profileSource(evidence: CollectedEvidence, capturedAt: string): BasicFactSource {
+  const handle = evidence.profile.handle.replace(/^@/, "");
+  return source({
+    url: `https://x.com/${encodeURIComponent(handle)}`,
+    title: "Official X profile",
+    excerpt: evidence.profile.bio.trim()
+      ? `${evidence.profile.display_name} (${evidence.profile.handle}): ${evidence.profile.bio.trim()}`
+      : `${evidence.profile.display_name} (${evidence.profile.handle}) is the provider-resolved identity for this account.`,
+    capturedAt,
+    provider: "twitterapi",
+    sourceClass: "official_subject",
+  });
+}
+
+function githubIdentitySource(evidence: CollectedEvidence, capturedAt: string): BasicFactSource | null {
+  if (!/links?\s+back\s+to\s+(?:this\s+)?X\s+handle/i.test(evidence.profile.identity_note)) return null;
+  const login = evidence.profile.identity_note.match(/GitHub\s+github\.com\/([A-Za-z0-9_.-]+)/i)?.[1];
+  if (!login) return null;
+  return source({
+    url: `https://github.com/${login}`,
+    title: "Identity-bound GitHub profile",
+    excerpt: evidence.profile.identity_note,
+    capturedAt,
+    provider: "github",
+    sourceClass: "other_public",
+  });
+}
+
+function profileSupportsVenture(
+  evidence: CollectedEvidence,
+  venture: CollectedEvidence["ventures"][number],
+  predicate: "founder" | "current_role",
+): boolean {
+  const clauses = evidence.profile.bio.split(/[.;|\n]+/).filter((clause) =>
+    containsPhrase(clause, venture.project_name)
+    || Boolean(venture.x_handle && containsPhrase(clause, venture.x_handle)));
+  return clauses.some((clause) => predicate === "founder"
+    ? FOUNDER_ROLE.test(clause)
+    : CURRENT_AUTHORITY_ROLE.test(clause));
+}
+
+function mergeProjectedFact(evidence: CollectedEvidence, fact: BasicFact): BasicFact {
+  const existing = evidence.basicFacts ?? (evidence.basicFacts = []);
+  const same = existing.find((candidate) =>
+    candidate.predicate === fact.predicate
+    && candidate.normalizedValue === fact.normalizedValue,
+  );
+  if (!same) {
+    existing.push(fact);
+    return fact;
+  }
+  const known = new Set(same.sources.map((candidate) => candidate.url));
+  same.sources.push(...fact.sources.filter((candidate) => !known.has(candidate.url)));
+  // A deterministic projection may add support, but it cannot erase a frozen
+  // conflict that was established by competing values or sources.
+  if (same.status !== "conflicted") same.status = "verified";
+  return same;
+}
+
+function reconcileQuestionLedger(evidence: CollectedEvidence, facts: readonly BasicFact[]): void {
+  const singletonPredicates = new Set<BasicFactPredicate>(["official_identity"]);
+  const projectedByPredicate = new Map<BasicFactPredicate, BasicFact[]>();
+  for (const fact of facts) {
+    if (fact.status !== "verified" && fact.status !== "corroborated") continue;
+    const rows = projectedByPredicate.get(fact.predicate) ?? [];
+    rows.push(fact);
+    projectedByPredicate.set(fact.predicate, rows);
+  }
+  for (const entry of evidence.basicFactQuestionLedger ?? []) {
+    const answers = projectedByPredicate.get(entry.predicate) ?? [];
+    if (!answers.length) continue;
+    if (singletonPredicates.has(entry.predicate)) {
+      const allPredicateFacts = (evidence.basicFacts ?? []).filter((fact) => fact.predicate === entry.predicate);
+      const acceptedValues = new Set(allPredicateFacts
+        .filter((fact) => fact.status === "verified" || fact.status === "corroborated")
+        .map((fact) => fact.normalizedValue));
+      if (allPredicateFacts.some((fact) => fact.status === "conflicted") || acceptedValues.size !== 1) continue;
+    }
+    entry.answerRefs = [...new Set([...entry.answerRefs, ...answers.map((fact) => fact.factId)])];
+    entry.status = "answered";
+  }
+}
+
 function formatUsd(value: number): string {
   const absolute = Math.abs(value);
   if (absolute >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(absolute >= 10_000_000_000 ? 0 : 1)}B`;
@@ -107,33 +370,95 @@ function formatUsd(value: number): string {
  * No model lead is promoted here.
  */
 export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): void {
-  if (!evidence.roles.includes(SubjectClass.PROJECT)) return;
-
   const projected: BasicFact[] = [];
   const capturedAt = evidence.profile.profile_captured_at
     ?? evidence.projectToken?.capturedAt
     ?? new Date().toISOString();
 
-  if (
-    evidence.profile.profile_collection_state === "resolved"
+  const resolvedProviderProfile = evidence.profile.profile_collection_state === "resolved"
     && evidence.profile.profile_provider === "twitterapi"
-    && evidence.profile.display_name.trim()
+    && evidence.profile.display_name.trim();
+  const officialProfileSource = resolvedProviderProfile ? profileSource(evidence, capturedAt) : null;
+
+  if (officialProfileSource && evidence.roles.includes(SubjectClass.PROJECT)) {
+    projected.push(makeFact(
+      evidence,
+      "official_identity",
+      evidence.profile.display_name.trim(),
+      [officialProfileSource],
+      evidence.profile.handle,
+    ));
+  }
+
+  if (
+    officialProfileSource
+    && evidence.roles.includes(SubjectClass.FOUNDER)
+    && evidence.profile.identity_confidence !== "SuspectedImpersonation"
   ) {
-    const handle = evidence.profile.handle.replace(/^@/, "");
-    const url = `https://x.com/${encodeURIComponent(handle)}`;
-    const excerpt = `${evidence.profile.display_name} (${evidence.profile.handle}) is the provider-resolved identity for this official project account${evidence.profile.website ? ` and links to ${evidence.profile.website}` : ""}.`;
-    projected.push(makeFact(evidence, "official_identity", evidence.profile.display_name.trim(), [source({
-      url,
-      title: "Official X profile",
-      excerpt,
-      capturedAt,
-      provider: "twitterapi",
-      sourceClass: "official_subject",
-    })], evidence.profile.handle));
+    const existingVerifiedSources = (evidence.basicFacts ?? [])
+      .filter((fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated"))
+      .flatMap((fact) => fact.sources)
+      .filter((candidate) =>
+        candidate.relation === "supports"
+        && candidate.provider !== "twitterapi"
+        && candidate.url !== officialProfileSource.url);
+    const aliases = [...new Set([
+      evidence.profile.display_name.trim(),
+      evidence.profile.resolved_name?.trim() ?? "",
+    ].filter(Boolean))];
+    const namedFrozenSource = existingVerifiedSources.find((candidate) => sourceMentionsSubject(candidate, aliases));
+    const githubSource = githubIdentitySource(evidence, capturedAt);
+    const identityAnchor = namedFrozenSource ?? githubSource;
+    if (identityAnchor) {
+      projected.push(makeFact(
+        evidence,
+        "official_identity",
+        evidence.profile.resolved_name?.trim() || evidence.profile.display_name.trim(),
+        [officialProfileSource, identityAnchor],
+        evidence.profile.handle,
+      ));
+    }
+
+    const personVentures = evidence.ventures.filter((venture) =>
+      venture.artifact_verified === true
+      && venture.evidence_origin !== "model_lead"
+      && venture.project_name.trim()
+      && venture.role.trim());
+    for (const venture of personVentures) {
+      const founderSources = existingVerifiedSources.filter((candidate) =>
+        sourceSupportsRelationship(candidate, venture, aliases, "founder"));
+      if (FOUNDER_ROLE.test(venture.role) && founderSources.length) {
+        const sources = [...founderSources];
+        if (officialProfileSource && profileSupportsVenture(evidence, venture, "founder")) sources.push(officialProfileSource);
+        projected.push(makeFact(
+          evidence,
+          "founder",
+          venture.project_name.trim(),
+          [...new Map(sources.map((candidate) => [candidate.url, candidate])).values()],
+        ));
+      }
+
+      const currentSources = existingVerifiedSources.filter((candidate) =>
+        sourceSupportsRelationship(candidate, venture, aliases, "current_role"));
+      if (
+        CURRENT_AUTHORITY_ROLE.test(venture.role)
+        && currentSources.length
+        && currentRoleIsFullySupported(currentSources, venture, aliases)
+      ) {
+        const sources = [...currentSources];
+        if (officialProfileSource && profileSupportsVenture(evidence, venture, "current_role")) sources.push(officialProfileSource);
+        projected.push(makeFact(
+          evidence,
+          "current_role",
+          `${venture.role.trim()} at ${venture.project_name.trim()}`,
+          [...new Map(sources.map((candidate) => [candidate.url, candidate])).values()],
+        ));
+      }
+    }
   }
 
   const teamKeys = new Set<string>();
-  for (const member of evidence.webTeam ?? []) {
+  for (const member of evidence.roles.includes(SubjectClass.PROJECT) ? evidence.webTeam ?? [] : []) {
     if (
       member.artifact_verified !== true
       || member.evidence_origin !== "deterministic"
@@ -164,7 +489,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     })], member.role));
   }
 
-  const token = evidence.projectToken;
+  const token = evidence.roles.includes(SubjectClass.PROJECT) ? evidence.projectToken : undefined;
   if (token?.verified) {
     const tokenExcerpt = `${token.name} (${token.symbol}) is the canonical project token on ${token.chain}; its identity matched the project's ${token.verification === "official_x" ? "official X account" : "official domain"}.`;
     const tokenSource = source({
@@ -188,7 +513,9 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     }
   }
 
-  const github = evidence.profile.identity_note.match(/GitHub\s+github\.com\/([A-Za-z0-9_.-]+)/i)?.[1];
+  const github = evidence.roles.includes(SubjectClass.PROJECT)
+    ? evidence.profile.identity_note.match(/GitHub\s+github\.com\/([A-Za-z0-9_.-]+)/i)?.[1]
+    : undefined;
   if (github) {
     const url = `https://github.com/${github}`;
     projected.push(makeFact(evidence, "repository", `github.com/${github}`, [source({
@@ -201,18 +528,6 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     })]));
   }
 
-  const existing = evidence.basicFacts ?? (evidence.basicFacts = []);
-  for (const fact of projected) {
-    const same = existing.find((candidate) =>
-      candidate.predicate === fact.predicate
-      && candidate.normalizedValue === fact.normalizedValue,
-    );
-    if (same) {
-      const known = new Set(same.sources.map((candidate) => candidate.url));
-      same.sources.push(...fact.sources.filter((candidate) => !known.has(candidate.url)));
-      if (fact.status === "verified") same.status = "verified";
-      continue;
-    }
-    existing.push(fact);
-  }
+  const materialized = projected.map((fact) => mergeProjectedFact(evidence, fact));
+  reconcileQuestionLedger(evidence, materialized);
 }

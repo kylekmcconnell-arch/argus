@@ -1,10 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-const { issuePanelCostToken, recordProviderUsageBatch, activateReportVersionWithAuthoritativeGraph } = vi.hoisted(() => ({
+const {
+  issuePanelCostToken,
+  recordProviderUsageBatch,
+  activateReportVersionWithAuthoritativeGraph,
+  persistReportVersionBundle,
+} = vi.hoisted(() => ({
   issuePanelCostToken: vi.fn(),
   recordProviderUsageBatch: vi.fn(),
   activateReportVersionWithAuthoritativeGraph: vi.fn(),
+  persistReportVersionBundle: vi.fn(),
 }));
 
 vi.mock("./_cache.js", () => ({ issuePanelCostToken, recordProviderUsageBatch }));
@@ -32,13 +38,13 @@ vi.mock("./_auth.js", () => ({
 
 vi.mock("./_provenance.js", () => ({
   activateReportVersion: vi.fn(),
-  persistProvenance: vi.fn(),
+  persistReportVersionBundle,
 }));
 
 vi.mock("./_graph.js", () => ({ activateReportVersionWithAuthoritativeGraph }));
 
 import { consumeInvestigationQuota, requireArgusAuth, serviceCredentials } from "./_auth.js";
-import { activateReportVersion, persistProvenance } from "./_provenance.js";
+import { activateReportVersion } from "./_provenance.js";
 import { resolveInput, runAudit } from "./_collector.js";
 import handler, { config } from "./audit";
 import {
@@ -82,6 +88,7 @@ describe("person audit input guard", () => {
     issuePanelCostToken.mockReturnValue("signed-panel-token");
     recordProviderUsageBatch.mockResolvedValue(undefined);
     activateReportVersionWithAuthoritativeGraph.mockResolvedValue(false);
+    persistReportVersionBundle.mockReset();
   });
 
   afterEach(() => {
@@ -173,18 +180,15 @@ describe("person audit input guard", () => {
         ],
       },
     } as never);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      JSON.stringify([{ report_version_id: reportVersionId }]),
-      { status: 200, headers: { "content-type": "application/json" } },
-    )));
+    persistReportVersionBundle.mockResolvedValue(reportVersionId);
     const { res, captured } = response();
 
     await handler(request("argus"), res);
 
-    const versionWrite = vi.mocked(fetch).mock.calls[0]?.[1];
-    expect(JSON.parse(String(versionWrite?.body))).toMatchObject({
-      p_completeness_state: "partial",
-    });
+    expect(persistReportVersionBundle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ completenessState: "partial" }),
+    );
 
     expect(recordProviderUsageBatch).toHaveBeenCalledWith(
       AUTH_ORGANIZATION_ID,
@@ -195,10 +199,10 @@ describe("person audit input guard", () => {
         { provider: "claude", op: "analysis", calls: 1, usd: 0.01, status: "succeeded" },
       ],
     );
-    expect(recordProviderUsageBatch.mock.invocationCallOrder[0]).toBeLessThan(
-      vi.mocked(persistProvenance).mock.invocationCallOrder[0],
+    expect(persistReportVersionBundle.mock.invocationCallOrder[0]).toBeLessThan(
+      recordProviderUsageBatch.mock.invocationCallOrder[0],
     );
-    expect(vi.mocked(persistProvenance).mock.invocationCallOrder[0]).toBeLessThan(
+    expect(recordProviderUsageBatch.mock.invocationCallOrder[0]).toBeLessThan(
       activateReportVersionWithAuthoritativeGraph.mock.invocationCallOrder[0],
     );
     expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledWith(
@@ -253,22 +257,44 @@ describe("person audit input guard", () => {
       cost: { schemaVersion: 1, calls: [{ provider: "grok", op: "live-search", calls: 1, usd: 0.1 }] },
     } as never);
     recordProviderUsageBatch.mockRejectedValueOnce(new Error("provider usage batch attribution failed (503)"));
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      JSON.stringify([{ report_version_id: "00000000-0000-4000-8000-000000000302" }]),
-      { status: 200, headers: { "content-type": "application/json" } },
-    )));
+    persistReportVersionBundle.mockResolvedValue("00000000-0000-4000-8000-000000000302");
     const { res, captured } = response();
 
     await handler(request("argus"), res);
 
     expect(recordProviderUsageBatch).toHaveBeenCalledOnce();
-    expect(persistProvenance).not.toHaveBeenCalled();
+    expect(persistReportVersionBundle).toHaveBeenCalledOnce();
     expect(activateReportVersionWithAuthoritativeGraph).not.toHaveBeenCalled();
     expect(activateReportVersion).not.toHaveBeenCalled();
     expect(issuePanelCostToken).not.toHaveBeenCalled();
     const stream = captured.chunks.join("");
     expect(stream).toContain("event: persistence\n");
     const done = JSON.parse(stream.match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null });
+  });
+
+  it("emits no immutable binding when the atomic parent-and-provenance bundle fails", async () => {
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
+    vi.mocked(runAudit).mockResolvedValue({
+      live: true,
+      handle: "@argus",
+      report: { audit_id: "audit-run-lineage-failure", composite_verdict: "PASS", governing_score: 81 },
+      cost: { schemaVersion: 1, calls: [{ provider: "grok", op: "live-search", calls: 1, usd: 0.1 }] },
+    } as never);
+    persistReportVersionBundle.mockRejectedValueOnce(
+      new Error("invalid axis evidence lineage: F1_identity_verifiability cites absence evidence without a gap"),
+    );
+    const { res, captured } = response();
+
+    await handler(request("argus"), res);
+
+    expect(persistReportVersionBundle).toHaveBeenCalledOnce();
+    expect(recordProviderUsageBatch).not.toHaveBeenCalled();
+    expect(activateReportVersionWithAuthoritativeGraph).not.toHaveBeenCalled();
+    expect(activateReportVersion).not.toHaveBeenCalled();
+    expect(issuePanelCostToken).not.toHaveBeenCalled();
+    const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
     expect(done.persistence).toEqual({ state: "failed", reportVersionId: null });
   });
 
@@ -281,16 +307,12 @@ describe("person audit input guard", () => {
       report: { audit_id: "audit-run-missing-ledger", composite_verdict: "PASS", governing_score: 81 },
       cost: { calls: [] },
     } as never);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      JSON.stringify([{ report_version_id: "00000000-0000-4000-8000-000000000303" }]),
-      { status: 200, headers: { "content-type": "application/json" } },
-    )));
     const { res, captured } = response();
 
     await handler(request("argus"), res);
 
     expect(recordProviderUsageBatch).not.toHaveBeenCalled();
-    expect(persistProvenance).not.toHaveBeenCalled();
+    expect(persistReportVersionBundle).not.toHaveBeenCalled();
     expect(activateReportVersionWithAuthoritativeGraph).not.toHaveBeenCalled();
     expect(activateReportVersion).not.toHaveBeenCalled();
     expect(issuePanelCostToken).not.toHaveBeenCalled();
@@ -309,18 +331,16 @@ describe("person audit input guard", () => {
       report: { audit_id: "audit-run-observed-empty", composite_verdict: "INCOMPLETE", governing_score: null },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      JSON.stringify([{ report_version_id: reportVersionId }]),
-      { status: 200, headers: { "content-type": "application/json" } },
-    )));
+    persistReportVersionBundle.mockResolvedValue(reportVersionId);
     const { res, captured } = response();
 
     await handler(request("argus"), res);
 
-    const versionWrite = vi.mocked(fetch).mock.calls[0]?.[1];
-    expect(JSON.parse(String(versionWrite?.body))).toMatchObject({ p_completeness_state: "partial" });
+    expect(persistReportVersionBundle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ completenessState: "partial" }),
+    );
     expect(recordProviderUsageBatch).not.toHaveBeenCalled();
-    expect(persistProvenance).toHaveBeenCalledOnce();
     expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledWith(
       expect.anything(),
       expect.objectContaining({ completeness: "partial" }),
@@ -361,16 +381,12 @@ describe("person audit input guard", () => {
       },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      JSON.stringify([{ report_version_id: reportVersionId }]),
-      { status: 200, headers: { "content-type": "application/json" } },
-    )));
+    persistReportVersionBundle.mockResolvedValue(reportVersionId);
     const { res, captured } = response();
 
     await handler(request("world_xyz"), res);
 
-    expect(fetch).toHaveBeenCalledOnce();
-    expect(persistProvenance).toHaveBeenCalledOnce();
+    expect(persistReportVersionBundle).toHaveBeenCalledOnce();
     expect(activateReportVersionWithAuthoritativeGraph).not.toHaveBeenCalled();
     expect(activateReportVersion).not.toHaveBeenCalled();
     expect(issuePanelCostToken).toHaveBeenCalledWith(AUTH_ORGANIZATION_ID, reportVersionId);
@@ -398,10 +414,7 @@ describe("person audit input guard", () => {
       },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      JSON.stringify([{ report_version_id: reportVersionId }]),
-      { status: 200, headers: { "content-type": "application/json" } },
-    )));
+    persistReportVersionBundle.mockResolvedValue(reportVersionId);
     const { res } = response();
 
     await handler(request("partial_founder"), res);
@@ -428,18 +441,15 @@ describe("person audit input guard", () => {
       },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      JSON.stringify([{ report_version_id: reportVersionId }]),
-      { status: 200, headers: { "content-type": "application/json" } },
-    )));
+    persistReportVersionBundle.mockResolvedValue(reportVersionId);
     const { res } = response();
 
     await handler(request("argus"), res);
 
-    const versionWrite = vi.mocked(fetch).mock.calls[0]?.[1];
-    expect(JSON.parse(String(versionWrite?.body))).toMatchObject({
-      p_methodology_version: "argus-person-v5-project-strength-bands",
-    });
+    expect(persistReportVersionBundle).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ methodologyVersion: "argus-person-v5-project-strength-bands" }),
+    );
 
     expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledWith(
       expect.anything(),
@@ -451,7 +461,7 @@ describe("person audit input guard", () => {
         completeness: "complete",
       }),
     );
-    expect(vi.mocked(persistProvenance).mock.invocationCallOrder[0]).toBeLessThan(
+    expect(persistReportVersionBundle.mock.invocationCallOrder[0]).toBeLessThan(
       activateReportVersionWithAuthoritativeGraph.mock.invocationCallOrder[0],
     );
     expect(activateReportVersion).not.toHaveBeenCalled();
@@ -471,15 +481,12 @@ describe("person audit input guard", () => {
       graph: { nodes: [{ type: "Person", key: "@argus", subject: true }], edges: [] },
       cost: { schemaVersion: 1, calls: [] },
     } as never);
-    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(
-      JSON.stringify([{ report_version_id: reportVersionId }]),
-      { status: 200, headers: { "content-type": "application/json" } },
-    )));
+    persistReportVersionBundle.mockResolvedValue(reportVersionId);
     const { res, captured } = response();
 
     await handler(request("argus"), res);
 
-    expect(persistProvenance).toHaveBeenCalledOnce();
+    expect(persistReportVersionBundle).toHaveBeenCalledOnce();
     expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledOnce();
     expect(activateReportVersion).not.toHaveBeenCalled();
     expect(issuePanelCostToken).not.toHaveBeenCalled();

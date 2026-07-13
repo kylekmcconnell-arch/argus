@@ -65,7 +65,8 @@ targets. A target is not described as shipped until a production report proves i
 - **Implemented and regression-tested:** immutable versions, organization-scoped
   access, source fetch attribution, verified-passage promotion, role-aware scoring,
   direct-versus-related legal attribution, stock-versus-token separation, and
-  provider-state truth.
+  provider-state truth. The report parent, evidence rows, check runs, and axis
+  links now persist in one transaction with exact replay-content equality.
 - **Release validation:** the named Brian Armstrong, Hayden Adams, Sam
   Bankman-Fried, and Jupiter canaries; live persistence and reopen; frozen-evidence
   answers; and first-viewport adviser UX.
@@ -105,6 +106,12 @@ record to the investigated identity.
 A batched search that returns no result is unresolved, not `checked_empty` for
 every question in the batch. Only a question-specific completed screen can create
 a checked-empty outcome. Access failures remain unavailable or partial.
+
+Coverage-only and absence artifacts stay in the immutable evidence catalog for
+inspection. They may be linked to an axis only when they match an explicit gap,
+and they never count as positive support for a score. A clear sanctions screen,
+provider miss, or empty search cannot prove identity, authority, traction, or
+integrity.
 
 ## Investigation standard
 

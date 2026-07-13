@@ -7,6 +7,7 @@ import {
   collectBasicFacts,
   basicFactsResearchQuestions,
   discoverBasicFactLeads,
+  discoverBasicFactLeadsDetailed,
   parseBasicFactLeads,
   verifyBasicFactLead,
 } from "./basicFacts";
@@ -286,6 +287,136 @@ describe("basic-facts lead parsing", () => {
       "audit",
       "traction",
     ]);
+  });
+
+  it.each([
+    ["official_token", "none"],
+    ["official_token", "No official token"],
+    ["public_security", "not applicable"],
+  ] as const)("does not publish %s placeholder value %s as an asset lead", (predicate, value) => {
+    expect(parseBasicFactLeads(JSON.stringify({
+      facts: [{
+        question_id: `person.${predicate}`,
+        subject: "Alice",
+        predicate,
+        value,
+        exact_excerpt: `A search article reported ${value}.`,
+        source_url: "https://news.example/asset-search",
+      }],
+    }), "Alice", "claude-web-search", [{
+      id: `person.${predicate}`,
+      audience: "person",
+      batch: "structure_risk",
+      predicate,
+      question: "Targeted asset question",
+      critical: true,
+    }])).toEqual([]);
+  });
+});
+
+describe("question-specific asset search", () => {
+  it("records completed-empty only after separate attributable web searches", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const prompts: string[] = [];
+    const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }> };
+      prompts.push(body.messages?.[0]?.content ?? "");
+      return new Response(JSON.stringify({
+        content: [{ type: "text", text: '{"facts":[]}' }],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          server_tool_use: { web_search_requests: 1 },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const assetQuestions = basicFactsResearchQuestions(ctx).filter((question) =>
+      question.predicate === "public_security" || question.predicate === "official_token");
+
+    const result = await discoverBasicFactLeadsDetailed(ctx, {
+      request,
+      cacheRead: async () => null,
+      cacheWrite: async () => undefined,
+    }, assetQuestions, "repair");
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(prompts).toHaveLength(2);
+    expect(prompts.filter((prompt) => prompt.includes("[person.public_security]")).every((prompt) =>
+      !prompt.includes("[person.official_token]"))).toBe(true);
+    expect(prompts.filter((prompt) => prompt.includes("[person.official_token]")).every((prompt) =>
+      !prompt.includes("[person.public_security]"))).toBe(true);
+    expect(prompts.join("\n")).toContain("issuer's investor-relations site or an official regulator filing");
+    expect(prompts.join("\n")).toContain("never serialize none, no token");
+    expect(result.questionStates).toEqual({
+      "person.public_security": "completed_empty",
+      "person.official_token": "completed_empty",
+    });
+    expect(result.questionProviders).toEqual({
+      "person.public_security": "claude-web-search",
+      "person.official_token": "claude-web-search",
+    });
+  });
+
+  it("keeps an empty model answer unresolved when no web-search use is attributable", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const question = basicFactsResearchQuestions(ctx).filter((candidate) =>
+      candidate.predicate === "official_token");
+    const result = await discoverBasicFactLeadsDetailed(ctx, {
+      request: async () => new Response(JSON.stringify({
+        content: [{ type: "text", text: '{"facts":[]}' }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+      cacheRead: async () => null,
+      cacheWrite: async () => undefined,
+    }, question, "repair");
+
+    expect(result.questionStates).toEqual({ "person.official_token": "partial" });
+  });
+
+  it("does not call a nonempty raw answer completed-empty when every row is filtered", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const question = basicFactsResearchQuestions(ctx).filter((candidate) =>
+      candidate.predicate === "official_token");
+    const result = await discoverBasicFactLeadsDetailed(ctx, {
+      request: async () => new Response(JSON.stringify({
+        content: [{
+          type: "text",
+          text: JSON.stringify({
+            facts: [{
+              question_id: "person.official_token",
+              subject: "Alice",
+              predicate: "official_token",
+              value: "none",
+              exact_excerpt: "A news article said no official token was planned.",
+              source_url: "https://news.example/no-token-plan",
+            }],
+          }),
+        }],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          server_tool_use: { web_search_requests: 1 },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } }),
+      cacheRead: async () => null,
+      cacheWrite: async () => undefined,
+    }, question, "repair");
+
+    expect(result.leads).toEqual([]);
+    expect(result.questionStates).toEqual({ "person.official_token": "partial" });
+    expect(result.detail).toContain("partial_1_raw_facts_filtered");
   });
 });
 
@@ -1799,6 +1930,310 @@ describe("basic-facts source verification", () => {
         sources: [expect.objectContaining({ sourceClass: "official_counterparty" })],
       }),
     ]);
+  });
+
+  it("binds a related public security only through a verified current-control relationship and authoritative issuer evidence", async () => {
+    const { ctx, evidence } = context("https://brianarmstrong.org");
+    ctx.handle = "@brian_armstrong";
+    evidence.profile.handle = "@brian_armstrong";
+    evidence.profile.display_name = "Brian Armstrong";
+    evidence.profile.resolved_name = "Brian Armstrong";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Coinbase",
+      role: "Co-founder and CEO",
+      period: "2012-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://coinbase.com",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "peopledatalabs",
+    });
+    const pressUrl = "https://forbes.example/coinbase";
+    const issuerUrl = "https://investor.coinbase.com/";
+    const securityLead = lead({
+      subject: "Brian Armstrong",
+      predicate: "public_security",
+      value: "COIN (Coinbase Global, Inc., NASDAQ)",
+      questionId: "person.public_security",
+      excerpt: "Coinbase Global, Inc. is publicly traded on Nasdaq under ticker COIN.",
+      sourceUrl: pressUrl,
+      candidateUrls: [issuerUrl],
+    });
+
+    const result = await collectBasicFacts(ctx, {
+      discover: async () => ({
+        provider: "claude-web-search",
+        state: "succeeded",
+        leads: [securityLead],
+        attempts: 1,
+        completedBatches: 1,
+        failedBatches: 0,
+        batchStates: { structure_risk: "succeeded" },
+      }),
+      repair: async () => ({
+        provider: "test",
+        state: "partial",
+        leads: [],
+        attempts: 1,
+        completedBatches: 1,
+        failedBatches: 0,
+        questionStates: { "person.official_token": "completed_empty" },
+        questionProviders: { "person.official_token": "test" },
+      }),
+      fetchSource: fetchDocuments({
+        [pressUrl]: document({
+          url: pressUrl,
+          host: "forbes.example",
+          text: `<p>${securityLead.excerpt}</p>`,
+          contentHash: "f".repeat(64),
+        }),
+        [issuerUrl]: document({
+          url: issuerUrl,
+          host: "investor.coinbase.com",
+          text: "<p>Coinbase Global, Inc. (NASDAQ: COIN) is publicly traded.</p>",
+          contentHash: "c".repeat(64),
+        }),
+      }),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ state: "executed" }));
+    expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
+      predicate: "public_security",
+      value: "COIN (Coinbase, NASDAQ-listed security)",
+      status: "verified",
+      sources: expect.arrayContaining([
+        expect.objectContaining({ url: issuerUrl, sourceClass: "official_counterparty" }),
+      ]),
+    }));
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.public_security"))
+      .toEqual(expect.objectContaining({ status: "answered" }));
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.official_token"))
+      .toEqual(expect.objectContaining({
+        status: "unanswered",
+        providerRuns: expect.arrayContaining([
+          expect.objectContaining({ phase: "repair", state: "completed_empty" }),
+        ]),
+      }));
+  });
+
+  it("binds a founder's official token through a verified current venture and that venture's fetched first-party docs", async () => {
+    const { ctx, evidence } = context("https://haydenadams.com");
+    ctx.handle = "@haydenzadams";
+    evidence.profile.handle = "@haydenzadams";
+    evidence.profile.display_name = "Hayden Adams";
+    evidence.profile.resolved_name = "Hayden Adams";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Uniswap",
+      domain: "uniswap.org",
+      role: "Founder",
+      period: "2018-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://uniswap.org/about",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const pressUrl = "https://press.example/uniswap-token";
+    const docsUrl = "https://docs.uniswap.org/concepts/governance/overview";
+    const passage = "UNI is the governance token of Uniswap.";
+    const tokenLead = lead({
+      subject: "Hayden Adams",
+      predicate: "official_token",
+      value: "UNI",
+      questionId: "person.official_token",
+      excerpt: passage,
+      sourceUrl: pressUrl,
+      candidateUrls: [docsUrl],
+    });
+
+    const result = await collectBasicFacts(ctx, {
+      discover: async () => [tokenLead],
+      repair: async () => [],
+      fetchSource: fetchDocuments({
+        [pressUrl]: document({
+          url: pressUrl,
+          host: "press.example",
+          text: `<p>${passage}</p>`,
+          contentHash: "4".repeat(64),
+        }),
+        [docsUrl]: document({
+          url: docsUrl,
+          host: "docs.uniswap.org",
+          text: `<p>${passage}</p>`,
+          contentHash: "5".repeat(64),
+        }),
+      }),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ state: "executed" }));
+    expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
+      predicate: "official_token",
+      value: "UNI",
+      status: "verified",
+      sources: expect.arrayContaining([
+        expect.objectContaining({ url: docsUrl, sourceClass: "official_counterparty" }),
+      ]),
+    }));
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.official_token"))
+      .toEqual(expect.objectContaining({ status: "answered" }));
+  });
+
+  it.each([
+    [
+      "another venture's official page",
+      "AAVE",
+      "AAVE is the governance token of Aave.",
+      "https://docs.aave.com/governance/token",
+    ],
+    [
+      "independent press without the founder",
+      "UNI",
+      "UNI is the governance token of Uniswap.",
+      "https://press.example/uniswap-uni",
+    ],
+    [
+      "the venture's stock ticker",
+      "UNI",
+      "Uniswap Global is publicly traded on Nasdaq under ticker UNI.",
+      "https://docs.uniswap.org/company/listing",
+    ],
+  ] as const)("does not bind %s as the founder's official token", async (_label, value, passage, sourceUrl) => {
+    const { ctx, evidence } = context("https://haydenadams.com");
+    ctx.handle = "@haydenzadams";
+    evidence.profile.handle = "@haydenzadams";
+    evidence.profile.display_name = "Hayden Adams";
+    evidence.profile.resolved_name = "Hayden Adams";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Uniswap",
+      domain: "uniswap.org",
+      role: "Founder",
+      period: "2018-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://uniswap.org/about",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    await collectBasicFacts(ctx, {
+      discover: async () => [lead({
+        subject: "Hayden Adams",
+        predicate: "official_token",
+        value,
+        questionId: "person.official_token",
+        excerpt: passage,
+        sourceUrl,
+      })],
+      repair: async () => [],
+      fetchSource: fetchDocuments({
+        [sourceUrl]: document({
+          url: sourceUrl,
+          host: new URL(sourceUrl).hostname,
+          text: `<p>${passage}</p>`,
+          contentHash: "6".repeat(64),
+        }),
+      }),
+    });
+
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "official_token")).toBe(false);
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.official_token"))
+      .toEqual(expect.objectContaining({ status: "unanswered" }));
+  });
+
+  it("does not establish a public security from press corroboration without issuer or regulator evidence", async () => {
+    const { ctx, evidence } = context("https://brianarmstrong.org");
+    ctx.handle = "@brian_armstrong";
+    evidence.profile.handle = "@brian_armstrong";
+    evidence.profile.display_name = "Brian Armstrong";
+    evidence.profile.resolved_name = "Brian Armstrong";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Coinbase",
+      role: "Co-founder and CEO",
+      period: "2012-present",
+      outcome: VentureOutcome.ACTIVE,
+      // A deterministic relationship may itself have been discovered in the
+      // press. That citation cannot turn the press host into first-party scope.
+      evidence_url: "https://press-one.example/coin",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const passage = "Brian Armstrong leads Coinbase, which is publicly traded on Nasdaq under ticker COIN.";
+    const urls = ["https://press-one.example/coin", "https://press-two.example/coin"];
+    await collectBasicFacts(ctx, {
+      discover: async () => urls.map((sourceUrl) => lead({
+        subject: "Brian Armstrong",
+        predicate: "public_security",
+        value: "COIN (Coinbase, NASDAQ)",
+        questionId: "person.public_security",
+        excerpt: passage,
+        sourceUrl,
+      })),
+      repair: async () => [],
+      fetchSource: fetchDocuments(Object.fromEntries(urls.map((url, index) => [
+        url,
+        document({
+          url,
+          host: new URL(url).hostname,
+          text: `<p>${passage}</p>`,
+          contentHash: String(index + 7).repeat(64),
+        }),
+      ]))),
+    });
+
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "public_security")).toBe(false);
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.public_security"))
+      .toEqual(expect.objectContaining({ status: "unanswered" }));
+  });
+
+  it("does not bind an issuer-only security page to a person without a verified current-control relationship", () => {
+    const issuerUrl = "https://investor.acme.example/listing";
+    const passage = "Acme Global, Inc. (NASDAQ: ACME) is publicly traded.";
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Alice",
+        predicate: "public_security",
+        value: "ACME (Acme Global, Inc., NASDAQ)",
+        questionId: "person.public_security",
+        excerpt: passage,
+        sourceUrl: issuerUrl,
+      }),
+      document({
+        url: issuerUrl,
+        host: "investor.acme.example",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Alice"],
+      "@alice",
+      [],
+      ["acme.example"],
+    )).toBeNull();
+  });
+
+  it("fails closed on malformed shared-host venture paths instead of aborting collection", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Alice Labs",
+      role: "Founder",
+      period: "2024-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://github.com/%ZZ",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+
+    await expect(collectBasicFacts(ctx, {
+      discover: async () => [],
+      repair: async () => [],
+      fetchSource: fetchDocuments({}),
+    })).resolves.toEqual(expect.objectContaining({ state: "partial" }));
   });
 
   it("treats an exact regulator passage as primary legal evidence", () => {

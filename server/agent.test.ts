@@ -86,7 +86,12 @@ const validationCatalog: AxisEvidenceRecord[] = [
   axisArtifact(F1_REF, [catalog[0].axis]),
   axisArtifact(F2_REF, [catalog[1].axis]),
   axisArtifact(F2_COUNTER_REF, [catalog[1].axis], "reported"),
-  axisArtifact(F2_UNAVAILABLE_REF, [catalog[1].axis], "unavailable"),
+  {
+    ...axisArtifact(F2_UNAVAILABLE_REF, [catalog[1].axis], "unavailable"),
+    provider: "track-record-provider",
+    operation: "track-record-search",
+    title: "Track record provider unavailable",
+  },
   axisArtifact(F2_CHECKED_EMPTY_REF, [catalog[1].axis], "checked_empty"),
 ];
 
@@ -1133,9 +1138,40 @@ describe("analyst verdict integrity", () => {
     }, catalog, validationCatalog);
 
     expect(result?.axes[1]).toMatchObject({
-      evidenceRefs: [F2_REF, F2_CHECKED_EMPTY_REF],
+      evidenceRefs: [F2_REF],
       gaps: [],
     });
+    expect(validationCatalog.some(({ artifactId }) => artifactId === F2_CHECKED_EMPTY_REF)).toBe(true);
+  });
+
+  it("keeps an absence screen out of positive founder identity support when no gap exists", () => {
+    const sanctionsClearRef = `art_v1_${"6".repeat(64)}`;
+    const identityEvidence = axisArtifact(F1_REF, ["F1_identity_verifiability"]);
+    const sanctionsClear = {
+      ...axisArtifact(sanctionsClearRef, ["F1_identity_verifiability"], "checked_empty"),
+      provider: "opensanctions",
+      operation: "sourceArtifacts:sanctions_screen",
+      section: "sourceArtifacts",
+      title: "US Treasury OFAC SDN exact-name screen",
+    };
+
+    const result = validateAnalystVerdict({
+      axes: [{
+        ...validAxis("F1_identity_verifiability", 11, F1_REF),
+        coverageRefs: [sanctionsClearRef],
+        gaps: [],
+      }],
+      headline: "Verified public identity and current authority govern the assessment.",
+      identity_note: "The founder identity is resolved through public first-party evidence.",
+    }, [{ axis: "F1_identity_verifiability", weight: 12, role: "FOUNDER" }], [identityEvidence, sanctionsClear]);
+
+    expect(result?.axes[0]).toMatchObject({
+      evidenceRefs: [F1_REF],
+      gaps: [],
+    });
+    expect([identityEvidence, sanctionsClear]).toContainEqual(
+      expect.objectContaining({ artifactId: sanctionsClearRef, verification: "checked_empty" }),
+    );
   });
 
   it("accepts every documented array boundary and rejects one item beyond each limit", () => {
@@ -1169,7 +1205,6 @@ describe("analyst verdict integrity", () => {
       evidenceRefs: [
         support[0].artifactId,
         ...support.slice(1, 8).map(({ artifactId }) => artifactId),
-        ...coverage.slice(0, 4).map(({ artifactId }) => artifactId),
       ],
       counterEvidenceRefs: counter.slice(0, 8).map(({ artifactId }) => artifactId),
       gaps: row.gaps,
@@ -4439,7 +4474,9 @@ describe("analyst verdict integrity", () => {
     const verdict = await analyzeSubject("@subject", ["FOUNDER"], singleAxisCatalog, evidenceJson);
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(verdict?.axes[0].evidenceRefs).toHaveLength(5);
+    // Only coverage rows semantically tied to the explicit gap are axis-linked;
+    // the rest remain available in the frozen evidence catalog.
+    expect(verdict?.axes[0].evidenceRefs).toHaveLength(3);
 
     const nonPreferredCoverage = validateAnalystVerdict({
       axes: [{
@@ -4455,7 +4492,7 @@ describe("analyst verdict integrity", () => {
       headline: "Identity is supported with a disclosed coverage limit.",
       identity_note: "Identity resolved from the collected profile evidence.",
     }, singleAxisCatalog, scorerCatalog);
-    expect(nonPreferredCoverage?.axes[0].evidenceRefs).toHaveLength(2);
+    expect(nonPreferredCoverage?.axes[0].evidenceRefs).toHaveLength(1);
   });
 
   it("skips semantic repair when the route cannot preserve its finalization reserve", async () => {

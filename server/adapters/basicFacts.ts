@@ -7,6 +7,7 @@ import {
   type BasicFactPredicate,
   type BasicFactQuestionLedgerEntry,
 } from "../../src/data/evidence";
+import { supportsExplicitEmptyBasicFact } from "../../src/lib/basicFactQuestions";
 import { ANALYST_MODEL, env } from "../config";
 import { cacheGet, cacheSet } from "../cache";
 import { addClaudeUsage, recordCall } from "../cost";
@@ -20,7 +21,7 @@ const REPAIR_SEARCH_USES = 4;
 const MAX_LEADS = 28;
 const MAX_SOURCES = 32;
 const DISCOVERY_TIMEOUT_MS = 50_000;
-const RESEARCH_CACHE_VERSION = "v5";
+const RESEARCH_CACHE_VERSION = "v6";
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
 const PREDICATES = new Set<BasicFactPredicate>([
@@ -136,6 +137,14 @@ export interface BasicFactsDiscoveryResult {
   completedBatches: number;
   failedBatches: number;
   batchStates?: Partial<Record<BasicFactsResearchBatch, BasicFactsDiscoveryState>>;
+  /**
+   * State from a search invocation that targeted exactly one question. A
+   * batch-level empty response can never populate this map because one blank
+   * multi-question answer does not prove that each question was searched.
+   */
+  questionStates?: Partial<Record<string, BasicFactsDiscoveryState>>;
+  /** Provider override for a question-specific invocation in a mixed repair. */
+  questionProviders?: Partial<Record<string, DiscoveryProvider | "none" | "test">>;
   detail?: string;
 }
 
@@ -571,6 +580,12 @@ function parsePayload(text: string): Record<string, unknown> | null {
   }
 }
 
+/** Preserve the raw answer shape separately from filtered lead parsing. */
+function rawBasicFactCount(text: string): number | null {
+  const payload = parsePayload(text);
+  return payload && Array.isArray(payload.facts) ? payload.facts.length : null;
+}
+
 function isAtomicValue(predicate: BasicFactPredicate, value: string): boolean {
   if (/[;\n]/.test(value)) return false;
   // A role title such as "Chair and CEO at Coinbase" is one relationship,
@@ -580,6 +595,20 @@ function isAtomicValue(predicate: BasicFactPredicate, value: string): boolean {
   // Commas almost always indicate a model-combined roster for people/backers.
   if (["founder", "executive", "investor"].includes(predicate) && value.includes(",")) return false;
   return true;
+}
+
+/**
+ * A scout may serialize a negative search answer as a fact row (for example,
+ * `official_token: "none"`). That row is not affirmative evidence and must
+ * never become a token or security lead. In a question-specific search it is
+ * equivalent to finding no publishable candidate; only the independently
+ * recorded search-completion state may then support a checked-empty outcome.
+ */
+function isEmptyAssetPlaceholder(predicate: BasicFactPredicate, value: string): boolean {
+  if (!supportsExplicitEmptyBasicFact(predicate)) return false;
+  const normalized = normalize(value).toLowerCase().replace(/[.!]+$/, "").trim();
+  return /^(?:n\/?a|none|no|not applicable|not found|unknown|unavailable)$/.test(normalized)
+    || /^(?:no|does not have|has no)\s+(?:known\s+|verified\s+|official\s+|native\s+|governance\s+)?(?:crypto\s+)?(?:token|security|stock|bond)s?$/.test(normalized);
 }
 
 /** Parse discovery JSON. Every row remains explicitly non-governing. */
@@ -610,6 +639,7 @@ export function parseBasicFactLeads(
     const excerpt = clean(row.exact_excerpt ?? row.excerpt, 1_200);
     const sourceUrl = safeCandidateUrl(row.source_url ?? row.sourceUrl);
     if (!predicate || !PREDICATES.has(predicate) || !subject || !value || !excerpt || !sourceUrl) continue;
+    if (isEmptyAssetPlaceholder(predicate, value)) continue;
     if (!isAtomicValue(predicate, value)) continue;
     const suppliedQuestionId = clean(row.question_id ?? row.questionId, 100);
     const suppliedQuestion = suppliedQuestionId ? questionById.get(suppliedQuestionId) : undefined;
@@ -681,13 +711,25 @@ function discoveryPrompt(
   const questionLedger = questions.map((question, index) =>
     `${index + 1}. [${question.id}] (${question.predicate}${question.critical ? ", decision-critical" : ""}) ${question.question}`,
   ).join("\n");
+  const targetedAssetInstruction = questions.length === 1 && questions[0]?.predicate === "public_security"
+    ? "This is a question-specific public-security search. Prefer the issuer's investor-relations site or an official regulator filing. Return a row only when the cited passage identifies the issuer plus an explicit ticker, exchange listing, stock, bond, equity, or debt security."
+    : questions.length === 1 && questions[0]?.predicate === "official_token"
+      ? "This is a question-specific official-token search. Search the official sites and documentation of the subject's verified current ventures. Return a row only for an affirmatively named official crypto token. If the completed search finds no affirmative source-linked token candidate, return {\"facts\":[]}; never serialize none, no token, a public-company stock, or an unlaunched token plan as a fact."
+      : "";
+  const verifiedVentureContext = verifiedVentureAssetRelationships(ctx)
+    .map((relationship) => `${relationship.name} (${relationship.officialScopes.join(", ")})`)
+    .join("; ");
   return [
     `${phase === "repair" ? "Repair the remaining verified-evidence gaps" : "Research foundational due-diligence facts"} for ${subjectName(ctx)} (${ctx.handle}).`,
     `Research audience: ${audience}. Answer only the targeted questions below; do not pad the response with adjacent facts.`,
     profile.website ? `Known official website: ${profile.website}` : "",
     profile.bio ? `Profile bio: ${profile.bio.slice(0, 800)}` : "",
+    verifiedVentureContext
+      ? `Verified current venture relationships (relationship evidence only, not proof of any stock or token): ${verifiedVentureContext}`
+      : "",
     "Targeted question ledger:",
     questionLedger,
+    targetedAssetInstruction,
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
@@ -771,11 +813,30 @@ async function callClaudeSearch(
 }
 
 interface BatchDiscoveryResult {
+  key: string;
   batch: BasicFactsResearchBatch;
+  questionIds: string[];
+  questionSpecific: boolean;
   state: Exclude<BasicFactsDiscoveryState, "skipped">;
   leads: BasicFactLead[];
   attempts: number;
   detail?: string;
+}
+
+interface QuestionSearchGroup {
+  key: string;
+  batch: Exclude<BasicFactsResearchBatch, "repair">;
+  questions: BasicFactsResearchQuestion[];
+  questionSpecific: boolean;
+}
+
+function aggregateGroupStates(states: readonly BasicFactsDiscoveryState[]): BasicFactsDiscoveryState {
+  if (!states.length) return "skipped";
+  if (states.every((state) => state === "failed")) return "failed";
+  if (states.some((state) => state === "failed" || state === "partial")) return "partial";
+  if (states.some((state) => state === "succeeded")) return "succeeded";
+  if (states.every((state) => state === "completed_empty")) return "completed_empty";
+  return "partial";
 }
 
 function aggregateDiscovery(
@@ -790,6 +851,19 @@ function aggregateDiscovery(
     : leads.length
       ? "succeeded"
       : "completed_empty";
+  const batchStates = Object.fromEntries(
+    (["identity", "track_record", "structure_risk"] as const).flatMap((batch) => {
+      const states = batches.filter((result) => result.batch === batch).map((result) => result.state);
+      return states.length ? [[batch, aggregateGroupStates(states)]] : [];
+    }),
+  );
+  const questionStates = Object.fromEntries(batches.flatMap((batch) =>
+    batch.questionSpecific
+      ? batch.questionIds.map((questionId) => [questionId, batch.state] as const)
+      : []));
+  const questionProviders = Object.fromEntries(
+    Object.keys(questionStates).map((questionId) => [questionId, provider] as const),
+  );
   return {
     provider,
     state,
@@ -797,19 +871,35 @@ function aggregateDiscovery(
     attempts: batches.reduce((sum, batch) => sum + batch.attempts, 0),
     completedBatches,
     failedBatches,
-    batchStates: Object.fromEntries(batches.map((batch) => [batch.batch, batch.state])),
+    batchStates,
+    ...(Object.keys(questionStates).length ? { questionStates } : {}),
+    ...(Object.keys(questionProviders).length ? { questionProviders } : {}),
     detail: batches.map((batch) => batch.detail).filter(Boolean).join("; ") || undefined,
   };
 }
 
-function questionsByBatch(
+function questionSearchGroups(
   questions: readonly BasicFactsResearchQuestion[],
-): Array<[Exclude<BasicFactsResearchBatch, "repair">, BasicFactsResearchQuestion[]]> {
+  phase: "primary" | "repair",
+): QuestionSearchGroup[] {
   const batches: Array<Exclude<BasicFactsResearchBatch, "repair">> = ["identity", "track_record", "structure_risk"];
-  return batches.flatMap((batch): Array<[Exclude<BasicFactsResearchBatch, "repair">, BasicFactsResearchQuestion[]]> => {
-    const selected = questions.filter((question) => question.batch === batch);
-    return selected.length ? [[batch, selected]] : [];
+  const isolateExplicitEmptyQuestion = (question: BasicFactsResearchQuestion): boolean =>
+    supportsExplicitEmptyBasicFact(question.predicate)
+    && (phase === "repair" || questions.length === 1);
+  const grouped = batches.flatMap((batch): QuestionSearchGroup[] => {
+    const selected = questions.filter((question) =>
+      question.batch === batch && !isolateExplicitEmptyQuestion(question));
+    return selected.length ? [{ key: batch, batch, questions: selected, questionSpecific: false }] : [];
   });
+  const targeted = questions
+    .filter(isolateExplicitEmptyQuestion)
+    .map((question): QuestionSearchGroup => ({
+      key: question.id,
+      batch: question.batch,
+      questions: [question],
+      questionSpecific: true,
+    }));
+  return [...grouped, ...targeted];
 }
 
 /** Claude hosted search discovery with an attributable state per targeted batch. */
@@ -827,21 +917,35 @@ export async function discoverBasicFactLeadsDetailed(
   const cacheWrite = dependencies.cacheWrite ?? cacheSet;
   const request = dependencies.request ?? fetch;
   const audience = questions[0]?.audience ?? researchAudience(ctx);
-  const grouped = questionsByBatch(questions);
-  const batches = await Promise.all(grouped.map(async ([batch, batchQuestions]): Promise<BatchDiscoveryResult> => {
+  const grouped = questionSearchGroups(questions, phase);
+  const batches = await Promise.all(grouped.map(async ({ key, batch, questions: batchQuestions, questionSpecific }): Promise<BatchDiscoveryResult> => {
+    const group = {
+      key,
+      batch,
+      questionIds: batchQuestions.map((question) => question.id),
+      questionSpecific,
+    };
     const questionFingerprint = createHash("sha256")
       .update(batchQuestions.map((question) => question.id).sort().join("|"))
       .digest("hex").slice(0, 12);
-    const cacheKey = `basic-facts:${RESEARCH_CACHE_VERSION}:claude:${audience}:${phase}:${batch}:${questionFingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
+    const cacheKey = `basic-facts:${RESEARCH_CACHE_VERSION}:claude:${audience}:${phase}:${key}:${questionFingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
     const cached = await cacheRead(cacheKey);
     if (cached) {
       const parsed = parseBasicFactLeads(cached, canonicalSubject, "claude-web-search", batchQuestions);
-      if (parsed) return {
-        batch,
-        state: parsed.length ? "succeeded" : "completed_empty",
+      const rawFactCount = rawBasicFactCount(cached);
+      // A cached empty JSON body does not retain proof that the provider used
+      // web search. Re-run a question-specific empty search so checked-empty
+      // can never be manufactured from stale text alone.
+      if (parsed?.length || (parsed && !questionSpecific)) return {
+        ...group,
+        state: parsed.length ? "succeeded" : rawFactCount === 0 ? "completed_empty" : "partial",
         leads: parsed,
         attempts: 0,
-        detail: `${batch}:cache_${parsed.length ? "hit" : "empty"}`,
+        detail: `${key}:cache_${parsed.length
+          ? "hit"
+          : rawFactCount === 0
+            ? "explicit_empty"
+            : "nonempty_filtered"}`,
       };
     }
 
@@ -849,23 +953,36 @@ export async function discoverBasicFactLeadsDetailed(
     const maxSearchUses = phase === "repair" ? REPAIR_SEARCH_USES : PRIMARY_SEARCH_USES_PER_BATCH;
     let attempts = 1;
     let response = await callClaudeSearch(prompt, request, undefined, maxSearchUses);
-    if (!response) return { batch, state: "failed", leads: [], attempts, detail: `${batch}:request_failed` };
+    if (!response) return { ...group, state: "failed", leads: [], attempts, detail: `${key}:request_failed` };
+    let webSearchRequests = response.usage?.server_tool_use?.web_search_requests ?? 0;
     if (response.stop_reason === "pause_turn" && response.content?.length) {
       attempts += 1;
       response = await callClaudeSearch(prompt, request, response.content, maxSearchUses);
-      if (!response) return { batch, state: "failed", leads: [], attempts, detail: `${batch}:continuation_failed` };
+      if (!response) return { ...group, state: "failed", leads: [], attempts, detail: `${key}:continuation_failed` };
+      webSearchRequests += response.usage?.server_tool_use?.web_search_requests ?? 0;
     }
     const text = responseText(response);
-    if (!text) return { batch, state: "partial", leads: [], attempts, detail: `${batch}:empty_output` };
+    if (!text) return { ...group, state: "partial", leads: [], attempts, detail: `${key}:empty_output` };
     const parsed = parseBasicFactLeads(text, canonicalSubject, "claude-web-search", batchQuestions);
-    if (!parsed) return { batch, state: "partial", leads: [], attempts, detail: `${batch}:invalid_json` };
+    if (!parsed) return { ...group, state: "partial", leads: [], attempts, detail: `${key}:invalid_json` };
     void cacheWrite(cacheKey, text);
+    const rawFactCount = rawBasicFactCount(text);
+    const explicitEmpty = rawFactCount === 0;
+    const attributableEmpty = !parsed.length
+      && explicitEmpty
+      && (!questionSpecific || webSearchRequests > 0);
     return {
-      batch,
-      state: parsed.length ? "succeeded" : "completed_empty",
+      ...group,
+      state: parsed.length ? "succeeded" : attributableEmpty ? "completed_empty" : "partial",
       leads: parsed,
       attempts,
-      detail: `${batch}:${parsed.length ? `${parsed.length}_leads` : "completed_empty"}`,
+      detail: `${key}:${parsed.length
+        ? `${parsed.length}_leads`
+        : attributableEmpty
+          ? `completed_empty_${webSearchRequests}_searches`
+          : rawFactCount !== null && rawFactCount > 0
+            ? `partial_${rawFactCount}_raw_facts_filtered`
+            : "empty_without_attributable_search"}`,
     };
   }));
   return aggregateDiscovery("claude-web-search", batches);
@@ -890,8 +1007,14 @@ async function discoverGrokQuestions(
     return { provider: "grok", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "Grok search is not configured" };
   }
   const audience = questions[0]?.audience ?? researchAudience(ctx);
-  const grouped = questionsByBatch(questions);
-  const batches = await Promise.all(grouped.map(async ([batch, batchQuestions]): Promise<BatchDiscoveryResult> => {
+  const grouped = questionSearchGroups(questions, phase);
+  const batches = await Promise.all(grouped.map(async ({ key, batch, questions: batchQuestions, questionSpecific }): Promise<BatchDiscoveryResult> => {
+    const group = {
+      key,
+      batch,
+      questionIds: batchQuestions.map((question) => question.id),
+      questionSpecific,
+    };
     const fingerprint = createHash("sha256")
       .update(batchQuestions.map((question) => question.id).sort().join("|"))
       .digest("hex").slice(0, 12);
@@ -900,18 +1023,25 @@ async function discoverGrokQuestions(
       discoveryPrompt(ctx, batchQuestions, phase),
       {
         maxToolCalls: phase === "repair" ? REPAIR_SEARCH_USES : PRIMARY_SEARCH_USES_PER_BATCH,
-        cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grok:${audience}:${phase}:${batch}:${fingerprint}:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}`,
+        cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grok:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}`,
       },
     );
-    if (!text) return { batch, state: "failed", leads: [], attempts: 1, detail: `${batch}:request_failed` };
+    if (!text) return { ...group, state: "failed", leads: [], attempts: 1, detail: `${key}:request_failed` };
     const parsed = parseBasicFactLeads(text, subjectName(ctx), "grok", batchQuestions);
-    if (!parsed) return { batch, state: "partial", leads: [], attempts: 1, detail: `${batch}:invalid_json` };
+    if (!parsed) return { ...group, state: "partial", leads: [], attempts: 1, detail: `${key}:invalid_json` };
     return {
-      batch,
-      state: parsed.length ? "succeeded" : "completed_empty",
+      ...group,
+      // grokSearch currently exposes text but not attributable tool-use
+      // telemetry. An empty targeted answer therefore stays partial rather
+      // than becoming a checked-empty claim.
+      state: parsed.length ? "succeeded" : questionSpecific ? "partial" : "completed_empty",
       leads: parsed,
       attempts: 1,
-      detail: `${batch}:${parsed.length ? `${parsed.length}_leads` : "completed_empty"}`,
+      detail: `${key}:${parsed.length
+        ? `${parsed.length}_leads`
+        : questionSpecific
+          ? "empty_without_attributable_search"
+          : "completed_empty"}`,
     };
   }));
   return aggregateDiscovery("grok", batches);
@@ -925,6 +1055,48 @@ async function discoverPrimary(
   return discoverGrokQuestions(ctx, questions, "primary");
 }
 
+function mergeDiscoveryResults(
+  defaultResult: BasicFactsDiscoveryResult,
+  questionSpecificResult: BasicFactsDiscoveryResult,
+): BasicFactsDiscoveryResult {
+  const leads = selectBasicFactLeads([...defaultResult.leads, ...questionSpecificResult.leads]);
+  const states = [defaultResult.state, questionSpecificResult.state];
+  const hasFailure = states.some((state) => state === "failed" || state === "partial");
+  const hasCompleted = states.some((state) => state === "succeeded" || state === "completed_empty");
+  const state: BasicFactsDiscoveryState = hasFailure
+    ? (leads.length || hasCompleted ? "partial" : "failed")
+    : leads.length
+      ? "succeeded"
+      : states.every((candidate) => candidate === "completed_empty")
+        ? "completed_empty"
+        : "partial";
+  const batchStates = Object.fromEntries(
+    (["identity", "track_record", "structure_risk", "repair"] as const).flatMap((batch) => {
+      const batchResults = [defaultResult.batchStates?.[batch], questionSpecificResult.batchStates?.[batch]]
+        .filter((candidate): candidate is BasicFactsDiscoveryState => Boolean(candidate));
+      return batchResults.length ? [[batch, aggregateGroupStates(batchResults)]] : [];
+    }),
+  );
+  return {
+    provider: defaultResult.provider,
+    state,
+    leads,
+    attempts: defaultResult.attempts + questionSpecificResult.attempts,
+    completedBatches: defaultResult.completedBatches + questionSpecificResult.completedBatches,
+    failedBatches: defaultResult.failedBatches + questionSpecificResult.failedBatches,
+    ...(Object.keys(batchStates).length ? { batchStates } : {}),
+    questionStates: {
+      ...(defaultResult.questionStates ?? {}),
+      ...(questionSpecificResult.questionStates ?? {}),
+    },
+    questionProviders: {
+      ...(defaultResult.questionProviders ?? {}),
+      ...(questionSpecificResult.questionProviders ?? {}),
+    },
+    detail: [defaultResult.detail, questionSpecificResult.detail].filter(Boolean).join("; ") || undefined,
+  };
+}
+
 async function discoverRepair(
   ctx: CollectContext,
   questions: readonly BasicFactsResearchQuestion[],
@@ -936,6 +1108,29 @@ async function discoverRepair(
   // Prefer a genuinely independent second search provider, then make a
   // targeted second pass with the configured provider if only one is present.
   if (primaryProvider === "claude-web-search" && env("XAI_API_KEY")) {
+    const attributableAssetQuestions = questions.filter((question) =>
+      supportsExplicitEmptyBasicFact(question.predicate));
+    const independentQuestions = questions.filter((question) =>
+      !supportsExplicitEmptyBasicFact(question.predicate));
+    if (attributableAssetQuestions.length && env("ANTHROPIC_API_KEY")) {
+      const [independent, targetedAssets] = await Promise.all([
+        independentQuestions.length
+          ? discoverGrokQuestions(ctx, independentQuestions, "repair")
+          : Promise.resolve<BasicFactsDiscoveryResult>({
+            provider: "grok",
+            state: "skipped",
+            leads: [],
+            attempts: 0,
+            completedBatches: 0,
+            failedBatches: 0,
+            detail: "no non-asset repair questions",
+          }),
+        discoverBasicFactLeadsDetailed(ctx, {}, attributableAssetQuestions, "repair"),
+      ]);
+      return independentQuestions.length
+        ? mergeDiscoveryResults(independent, targetedAssets)
+        : targetedAssets;
+    }
     return discoverGrokQuestions(ctx, questions, "repair");
   }
   if (primaryProvider === "grok" && env("ANTHROPIC_API_KEY")) {
@@ -1106,6 +1301,8 @@ const PREDICATE_PATTERNS: Record<BasicFactPredicate, RegExp> = {
   repository: /\b(?:github|source code|codebase|repository|repo|open source|open-source)\b/i,
   traction: /\b(?:users?|customers?|volume|tvl|total value locked|transactions?|revenue|fees|usage|adoption|downloads?|active wallets?)\b/i,
 };
+
+const EXPLICIT_OFFICIAL_CRYPTO_TOKEN = /\b(?:official|governance|native|utility|crypto(?:currency)?)\s+(?:crypto\s+)?token\b/i;
 
 function positivePredicateMatches(excerpt: string, predicate: BasicFactPredicate): RegExpMatchArray[] {
   const pattern = new RegExp(PREDICATE_PATTERNS[predicate].source, "gi");
@@ -1913,8 +2110,14 @@ function directPersonLegalIdentityIsBound(
   aliases: readonly string[],
   officialCounterpartyHosts: readonly string[],
 ): boolean {
-  const knownOrganizationTokens = new Set(officialCounterpartyHosts.flatMap((host) =>
-    [...trustedHostContextTokens(host)]));
+  const knownOrganizationTokens = new Set(officialCounterpartyHosts.flatMap((scope) => {
+    try {
+      const url = new URL(scope.includes("://") ? scope : `https://${scope}`);
+      return [...trustedHostContextTokens(url.hostname)];
+    } catch {
+      return [];
+    }
+  }));
   if (!knownOrganizationTokens.size) return false;
   return attributionClauses(passage).some((clause) =>
     hasSubjectAlias(clause, aliases)
@@ -1942,18 +2145,37 @@ export function verifyBasicFactLead(
   subjectKey = lead.subject,
   officialHosts: readonly string[] = [],
   officialCounterpartyHosts: readonly string[] = [],
+  ventureAssetRelationships: readonly VerifiedVentureAssetRelationship[] = [],
 ): BasicFact | null {
   const page = documentText(document);
   if (!isAtomicValue(lead.predicate, lead.value)) return null;
   if (lead.predicate === "legal_regulatory_event" && (!lead.eventStatus || !lead.attributedEntity)) return null;
   const official = sameOfficialScope(document, officialHosts);
+  const publicSecurityRegulator = lead.predicate === "public_security"
+    && regulatorySourceSupports(document.host, lead.predicate);
+  const ventureAssetPredicate = lead.predicate === "public_security" || lead.predicate === "official_token";
+  const authoritativeAssetRelationships = ventureAssetPredicate
+    ? ventureAssetRelationships.filter((relationship) => {
+      const ventureNamedByLead = looseContainsPhrase(`${lead.value} ${lead.excerpt}`, relationship.name);
+      const ventureOfficial = relationship.officialScopes.some((scope) => sameOfficialScope(document, [scope]));
+      return ventureNamedByLead && (ventureOfficial || publicSecurityRegulator);
+    })
+    : [];
+  const verificationAliases = [
+    ...aliases,
+    ...authoritativeAssetRelationships.map((relationship) => relationship.name),
+  ];
   const counterpartyPredicate = new Set<BasicFactPredicate>([
     "current_role", "prior_role", "founder", "executive", "founded", "product",
     "exit", "track_record", "funding", "investor", "legal_entity", "governance",
+    "public_security", "official_token",
   ]).has(lead.predicate);
+  const applicableCounterpartyHosts = ventureAssetPredicate
+    ? authoritativeAssetRelationships.flatMap((relationship) => relationship.officialScopes)
+    : officialCounterpartyHosts;
   const officialCounterparty = !official
     && counterpartyPredicate
-    && sameOfficialScope(document, officialCounterpartyHosts);
+    && sameOfficialScope(document, applicableCounterpartyHosts);
   // A verified first-party/counterparty host may supply only the organization
   // anchor (for example, "our co-founder" on investor.coinbase.com). Subject,
   // predicate, dates, metrics, and every other value component still have to
@@ -1961,10 +2183,18 @@ export function verifyBasicFactLead(
   const contextTokens = official || officialCounterparty
     ? trustedHostContextTokens(document.host)
     : new Set<string>();
-  const excerpt = supportingSourcePassage(page, lead, aliases, contextTokens);
+  const excerpt = supportingSourcePassage(page, lead, verificationAliases, contextTokens);
   if (!excerpt) return null;
-  const claimClause = governingClaimClause(excerpt, lead, aliases, contextTokens);
+  const claimClause = governingClaimClause(excerpt, lead, verificationAliases, contextTokens);
   if (!claimClause) return null;
+  // A related venture's first-party page may stand in for the person's name,
+  // but only explicit crypto-token language may do so. A stock ticker or
+  // security symbol on that same site must remain public_security evidence.
+  if (
+    lead.predicate === "official_token"
+    && authoritativeAssetRelationships.length
+    && !EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause)
+  ) return null;
   const verifiedValue = lead.predicate === "public_security"
     ? verifiedPublicSecurityValue(lead.value, claimClause)
     : lead.value;
@@ -2069,6 +2299,10 @@ function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[] {
     const independentHosts = new Set(sources
       .filter((source) => source.sourceClass === "independent_press")
       .map((source) => new URL(source.url).hostname.replace(/^www\./, "")));
+    // A stock or debt-security classification must come from the issuer or a
+    // regulator. Two news articles may corroborate a reported claim, but they
+    // cannot authoritatively establish the instrument or its listing.
+    if (rows[0]?.predicate === "public_security" && !official) return [];
     if (!official && independentHosts.size < 2) return [];
     return [{
       ...rows[0],
@@ -2195,17 +2429,97 @@ function mergeLeads(
   return selectBasicFactLeads(merged);
 }
 
+interface VerifiedVentureAssetRelationship {
+  name: string;
+  officialScopes: string[];
+}
+
+const CURRENT_CONTROL_ROLE = /\b(?:co[- ]?founder|founder|chief executive officer|ceo|chair(?:man|woman|person)?|owner|controlling)\b/i;
+const CURRENT_PERIOD = /\b(?:current|currently|now|ongoing|present|today)\b/i;
+const VENTURE_IDENTITY_STOP_WORDS = new Set([
+  "company", "dao", "exchange", "foundation", "global", "group", "holdings",
+  "inc", "labs", "limited", "llc", "network", "project", "protocol", "technologies",
+  "technology", "the",
+]);
+
+function safeVentureScope(value: string | null | undefined): string | null {
+  if (!value?.trim()) return null;
+  return safeCandidateUrl(value.includes("://") ? value : `https://${value}`);
+}
+
+function ventureIdentityTokens(venture: CollectContext["evidence"]["ventures"][number]): string[] {
+  return [...new Set([
+    ...looseTokens(venture.project_name),
+    ...looseTokens(venture.x_handle?.replace(/^@/, "") ?? ""),
+  ].filter((token) => token.length >= 4 && !VENTURE_IDENTITY_STOP_WORDS.has(token)))];
+}
+
+/**
+ * `evidence_url` is often a press or aggregator citation. It can define an
+ * official venture scope only when the dedicated host itself identifies the
+ * venture, or when a shared-host tenant path identifies it. A Forbes article
+ * about Coinbase must never make forbes.com a Coinbase first-party domain.
+ */
+function evidenceUrlMatchesVentureIdentity(
+  scope: string,
+  venture: CollectContext["evidence"]["ventures"][number],
+): boolean {
+  let url: URL;
+  try { url = new URL(scope); } catch { return false; }
+  const host = normalizedHost(url.hostname);
+  const identityTokens = ventureIdentityTokens(venture);
+  if (!identityTokens.length) return false;
+  if (PATH_TENANTED_HOSTS.has(host)) {
+    let decodedPath: string;
+    try { decodedPath = decodeURIComponent(url.pathname); } catch { return false; }
+    const pathTokens = looseTokens(decodedPath);
+    return identityTokens.some((token) => pathTokens.includes(token));
+  }
+  const hostLabels = host.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
+  return identityTokens.some((token) => hostLabels.includes(token));
+}
+
+function verifiedVentureOfficialScopes(
+  venture: CollectContext["evidence"]["ventures"][number],
+): string[] {
+  const domainScope = safeVentureScope(venture.domain);
+  const evidenceScope = safeVentureScope(venture.evidence_url);
+  return [...new Set([
+    ...(domainScope ? [domainScope] : []),
+    ...(evidenceScope && evidenceUrlMatchesVentureIdentity(evidenceScope, venture)
+      ? [evidenceScope]
+      : []),
+  ])];
+}
+
+/**
+ * A person's related-asset answer is a two-link claim: the person must have a
+ * verified, current control relationship with an organization, and a fetched
+ * first-party source (or regulator for securities) must independently identify
+ * the asset. The relationship never proves a token or security by itself; it
+ * only supplies the entity and official scope for source checking.
+ */
+function verifiedVentureAssetRelationships(ctx: CollectContext): VerifiedVentureAssetRelationship[] {
+  return ctx.evidence.ventures.flatMap((venture): VerifiedVentureAssetRelationship[] => {
+    if (
+      venture.artifact_verified !== true
+      || venture.evidence_origin === "model_lead"
+      || !venture.project_name?.trim()
+      || !CURRENT_CONTROL_ROLE.test(venture.role ?? "")
+      || !CURRENT_PERIOD.test(venture.period ?? "")
+    ) return [];
+    const officialScopes = verifiedVentureOfficialScopes(venture);
+    return officialScopes.length ? [{ name: venture.project_name.trim(), officialScopes }] : [];
+  });
+}
+
 function verifiedCounterpartyHosts(ctx: CollectContext): string[] {
   return [...new Set(ctx.evidence.ventures.flatMap((venture): string[] => {
     if (
       venture.artifact_verified !== true
       || venture.evidence_origin === "model_lead"
-      || !venture.domain?.trim()
     ) return [];
-    const candidate = venture.domain.includes("://") ? venture.domain : `https://${venture.domain}`;
-    const safe = safeCandidateUrl(candidate);
-    if (!safe) return [];
-    try { return [new URL(safe).hostname]; } catch { return []; }
+    return verifiedVentureOfficialScopes(venture);
   }))];
 }
 
@@ -2286,6 +2600,8 @@ function questionLedger(
   return questions.map((question) => {
     const answerRefs = deterministicQuestionAnswerRefs(ctx, question, facts);
     const questionRunState = (result: BasicFactsDiscoveryResult): BasicFactQuestionLedgerEntry["providerRuns"][number]["state"] => {
+      const questionSpecificState = result.questionStates?.[question.id];
+      if (questionSpecificState) return questionSpecificState;
       const state = result.batchStates?.[question.batch] ?? result.state;
       // One batched model search asks several questions at once. A blank batch
       // is not a separate, exhaustive negative screen for every question in it.
@@ -2295,15 +2611,15 @@ function questionLedger(
     };
     const providerRuns: BasicFactQuestionLedgerEntry["providerRuns"] = [{
       phase: "primary",
-      provider: primary.provider,
+      provider: primary.questionProviders?.[question.id] ?? primary.provider,
       state: questionRunState(primary),
     }];
     if (repairQuestionIds.has(question.id)) {
-      const repairState = repair.batchStates?.[question.batch] ?? repair.batchStates?.repair ?? repair.state;
+      const repairState = questionRunState(repair);
       providerRuns.push({
         phase: "repair",
-        provider: repair.provider,
-        state: repairState === "completed_empty" ? "partial" : repairState,
+        provider: repair.questionProviders?.[question.id] ?? repair.provider,
+        state: repairState,
       });
     }
     return {
@@ -2352,6 +2668,7 @@ export async function collectBasicFacts(
       try { return [new URL(value).toString()]; } catch { return []; }
     });
   const officialCounterpartyHosts = verifiedCounterpartyHosts(ctx);
+  const ventureAssetRelationships = verifiedVentureAssetRelationships(ctx);
   const sourceByUrl = new Map<string, Promise<PublicTextResult>>();
   const fetchOnce = (url: string): Promise<PublicTextResult> => {
     const key = new URL(url).toString();
@@ -2392,7 +2709,15 @@ export async function collectBasicFacts(
       .map(async ({ lead }) => {
         const result = await fetchOnce(lead.sourceUrl);
         return result.status === "ok"
-          ? verifyBasicFactLead(lead, result, aliases, ctx.handle, officialHosts, officialCounterpartyHosts)
+          ? verifyBasicFactLead(
+            lead,
+            result,
+            aliases,
+            ctx.handle,
+            officialHosts,
+            officialCounterpartyHosts,
+            ventureAssetRelationships,
+          )
           : null;
       })))
       .filter((fact): fact is BasicFact => fact !== null);

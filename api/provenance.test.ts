@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
-import { AXIS_SCORING_CONTRACT, persistProvenance } from "./_provenance";
+import {
+  AXIS_SCORING_CONTRACT,
+  persistProvenance,
+  persistReportVersionBundle,
+  prepareProvenanceRows,
+} from "./_provenance";
 import { getProfile, PROFILES, SubjectClass } from "../src/engine";
 import type { AxisEvidenceRecord } from "../src/data/evidence";
 
@@ -1187,6 +1192,193 @@ describe("frozen source artifact provenance", () => {
         sourceContentHash: contentHash,
       },
     });
+  });
+});
+
+describe("atomic immutable report bundle", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const payload = {
+    handle: "@alice",
+    checkRuns: [{
+      checkId: "identity-resolution",
+      label: "Identity resolution",
+      status: "confirmed",
+      provider: "official-site",
+      sourceCount: 1,
+    }],
+    sourceArtifacts: [{
+      provider: "official-site",
+      kind: "team",
+      title: "Alice is the current founder and CEO",
+      sourceUrl: "https://alice.example/team",
+      capturedAt: "2026-07-13T12:00:00.000Z",
+    }],
+    report: {
+      audit_id: "bundle-audit-1",
+      composite_verdict: "INCOMPLETE",
+      governing_score: null,
+      roles: [],
+      role_reports: [],
+    },
+  };
+
+  it("sends one unbound child bundle and accepts only matching materialized counts", async () => {
+    const reportVersionId = "00000000-0000-4000-8000-000000000022";
+    const prepared = prepareProvenanceRows(
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        attestationState: "analyst_submitted",
+      },
+      payload,
+      payload.checkRuns,
+    );
+    expect(prepared.evidenceItems.length).toBeGreaterThan(0);
+    expect(prepared.checkRuns).toHaveLength(1);
+    expect(prepared.axisEvidence).toEqual([]);
+    for (const row of [...prepared.evidenceItems, ...prepared.checkRuns]) {
+      expect(row).not.toHaveProperty("organization_id");
+      expect(row).not.toHaveProperty("report_version_id");
+      expect(row).not.toHaveProperty("attestation_state");
+    }
+
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{
+      report_version_id: reportVersionId,
+      evidence_count: prepared.evidenceItems.length,
+      check_count: prepared.checkRuns.length,
+      axis_evidence_count: prepared.axisEvidence.length,
+    }]), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(persistReportVersionBundle(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        kind: "person",
+        canonicalRef: "alice",
+        query: "@alice",
+        createdBy: "00000000-0000-4000-8000-000000000010",
+        payload,
+        checks: payload.checkRuns,
+        runId: "bundle-audit-1",
+        attestationState: "analyst_submitted",
+        verdict: "INCOMPLETE",
+        score: null,
+        completenessState: "partial",
+        methodologyVersion: null,
+        providerSnapshot: {},
+        cost: {},
+      },
+    )).resolves.toBe(reportVersionId);
+
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0][0]).toBe(
+      "https://database.example/rest/v1/rpc/persist_report_version_bundle",
+    );
+    const body = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
+    expect(body).toMatchObject({
+      p_organization_id: "00000000-0000-4000-8000-000000000011",
+      p_payload: payload,
+      p_check_runs: [expect.objectContaining({ check_id: "identity-resolution" })],
+    });
+    expect(body.p_evidence_items.length).toBe(prepared.evidenceItems.length);
+  });
+
+  it("rejects incomplete check materialization before issuing the parent RPC", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const duplicateChecks = [payload.checkRuns[0], payload.checkRuns[0]];
+
+    await expect(persistReportVersionBundle(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        kind: "person",
+        canonicalRef: "alice",
+        query: "@alice",
+        createdBy: "00000000-0000-4000-8000-000000000010",
+        payload: { ...payload, checkRuns: duplicateChecks },
+        checks: duplicateChecks,
+        runId: "bundle-audit-invalid",
+        attestationState: "analyst_submitted",
+        verdict: "INCOMPLETE",
+        score: null,
+        completenessState: "partial",
+        methodologyVersion: null,
+        providerSnapshot: {},
+        cost: {},
+      },
+    )).rejects.toThrow("every frozen check must have one unique row");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("fails closed when the RPC reports child counts that do not match the frozen payload", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify([{
+      report_version_id: "00000000-0000-4000-8000-000000000022",
+      evidence_count: 0,
+      check_count: 0,
+      axis_evidence_count: 0,
+    }]), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(persistReportVersionBundle(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        kind: "person",
+        canonicalRef: "alice",
+        query: "@alice",
+        createdBy: "00000000-0000-4000-8000-000000000010",
+        payload,
+        checks: payload.checkRuns,
+        runId: "bundle-audit-count-mismatch",
+        attestationState: "analyst_submitted",
+        verdict: "INCOMPLETE",
+        score: null,
+        completenessState: "partial",
+        methodologyVersion: null,
+        providerSnapshot: {},
+        cost: {},
+      },
+    )).rejects.toThrow("inconsistent child counts");
+  });
+});
+
+describe("report bundle migration contract (static SQL assertions only)", () => {
+  const sql = readFileSync(
+    new URL("../supabase/migrations/20260713181834_persist_report_version_bundle.sql", import.meta.url),
+    "utf8",
+  );
+
+  it("creates parent and provenance children inside one bounded service-only RPC", () => {
+    const parentWrite = sql.indexOf("from public.persist_report_version(");
+    const evidenceWrite = sql.indexOf("insert into public.evidence_items");
+    const checkWrite = sql.indexOf("insert into public.check_runs");
+    const axisWrite = sql.indexOf("insert into public.report_axis_evidence");
+    expect(sql).toContain("create or replace function public.persist_report_version_bundle");
+    expect(sql).toContain("security invoker");
+    expect(sql).toContain("set search_path = ''");
+    expect(sql).toContain("set local lock_timeout = '5s'");
+    expect(sql).toContain("set local statement_timeout = '120s'");
+    expect(parentWrite).toBeGreaterThan(-1);
+    expect(evidenceWrite).toBeGreaterThan(parentWrite);
+    expect(checkWrite).toBeGreaterThan(evidenceWrite);
+    expect(axisWrite).toBeGreaterThan(checkWrite);
+    expect(sql).toContain("payload checkRuns were not fully materialized");
+    expect(sql).toContain("immutable report provenance materialization mismatch");
+    expect(sql).toContain("immutable evidence item replay content mismatch");
+    expect(sql).toContain("immutable check run replay content mismatch");
+    expect(sql).toContain("immutable axis evidence replay content mismatch");
+    expect(sql).toContain("actual.metadata is distinct from incoming.value -> 'metadata'");
+    expect(sql).toContain("actual.state is distinct from incoming.value ->> 'state'");
+    expect(sql).toContain("actual.artifact_id is distinct from incoming.value ->> 'artifact_id'");
+  });
+
+  it("keeps the mutation surface restricted to the service role", () => {
+    expect(sql).toContain(") from public, anon, authenticated, service_role;");
+    expect(sql).toContain(") to service_role;");
   });
 });
 

@@ -335,4 +335,100 @@ describe("PersonCheckTracker", () => {
     expect(byId(tracker, ["FOUNDER"], "profile-photo-authenticity")?.decisionCritical).toBe(false);
     expect(byId(tracker, ["FOUNDER"], "trust-graph-connections")?.decisionCritical).toBe(false);
   });
+
+  it("keeps a fully answered Brian-like founder PASS final when photo and CourtListener diagnostics fail", () => {
+    const tracker = new PersonCheckTracker();
+    for (const [id, status, note] of [
+      ["founder-identity-authority", "confirmed", "Brian Armstrong and his current Coinbase CEO authority were verified"],
+      ["founder-company-relationships", "confirmed", "Coinbase founder and current company relationships were verified"],
+      ["founder-track-record", "confirmed", "prior operating role and Coinbase outcome were verified"],
+      ["founder-control-conflicts", "checked-empty", "targeted control and conflict search completed without a publishable conflict"],
+      ["founder-legal-regulatory", "checked-empty", "direct-subject legal search completed without attributing a company matter to the founder"],
+      ["founder-asset-distinction", "confirmed", "COIN was verified as a public security and kept separate from crypto-token questions"],
+    ] as const) {
+      tracker.record({
+        id,
+        status,
+        note,
+        provider: "verified-founder-questions",
+        sourceCount: status === "checked-empty" ? 0 : 1,
+      });
+    }
+    tracker.record({
+      id: "profile-photo-authenticity",
+      status: "unavailable",
+      note: "vision provider failed or returned an invalid profile-photo result",
+      provider: "claude-vision",
+    });
+    tracker.record({
+      id: "us-legal-history",
+      status: "unavailable",
+      note: "CourtListener returned a partial page and could not complete its supplemental name screen",
+      provider: "courtlistener",
+    });
+    tracker.provider(
+      "offchain-diligence",
+      "News, legal, and sanctions",
+      "partial",
+      "CourtListener coverage was partial",
+    );
+
+    const checks = tracker.snapshot(["FOUNDER"], { resolvedRealName: true });
+    const readiness = deriveDecisionReadiness(checks, {
+      roleCount: 1,
+      decisionAxisTotal: 6,
+      evidenceBackedAxes: 6,
+    });
+    const completeness = tracker.completeness(["FOUNDER"], { resolvedRealName: true });
+    const presentation = presentPublicReport({
+      verdict: "PASS",
+      score: 80,
+      completeness,
+      attestation: "server_collected",
+      checks,
+      readiness: {
+        ...readiness,
+        roleCount: 1,
+        neededEvidenceSummary: "No decision-critical evidence checks remain open.",
+      },
+    });
+
+    expect(byId(tracker, ["FOUNDER"], "founder-identity-authority", { resolvedRealName: true })).toMatchObject({
+      status: "confirmed",
+      decisionCritical: true,
+      note: expect.stringContaining("current Coinbase CEO authority"),
+    });
+    expect(byId(tracker, ["FOUNDER"], "founder-company-relationships", { resolvedRealName: true })).toMatchObject({
+      status: "confirmed",
+      decisionCritical: true,
+      note: expect.stringContaining("Coinbase founder"),
+    });
+    expect(byId(tracker, ["FOUNDER"], "profile-photo-authenticity", { resolvedRealName: true })).toMatchObject({
+      status: "unavailable",
+      decisionCritical: false,
+    });
+    expect(byId(tracker, ["FOUNDER"], "us-legal-history", { resolvedRealName: true })).toMatchObject({
+      status: "unavailable",
+      decisionCritical: false,
+    });
+    expect(tracker.providers().runs).toContainEqual(expect.objectContaining({
+      id: "offchain-diligence",
+      state: "partial",
+    }));
+    expect(readiness).toMatchObject({
+      status: "ready",
+      successful: 6,
+      applicable: 6,
+      coveragePercent: 100,
+      unresolved: 0,
+    });
+    expect(completeness).toBe("complete");
+    expect(presentation).toMatchObject({
+      displayVerdict: "PASS",
+      readinessLabel: "EVIDENCE COVERAGE COMPLETE",
+      primaryScore: "80",
+      scoreLabel: "SCORE",
+      final: true,
+    });
+  });
 });

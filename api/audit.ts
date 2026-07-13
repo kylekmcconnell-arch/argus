@@ -7,10 +7,9 @@ import {
   consumeInvestigationQuota,
   requireArgusAuth,
   serviceCredentials,
-  serviceHeaders,
   type AuthContext,
 } from "./_auth.js";
-import { activateReportVersion, persistProvenance } from "./_provenance.js";
+import { activateReportVersion, persistReportVersionBundle } from "./_provenance.js";
 import { issuePanelCostToken, recordProviderUsageBatch, type PanelCostLine } from "./_cache.js";
 import { coverageQualifiedCompleteness } from "../src/lib/reportPresentation.js";
 import {
@@ -85,36 +84,6 @@ export async function persistServerDossier(
     checks: dossier.checkRuns ?? [],
   });
 
-  const versionResponse = await fetch(`${credentials.url}/rest/v1/rpc/persist_report_version`, {
-    method: "POST",
-    headers: serviceHeaders(credentials.key),
-    body: JSON.stringify({
-      p_organization_id: auth.organizationId,
-      p_kind: "person",
-      p_canonical_ref: ref,
-      p_query: query,
-      p_created_by: auth.userId,
-      p_payload: dossier,
-      p_run_id: runId,
-      p_attestation_state: attestationState,
-      p_verdict: verdict,
-      p_score: score,
-      p_completeness_state: qualifiedCompleteness,
-      p_methodology_version: process.env.ARGUS_METHODOLOGY_VERSION
-        || (dossier.axisCitationVersion === 1 ? LINEAGE_METHODOLOGY_VERSION : null),
-      p_provider_snapshot: dossier?.providerSnapshot ?? dossier?.providers ?? {},
-      p_cost: dossier?.cost ?? {},
-    }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!versionResponse.ok) {
-    throw new Error(`immutable report write failed (${versionResponse.status}): ${(await versionResponse.text()).slice(0, 240)}`);
-  }
-  const versions = (await versionResponse.json()) as Array<{ report_version_id?: unknown }>;
-  const reportVersionId = Array.isArray(versions) && typeof versions[0]?.report_version_id === "string"
-    ? versions[0].report_version_id
-    : null;
-  if (!reportVersionId) throw new Error("immutable report write returned no id");
   const cost = dossier.cost && typeof dossier.cost === "object" && !Array.isArray(dossier.cost)
     ? dossier.cost as { schemaVersion?: unknown; calls?: unknown }
     : {};
@@ -123,6 +92,24 @@ export async function persistServerDossier(
   if (dossier.live && !hasObservedLedger) {
     throw new Error("live provider usage ledger is missing");
   }
+  const reportVersionId = await persistReportVersionBundle(credentials, {
+    organizationId: auth.organizationId,
+    kind: "person",
+    canonicalRef: ref,
+    query,
+    createdBy: auth.userId,
+    payload: dossier,
+    checks: dossier.checkRuns,
+    runId,
+    attestationState,
+    verdict,
+    score,
+    completenessState: qualifiedCompleteness,
+    methodologyVersion: process.env.ARGUS_METHODOLOGY_VERSION
+      || (dossier.axisCitationVersion === 1 ? LINEAGE_METHODOLOGY_VERSION : null),
+    providerSnapshot: dossier?.providerSnapshot ?? dossier?.providers ?? {},
+    cost: dossier?.cost ?? {},
+  });
   if (costLines.length > 0) {
     await recordProviderUsageBatch(
       auth.organizationId,
@@ -131,12 +118,6 @@ export async function persistServerDossier(
       costLines,
     );
   }
-  await persistProvenance(
-    credentials,
-    { organizationId: auth.organizationId, reportVersionId, attestationState },
-    dossier,
-    dossier.checkRuns,
-  );
   if (isDecisionlessIncomplete(dossier)) {
     console.warn("[api/audit] decisionless incomplete report version saved without activation", JSON.stringify({
       organizationId: auth.organizationId,

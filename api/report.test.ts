@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
-const { issuePanelCostToken } = vi.hoisted(() => ({
+const { issuePanelCostToken, persistReportVersionBundle } = vi.hoisted(() => ({
   issuePanelCostToken: vi.fn(),
+  persistReportVersionBundle: vi.fn(),
 }));
 
 vi.mock("./_cache.js", () => ({ issuePanelCostToken }));
@@ -22,6 +23,7 @@ vi.mock("./_auth.js", () => ({
 vi.mock("./_provenance.js", () => ({
   persistProvenance: vi.fn(async () => undefined),
   activateReportVersion: vi.fn(async () => undefined),
+  persistReportVersionBundle,
 }));
 
 import { requireArgusAuth } from "./_auth.js";
@@ -70,6 +72,7 @@ describe("report case lifecycle API", () => {
     vi.mocked(requireArgusAuth).mockClear();
     vi.mocked(activateReportVersion).mockClear();
     issuePanelCostToken.mockReset().mockReturnValue("signed-panel-token");
+    persistReportVersionBundle.mockReset();
   });
 
   afterEach(() => {
@@ -156,8 +159,7 @@ describe("report case lifecycle API", () => {
   it("relies on atomic immutable persistence without a second projection write", async () => {
     const address = "0x00000000000000000000000000000000000000aa";
     const versionId = "00000000-0000-4000-8000-000000000301";
-    const fetchMock = vi.fn().mockResolvedValue(jsonResponse([{ report_version_id: versionId }]));
-    vi.stubGlobal("fetch", fetchMock);
+    persistReportVersionBundle.mockResolvedValue(versionId);
     const { res, captured } = response();
 
     await handler(request("POST", {
@@ -171,11 +173,15 @@ describe("report case lifecycle API", () => {
       },
     }), res);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("https://database.example/rest/v1/rpc/persist_report_version");
-    expect(JSON.parse(String(fetchMock.mock.calls[0][1]?.body))).toMatchObject({
-      p_completeness_state: "partial",
-    });
+    expect(persistReportVersionBundle).toHaveBeenCalledWith(
+      { url: "https://database.example", key: "test-service-key" },
+      expect.objectContaining({
+        kind: "token",
+        canonicalRef: address,
+        completenessState: "partial",
+        checks: [{ label: "Contract safety", status: "unknown" }],
+      }),
+    );
     expect(activateReportVersion).toHaveBeenCalledWith(
       { url: "https://database.example", key: "test-service-key" },
       "00000000-0000-4000-8000-000000000001",

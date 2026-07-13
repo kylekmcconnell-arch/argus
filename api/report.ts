@@ -7,7 +7,11 @@ import {
   type AuthContext,
   type ServiceCredentials,
 } from "./_auth.js";
-import { activateReportVersion, persistProvenance } from "./_provenance.js";
+import {
+  activateReportVersion,
+  persistProvenance,
+  persistReportVersionBundle,
+} from "./_provenance.js";
 import { issuePanelCostToken } from "./_cache.js";
 import {
   mapStoredCheckRuns,
@@ -492,43 +496,25 @@ async function createImmutableVersion(
     attestation: "analyst_submitted",
     checks: Array.isArray(raw.checkRuns) ? raw.checkRuns : [],
   });
-  const response = await fetch(`${credentials.url}/rest/v1/rpc/persist_report_version`, {
-    method: "POST",
-    headers: serviceHeaders(credentials.key),
-    body: JSON.stringify({
-      p_organization_id: auth.organizationId,
-      p_kind: row.kind,
-      p_canonical_ref: row.ref,
-      p_query: row.query,
-      p_created_by: auth.userId,
-      p_payload: payload,
-      // Client-computed token/site reports never choose an idempotency key for
-      // a server-attested run. Each explicit submission is a new version.
-      p_run_id: null,
-      p_attestation_state: "analyst_submitted",
-      p_verdict: row.verdict,
-      p_score: row.score,
-      p_completeness_state: qualifiedCompleteness,
-      p_methodology_version: process.env.ARGUS_METHODOLOGY_VERSION || null,
-      p_provider_snapshot: payloadRecord.providerSnapshot ?? payloadRecord.providers ?? {},
-      p_cost: Object.keys(asRecord(payloadRecord.cost)).length ? asRecord(payloadRecord.cost) : {},
-    }),
-    signal: AbortSignal.timeout(10_000),
-  });
-  if (!response.ok) {
-    throw new Error(`immutable version write failed (${response.status}): ${(await response.text()).slice(0, 240)}`);
-  }
-  const rows = (await response.json()) as unknown;
-  const versionId = Array.isArray(rows) && typeof rows[0]?.report_version_id === "string"
-    ? rows[0].report_version_id
-    : "";
-  if (!versionId) throw new Error("immutable version write returned no id");
-  await persistProvenance(
-    credentials,
-    { organizationId: auth.organizationId, reportVersionId: versionId, attestationState: "analyst_submitted" },
+  const versionId = await persistReportVersionBundle(credentials, {
+    organizationId: auth.organizationId,
+    kind: row.kind as "person" | "token" | "investigation" | "site",
+    canonicalRef: String(row.ref),
+    query: String(row.query),
+    createdBy: auth.userId,
     payload,
-    raw.checkRuns,
-  );
+    checks: raw.checkRuns,
+    // Client-computed token/site reports never choose an idempotency key for
+    // a server-attested run. Each explicit submission is a new version.
+    runId: null,
+    attestationState: "analyst_submitted",
+    verdict: typeof row.verdict === "string" ? row.verdict : null,
+    score: typeof row.score === "number" ? row.score : null,
+    completenessState: qualifiedCompleteness,
+    methodologyVersion: process.env.ARGUS_METHODOLOGY_VERSION || null,
+    providerSnapshot: payloadRecord.providerSnapshot ?? payloadRecord.providers ?? {},
+    cost: Object.keys(asRecord(payloadRecord.cost)).length ? asRecord(payloadRecord.cost) : {},
+  });
   await activateReportVersion(credentials, auth.organizationId, versionId);
   return versionId;
 }
@@ -841,8 +827,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         row.report_version_id = await createImmutableVersion(credentials, auth, row, body);
         const reportVersionId = String(row.report_version_id);
         const panelCostToken = issuePanelCostToken(auth.organizationId, reportVersionId);
-        // The RPC atomically wrote both the immutable version and its active
-        // projection. A second HTTP write would reintroduce partial persistence.
+        // The bundle RPC atomically wrote the immutable version and every
+        // provenance child before activation. A second parent/provenance write
+        // would reintroduce partial persistence.
         res.status(200).json({
           ok: true,
           reportVersionId,
