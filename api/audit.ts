@@ -118,26 +118,32 @@ export async function persistServerDossier(
       costLines,
     );
   }
+  // Always run the activation path and let the DATABASE decide what supersedes
+  // what: activate_report_version_with_graph self-skips unless completeness is
+  // "complete" (a decisionless INCOMPLETE report is always partial), and the
+  // plain activate_report_version RPC preserves a prior decision-bearing
+  // projection when the fresh scan is routing-failed. Skipping activation here
+  // was broader than that DB guard — it stranded a brand-new subject's first
+  // INCOMPLETE report, which should still become its visible current report.
   if (isDecisionlessIncomplete(dossier)) {
-    console.warn("[api/audit] decisionless incomplete report version saved without activation", JSON.stringify({
+    console.info("[api/audit] decisionless incomplete report version saved; DB guard governs whether it supersedes a prior decision report", JSON.stringify({
       organizationId: auth.organizationId,
       reportVersionId,
       ref,
     }));
-  } else {
-    const activatedWithGraph = await activateReportVersionWithAuthoritativeGraph(
-      credentials,
-      {
-        organizationId: auth.organizationId,
-        reportVersionId,
-        userId: auth.userId,
-        attestationState,
-        completeness: qualifiedCompleteness,
-      },
-    );
-    if (!activatedWithGraph) {
-      await activateReportVersion(credentials, auth.organizationId, reportVersionId);
-    }
+  }
+  const activatedWithGraph = await activateReportVersionWithAuthoritativeGraph(
+    credentials,
+    {
+      organizationId: auth.organizationId,
+      reportVersionId,
+      userId: auth.userId,
+      attestationState,
+      completeness: qualifiedCompleteness,
+    },
+  );
+  if (!activatedWithGraph) {
+    await activateReportVersion(credentials, auth.organizationId, reportVersionId);
   }
   return reportVersionId;
 }

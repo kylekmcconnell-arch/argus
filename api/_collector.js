@@ -2962,15 +2962,21 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const catalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog2);
   const limitingByAxis = new Map(projectAxes.map(({ axis }) => [axis, catalog.filter((artifact) => isVerifiedCounterArtifact(artifact, axis)).map((artifact) => artifact.artifactId)]));
   const bands = {};
-  const setBand = (axis, tier, reasons, anchors) => {
+  const setBand = (axis, tier, reasons, anchors, floorTier) => {
     const spec = projectAxes.find((candidate) => candidate.axis === axis);
     if (!spec) return;
     const limiting = limitingByAxis.get(axis) ?? [];
     const effectiveTier = tier === "none" && limiting.length > 0 ? "adverse" : tier;
+    const range = projectBandRange(spec.weight, effectiveTier);
+    const widenedByUnverified = floorTier !== void 0 && floorTier !== effectiveTier && effectiveTier !== "adverse";
     bands[axis] = {
       tier: effectiveTier,
-      ...projectBandRange(spec.weight, effectiveTier),
-      reasons: effectiveTier !== tier ? ["verified score-limiting evidence", ...reasons] : reasons,
+      ...widenedByUnverified ? { minScore: projectBandRange(spec.weight, floorTier).minScore, maxScore: range.maxScore } : range,
+      reasons: [
+        ...effectiveTier !== tier ? ["verified score-limiting evidence"] : [],
+        ...widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : [],
+        ...reasons
+      ],
       anchorArtifactIds: [.../* @__PURE__ */ new Set([...anchors, ...limiting])]
     };
   };
@@ -2983,6 +2989,10 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   ], artifactIds([...leaders, ...leaderFacts, ...officialFacts, ...legalFacts, ...profile ? [profile] : []]));
   const p2Anchors = [...repositoryFacts, ...productFacts, ...auditFacts, ...productPress, ...productActivity];
   const productProof = productFacts.length > 0 || productPress.length > 0 || productActivity.length > 0;
+  const verifiedProductProof = productFacts.length > 0 || productActivity.length > 0;
+  let p2FloorTier = repositoryFacts.length || verifiedProductProof ? "emerging" : "none";
+  if (!earlyStage && repositoryFacts.length > 0 && verifiedProductProof) p2FloorTier = "solid";
+  if (!earlyStage && repositoryFacts.length > 0 && verifiedProductProof && auditFacts.length > 0) p2FloorTier = "exceptional";
   let p2Tier = repositoryFacts.length || productProof ? "emerging" : "none";
   if (!earlyStage && repositoryFacts.length > 0 && productProof) p2Tier = "solid";
   if (!earlyStage && repositoryFacts.length > 0 && productProof && (auditFacts.length > 0 || productPress.length >= 2)) p2Tier = "exceptional";
@@ -2990,7 +3000,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...repositoryFacts.length ? ["verified public repository"] : [],
     ...productProof ? ["source-backed product operation"] : [],
     ...earlyStage ? ["explicit early-stage product marker"] : []
-  ], artifactIds(p2Anchors));
+  ], artifactIds(p2Anchors), p2FloorTier);
   const tokenDisclosures = [...tokenDisclosureFacts];
   const p3Tier = !verifiedToken ? "none" : scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging";
   setBand("P3_token_conduct", p3Tier, [
@@ -3001,6 +3011,8 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...auditFacts.length ? ["verified security review"] : []
   ], artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts]));
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
+  let p4FloorTier = fundingFacts.length || investorFacts.length || advisorTeam.length ? "emerging" : "none";
+  if (investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4FloorTier = "solid";
   let p4Tier = fundingFacts.length || investorFacts.length || advisorTeam.length || relationshipPress.length ? "emerging" : "none";
   if (relationshipPress.length > 0 || investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4Tier = "solid";
   if (distinctRelationshipKeys.size >= 2) p4Tier = "exceptional";
@@ -3008,12 +3020,17 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...relationshipPress.length ? [`${distinctRelationshipKeys.size} material relationship source${distinctRelationshipKeys.size === 1 ? "" : "s"}`] : [],
     ...fundingFacts.length ? ["source-backed financing state"] : [],
     ...advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : []
-  ], artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...advisorTeam]));
+  ], artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...advisorTeam]), p4FloorTier);
+  const verifiedCurrentActivity = currentSocialActivity;
+  let p5FloorTier = verifiedCurrentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
+  if (verifiedCurrentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5FloorTier = "solid";
+  if (verifiedCurrentActivity && currentProtocolTractionFacts.length > 0 && scaleSignals >= 2 && tokenProviders >= 2) p5FloorTier = "exceptional";
   let p5Tier = currentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
   if (currentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5Tier = "solid";
   if (currentActivity && currentProtocolTractionFacts.length > 0 && scaleSignals >= 2 && tokenProviders >= 2) p5Tier = "exceptional";
   const severeProjectTokenDrawdown = catalog.some((artifact) => artifact.operation === "findings:ProjectTokenDrawdown" && artifact.counterEligibleAxes?.includes("P5_traction_and_liveness"));
   if (severeProjectTokenDrawdown && p5Tier === "exceptional") p5Tier = "solid";
+  if (severeProjectTokenDrawdown && p5FloorTier === "exceptional") p5FloorTier = "solid";
   setBand("P5_traction_and_liveness", p5Tier, [
     ...currentActivity ? ["current operating activity"] : [],
     ...protocolTractionFacts.length ? ["verified protocol usage metric"] : [],
@@ -3025,7 +3042,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...freshProductPress,
     ...protocolTractionFacts,
     ...token ? [token] : []
-  ]));
+  ]), p5FloorTier);
   const disclosureBase = [...legalFacts, ...officialFacts, ...repositoryFacts];
   let p6Tier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
   if ((governanceFacts.length > 0 || auditFacts.length > 0) && disclosureBase.length > 0 || legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0) p6Tier = "solid";
@@ -4452,9 +4469,39 @@ var CHECKS = [
   { id: "founder-asset-distinction", label: "Related assets and security/token distinction", defaultNote: "related public securities, native tokens, and other assets were not clearly distinguished", role: "FOUNDER", criticalFor: ["FOUNDER"] },
   { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR", criticalFor: ["INVESTOR"] },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
-  { id: "us-legal-history", label: "US legal history", defaultNote: "server collector did not run a legal-history check", requiresResolvedRealName: true },
-  { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check", requiresResolvedRealName: true },
-  { id: "trust-graph-connections", label: "Trust-graph connections", defaultNote: "server collector did not run flagged-subject graph reconciliation" }
+  // Sanctions, legal history, and flagged-subject graph reconciliation are
+  // legal-grade decision gates, not provider diagnostics. A report must never
+  // present as decision-ready clearance while they are unresolved.
+  //  - us-legal-history gates every person role EXCEPT founders, whose
+  //    founder-legal-regulatory question is the stronger, attribution-verified
+  //    form of the same gate (a raw CourtListener name screen stays visible as
+  //    a diagnostic for them).
+  //  - ofac-sanctions-name gates EVERY person role including founders: no
+  //    research check substitutes for an SDN screen.
+  //  - trust-graph-connections gates every role: a subject tied to a flagged
+  //    operation is the exact signal this product exists to surface.
+  // All three stay conditional on scope (requiresResolvedRealName marks the
+  // name screens not-applicable, never silently complete).
+  {
+    id: "us-legal-history",
+    label: "US legal history",
+    defaultNote: "server collector did not run a legal-history check",
+    requiresResolvedRealName: true,
+    criticalFor: ["KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"]
+  },
+  {
+    id: "ofac-sanctions-name",
+    label: "OFAC sanctions (name)",
+    defaultNote: "server collector did not run a name-sanctions check",
+    requiresResolvedRealName: true,
+    criticalFor: ["FOUNDER", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"]
+  },
+  {
+    id: "trust-graph-connections",
+    label: "Trust-graph connections",
+    defaultNote: "server collector did not run flagged-subject graph reconciliation",
+    criticalFor: ["FOUNDER", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER", "PROJECT"]
+  }
 ];
 var PERSON_CHECK_IDS = Object.freeze(CHECKS.map((check) => check.id));
 var LEGACY_PERSON_CHECK_IDS = Object.freeze([

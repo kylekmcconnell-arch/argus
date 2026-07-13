@@ -196,6 +196,7 @@ describe("analyst verdict integrity", () => {
         { predicate: "governance", value: "Token-holder governance", status: "verified", artifact_verified: true },
         { predicate: "tokenomics", value: "Published token allocation and supply schedule", status: "verified", artifact_verified: true },
         { predicate: "audit", value: "Independent protocol audit", status: "verified", artifact_verified: true },
+        { predicate: "investor", value: "Jump Crypto disclosed as a strategic backer", status: "verified", artifact_verified: true },
         { predicate: "traction", value: "$25M verified daily protocol volume", qualifier: "as of 2026-07-10", status: "verified", artifact_verified: true },
       ],
       projectToken: {
@@ -277,6 +278,7 @@ describe("analyst verdict integrity", () => {
         { predicate: "tokenomics", value: "Published JUP allocation and supply schedule", status: "verified", artifact_verified: true },
         { predicate: "vesting", value: "Published contributor unlock schedule", status: "verified", artifact_verified: true },
         { predicate: "audit", value: "Independent protocol security reviews", status: "verified", artifact_verified: true },
+        { predicate: "investor", value: "Jump Crypto disclosed as an integration counterparty and backer", status: "verified", artifact_verified: true },
         { predicate: "traction", value: "$1B verified daily protocol trading volume", qualifier: "as of 2026-07-10", status: "verified", artifact_verified: true },
       ],
       projectToken: {
@@ -368,6 +370,89 @@ describe("analyst verdict integrity", () => {
 
     expect(deriveProjectStrengthBands(syndicatedPacket, axes).P4_backing_and_partners.tier).toBe("solid");
     expect(deriveProjectStrengthBands(independentlyCorroboratedPacket, axes).P4_backing_and_partners.tier).toBe("exceptional");
+  });
+
+  it("lets unverified press widen the allowed ceiling but never force a score floor", () => {
+    const axes: AnalystAxis[] = [{
+      axis: "P4_backing_and_partners",
+      weight: 14,
+      role: SubjectClass.PROJECT,
+    }];
+    const pressOnly = buildScoringEvidencePacket({
+      sourceArtifacts: [{
+        kind: "press",
+        provider: "google-news",
+        title: "Project partners with Counterparty on regulated trading",
+        excerpt: "The companies launched the integration together.",
+        sourceUrl: "https://wire.example/project-counterparty",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        publishedAt: "2026-07-10T12:00:00.000Z",
+        contentHash: "d".repeat(64),
+        match: "exact_handle",
+      }],
+    }, axes);
+    const verifiedBacking = buildScoringEvidencePacket({
+      basicFacts: [{
+        predicate: "investor",
+        value: "Counterparty disclosed as a strategic backer",
+        status: "verified",
+        artifact_verified: true,
+      }],
+    }, axes);
+
+    const pressBand = deriveProjectStrengthBands(pressOnly, axes).P4_backing_and_partners;
+    // Headlines that were never passage-verified may justify a higher ceiling
+    // for the analyst's judgment, but must not manufacture a minimum score.
+    expect(pressBand.tier).toBe("solid");
+    expect(pressBand.minScore).toBe(0);
+    expect(pressBand.maxScore).toBeGreaterThan(0);
+    expect(pressBand.reasons).toContain("unverified press widens the ceiling only, never the floor");
+
+    const verifiedBand = deriveProjectStrengthBands(verifiedBacking, axes).P4_backing_and_partners;
+    // A verified backing record is exactly what a floor may derive from.
+    expect(verifiedBand.tier).toBe("solid");
+    expect(verifiedBand.minScore).toBeGreaterThan(0);
+  });
+
+  it("never lets fresh press headlines force a traction or liveness floor", () => {
+    const axes: AnalystAxis[] = [{
+      axis: "P5_traction_and_liveness",
+      weight: 14,
+      role: SubjectClass.PROJECT,
+    }];
+    const freshPress = {
+      kind: "press",
+      provider: "google-news",
+      title: "Project launches a production exchange upgrade",
+      excerpt: "The project shipped its latest platform release.",
+      sourceUrl: "https://wire.example/project-release",
+      capturedAt: "2026-07-12T12:00:00.000Z",
+      publishedAt: "2026-07-10T12:00:00.000Z",
+      contentHash: "e".repeat(64),
+      match: "exact_handle",
+    } as const;
+    const pressOnly = buildScoringEvidencePacket({ sourceArtifacts: [freshPress] }, axes);
+    const verifiedTraction = buildScoringEvidencePacket({
+      sourceArtifacts: [freshPress],
+      basicFacts: [{
+        predicate: "traction",
+        value: "$25M verified daily protocol volume",
+        qualifier: "as of 2026-07-10",
+        status: "verified",
+        artifact_verified: true,
+      }],
+    }, axes);
+
+    const pressOnlyBand = deriveProjectStrengthBands(pressOnly, axes).P5_traction_and_liveness;
+    expect(pressOnlyBand.tier).toBe("emerging");
+    expect(pressOnlyBand.minScore).toBe(0);
+    expect(pressOnlyBand.maxScore).toBeGreaterThan(0);
+    expect(pressOnlyBand.reasons).toContain("unverified press widens the ceiling only, never the floor");
+
+    const tractionBand = deriveProjectStrengthBands(verifiedTraction, axes).P5_traction_and_liveness;
+    expect(tractionBand.tier).toBe("solid");
+    expect(tractionBand.minScore).toBeLessThan(Math.ceil(axes[0].weight * 0.7));
+    expect(tractionBand.minScore).toBe(Math.ceil(axes[0].weight * 0.4));
   });
 
   it("keeps staff, generic posts, and unrelated beta mentions from inflating project strength", () => {
@@ -4184,6 +4269,11 @@ describe("analyst verdict integrity", () => {
       basicFacts: [{
         predicate: "official_identity",
         value: "Established Project",
+        status: "verified",
+        artifact_verified: true,
+      }, {
+        predicate: "investor",
+        value: "Regulated Counterparty disclosed as a strategic backer",
         status: "verified",
         artifact_verified: true,
       }],

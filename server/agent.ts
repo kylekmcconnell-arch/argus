@@ -1292,15 +1292,28 @@ export function deriveProjectStrengthBands(
     tier: ProjectStrengthTier,
     reasons: string[],
     anchors: string[],
+    // Unverified evidence (press headlines that were never passage-verified)
+    // may WIDEN the allowed range upward, but the enforced minimum must come
+    // only from verified records: floorTier is the strongest tier the axis
+    // reaches WITHOUT unverified sources. Omitted = the tier is fully verified.
+    floorTier?: ProjectStrengthTier,
   ) => {
     const spec = projectAxes.find((candidate) => candidate.axis === axis);
     if (!spec) return;
     const limiting = limitingByAxis.get(axis) ?? [];
     const effectiveTier = tier === "none" && limiting.length > 0 ? "adverse" : tier;
+    const range = projectBandRange(spec.weight, effectiveTier);
+    const widenedByUnverified = floorTier !== undefined && floorTier !== effectiveTier && effectiveTier !== "adverse";
     bands[axis] = {
       tier: effectiveTier,
-      ...projectBandRange(spec.weight, effectiveTier),
-      reasons: effectiveTier !== tier ? ["verified score-limiting evidence", ...reasons] : reasons,
+      ...(widenedByUnverified
+        ? { minScore: projectBandRange(spec.weight, floorTier).minScore, maxScore: range.maxScore }
+        : range),
+      reasons: [
+        ...(effectiveTier !== tier ? ["verified score-limiting evidence"] : []),
+        ...(widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : []),
+        ...reasons,
+      ],
       anchorArtifactIds: [...new Set([...anchors, ...limiting])],
     };
   };
@@ -1317,6 +1330,12 @@ export function deriveProjectStrengthBands(
 
   const p2Anchors = [...repositoryFacts, ...productFacts, ...auditFacts, ...productPress, ...productActivity];
   const productProof = productFacts.length > 0 || productPress.length > 0 || productActivity.length > 0;
+  // Verified-only ladder (press excluded): the enforced score floor may only
+  // come from records ARGUS actually verified, never from search headlines.
+  const verifiedProductProof = productFacts.length > 0 || productActivity.length > 0;
+  let p2FloorTier: ProjectStrengthTier = repositoryFacts.length || verifiedProductProof ? "emerging" : "none";
+  if (!earlyStage && repositoryFacts.length > 0 && verifiedProductProof) p2FloorTier = "solid";
+  if (!earlyStage && repositoryFacts.length > 0 && verifiedProductProof && auditFacts.length > 0) p2FloorTier = "exceptional";
   let p2Tier: ProjectStrengthTier = repositoryFacts.length || productProof ? "emerging" : "none";
   if (!earlyStage && repositoryFacts.length > 0 && productProof) p2Tier = "solid";
   if (!earlyStage && repositoryFacts.length > 0 && productProof && (auditFacts.length > 0 || productPress.length >= 2)) p2Tier = "exceptional";
@@ -1324,7 +1343,7 @@ export function deriveProjectStrengthBands(
     ...(repositoryFacts.length ? ["verified public repository"] : []),
     ...(productProof ? ["source-backed product operation"] : []),
     ...(earlyStage ? ["explicit early-stage product marker"] : []),
-  ], artifactIds(p2Anchors));
+  ], artifactIds(p2Anchors), p2FloorTier);
 
   const tokenDisclosures = [...tokenDisclosureFacts];
   const p3Tier: ProjectStrengthTier = !verifiedToken ? "none"
@@ -1341,6 +1360,10 @@ export function deriveProjectStrengthBands(
   ], artifactIds([...(token ? [token] : []), ...governanceFacts, ...tokenDisclosures, ...auditFacts]));
 
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
+  // Verified-only ladder (press excluded) for the enforced floor: headlines can
+  // suggest a partnership story to the analyst but cannot force a minimum score.
+  let p4FloorTier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || advisorTeam.length ? "emerging" : "none";
+  if (investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4FloorTier = "solid";
   let p4Tier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || advisorTeam.length || relationshipPress.length ? "emerging" : "none";
   if (relationshipPress.length > 0 || investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4Tier = "solid";
   if (distinctRelationshipKeys.size >= 2) p4Tier = "exceptional";
@@ -1348,8 +1371,15 @@ export function deriveProjectStrengthBands(
     ...(relationshipPress.length ? [`${distinctRelationshipKeys.size} material relationship source${distinctRelationshipKeys.size === 1 ? "" : "s"}`] : []),
     ...(fundingFacts.length ? ["source-backed financing state"] : []),
     ...(advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : []),
-  ], artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...advisorTeam]));
+  ], artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...advisorTeam]), p4FloorTier);
 
+  // Fresh press can establish an upper-bound liveness hypothesis, but it is
+  // still an unfetched headline. Compute the enforceable floor from verified
+  // activity only so coverage cannot manufacture traction points.
+  const verifiedCurrentActivity = currentSocialActivity;
+  let p5FloorTier: ProjectStrengthTier = verifiedCurrentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
+  if (verifiedCurrentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5FloorTier = "solid";
+  if (verifiedCurrentActivity && currentProtocolTractionFacts.length > 0 && scaleSignals >= 2 && tokenProviders >= 2) p5FloorTier = "exceptional";
   let p5Tier: ProjectStrengthTier = currentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
   if (currentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5Tier = "solid";
   if (currentActivity && currentProtocolTractionFacts.length > 0 && scaleSignals >= 2 && tokenProviders >= 2) p5Tier = "exceptional";
@@ -1357,6 +1387,7 @@ export function deriveProjectStrengthBands(
     artifact.operation === "findings:ProjectTokenDrawdown"
     && artifact.counterEligibleAxes?.includes("P5_traction_and_liveness"));
   if (severeProjectTokenDrawdown && p5Tier === "exceptional") p5Tier = "solid";
+  if (severeProjectTokenDrawdown && p5FloorTier === "exceptional") p5FloorTier = "solid";
   setBand("P5_traction_and_liveness", p5Tier, [
     ...(currentActivity ? ["current operating activity"] : []),
     ...(protocolTractionFacts.length ? ["verified protocol usage metric"] : []),
@@ -1368,7 +1399,7 @@ export function deriveProjectStrengthBands(
     ...freshProductPress,
     ...protocolTractionFacts,
     ...(token ? [token] : []),
-  ]));
+  ]), p5FloorTier);
 
   const disclosureBase = [...legalFacts, ...officialFacts, ...repositoryFacts];
   let p6Tier: ProjectStrengthTier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";

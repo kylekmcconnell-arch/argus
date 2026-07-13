@@ -223,7 +223,7 @@ export function ProvidersPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
-      <h1 className="display-sm text-[24px] text-ink">Providers &amp; coverage</h1>
+      <h1 className="display-sm text-[24px] text-ink">Data sources &amp; coverage</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
         Credential readiness and observed request health across ARGUS. Configured means access is present; Healthy
         means a recorded request succeeded. Secret values are never shown.

@@ -165,8 +165,8 @@ describe("PersonCheckTracker", () => {
 
     expect(readiness).toMatchObject({
       status: "ready",
-      successful: 6,
-      applicable: 6,
+      successful: 7,
+      applicable: 7,
       coveragePercent: 100,
       unresolved: 0,
     });
@@ -310,11 +310,14 @@ describe("PersonCheckTracker", () => {
       tracker.record({ id, status: "checked-empty", note: `${id} completed`, provider: "test-provider" });
     }
 
+    // Provider tranches completed: the OFAC screen counts (it is a founder
+    // decision gate), but the six founder questions and the trust-graph
+    // reconciliation remain open — far from decision-ready.
     const readiness = deriveDecisionReadiness(tracker.snapshot(["FOUNDER"], { resolvedRealName: true }));
-    expect(readiness).toMatchObject({ status: "incomplete", successful: 0, applicable: 6, coveragePercent: 0 });
+    expect(readiness).toMatchObject({ status: "incomplete", successful: 1, applicable: 8, coveragePercent: 12 });
   });
 
-  it("reaches decision-ready founder coverage from investor questions, not optional provider bookkeeping", () => {
+  it("reaches decision-ready founder coverage from investor questions plus the legal-grade screens, not optional provider bookkeeping", () => {
     const tracker = new PersonCheckTracker();
     for (const id of [
       "founder-identity-authority",
@@ -323,6 +326,8 @@ describe("PersonCheckTracker", () => {
       "founder-control-conflicts",
       "founder-legal-regulatory",
       "founder-asset-distinction",
+      "ofac-sanctions-name",
+      "trust-graph-connections",
     ] as const) {
       tracker.record({ id, status: "checked-empty", note: `${id} completed`, provider: "test-provider" });
     }
@@ -330,10 +335,64 @@ describe("PersonCheckTracker", () => {
     const checks = tracker.snapshot(["FOUNDER"], { resolvedRealName: true });
     const readiness = deriveDecisionReadiness(checks);
 
-    expect(readiness).toMatchObject({ status: "ready", successful: 6, applicable: 6, coveragePercent: 100 });
+    expect(readiness).toMatchObject({ status: "ready", successful: 8, applicable: 8, coveragePercent: 100 });
     expect(tracker.completeness(["FOUNDER"], { resolvedRealName: true })).toBe("complete");
+    // Photo, news, GitHub, and handle-history stay non-gating diagnostics…
     expect(byId(tracker, ["FOUNDER"], "profile-photo-authenticity")?.decisionCritical).toBe(false);
-    expect(byId(tracker, ["FOUNDER"], "trust-graph-connections")?.decisionCritical).toBe(false);
+    // …but the sanctions screen and flagged-subject reconciliation are decision
+    // gates for every role: clearance must never present while they are open.
+    expect(byId(tracker, ["FOUNDER"], "ofac-sanctions-name", { resolvedRealName: true })?.decisionCritical).toBe(true);
+    expect(byId(tracker, ["FOUNDER"], "trust-graph-connections")?.decisionCritical).toBe(true);
+  });
+
+  it("never presents decision-ready clearance while the sanctions screen is unresolved", () => {
+    const tracker = new PersonCheckTracker();
+    for (const id of [
+      "founder-identity-authority",
+      "founder-company-relationships",
+      "founder-track-record",
+      "founder-control-conflicts",
+      "founder-legal-regulatory",
+      "founder-asset-distinction",
+      "trust-graph-connections",
+    ] as const) {
+      tracker.record({ id, status: "confirmed", note: `${id} verified`, provider: "test-provider", sourceCount: 1 });
+    }
+    // ofac-sanctions-name deliberately never recorded.
+
+    const checks = tracker.snapshot(["FOUNDER"], { resolvedRealName: true });
+    const readiness = deriveDecisionReadiness(checks, { roleCount: 1, decisionAxisTotal: 6, evidenceBackedAxes: 6 });
+    const completeness = tracker.completeness(["FOUNDER"], { resolvedRealName: true });
+    const presentation = presentPublicReport({
+      verdict: "PASS",
+      score: 95,
+      completeness,
+      attestation: "server_collected",
+      checks,
+      readiness: { ...readiness, roleCount: 1, neededEvidenceSummary: "OFAC sanctions screen unresolved." },
+    });
+
+    expect(readiness.status).not.toBe("ready");
+    expect(completeness).toBe("partial");
+    expect(presentation.final).toBe(false);
+    expect(presentation.displayVerdict).not.toBe("PASS");
+  });
+
+  it("gates KOL and investor readiness on the legal-grade screens they previously skipped", () => {
+    const tracker = new PersonCheckTracker();
+    for (const id of [
+      "identity-resolution",
+      "affiliations-associates",
+      "promoted-token-performance",
+    ] as const) {
+      tracker.record({ id, status: "confirmed", note: `${id} verified`, provider: "test-provider", sourceCount: 1 });
+    }
+    // us-legal-history / ofac-sanctions-name / trust-graph-connections unresolved.
+
+    const readiness = deriveDecisionReadiness(tracker.snapshot(["KOL"], { resolvedRealName: true }));
+    expect(readiness.status).not.toBe("ready");
+    expect(readiness.applicable).toBe(6);
+    expect(readiness.successful).toBe(3);
   });
 
   it("keeps a fully answered Brian-like founder PASS final when photo and CourtListener diagnostics fail", () => {
@@ -365,6 +424,18 @@ describe("PersonCheckTracker", () => {
       status: "unavailable",
       note: "CourtListener returned a partial page and could not complete its supplemental name screen",
       provider: "courtlistener",
+    });
+    tracker.record({
+      id: "ofac-sanctions-name",
+      status: "checked-empty",
+      note: "no exact SDN match for the resolved name",
+      provider: "ofac-sdn",
+    });
+    tracker.record({
+      id: "trust-graph-connections",
+      status: "checked-empty",
+      note: "no flagged-subject ties in the workspace graph",
+      provider: "trust-graph",
     });
     tracker.provider(
       "offchain-diligence",
@@ -417,8 +488,8 @@ describe("PersonCheckTracker", () => {
     }));
     expect(readiness).toMatchObject({
       status: "ready",
-      successful: 6,
-      applicable: 6,
+      successful: 8,
+      applicable: 8,
       coveragePercent: 100,
       unresolved: 0,
     });
