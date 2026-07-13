@@ -18,6 +18,7 @@
     "quality": "npm run truth:check && npm run canary:offline && npm run calibrate && npm test && npm run typecheck",
     "seed:local-report": "tsx scripts/seed-local-report.ts",
     "check-env": "tsx scripts/check-env.ts",
+    "test:db": "supabase test db supabase/tests/report_activation_quality_guard.sql supabase/tests/database/persist_report_version_bundle.test.sql",
     "lint": "eslint .",
     "preview": "vite preview"
   },

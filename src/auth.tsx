@@ -180,11 +180,12 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
       if (otpError) throw otpError;
       setMessage("Check your email for the secure ARGUS sign-in link.");
     } catch (signInError) {
-      setError(
-        signInError instanceof Error
-          ? signInError.message
-          : "The sign-in link could not be sent.",
-      );
+      const message = signInError instanceof Error
+        ? signInError.message
+        : "The sign-in link could not be sent.";
+      setError(/signups? not allowed/i.test(message)
+        ? "This account still needs an ARGUS invitation. Ask an owner to resend it from Audit & access."
+        : message);
     } finally {
       setSending(false);
     }

@@ -88,6 +88,22 @@ async function allAuthUsers(client: SupabaseClient): Promise<User[]> {
   return data.users;
 }
 
+function hasVerifiedEmail(user: User): boolean {
+  return Boolean(user.email_confirmed_at || user.confirmed_at);
+}
+
+async function resendPendingInvitation(
+  client: SupabaseClient,
+  email: string,
+): Promise<Error | null> {
+  const { error } = await client.auth.resend({
+    type: "signup",
+    email,
+    options: { emailRedirectTo: invitationOrigin() },
+  });
+  return error;
+}
+
 function memberView(member: MemberRow, user?: User) {
   return {
     userId: member.user_id,
@@ -214,6 +230,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const users = await allAuthUsers(client);
       let user = users.find((candidate) => candidate.email?.trim().toLowerCase() === email);
       let invitationSent = false;
+      let invitationResent = false;
+      let authUserCreated = false;
       if (!user) {
         const { data, error } = await client.auth.admin.inviteUserByEmail(email, {
           redirectTo: invitationOrigin(),
@@ -225,6 +243,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         user = data.user;
         invitationSent = true;
+        authUserCreated = true;
+      } else if (!hasVerifiedEmail(user)) {
+        const resendError = await resendPendingInvitation(client, email);
+        if (resendError) {
+          console.error("[members] invitation resend failed", resendError.message);
+          res.status(502).json({
+            error: "invitation_resend_failed",
+            message: "Supabase could not resend the invitation.",
+          });
+          return;
+        }
+        invitationSent = true;
+        invitationResent = true;
       }
       if (!user?.id) throw new Error("invitation returned no user");
 
@@ -239,9 +270,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         active: true,
         eventType: invitationSent ? "member.invited" : "member.access_granted",
       });
-      res.status(invitationSent ? 201 : 200).json({
+      res.status(authUserCreated ? 201 : 200).json({
         member: memberView(member, user),
         invitationSent,
+        invitationResent,
       });
       return;
     }
@@ -271,6 +303,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: "active_must_be_boolean" });
       return;
     }
+    if (body.resendInvitation !== undefined && typeof body.resendInvitation !== "boolean") {
+      res.status(400).json({ error: "resend_invitation_must_be_boolean" });
+      return;
+    }
 
     const nextRole = roleValue(body.role) || existing.role;
     const nextActive = typeof body.active === "boolean" ? body.active : existing.active;
@@ -284,6 +320,48 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const nextDisplayName = body.displayName === undefined
       ? existing.display_name || email.split("@")[0]
       : cleanDisplayName(body.displayName, email);
+
+    if (body.resendInvitation === true) {
+      if (!existing.active) {
+        res.status(409).json({
+          error: "member_disabled",
+          message: "Restore this member before resending an invitation.",
+        });
+        return;
+      }
+      if (hasVerifiedEmail(targetUser)) {
+        res.status(409).json({
+          error: "email_already_verified",
+          message: "This member has already verified their email.",
+        });
+        return;
+      }
+      const resendError = await resendPendingInvitation(client, email);
+      if (resendError) {
+        console.error("[members] invitation resend failed", resendError.message);
+        res.status(502).json({
+          error: "invitation_resend_failed",
+          message: "Supabase could not resend the invitation.",
+        });
+        return;
+      }
+      const member = await manageMember(client, {
+        organizationId: auth.organizationId,
+        actorUserId: auth.userId,
+        targetUserId: userId,
+        targetEmail: email,
+        role: existing.role,
+        displayName: existing.display_name || email.split("@")[0],
+        active: true,
+        eventType: "member.invited",
+      });
+      res.status(200).json({
+        member: memberView(member, targetUser),
+        invitationSent: true,
+        invitationResent: true,
+      });
+      return;
+    }
 
     if (auth.userId === userId && (nextRole !== "owner" || !nextActive)) {
       res.status(409).json({

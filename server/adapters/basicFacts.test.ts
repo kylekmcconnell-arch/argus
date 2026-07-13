@@ -2105,13 +2105,21 @@ describe("basic-facts source verification", () => {
           text: "<p>Brian Armstrong is Co-founder and CEO at Coinbase.</p>",
           contentHash: "8".repeat(64),
         }),
-        [registryUrl]: document({
-          url: registryUrl,
-          host: "www.sec.gov",
-          contentType: "application/json",
-          text: JSON.stringify(registryPayload),
-          contentHash: "9".repeat(64),
-        }),
+        [registryUrl]: {
+          ...document({
+            url: registryUrl,
+            host: "www.sec.gov",
+            contentType: "text/plain",
+            text: [
+              "Title: SEC company ticker and exchange registry",
+              `URL Source: ${registryUrl}`,
+              "Markdown Content:",
+              JSON.stringify(registryPayload),
+            ].join("\n"),
+            contentHash: "9".repeat(64),
+          }),
+          retrievalProvider: "jina-reader",
+        } as PublicTextDocument,
       }),
     });
 
@@ -2148,6 +2156,289 @@ describe("basic-facts source verification", () => {
           }),
         ]),
       }));
+  });
+
+  it("re-verifies Brian's cbBTC and cbETH leads after repair proves the Coinbase relationship", async () => {
+    const { ctx, evidence } = context("https://brianarmstrong.org");
+    ctx.handle = "@brian_armstrong";
+    evidence.profile.handle = "@brian_armstrong";
+    evidence.profile.display_name = "Brian Armstrong";
+    evidence.profile.resolved_name = "Brian Armstrong";
+    evidence.roles = [SubjectClass.MEMBER];
+    const boardUrl = "https://investor.coinbase.com/governance/board-of-directors/default.aspx";
+    const xUrl = "https://x.com/brian_armstrong";
+    const cbBtcUrl = "https://www.coinbase.com/blog/coinbase-wrapped-btc-cbbtc-is-now-live";
+    const cbEthUrl = "https://help.coinbase.com/en/exchange/crypto-transfers/cbeth";
+    const rolePassage = "Brian Armstrong is Co-founder and CEO at Coinbase.";
+    const cbBtcPassage = "Coinbase is rolling out cbBTC, Coinbase Wrapped BTC, an ERC20 token backed 1:1 by Bitcoin held by Coinbase.";
+    const cbEthPassage = "Coinbase Wrapped Staked ETH (cbETH) is a utility token that represents ETH staked through Coinbase.";
+
+    await collectBasicFacts(ctx, {
+      discover: async () => ({
+        provider: "claude-web-search",
+        state: "failed",
+        leads: [],
+        attempts: 1,
+        completedBatches: 0,
+        failedBatches: 3,
+      }),
+      repair: async () => ({
+        provider: "grok",
+        state: "succeeded",
+        leads: [
+          lead({
+            subject: "Brian Armstrong",
+            predicate: "current_role",
+            value: "Co-founder and CEO at Coinbase",
+            questionId: "person.current_role",
+            excerpt: rolePassage,
+            sourceUrl: boardUrl,
+          }),
+          lead({
+            subject: "Brian Armstrong",
+            predicate: "current_role",
+            value: "Co-founder and CEO at Coinbase",
+            questionId: "person.current_role",
+            excerpt: rolePassage,
+            sourceUrl: xUrl,
+          }),
+          lead({
+            subject: "Brian Armstrong",
+            predicate: "official_token",
+            value: "cbBTC",
+            questionId: "person.official_token",
+            excerpt: cbBtcPassage,
+            sourceUrl: cbBtcUrl,
+          }),
+          lead({
+            subject: "Brian Armstrong",
+            predicate: "official_token",
+            value: "cbETH",
+            questionId: "person.official_token",
+            excerpt: cbEthPassage,
+            sourceUrl: cbEthUrl,
+          }),
+        ],
+        attempts: 1,
+        completedBatches: 1,
+        failedBatches: 0,
+      }),
+      fetchSource: fetchDocuments({
+        [boardUrl]: document({
+          url: boardUrl,
+          host: "investor.coinbase.com",
+          text: `<p>${rolePassage}</p>`,
+          contentHash: "1".repeat(64),
+        }),
+        [xUrl]: document({
+          url: xUrl,
+          host: "x.com",
+          text: `<p>${rolePassage}</p>`,
+          contentHash: "2".repeat(64),
+        }),
+        [cbBtcUrl]: document({
+          url: cbBtcUrl,
+          host: "www.coinbase.com",
+          text: `<p>${cbBtcPassage}</p>`,
+          contentHash: "3".repeat(64),
+        }),
+        [cbEthUrl]: document({
+          url: cbEthUrl,
+          host: "help.coinbase.com",
+          text: `<p>${cbEthPassage}</p>`,
+          contentHash: "4".repeat(64),
+        }),
+      }),
+    });
+
+    expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
+      predicate: "current_role",
+      value: "Co-founder and CEO at Coinbase",
+      status: "corroborated",
+    }));
+    const tokens = evidence.basicFacts?.filter((fact) => fact.predicate === "official_token") ?? [];
+    expect(tokens).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        value: "cbBTC",
+        status: "verified",
+        sources: [expect.objectContaining({ url: cbBtcUrl, sourceClass: "official_counterparty" })],
+      }),
+      expect.objectContaining({
+        value: "cbETH",
+        status: "verified",
+        sources: [expect.objectContaining({ url: cbEthUrl, sourceClass: "official_counterparty" })],
+      }),
+    ]));
+    expect(tokens).toHaveLength(2);
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.official_token"))
+      .toEqual(expect.objectContaining({ status: "answered", answerRefs: expect.arrayContaining([
+        expect.stringMatching(/^basic_v1_/),
+      ]) }));
+  });
+
+  it("keeps a project's canonical official-token answer singular", async () => {
+    const { ctx, evidence } = context("https://jup.ag");
+    const jupUrl = "https://jup.ag/jup";
+    const jlpUrl = "https://jup.ag/jlp";
+    await collectBasicFacts(ctx, {
+      discover: async () => [
+        lead({
+          predicate: "official_token",
+          value: "JUP",
+          questionId: "project.official_token",
+          excerpt: "JUP is the official token of Jupiter.",
+          sourceUrl: jupUrl,
+        }),
+        lead({
+          predicate: "official_token",
+          value: "JLP",
+          questionId: "project.official_token",
+          excerpt: "JLP is the official token of Jupiter.",
+          sourceUrl: jlpUrl,
+        }),
+      ],
+      fetchSource: fetchDocuments({
+        [jupUrl]: document({
+          url: jupUrl,
+          host: "jup.ag",
+          text: "<p>JUP is the official token of Jupiter.</p>",
+          contentHash: "5".repeat(64),
+        }),
+        [jlpUrl]: document({
+          url: jlpUrl,
+          host: "jup.ag",
+          text: "<p>JLP is the official token of Jupiter.</p>",
+          contentHash: "6".repeat(64),
+        }),
+      }),
+    });
+
+    const tokens = evidence.basicFacts?.filter((fact) => fact.predicate === "official_token") ?? [];
+    expect(tokens).toHaveLength(2);
+    expect(tokens.every((fact) => fact.status === "conflicted")).toBe(true);
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "project.official_token"))
+      .toEqual(expect.objectContaining({ status: "unanswered", answerRefs: [] }));
+  });
+
+  it.each([
+    ["WBTC", "Coinbase supports WBTC, an ERC-20 wrapped token issued by BitGo."],
+    ["ARB", "Coinbase supports ARB, the governance token issued by Arbitrum Foundation."],
+    ["ABC", "Coinbase supports ABC, a utility token created by Acme Labs."],
+    ["XYZ", "Coinbase's official governance token support includes XYZ."],
+    ["CUST", "Coinbase customers created CUST, a utility token."],
+    ["CVA", "Coinbase Ventures created CVA, a governance token."],
+    ["CVP", "Coinbase Ventures portfolio company Arbitrum created CVP, a governance token."],
+    ["CUSO", "CUSO is a utility token created by Coinbase customers."],
+    ["CVO", "CVO is a governance token issued by Coinbase Ventures."],
+    ["CVPO", "CVPO is a governance token issued by Coinbase Ventures portfolio company Arbitrum."],
+    ["FAK", "FAK is the fake governance token of Coinbase."],
+    ["UNOF", "UNOF is the unofficial governance token of Coinbase."],
+    ["PROP", "PROP is the proposed governance token of Coinbase."],
+    ["POT", "POT is the potential governance token of Coinbase."],
+    ["HYP", "HYP is the hypothetical governance token of Coinbase."],
+    ["FORM", "FORM is the former governance token of Coinbase."],
+    ["PLAN", "PLAN is the planned governance token of Coinbase."],
+    ["UNLA", "UNLA is the unlaunched governance token of Coinbase."],
+    ["NOTK", "NOTK is not the governance token of Coinbase."],
+    ["NOTO", "NOTO is no governance token of Coinbase."],
+    ["NEVR", "NEVR is never the governance token of Coinbase."],
+    ["NOLG", "NOLG is no longer the governance token of Coinbase."],
+    ["ALLG", "ALLG is the alleged governance token of Coinbase."],
+    ["RUMR", "RUMR is the rumored governance token of Coinbase."],
+    ["PURP", "PURP is the purported governance token of Coinbase."],
+    ["CLMD", "CLMD is the claimed governance token of Coinbase."],
+    ["POSS", "POSS is a possible governance token of Coinbase."],
+    ["MAYB", "MAYB is maybe the governance token of Coinbase."],
+    ["MAYT", "MAYT may become the governance token of Coinbase."],
+    ["MIGH", "MIGH might become the governance token of Coinbase."],
+    ["COUL", "COUL could become the governance token of Coinbase."],
+    ["CAND", "CAND is a candidate governance token of Coinbase."],
+    ["FUTR", "FUTR is the future governance token of Coinbase."],
+    ["INTD", "INTD is the intended governance token of Coinbase."],
+    ["COMP", "Coinbase's competitor's governance token is COMP."],
+    ["RIVL", "Coinbase's rival's governance token is RIVL."],
+    ["THRD", "Coinbase's third-party's governance token is THRD."],
+    ["PART", "Coinbase's partner's governance token is PART."],
+    ["SUBS", "Coinbase's subsidiary's governance token is SUBS."],
+    ["AFFL", "Coinbase's affiliate's governance token is AFFL."],
+    ["CST2", "Coinbase's customer's governance token is CST2."],
+    ["CLNT", "Coinbase's client's governance token is CLNT."],
+    ["VEND", "Coinbase's vendor's governance token is VEND."],
+    ["PORT", "Coinbase's portfolio company's governance token is PORT."],
+    ["TEST", "TEST is the test governance token of Coinbase."],
+    ["TNET", "TNET is the testnet governance token of Coinbase."],
+    ["DEMO", "DEMO is the demo governance token of Coinbase."],
+    ["MOCK", "MOCK is the mock governance token of Coinbase."],
+    ["EXPR", "EXPR is the experimental governance token of Coinbase."],
+    ["DRFT", "DRFT is the draft governance token of Coinbase."],
+    ["REPT", "REPT is reportedly the governance token of Coinbase."],
+    ["SUPP", "SUPP is supposedly the governance token of Coinbase."],
+    ["SOCL", "SOCL is the so-called governance token of Coinbase."],
+    ["INVT", "Coinbase's investee's governance token is INVT."],
+    ["BACK", "Coinbase's backed project's governance token is BACK."],
+    ["CONT", "Coinbase's contractor's governance token is CONT."],
+    ["JVEN", "Coinbase's joint venture's governance token is JVEN."],
+    ["SCAM", "Coinbase Wrapped ETH (SCAM) is a utility token."],
+    ["SCM2", "Coinbase Wrapped ETH (SCM2) is a utility token of Acme Labs."],
+    ["xETH", "Coinbase Wrapped ETH (xETH) is a utility token of Acme Labs."],
+    ["fakeETH", "Coinbase Wrapped ETH (fakeETH) is a fake token."],
+    ["testETH", "Coinbase Wrapped ETH (testETH) is a test token."],
+    ["netETH", "Coinbase Wrapped ETH (netETH) is a testnet token."],
+    ["demoETH", "Coinbase Wrapped ETH (demoETH) is a demo token."],
+    ["mockETH", "Coinbase Wrapped ETH (mockETH) is a mock token."],
+    ["expETH", "Coinbase Wrapped ETH (expETH) is an experimental token."],
+    ["draftETH", "Coinbase Wrapped ETH (draftETH) is a draft token."],
+    ["formerETH", "Coinbase Wrapped ETH (formerETH) is a former token."],
+    ["unofETH", "Coinbase Wrapped ETH (unofETH) is an unofficial token."],
+    ["nliveETH", "Coinbase Wrapped ETH (nliveETH) is a non-live token."],
+    ["uncETH", "Coinbase Wrapped ETH (uncETH) is an uncertain token."],
+    ["xaETH", "Coinbase Wrapped ETH (xaETH) is an Acme Labs utility token."],
+    ["xbETH", "Coinbase Wrapped ETH (xbETH) is Acme Labs’ utility token."],
+    ["xcETH", "Coinbase Wrapped ETH (xcETH) is used as Acme Labs' utility token."],
+    ["xvETH", "xvETH, Coinbase Wrapped ETH is an Acme Labs utility token."],
+  ] as const)("does not bind token %s without exact venture ownership", async (symbol, passage) => {
+    const { ctx, evidence } = context("https://brianarmstrong.org");
+    ctx.handle = "@brian_armstrong";
+    evidence.profile.handle = "@brian_armstrong";
+    evidence.profile.display_name = "Brian Armstrong";
+    evidence.profile.resolved_name = "Brian Armstrong";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Coinbase",
+      domain: "coinbase.com",
+      role: "Co-founder and CEO",
+      period: "2012-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://investor.coinbase.com/governance/board-of-directors/default.aspx",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const sourceUrl = `https://www.coinbase.com/assets/${symbol.toLowerCase()}`;
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [lead({
+        subject: "Brian Armstrong",
+        predicate: "official_token",
+        value: symbol,
+        questionId: "person.official_token",
+        excerpt: passage,
+        sourceUrl,
+      })],
+      fetchSource: fetchDocuments({
+        [sourceUrl]: document({
+          url: sourceUrl,
+          host: "www.coinbase.com",
+          text: `<p>${passage}</p>`,
+          contentHash: "7".repeat(64),
+        }),
+      }),
+    });
+
+    expect(evidence.basicFacts?.some((fact) =>
+      fact.predicate === "official_token" && fact.value === symbol)).toBe(false);
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.official_token"))
+      .toEqual(expect.objectContaining({ status: "unanswered", answerRefs: [] }));
   });
 
   it("does not treat an organization-named attacker subdomain as first-party scope", async () => {

@@ -1,7 +1,14 @@
--- Regression coverage for routing-failed immutable attempts. Run after the
--- canonical migrations with psql -v ON_ERROR_STOP=1.
+-- Executable pgTAP coverage for decisionless immutable attempts. Run against
+-- a migrated local database with `supabase test db`.
 
 begin;
+
+create extension if not exists pgtap with schema extensions;
+set local search_path = public, extensions, pg_catalog;
+
+-- The detailed DO blocks below fail immediately on a broken invariant. One TAP
+-- assertion records that the complete end-to-end scenario reached the end.
+select plan(1);
 
 insert into public.organizations (id, slug, name)
 values ('00000000-0000-4000-8000-000000000090', 'quality-guard-test', 'Quality Guard Test');
@@ -230,6 +237,59 @@ begin
 end;
 $assert_new_decision_activated$;
 
+-- A decisionless report is still the correct visible snapshot for a brand-new
+-- subject. With no prior decision-bearing projection, the DB guard must allow
+-- activation even when routing succeeded but the scorer produced no axes.
+insert into quality_guard_versions (label, report_version_id)
+select 'first-decisionless', persisted.report_version_id
+from public.persist_report_version(
+  '00000000-0000-4000-8000-000000000090',
+  'person',
+  'first_empty',
+  '@first_empty',
+  '00000000-0000-4000-8000-000000000091',
+  '{
+    "handle":"@first_empty",
+    "report":{
+      "roles":["PROJECT"],
+      "role_reports":[{"role":"PROJECT","axes":{}}],
+      "composite_verdict":"INCOMPLETE",
+      "governing_score":null
+    }
+  }'::jsonb,
+  'quality-guard-first-decisionless',
+  'server_collected',
+  'INCOMPLETE',
+  null,
+  'partial',
+  null,
+  '{}'::jsonb,
+  '{}'::jsonb
+) persisted;
+
+select public.activate_report_version(
+  '00000000-0000-4000-8000-000000000090',
+  (select report_version_id from quality_guard_versions where label = 'first-decisionless')
+);
+
+do $assert_first_decisionless_activated$
+begin
+  if (
+    select report_version_id
+    from public.reports
+    where organization_id = '00000000-0000-4000-8000-000000000090'
+      and kind = 'person'
+      and ref = 'first_empty'
+  ) is distinct from (
+    select report_version_id
+    from quality_guard_versions
+    where label = 'first-decisionless'
+  ) then
+    raise exception 'brand-new decisionless report did not activate';
+  end if;
+end;
+$assert_first_decisionless_activated$;
+
 -- Malformed JSON inputs are false, never exceptions.
 do $assert_malformed_payload_is_safe$
 begin
@@ -272,4 +332,8 @@ begin
 end;
 $assert_malformed_payload_is_safe$;
 
+select pass(
+  'decision guard preserves prior reports, activates first snapshots, and classifies failure shapes safely'
+);
+select * from finish();
 rollback;

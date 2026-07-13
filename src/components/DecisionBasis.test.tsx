@@ -237,6 +237,7 @@ describe("DecisionBasis", () => {
           gaps: [
             "Licensed identity-provider (PeopleDataLabs) returned no structured real-world record for either named co-founder.",
             "Handle-history provider coverage is partial; prior handles cannot be fully ruled out.",
+            "Reddit provider collection unavailable.",
           ],
         },
       },
@@ -248,8 +249,10 @@ describe("DecisionBasis", () => {
 
     expect(container.textContent).toContain("Confirm the legal identity and current role of each founder.");
     expect(container.textContent).toContain("Confirm whether the project or its founders previously used other public identities.");
+    expect(container.textContent).toContain("1 additional coverage gap recorded on this axis");
     expect(container.textContent).not.toContain("People Data Labs collection failed");
     expect(container.textContent).not.toContain("Licensed identity-provider");
     expect(container.textContent).not.toContain("Handle-history provider coverage");
+    expect(container.textContent).not.toContain("Reddit provider collection unavailable");
   });
 });

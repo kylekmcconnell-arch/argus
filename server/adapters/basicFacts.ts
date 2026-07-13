@@ -1303,6 +1303,7 @@ const PREDICATE_PATTERNS: Record<BasicFactPredicate, RegExp> = {
 };
 
 const EXPLICIT_OFFICIAL_CRYPTO_TOKEN = /\b(?:official|governance|native|utility|crypto(?:currency)?)\s+(?:crypto\s+)?token\b/i;
+const EXPLICIT_WRAPPED_OR_ERC_TOKEN = /\b(?:wrapped(?:\s+[a-z0-9-]+){0,3}\s+token|erc[- ]?\d+\s+(?:wrapped\s+)?token)\b/i;
 
 function positivePredicateMatches(excerpt: string, predicate: BasicFactPredicate): RegExpMatchArray[] {
   const pattern = new RegExp(PREDICATE_PATTERNS[predicate].source, "gi");
@@ -2136,6 +2137,130 @@ function factId(
   return `basic_v1_${createHash("sha256").update(identity).digest("hex")}`;
 }
 
+/**
+ * Token-type language establishes the instrument, not who owns or issued it.
+ * For a person's or investor's related asset, require the same bounded clause
+ * to affirmatively bind that token to the verified venture. Compatibility,
+ * listing, and custody copy never establishes ownership. An explicit issuer
+ * or creator outside the venture is a hard reject.
+ */
+const TOKEN_ENTITY_LEGAL_SUFFIX = "(?:global|group|holding|holdings|co|company|corp|corporation|inc|incorporated|limited|llc|ltd|plc)";
+const CAPTURED_TOKEN_ENTITY = "([^,.!?;]{1,100}?)(?=\\s+(?:and|but|that|which|while|who)\\b|[,.;:!?)]|$)";
+const CAPTURED_TERMINAL_TOKEN_ENTITY = "([^.!?;]{1,100}?)(?=[.!?;]|$)";
+
+function exactTokenVentureEntityPattern(name: string): string | null {
+  const venture = loosePhrasePattern(name);
+  if (!venture) return null;
+  return `(?:the\\s+)?${venture}(?:\\s*,?\\s+${TOKEN_ENTITY_LEGAL_SUFFIX})*`;
+}
+
+function capturedTokenEntityMatchesVenture(
+  value: string,
+  relationships: readonly VerifiedVentureAssetRelationship[],
+): boolean {
+  const entity = clean(value, 120);
+  return Boolean(entity && relationships.some((relationship) =>
+    registryIssuerMatchesRelationship(entity, relationship.name)));
+}
+
+function relationshipBoundTokenHasAffirmativeVentureLink(
+  claimClause: string,
+  lead: BasicFactLead,
+  relationships: readonly VerifiedVentureAssetRelationship[],
+): boolean {
+  const value = loosePhrasePattern(lead.value);
+  if (!value) return false;
+  const originAttributions = [...claimClause.matchAll(new RegExp(
+    `\\b(?:created|deployed|developed|issued|launched|minted|owned)\\s+(?:by|of)\\s+${CAPTURED_TOKEN_ENTITY}`,
+    "gi",
+  ))];
+  if (originAttributions.some((match) =>
+    !capturedTokenEntityMatchesVenture(match[1], relationships))) return false;
+  const tokenDescriptor = "(?:official|governance|native|utility|wrapped|erc[- ]?\\d+)";
+  const terminalValue = `\\(?${value}\\)?(?=$|\\s*[.!?](?:\\s|$))`;
+  const tokenOfVenture = new RegExp(
+    `^(?:the\\s+)?\\$?${value}\\s+is\\s+(?:the\\s+)?${tokenDescriptor}\\s+(?:crypto\\s+)?token\\s+of\\s+${CAPTURED_TERMINAL_TOKEN_ENTITY}`,
+    "i",
+  ).exec(claimClause);
+  if (tokenOfVenture && capturedTokenEntityMatchesVenture(tokenOfVenture[1], relationships)) return true;
+
+  const reverseOrigin = new RegExp(
+    `^(?:the\\s+)?\\$?${value}\\s+(?:is|was)\\s+(?:created|issued|minted)\\s+by\\s+${CAPTURED_TERMINAL_TOKEN_ENTITY}`,
+    "i",
+  ).exec(claimClause);
+  if (reverseOrigin && capturedTokenEntityMatchesVenture(reverseOrigin[1], relationships)) return true;
+
+  const brandDescriptor = "(?:wrapped|staked|bridged|liquid|tokenized)";
+  const brandedBase = `(?:${brandDescriptor}\\s+){1,3}([A-Za-z0-9]{2,12})`;
+  const brandedContinuationIsValid = (match: RegExpExecArray | null): boolean => {
+    const base = match?.[1];
+    if (!base || !/^[A-Z0-9]{2,12}$/.test(base)) return false;
+    const normalizedValue = looseTokens(lead.value).join("");
+    if (!normalizedValue.endsWith(base.toLowerCase())) return false;
+    const tail = claimClause.slice((match.index ?? 0) + match[0].length).trim();
+    if (!tail || /^[\s,.;:!?()[\]'"–—-]+$/.test(tail)) return true;
+    const simpleTokenTail = new RegExp(
+      `^is\\s+(?:a|an|the)\\s+${tokenDescriptor}\\s+(?:crypto\\s+)?token\\s*[.!?]?$`,
+      "i",
+    );
+    if (simpleTokenTail.test(tail)) return true;
+
+    const stakedRepresentation = new RegExp(
+      `^is\\s+a\\s+utility\\s+token\\s+that\\s+represents\\s+([A-Za-z0-9]{2,12})\\s+staked\\s+through\\s+${CAPTURED_TERMINAL_TOKEN_ENTITY}[.!?]?$`,
+      "i",
+    ).exec(tail);
+    if (
+      stakedRepresentation
+      && /^[A-Z0-9]{2,12}$/.test(stakedRepresentation[1])
+      && stakedRepresentation[1].toLowerCase() === base.toLowerCase()
+      && capturedTokenEntityMatchesVenture(stakedRepresentation[2], relationships)
+    ) return true;
+
+    const backedRepresentation = new RegExp(
+      `^[,;:\\u2013\\u2014-]?\\s*an\\s+erc(?:[- ]?\\d+)?\\s+token\\s+backed\\s+1:1\\s+by\\s+(Bitcoin|BTC)\\s+held\\s+by\\s+${CAPTURED_TERMINAL_TOKEN_ENTITY}[.!?]?$`,
+      "i",
+    ).exec(tail);
+    return Boolean(
+      backedRepresentation
+      && base.toUpperCase() === "BTC"
+      && capturedTokenEntityMatchesVenture(backedRepresentation[2], relationships)
+    );
+  };
+  return relationships.some((relationship) => {
+    const venture = exactTokenVentureEntityPattern(relationship.name);
+    if (!venture) return false;
+    const directOrigin = new RegExp(
+      `^${venture}\\s+(?:created|issued|minted)\\s+${terminalValue}`,
+      "i",
+    ).test(claimClause);
+    if (directOrigin) return true;
+
+    const possessive = new RegExp(
+      `^${venture}['’]s\\s+(?:${tokenDescriptor}\\s+){1,2}(?:crypto\\s+)?token\\s+(?:is\\s+)?${terminalValue}`,
+      "i",
+    ).test(claimClause);
+    if (possessive) return true;
+
+    const directBrand = new RegExp(
+      `^${venture}\\s+${brandedBase}\\s*\\(\\s*${value}\\s*\\)`,
+      "i",
+    ).exec(claimClause);
+    if (brandedContinuationIsValid(directBrand)) return true;
+
+    const combinedBrand = new RegExp(
+      `^${venture}\\s+is\\s+rolling\\s+out\\s+${value}\\s*[,;:\\u2013\\u2014-]\\s*${venture}\\s+${brandedBase}`,
+      "i",
+    ).exec(claimClause);
+    if (brandedContinuationIsValid(combinedBrand)) return true;
+
+    const valueFirstBrand = new RegExp(
+      `^(?:the\\s+)?\\$?${value}\\s*[,;:\\u2013\\u2014-]\\s*${venture}\\s+${brandedBase}`,
+      "i",
+    ).exec(claimClause);
+    return brandedContinuationIsValid(valueFirstBrand);
+  });
+}
+
 /** Promote one lead only when a short passage in the safely fetched artifact
  * independently contains the subject, atomic value, and predicate language. */
 export function verifyBasicFactLead(
@@ -2190,11 +2315,21 @@ export function verifyBasicFactLead(
   // A related venture's first-party page may stand in for the person's name,
   // but only explicit crypto-token language may do so. A stock ticker or
   // security symbol on that same site must remain public_security evidence.
-  if (
-    lead.predicate === "official_token"
-    && authoritativeAssetRelationships.length
-    && !EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause)
-  ) return null;
+  if (lead.predicate === "official_token" && authoritativeAssetRelationships.length) {
+    const personOrInvestorAsset = /^(?:person|investor)\./.test(lead.questionId ?? "");
+    const explicitTokenLanguage = EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause)
+      || EXPLICIT_WRAPPED_OR_ERC_TOKEN.test(claimClause);
+    const affirmativeVentureLink = relationshipBoundTokenHasAffirmativeVentureLink(
+      claimClause,
+      lead,
+      authoritativeAssetRelationships,
+    );
+    // Project canonical-token verification remains on its existing path. The
+    // stricter ownership gate applies only when a venture relationship stands
+    // in for an audited person or investor.
+    if (personOrInvestorAsset && (!explicitTokenLanguage || !affirmativeVentureLink)) return null;
+    if (!personOrInvestorAsset && !EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) && !affirmativeVentureLink) return null;
+  }
   const verifiedValue = lead.predicate === "public_security"
     ? verifiedPublicSecurityValue(lead.value, claimClause)
     : lead.value;
@@ -2312,10 +2447,17 @@ function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[] {
   });
 
   const singletonPredicates = new Set(resolved
-    .map((fact) => fact.predicate)
-    .filter((predicate) => !MULTI_VALUE_PREDICATES.has(predicate)));
+    .filter((fact) =>
+      !MULTI_VALUE_PREDICATES.has(fact.predicate)
+      // A founder or investor can control more than one venture-issued token.
+      // Keep the project-level canonical-token question singular, but do not
+      // turn two separately verified person-level assets into a conflict.
+      && !(fact.predicate === "official_token" && /^(?:person|investor)\./.test(fact.questionId ?? "")))
+    .map((fact) => fact.predicate));
   for (const predicate of singletonPredicates) {
-    const values = resolved.filter((fact) => fact.predicate === predicate);
+    const values = resolved.filter((fact) =>
+      fact.predicate === predicate
+      && !(fact.predicate === "official_token" && /^(?:person|investor)\./.test(fact.questionId ?? "")));
     if (values.length > 1) values.forEach((fact) => { fact.status = "conflicted"; });
   }
 
@@ -2455,7 +2597,7 @@ const COMMON_COUNTRY_PUBLIC_SUFFIX_LABELS = new Set([
   "ac", "co", "com", "edu", "gov", "net", "org",
 ]);
 const REGISTRY_LEGAL_ENTITY_TOKENS = new Set([
-  "company", "corp", "corporation", "inc", "incorporated", "limited", "llc", "ltd", "plc", "the",
+  "co", "company", "corp", "corporation", "inc", "incorporated", "limited", "llc", "ltd", "plc", "the",
 ]);
 const REGISTRY_SHORTHAND_QUALIFIERS = new Set([
   "global", "group", "holding", "holdings",
@@ -2570,6 +2712,32 @@ function scopeMatchesOrganizationIdentity(scope: string, name: string): boolean 
 }
 
 /**
+ * Collapse an identity-proven dedicated host to its registrable organization
+ * scope. This lets investor.coinbase.com establish that www.coinbase.com and
+ * help.coinbase.com are first-party siblings, while the identity check above
+ * still rejects lookalikes such as coinbase.attacker.com. Shared hosts retain
+ * their exact tenant path.
+ */
+function verifiedOrganizationScope(scope: string, name: string): string | null {
+  if (!scopeMatchesOrganizationIdentity(scope, name)) return null;
+  let url: URL;
+  try { url = new URL(scope); } catch { return null; }
+  const host = normalizedHost(url.hostname);
+  if (PATH_TENANTED_HOSTS.has(host)) return safeVentureScope(scope);
+  const hostLabels = host.split(".");
+  const lastLabel = hostLabels.at(-1) ?? "";
+  const penultimateLabel = hostLabels.at(-2) ?? "";
+  const suffixWidth = hostLabels.length >= 3
+    && lastLabel.length === 2
+    && COMMON_COUNTRY_PUBLIC_SUFFIX_LABELS.has(penultimateLabel)
+    ? 2
+    : 1;
+  const registrableHost = hostLabels.slice(-(suffixWidth + 1)).join(".");
+  if (!registrableHost.includes(".")) return null;
+  return `${url.protocol}//${registrableHost}/`;
+}
+
+/**
  * A source-verified current-role answer can establish the relationship during
  * this very adapter pass, before any later dossier projection has created a
  * Venture row. Accept it only when a fetched source binds the audited person
@@ -2595,9 +2763,8 @@ function verifiedFactAssetRelationships(
         || !hasSubjectAlias(source.excerpt, aliases)
         || !CURRENT_CONTROL_ROLE.test(source.excerpt)
         || !PREDICATE_PATTERNS.current_role.test(source.excerpt)
-        || !scopeMatchesOrganizationIdentity(source.url, relationship.name)
       ) return [];
-      const scope = safeVentureScope(source.url);
+      const scope = verifiedOrganizationScope(source.url, relationship.name);
       return scope ? [scope] : [];
     });
     return scopes.length
@@ -2624,8 +2791,14 @@ function mergeVentureAssetRelationships(
 }
 
 function secExchangeRegistryRows(document: PublicTextDocument): SecExchangeRegistryRow[] | null {
+  let jsonText = document.text;
+  if ("retrievalProvider" in document && document.retrievalProvider === "jina-reader") {
+    const markers = [...document.text.matchAll(/^Markdown Content:\s*$/gm)];
+    if (markers.length !== 1 || markers[0].index === undefined) return null;
+    jsonText = document.text.slice(markers[0].index + markers[0][0].length).trim();
+  }
   let payload: unknown;
-  try { payload = JSON.parse(document.text); } catch { return null; }
+  try { payload = JSON.parse(jsonText); } catch { return null; }
   if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
   const fields = (payload as { fields?: unknown }).fields;
   const data = (payload as { data?: unknown }).data;
@@ -2928,7 +3101,11 @@ export async function collectBasicFacts(
     return pending;
   };
 
-  const verifyLeads = async (leads: readonly BasicFactLead[], sourceLimit: number): Promise<BasicFact[]> => {
+  const verifyLeads = async (
+    leads: readonly BasicFactLead[],
+    sourceLimit: number,
+    assetRelationships: readonly VerifiedVentureAssetRelationship[] = ventureAssetRelationships,
+  ): Promise<BasicFact[]> => {
     const variants = verificationLeadVariants(ctx, leads, officialHosts, officialCounterpartyHosts);
     // Give every selected lead one verification attempt before spending the
     // remaining budget on corroboration, so early multi-source rosters cannot
@@ -2953,7 +3130,7 @@ export async function collectBasicFacts(
             ctx.handle,
             officialHosts,
             officialCounterpartyHosts,
-            ventureAssetRelationships,
+            assetRelationships,
           )
           : null;
       })))
@@ -2981,10 +3158,27 @@ export async function collectBasicFacts(
   }
   const repairLeads = selectBasicFactLeads(repair.leads);
   const repairVerified = await verifyLeads(repairLeads, Math.min(12, MAX_SOURCES));
-  const sourceVerifiedBeforeRegistry = resolveBasicFactCandidates([...primaryVerified, ...repairVerified]);
+  const relationshipFacts = resolveBasicFactCandidates([...primaryVerified, ...repairVerified]);
   const authoritativeAssetRelationships = mergeVentureAssetRelationships([
     ...ventureAssetRelationships,
-    ...verifiedFactAssetRelationships(ctx, sourceVerifiedBeforeRegistry),
+    ...verifiedFactAssetRelationships(ctx, relationshipFacts),
+  ]);
+  const allLeads = mergeLeads(primaryLeads, repairLeads);
+  // Asset leads can arrive in the same repair response that first proves the
+  // person's current control relationship. Re-run only those leads against
+  // the newly established venture scopes; fetchOnce reuses earlier responses
+  // and the asset-only pass retains its own bounded source budget.
+  const relationshipBoundAssets = authoritativeAssetRelationships.length
+    ? await verifyLeads(
+      allLeads.filter((lead) => lead.predicate === "public_security" || lead.predicate === "official_token"),
+      Math.min(12, MAX_SOURCES),
+      authoritativeAssetRelationships,
+    )
+    : [];
+  const sourceVerifiedBeforeRegistry = resolveBasicFactCandidates([
+    ...primaryVerified,
+    ...repairVerified,
+    ...relationshipBoundAssets,
   ]);
   let registryVerified: BasicFact[] = [];
   const publicSecurityQuestion = questions.find((question) => question.predicate === "public_security");
@@ -3005,8 +3199,12 @@ export async function collectBasicFacts(
       );
     }
   }
-  const allLeads = mergeLeads(primaryLeads, repairLeads);
-  const verified = [...primaryVerified, ...registryVerified, ...repairVerified];
+  const verified = [
+    ...primaryVerified,
+    ...registryVerified,
+    ...repairVerified,
+    ...relationshipBoundAssets,
+  ];
   ctx.evidence.basicFactLeads = allLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = resolveBasicFactCandidates(verified);
   const repairQuestionIds = new Set(missingCritical.map((question) => question.id));

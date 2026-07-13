@@ -27,6 +27,7 @@ interface MembersResponse {
   currentUserId?: string;
   member?: WorkspaceMember;
   invitationSent?: boolean;
+  invitationResent?: boolean;
   error?: string;
   message?: string;
 }
@@ -38,7 +39,7 @@ const ROLE_COPY: Record<ArgusRole, string> = {
 };
 
 const EVENT_COPY: Record<string, string> = {
-  "member.invited": "invited",
+  "member.invited": "sent an invite to",
   "member.access_granted": "granted access to",
   "member.role_changed": "changed the role for",
   "member.access_disabled": "disabled",
@@ -76,6 +77,7 @@ export function TeamAccess() {
   const [role, setRole] = useState<ArgusRole>("analyst");
   const [inviting, setInviting] = useState(false);
   const [updatingUserId, setUpdatingUserId] = useState<string | null>(null);
+  const [resendingUserId, setResendingUserId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     if (auth.role !== "owner") return;
@@ -128,8 +130,10 @@ export function TeamAccess() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ email, displayName, role }),
       }));
-      setNotice(body.invitationSent
-        ? `Invitation sent to ${email.trim().toLowerCase()}.`
+      setNotice(body.invitationResent
+        ? `Fresh invitation sent to ${email.trim().toLowerCase()}.`
+        : body.invitationSent
+          ? `Invitation sent to ${email.trim().toLowerCase()}.`
         : `${email.trim().toLowerCase()} can now sign in to ARGUS.`);
       setEmail("");
       setDisplayName("");
@@ -146,7 +150,7 @@ export function TeamAccess() {
     member: WorkspaceMember,
     change: { role?: ArgusRole; active?: boolean },
   ) => {
-    if (updatingUserId) return;
+    if (updatingUserId || resendingUserId) return;
     const nextActive = change.active ?? member.active;
     if (!nextActive && !window.confirm(`Disable ARGUS access for ${member.email}? Their reports remain in the workspace.`)) return;
     setUpdatingUserId(member.userId);
@@ -164,6 +168,26 @@ export function TeamAccess() {
       setError(updateError instanceof Error ? updateError.message : "Access could not be updated.");
     } finally {
       setUpdatingUserId(null);
+    }
+  };
+
+  const resendInvitation = async (member: WorkspaceMember) => {
+    if (updatingUserId || resendingUserId || member.emailVerified || !member.active) return;
+    setResendingUserId(member.userId);
+    setError("");
+    setNotice("");
+    try {
+      await responseBody(await fetch("/api/members", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ userId: member.userId, resendInvitation: true }),
+      }));
+      setNotice(`Fresh invitation sent to ${member.email}.`);
+      await load();
+    } catch (resendError) {
+      setError(resendError instanceof Error ? resendError.message : "The invitation could not be resent.");
+    } finally {
+      setResendingUserId(null);
     }
   };
 
@@ -243,7 +267,9 @@ export function TeamAccess() {
           <div className="px-5 py-6 text-[12.5px] text-ink-faint">No workspace members have been provisioned.</div>
         ) : members.map((member) => {
           const isSelf = member.userId === auth.user.id;
-          const pending = updatingUserId === member.userId;
+          const updating = updatingUserId === member.userId;
+          const resending = resendingUserId === member.userId;
+          const pending = updating || resending;
           return (
             <div key={member.userId} className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5 last:border-0">
               <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-line bg-panel-2 text-[11px] font-medium text-signal-lift">
@@ -260,6 +286,16 @@ export function TeamAccess() {
                   {member.emailVerified ? "verified" : "invitation pending"} · {relativeTime(member.lastSignInAt)}
                 </span>
               </span>
+              {!member.emailVerified && member.active && (
+                <button
+                  type="button"
+                  disabled={pending}
+                  onClick={() => void resendInvitation(member)}
+                  className="btn-chip whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-45"
+                >
+                  {resending ? "sending…" : "resend invite"}
+                </button>
+              )}
               <select
                 aria-label={`Role for ${member.email}`}
                 value={member.role}
@@ -278,7 +314,7 @@ export function TeamAccess() {
                 onClick={() => void updateMember(member, { active: !member.active })}
                 className="btn-chip min-w-[70px] justify-center disabled:cursor-not-allowed disabled:opacity-45"
               >
-                {pending ? "saving…" : member.active ? "disable" : "restore"}
+                {updating ? "saving…" : member.active ? "disable" : "restore"}
               </button>
             </div>
           );

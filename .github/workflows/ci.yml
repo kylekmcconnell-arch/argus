@@ -6,6 +6,21 @@ on:
   pull_request:
 
 jobs:
+  database:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.109.1
+
+      - name: Start isolated Supabase database
+        run: supabase start
+
+      - name: Executable Postgres persistence and activation gates
+        run: supabase test db supabase/tests/report_activation_quality_guard.sql supabase/tests/database/persist_report_version_bundle.test.sql
+
   verify:
     runs-on: ubuntu-latest
     steps:
