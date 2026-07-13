@@ -1,10 +1,11 @@
 import { createHash } from "node:crypto";
 import { SubjectClass } from "../src/engine";
-import type {
-  BasicFact,
-  BasicFactPredicate,
-  BasicFactSource,
-  CollectedEvidence,
+import {
+  canonicalBasicFactComparisonValue,
+  type BasicFact,
+  type BasicFactPredicate,
+  type BasicFactSource,
+  type CollectedEvidence,
 } from "../src/data/evidence";
 
 const CRITICAL = new Set<BasicFactPredicate>([
@@ -22,12 +23,15 @@ const normalizeValue = (value: string): string => value
   .replace(/\s+/g, " ")
   .trim();
 
+const normalizeFactValue = (predicate: BasicFactPredicate, value: string): string =>
+  canonicalBasicFactComparisonValue(predicate, normalizeValue(value));
+
 const hash = (value: unknown): string => createHash("sha256")
   .update(JSON.stringify(value))
   .digest("hex");
 
 function factId(subjectKey: string, predicate: BasicFactPredicate, value: string): string {
-  return `basic_v1_${hash(`${subjectKey.toLowerCase()}::${predicate}::${normalizeValue(value)}`)}`;
+  return `basic_v1_${hash(`${subjectKey.toLowerCase()}::${predicate}::${normalizeFactValue(predicate, value)}`)}`;
 }
 
 function officialHost(evidence: CollectedEvidence): string | null {
@@ -77,7 +81,7 @@ function makeFact(
     subjectKey,
     predicate,
     value,
-    normalizedValue: normalizeValue(value),
+    normalizedValue: normalizeFactValue(predicate, value),
     status: "verified",
     critical: CRITICAL.has(predicate),
     sources,

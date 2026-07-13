@@ -61,6 +61,11 @@ export interface AdapterRunResult {
   state: "executed" | "partial" | "failed" | "skipped";
   detail?: string;
   attempts?: number;
+  /**
+   * Checks for which this adapter received an explicit, completed empty
+   * response. This is distinct from a provider failure or an omitted result.
+   */
+  explicitEmptyChecks?: readonly PersonCheckId[];
 }
 
 // An adapter declares which provider key(s) it needs and a run() that mutates

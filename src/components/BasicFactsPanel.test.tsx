@@ -189,6 +189,34 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).not.toContain("The sources disagree");
   });
 
+  it("does not present JUP and $JUP as conflicting token identities", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[
+            {
+              predicate: "official_token",
+              value: "JUP",
+              status: "verified",
+              sources: [{ url: "https://jup.ag/token", relation: "supports" }],
+            },
+            {
+              predicate: "official_token",
+              value: "$JUP",
+              status: "verified",
+              sources: [{ url: "https://coingecko.com/en/coins/jupiter-exchange-solana", relation: "supports" }],
+            },
+          ]}
+        />,
+      );
+    });
+
+    expect(container.querySelectorAll('ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(1);
+    expect(container.textContent).toContain("JUP");
+    expect(container.textContent).not.toContain("Conflicted");
+    expect(container.textContent).not.toContain("Sources disagree");
+  });
+
   it("maps every canonical collector predicate to a plain investor question", () => {
     const canonicalFacts = [
       ["official_identity", "Jupiter"],

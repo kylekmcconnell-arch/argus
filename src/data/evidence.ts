@@ -328,6 +328,19 @@ export type BasicFactPredicate =
   | "repository"
   | "traction";
 
+/**
+ * Normalize formatting that cannot change the meaning of one atomic fact.
+ * A leading `$` is conventional ticker notation, so `JUP` and `$JUP` are the
+ * same official token. Dollar signs remain significant for every other
+ * predicate, including funding and traction amounts.
+ */
+export function canonicalBasicFactComparisonValue(predicate: string, value: string): string {
+  const normalized = value.trim().toLowerCase();
+  return predicate.trim().toLowerCase() === "official_token"
+    ? normalized.replace(/^\$+\s*/, "")
+    : normalized;
+}
+
 export type BasicFactStatus =
   | "verified"
   | "corroborated"

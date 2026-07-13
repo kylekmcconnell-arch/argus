@@ -114,4 +114,52 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(evidence.basicFacts).toHaveLength(1);
     expect(evidence.basicFacts?.[0].sources).toHaveLength(1);
   });
+
+  it("merges provider $TICKER notation into an existing plain token symbol", () => {
+    const evidence = emptyEvidence("@project");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Project Token",
+      symbol: "JUP",
+      coingeckoId: "project-token",
+      rank: 100,
+      address: "JUPTokenAddress",
+      chain: "Solana",
+      sourceUrl: "https://www.coingecko.com/en/coins/project-token",
+      capturedAt: "2026-07-12T20:01:00.000Z",
+      providers: ["coingecko"],
+    };
+    evidence.basicFacts = [{
+      factId: "fact-token",
+      subjectKey: "@project",
+      predicate: "official_token",
+      value: "JUP",
+      normalizedValue: "jup",
+      status: "verified",
+      critical: true,
+      sources: [{
+        url: "https://project.example/token",
+        sourceClass: "official_subject",
+        relation: "supports",
+        excerpt: "The official token is JUP.",
+        contentHash: "a".repeat(64),
+        capturedAt: "2026-07-12T20:00:00.000Z",
+        provider: "public-web",
+        artifactVerified: true,
+      }],
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    }];
+
+    projectProviderBackedBasicFacts(evidence);
+
+    expect(evidence.basicFacts).toHaveLength(2);
+    const tokenFacts = evidence.basicFacts?.filter((fact) => fact.predicate === "official_token") ?? [];
+    expect(tokenFacts).toHaveLength(1);
+    expect(tokenFacts[0]).toMatchObject({ value: "JUP", normalizedValue: "jup", status: "verified" });
+    expect(tokenFacts[0].sources).toHaveLength(2);
+  });
 });

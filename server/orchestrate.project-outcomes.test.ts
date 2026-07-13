@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { emptyEvidence } from "../src/data/evidence";
+import { emptyEvidence, type BasicFact, type BasicFactPredicate } from "../src/data/evidence";
 import { SubjectClass } from "../src/engine";
 import type { CheckObservation, CollectContext } from "./adapters/types";
 import { collectProjectCoreEvidenceOutcomes, recordProjectTokenDrawdownFinding } from "./orchestrate";
@@ -15,6 +15,31 @@ function context() {
     recordCheck: (outcome) => outcomes.push(outcome),
   };
   return { ctx, evidence, outcomes };
+}
+
+function verifiedFact(predicate: BasicFactPredicate): BasicFact {
+  return {
+    factId: `fact-${predicate}`,
+    subjectKey: "@project",
+    predicate,
+    value: `Project ${predicate} disclosure`,
+    normalizedValue: `project ${predicate} disclosure`,
+    status: "verified",
+    critical: false,
+    sources: [{
+      url: `https://project.example/${predicate}`,
+      sourceClass: "official_subject",
+      relation: "supports",
+      excerpt: `Project publishes its ${predicate} disclosure.`,
+      contentHash: predicate.padEnd(64, "0").slice(0, 64),
+      capturedAt: "2026-07-13T12:00:00.000Z",
+      provider: "public-web",
+      artifactVerified: true,
+    }],
+    evidence_origin: "deterministic",
+    artifact_verified: true,
+    provider: "public-web",
+  };
 }
 
 describe("project core evidence outcomes", () => {
@@ -158,6 +183,57 @@ describe("project core evidence outcomes", () => {
       provider: "project-disclosure-collector",
       note: expect.stringContaining("canonical token identity alone does not establish transparency"),
     });
+  });
+
+  it.each([
+    "legal_entity",
+    "governance",
+    "tokenomics",
+    "vesting",
+    "treasury",
+    "audit",
+    "repository",
+  ] satisfies BasicFactPredicate[])("confirms transparency from a verified %s fact", (predicate) => {
+    const { ctx, evidence, outcomes } = context();
+    evidence.basicFacts = [verifiedFact(predicate)];
+
+    collectProjectCoreEvidenceOutcomes(ctx);
+
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      id: "project-transparency",
+      status: "confirmed",
+      provider: "basic-facts-web",
+      sourceCount: 1,
+    }));
+  });
+
+  it("does not confirm transparency from an unresolved disclosure lead", () => {
+    const { ctx, evidence, outcomes } = context();
+    evidence.basicFacts = [{ ...verifiedFact("governance"), status: "lead" }];
+
+    collectProjectCoreEvidenceOutcomes(ctx);
+
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      id: "project-transparency",
+      status: "unavailable",
+    }));
+    expect(outcomes).not.toContainEqual(expect.objectContaining({
+      id: "project-transparency",
+      status: "confirmed",
+    }));
+  });
+
+  it("records checked-empty only when the disclosure provider returned an explicit no-match", () => {
+    const { ctx, outcomes } = context();
+
+    collectProjectCoreEvidenceOutcomes(ctx, { transparencySearchExplicitlyEmpty: true });
+
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      id: "project-transparency",
+      status: "checked-empty",
+      provider: "basic-facts-web",
+      note: expect.stringContaining("explicit no-match"),
+    }));
   });
 
   it("does not record project outcomes for a non-project methodology", () => {

@@ -4,6 +4,7 @@ import {
   MagnifyingGlass,
   Warning,
 } from "@phosphor-icons/react";
+import { canonicalBasicFactComparisonValue } from "../data/evidence";
 
 export type BasicFactStatus =
   | "verified"
@@ -218,7 +219,7 @@ function factRows(facts: readonly BasicFactView[], fillRequired: boolean): Basic
       answerFor(existing),
       answerFor(fact),
     ].filter((value) => value && !/^(?:No verified answer|Not applicable|Sources disagree|A source was verified)/.test(value))
-      .map((value) => [value.toLowerCase(), value])).values()];
+      .map((value) => [canonicalBasicFactComparisonValue(predicate, value), value])).values()];
     const conflictingValues = SINGLE_VALUE_PREDICATES.has(predicate) && values.length > 1;
     const combinedStatus = existing.status === "conflicted" || fact.status === "conflicted" || conflictingValues
       ? "conflicted"

@@ -2,7 +2,13 @@ import { describe, expect, it } from "vitest";
 import { SubjectClass } from "../src/engine";
 import { emptyEvidence, type BasicFact, type BasicFactPredicate } from "../src/data/evidence";
 import type { CheckObservation, CollectContext } from "./adapters/types";
-import { axisCatalog, collectProjectCoreEvidenceOutcomes, projectVerifiedBasicFacts, providerBackedRoles } from "./orchestrate";
+import {
+  axisCatalog,
+  coalesceTeamMembersByHandle,
+  collectProjectCoreEvidenceOutcomes,
+  projectVerifiedBasicFacts,
+  providerBackedRoles,
+} from "./orchestrate";
 
 const basicFact = (predicate: BasicFactPredicate, value: string, qualifier?: string): BasicFact => ({
   factId: `fact-${predicate}-${value}`,
@@ -40,6 +46,41 @@ function resolvedProjectProfile(bio: string, website: string | null | undefined 
 }
 
 describe("provider-backed project routing", () => {
+  it("coalesces different roster names that enrichment resolves to the same X handle", () => {
+    expect(coalesceTeamMembersByHandle([
+      {
+        name: "Siong",
+        handle: "@sssionggg",
+        role: "Co-founder",
+        source: "Project governance forum",
+        sourceUrl: "https://discuss.example/team",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "team-page",
+        identity_link_evidence_origin: "model_lead",
+      },
+      {
+        name: "Siong Ong",
+        handle: "@sssionggg",
+        role: "Co-founder",
+        source: "Web identity search",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        provider: "grok",
+        identity_link_evidence_origin: "model_lead",
+      },
+    ])).toEqual([
+      expect.objectContaining({
+        name: "Siong",
+        handle: "@sssionggg",
+        role: "Co-founder",
+        source: "Project governance forum",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }),
+    ]);
+  });
+
   it("routes @world_xyz to the PROJECT methodology and requests every PROJECT axis", () => {
     const evidence = resolvedProjectProfile("the solana prediction market");
     const roles = providerBackedRoles(evidence);
@@ -174,6 +215,47 @@ describe("provider-backed project routing", () => {
     expect(evidence.profile.identity_confidence).toBe("Probable");
     expect(outcome.detail).toContain("1 verified backing record");
     expect(outcome.detail).toContain("2 verified disclosure records");
+  });
+
+  it("merges a verified full-name fact into the roster member with the same cited X handle", () => {
+    const evidence = resolvedProjectProfile("the Solana liquidity protocol", "https://jup.ag");
+    evidence.roles = [SubjectClass.PROJECT];
+    const siong = basicFact("founder", "Siong Ong", "Co-founder");
+    siong.sources[0] = {
+      ...siong.sources[0],
+      url: "https://discuss.jup.ag/t/founders/1",
+      excerpt: "Siong Ong (@sssionggg) is a co-founder of Jupiter.",
+    };
+    evidence.basicFacts = [siong];
+    evidence.webTeam = [{
+      name: "Siong",
+      handle: "@sssionggg",
+      role: "Co-founder",
+      source: "Jupiter governance forum",
+      sourceUrl: "https://discuss.jup.ag/t/founders/1",
+      evidence: "Siong is listed as a co-founder.",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "team-page",
+      identity_link_evidence_origin: "deterministic",
+    }];
+    const checks: CheckObservation[] = [];
+    const ctx: CollectContext = {
+      handle: "@JupiterExchange",
+      evidence,
+      emit: () => undefined,
+      recordCheck: (check) => checks.push(check),
+    };
+
+    projectVerifiedBasicFacts(ctx);
+
+    expect(evidence.webTeam).toHaveLength(1);
+    expect(evidence.webTeam[0]).toMatchObject({ name: "Siong", handle: "@sssionggg" });
+    expect(checks).toContainEqual(expect.objectContaining({
+      id: "project-team-identity",
+      status: "confirmed",
+      provider: "basic-facts-web",
+    }));
   });
 
   it.each([

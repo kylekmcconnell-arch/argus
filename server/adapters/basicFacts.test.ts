@@ -172,6 +172,22 @@ describe("basic-facts lead parsing", () => {
 });
 
 describe("basic-facts source verification", () => {
+  it("marks an explicit completed no-match without calling the provider unavailable", async () => {
+    const { ctx, evidence } = context();
+    const result = await collectBasicFacts(ctx, {
+      discover: async () => [],
+      fetchSource: vi.fn(),
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      state: "partial",
+      detail: expect.stringContaining("search completed"),
+      explicitEmptyChecks: ["project-transparency"],
+    }));
+    expect(evidence.basicFactLeads).toEqual([]);
+    expect(evidence.basicFacts).toEqual([]);
+  });
+
   it("promotes an exact first-party source to verified", async () => {
     const { ctx, evidence } = context();
     const result = await collectBasicFacts(ctx, {
@@ -192,6 +208,55 @@ describe("basic-facts source verification", () => {
           sourceClass: "official_subject",
           artifactVerified: true,
         })],
+      }),
+    ]);
+  });
+
+  it("treats a leading ticker dollar sign as formatting, not a token conflict", async () => {
+    const { ctx, evidence } = context();
+    const plainUrl = "https://jup.ag/token";
+    const prefixedUrl = "https://docs.jup.ag/token";
+    const result = await collectBasicFacts(ctx, {
+      discover: async () => [
+        lead({
+          predicate: "official_token",
+          value: "JUP",
+          excerpt: "Jupiter's official token is JUP.",
+          sourceUrl: plainUrl,
+        }),
+        lead({
+          predicate: "official_token",
+          value: "$JUP",
+          excerpt: "The official Jupiter token is $JUP.",
+          sourceUrl: prefixedUrl,
+        }),
+      ],
+      fetchSource: fetchDocuments({
+        [plainUrl]: document({
+          url: plainUrl,
+          text: "<html><body><p>Jupiter's official token is JUP.</p></body></html>",
+          contentHash: "b".repeat(64),
+        }),
+        [prefixedUrl]: document({
+          url: prefixedUrl,
+          host: "docs.jup.ag",
+          text: "<html><body><p>The official Jupiter token is $JUP.</p></body></html>",
+          contentHash: "c".repeat(64),
+        }),
+      }),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ state: "executed" }));
+    expect(evidence.basicFacts).toEqual([
+      expect.objectContaining({
+        predicate: "official_token",
+        value: "JUP",
+        normalizedValue: "jup",
+        status: "verified",
+        sources: [
+          expect.objectContaining({ url: plainUrl }),
+          expect.objectContaining({ url: prefixedUrl }),
+        ],
       }),
     ]);
   });

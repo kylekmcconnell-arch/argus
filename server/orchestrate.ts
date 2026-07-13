@@ -14,7 +14,7 @@ import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEnt
 import { env } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
-import { emptyEvidence } from "../src/data/evidence";
+import { emptyEvidence, type BasicFact, type WebTeamMember } from "../src/data/evidence";
 import type { AdapterRunResult, CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import {
   ANALYST_EVIDENCE_MAX_CHARS,
@@ -70,6 +70,53 @@ const ADAPTERS: Adapter[] = [
   onchainAdapter,
   basicFactsAdapter,
 ];
+
+const teamEvidenceRank = (member: WebTeamMember): number =>
+  member.artifact_verified === true && member.evidence_origin !== "model_lead"
+    ? 2
+    : member.evidence_origin !== "model_lead"
+      ? 1
+      : 0;
+
+/**
+ * Collapse roster rows that resolve to the same X identity after enrichment.
+ * Keep the strongest source-backed row as the governing name, role, and
+ * provenance, while carrying over non-governing identity links it lacks.
+ */
+export function coalesceTeamMembersByHandle(members: readonly WebTeamMember[]): WebTeamMember[] {
+  const output: WebTeamMember[] = [];
+  const indexByHandle = new Map<string, number>();
+  for (const member of members) {
+    const handle = member.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
+    const existingIndex = handle ? indexByHandle.get(handle) : undefined;
+    if (existingIndex === undefined) {
+      output.push({ ...member });
+      if (handle) indexByHandle.set(handle, output.length - 1);
+      continue;
+    }
+
+    const existing = output[existingIndex];
+    const preferred = teamEvidenceRank(member) > teamEvidenceRank(existing) ? member : existing;
+    const secondary = preferred === existing ? member : existing;
+    const merged: WebTeamMember = { ...preferred };
+    if (!merged.handle && secondary.handle) merged.handle = secondary.handle;
+    if (!merged.linkedin && secondary.linkedin) merged.linkedin = secondary.linkedin;
+    if ((!merged.projects || !merged.projects.length) && secondary.projects?.length) {
+      merged.projects = secondary.projects;
+      merged.projects_evidence_origin = secondary.projects_evidence_origin;
+    }
+    if (
+      secondary.identity_link_evidence_origin !== "model_lead"
+      && preferred.identity_link_evidence_origin === "model_lead"
+    ) {
+      merged.identity_link_evidence_origin = secondary.identity_link_evidence_origin;
+      if (secondary.handle) merged.handle = secondary.handle;
+      if (secondary.linkedin) merged.linkedin = secondary.linkedin;
+    }
+    output[existingIndex] = merged;
+  }
+  return output;
+}
 
 // Adapters that require a key to do anything meaningful (keyless DEX/CG no-op
 // without a promoted contract, so they don't count as "live collection").
@@ -515,6 +562,7 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
       if (!m.handle && f.handle) {
         m.handle = f.handle;
         m.identity_link_evidence_origin = "model_lead";
+        byHandle.set(norm(f.handle), m);
         linked++;
       }
       if (!m.linkedin && f.linkedin) {
@@ -524,6 +572,10 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
       }
     }
     if (linked) ctx.emit({ phase: "P1 · Team", label: "Identities linked", detail: `Resolved X/LinkedIn for ${linked} of ${nameOnly.length} name-only team members.`, source: "grok", tone: "good" });
+  }
+  const coalescedTeam = coalesceTeamMembersByHandle(webTeam);
+  if (coalescedTeam.length !== webTeam.length) {
+    webTeam.splice(0, webTeam.length, ...coalescedTeam);
   }
   if (webTeam.length) {
     ctx.emit({ phase: "P1 · Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
@@ -784,14 +836,41 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
   if (!facts.length) return;
 
   const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const normHandle = (value: string) => value.trim().replace(/^@/, "").toLowerCase();
+  const subjectHandle = normHandle(ctx.handle);
+  const citedPersonHandle = (fact: BasicFact): string | undefined => {
+    const handles = new Set<string>();
+    for (const source of fact.sources) {
+      try {
+        const parsed = new URL(source.url);
+        if (/^(?:x|twitter)\.com$/i.test(parsed.hostname.replace(/^www\./, ""))) {
+          const candidate = normHandle(parsed.pathname.split("/").filter(Boolean)[0] ?? "");
+          if (/^[a-z0-9_]{2,30}$/.test(candidate)) handles.add(candidate);
+        }
+      } catch {
+        // Source URLs were already validated by the collector. Ignore any
+        // malformed legacy row instead of inventing an identity link.
+      }
+      for (const match of source.excerpt.matchAll(/@([A-Za-z0-9_]{2,30})\b/g)) {
+        handles.add(normHandle(match[1]));
+      }
+    }
+    handles.delete(subjectHandle);
+    return handles.size === 1 ? [...handles][0] : undefined;
+  };
   const roster = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
   const people = facts.filter((fact) => fact.predicate === "founder" || fact.predicate === "executive");
   for (const fact of people) {
-    if (roster.some((member) => norm(member.name) === norm(fact.value))) continue;
+    const citedHandle = citedPersonHandle(fact);
+    const existing = roster.find((member) =>
+      norm(member.name) === norm(fact.value)
+      || Boolean(citedHandle && member.handle && normHandle(member.handle) === citedHandle));
+    if (existing) continue;
     const source = fact.sources.find((candidate) => candidate.relation === "supports") ?? fact.sources[0];
     if (!source) continue;
     roster.push({
       name: fact.value,
+      ...(citedHandle ? { handle: `@${citedHandle}`, identity_link_evidence_origin: "deterministic" as const } : {}),
       role: fact.qualifier ?? (fact.predicate === "founder" ? "Founder" : "Executive"),
       evidence: source.excerpt,
       source: source.title ?? (source.sourceClass === "official_subject" ? "Official project source" : "Corroborated public sources"),
@@ -858,15 +937,33 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
 
 const PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
 const PROJECT_BACKING_PROVIDERS = new Set(["team-page", "twitterapi"]);
+const PROJECT_TRANSPARENCY_FACT_PREDICATES = new Set([
+  "legal_entity",
+  "governance",
+  "tokenomics",
+  "vesting",
+  "treasury",
+  "audit",
+  "repository",
+]);
+
+export interface ProjectCoreEvidenceOutcomeOptions {
+  /** A disclosure search completed and explicitly returned no candidate facts. */
+  transparencySearchExplicitlyEmpty?: boolean;
+}
 
 /**
  * Record the project-check outcomes that core collection can defend today.
  * This deliberately does not turn model search, notable followers, or a
  * generic "partner" title into evidence of project backing. Transparency stays
- * unavailable until a fetched source directly proves a governance or audit
- * disclosure instead of merely appearing on a governance-themed URL.
+ * unavailable until a fetched source directly proves a qualifying disclosure
+ * instead of merely appearing on a disclosure-themed URL. A
+ * completed empty search is recorded separately from an unavailable provider.
  */
-export function collectProjectCoreEvidenceOutcomes(ctx: CollectContext): {
+export function collectProjectCoreEvidenceOutcomes(
+  ctx: CollectContext,
+  options: ProjectCoreEvidenceOutcomeOptions = {},
+): {
   state: "partial" | "skipped";
   detail: string;
 } {
@@ -913,7 +1010,7 @@ export function collectProjectCoreEvidenceOutcomes(ctx: CollectContext): {
   }
 
   const verifiedDisclosures = (ctx.evidence.basicFacts ?? []).filter((fact) =>
-    (fact.predicate === "governance" || fact.predicate === "audit")
+    PROJECT_TRANSPARENCY_FACT_PREDICATES.has(fact.predicate)
     && fact.artifact_verified === true
     && (fact.status === "verified" || fact.status === "corroborated"),
   );
@@ -921,13 +1018,21 @@ export function collectProjectCoreEvidenceOutcomes(ctx: CollectContext): {
     ctx.recordCheck?.({
       id: "project-transparency",
       status: "confirmed",
-      note: `${verifiedDisclosures.length} governance or security-audit disclosure${verifiedDisclosures.length === 1 ? " was" : "s were"} verified against fetched, cited public sources`,
+      note: `${verifiedDisclosures.length} legal, governance, token-economic, repository, or security disclosure${verifiedDisclosures.length === 1 ? " was" : "s were"} verified against fetched, cited public sources`,
       provider: "basic-facts-web",
       sourceCount: verifiedDisclosures.reduce((total, fact) => total + fact.sources.length, 0),
     });
+  } else if (options.transparencySearchExplicitlyEmpty) {
+    ctx.recordCheck?.({
+      id: "project-transparency",
+      status: "checked-empty",
+      note: "bounded disclosure search completed with an explicit no-match; no source-linked legal, governance, token-economic, repository, or security disclosure candidate was returned",
+      provider: "basic-facts-web",
+    });
   } else {
-    // Canonical token identity is not a transparency attestation. An empty
-    // verified-facts bag must remain unavailable rather than looking checked.
+    // Canonical token identity is not a transparency attestation. Without a
+    // verified disclosure or explicit completed-empty search, the path remains
+    // unavailable rather than looking checked.
     ctx.recordCheck?.({
       id: "project-transparency",
       status: "unavailable",
@@ -1515,6 +1620,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     ? liveSeedEvidence
     : emptyEvidence(rawHandle);
   const checkTracker = new PersonCheckTracker();
+  const adapterResults = new Map<string, AdapterRunResult>();
   emit({ phase: "P0 · Intake", label: "Resolve handle", detail: `Normalizing ${rawHandle} and opening the audit ledger.`, tone: "neutral" });
 
   const ctx: CollectContext = {
@@ -1584,6 +1690,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     try {
       const before = attemptTotals();
       const result = await a.run(ctx);
+      if (result) adapterResults.set(a.id, result);
       const attempts = attemptDelta(before, attemptTotals());
       const state = adapterRunState(result, attempts);
       const detail = result?.detail
@@ -1672,7 +1779,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // frozen first-party evidence. An official token binding alone is never
   // allowed to complete transparency.
   try {
-    const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx);
+    const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx, {
+      transparencySearchExplicitlyEmpty: adapterResults
+        .get("basic-facts")
+        ?.explicitEmptyChecks
+        ?.includes("project-transparency") === true,
+    });
     checkTracker.provider(
       "project-core-outcomes",
       "Project backing and disclosure evidence",

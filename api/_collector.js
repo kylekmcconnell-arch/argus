@@ -565,6 +565,7 @@ var Audit = class {
   promotions = [];
   associates = [];
   findings = [];
+  finalizedAt;
   constructor(handle, opts = {}) {
     this.handle = normalizeHandle(handle);
     if (opts.roles) this.roles = opts.roles.map(asClass);
@@ -777,6 +778,7 @@ var Audit = class {
     return this.identity === "SuspectedImpersonation";
   }
   finalize() {
+    const finalizedAt = this.finalizedAt ?? (this.finalizedAt = (/* @__PURE__ */ new Date()).toISOString());
     const identity = this.identity;
     const sharedKeys = this.sharedCapsTriggered();
     const identityBonus = identity ? DOX_BONUS[identity] ?? 0 : 0;
@@ -875,7 +877,7 @@ var Audit = class {
       cap_applied: govCap,
       publishable_findings: this.publishable(),
       investigative_leads: this.investigativeLeads(),
-      finalized_at: (/* @__PURE__ */ new Date(0)).toISOString()
+      finalized_at: finalizedAt
     };
     if (this.roles.includes("FOUNDER" /* FOUNDER */)) report.founder_summary = this.founderSummary();
     if (this.roles.includes("ADVISOR" /* ADVISOR */)) report.advised_summary = this.advisedOutcomeSummary();
@@ -892,7 +894,14 @@ var Audit = class {
     );
   }
   toPanoptes() {
-    const nodes = [{ type: "Person", key: this.handle, roles: this.roles, subject: true }];
+    const projectSubject = this.roles.length === 1 && this.roles[0] === "PROJECT" /* PROJECT */;
+    const nodes = [{
+      type: projectSubject ? "Company" : "Person",
+      ...projectSubject ? { subtype: "Project" } : {},
+      key: this.handle,
+      roles: this.roles,
+      subject: true
+    }];
     const edges = [];
     for (const a of this.associates) {
       nodes.push({ type: "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
@@ -1414,6 +1423,10 @@ function findSubject(handle) {
 }
 
 // src/data/evidence.ts
+function canonicalBasicFactComparisonValue(predicate, value) {
+  const normalized4 = value.trim().toLowerCase();
+  return predicate.trim().toLowerCase() === "official_token" ? normalized4.replace(/^\$+\s*/, "") : normalized4;
+}
 function emptyEvidence(handle) {
   const u = handle.replace(/^@/, "");
   return {
@@ -7558,7 +7571,8 @@ var sameOfficialDomain = (host, officialHosts) => {
   });
 };
 function factId(subjectKey, predicate, value) {
-  return `basic_v1_${createHash4("sha256").update(`${subjectKey.toLowerCase()}::${predicate}::${searchable(value)}`).digest("hex")}`;
+  const normalizedValue = canonicalBasicFactComparisonValue(predicate, searchable(value));
+  return `basic_v1_${createHash4("sha256").update(`${subjectKey.toLowerCase()}::${predicate}::${normalizedValue}`).digest("hex")}`;
 }
 function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject, officialHosts = []) {
   const page = documentText(document);
@@ -7572,7 +7586,7 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
     subjectKey,
     predicate: lead.predicate,
     value: lead.value,
-    normalizedValue: searchable(lead.value),
+    normalizedValue: canonicalBasicFactComparisonValue(lead.predicate, searchable(lead.value)),
     status: official ? "verified" : "lead",
     critical: CRITICAL_PREDICATES.has(lead.predicate),
     sources: [{
@@ -7694,7 +7708,11 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   ctx.evidence.basicFactLeads = boundedLeads.map((lead) => ({ ...lead }));
   if (!boundedLeads.length) {
     ctx.evidence.basicFacts = [];
-    return { state: "partial", detail: "search returned no source-linked basic-fact candidates" };
+    return {
+      state: "partial",
+      detail: "search completed with no source-linked basic-fact candidates",
+      explicitEmptyChecks: ["project-transparency"]
+    };
   }
   const aliases = subjectAliases(ctx);
   const officialHosts = [ctx.evidence.profile.website].filter((value) => Boolean(value)).flatMap((value) => {
@@ -11654,9 +11672,10 @@ var CRITICAL = /* @__PURE__ */ new Set([
   "official_token"
 ]);
 var normalizeValue = (value) => value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
+var normalizeFactValue = (predicate, value) => canonicalBasicFactComparisonValue(predicate, normalizeValue(value));
 var hash2 = (value) => createHash10("sha256").update(JSON.stringify(value)).digest("hex");
 function factId2(subjectKey, predicate, value) {
-  return `basic_v1_${hash2(`${subjectKey.toLowerCase()}::${predicate}::${normalizeValue(value)}`)}`;
+  return `basic_v1_${hash2(`${subjectKey.toLowerCase()}::${predicate}::${normalizeFactValue(predicate, value)}`)}`;
 }
 function officialHost(evidence) {
   try {
@@ -11689,7 +11708,7 @@ function makeFact(evidence, predicate, value, sources, qualifier) {
     subjectKey,
     predicate,
     value,
-    normalizedValue: normalizeValue(value),
+    normalizedValue: normalizeFactValue(predicate, value),
     status: "verified",
     critical: CRITICAL.has(predicate),
     sources,
@@ -11804,6 +11823,37 @@ var ADAPTERS = [
   onchainAdapter,
   basicFactsAdapter
 ];
+var teamEvidenceRank = (member) => member.artifact_verified === true && member.evidence_origin !== "model_lead" ? 2 : member.evidence_origin !== "model_lead" ? 1 : 0;
+function coalesceTeamMembersByHandle(members) {
+  const output = [];
+  const indexByHandle = /* @__PURE__ */ new Map();
+  for (const member of members) {
+    const handle = member.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
+    const existingIndex = handle ? indexByHandle.get(handle) : void 0;
+    if (existingIndex === void 0) {
+      output.push({ ...member });
+      if (handle) indexByHandle.set(handle, output.length - 1);
+      continue;
+    }
+    const existing = output[existingIndex];
+    const preferred = teamEvidenceRank(member) > teamEvidenceRank(existing) ? member : existing;
+    const secondary = preferred === existing ? member : existing;
+    const merged = { ...preferred };
+    if (!merged.handle && secondary.handle) merged.handle = secondary.handle;
+    if (!merged.linkedin && secondary.linkedin) merged.linkedin = secondary.linkedin;
+    if ((!merged.projects || !merged.projects.length) && secondary.projects?.length) {
+      merged.projects = secondary.projects;
+      merged.projects_evidence_origin = secondary.projects_evidence_origin;
+    }
+    if (secondary.identity_link_evidence_origin !== "model_lead" && preferred.identity_link_evidence_origin === "model_lead") {
+      merged.identity_link_evidence_origin = secondary.identity_link_evidence_origin;
+      if (secondary.handle) merged.handle = secondary.handle;
+      if (secondary.linkedin) merged.linkedin = secondary.linkedin;
+    }
+    output[existingIndex] = merged;
+  }
+  return output;
+}
 var KEYED = /* @__PURE__ */ new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain", "basic-facts"]);
 var attemptTotals = (providers, operations) => {
   const allow = providers ? new Set(providers) : null;
@@ -12141,6 +12191,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       if (!m.handle && f.handle) {
         m.handle = f.handle;
         m.identity_link_evidence_origin = "model_lead";
+        byHandle.set(norm2(f.handle), m);
         linked++;
       }
       if (!m.linkedin && f.linkedin) {
@@ -12150,6 +12201,10 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
       }
     }
     if (linked) ctx.emit({ phase: "P1 \xB7 Team", label: "Identities linked", detail: `Resolved X/LinkedIn for ${linked} of ${nameOnly.length} name-only team members.`, source: "grok", tone: "good" });
+  }
+  const coalescedTeam = coalesceTeamMembersByHandle(webTeam);
+  if (coalescedTeam.length !== webTeam.length) {
+    webTeam.splice(0, webTeam.length, ...coalescedTeam);
   }
   if (webTeam.length) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "Team assembled", detail: `${webTeam.length} people behind the project: ${webTeam.slice(0, 6).map((t) => t.name + (t.handle ? ` ${t.handle}` : "")).join(", ")}${domain ? ` (site + posts)` : " (posts)"}.`, source: "team-search", tone: "good" });
@@ -12368,14 +12423,37 @@ function projectVerifiedBasicFacts(ctx) {
   );
   if (!facts.length) return;
   const norm2 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const normHandle = (value) => value.trim().replace(/^@/, "").toLowerCase();
+  const subjectHandle = normHandle(ctx.handle);
+  const citedPersonHandle = (fact) => {
+    const handles = /* @__PURE__ */ new Set();
+    for (const source2 of fact.sources) {
+      try {
+        const parsed = new URL(source2.url);
+        if (/^(?:x|twitter)\.com$/i.test(parsed.hostname.replace(/^www\./, ""))) {
+          const candidate = normHandle(parsed.pathname.split("/").filter(Boolean)[0] ?? "");
+          if (/^[a-z0-9_]{2,30}$/.test(candidate)) handles.add(candidate);
+        }
+      } catch {
+      }
+      for (const match of source2.excerpt.matchAll(/@([A-Za-z0-9_]{2,30})\b/g)) {
+        handles.add(normHandle(match[1]));
+      }
+    }
+    handles.delete(subjectHandle);
+    return handles.size === 1 ? [...handles][0] : void 0;
+  };
   const roster = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
   const people = facts.filter((fact) => fact.predicate === "founder" || fact.predicate === "executive");
   for (const fact of people) {
-    if (roster.some((member) => norm2(member.name) === norm2(fact.value))) continue;
+    const citedHandle = citedPersonHandle(fact);
+    const existing = roster.find((member) => norm2(member.name) === norm2(fact.value) || Boolean(citedHandle && member.handle && normHandle(member.handle) === citedHandle));
+    if (existing) continue;
     const source2 = fact.sources.find((candidate) => candidate.relation === "supports") ?? fact.sources[0];
     if (!source2) continue;
     roster.push({
       name: fact.value,
+      ...citedHandle ? { handle: `@${citedHandle}`, identity_link_evidence_origin: "deterministic" } : {},
       role: fact.qualifier ?? (fact.predicate === "founder" ? "Founder" : "Executive"),
       evidence: source2.excerpt,
       source: source2.title ?? (source2.sourceClass === "official_subject" ? "Official project source" : "Corroborated public sources"),
@@ -12435,7 +12513,16 @@ function projectVerifiedBasicFacts(ctx) {
 }
 var PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
 var PROJECT_BACKING_PROVIDERS = /* @__PURE__ */ new Set(["team-page", "twitterapi"]);
-function collectProjectCoreEvidenceOutcomes(ctx) {
+var PROJECT_TRANSPARENCY_FACT_PREDICATES = /* @__PURE__ */ new Set([
+  "legal_entity",
+  "governance",
+  "tokenomics",
+  "vesting",
+  "treasury",
+  "audit",
+  "repository"
+]);
+function collectProjectCoreEvidenceOutcomes(ctx, options = {}) {
   if (!ctx.evidence.roles.includes("PROJECT" /* PROJECT */)) {
     return { state: "skipped", detail: "not a provider-backed project role" };
   }
@@ -12467,15 +12554,22 @@ function collectProjectCoreEvidenceOutcomes(ctx) {
     });
   }
   const verifiedDisclosures = (ctx.evidence.basicFacts ?? []).filter(
-    (fact) => (fact.predicate === "governance" || fact.predicate === "audit") && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")
+    (fact) => PROJECT_TRANSPARENCY_FACT_PREDICATES.has(fact.predicate) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")
   );
   if (verifiedDisclosures.length) {
     ctx.recordCheck?.({
       id: "project-transparency",
       status: "confirmed",
-      note: `${verifiedDisclosures.length} governance or security-audit disclosure${verifiedDisclosures.length === 1 ? " was" : "s were"} verified against fetched, cited public sources`,
+      note: `${verifiedDisclosures.length} legal, governance, token-economic, repository, or security disclosure${verifiedDisclosures.length === 1 ? " was" : "s were"} verified against fetched, cited public sources`,
       provider: "basic-facts-web",
       sourceCount: verifiedDisclosures.reduce((total, fact) => total + fact.sources.length, 0)
+    });
+  } else if (options.transparencySearchExplicitlyEmpty) {
+    ctx.recordCheck?.({
+      id: "project-transparency",
+      status: "checked-empty",
+      note: "bounded disclosure search completed with an explicit no-match; no source-linked legal, governance, token-economic, repository, or security disclosure candidate was returned",
+      provider: "basic-facts-web"
     });
   } else {
     ctx.recordCheck?.({
@@ -12954,6 +13048,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   }
   const evidence = liveSeedEvidence ? liveSeedEvidence : emptyEvidence(rawHandle);
   const checkTracker = new PersonCheckTracker();
+  const adapterResults = /* @__PURE__ */ new Map();
   emit({ phase: "P0 \xB7 Intake", label: "Resolve handle", detail: `Normalizing ${rawHandle} and opening the audit ledger.`, tone: "neutral" });
   const ctx = {
     handle: evidence.profile.handle,
@@ -13015,6 +13110,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     try {
       const before = attemptTotals();
       const result = await a.run(ctx);
+      if (result) adapterResults.set(a.id, result);
       const attempts = attemptDelta(before, attemptTotals());
       const state = adapterRunState(result, attempts);
       const detail = result?.detail ?? (state === "skipped" ? "no applicable provider call was observed" : `${attempts.total} provider attempt${attempts.total === 1 ? "" : "s"} observed`);
@@ -13079,7 +13175,9 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     emit({ phase: "P0 \xB7 Routing", label: "Role unresolved", detail: "No deterministic or provider-corroborated role evidence was collected. Model role candidates remain leads; the report will publish INCOMPLETE.", tone: "warn" });
   }
   try {
-    const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx);
+    const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx, {
+      transparencySearchExplicitlyEmpty: adapterResults.get("basic-facts")?.explicitEmptyChecks?.includes("project-transparency") === true
+    });
     checkTracker.provider(
       "project-core-outcomes",
       "Project backing and disclosure evidence",

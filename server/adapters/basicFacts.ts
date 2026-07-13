@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { isIP } from "node:net";
-import type {
-  BasicFact,
-  BasicFactLead,
-  BasicFactPredicate,
+import {
+  canonicalBasicFactComparisonValue,
+  type BasicFact,
+  type BasicFactLead,
+  type BasicFactPredicate,
 } from "../../src/data/evidence";
 import { ANALYST_MODEL, env } from "../config";
 import { cacheGet, cacheSet } from "../cache";
@@ -557,7 +558,8 @@ const sameOfficialDomain = (host: string, officialHosts: readonly string[]): boo
 };
 
 function factId(subjectKey: string, predicate: BasicFactPredicate, value: string): string {
-  return `basic_v1_${createHash("sha256").update(`${subjectKey.toLowerCase()}::${predicate}::${searchable(value)}`).digest("hex")}`;
+  const normalizedValue = canonicalBasicFactComparisonValue(predicate, searchable(value));
+  return `basic_v1_${createHash("sha256").update(`${subjectKey.toLowerCase()}::${predicate}::${normalizedValue}`).digest("hex")}`;
 }
 
 /** Promote one lead only when a short passage in the safely fetched artifact
@@ -582,7 +584,7 @@ export function verifyBasicFactLead(
     subjectKey,
     predicate: lead.predicate,
     value: lead.value,
-    normalizedValue: searchable(lead.value),
+    normalizedValue: canonicalBasicFactComparisonValue(lead.predicate, searchable(lead.value)),
     status: official ? "verified" : "lead",
     critical: CRITICAL_PREDICATES.has(lead.predicate),
     sources: [{
@@ -723,7 +725,11 @@ export async function collectBasicFacts(
   ctx.evidence.basicFactLeads = boundedLeads.map((lead) => ({ ...lead }));
   if (!boundedLeads.length) {
     ctx.evidence.basicFacts = [];
-    return { state: "partial", detail: "search returned no source-linked basic-fact candidates" };
+    return {
+      state: "partial",
+      detail: "search completed with no source-linked basic-fact candidates",
+      explicitEmptyChecks: ["project-transparency"],
+    };
   }
 
   const aliases = subjectAliases(ctx);

@@ -69,6 +69,45 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(first.audit_id).toMatch(/^PA-/);
   });
 
+  it("records the real report finalization time instead of the Unix epoch", () => {
+    const audit = new Audit("@timestamped", { subject_class: SubjectClass.FOUNDER });
+    const before = Date.now();
+
+    const report = audit.finalize();
+
+    const finalizedAt = Date.parse(report.finalized_at);
+    expect(Number.isFinite(finalizedAt)).toBe(true);
+    expect(finalizedAt).toBeGreaterThanOrEqual(before);
+    expect(finalizedAt).toBeLessThanOrEqual(Date.now());
+    expect(report.finalized_at).not.toBe("1970-01-01T00:00:00.000Z");
+    expect(audit.finalize().finalized_at).toBe(report.finalized_at);
+  });
+
+  it("persists PROJECT graph subjects as projects while keeping people typed as people", () => {
+    const project = new Audit("@protocol", { subject_class: SubjectClass.PROJECT });
+    const person = new Audit("@founder", { subject_class: SubjectClass.FOUNDER });
+    const mixedPerson = new Audit("@founder_project", {
+      roles: [SubjectClass.FOUNDER, SubjectClass.PROJECT],
+    });
+
+    expect(project.toPanoptes().nodes.find((node) => node.subject)).toMatchObject({
+      type: "Company",
+      subtype: "Project",
+      key: "@protocol",
+      roles: [SubjectClass.PROJECT],
+    });
+    expect(person.toPanoptes().nodes.find((node) => node.subject)).toMatchObject({
+      type: "Person",
+      key: "@founder",
+      roles: [SubjectClass.FOUNDER],
+    });
+    expect(mixedPerson.toPanoptes().nodes.find((node) => node.subject)).toMatchObject({
+      type: "Person",
+      key: "@founder_project",
+      roles: [SubjectClass.FOUNDER, SubjectClass.PROJECT],
+    });
+  });
+
   it("all axis weights sum to 100", () => {
     expect(validateAxes()).toEqual({});
   });

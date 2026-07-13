@@ -262,6 +262,7 @@ export class Audit {
   private promotions: Promotion[] = [];
   private associates: Associate[] = [];
   private findings: Finding[] = [];
+  private finalizedAt?: string;
 
   constructor(
     handle: string,
@@ -559,6 +560,7 @@ export class Audit {
   }
 
   finalize(): AuditReport {
+    const finalizedAt = this.finalizedAt ?? (this.finalizedAt = new Date().toISOString());
     const identity = this.identity;
     const sharedKeys = this.sharedCapsTriggered();
     const identityBonus = identity ? DOX_BONUS[identity] ?? 0 : 0;
@@ -669,7 +671,7 @@ export class Audit {
       cap_applied: govCap,
       publishable_findings: this.publishable(),
       investigative_leads: this.investigativeLeads(),
-      finalized_at: new Date(0).toISOString(),
+      finalized_at: finalizedAt,
     };
     if (this.roles.includes(SubjectClass.FOUNDER)) report.founder_summary = this.founderSummary();
     if (this.roles.includes(SubjectClass.ADVISOR)) report.advised_summary = this.advisedOutcomeSummary();
@@ -693,7 +695,14 @@ export class Audit {
   }
 
   toPanoptes(): { nodes: PanoptesNode[]; edges: PanoptesEdge[] } {
-    const nodes: PanoptesNode[] = [{ type: "Person", key: this.handle, roles: this.roles, subject: true }];
+    const projectSubject = this.roles.length === 1 && this.roles[0] === SubjectClass.PROJECT;
+    const nodes: PanoptesNode[] = [{
+      type: projectSubject ? "Company" : "Person",
+      ...(projectSubject ? { subtype: "Project" } : {}),
+      key: this.handle,
+      roles: this.roles,
+      subject: true,
+    }];
     const edges: PanoptesEdge[] = [];
     for (const a of this.associates) {
       nodes.push({ type: "Person", key: a.associate_key, in_cabal_kb: !!a.in_cabal_kb });
