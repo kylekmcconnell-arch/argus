@@ -71,6 +71,34 @@ function evidenceTitle(value: string): string {
   return value.replace(/\b([A-Z]{1,3}\d+_[a-z0-9_]+)\b/gi, (axis) => axisLabel(axis));
 }
 
+function investorQuestion(value: string): string | null {
+  const gap = evidenceTitle(value).replace(/\s+/g, " ").trim();
+  if (!gap) return null;
+  if (/people\s*data\s*labs|peopledatalabs|identity[- ]provider|real[- ]world record/i.test(gap)) {
+    return "Confirm the legal identity and current role of each founder.";
+  }
+  if (/handle[- ]history|prior handles?|previous(?:ly)? used other (?:handles?|identit)/i.test(gap)) {
+    return "Confirm whether the project or its founders previously used other public identities.";
+  }
+  if (/(?:funding|fundraise|investor|backer).*(?:provider|crunchbase|unavailable|failed)|(?:crunchbase).*(?:funding|investor)/i.test(gap)) {
+    return "Confirm the project's funding history and named investors.";
+  }
+  if (/(?:contract|deployer|liquidity|token).*(?:on[- ]chain|provider|unavailable|failed)/i.test(gap)) {
+    return "Verify the token contract, deployer controls, ownership, and current liquidity.";
+  }
+  if (/\b(?:provider|api|artifact|lineage|collection (?:failed|partial|unavailable)|not configured|trust[- ]graph|argus report|source ledger|coverage (?:is |was )?partial)\b/i.test(gap)) {
+    return null;
+  }
+  return gap;
+}
+
+function investorQuestions(row: DecisionBasisRow): string[] {
+  return [...new Set(row.gaps.flatMap((gap) => {
+    const question = investorQuestion(gap);
+    return question ? [question] : [];
+  }))];
+}
+
 function EvidenceRecord({ record, relation }: { record: AxisEvidenceRecord; relation: "support" | "counter" | "gap" }) {
   const source = safeExternalSource(record.sourceUrl);
   const captured = capturedLabel(record.capturedAt);
@@ -174,6 +202,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
     : defaultAxis(model.rows);
   const selected = model.rows.find((row) => row.axis === activeAxis) ?? null;
   const selectedTriggerId = selected ? axisAnchorId(selected.axis) : undefined;
+  const selectedQuestions = selected ? investorQuestions(selected) : [];
   const selectAxis = (axis: string, updateHash = false) => {
     setSelectedAxis(axis);
     if (updateHash && typeof window !== "undefined") {
@@ -213,6 +242,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
               const selectedTab = row.axis === selected?.axis;
               const meta = STATUS_META[row.status];
               const triggerId = axisAnchorId(row.axis);
+              const questions = investorQuestions(row);
               return (
                 <div key={row.axis} role="presentation">
                   <button
@@ -237,10 +267,10 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                     <span className="mt-1 block text-[11px] text-ink-faint">
                       {row.support.length} cited source{row.support.length === 1 ? "" : "s"}
                       {row.counter.length ? ` · ${row.counter.length} need${row.counter.length === 1 ? "s" : ""} reconciliation` : ""}
-                      {Math.max(row.gaps.length, row.gapArtifacts.length) ? ` · ${Math.max(row.gaps.length, row.gapArtifacts.length)} question${Math.max(row.gaps.length, row.gapArtifacts.length) === 1 ? "" : "s"} to verify` : ""}
+                      {questions.length ? ` · ${questions.length} question${questions.length === 1 ? "" : "s"} to verify` : ""}
                     </span>
                     <span className="mt-0.5 block truncate text-[11px] text-ink-dim">
-                      {evidenceTitle(row.support[0]?.title ?? row.counter[0]?.title ?? row.gapArtifacts[0]?.title ?? row.gaps[0] ?? "No qualifying frozen citation recorded")}
+                      {evidenceTitle(row.support[0]?.title ?? row.counter[0]?.title ?? questions[0] ?? "No qualifying frozen citation recorded")}
                     </span>
                   </button>
                 </div>
@@ -275,21 +305,14 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                 </div>
               </div>
 
-              <div className="mt-3 border-t border-line/60 pt-2.5">
-                <h5 className="eyebrow">Questions to verify</h5>
-                {selected.gapArtifacts.length > 0 && (
-                  <ul className="mt-1.5 space-y-2" aria-label={`Gap artifacts for ${axisLabel(selected.axis)}`}>
-                    {selected.gapArtifacts.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="gap" />)}
-                  </ul>
-                )}
-                {selected.gaps.length ? (
+              {selectedQuestions.length > 0 && (
+                <div className="mt-3 border-t border-line/60 pt-2.5">
+                  <h5 className="eyebrow">Questions to verify</h5>
                   <ul className="mt-1.5 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-caution">
-                    {selected.gaps.map((gap) => <li key={gap}>{gap}</li>)}
+                    {selectedQuestions.map((question) => <li key={question}>{question}</li>)}
                   </ul>
-                ) : selected.gapArtifacts.length === 0 ? (
-                  <p className="mt-1.5 text-[11px] text-ink-faint">No open verification question was recorded for this area.</p>
-                ) : null}
-              </div>
+                </div>
+              )}
             </div>
           )}
         </>

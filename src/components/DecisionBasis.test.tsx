@@ -205,4 +205,48 @@ describe("DecisionBasis", () => {
     expect(container.textContent).toContain("Frozen support-artifact");
     expect(container.querySelector('a[href*="user:secret"]')).toBeNull();
   });
+
+  it("turns technical coverage gaps into plain investor questions and hides provider diagnostics", () => {
+    const gapArtifact = evidence("pdl-unavailable", "P1_team_and_identity", {
+      provider: "peopledatalabs",
+      operation: "identity-resolution",
+      section: "provider-runs",
+      title: "People Data Labs collection failed",
+      excerpt: "Provider run failed.",
+      verification: "unavailable",
+      sourceUrl: undefined,
+    });
+    const report: RoleReport = {
+      role: "PROJECT",
+      verdict: "CAUTION",
+      raw_total: 79,
+      score_total: 79,
+      cap_applied: null,
+      dox_bonus: 0,
+      axes: {
+        P1_team_and_identity: {
+          score: 12,
+          weight: 16,
+          role: "PROJECT",
+          rationale: "Named founders were found.",
+          evidenceRefs: [gapArtifact.artifactId],
+          counterEvidenceRefs: [],
+          gaps: [
+            "Licensed identity-provider (PeopleDataLabs) returned no structured real-world record for either named co-founder.",
+            "Handle-history provider coverage is partial; prior handles cannot be fully ruled out.",
+          ],
+        },
+      },
+    };
+
+    act(() => {
+      root.render(<DecisionBasis roleReport={report} catalog={[gapArtifact]} lineageVersion={1} />);
+    });
+
+    expect(container.textContent).toContain("Confirm the legal identity and current role of each founder.");
+    expect(container.textContent).toContain("Confirm whether the project or its founders previously used other public identities.");
+    expect(container.textContent).not.toContain("People Data Labs collection failed");
+    expect(container.textContent).not.toContain("Licensed identity-provider");
+    expect(container.textContent).not.toContain("Handle-history provider coverage");
+  });
 });

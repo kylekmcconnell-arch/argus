@@ -85,6 +85,26 @@ describe("basic-facts lead parsing", () => {
       }],
     }))).toEqual([]);
   });
+
+  it("keeps safe corroborating URLs and drops unsafe or duplicate candidates", () => {
+    expect(parseBasicFactLeads(JSON.stringify({
+      facts: [{
+        subject: "Jupiter",
+        predicate: "founder",
+        value: "Meow",
+        exact_excerpt: "Jupiter was founded by Meow.",
+        source_url: "https://coindesk.com/jupiter",
+        candidate_urls: [
+          "https://decrypt.co/jupiter",
+          "https://localhost/private",
+          "https://coindesk.com/jupiter",
+          "https://decrypt.co/jupiter",
+        ],
+      }],
+    }))?.[0]).toEqual(expect.objectContaining({
+      candidateUrls: ["https://decrypt.co/jupiter"],
+    }));
+  });
 });
 
 describe("basic-facts source verification", () => {
@@ -112,6 +132,49 @@ describe("basic-facts source verification", () => {
     ]);
   });
 
+  it("stores the fetched supporting passage when search-snippet wording and page markup differ", () => {
+    const fact = verifyBasicFactLead(
+      lead({
+        excerpt: "Jupiter, founded by Meow, launched in 2021.",
+        qualifier: "Core team founder",
+      }),
+      document({
+        text: "<html><body><h1>Jupiter</h1><p>In 2021, <a href='/team'>Meow</a> founded the protocol.</p></body></html>",
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["jup.ag"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      status: "verified",
+      value: "Meow",
+      sources: [expect.objectContaining({
+        excerpt: expect.stringContaining("In 2021, Meow founded the protocol"),
+      })],
+    }));
+    // An unsupported model qualifier is not copied into the verified artifact.
+    expect(fact).not.toHaveProperty("qualifier");
+  });
+
+  it("accepts common chain wording on a fetched official page", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        predicate: "network",
+        value: "Solana",
+        excerpt: "Jupiter is a decentralized exchange on the Solana blockchain.",
+      }),
+      document({ text: "<html><body><h1>Jupiter</h1><p>The exchange is built for Solana.</p></body></html>" }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["jup.ag"],
+    )).toEqual(expect.objectContaining({
+      predicate: "network",
+      value: "Solana",
+      status: "verified",
+    }));
+  });
+
   it("keeps one independent source as a non-scoreable lead", async () => {
     const { ctx, evidence } = context();
     const independentLead = lead({ sourceUrl: "https://coindesk.com/jupiter" });
@@ -128,6 +191,9 @@ describe("basic-facts source verification", () => {
     expect(result).toEqual(expect.objectContaining({ state: "partial" }));
     expect(evidence.basicFactLeads).toEqual([independentLead]);
     expect(evidence.basicFacts).toEqual([]);
+    expect(ctx.emit).toHaveBeenCalledWith(expect.objectContaining({
+      detail: expect.stringContaining("1/1 leads matched subject, value, and predicate language"),
+    }));
   });
 
   it("corroborates the same atomic fact across two independent hosts", async () => {
@@ -156,10 +222,91 @@ describe("basic-facts source verification", () => {
     ]);
   });
 
+  it("uses candidate URLs to corroborate one discovered atomic fact", async () => {
+    const firstUrl = "https://coindesk.com/jupiter";
+    const secondUrl = "https://decrypt.co/jupiter";
+    const { ctx, evidence } = context();
+    const result = await collectBasicFacts(ctx, {
+      discover: async () => [lead({ sourceUrl: firstUrl, candidateUrls: [secondUrl] })],
+      fetchSource: fetchDocuments({
+        [firstUrl]: document({ url: firstUrl, host: "coindesk.com", contentHash: "b".repeat(64) }),
+        [secondUrl]: document({
+          url: secondUrl,
+          host: "decrypt.co",
+          text: "<html><body><h1>Jupiter</h1><p>The protocol was co-founded by Meow in 2021.</p></body></html>",
+          contentHash: "c".repeat(64),
+        }),
+      }),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ state: "executed" }));
+    expect(evidence.basicFacts).toEqual([
+      expect.objectContaining({
+        predicate: "founder",
+        value: "Meow",
+        status: "corroborated",
+        sources: [
+          expect.objectContaining({ url: firstUrl }),
+          expect.objectContaining({ url: secondUrl }),
+        ],
+      }),
+    ]);
+  });
+
+  it("reuses an already verified first-party team URL as a source candidate", async () => {
+    const { ctx, evidence } = context();
+    evidence.webTeam = [{
+      name: "Meow",
+      role: "Co-founder",
+      evidence: "direct role statement on https://docs.jup.ag/tokenomics",
+      source: "Jupiter tokenomics",
+      sourceUrl: "https://docs.jup.ag/tokenomics",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "team-page",
+    }];
+    const result = await collectBasicFacts(ctx, {
+      discover: async () => [lead({ sourceUrl: "https://bitget.com/jupiter-founders" })],
+      fetchSource: fetchDocuments({
+        "https://docs.jup.ag/tokenomics": document({
+          url: "https://docs.jup.ag/tokenomics",
+          host: "docs.jup.ag",
+          text: "<html><body><h1>Jupiter tokenomics</h1><p>Jupiter was co-founded by Meow to improve swaps on Solana.</p></body></html>",
+          contentHash: "d".repeat(64),
+        }),
+      }),
+    });
+
+    expect(result).toEqual(expect.objectContaining({ state: "executed" }));
+    expect(evidence.basicFacts).toEqual([
+      expect.objectContaining({
+        predicate: "founder",
+        value: "Meow",
+        status: "verified",
+        sources: [expect.objectContaining({
+          url: "https://docs.jup.ag/tokenomics",
+          sourceClass: "official_subject",
+        })],
+      }),
+    ]);
+  });
+
   it("rejects a hallucinated quote that is absent from the fetched artifact", () => {
     expect(verifyBasicFactLead(
       lead(),
       document({ text: "<html><body><p>Jupiter is a Solana liquidity aggregator.</p></body></html>" }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["jup.ag"],
+    )).toBeNull();
+  });
+
+  it("does not stitch subject, value, and predicate from distant page sections", () => {
+    expect(verifyBasicFactLead(
+      lead(),
+      document({
+        text: `<html><body><h1>Jupiter</h1>${"<p>Market data was discussed without naming a team.</p>".repeat(20)}<p>Meow founded another company.</p></body></html>`,
+      }),
       ["Jupiter", "@JupiterExchange"],
       "@JupiterExchange",
       ["jup.ag"],

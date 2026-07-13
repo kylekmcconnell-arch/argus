@@ -128,6 +128,23 @@ describe("public web evidence fetcher", () => {
     if (result.status === "ok") expect(result.contentHash).toMatch(/^[a-f0-9]{64}$/);
   });
 
+  it("accepts markdown evidence pages as bounded public text", async () => {
+    const requestMock = vi.fn(async () => new Response("# Jupiter\n\nJupiter was co-founded by Meow.", {
+      status: 200,
+      headers: { "content-type": "text/markdown; charset=utf-8" },
+    }));
+    const result = await fetchPublicText("https://docs.jup.ag/tokenomics.md", {
+      request: requestMock,
+      lookup: publicLookup,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: "ok",
+      contentType: "text/markdown",
+      text: expect.stringContaining("co-founded by Meow"),
+    }));
+  });
+
   it("returns a bounded failure when the response stream breaks", async () => {
     const requestMock = vi.fn(async () => new Response(new ReadableStream({
       start(controller) { controller.error(new Error("socket reset")); },

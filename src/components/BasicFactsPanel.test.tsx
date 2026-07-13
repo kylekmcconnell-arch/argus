@@ -70,13 +70,14 @@ describe("BasicFactsPanel", () => {
     });
 
     expect(container.querySelector("#basic-facts")).not.toBeNull();
-    expect(container.querySelectorAll('ol[aria-label="Required diligence questions"] > li')).toHaveLength(15);
-    expect(container.textContent).toContain("2/15");
-    expect(container.textContent).toContain("12");
+    expect(container.querySelectorAll('ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(2);
+    expect(container.querySelectorAll('ul[aria-label="Unresolved basic facts"] > li')).toHaveLength(12);
+    expect(container.textContent).toContain("2 confirmed");
+    expect(container.textContent).toContain("12 questions");
     expect(container.textContent).toContain("What does the project actually do?");
-    expect(container.textContent).toContain("No verified answer was found in this snapshot.");
+    expect(container.textContent).toContain("Still to confirm");
     expect(container.textContent).toContain("Corroborated");
-    expect(container.textContent).toContain("The sources disagree");
+    expect(container.textContent).toContain("Sources disagree");
 
     const sourceLinks = [...container.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')];
     expect(sourceLinks.map((link) => link.href)).toEqual(expect.arrayContaining([
@@ -113,12 +114,13 @@ describe("BasicFactsPanel", () => {
       );
     });
 
-    expect(container.textContent).toContain("Unverified discovery leads");
-    expect(container.textContent).toContain("They do not affect the verdict");
+    expect(container.textContent).toContain("Research leads awaiting verification");
+    expect(container.textContent).toContain("excluded from the verdict");
     expect(container.textContent).toContain("Candidate founder from model search");
     expect(container.textContent).toContain("$25 million");
-    expect(container.textContent).toContain("0/15");
-    expect(container.textContent).toContain("No verified answer was found in this snapshot.");
+    expect(container.textContent).toContain("0 confirmed");
+    expect(container.textContent).toContain("Foundational answers are still being verified");
+    expect(container.textContent).toContain("ARGUS found 2 possible answers");
     expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
     expect([...container.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')].map((link) => link.href)).toEqual([
       "https://example.com/candidate",
@@ -142,7 +144,7 @@ describe("BasicFactsPanel", () => {
       );
     });
 
-    expect(container.querySelectorAll('ol[aria-label="Required diligence questions"] > li')).toHaveLength(1);
+    expect(container.querySelectorAll('ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(1);
     expect(container.textContent).toContain("Legal name");
     expect(container.textContent).not.toContain("Who founded it?");
   });
@@ -221,8 +223,8 @@ describe("BasicFactsPanel", () => {
       );
     });
 
-    expect(container.querySelectorAll('ol[aria-label="Required diligence questions"] > li')).toHaveLength(15);
-    expect(container.textContent).toContain("15/15");
+    expect(container.querySelectorAll('ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(15);
+    expect(container.textContent).toContain("15 confirmed");
     expect(container.textContent).toContain("Who founded it?");
     expect(container.textContent).toContain("Who operates it today?");
     expect(container.textContent).toContain("When was it founded?");

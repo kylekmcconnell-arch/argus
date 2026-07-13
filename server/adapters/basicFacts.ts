@@ -15,7 +15,7 @@ import type { Adapter, AdapterRunResult, CollectContext } from "./types";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const MAX_SEARCH_USES = 4;
 const MAX_LEADS = 16;
-const MAX_SOURCES = 12;
+const MAX_SOURCES = 24;
 const DISCOVERY_TIMEOUT_MS = 50_000;
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
@@ -85,11 +85,17 @@ const searchable = (value: string): string => normalize(value)
   .replace(/\s+/g, " ")
   .trim();
 
-function containsPhrase(text: string, phrase: string): boolean {
-  const haystack = ` ${searchable(text)} `;
-  const needle = searchable(phrase);
+const looseTokens = (value: string): string[] => value
+  .normalize("NFKD")
+  .replace(/[\u0300-\u036f]/g, "")
+  .toLowerCase()
+  .match(/[\p{L}\p{N}]+/gu) ?? [];
+
+const looseContainsPhrase = (text: string, phrase: string): boolean => {
+  const haystack = ` ${looseTokens(text).join(" ")} `;
+  const needle = looseTokens(phrase).join(" ");
   return !!needle && haystack.includes(` ${needle} `);
-}
+};
 
 function safeCandidateUrl(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 2_000) return null;
@@ -158,6 +164,14 @@ export function parseBasicFactLeads(
     if (!isAtomicValue(predicate, value)) continue;
     const qualifier = clean(row.qualifier, 120);
     const sourceTitle = clean(row.source_title ?? row.sourceTitle, 240);
+    const rawCandidateUrls = row.candidate_urls ?? row.candidateUrls;
+    const candidateUrls: string[] = Array.isArray(rawCandidateUrls)
+      ? [...new Set(rawCandidateUrls
+        .flatMap((candidate): string[] => {
+          const safe = safeCandidateUrl(candidate);
+          return safe && safe !== sourceUrl ? [safe] : [];
+        }))].slice(0, 4)
+      : [];
     const key = `${predicate}::${searchable(value)}::${sourceUrl}::${searchable(excerpt)}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -169,6 +183,7 @@ export function parseBasicFactLeads(
       excerpt,
       sourceUrl,
       ...(sourceTitle ? { sourceTitle } : {}),
+      ...(candidateUrls.length ? { candidateUrls } : {}),
       evidence_origin: "model_lead",
       artifact_verified: false,
       provider,
@@ -205,9 +220,10 @@ function discoveryPrompt(ctx: CollectContext): string {
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
     "Each exact_excerpt must be a verbatim one-to-three sentence passage that itself explicitly contains the subject identity, the claimed value, and language proving the predicate.",
+    "For candidate_urls, include up to three additional public pages that explicitly state the same atomic fact. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url.",
     "Do not infer. A search answer is only a lead; ARGUS will fetch and verify every URL independently.",
     "Return JSON only in this exact shape:",
-    '{"facts":[{"subject":"...","predicate":"founder|executive|founded|launched|official_token|funding|investor|product|network|legal_entity|official_identity|governance|audit|repository|traction","value":"one atomic value","qualifier":"optional exact role or metric label","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"..."}]}',
+    '{"facts":[{"subject":"...","predicate":"founder|executive|founded|launched|official_token|funding|investor|product|network|legal_entity|official_identity|governance|audit|repository|traction","value":"one atomic value","qualifier":"optional exact role or metric label","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}',
   ].filter(Boolean).join("\n");
 }
 
@@ -279,7 +295,7 @@ export async function discoverBasicFactLeads(
 ): Promise<BasicFactLead[] | null> {
   if (!env("ANTHROPIC_API_KEY") && !dependencies.request) return null;
   const canonicalSubject = subjectName(ctx);
-  const cacheKey = `basic-facts:v1:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
+  const cacheKey = `basic-facts:v2:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
   const cacheRead = dependencies.cacheRead ?? ((key: string) => cacheGet(key, { operation: "basic-facts-hit", meta: "24h Claude web-search cache" }));
   const cacheWrite = dependencies.cacheWrite ?? cacheSet;
   const cached = await cacheRead(cacheKey);
@@ -307,7 +323,7 @@ async function discoverWithFallback(ctx: CollectContext): Promise<BasicFactLead[
   const text = await grokSearch(
     "You are ARGUS's basic-facts research scout. Use live web search. Return only the requested JSON. All output remains an unverified lead.",
     discoveryPrompt(ctx),
-    { maxToolCalls: MAX_SEARCH_USES, cacheKey: `basic-facts-grok:v1:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}` },
+    { maxToolCalls: MAX_SEARCH_USES, cacheKey: `basic-facts-grok:v2:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}` },
   );
   return text ? parseBasicFactLeads(text, subjectName(ctx), "grok") : claude;
 }
@@ -326,11 +342,15 @@ function documentText(document: PublicTextDocument): string {
   return normalize(decodeHtmlEntities(document.text
     .replace(/<(?:script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|svg)>/gi, " ")
     .replace(/<!--([\s\S]*?)-->/g, " ")
+    // Keep block boundaries as sentence boundaries. Without this, a heading,
+    // navigation item and unrelated paragraph can collapse into one apparent
+    // supporting passage after tags are removed.
+    .replace(/<br\s*\/?\s*>|<\/(?:p|div|section|article|li|h[1-6]|tr|td|th|main|header|footer|blockquote)>/gi, ". ")
     .replace(/<[^>]+>/g, " ")));
 }
 
 const PREDICATE_PATTERNS: Record<BasicFactPredicate, RegExp> = {
-  founder: /\b(?:co[- ]?founders?|founders?|founded by)\b/i,
+  founder: /\b(?:co[- ]?founders?|founders?|co[- ]?founded|founded(?:\s+by)?)\b/i,
   executive: /\b(?:chief executive officer|chief technology officer|chief operating officer|chief financial officer|ceo|cto|coo|cfo|president|executive|director|head of|lead)\b/i,
   founded: /\b(?:founded|established|formed|incorporated)\b/i,
   launched: /\b(?:launched|went live|debuted|released|introduced)\b/i,
@@ -338,7 +358,7 @@ const PREDICATE_PATTERNS: Record<BasicFactPredicate, RegExp> = {
   funding: /\b(?:raised|raises|funding|financing|fundraise|round|capital)\b/i,
   investor: /\b(?:invested|investment|investor|backed|backing|led the round|participated in)\b/i,
   product: /\b(?:product|platform|protocol|service|aggregator|exchange|marketplace|wallet|application|app)\b/i,
-  network: /\b(?:blockchain|network|chain|mainnet|built on|deployed on|runs on)\b/i,
+  network: /\b(?:blockchain|network|chain|mainnet|built on|deployed on|runs on|(?:on|for)\s+(?:the\s+)?(?:ethereum|solana|polygon|arbitrum|optimism|avalanche|base|bnb(?:\s+chain)?|bitcoin|cosmos|sui|aptos|near|tron|ton|polkadot|cardano))\b/i,
   legal_entity: /\b(?:legal entity|company|corporation|incorporated|foundation|limited|ltd\.?|inc\.?|llc|labs)\b/i,
   official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company)\b/i,
   governance: /\b(?:governance|governed|dao|proposal|vote|voting|council|multisig|multi-sig)\b/i,
@@ -352,6 +372,118 @@ function predicateIsSupported(excerpt: string, predicate: BasicFactPredicate): b
   if (!match) return false;
   const local = excerpt.slice(Math.max(0, match.index - 45), match.index + match[0].length + 45);
   return !/\b(?:not|never|no evidence|didn't|did not|denied|false claim)\b/i.test(local);
+}
+
+const MAX_SUPPORT_PASSAGE_CHARS = 720;
+
+interface SourceToken {
+  key: string;
+  start: number;
+  end: number;
+}
+
+function sourceTokens(value: string): SourceToken[] {
+  const tokens: SourceToken[] = [];
+  for (const match of value.matchAll(/[\p{L}\p{N}]+/gu)) {
+    if (match.index === undefined) continue;
+    const key = looseTokens(match[0])[0];
+    if (key) tokens.push({ key, start: match.index, end: match.index + match[0].length });
+  }
+  return tokens;
+}
+
+function phraseTokenStarts(tokens: readonly SourceToken[], phrase: string): number[] {
+  const needle = looseTokens(phrase);
+  if (!needle.length || needle.length > tokens.length) return [];
+  const starts: number[] = [];
+  for (let index = 0; index <= tokens.length - needle.length; index += 1) {
+    if (needle.every((token, offset) => tokens[index + offset].key === token)) starts.push(index);
+  }
+  return starts;
+}
+
+function exactTokenPassage(page: string, excerpt: string): string | null {
+  const pageTokens = sourceTokens(page);
+  const excerptTokens = looseTokens(excerpt);
+  if (!excerptTokens.length || excerptTokens.length > pageTokens.length) return null;
+  for (let index = 0; index <= pageTokens.length - excerptTokens.length; index += 1) {
+    if (!excerptTokens.every((token, offset) => pageTokens[index + offset].key === token)) continue;
+    return normalize(page.slice(pageTokens[index].start, pageTokens[index + excerptTokens.length - 1].end));
+  }
+  return null;
+}
+
+function sourceSentencePassages(page: string): string[] {
+  const sentences = [...page.matchAll(/[^.!?]+(?:[.!?]+|$)/g)].flatMap((match) => {
+    if (match.index === undefined || !normalize(match[0])) return [];
+    return [{ start: match.index, end: match.index + match[0].length }];
+  });
+  const passages: string[] = [];
+  for (let start = 0; start < sentences.length; start += 1) {
+    for (let count = 0; count < 3 && start + count < sentences.length; count += 1) {
+      const passage = normalize(page.slice(sentences[start].start, sentences[start + count].end));
+      if (passage.length > MAX_SUPPORT_PASSAGE_CHARS) break;
+      passages.push(passage);
+    }
+  }
+  return passages;
+}
+
+function sourceAnchorPassages(page: string, value: string): string[] {
+  const tokens = sourceTokens(page);
+  const valueTokens = looseTokens(value);
+  if (!valueTokens.length) return [];
+  return phraseTokenStarts(tokens, value).map((start) => {
+    const from = Math.max(0, start - 28);
+    const to = Math.min(tokens.length - 1, start + valueTokens.length - 1 + 28);
+    return normalize(page.slice(tokens[from].start, tokens[to].end));
+  }).filter((passage) => passage.length <= MAX_SUPPORT_PASSAGE_CHARS);
+}
+
+function passageSupportsLead(
+  passage: string,
+  lead: BasicFactLead,
+  aliases: readonly string[],
+): boolean {
+  return aliases.some((alias) => looseContainsPhrase(passage, alias))
+    && looseContainsPhrase(passage, lead.value)
+    && predicateIsSupported(passage, lead.predicate);
+}
+
+function overlapScore(left: string, right: string): number {
+  const leftTokens = new Set(looseTokens(left));
+  const rightTokens = looseTokens(right);
+  return rightTokens.length
+    ? rightTokens.filter((token) => leftTokens.has(token)).length / rightTokens.length
+    : 0;
+}
+
+/**
+ * Return the actual fetched passage that proves a model-suggested fact.
+ *
+ * Search indexes routinely differ from a fresh page fetch at punctuation, link
+ * boundaries, or nearby copy. The model's quote is therefore a locator, never
+ * the evidence artifact. Exact and punctuation-insensitive quote matches are
+ * preferred; otherwise a short fetched passage must itself contain the subject,
+ * atomic value, and predicate language. Distant page-wide co-occurrence fails.
+ */
+function supportingSourcePassage(
+  page: string,
+  lead: BasicFactLead,
+  aliases: readonly string[],
+): string | null {
+  const excerpt = normalize(decodeHtmlEntities(lead.excerpt));
+  const exact = page.includes(excerpt) ? excerpt : exactTokenPassage(page, excerpt);
+  if (exact && passageSupportsLead(exact, lead, aliases)) return exact;
+
+  const candidates = [...new Set([
+    ...sourceSentencePassages(page),
+    ...sourceAnchorPassages(page, lead.value),
+  ])].filter((passage) => passageSupportsLead(passage, lead, aliases));
+  if (!candidates.length) return null;
+  return candidates.sort((left, right) =>
+    overlapScore(right, excerpt) - overlapScore(left, excerpt)
+    || left.length - right.length)[0];
 }
 
 const normalizedHost = (host: string): string => host
@@ -376,10 +508,8 @@ function factId(subjectKey: string, predicate: BasicFactPredicate, value: string
   return `basic_v1_${createHash("sha256").update(`${subjectKey.toLowerCase()}::${predicate}::${searchable(value)}`).digest("hex")}`;
 }
 
-/**
- * Promote one lead only if the exact quote is in the safely fetched artifact
- * and that quote independently contains subject, atomic value, and predicate.
- */
+/** Promote one lead only when a short passage in the safely fetched artifact
+ * independently contains the subject, atomic value, and predicate language. */
 export function verifyBasicFactLead(
   lead: BasicFactLead,
   document: PublicTextDocument,
@@ -388,13 +518,13 @@ export function verifyBasicFactLead(
   officialHosts: readonly string[] = [],
 ): BasicFact | null {
   const page = documentText(document);
-  const excerpt = normalize(decodeHtmlEntities(lead.excerpt));
-  if (!excerpt || !page.includes(excerpt)) return null;
-  if (!aliases.some((alias) => containsPhrase(excerpt, alias))) return null;
-  if (!containsPhrase(excerpt, lead.value)) return null;
-  if (lead.qualifier && !containsPhrase(excerpt, lead.qualifier)) return null;
-  if (!isAtomicValue(lead.predicate, lead.value) || !predicateIsSupported(excerpt, lead.predicate)) return null;
+  if (!isAtomicValue(lead.predicate, lead.value)) return null;
+  const excerpt = supportingSourcePassage(page, lead, aliases);
+  if (!excerpt) return null;
   const official = sameOfficialDomain(document.host, officialHosts);
+  const supportedQualifier = lead.qualifier && looseContainsPhrase(excerpt, lead.qualifier)
+    ? lead.qualifier
+    : undefined;
   return {
     factId: factId(subjectKey, lead.predicate, lead.value),
     subjectKey,
@@ -414,7 +544,7 @@ export function verifyBasicFactLead(
       provider: "public-web",
       artifactVerified: true,
     }],
-    ...(lead.qualifier ? { qualifier: lead.qualifier } : {}),
+    ...(supportedQualifier ? { qualifier: supportedQualifier } : {}),
     evidence_origin: "deterministic",
     artifact_verified: true,
     provider: "public-web",
@@ -457,6 +587,62 @@ function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[] {
     if (values.length > 1) values.forEach((fact) => { fact.status = "conflicted"; });
   }
   return resolved;
+}
+
+interface VerificationLeadVariant {
+  lead: BasicFactLead;
+  priority: number;
+}
+
+const personKey = (value: string): string => looseTokens(value).join(" ");
+
+function teamSourceCandidates(ctx: CollectContext, lead: BasicFactLead): Array<{ url: string; title?: string }> {
+  if (lead.predicate !== "founder" && lead.predicate !== "executive") return [];
+  return (ctx.evidence.webTeam ?? []).flatMap((member) => {
+    if (
+      member.artifact_verified !== true
+      || member.evidence_origin !== "deterministic"
+      || personKey(member.name) !== personKey(lead.value)
+      || (lead.predicate === "founder" && !/\bfounder\b|\bco[- ]?founder\b/i.test(member.role))
+      || (lead.predicate === "executive" && !PREDICATE_PATTERNS.executive.test(member.role))
+    ) return [];
+    const url = safeCandidateUrl(member.sourceUrl);
+    if (!url) return [];
+    const title = clean(member.source, 240);
+    return [{ url, ...(title ? { title } : {}) }];
+  });
+}
+
+function verificationLeadVariants(
+  ctx: CollectContext,
+  leads: readonly BasicFactLead[],
+  officialHosts: readonly string[],
+): VerificationLeadVariant[] {
+  const variants: VerificationLeadVariant[] = [];
+  const seen = new Set<string>();
+  const add = (lead: BasicFactLead, value: unknown, title: string | undefined, primary: boolean) => {
+    const sourceUrl = safeCandidateUrl(value);
+    if (!sourceUrl) return;
+    const key = `${lead.predicate}::${personKey(lead.value)}::${sourceUrl}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    let official = false;
+    try { official = sameOfficialDomain(new URL(sourceUrl).hostname, officialHosts); } catch { /* already sanitized */ }
+    const variantLead = { ...lead, sourceUrl };
+    if (title) variantLead.sourceTitle = title;
+    else delete variantLead.sourceTitle;
+    variants.push({
+      lead: variantLead,
+      priority: official ? 0 : primary ? 1 : 2,
+    });
+  };
+
+  for (const lead of leads) {
+    add(lead, lead.sourceUrl, lead.sourceTitle, true);
+    for (const sourceUrl of lead.candidateUrls ?? []) add(lead, sourceUrl, undefined, false);
+    for (const source of teamSourceCandidates(ctx, lead)) add(lead, source.url, source.title, false);
+  }
+  return variants.sort((left, right) => left.priority - right.priority);
 }
 
 /** Discover broad basic facts, then fail closed while fetching and verifying. */
@@ -515,20 +701,23 @@ export async function collectBasicFacts(
   };
 
   const boundedLeads = leads.slice(0, MAX_LEADS);
-  const allowedSources = new Set(boundedLeads.map((lead) => lead.sourceUrl).slice(0, MAX_SOURCES));
-  const verified = (await Promise.all(boundedLeads
-    .filter((lead) => allowedSources.has(lead.sourceUrl))
-    .map(async (lead) => {
+  const variants = verificationLeadVariants(ctx, boundedLeads, officialHosts);
+  const allowedSources = new Set([...new Set(variants.map(({ lead }) => lead.sourceUrl))].slice(0, MAX_SOURCES));
+  const verified = (await Promise.all(variants
+    .filter(({ lead }) => allowedSources.has(lead.sourceUrl))
+    .map(async ({ lead }) => {
       const result = await fetchOnce(lead.sourceUrl);
       return result.status === "ok" ? verifyBasicFactLead(lead, result, aliases, ctx.handle, officialHosts) : null;
     })))
     .filter((fact): fact is BasicFact => fact !== null);
 
   ctx.evidence.basicFacts = resolveBasicFactCandidates(verified);
+  const sourceVerifiedLeadCount = new Set(verified.map((fact) =>
+    `${fact.predicate}::${fact.normalizedValue}`)).size;
   ctx.emit({
     phase: "P0 · Intake",
     label: ctx.evidence.basicFacts.length ? "Basic facts verified" : "Basic facts need review",
-    detail: `${ctx.evidence.basicFacts.length}/${boundedLeads.length} cited facts passed exact source and predicate checks.`,
+    detail: `${sourceVerifiedLeadCount}/${boundedLeads.length} leads matched subject, value, and predicate language in fetched source text; ${ctx.evidence.basicFacts.length} met the first-party or two-source publication threshold.`,
     source: "public-web",
     tone: ctx.evidence.basicFacts.length ? "good" : "warn",
   });

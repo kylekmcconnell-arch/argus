@@ -1143,7 +1143,7 @@ function assembleDossier(ev, live) {
     ...ev.basicFacts?.length ? {
       basicFacts: ev.basicFacts.map((fact) => ({
         ...fact,
-        ...fact.sources ? { sources: fact.sources.map((source) => ({ ...source })) } : {}
+        ...fact.sources ? { sources: fact.sources.map((source2) => ({ ...source2 })) } : {}
       }))
     } : {},
     ...ev.basicFactLeads?.length ? {
@@ -1841,14 +1841,14 @@ var canonicalOfficialWebsite = (value) => {
   }
 };
 var sourceMatchesOfficialWebsiteScope = (sourceValue, profileWebsite) => {
-  const source = sourceValue instanceof URL ? sourceValue : boundedWebUrl(sourceValue);
+  const source2 = sourceValue instanceof URL ? sourceValue : boundedWebUrl(sourceValue);
   const scope = canonicalOfficialWebsite(profileWebsite);
-  if (!source || !scope || !hostMatches(source.hostname, scope.domain)) return false;
+  if (!source2 || !scope || !hostMatches(source2.hostname, scope.domain)) return false;
   const scopeUrl = new URL(scope.canonicalUrl);
   if (scopeUrl.pathname === "/") return true;
-  const sourcePath = source.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/";
+  const sourcePath = source2.pathname.replace(/\/{2,}/g, "/").replace(/\/$/, "") || "/";
   const scopePath = scopeUrl.pathname.replace(/\/$/, "");
-  return cleanHost(source.hostname) === scope.domain && (sourcePath === scopePath || sourcePath.startsWith(`${scopePath}/`));
+  return cleanHost(source2.hostname) === scope.domain && (sourcePath === scopePath || sourcePath.startsWith(`${scopePath}/`));
 };
 var validatedPacketProfile = (context, now, artifactCapturedAt) => {
   const profile = asRecord(context.profile);
@@ -1892,15 +1892,15 @@ var isRecordSpecificRegulatoryUrl = (url) => {
 var hasCurrentAffiliationProof = (value, capturedAt, now, profile) => {
   const subjectName3 = comparable(value.subjectName);
   const handle = typeof value.subjectHandle === "string" ? value.subjectHandle.trim().replace(/^@/, "") : "";
-  const source = boundedWebUrl(value.attributionSourceUrl);
+  const source2 = boundedWebUrl(value.attributionSourceUrl);
   const sourceHash = typeof value.attributionSourceContentHash === "string" ? value.attributionSourceContentHash : "";
   const affiliationCapturedAt = validDate(value.attributionCapturedAt);
-  if (!subjectName3 || !HANDLE.test(handle) || !source || !SHA256_HEX.test(sourceHash) || !affiliationCapturedAt) return false;
+  if (!subjectName3 || !HANDLE.test(handle) || !source2 || !SHA256_HEX.test(sourceHash) || !affiliationCapturedAt) return false;
   if (affiliationCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || affiliationCapturedAt.getTime() > capturedAt.getTime() + CLOCK_SKEW_MS || capturedAt.getTime() - affiliationCapturedAt.getTime() > 7 * DAY_MS) return false;
-  const host = cleanHost(source.hostname);
-  const path = source.pathname.split("/").filter(Boolean);
+  const host = cleanHost(source2.hostname);
+  const path = source2.pathname.split("/").filter(Boolean);
   if (value.attributionSourceKind !== "provider_profile") return false;
-  const sourceBound = (host === "x.com" || host === "twitter.com") && path.length === 1 && path[0].toLowerCase() === handle.toLowerCase() && !source.search && !source.hash;
+  const sourceBound = (host === "x.com" || host === "twitter.com") && path.length === 1 && path[0].toLowerCase() === handle.toLowerCase() && !source2.search && !source2.hash;
   if (!sourceBound) return false;
   if (!profile) return true;
   const profileCapturedAt = validDate(profile.profile_captured_at);
@@ -1910,18 +1910,18 @@ var hasCurrentAffiliationProof = (value, capturedAt, now, profile) => {
 };
 var hasOfficialInvestorDomainProof = (value, capturedAt, now, profile) => {
   const officialDomain = typeof value.investorEntityDomain === "string" ? cleanHost(value.investorEntityDomain) : "";
-  const source = boundedWebUrl(value.investorDomainSourceUrl);
+  const source2 = boundedWebUrl(value.investorDomainSourceUrl);
   const sourceHash = typeof value.investorDomainSourceContentHash === "string" ? value.investorDomainSourceContentHash : "";
   const domainCapturedAt = validDate(value.investorDomainCapturedAt);
   const fundHandle = canonicalHandle(value.investorEntityHandle);
   const profileName = typeof value.investorDomainProfileName === "string" ? value.investorDomainProfileName.trim() : "";
   const profileWebsite = typeof value.investorDomainProfileWebsite === "string" ? value.investorDomainProfileWebsite.trim() : "";
   const profileWebsiteUrl = boundedWebUrl(profileWebsite);
-  if (value.investorDomainSourceKind !== "provider_profile" || !isCredibleOfficialDomain(officialDomain) || !source || !SHA256_HEX.test(sourceHash) || !domainCapturedAt || !fundHandle || !profileName || !profileWebsite || !profileWebsiteUrl || profileWebsiteUrl.search || profileWebsiteUrl.hash || !providerEntityNamesMatch(profileName, value.investorEntityName) || profileWebsiteHost(profileWebsite) !== officialDomain || !sourceMatchesOfficialWebsiteScope(value.sourceUrl, profileWebsite) || !profile || !profileBioHasCurrentHandleAffiliation(profile, fundHandle)) return false;
+  if (value.investorDomainSourceKind !== "provider_profile" || !isCredibleOfficialDomain(officialDomain) || !source2 || !SHA256_HEX.test(sourceHash) || !domainCapturedAt || !fundHandle || !profileName || !profileWebsite || !profileWebsiteUrl || profileWebsiteUrl.search || profileWebsiteUrl.hash || !providerEntityNamesMatch(profileName, value.investorEntityName) || profileWebsiteHost(profileWebsite) !== officialDomain || !sourceMatchesOfficialWebsiteScope(value.sourceUrl, profileWebsite) || !profile || !profileBioHasCurrentHandleAffiliation(profile, fundHandle)) return false;
   if (domainCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || domainCapturedAt.getTime() > capturedAt.getTime() + CLOCK_SKEW_MS || capturedAt.getTime() - domainCapturedAt.getTime() > 7 * DAY_MS) return false;
-  const host = cleanHost(source.hostname);
-  const path = source.pathname.split("/").filter(Boolean);
-  return (host === "x.com" || host === "twitter.com") && path.length === 1 && path[0].toLowerCase() === fundHandle && !source.search && !source.hash;
+  const host = cleanHost(source2.hostname);
+  const path = source2.pathname.split("/").filter(Boolean);
+  return (host === "x.com" || host === "twitter.com") && path.length === 1 && path[0].toLowerCase() === fundHandle && !source2.search && !source2.hash;
 };
 var structurallyStrictFundScaleArtifact = (value, now, context) => {
   if (value.kind !== "fund_scale" || value.provider !== "fund-scale-web" || value.match !== "fund_scale_confirmed") return false;
@@ -1990,9 +1990,9 @@ function isStrictFundScaleArtifact(value, peers = [], context = {}) {
   const hashes = /* @__PURE__ */ new Set();
   const prose = /* @__PURE__ */ new Set();
   for (const peer of compatible) {
-    const source = boundedWebUrl(peer.sourceUrl);
-    if (!source) continue;
-    domains.add(registrableApprox(source.hostname));
+    const source2 = boundedWebUrl(peer.sourceUrl);
+    if (!source2) continue;
+    domains.add(registrableApprox(source2.hostname));
     hashes.add(String(peer.sourceContentHash).toLowerCase());
     const excerpt = comparable(peer.excerpt);
     if (excerpt) prose.add(excerpt);
@@ -2691,7 +2691,7 @@ var sourceArtifactPriority = (value) => {
   if (row.kind === "legal_case" || row.kind === "sanctions_screen" || row.kind === "trust_graph") return 5;
   return 6;
 };
-var retainSourceArtifacts = (source, limit) => source.map((value, index) => ({ value, index, priority: sourceArtifactPriority(value) })).sort((left, right) => left.priority - right.priority || left.index - right.index).slice(0, limit).map(({ value }) => value);
+var retainSourceArtifacts = (source2, limit) => source2.map((value, index) => ({ value, index, priority: sourceArtifactPriority(value) })).sort((left, right) => left.priority - right.priority || left.index - right.index).slice(0, limit).map(({ value }) => value);
 var compactProfileAuthenticity = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
   const row = value;
@@ -3238,8 +3238,8 @@ var verificationFor = (section, record2, sourceArtifactPeers = [], subjectHandle
 var DIRECT_SECTIONS = /* @__PURE__ */ new Set(["profile", "profileAuthenticity", "projectToken", "findings", "wallets", "promotions", "recentActivity"]);
 var providerFor = (section, payload) => {
   if (section === "basicFacts" && Array.isArray(payload.sources)) {
-    const source = payload.sources.find((value) => value && typeof value === "object" && !Array.isArray(value));
-    const sourceProvider = source ? recordText(source, ["provider"], 100) : void 0;
+    const source2 = payload.sources.find((value) => value && typeof value === "object" && !Array.isArray(value));
+    const sourceProvider = source2 ? recordText(source2, ["provider"], 100) : void 0;
     if (sourceProvider) return sourceProvider;
   }
   const declared = recordText(payload, ["provider"], 100);
@@ -3509,15 +3509,15 @@ function serializeAnalystEvidencePacket(input, options) {
       coverage.providerRuns = { available: rawSource.length, included: 0 };
       continue;
     }
-    const source = options.includeInvestigativeLeads ? rawSource : rawSource.filter((item) => {
+    const source2 = options.includeInvestigativeLeads ? rawSource : rawSource.filter((item) => {
       if (!item || typeof item !== "object" || Array.isArray(item)) return true;
       const record2 = item;
       return record2.evidence_origin !== "model_lead" && record2.artifact_verified !== false;
     });
-    const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source, options.axisCatalog ? source.length : limit) : source.slice(0, limit);
+    const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source2, options.axisCatalog ? source2.length : limit) : source2.slice(0, limit);
     const included = selected.map((item) => section === "sourceArtifacts" ? compactSourceArtifact(item) : compactObject(item)).filter((item) => item !== void 0);
     packet[section] = included;
-    coverage[section] = { available: source.length, included: included.length };
+    coverage[section] = { available: source2.length, included: included.length };
   }
   const pruneOrder = [
     "recentActivity",
@@ -4814,10 +4814,10 @@ async function followsSubject(endorser, subject) {
   const rel = await checkFollow(endorser, subject);
   return rel ? rel.following : null;
 }
-async function checkFollow(source, target) {
+async function checkFollow(source2, target) {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
-  const s = source.replace(/^@/, "");
+  const s = source2.replace(/^@/, "");
   const t = target.replace(/^@/, "");
   try {
     const res = await twFetch(`${TWITTERAPI}/twitter/user/check_follow_relationship?source_user_name=${encodeURIComponent(s)}&target_user_name=${encodeURIComponent(t)}`, key);
@@ -5089,7 +5089,7 @@ function scanPostsForRoles(posts, projectName2) {
   }
   return out.slice(0, 12);
 }
-function parseTeamJSON(text2, selfHandle, source) {
+function parseTeamJSON(text2, selfHandle, source2) {
   if (!text2) return [];
   const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -5109,7 +5109,7 @@ function parseTeamJSON(text2, selfHandle, source) {
         kind,
         linkedin,
         evidence: typeof t.evidence === "string" ? t.evidence : void 0,
-        source,
+        source: source2,
         projects: projects && projects.length ? projects : void 0
       };
     }).filter((t) => !t.handle || t.handle.replace(/^@/, "").toLowerCase() !== self).slice(0, 16);
@@ -6617,6 +6617,7 @@ var SAFE_CONTENT_TYPES = /* @__PURE__ */ new Set([
   "application/ld+json",
   "application/xhtml+xml",
   "text/html",
+  "text/markdown",
   "text/plain",
   "text/xml"
 ]);
@@ -6800,7 +6801,7 @@ async function fetchPublicText(raw, dependencies = {}) {
 var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
 var MAX_SEARCH_USES = 4;
 var MAX_LEADS = 16;
-var MAX_SOURCES = 12;
+var MAX_SOURCES = 24;
 var DISCOVERY_TIMEOUT_MS = 5e4;
 var SENSITIVE_URL_PARAM3 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 var PREDICATES = /* @__PURE__ */ new Set([
@@ -6830,11 +6831,12 @@ var CRITICAL_PREDICATES = /* @__PURE__ */ new Set([
 var clean = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
 var normalize = (value) => value.normalize("NFKC").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim();
 var searchable = (value) => normalize(value).toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
-function containsPhrase(text2, phrase) {
-  const haystack = ` ${searchable(text2)} `;
-  const needle = searchable(phrase);
+var looseTokens = (value) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().match(/[\p{L}\p{N}]+/gu) ?? [];
+var looseContainsPhrase = (text2, phrase) => {
+  const haystack = ` ${looseTokens(text2).join(" ")} `;
+  const needle = looseTokens(phrase).join(" ");
   return !!needle && haystack.includes(` ${needle} `);
-}
+};
 function safeCandidateUrl(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
   try {
@@ -6880,6 +6882,11 @@ function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-sear
     if (!isAtomicValue(predicate, value)) continue;
     const qualifier = clean(row.qualifier, 120);
     const sourceTitle = clean(row.source_title ?? row.sourceTitle, 240);
+    const rawCandidateUrls = row.candidate_urls ?? row.candidateUrls;
+    const candidateUrls2 = Array.isArray(rawCandidateUrls) ? [...new Set(rawCandidateUrls.flatMap((candidate) => {
+      const safe = safeCandidateUrl(candidate);
+      return safe && safe !== sourceUrl ? [safe] : [];
+    }))].slice(0, 4) : [];
     const key = `${predicate}::${searchable(value)}::${sourceUrl}::${searchable(excerpt)}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -6891,6 +6898,7 @@ function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-sear
       excerpt,
       sourceUrl,
       ...sourceTitle ? { sourceTitle } : {},
+      ...candidateUrls2.length ? { candidateUrls: candidateUrls2 } : {},
       evidence_origin: "model_lead",
       artifact_verified: false,
       provider
@@ -6922,9 +6930,10 @@ function discoveryPrompt(ctx) {
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
     "Each exact_excerpt must be a verbatim one-to-three sentence passage that itself explicitly contains the subject identity, the claimed value, and language proving the predicate.",
+    "For candidate_urls, include up to three additional public pages that explicitly state the same atomic fact. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url.",
     "Do not infer. A search answer is only a lead; ARGUS will fetch and verify every URL independently.",
     "Return JSON only in this exact shape:",
-    '{"facts":[{"subject":"...","predicate":"founder|executive|founded|launched|official_token|funding|investor|product|network|legal_entity|official_identity|governance|audit|repository|traction","value":"one atomic value","qualifier":"optional exact role or metric label","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"..."}]}'
+    '{"facts":[{"subject":"...","predicate":"founder|executive|founded|launched|official_token|funding|investor|product|network|legal_entity|official_identity|governance|audit|repository|traction","value":"one atomic value","qualifier":"optional exact role or metric label","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}'
   ].filter(Boolean).join("\n");
 }
 function responseText(response) {
@@ -6979,7 +6988,7 @@ async function callClaudeSearch(prompt, request, assistantContent) {
 async function discoverBasicFactLeads(ctx, dependencies = {}) {
   if (!env("ANTHROPIC_API_KEY") && !dependencies.request) return null;
   const canonicalSubject = subjectName(ctx);
-  const cacheKey = `basic-facts:v1:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
+  const cacheKey = `basic-facts:v2:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
   const cacheRead = dependencies.cacheRead ?? ((key) => cacheGet(key, { operation: "basic-facts-hit", meta: "24h Claude web-search cache" }));
   const cacheWrite = dependencies.cacheWrite ?? cacheSet;
   const cached = await cacheRead(cacheKey);
@@ -7005,7 +7014,7 @@ async function discoverWithFallback(ctx) {
   const text2 = await grokSearch(
     "You are ARGUS's basic-facts research scout. Use live web search. Return only the requested JSON. All output remains an unverified lead.",
     discoveryPrompt(ctx),
-    { maxToolCalls: MAX_SEARCH_USES, cacheKey: `basic-facts-grok:v1:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}` }
+    { maxToolCalls: MAX_SEARCH_USES, cacheKey: `basic-facts-grok:v2:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}` }
   );
   return text2 ? parseBasicFactLeads(text2, subjectName(ctx), "grok") : claude;
 }
@@ -7019,10 +7028,10 @@ function decodeHtmlEntities(value) {
 }
 function documentText(document) {
   if (!/html|xhtml/i.test(document.contentType)) return normalize(document.text);
-  return normalize(decodeHtmlEntities(document.text.replace(/<(?:script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|svg)>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<[^>]+>/g, " ")));
+  return normalize(decodeHtmlEntities(document.text.replace(/<(?:script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|svg)>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<br\s*\/?\s*>|<\/(?:p|div|section|article|li|h[1-6]|tr|td|th|main|header|footer|blockquote)>/gi, ". ").replace(/<[^>]+>/g, " ")));
 }
 var PREDICATE_PATTERNS = {
-  founder: /\b(?:co[- ]?founders?|founders?|founded by)\b/i,
+  founder: /\b(?:co[- ]?founders?|founders?|co[- ]?founded|founded(?:\s+by)?)\b/i,
   executive: /\b(?:chief executive officer|chief technology officer|chief operating officer|chief financial officer|ceo|cto|coo|cfo|president|executive|director|head of|lead)\b/i,
   founded: /\b(?:founded|established|formed|incorporated)\b/i,
   launched: /\b(?:launched|went live|debuted|released|introduced)\b/i,
@@ -7030,7 +7039,7 @@ var PREDICATE_PATTERNS = {
   funding: /\b(?:raised|raises|funding|financing|fundraise|round|capital)\b/i,
   investor: /\b(?:invested|investment|investor|backed|backing|led the round|participated in)\b/i,
   product: /\b(?:product|platform|protocol|service|aggregator|exchange|marketplace|wallet|application|app)\b/i,
-  network: /\b(?:blockchain|network|chain|mainnet|built on|deployed on|runs on)\b/i,
+  network: /\b(?:blockchain|network|chain|mainnet|built on|deployed on|runs on|(?:on|for)\s+(?:the\s+)?(?:ethereum|solana|polygon|arbitrum|optimism|avalanche|base|bnb(?:\s+chain)?|bitcoin|cosmos|sui|aptos|near|tron|ton|polkadot|cardano))\b/i,
   legal_entity: /\b(?:legal entity|company|corporation|incorporated|foundation|limited|ltd\.?|inc\.?|llc|labs)\b/i,
   official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company)\b/i,
   governance: /\b(?:governance|governed|dao|proposal|vote|voting|council|multisig|multi-sig)\b/i,
@@ -7043,6 +7052,79 @@ function predicateIsSupported(excerpt, predicate) {
   if (!match) return false;
   const local = excerpt.slice(Math.max(0, match.index - 45), match.index + match[0].length + 45);
   return !/\b(?:not|never|no evidence|didn't|did not|denied|false claim)\b/i.test(local);
+}
+var MAX_SUPPORT_PASSAGE_CHARS = 720;
+function sourceTokens(value) {
+  const tokens = [];
+  for (const match of value.matchAll(/[\p{L}\p{N}]+/gu)) {
+    if (match.index === void 0) continue;
+    const key = looseTokens(match[0])[0];
+    if (key) tokens.push({ key, start: match.index, end: match.index + match[0].length });
+  }
+  return tokens;
+}
+function phraseTokenStarts(tokens, phrase) {
+  const needle = looseTokens(phrase);
+  if (!needle.length || needle.length > tokens.length) return [];
+  const starts = [];
+  for (let index = 0; index <= tokens.length - needle.length; index += 1) {
+    if (needle.every((token, offset) => tokens[index + offset].key === token)) starts.push(index);
+  }
+  return starts;
+}
+function exactTokenPassage(page, excerpt) {
+  const pageTokens = sourceTokens(page);
+  const excerptTokens = looseTokens(excerpt);
+  if (!excerptTokens.length || excerptTokens.length > pageTokens.length) return null;
+  for (let index = 0; index <= pageTokens.length - excerptTokens.length; index += 1) {
+    if (!excerptTokens.every((token, offset) => pageTokens[index + offset].key === token)) continue;
+    return normalize(page.slice(pageTokens[index].start, pageTokens[index + excerptTokens.length - 1].end));
+  }
+  return null;
+}
+function sourceSentencePassages(page) {
+  const sentences = [...page.matchAll(/[^.!?]+(?:[.!?]+|$)/g)].flatMap((match) => {
+    if (match.index === void 0 || !normalize(match[0])) return [];
+    return [{ start: match.index, end: match.index + match[0].length }];
+  });
+  const passages = [];
+  for (let start = 0; start < sentences.length; start += 1) {
+    for (let count = 0; count < 3 && start + count < sentences.length; count += 1) {
+      const passage = normalize(page.slice(sentences[start].start, sentences[start + count].end));
+      if (passage.length > MAX_SUPPORT_PASSAGE_CHARS) break;
+      passages.push(passage);
+    }
+  }
+  return passages;
+}
+function sourceAnchorPassages(page, value) {
+  const tokens = sourceTokens(page);
+  const valueTokens = looseTokens(value);
+  if (!valueTokens.length) return [];
+  return phraseTokenStarts(tokens, value).map((start) => {
+    const from = Math.max(0, start - 28);
+    const to = Math.min(tokens.length - 1, start + valueTokens.length - 1 + 28);
+    return normalize(page.slice(tokens[from].start, tokens[to].end));
+  }).filter((passage) => passage.length <= MAX_SUPPORT_PASSAGE_CHARS);
+}
+function passageSupportsLead(passage, lead, aliases) {
+  return aliases.some((alias) => looseContainsPhrase(passage, alias)) && looseContainsPhrase(passage, lead.value) && predicateIsSupported(passage, lead.predicate);
+}
+function overlapScore(left, right) {
+  const leftTokens = new Set(looseTokens(left));
+  const rightTokens = looseTokens(right);
+  return rightTokens.length ? rightTokens.filter((token) => leftTokens.has(token)).length / rightTokens.length : 0;
+}
+function supportingSourcePassage(page, lead, aliases) {
+  const excerpt = normalize(decodeHtmlEntities(lead.excerpt));
+  const exact = page.includes(excerpt) ? excerpt : exactTokenPassage(page, excerpt);
+  if (exact && passageSupportsLead(exact, lead, aliases)) return exact;
+  const candidates = [.../* @__PURE__ */ new Set([
+    ...sourceSentencePassages(page),
+    ...sourceAnchorPassages(page, lead.value)
+  ])].filter((passage) => passageSupportsLead(passage, lead, aliases));
+  if (!candidates.length) return null;
+  return candidates.sort((left, right) => overlapScore(right, excerpt) - overlapScore(left, excerpt) || left.length - right.length)[0];
 }
 var normalizedHost = (host) => host.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
 var sameOfficialDomain = (host, officialHosts) => {
@@ -7057,13 +7139,11 @@ function factId(subjectKey, predicate, value) {
 }
 function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject, officialHosts = []) {
   const page = documentText(document);
-  const excerpt = normalize(decodeHtmlEntities(lead.excerpt));
-  if (!excerpt || !page.includes(excerpt)) return null;
-  if (!aliases.some((alias) => containsPhrase(excerpt, alias))) return null;
-  if (!containsPhrase(excerpt, lead.value)) return null;
-  if (lead.qualifier && !containsPhrase(excerpt, lead.qualifier)) return null;
-  if (!isAtomicValue(lead.predicate, lead.value) || !predicateIsSupported(excerpt, lead.predicate)) return null;
+  if (!isAtomicValue(lead.predicate, lead.value)) return null;
+  const excerpt = supportingSourcePassage(page, lead, aliases);
+  if (!excerpt) return null;
   const official = sameOfficialDomain(document.host, officialHosts);
+  const supportedQualifier = lead.qualifier && looseContainsPhrase(excerpt, lead.qualifier) ? lead.qualifier : void 0;
   return {
     factId: factId(subjectKey, lead.predicate, lead.value),
     subjectKey,
@@ -7083,7 +7163,7 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
       provider: "public-web",
       artifactVerified: true
     }],
-    ...lead.qualifier ? { qualifier: lead.qualifier } : {},
+    ...supportedQualifier ? { qualifier: supportedQualifier } : {},
     evidence_origin: "deterministic",
     artifact_verified: true,
     provider: "public-web",
@@ -7110,9 +7190,9 @@ function resolveBasicFactCandidates(candidates) {
     grouped.set(key, rows);
   }
   const resolved = [...grouped.values()].flatMap((rows) => {
-    const sources = [...new Map(rows.flatMap((row) => row.sources).map((source) => [source.url, source])).values()];
-    const official = sources.some((source) => source.sourceClass === "official_subject");
-    const independentHosts = new Set(sources.filter((source) => source.sourceClass === "independent_press").map((source) => new URL(source.url).hostname.replace(/^www\./, "")));
+    const sources = [...new Map(rows.flatMap((row) => row.sources).map((source2) => [source2.url, source2])).values()];
+    const official = sources.some((source2) => source2.sourceClass === "official_subject");
+    const independentHosts = new Set(sources.filter((source2) => source2.sourceClass === "independent_press").map((source2) => new URL(source2.url).hostname.replace(/^www\./, "")));
     if (!official && independentHosts.size < 2) return [];
     return [{
       ...rows[0],
@@ -7128,6 +7208,46 @@ function resolveBasicFactCandidates(candidates) {
     });
   }
   return resolved;
+}
+var personKey = (value) => looseTokens(value).join(" ");
+function teamSourceCandidates(ctx, lead) {
+  if (lead.predicate !== "founder" && lead.predicate !== "executive") return [];
+  return (ctx.evidence.webTeam ?? []).flatMap((member) => {
+    if (member.artifact_verified !== true || member.evidence_origin !== "deterministic" || personKey(member.name) !== personKey(lead.value) || lead.predicate === "founder" && !/\bfounder\b|\bco[- ]?founder\b/i.test(member.role) || lead.predicate === "executive" && !PREDICATE_PATTERNS.executive.test(member.role)) return [];
+    const url = safeCandidateUrl(member.sourceUrl);
+    if (!url) return [];
+    const title = clean(member.source, 240);
+    return [{ url, ...title ? { title } : {} }];
+  });
+}
+function verificationLeadVariants(ctx, leads, officialHosts) {
+  const variants = [];
+  const seen = /* @__PURE__ */ new Set();
+  const add = (lead, value, title, primary) => {
+    const sourceUrl = safeCandidateUrl(value);
+    if (!sourceUrl) return;
+    const key = `${lead.predicate}::${personKey(lead.value)}::${sourceUrl}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    let official = false;
+    try {
+      official = sameOfficialDomain(new URL(sourceUrl).hostname, officialHosts);
+    } catch {
+    }
+    const variantLead = { ...lead, sourceUrl };
+    if (title) variantLead.sourceTitle = title;
+    else delete variantLead.sourceTitle;
+    variants.push({
+      lead: variantLead,
+      priority: official ? 0 : primary ? 1 : 2
+    });
+  };
+  for (const lead of leads) {
+    add(lead, lead.sourceUrl, lead.sourceTitle, true);
+    for (const sourceUrl of lead.candidateUrls ?? []) add(lead, sourceUrl, void 0, false);
+    for (const source2 of teamSourceCandidates(ctx, lead)) add(lead, source2.url, source2.title, false);
+  }
+  return variants.sort((left, right) => left.priority - right.priority);
 }
 async function collectBasicFacts(ctx, dependencies = {}) {
   const discover = dependencies.discover ?? discoverWithFallback;
@@ -7179,16 +7299,18 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     return pending;
   };
   const boundedLeads = leads.slice(0, MAX_LEADS);
-  const allowedSources = new Set(boundedLeads.map((lead) => lead.sourceUrl).slice(0, MAX_SOURCES));
-  const verified = (await Promise.all(boundedLeads.filter((lead) => allowedSources.has(lead.sourceUrl)).map(async (lead) => {
+  const variants = verificationLeadVariants(ctx, boundedLeads, officialHosts);
+  const allowedSources = new Set([...new Set(variants.map(({ lead }) => lead.sourceUrl))].slice(0, MAX_SOURCES));
+  const verified = (await Promise.all(variants.filter(({ lead }) => allowedSources.has(lead.sourceUrl)).map(async ({ lead }) => {
     const result = await fetchOnce(lead.sourceUrl);
     return result.status === "ok" ? verifyBasicFactLead(lead, result, aliases, ctx.handle, officialHosts) : null;
   }))).filter((fact) => fact !== null);
   ctx.evidence.basicFacts = resolveBasicFactCandidates(verified);
+  const sourceVerifiedLeadCount = new Set(verified.map((fact) => `${fact.predicate}::${fact.normalizedValue}`)).size;
   ctx.emit({
     phase: "P0 \xB7 Intake",
     label: ctx.evidence.basicFacts.length ? "Basic facts verified" : "Basic facts need review",
-    detail: `${ctx.evidence.basicFacts.length}/${boundedLeads.length} cited facts passed exact source and predicate checks.`,
+    detail: `${sourceVerifiedLeadCount}/${boundedLeads.length} leads matched subject, value, and predicate language in fetched source text; ${ctx.evidence.basicFacts.length} met the first-party or two-source publication threshold.`,
     source: "public-web",
     tone: ctx.evidence.basicFacts.length ? "good" : "warn"
   });
@@ -7260,15 +7382,15 @@ async function searchNewsPhrase(phrase, fetcher) {
   const items = xml.split(/<item>/).slice(1).map((block) => block.split("</item>")[0]);
   const articles = items.map((block) => {
     const rawTitle = tag(block, "title") ?? "";
-    const source = tag(block, "source") ?? (rawTitle.includes(" - ") ? rawTitle.split(" - ").pop() ?? "" : "");
-    const title = source && rawTitle.endsWith(` - ${source}`) ? rawTitle.slice(0, -(source.length + 3)) : rawTitle;
+    const source2 = tag(block, "source") ?? (rawTitle.includes(" - ") ? rawTitle.split(" - ").pop() ?? "" : "");
+    const title = source2 && rawTitle.endsWith(` - ${source2}`) ? rawTitle.slice(0, -(source2.length + 3)) : rawTitle;
     const link = tag(block, "link");
     const published = tag(block, "pubDate");
     const description = tag(block, "description") ?? "";
     const parsedDate = published ? Date.parse(published) : Number.NaN;
     return {
       title,
-      source,
+      source: source2,
       url: link,
       publishedAt: Number.isFinite(parsedDate) ? parsedDate : null,
       blob: `${title} ${description}`.toLowerCase()
@@ -8309,12 +8431,12 @@ async function resolveWalletsFromText(text2) {
   if (!text2) return [];
   const out = [];
   const seen = /* @__PURE__ */ new Set();
-  const add = (address, chain, source) => {
+  const add = (address, chain, source2) => {
     if (!address) return;
     const k = address.toLowerCase();
     if (seen.has(k)) return;
     seen.add(k);
-    out.push({ address, chain, source, tier: "SelfDoxxed" });
+    out.push({ address, chain, source: source2, tier: "SelfDoxxed" });
   };
   for (const m of text2.matchAll(ADDR_IN_TEXT)) add(m[0], "evm", "0x address self-disclosed in X bio/posts");
   const names = /* @__PURE__ */ new Set();
@@ -9294,10 +9416,10 @@ function parsePortfolioCandidates(text2) {
     const rawSources = Array.isArray(row.sources) ? row.sources : [];
     for (const candidate of rawSources) {
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
-      const source = candidate;
-      const url = safeCandidateUrl2(source.url);
+      const source2 = candidate;
+      const url = safeCandidateUrl2(source2.url);
       if (!url) continue;
-      sources.push({ url, ...clean2(source.title, 180) ? { title: clean2(source.title, 180) } : {} });
+      sources.push({ url, ...clean2(source2.title, 180) ? { title: clean2(source2.title, 180) } : {} });
     }
     const singularUrl = safeCandidateUrl2(row.source_url);
     if (singularUrl) sources.push({
@@ -9305,7 +9427,7 @@ function parsePortfolioCandidates(text2) {
       ...clean2(row.source_title, 180) ? { title: clean2(row.source_title, 180) } : {}
     });
     const uniqueSources = sources.filter(
-      (source, index) => sources.findIndex((candidate) => candidate.url === source.url) === index
+      (source2, index) => sources.findIndex((candidate) => candidate.url === source2.url) === index
     ).slice(0, MAX_SOURCES_PER_CANDIDATE);
     const investorEntityName = clean2(row.investor_entity, 120);
     const attribution = row.attribution === "affiliated_fund" ? "affiliated_fund" : row.attribution === "direct_subject" ? "direct_subject" : void 0;
@@ -9742,7 +9864,7 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
     });
     return { state: "failed", detail: "portfolio discovery failed" };
   }
-  ctx.evidence.portfolioLeads = leads.slice(0, MAX_CANDIDATES).map((lead) => ({ ...lead, sources: lead.sources.map((source) => ({ ...source })) }));
+  ctx.evidence.portfolioLeads = leads.slice(0, MAX_CANDIDATES).map((lead) => ({ ...lead, sources: lead.sources.map((source2) => ({ ...source2 })) }));
   if (!leads.length) {
     ctx.recordCheck?.({
       id: "vc-portfolio-track-record",
@@ -9770,9 +9892,9 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
       ...entity.aliases,
       entity.handle && (entity.handleTrusted || officialInvestorDomain) ? entity.handle.replace(/^@/, "") : void 0
     ].filter((value) => Boolean(value?.trim()));
-    const candidateHosts = lead.sources.flatMap((source) => {
+    const candidateHosts = lead.sources.flatMap((source2) => {
       try {
-        return [new URL(source.url).hostname.replace(/^www\./i, "").toLowerCase()];
+        return [new URL(source2.url).hostname.replace(/^www\./i, "").toLowerCase()];
       } catch {
         return [];
       }
@@ -9781,10 +9903,10 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
       (host) => !(officialInvestorDomain && hostMatches2(host, officialInvestorDomain)) && !listedHost2(host, PRIMARY_HOSTS) && !listedHost2(host, PRESS_HOSTS)
     );
     const officialProjectDomain = needsProjectDomain ? await resolveProjectDomain(lead).catch(() => void 0) : void 0;
-    return Promise.all(lead.sources.slice(0, MAX_SOURCES_PER_CANDIDATE).map(async (source) => {
-      const result = await fetchSourceOnce(source.url);
+    return Promise.all(lead.sources.slice(0, MAX_SOURCES_PER_CANDIDATE).map(async (source2) => {
+      const result = await fetchSourceOnce(source2.url);
       if (result.status !== "ok") {
-        return { lead, entity, source, officialProjectDomain, officialInvestorDomain, investorDomainProof, failed: true };
+        return { lead, entity, source: source2, officialProjectDomain, officialInvestorDomain, investorDomainProof, failed: true };
       }
       const classification = sourceClass(
         result.url,
@@ -9799,7 +9921,7 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
         subjectAliases: investorAliases,
         projectName: lead.projectName
       });
-      return { lead, entity, source, document: result, sourceClass: classification, officialProjectDomain, officialInvestorDomain, investorDomainProof, match, failed: false };
+      return { lead, entity, source: source2, document: result, sourceClass: classification, officialProjectDomain, officialInvestorDomain, investorDomainProof, match, failed: false };
     }));
   }))).flat();
   const supported = inspections.filter((item) => Boolean(item.entity && item.document && item.sourceClass && item.match?.supported));
@@ -9997,10 +10119,10 @@ function parseFundScaleCandidates(text2) {
     const sources = [];
     for (const sourceRaw of Array.isArray(row.sources) ? row.sources : []) {
       if (!sourceRaw || typeof sourceRaw !== "object" || Array.isArray(sourceRaw)) continue;
-      const source = sourceRaw;
-      const url = safeCandidateUrl3(source.url);
+      const source2 = sourceRaw;
+      const url = safeCandidateUrl3(source2.url);
       if (!url) continue;
-      const title = clean3(source.title, 180);
+      const title = clean3(source2.title, 180);
       sources.push({ url, ...title ? { title } : {} });
     }
     const singularUrl = safeCandidateUrl3(row.source_url);
@@ -10009,7 +10131,7 @@ function parseFundScaleCandidates(text2) {
       sources.push({ url: singularUrl, ...title ? { title } : {} });
     }
     const uniqueSources = sources.filter(
-      (source, index) => sources.findIndex((candidate) => candidate.url === source.url) === index
+      (source2, index) => sources.findIndex((candidate) => candidate.url === source2.url) === index
     ).slice(0, MAX_SOURCES_PER_CANDIDATE2);
     const fundVehicleHint = clean3(row.fund_vehicle, 160);
     const fundHandleRaw = clean3(row.fund_x_handle ?? row.investor_x_handle, 40)?.replace(/^@/, "");
@@ -10017,7 +10139,7 @@ function parseFundScaleCandidates(text2) {
     const attribution = row.attribution === "affiliated_fund" ? "affiliated_fund" : row.attribution === "direct_subject" ? "direct_subject" : void 0;
     const metricHint = ["aum", "fund_vehicle", "first_close", "final_close"].includes(String(row.metric_hint)) ? row.metric_hint : void 0;
     const amountHint = typeof row.amount_hint_usd === "number" && Number.isFinite(row.amount_hint_usd) && row.amount_hint_usd >= MIN_FUND_AMOUNT_USD && row.amount_hint_usd <= MAX_FUND_AMOUNT_USD ? Math.round(row.amount_hint_usd) : void 0;
-    const key = `${compact2(fundName)}::${compact2(fundVehicleHint ?? "")}::${uniqueSources.map((source) => source.url).join("|")}`;
+    const key = `${compact2(fundName)}::${compact2(fundVehicleHint ?? "")}::${uniqueSources.map((source2) => source2.url).join("|")}`;
     if (seen.has(key)) continue;
     seen.add(key);
     leads.push({
@@ -10299,7 +10421,7 @@ function syntheticPortfolioLead(lead) {
     ...lead.fundHandle ? { investorEntityHandle: lead.fundHandle } : {},
     ...lead.attribution ? { attribution: lead.attribution } : {},
     relationship: "invested_in",
-    sources: lead.sources.map((source) => ({ ...source })),
+    sources: lead.sources.map((source2) => ({ ...source2 })),
     evidence_origin: "model_lead",
     artifact_verified: false,
     provider: "grok"
@@ -10466,14 +10588,14 @@ async function collectFundScale(ctx, dependencies = {}) {
       ...entity.aliases,
       entity.handle && (entity.handleTrusted || officialInvestorDomain) ? entity.handle.replace(/^@/, "") : void 0
     ].filter((value) => Boolean(value?.trim()));
-    return Promise.all(lead.sources.slice(0, MAX_SOURCES_PER_CANDIDATE2).map(async (source) => {
-      const result = await fetchSourceOnce(source.url);
+    return Promise.all(lead.sources.slice(0, MAX_SOURCES_PER_CANDIDATE2).map(async (source2) => {
+      const result = await fetchSourceOnce(source2.url);
       if (result.status !== "ok") {
-        return { lead, entity, source, officialInvestorDomain, investorDomainProof, matches: [], failed: true };
+        return { lead, entity, source: source2, officialInvestorDomain, investorDomainProof, matches: [], failed: true };
       }
       const classification = sourceClass2(result, officialInvestorDomain, officialInvestorDomainScope, entity.attribution);
       const matches = supportsFundScaleClaim({ document: result, sourceClass: classification, subjectAliases: aliases, now });
-      return { lead, entity, source, document: result, sourceClass: classification, officialInvestorDomain, investorDomainProof, matches, failed: false };
+      return { lead, entity, source: source2, document: result, sourceClass: classification, officialInvestorDomain, investorDomainProof, matches, failed: false };
     }));
   }))).flat();
   const unclusteredSupported = inspections.flatMap((inspection) => {
@@ -11081,6 +11203,153 @@ async function collectProjectTokenIdentity(ctx) {
   };
 }
 
+// server/basicFactsProjection.ts
+import { createHash as createHash10 } from "node:crypto";
+var CRITICAL = /* @__PURE__ */ new Set([
+  "official_identity",
+  "product",
+  "founder",
+  "executive",
+  "official_token"
+]);
+var normalizeValue = (value) => value.normalize("NFKC").toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
+var hash2 = (value) => createHash10("sha256").update(JSON.stringify(value)).digest("hex");
+function factId2(subjectKey, predicate, value) {
+  return `basic_v1_${hash2(`${subjectKey.toLowerCase()}::${predicate}::${normalizeValue(value)}`)}`;
+}
+function officialHost(evidence) {
+  try {
+    return evidence.profile.website ? new URL(evidence.profile.website).hostname.replace(/^www\./, "").toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+function isOfficialUrl(url, host) {
+  if (!host) return false;
+  try {
+    const candidate = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    return candidate === host || candidate.endsWith(`.${host}`);
+  } catch {
+    return false;
+  }
+}
+function source(input) {
+  return {
+    ...input,
+    relation: "supports",
+    contentHash: hash2(input),
+    artifactVerified: true
+  };
+}
+function makeFact(evidence, predicate, value, sources, qualifier) {
+  const subjectKey = evidence.profile.handle;
+  return {
+    factId: factId2(subjectKey, predicate, value),
+    subjectKey,
+    predicate,
+    value,
+    normalizedValue: normalizeValue(value),
+    status: "verified",
+    critical: CRITICAL.has(predicate),
+    sources,
+    ...qualifier ? { qualifier } : {},
+    evidence_origin: "deterministic",
+    artifact_verified: true,
+    provider: "public-web"
+  };
+}
+function formatUsd(value) {
+  const absolute = Math.abs(value);
+  if (absolute >= 1e9) return `$${(value / 1e9).toFixed(absolute >= 1e10 ? 0 : 1)}B`;
+  if (absolute >= 1e6) return `$${(value / 1e6).toFixed(absolute >= 1e7 ? 0 : 1)}M`;
+  if (absolute >= 1e3) return `$${(value / 1e3).toFixed(absolute >= 1e4 ? 0 : 1)}K`;
+  return `$${value.toFixed(2)}`;
+}
+function projectProviderBackedBasicFacts(evidence) {
+  if (!evidence.roles.includes("PROJECT" /* PROJECT */)) return;
+  const projected = [];
+  const capturedAt = evidence.profile.profile_captured_at ?? evidence.projectToken?.capturedAt ?? (/* @__PURE__ */ new Date()).toISOString();
+  if (evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && evidence.profile.display_name.trim()) {
+    const handle = evidence.profile.handle.replace(/^@/, "");
+    const url = `https://x.com/${encodeURIComponent(handle)}`;
+    const excerpt = `${evidence.profile.display_name} (${evidence.profile.handle}) is the provider-resolved identity for this official project account${evidence.profile.website ? ` and links to ${evidence.profile.website}` : ""}.`;
+    projected.push(makeFact(evidence, "official_identity", evidence.profile.display_name.trim(), [source({
+      url,
+      title: "Official X profile",
+      excerpt,
+      capturedAt,
+      provider: "twitterapi",
+      sourceClass: "official_subject"
+    })], evidence.profile.handle));
+  }
+  const teamKeys = /* @__PURE__ */ new Set();
+  for (const member of evidence.webTeam ?? []) {
+    if (member.artifact_verified !== true || member.evidence_origin !== "deterministic" || member.provider !== "team-page" && member.provider !== "twitterapi" || !member.sourceUrl || !member.name.trim()) continue;
+    const predicate = /\b(?:co[- ]?founder|founder|creator)\b/i.test(member.role) ? "founder" : /\b(?:ceo|cto|coo|cfo|chief|president|director|head|lead)\b/i.test(member.role) ? "executive" : null;
+    if (!predicate) continue;
+    const identityKey = member.handle?.replace(/^@/, "").toLowerCase() || normalizeValue(member.name);
+    if (teamKeys.has(identityKey)) continue;
+    teamKeys.add(identityKey);
+    const excerpt = member.evidence?.trim() || `${member.name} is listed as ${member.role} by the project's fetched ${member.source}.`;
+    projected.push(makeFact(evidence, predicate, member.name.trim(), [source({
+      url: member.sourceUrl,
+      title: member.source || "Project team source",
+      excerpt,
+      capturedAt,
+      provider: member.provider,
+      sourceClass: member.provider === "twitterapi" || isOfficialUrl(member.sourceUrl, officialHost(evidence)) ? "official_subject" : "other_public"
+    })], member.role));
+  }
+  const token = evidence.projectToken;
+  if (token?.verified) {
+    const tokenExcerpt = `${token.name} (${token.symbol}) is the canonical project token on ${token.chain}; its identity matched the project's ${token.verification === "official_x" ? "official X account" : "official domain"}.`;
+    const tokenSource = source({
+      url: token.sourceUrl,
+      title: "CoinGecko token record",
+      excerpt: tokenExcerpt,
+      capturedAt: token.capturedAt,
+      provider: (token.providers ?? ["coingecko"]).join(" + "),
+      sourceClass: "regulatory_or_onchain"
+    });
+    projected.push(makeFact(evidence, "official_token", `$${token.symbol.toUpperCase()}`, [tokenSource], token.name));
+    projected.push(makeFact(evidence, "network", token.chain, [tokenSource]));
+    if (typeof token.volume24hUsd === "number" && token.volume24hUsd > 0) {
+      projected.push(makeFact(
+        evidence,
+        "traction",
+        `${formatUsd(token.volume24hUsd)} 24h trading volume`,
+        [tokenSource],
+        `captured ${token.capturedAt.slice(0, 10)}`
+      ));
+    }
+  }
+  const github = evidence.profile.identity_note.match(/GitHub\s+github\.com\/([A-Za-z0-9_.-]+)/i)?.[1];
+  if (github) {
+    const url = `https://github.com/${github}`;
+    projected.push(makeFact(evidence, "repository", `github.com/${github}`, [source({
+      url,
+      title: "Verified GitHub account",
+      excerpt: evidence.profile.identity_note,
+      capturedAt,
+      provider: "github",
+      sourceClass: isOfficialUrl(url, officialHost(evidence)) ? "official_subject" : "other_public"
+    })]));
+  }
+  const existing = evidence.basicFacts ?? (evidence.basicFacts = []);
+  for (const fact of projected) {
+    const same = existing.find(
+      (candidate) => candidate.predicate === fact.predicate && candidate.normalizedValue === fact.normalizedValue
+    );
+    if (same) {
+      const known = new Set(same.sources.map((candidate) => candidate.url));
+      same.sources.push(...fact.sources.filter((candidate) => !known.has(candidate.url)));
+      if (fact.status === "verified") same.status = "verified";
+      continue;
+    }
+    existing.push(fact);
+  }
+}
+
 // server/orchestrate.ts
 var ADAPTERS = [
   xAdapter,
@@ -11662,14 +11931,14 @@ function projectVerifiedBasicFacts(ctx) {
   const people = facts.filter((fact) => fact.predicate === "founder" || fact.predicate === "executive");
   for (const fact of people) {
     if (roster.some((member) => norm2(member.name) === norm2(fact.value))) continue;
-    const source = fact.sources.find((candidate) => candidate.relation === "supports") ?? fact.sources[0];
-    if (!source) continue;
+    const source2 = fact.sources.find((candidate) => candidate.relation === "supports") ?? fact.sources[0];
+    if (!source2) continue;
     roster.push({
       name: fact.value,
       role: fact.qualifier ?? (fact.predicate === "founder" ? "Founder" : "Executive"),
-      evidence: source.excerpt,
-      source: source.title ?? (source.sourceClass === "official_subject" ? "Official project source" : "Corroborated public sources"),
-      sourceUrl: source.url,
+      evidence: source2.excerpt,
+      source: source2.title ?? (source2.sourceClass === "official_subject" ? "Official project source" : "Corroborated public sources"),
+      sourceUrl: source2.url,
       evidence_origin: "deterministic",
       artifact_verified: true,
       provider: "basic-facts-web"
@@ -12265,11 +12534,12 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     }
     finishRuntimeStage(`adapter:${a.id}`, stageStartedAt);
   }
-  projectVerifiedBasicFacts(ctx);
   if (fixture) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
   }
+  projectProviderBackedBasicFacts(evidence);
+  projectVerifiedBasicFacts(ctx);
   const trackedPass = (id, label, providers, work, onError) => {
     const before = attemptTotals(providers);
     return Promise.resolve().then(work).then(() => {

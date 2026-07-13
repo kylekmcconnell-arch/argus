@@ -13,6 +13,7 @@ const SAFE_CONTENT_TYPES = new Set([
   "application/ld+json",
   "application/xhtml+xml",
   "text/html",
+  "text/markdown",
   "text/plain",
   "text/xml",
 ]);

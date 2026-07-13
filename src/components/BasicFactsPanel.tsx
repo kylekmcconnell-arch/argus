@@ -296,6 +296,9 @@ export function BasicFactsPanel({
   const conflicted = rows.filter((fact) => fact.status === "conflicted").length;
   const unresolved = rows.filter((fact) => fact.status === "unresolved").length;
   const applicable = rows.filter((fact) => fact.status !== "not_applicable").length;
+  const answeredRows = rows.filter((fact) => fact.status === "verified" || fact.status === "corroborated");
+  const conflictedRows = rows.filter((fact) => fact.status === "conflicted");
+  const unresolvedRows = rows.filter((fact) => fact.status === "unresolved");
 
   return (
     <section id={id} className="panel scroll-mt-28 overflow-hidden" aria-labelledby={`${id}-title`}>
@@ -308,19 +311,13 @@ export function BasicFactsPanel({
               The basic questions an investor should never have to research twice. Answers count only when a fetched source supports them.
             </p>
           </div>
-          <div className="grid shrink-0 grid-cols-3 gap-1.5 text-center" aria-label="Basic facts coverage">
-            <div className="panel-inset min-w-16 px-2.5 py-2">
-              <div className="mono text-[14px] font-semibold text-pass">{answered}/{applicable}</div>
-              <div className="mt-0.5 text-[9px] uppercase tracking-[0.12em] text-ink-faint">answered</div>
-            </div>
-            <div className="panel-inset min-w-16 px-2.5 py-2">
-              <div className={`mono text-[14px] font-semibold ${conflicted ? "text-avoid" : "text-ink-dim"}`}>{conflicted}</div>
-              <div className="mt-0.5 text-[9px] uppercase tracking-[0.12em] text-ink-faint">conflicts</div>
-            </div>
-            <div className="panel-inset min-w-16 px-2.5 py-2">
-              <div className={`mono text-[14px] font-semibold ${unresolved ? "text-caution" : "text-ink-dim"}`}>{unresolved}</div>
-              <div className="mt-0.5 text-[9px] uppercase tracking-[0.12em] text-ink-faint">open</div>
-            </div>
+          <div className="panel-inset flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-[11px]" aria-label="Basic facts coverage">
+            <span className="inline-flex items-center gap-1.5 font-medium text-pass">
+              <CheckCircle aria-hidden="true" size={14} weight="fill" />
+              {answered} confirmed
+            </span>
+            {conflicted > 0 && <span className="text-avoid">{conflicted} conflicted</span>}
+            {unresolved > 0 && <span className="text-ink-faint">{unresolved} still to verify</span>}
           </div>
         </div>
         <div className="mt-3 h-1 overflow-hidden rounded-full bg-line/70" aria-hidden="true">
@@ -328,36 +325,23 @@ export function BasicFactsPanel({
         </div>
       </header>
 
-      {rows.length > 0 && (
-        <ol className="divide-y divide-line/60" aria-label="Required diligence questions">
-          {rows.map((fact, index) => {
-            const meta = STATUS_META[fact.status as Exclude<BasicFactStatus, "lead">] ?? STATUS_META.unresolved;
+      {answeredRows.length > 0 ? (
+        <ul className="grid gap-2 p-4 sm:grid-cols-2 sm:p-5" aria-label="Confirmed basic facts">
+          {answeredRows.map((fact, index) => {
+            const meta = STATUS_META[fact.status as "verified" | "corroborated"];
             const sources = dedupeSources(fact.sources ?? []);
             return (
-              <li key={fact.factId || `${fact.predicate}:${index}`} className="grid gap-2 px-4 py-3.5 sm:grid-cols-[minmax(12rem,0.8fr)_minmax(0,1.2fr)] sm:px-5">
-                <div className="min-w-0">
-                  <div className="flex items-start gap-2">
-                    {fact.status === "verified" || fact.status === "corroborated" ? (
-                      <CheckCircle aria-hidden="true" size={17} weight="fill" className="mt-0.5 shrink-0 text-pass" />
-                    ) : fact.status === "conflicted" ? (
-                      <Warning aria-hidden="true" size={17} weight="fill" className="mt-0.5 shrink-0 text-avoid" />
-                    ) : (
-                      <MagnifyingGlass aria-hidden="true" size={17} weight="bold" className="mt-0.5 shrink-0 text-caution" />
-                    )}
-                    <p className="text-[12.5px] font-medium leading-relaxed text-ink">{questionFor(fact.predicate)}</p>
+              <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset min-w-0 px-3.5 py-3.5">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10.5px] leading-relaxed text-ink-faint">{questionFor(fact.predicate)}</p>
+                    <p className="mt-1 text-[15px] font-medium leading-snug text-ink">{answerFor(fact)}</p>
                   </div>
-                  {fact.critical && <span className="mono ml-6 mt-1 block text-[9px] uppercase tracking-[0.12em] text-ink-faint">decision critical</span>}
+                  <span className={`chip shrink-0 normal-case tracking-normal ${meta.className}`}>
+                    <CheckCircle aria-hidden="true" size={12} weight="fill" />
+                    {meta.label}
+                  </span>
                 </div>
-                <div className="min-w-0 sm:border-l sm:border-line/60 sm:pl-4">
-                  <div className="flex flex-wrap items-start gap-2">
-                    <p className={`min-w-0 flex-1 text-[12.5px] leading-relaxed ${fact.status === "unresolved" || fact.status === "not_applicable" ? "text-ink-faint" : "text-ink"}`}>
-                      {answerFor(fact)}
-                    </p>
-                    <span className={`chip shrink-0 normal-case tracking-normal ${meta.className}`}>{meta.label}</span>
-                  </div>
-                  {fact.status === "conflicted" && (
-                    <p className="mt-1 text-[11px] leading-relaxed text-avoid">The sources disagree. ARGUS has not selected a clean answer.</p>
-                  )}
                   {sources.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${questionFor(fact.predicate)}`}>
                       {sources.slice(0, 4).map((source, sourceIndex) => {
@@ -379,25 +363,98 @@ export function BasicFactsPanel({
                       })}
                     </div>
                   )}
-                </div>
               </li>
             );
           })}
-        </ol>
-      )}
-
-      {discoveryLeads.length > 0 && (
-        <div className="border-t border-caution/30 bg-caution/[0.035] px-4 py-4 sm:px-5" aria-label="Unverified basic fact leads">
-          <div className="flex items-start gap-2.5">
+        </ul>
+      ) : (
+        <div className="px-4 py-5 sm:px-5">
+          <div className="panel-inset flex items-start gap-3 px-3.5 py-3.5">
             <MagnifyingGlass aria-hidden="true" size={18} weight="bold" className="mt-0.5 shrink-0 text-caution" />
-            <div className="min-w-0">
-              <h3 className="text-[13px] font-semibold text-ink">Unverified discovery leads</h3>
-              <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">
-                AI-suggested answers stay out of the facts above until ARGUS fetches and verifies the underlying source. They do not affect the verdict.
+            <div>
+              <p className="text-[13px] font-medium text-ink">Foundational answers are still being verified</p>
+              <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+                ARGUS found {discoveryLeads.length} possible answer{discoveryLeads.length === 1 ? "" : "s"}, but none cleared source verification in this snapshot.
               </p>
             </div>
           </div>
+        </div>
+      )}
+
+      {conflictedRows.length > 0 && (
+        <div className="border-t border-avoid/30 bg-avoid/[0.035] px-4 py-4 sm:px-5" aria-label="Conflicted basic facts">
+          <div className="flex items-start gap-2.5">
+            <Warning aria-hidden="true" size={18} weight="fill" className="mt-0.5 shrink-0 text-avoid" />
+            <div>
+              <h3 className="text-[13px] font-semibold text-ink">Sources disagree</h3>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">ARGUS has not selected a clean answer for these points.</p>
+            </div>
+          </div>
           <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+            {conflictedRows.map((fact, index) => {
+              const sources = dedupeSources(fact.sources ?? []);
+              return (
+                <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset px-3 py-2.5">
+                  <p className="text-[10.5px] text-ink-faint">{questionFor(fact.predicate)}</p>
+                  <p className="mt-1 text-[12.5px] leading-relaxed text-avoid">{answerFor(fact)}</p>
+                  {sources.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${questionFor(fact.predicate)}`}>
+                      {sources.slice(0, 4).map((source, sourceIndex) => {
+                        const url = safeHttpUrl(source.url)!;
+                        const contradicts = source.relation === "contradicts";
+                        return (
+                          <a
+                            key={`${url}:${sourceIndex}`}
+                            href={url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            title={source.excerpt || sourceLabel(source, url)}
+                            className={`btn-chip min-h-8 max-w-full normal-case tracking-normal ${contradicts ? "tint-avoid" : "tint-signal"}`}
+                          >
+                            <ArrowSquareOut aria-hidden="true" size={12} weight="bold" className="shrink-0" />
+                            <span className="max-w-52 truncate">{contradicts ? "Contradicts: " : ""}{sourceLabel(source, url)}</span>
+                          </a>
+                        );
+                      })}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {unresolvedRows.length > 0 && (
+        <details className="group border-t border-line/60 px-4 py-3.5 sm:px-5">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-[12.5px] font-medium text-ink marker:content-none">
+            <span>Still to confirm</span>
+            <span className="chip tint-caution normal-case tracking-normal">{unresolvedRows.length} questions</span>
+          </summary>
+          <ul className="mt-3 grid gap-x-6 gap-y-2 border-t border-line/50 pt-3 sm:grid-cols-2" aria-label="Unresolved basic facts">
+            {unresolvedRows.map((fact, index) => (
+              <li key={fact.factId || `${fact.predicate}:${index}`} className="flex items-start gap-2 text-[11.5px] leading-relaxed text-ink-dim">
+                <MagnifyingGlass aria-hidden="true" size={13} weight="bold" className="mt-0.5 shrink-0 text-caution" />
+                {questionFor(fact.predicate)}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+
+      {discoveryLeads.length > 0 && (
+        <details className="group border-t border-caution/30 bg-caution/[0.025] px-4 py-3.5 sm:px-5" aria-label="Unverified basic fact leads">
+          <summary className="flex cursor-pointer list-none items-center justify-between gap-3 marker:content-none">
+            <span className="flex min-w-0 items-center gap-2.5">
+              <MagnifyingGlass aria-hidden="true" size={16} weight="bold" className="shrink-0 text-caution" />
+              <span>
+                <span className="block text-[12.5px] font-medium text-ink">Research leads awaiting verification</span>
+                <span className="mt-0.5 block text-[10.5px] text-ink-faint">Visible for transparency, excluded from the verdict</span>
+              </span>
+            </span>
+            <span className="chip tint-caution shrink-0 normal-case tracking-normal">{discoveryLeads.length} leads</span>
+          </summary>
+          <ul className="mt-3 grid gap-2 border-t border-caution/20 pt-3 sm:grid-cols-2">
             {discoveryLeads.map((lead, index) => {
               const urls = [...new Set([lead.sourceUrl, ...(lead.candidateUrls ?? [])].flatMap((url) => safeHttpUrl(url) ? [safeHttpUrl(url)!] : []))];
               const leadValue = displayValue(lead.value);
@@ -427,7 +484,7 @@ export function BasicFactsPanel({
               );
             })}
           </ul>
-        </div>
+        </details>
       )}
     </section>
   );

@@ -55,6 +55,7 @@ import { collectTrustGraph } from "./adapters/trustgraph";
 import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
 import { collectProjectTokenIdentity } from "./adapters/projectToken";
+import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 
 const ADAPTERS: Adapter[] = [
   xAdapter,
@@ -1526,11 +1527,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     }
     finishRuntimeStage(`adapter:${a.id}`, stageStartedAt);
   }
-  projectVerifiedBasicFacts(ctx);
   if (fixture) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
   }
+  projectProviderBackedBasicFacts(evidence);
+  projectVerifiedBasicFacts(ctx);
 
   // Post-discovery signal passes, all before the analyst so their findings feed
   // the scoring. Token lifecycle is keyless (DexScreener); cadence needs the
