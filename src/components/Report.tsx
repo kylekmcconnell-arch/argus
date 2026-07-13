@@ -2064,7 +2064,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             items={[
               { href: "#decision-summary", label: "Summary", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
               ...(f.projectToken ? [{ href: "#project-token" as const, label: "Token", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
-              ...(showBasicFacts ? [{ href: "#basic-facts" as const, label: "Basics", icon: <CheckCircle aria-hidden="true" size={15} weight="bold" />, count: basicFacts.filter((fact) => fact.status === "verified" || fact.status === "corroborated").length }] : []),
+              ...(showBasicFacts ? [{
+                href: "#basic-facts" as const,
+                label: "Basics",
+                icon: <CheckCircle aria-hidden="true" size={15} weight="bold" />,
+                count: new Set(basicFacts
+                  .filter((fact) => fact.status === "verified" || fact.status === "corroborated")
+                  .map((fact) => fact.predicate)).size,
+              }] : []),
               { href: "#decision-basis", label: "Diligence", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
               { href: "#identity-evidence", label: "Identity", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
               ...(visibleIntelligenceCount > 0 ? [{ href: "#evidence-ledger" as const, label: "Evidence", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount }] : []),
