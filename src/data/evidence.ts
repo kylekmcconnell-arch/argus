@@ -290,6 +290,75 @@ export interface TrustGraphScreen {
   riskEntities?: { key: string; label: string }[];
 }
 
+export type BasicFactPredicate =
+  | "official_identity"
+  | "product"
+  | "founder"
+  | "executive"
+  | "founded"
+  | "launched"
+  | "official_token"
+  | "network"
+  | "legal_entity"
+  | "funding"
+  | "investor"
+  | "governance"
+  | "audit"
+  | "repository"
+  | "traction";
+
+export type BasicFactStatus =
+  | "verified"
+  | "corroborated"
+  | "conflicted"
+  | "lead"
+  | "unresolved"
+  | "not_applicable";
+
+export interface BasicFactSource {
+  url: string;
+  title?: string;
+  sourceClass: "official_subject" | "official_counterparty" | "regulatory_or_onchain" | "independent_press" | "other_public";
+  relation: "supports" | "contradicts";
+  excerpt: string;
+  contentHash: string;
+  capturedAt: string;
+  provider: string;
+  artifactVerified: true;
+}
+
+/** A source-fetched foundational answer. Model agreement alone never creates one. */
+export interface BasicFact {
+  factId: string;
+  subjectKey: string;
+  predicate: BasicFactPredicate;
+  value: string;
+  normalizedValue: string;
+  status: BasicFactStatus;
+  critical: boolean;
+  sources: BasicFactSource[];
+  qualifier?: string;
+  evidence_origin: "deterministic";
+  artifact_verified: true;
+  provider: "public-web";
+  discoveryProvider?: "claude-web-search" | "grok";
+}
+
+/** Model-discovered answer and candidate source. It is never scoreable. */
+export interface BasicFactLead {
+  subject: string;
+  predicate: BasicFactPredicate;
+  value: string;
+  qualifier?: string;
+  excerpt: string;
+  sourceUrl: string;
+  sourceTitle?: string;
+  candidateUrls?: string[];
+  evidence_origin: "model_lead";
+  artifact_verified: false;
+  provider: "claude-web-search" | "grok";
+}
+
 // A person behind the project, dug from the website (web/LinkedIn), the account's
 // own posts (role-word scan), or its X content. Named-only people are kept — a
 // real name with a role is signal even without an X handle to audit.
@@ -347,6 +416,10 @@ export interface CollectedEvidence {
   trustGraphScreen?: TrustGraphScreen;
   /** Verified project-owned token identity and frozen market snapshot. */
   projectToken?: ProjectTokenSnapshot;
+  /** Required foundational answers backed by independently fetched pages. */
+  basicFacts?: BasicFact[];
+  /** Search-model suggestions retained separately until source verification succeeds. */
+  basicFactLeads?: BasicFactLead[];
   webTeam?: WebTeamMember[]; // people dug from the site + posts (the auto-pivot)
   // Second-hop: the people behind the subject's top ventures (subject → venture →
   // its team). `key` is the venture's canonical graph key so the edges attach to
@@ -385,5 +458,7 @@ export function emptyEvidence(handle: string): CollectedEvidence {
     contradictions: [],
     sourceArtifacts: [],
     portfolioLeads: [],
+    basicFacts: [],
+    basicFactLeads: [],
   };
 }

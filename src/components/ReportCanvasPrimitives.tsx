@@ -126,7 +126,7 @@ export function ReportCanvasNarrativeSection({
                   {item.detail && <p className="mt-0.5 text-[11px] leading-relaxed text-ink-dim">{item.detail}</p>}
                   {(item.provenance || item.href) && (
                     <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
-                      {item.provenance && <span className="mono">{item.provenance}</span>}
+                      {item.provenance && <span>{item.provenance}</span>}
                       {item.href && (
                         <a href={item.href} className="inline-flex min-h-8 items-center gap-1 text-signal-lift underline-offset-2 hover:underline">
                           Inspect evidence <ArrowRight aria-hidden="true" size={12} weight="bold" />
@@ -159,19 +159,21 @@ export function ReportCanvasRailCard({
   count,
   items,
   footer,
+  emptyCopy = "Nothing needs attention here.",
 }: {
   title: string;
   tone: ReportCanvasTone;
   count?: string;
   items: ReportCanvasRailItem[];
   footer?: ReactNode;
+  emptyCopy?: string;
 }) {
   return (
     <section className="panel overflow-hidden" aria-label={title}>
       <div className="flex items-center gap-2 border-b border-line/60 px-3.5 py-3">
         <ToneIcon tone={tone} size={16} />
-        <h2 className="eyebrow text-ink-dim">{title}</h2>
-        {count && <span className="mono ml-auto text-[11px] text-ink-faint">{count}</span>}
+        <h2 className="text-[12.5px] font-semibold text-ink-dim">{title}</h2>
+        {count && <span className="ml-auto text-[11.5px] text-ink-faint">{count}</span>}
       </div>
       {items.length ? (
         <ul className="divide-y divide-line/60">
@@ -185,12 +187,12 @@ export function ReportCanvasRailCard({
               ) : (
                 <p className="text-[12.5px] leading-snug text-ink-dim">{item.label}</p>
               )}
-              {item.meta && <p className="mono mt-1 text-[11px] leading-snug text-ink-faint">{item.meta}</p>}
+              {item.meta && <p className="mt-1 text-[11.5px] leading-snug text-ink-faint">{item.meta}</p>}
             </li>
           ))}
         </ul>
       ) : (
-        <p className="px-3.5 py-3 text-[12.5px] leading-relaxed text-ink-faint">No items recorded.</p>
+        <p className="px-3.5 py-3 text-[12.5px] leading-relaxed text-ink-faint">{emptyCopy}</p>
       )}
       {footer && <div className="border-t border-line/60 px-3.5 py-2.5 text-[11px] text-ink-faint">{footer}</div>}
     </section>

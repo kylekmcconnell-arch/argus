@@ -86,6 +86,12 @@ export const AXIS_LABELS: Record<string, string> = {
   ME1_identity: "Identity",
   ME2_role_authenticity: "Role authenticity",
   ME3_conduct_reputation: "Conduct & reputation",
+  P1_team_and_identity: "Team and leadership",
+  P2_product_substance: "Product and execution",
+  P3_token_conduct: "Token design and conduct",
+  P4_backing_and_partners: "Backers and partnerships",
+  P5_traction_and_liveness: "Traction and usage",
+  P6_transparency_integrity: "Transparency and integrity",
 };
 
 export const CAP_LABELS: Record<string, string> = {
@@ -102,7 +108,10 @@ export const CAP_LABELS: Record<string, string> = {
 };
 
 export function axisLabel(k: string): string {
-  return AXIS_LABELS[k] ?? k;
+  return AXIS_LABELS[k] ?? k
+    .replace(/^[A-Z]{1,3}\d+_/, "")
+    .replace(/_/g, " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
 }
 export function capLabel(k: string): string {
   return CAP_LABELS[k] ?? k;

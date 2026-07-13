@@ -89,4 +89,22 @@ describe("per-audit cost isolation", () => {
       expect.objectContaining({ provider: "claude", calls: 1, failed: 1, status: "failed", usd: 0 }),
     ]));
   });
+
+  it("attributes Claude hosted web-search usage to the exact operation", () => {
+    const cost = withCostLedger(() => {
+      addClaudeUsage({
+        input_tokens: 1_000,
+        output_tokens: 100,
+        server_tool_use: { web_search_requests: 2 },
+      }, "basic-facts-search");
+      return getCost();
+    });
+
+    expect(cost.calls).toContainEqual(expect.objectContaining({
+      provider: "claude",
+      op: "basic-facts-search",
+      usd: 0.0245,
+      meta: "1100 tok · 2 web searches",
+    }));
+  });
 });

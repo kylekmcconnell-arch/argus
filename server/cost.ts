@@ -23,6 +23,7 @@ const PRICE = {
   grokSource: 25 / 1000,
   claudeIn: 3 / 1e6,
   claudeOut: 15 / 1e6,
+  claudeWebSearch: 10 / 1000,
   twitterapiCall: 0.0002,
   pdlMatch: 0.1,
   heliusCall: 0.0001,
@@ -155,7 +156,11 @@ export function addGrokUsage(
 }
 
 export function addClaudeUsage(
-  u: { input_tokens?: number; output_tokens?: number } | undefined,
+  u: {
+    input_tokens?: number;
+    output_tokens?: number;
+    server_tool_use?: { web_search_requests?: number };
+  } | undefined,
   op = "analysis",
   status: ProviderUsageStatus = "succeeded",
   outcomeMeta?: string,
@@ -163,14 +168,15 @@ export function addClaudeUsage(
   const { claude } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
+  const webSearches = u?.server_tool_use?.web_search_requests ?? 0;
   claude.calls += 1;
   claude.in += tin;
   claude.out += tout;
   recordCall(
     "claude",
     op,
-    tin * PRICE.claudeIn + tout * PRICE.claudeOut,
-    [`${tin + tout} tok`, outcomeMeta].filter(Boolean).join(" · "),
+    tin * PRICE.claudeIn + tout * PRICE.claudeOut + webSearches * PRICE.claudeWebSearch,
+    [`${tin + tout} tok`, webSearches ? `${webSearches} web searches` : "", outcomeMeta].filter(Boolean).join(" · "),
     status,
   );
 }

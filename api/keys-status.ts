@@ -11,7 +11,7 @@ export const config = { maxDuration: 15 };
 interface Prov { key: string; alternativeKeys?: string[]; also?: string; label: string; powers: string; source: string; tier: "paid" | "optional" | "infra"; live?: "github" }
 
 const PROVIDERS: Prov[] = [
-  { key: "ANTHROPIC_API_KEY", label: "Claude (Anthropic)", powers: "The analyst + vision (screenshot OCR, profile-photo check)", source: "console.anthropic.com", tier: "paid" },
+  { key: "ANTHROPIC_API_KEY", label: "Claude (Anthropic)", powers: "Cited basic-facts web research + analyst + vision", source: "console.anthropic.com", tier: "paid" },
   { key: "XAI_API_KEY", label: "Grok (xAI)", powers: "Live web + X search: team & affiliation discovery", source: "console.x.ai", tier: "paid" },
   { key: "TWITTERAPI_KEY", label: "twitterapi.io", powers: "X profile, posts, follower/following graph", source: "twitterapi.io", tier: "paid" },
   { key: "HELIUS_API_KEY", label: "Helius (Solana)", powers: "Core: attributed-wallet activity. Supplemental: deployer, funding, mint, and serial-launch traces", source: "dashboard.helius.dev", tier: "paid" },

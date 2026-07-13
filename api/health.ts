@@ -35,7 +35,7 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
 
   const services = [
     configuredService("xai", "Grok (xAI)", process.env.XAI_API_KEY, "configure XAI_API_KEY"),
-    configuredService("anthropic", "Claude analyst", process.env.ANTHROPIC_API_KEY, "configure ANTHROPIC_API_KEY"),
+    configuredService("anthropic", "Claude research + analyst", process.env.ANTHROPIC_API_KEY, "configure ANTHROPIC_API_KEY"),
     configuredService("twitterapi", "twitterapi.io", process.env.TWITTERAPI_KEY, "configure TWITTERAPI_KEY"),
   ];
 

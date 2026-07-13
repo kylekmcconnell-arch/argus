@@ -47,6 +47,7 @@ import { dexscreenerAdapter } from "./adapters/dexscreener";
 import { coingeckoAdapter } from "./adapters/coingecko";
 import { redditAdapter } from "./adapters/reddit";
 import { onchainAdapter } from "./adapters/onchain";
+import { basicFactsAdapter } from "./adapters/basicFacts";
 import { hasResolvedRealName, offchainAdapter } from "./adapters/offchain";
 import { archivedAffiliation } from "./adapters/wayback";
 import { resolveForHandle } from "./adapters/wallet";
@@ -65,11 +66,12 @@ const ADAPTERS: Adapter[] = [
   coingeckoAdapter,
   redditAdapter,
   onchainAdapter,
+  basicFactsAdapter,
 ];
 
 // Adapters that require a key to do anything meaningful (keyless DEX/CG no-op
 // without a promoted contract, so they don't count as "live collection").
-const KEYED = new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain"]);
+const KEYED = new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain", "basic-facts"]);
 
 interface AttemptTotals {
   total: number;
@@ -264,8 +266,10 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
   // accounts can supply their verified CoinGecko homepage here.
   await collectProjectSiteSubstance(ctx, domain);
 
-  if (!analystAvailable()) return;
-  ctx.emit({ phase: "P0 · Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify…", tone: "neutral" });
+  const canExtractClaims = analystAvailable();
+  if (canExtractClaims) {
+    ctx.emit({ phase: "P0 · Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify…", tone: "neutral" });
+  }
   // Claim extraction and affiliation/team discovery read the same frozen intake
   // inputs and do not depend on one another. Start both provider waves together,
   // but continue to apply claims first below so venture/testimonial merge order and
@@ -274,7 +278,12 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
   // the project's own team page (handle "VulcanForged" -> vulcanforged.com, whose
   // docs.* /team is the canonical roster). Failed guesses just fetch nothing.
   const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
-  const claimsPromise = extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
+  // Claude claim extraction is optional. Do not let a missing Anthropic key
+  // suppress independent Grok/X discovery or the keyless first-party team
+  // fetchers below; each provider must fail and attribute independently.
+  const claimsPromise = canExtractClaims
+    ? extractClaims(ctx.handle, ctx.evidence.profile.bio, posts)
+    : Promise.resolve(null);
   const discoveryPromise = Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     // Team announcements are usually old, high-signal posts. `posts` is the
@@ -759,6 +768,71 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   return [...roles];
 }
 
+/**
+ * Reuse source-fetched founder and executive facts in the human-readable team
+ * roster. The search model only suggests candidates; every row admitted here
+ * already passed an independent page fetch plus exact excerpt verification.
+ */
+export function projectVerifiedBasicFacts(ctx: CollectContext): void {
+  if (!providerBackedRoles(ctx.evidence).includes(SubjectClass.PROJECT)) return;
+  const facts = (ctx.evidence.basicFacts ?? []).filter((fact) =>
+    fact.artifact_verified === true
+    && (fact.status === "verified" || fact.status === "corroborated"),
+  );
+  if (!facts.length) return;
+
+  const norm = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const roster = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
+  const people = facts.filter((fact) => fact.predicate === "founder" || fact.predicate === "executive");
+  for (const fact of people) {
+    if (roster.some((member) => norm(member.name) === norm(fact.value))) continue;
+    const source = fact.sources.find((candidate) => candidate.relation === "supports") ?? fact.sources[0];
+    if (!source) continue;
+    roster.push({
+      name: fact.value,
+      role: fact.qualifier ?? (fact.predicate === "founder" ? "Founder" : "Executive"),
+      evidence: source.excerpt,
+      source: source.title ?? (source.sourceClass === "official_subject" ? "Official project source" : "Corroborated public sources"),
+      sourceUrl: source.url,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "basic-facts-web",
+    });
+  }
+
+  if (people.length) {
+    ctx.recordCheck?.({
+      id: "project-team-identity",
+      status: "confirmed",
+      note: `${people.length} founder or executive record${people.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+      provider: "basic-facts-web",
+      sourceCount: people.reduce((total, fact) => total + fact.sources.length, 0),
+    });
+  }
+
+  const products = facts.filter((fact) => fact.predicate === "product");
+  if (products.length) {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "confirmed",
+      note: `${products.length} core product description${products.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+      provider: "basic-facts-web",
+      sourceCount: products.reduce((total, fact) => total + fact.sources.length, 0),
+    });
+  }
+
+  const traction = facts.filter((fact) => fact.predicate === "traction");
+  if (traction.length) {
+    ctx.recordCheck?.({
+      id: "project-traction-liveness",
+      status: "confirmed",
+      note: `${traction.length} concrete traction or usage metric${traction.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+      provider: "basic-facts-web",
+      sourceCount: traction.reduce((total, fact) => total + fact.sources.length, 0),
+    });
+  }
+}
+
 const PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
 const PROJECT_BACKING_PROVIDERS = new Set(["team-page", "twitterapi"]);
 
@@ -786,14 +860,24 @@ export function collectProjectCoreEvidenceOutcomes(ctx: CollectContext): {
       && PROJECT_BACKING_ROLE.test(member.role),
     );
 
-  if (verifiedBackers.length) {
-    const providers = [...new Set(verifiedBackers.map((member) => member.provider!))];
+  const verifiedInvestorFacts = (ctx.evidence.basicFacts ?? []).filter((fact) =>
+    fact.predicate === "investor"
+    && fact.artifact_verified === true
+    && (fact.status === "verified" || fact.status === "corroborated"),
+  );
+  const backingCount = verifiedBackers.length + verifiedInvestorFacts.length;
+
+  if (backingCount) {
+    const providers = [...new Set([
+      ...verifiedBackers.map((member) => member.provider!),
+      ...(verifiedInvestorFacts.length ? ["basic-facts-web"] : []),
+    ])];
     ctx.recordCheck?.({
       id: "project-backing-partners",
       status: "confirmed",
-      note: `${verifiedBackers.length} named advisor, backer, or investor record${verifiedBackers.length === 1 ? " was" : "s were"} verified from first-party project team or account evidence; funding terms and institutional investment were not inferred`,
+      note: `${backingCount} named advisor, backer, or investor record${backingCount === 1 ? " was" : "s were"} verified from fetched public evidence; funding terms and institutional investment were not inferred beyond these named records`,
       provider: providers.join("/"),
-      sourceCount: verifiedBackers.length,
+      sourceCount: verifiedBackers.length + verifiedInvestorFacts.reduce((total, fact) => total + fact.sources.length, 0),
     });
   } else {
     ctx.recordCheck?.({
@@ -804,20 +888,33 @@ export function collectProjectCoreEvidenceOutcomes(ctx: CollectContext): {
     });
   }
 
-  // Canonical token identity is not a transparency attestation. Core collection
-  // currently freezes neither first-party tokenomics/governance documents nor a
-  // directly fetched audit report, so an empty evidence bag cannot honestly mean
-  // that those disclosures were checked and absent.
-  ctx.recordCheck?.({
-    id: "project-transparency",
-    status: "unavailable",
-    note: "no bounded first-party tokenomics, governance, or direct audit-report collector ran; canonical token identity alone does not establish transparency",
-    provider: "project-disclosure-collector",
-  });
+  const verifiedDisclosures = (ctx.evidence.basicFacts ?? []).filter((fact) =>
+    (fact.predicate === "governance" || fact.predicate === "audit")
+    && fact.artifact_verified === true
+    && (fact.status === "verified" || fact.status === "corroborated"),
+  );
+  if (verifiedDisclosures.length) {
+    ctx.recordCheck?.({
+      id: "project-transparency",
+      status: "confirmed",
+      note: `${verifiedDisclosures.length} governance or security-audit disclosure${verifiedDisclosures.length === 1 ? " was" : "s were"} verified against fetched, cited public sources`,
+      provider: "basic-facts-web",
+      sourceCount: verifiedDisclosures.reduce((total, fact) => total + fact.sources.length, 0),
+    });
+  } else {
+    // Canonical token identity is not a transparency attestation. An empty
+    // verified-facts bag must remain unavailable rather than looking checked.
+    ctx.recordCheck?.({
+      id: "project-transparency",
+      status: "unavailable",
+      note: "no fetched governance or direct audit-report source passed verification; canonical token identity alone does not establish transparency",
+      provider: "project-disclosure-collector",
+    });
+  }
 
   return {
     state: "partial",
-    detail: `bounded frozen-evidence scan completed with ${verifiedBackers.length} verified backing record${verifiedBackers.length === 1 ? "" : "s"}; the project-disclosure collector is not wired`,
+    detail: `bounded frozen-evidence scan completed with ${backingCount} verified backing record${backingCount === 1 ? "" : "s"} and ${verifiedDisclosures.length} verified disclosure record${verifiedDisclosures.length === 1 ? "" : "s"}`,
   };
 }
 
@@ -1291,6 +1388,8 @@ export function downgradeFixtureEvidenceForLive(seed: CollectedEvidence): Collec
     trustGraphScreen: undefined,
     webTeam: [],
     ventureTeams: [],
+    basicFacts: [],
+    basicFactLeads: [],
   };
 }
 
@@ -1427,6 +1526,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     }
     finishRuntimeStage(`adapter:${a.id}`, stageStartedAt);
   }
+  projectVerifiedBasicFacts(ctx);
   if (fixture) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
@@ -1641,6 +1741,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
     projectToken: evidence.projectToken,
+    basicFacts: evidence.basicFacts,
     checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
     providerRuns: checkTracker.providers().runs,
   };

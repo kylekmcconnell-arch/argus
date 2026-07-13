@@ -13,11 +13,17 @@ export interface DecisionBasisProps {
 }
 
 const STATUS_META: Record<DecisionBasisStatus, { label: string; color: string }> = {
-  grounded: { label: "Fully grounded", color: "var(--color-pass)" },
-  partial: { label: "Partial", color: "var(--color-caution)" },
-  contested: { label: "Contested", color: "var(--color-avoid)" },
-  gap: { label: "No support", color: "var(--color-caution)" },
+  grounded: { label: "Strong evidence", color: "var(--color-pass)" },
+  partial: { label: "Moderate evidence", color: "var(--color-caution)" },
+  contested: { label: "Mixed evidence", color: "var(--color-avoid)" },
+  gap: { label: "Limited evidence", color: "var(--color-caution)" },
 };
+
+const RELATION_LABEL = {
+  support: "Supports this view",
+  counter: "Needs reconciliation",
+  gap: "Open question",
+} as const;
 
 function safeExternalSource(value?: string): string | null {
   if (!value) return null;
@@ -61,35 +67,44 @@ function axisAnchorId(axis: string): string {
   return `decision-basis-${axis.replace(/[^a-z0-9_-]/gi, "-")}`;
 }
 
+function evidenceTitle(value: string): string {
+  return value.replace(/\b([A-Z]{1,3}\d+_[a-z0-9_]+)\b/gi, (axis) => axisLabel(axis));
+}
+
 function EvidenceRecord({ record, relation }: { record: AxisEvidenceRecord; relation: "support" | "counter" | "gap" }) {
   const source = safeExternalSource(record.sourceUrl);
   const captured = capturedLabel(record.capturedAt);
+  const title = evidenceTitle(record.title);
   return (
     <li className="panel-inset px-3 py-2.5">
       <div className="flex flex-wrap items-center gap-1.5">
-        <span className="chip">{relation}</span>
-        <span className="mono text-[11px] uppercase tracking-wide text-ink-faint">{record.provider}</span>
-        <span className="mono text-[11px] uppercase tracking-wide text-ink-faint">{record.operation}</span>
-        <span className="mono ml-auto text-[11px] uppercase tracking-wide text-ink-faint">{record.verification.replace(/_/g, " ")}</span>
+        <span className="chip">{RELATION_LABEL[relation]}</span>
+        <span className="ml-auto text-[11px] text-ink-faint">{captured ? `Captured ${captured}` : "Source captured by ARGUS"}</span>
       </div>
-      <div className="mt-1.5 text-[12.5px] font-medium leading-snug text-ink">{record.title}</div>
+      <div className="mt-1.5 text-[12.5px] font-medium leading-snug text-ink">{title}</div>
       {record.excerpt && <p className="mt-1 text-[11px] leading-relaxed text-ink-dim">{record.excerpt}</p>}
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-faint">
-        <span className="mono" title={record.artifactId}>Artifact {compactId(record.artifactId)}</span>
-        <span className="mono" title={record.contentHash}>SHA-256 {compactId(record.contentHash)}</span>
-        {captured && <span>Captured <time dateTime={record.capturedAt}>{captured}</time></span>}
         {source && (
           <a
             href={source}
             target="_blank"
             rel="noopener noreferrer"
             className="mono link-ext"
-            aria-label={`Open source URL for ${record.title} in a new tab`}
+            aria-label={`Open source URL for ${title} in a new tab`}
           >
-            Open source URL
+            View source
           </a>
         )}
       </div>
+      <details className="mt-2 text-[11px] text-ink-faint">
+        <summary className="cursor-pointer select-none">Verification details</summary>
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+          <span>{record.provider}</span>
+          <span>{record.verification.replace(/_/g, " ")}</span>
+          <span className="mono" title={record.artifactId}>Artifact {compactId(record.artifactId)}</span>
+          <span className="mono" title={record.contentHash}>SHA-256 {compactId(record.contentHash)}</span>
+        </div>
+      </details>
     </li>
   );
 }
@@ -133,7 +148,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
     return (
       <section aria-label="Decision basis" className="panel px-4 py-3.5">
         <div className="flex flex-wrap items-center gap-2">
-          <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Decision basis</h3>
+          <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">How ARGUS reached this view</h3>
           <span className="chip">{statusLabel}</span>
         </div>
         <div className="mt-2 flex flex-wrap items-center gap-3">
@@ -181,23 +196,19 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
   return (
     <section aria-label="Decision basis" className="panel px-4 py-3.5">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-        <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Decision basis</h3>
+        <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">How ARGUS reached this view</h3>
         <span className="text-[12.5px] text-ink-faint">{roleLabel(model.role ?? undefined)}</span>
-        <span className="mono ml-auto text-[11px] uppercase tracking-wide text-ink-faint">
-          {model.evidenceBacked}/{model.rows.length} axes evidence-backed
-          {` · ${model.grounded}/${model.rows.length} fully grounded`}
-          {model.partial ? ` · ${model.partial} partial` : ""}
-          {model.contested ? ` · ${model.contested} contested` : ""}
-          {model.gaps ? ` · ${model.gaps} without support` : ""}
+        <span className="ml-auto text-[11.5px] text-ink-faint">
+          {model.evidenceBacked} of {model.rows.length} diligence areas have cited support
         </span>
       </div>
       <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-        Evidence-backed means qualifying support is cited. Fully grounded additionally requires no counter-evidence or unresolved gaps.
+        Select an area to see what supports the view, what conflicts, and what still needs to be verified.
       </p>
 
       {model.rows.length ? (
         <>
-          <div className="mt-3 grid gap-2 md:grid-cols-2" role="tablist" aria-label="Governing axis evidence lineage">
+          <div className="mt-3 grid gap-2 md:grid-cols-2" role="tablist" aria-label="Diligence area evidence">
             {model.rows.map((row, index) => {
               const selectedTab = row.axis === selected?.axis;
               const meta = STATUS_META[row.status];
@@ -221,14 +232,15 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                   >
                     <span className="flex items-center gap-2">
                       <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">{axisLabel(row.axis)}</span>
-                      <span className="mono shrink-0 text-[11px] text-ink-faint">{row.score}/{row.weight}</span>
                       <span className="chip tint-var shrink-0" style={{ ["--tint" as string]: meta.color }}>{meta.label}</span>
                     </span>
                     <span className="mt-1 block text-[11px] text-ink-faint">
-                      {row.support.length} support · {row.counter.length} counter · {Math.max(row.gaps.length, row.gapArtifacts.length)} gap{Math.max(row.gaps.length, row.gapArtifacts.length) === 1 ? "" : "s"}
+                      {row.support.length} cited source{row.support.length === 1 ? "" : "s"}
+                      {row.counter.length ? ` · ${row.counter.length} need${row.counter.length === 1 ? "s" : ""} reconciliation` : ""}
+                      {Math.max(row.gaps.length, row.gapArtifacts.length) ? ` · ${Math.max(row.gaps.length, row.gapArtifacts.length)} question${Math.max(row.gaps.length, row.gapArtifacts.length) === 1 ? "" : "s"} to verify` : ""}
                     </span>
                     <span className="mt-0.5 block truncate text-[11px] text-ink-dim">
-                      {row.support[0]?.title ?? row.counter[0]?.title ?? row.gapArtifacts[0]?.title ?? row.gaps[0] ?? "No qualifying frozen citation recorded"}
+                      {evidenceTitle(row.support[0]?.title ?? row.counter[0]?.title ?? row.gapArtifacts[0]?.title ?? row.gaps[0] ?? "No qualifying frozen citation recorded")}
                     </span>
                   </button>
                 </div>
@@ -240,31 +252,31 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
             <div id={detailId} role="tabpanel" aria-labelledby={selectedTriggerId} className="panel-inset mt-3 px-3 py-3">
               <div className="flex flex-wrap items-center gap-2">
                 <h4 className="text-[12.5px] font-medium text-ink">{axisLabel(selected.axis)}</h4>
-                <span className="mono text-[11px] text-ink-faint">{selected.score}/{selected.weight}</span>
+                <span className="chip tint-var" style={{ ["--tint" as string]: STATUS_META[selected.status].color }}>{STATUS_META[selected.status].label}</span>
               </div>
-              <p className="mt-1 text-[11px] text-ink-faint">Frozen citations from the exact scorer packet. Analyst rationale is shown separately in the role breakdown.</p>
+              <p className="mt-1 text-[11px] text-ink-faint">These are the exact sources ARGUS used for this part of the assessment.</p>
 
               <div className="mt-3 grid gap-3 lg:grid-cols-2">
                 <div>
-                  <h5 className="eyebrow">Supporting evidence</h5>
+                  <h5 className="eyebrow">Why this looks credible</h5>
                   {selected.support.length ? (
                     <ul className="mt-1.5 space-y-2" aria-label={`Supporting evidence for ${axisLabel(selected.axis)}`}>
                       {selected.support.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="support" />)}
                     </ul>
-                  ) : <p className="mt-1.5 text-[11px] text-ink-faint">No qualifying supporting artifact cited.</p>}
+                  ) : <p className="mt-1.5 text-[11px] text-ink-faint">No verified supporting source was captured.</p>}
                 </div>
                 <div>
-                  <h5 className="eyebrow">Counter-evidence & conflicts</h5>
+                  <h5 className="eyebrow">What needs reconciliation</h5>
                   {selected.counter.length ? (
                     <ul className="mt-1.5 space-y-2" aria-label={`Counter-evidence for ${axisLabel(selected.axis)}`}>
                       {selected.counter.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="counter" />)}
                     </ul>
-                  ) : <p className="mt-1.5 text-[11px] text-ink-faint">No qualifying counter-evidence cited.</p>}
+                  ) : <p className="mt-1.5 text-[11px] text-ink-faint">No conflicting source was captured.</p>}
                 </div>
               </div>
 
               <div className="mt-3 border-t border-line/60 pt-2.5">
-                <h5 className="eyebrow">Evidence gaps</h5>
+                <h5 className="eyebrow">Questions to verify</h5>
                 {selected.gapArtifacts.length > 0 && (
                   <ul className="mt-1.5 space-y-2" aria-label={`Gap artifacts for ${axisLabel(selected.axis)}`}>
                     {selected.gapArtifacts.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="gap" />)}
@@ -275,14 +287,14 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                     {selected.gaps.map((gap) => <li key={gap}>{gap}</li>)}
                   </ul>
                 ) : selected.gapArtifacts.length === 0 ? (
-                  <p className="mt-1.5 text-[11px] text-ink-faint">No unresolved gap recorded for this axis.</p>
+                  <p className="mt-1.5 text-[11px] text-ink-faint">No open verification question was recorded for this area.</p>
                 ) : null}
               </div>
             </div>
           )}
         </>
       ) : (
-        <p className="mt-3 text-[12.5px] text-ink-dim">No scored governing axes were stored in this report.</p>
+        <p className="mt-3 text-[12.5px] text-ink-dim">No diligence areas were scored in this report.</p>
       )}
     </section>
   );

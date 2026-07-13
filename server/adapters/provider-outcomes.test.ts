@@ -72,7 +72,9 @@ describe("keyless adapter attempt accounting", () => {
         ? response(roster, 200, "text/plain")
         : response("missing", 404)
     )));
-    structured.mockResolvedValue({ people: [{ name: "Alice Example", role: "Founder" }] });
+    structured.mockResolvedValue({
+      people: [{ name: "Alice Example", role: "Founder", source_url: "https://example.org/team" }],
+    });
 
     const captured = await withCostLedger(async () => ({
       result: await fetchTeamPage("example.org", "Example"),

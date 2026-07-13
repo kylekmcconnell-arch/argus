@@ -367,9 +367,11 @@ describe("decision-safe person report presentation", () => {
 
     expect(container.textContent).toContain("Project routing unresolved");
     expect(container.textContent).toContain("ARGUS collected intelligence, but did not select a scoring methodology");
-    expect(container.textContent).toContain("Decision coverage0%");
+    expect(container.textContent).toContain("Review coverage0%");
     expect(container.textContent).toContain("Resolve whether this account represents a project, organization, token, or person");
-    expect(container.textContent).toContain("Identity resolution collection failed");
+    expect(container.textContent).toContain("Data coverage notes");
+    expect(container.textContent).toContain("Identity resolution");
+    expect(container.textContent).toContain("Provider returned no identity match");
     expect([...container.querySelectorAll("span")].some((node) => node.textContent?.trim() === "decision-ready")).toBe(false);
     expect(container.textContent).not.toContain("<UNKNOWN>");
     expect(harness.trustGraph).toHaveBeenCalledWith(expect.objectContaining({
@@ -415,7 +417,7 @@ describe("decision-safe person report presentation", () => {
 
     expect(container.textContent).toContain("Scoring output incomplete");
     expect(container.textContent).toContain("ARGUS resolved this subject to Project, but the scoring pass did not complete");
-    expect(container.textContent).toContain("Decision coverage0%");
+    expect(container.textContent).toContain("Review coverage0%");
     expect(container.textContent).toContain("Collected intelligence that did not enter a score");
     expect(container.textContent).toContain("Complete the Project scoring pass");
     expect(container.textContent).not.toContain("Project routing unresolved");
@@ -435,8 +437,78 @@ describe("decision-safe person report presentation", () => {
     expect(dossier.report.composite_verdict).not.toBe("PASS");
     const verdictDrivers = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
     const counterweight = container.querySelector('section[aria-labelledby="confidence-limits-title"]')?.textContent ?? "";
-    expect(verdictDrivers).toMatch(/hard cap governs|scored \d+\/\d+/i);
+    expect(verdictDrivers).toMatch(/hard cap governs|needs more verification/i);
     expect(counterweight).toContain("What evidence pulls the other way");
+  });
+
+  it("translates internal axis and provider language into an investor-readable summary", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
+    const originalAxisName = Object.keys(governing.axes)[0]!;
+    const artifactId = `art_v1_${"a".repeat(64)}`;
+    const dossier = {
+      ...base,
+      axisCitationVersion: 1 as const,
+      axisEvidenceCatalog: [{
+        artifactId,
+        kind: "axis_evidence" as const,
+        provider: "frozen-provider",
+        operation: "project-diligence",
+        section: "governing-axis",
+        title: "Verified operating-team source",
+        contentHash: "b".repeat(64),
+        eligibleAxes: [originalAxisName],
+        verification: "verified" as const,
+        scope: "direct_subject" as const,
+      }],
+      providerSnapshot: {
+        capturedAt: "2026-07-12T20:00:00.000Z",
+        runs: [
+          { id: "crunchbase", label: "Crunchbase", state: "unavailable" as const, observedAt: "2026-07-12T20:00:00.000Z" },
+          { id: "reddit", label: "Reddit", state: "failed" as const, observedAt: "2026-07-12T20:00:00.000Z" },
+        ],
+      },
+      checkRuns: [{
+        checkId: "project-disclosures",
+        label: "Transparency and disclosures",
+        status: "unknown" as const,
+        provider: "project-disclosure-collector",
+      }],
+      report: {
+        ...base.report,
+        role_reports: base.report.role_reports.map((role) => role.role === governing.role ? {
+          ...role,
+          axes: {
+            ...role.axes,
+            [originalAxisName]: {
+              ...governing.axes[originalAxisName]!,
+              evidenceRefs: [artifactId],
+              gaps: ["Confirm the current operating team."],
+            },
+          },
+        } : role),
+      },
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const diligenceRail = container.querySelector('section[aria-label="Diligence areas"]')?.textContent ?? "";
+    const openQuestionsRail = container.querySelector('section[aria-label="Open questions"]')?.textContent ?? "";
+    expect(diligenceRail).toMatch(/Strong evidence|Moderate evidence|Limited evidence/);
+    expect(diligenceRail).toContain("question to verify");
+    expect(diligenceRail).toContain("reviewed");
+    expect(diligenceRail).not.toContain(originalAxisName);
+    expect(diligenceRail).not.toMatch(/[A-Z]\d+_/);
+    expect(diligenceRail).not.toContain("_");
+    expect(diligenceRail).not.toContain("counter");
+    expect(diligenceRail).not.toContain("gaps");
+    expect(openQuestionsRail).toContain("Transparency and disclosures");
+    expect(openQuestionsRail).not.toContain("Crunchbase");
+    expect(openQuestionsRail).not.toContain("Reddit");
+    expect(container.textContent).toContain("See all evidence");
+    expect(container.textContent).toContain("See what still needs checking");
   });
 
   it("withholds incomplete PASS clearance while preserving it as a preliminary signal", () => {
@@ -526,10 +598,10 @@ describe("decision-safe person report presentation", () => {
     expect([...container.querySelectorAll(".display")].some((node) => node.textContent?.trim() === "PROVISIONAL")).toBe(true);
     expect(container.textContent).toContain("provisional score");
     expect(container.textContent).toContain("PASS SIGNAL");
-    expect(container.textContent).toContain("Decision coverage76%");
-    expect(container.textContent).toContain("Recorded outcomes10 / 13");
-    expect(container.textContent).toContain("Evidence-backed axes6 / 6");
-    expect(container.textContent).toContain("Unresolved checks3");
+    expect(container.textContent).toContain("Review coverage76%");
+    expect(container.textContent).toContain("Checks completed10 / 13");
+    expect(container.textContent).toContain("Areas with evidence6 / 6");
+    expect(container.textContent).toContain("Questions remaining3");
     expect(container.textContent).toContain("Final clearance remains withheld");
     expect(container.textContent).toContain("Evidence-backed scored-axis breakdown");
     expect(container.textContent).toContain("= provisional 71");

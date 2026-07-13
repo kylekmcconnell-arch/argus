@@ -138,11 +138,11 @@ describe("DecisionBasis", () => {
       root.render(<DecisionBasis roleReport={roleReport()} catalog={[support, counter]} lineageVersion={1} />);
     });
 
-    expect(container.textContent).toContain("Decision basis");
+    expect(container.textContent).toContain("How ARGUS reached this view");
     expect(container.textContent).toContain("Founder");
-    expect(container.textContent).toContain("1/2 axes evidence-backed · 0/2 fully grounded · 1 contested · 1 without support");
-    expect(container.textContent).toContain("Contested");
-    expect(container.textContent).toContain("Evidence-backed means qualifying support is cited");
+    expect(container.textContent).toContain("1 of 2 diligence areas have cited support");
+    expect(container.textContent).toContain("Mixed evidence");
+    expect(container.textContent).toContain("what still needs to be verified");
 
     const axisButtons = [...container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')];
     expect(axisButtons).toHaveLength(2);

@@ -1,7 +1,33 @@
 import { describe, expect, it } from "vitest";
 import { SubjectClass } from "../src/engine";
-import { emptyEvidence } from "../src/data/evidence";
-import { axisCatalog, providerBackedRoles } from "./orchestrate";
+import { emptyEvidence, type BasicFact, type BasicFactPredicate } from "../src/data/evidence";
+import type { CheckObservation, CollectContext } from "./adapters/types";
+import { axisCatalog, collectProjectCoreEvidenceOutcomes, projectVerifiedBasicFacts, providerBackedRoles } from "./orchestrate";
+
+const basicFact = (predicate: BasicFactPredicate, value: string, qualifier?: string): BasicFact => ({
+  factId: `fact-${predicate}-${value}`,
+  subjectKey: "@JupiterExchange",
+  predicate,
+  value,
+  normalizedValue: value.toLowerCase(),
+  status: "verified",
+  critical: predicate === "founder" || predicate === "product",
+  sources: [{
+    url: `https://jup.ag/${predicate}`,
+    sourceClass: "official_subject",
+    relation: "supports",
+    excerpt: `Jupiter confirms ${value} for ${predicate}.`,
+    contentHash: predicate.padEnd(64, "0").slice(0, 64),
+    capturedAt: "2026-07-12T18:00:00.000Z",
+    provider: "public-web",
+    artifactVerified: true,
+  }],
+  ...(qualifier ? { qualifier } : {}),
+  evidence_origin: "deterministic",
+  artifact_verified: true,
+  provider: "public-web",
+  discoveryProvider: "claude-web-search",
+});
 
 function resolvedProjectProfile(bio: string, website: string | null | undefined = "https://world.xyz/") {
   const evidence = emptyEvidence("@world_xyz");
@@ -103,6 +129,48 @@ describe("provider-backed project routing", () => {
     const roles = providerBackedRoles(evidence);
     expect(roles).toEqual([]);
     expect(axisCatalog(roles)).toEqual([]);
+  });
+
+  it("turns verified basic facts into a cited project roster and completed diligence checks", () => {
+    const evidence = resolvedProjectProfile("the Solana liquidity protocol", "https://jup.ag");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.basicFacts = [
+      basicFact("founder", "Meow", "Co-founder"),
+      basicFact("product", "Jupiter Swap"),
+      basicFact("traction", "$1 billion monthly volume"),
+      basicFact("investor", "Framework Ventures"),
+      basicFact("governance", "Jupiter DAO"),
+      basicFact("audit", "OtterSec security review"),
+    ];
+    const checks: CheckObservation[] = [];
+    const ctx: CollectContext = {
+      handle: "@JupiterExchange",
+      evidence,
+      emit: () => undefined,
+      recordCheck: (check) => checks.push(check),
+    };
+
+    projectVerifiedBasicFacts(ctx);
+    const outcome = collectProjectCoreEvidenceOutcomes(ctx);
+
+    expect(evidence.webTeam).toEqual([
+      expect.objectContaining({
+        name: "Meow",
+        role: "Co-founder",
+        sourceUrl: "https://jup.ag/founder",
+        artifact_verified: true,
+        provider: "basic-facts-web",
+      }),
+    ]);
+    expect(checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "project-team-identity", status: "confirmed" }),
+      expect.objectContaining({ id: "project-product-substance", status: "confirmed" }),
+      expect.objectContaining({ id: "project-traction-liveness", status: "confirmed" }),
+      expect.objectContaining({ id: "project-backing-partners", status: "confirmed" }),
+      expect.objectContaining({ id: "project-transparency", status: "confirmed" }),
+    ]));
+    expect(outcome.detail).toContain("1 verified backing record");
+    expect(outcome.detail).toContain("2 verified disclosure records");
   });
 
   it.each([

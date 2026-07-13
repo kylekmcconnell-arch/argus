@@ -1,5 +1,6 @@
 // server/config.ts
 var PROVIDERS = [
+  { id: "claude-research", label: "Claude (cited basic-facts research)", env: ["ANTHROPIC_API_KEY"], free: false, feeds: "founders, product, token, launch, governance, audits, repositories, funding and traction leads with sources" },
   { id: "grok", label: "Grok (X + cited web discovery)", env: ["XAI_API_KEY"], free: false, feeds: "testimonial acknowledgment, recent activity, sentiment, portfolio and fund-scale leads" },
   { id: "twitterapi", label: "twitterapi.io (X follow graph)", env: ["TWITTERAPI_KEY"], free: false, feeds: "follower/following graph, profile, account age" },
   { id: "coingecko", label: "CoinGecko", env: ["COINGECKO_API_KEY"], free: true, feeds: "token price/mcap, call performance (K2)" },
@@ -1139,6 +1140,18 @@ function assembleDossier(ev, live) {
         history: { ...ev.projectToken.history, points: [...ev.projectToken.history.points] }
       } : {}
     } : void 0,
+    ...ev.basicFacts?.length ? {
+      basicFacts: ev.basicFacts.map((fact) => ({
+        ...fact,
+        ...fact.sources ? { sources: fact.sources.map((source) => ({ ...source })) } : {}
+      }))
+    } : {},
+    ...ev.basicFactLeads?.length ? {
+      basicFactLeads: ev.basicFactLeads.map((lead) => ({
+        ...lead,
+        ...lead.candidateUrls ? { candidateUrls: [...lead.candidateUrls] } : {}
+      }))
+    } : {},
     report,
     graph,
     founderSummary: ev.roles.includes("FOUNDER" /* FOUNDER */) ? a.founderSummary() : void 0,
@@ -1422,7 +1435,9 @@ function emptyEvidence(handle) {
     notableFollowers: [],
     contradictions: [],
     sourceArtifacts: [],
-    portfolioLeads: []
+    portfolioLeads: [],
+    basicFacts: [],
+    basicFactLeads: []
   };
 }
 
@@ -1437,6 +1452,7 @@ var PRICE = {
   grokSource: 25 / 1e3,
   claudeIn: 3 / 1e6,
   claudeOut: 15 / 1e6,
+  claudeWebSearch: 10 / 1e3,
   twitterapiCall: 2e-4,
   pdlMatch: 0.1,
   heliusCall: 1e-4
@@ -1466,9 +1482,9 @@ var aggregateStatus = (line) => {
   return "partial";
 };
 function mergeMeta(current, next) {
-  const clean3 = next?.trim();
-  if (!clean3 || current?.includes(clean3)) return current;
-  return [current, clean3].filter(Boolean).join(" \xB7 ").slice(0, 500);
+  const clean4 = next?.trim();
+  if (!clean4 || current?.includes(clean4)) return current;
+  return [current, clean4].filter(Boolean).join(" \xB7 ").slice(0, 500);
 }
 function recordCall(provider, op, usd = 0, meta, status = "succeeded") {
   const { ledger } = currentState();
@@ -1512,14 +1528,15 @@ function addClaudeUsage(u, op = "analysis", status = "succeeded", outcomeMeta) {
   const { claude } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
+  const webSearches = u?.server_tool_use?.web_search_requests ?? 0;
   claude.calls += 1;
   claude.in += tin;
   claude.out += tout;
   recordCall(
     "claude",
     op,
-    tin * PRICE.claudeIn + tout * PRICE.claudeOut,
-    [`${tin + tout} tok`, outcomeMeta].filter(Boolean).join(" \xB7 "),
+    tin * PRICE.claudeIn + tout * PRICE.claudeOut + webSearches * PRICE.claudeWebSearch,
+    [`${tin + tout} tok`, webSearches ? `${webSearches} web searches` : "", outcomeMeta].filter(Boolean).join(" \xB7 "),
     status
   );
 }
@@ -1767,8 +1784,8 @@ var profileBioHasCurrentHandleAffiliation = (profile, value) => {
 };
 var cleanHost = (value) => value.replace(/^www\./i, "").toLowerCase();
 var isSharedPublicationHost = (host) => {
-  const clean3 = cleanHost(host);
-  return [...SHARED_PUBLICATION_HOSTS].some((candidate) => clean3 === candidate || clean3.endsWith(`.${candidate}`));
+  const clean4 = cleanHost(host);
+  return [...SHARED_PUBLICATION_HOSTS].some((candidate) => clean4 === candidate || clean4.endsWith(`.${candidate}`));
 };
 var isPublicHostname = (value) => {
   const host = cleanHost(value).replace(/^\[|\]$/g, "").replace(/\.$/, "");
@@ -1873,12 +1890,12 @@ var isRecordSpecificRegulatoryUrl = (url) => {
   return false;
 };
 var hasCurrentAffiliationProof = (value, capturedAt, now, profile) => {
-  const subjectName2 = comparable(value.subjectName);
+  const subjectName3 = comparable(value.subjectName);
   const handle = typeof value.subjectHandle === "string" ? value.subjectHandle.trim().replace(/^@/, "") : "";
   const source = boundedWebUrl(value.attributionSourceUrl);
   const sourceHash = typeof value.attributionSourceContentHash === "string" ? value.attributionSourceContentHash : "";
   const affiliationCapturedAt = validDate(value.attributionCapturedAt);
-  if (!subjectName2 || !HANDLE.test(handle) || !source || !SHA256_HEX.test(sourceHash) || !affiliationCapturedAt) return false;
+  if (!subjectName3 || !HANDLE.test(handle) || !source || !SHA256_HEX.test(sourceHash) || !affiliationCapturedAt) return false;
   if (affiliationCapturedAt.getTime() > now.getTime() + CLOCK_SKEW_MS || affiliationCapturedAt.getTime() > capturedAt.getTime() + CLOCK_SKEW_MS || capturedAt.getTime() - affiliationCapturedAt.getTime() > 7 * DAY_MS) return false;
   const host = cleanHost(source.hostname);
   const path = source.pathname.split("/").filter(Boolean);
@@ -3025,11 +3042,35 @@ var SOURCE_ARTIFACT_AXIS_ELIGIBILITY = {
     "ME3_conduct_reputation"
   ]
 };
+var BASIC_FACT_AXIS_ELIGIBILITY = {
+  official_identity: ["P1_team_and_identity", "P6_transparency_integrity"],
+  founder: ["P1_team_and_identity"],
+  founders: ["P1_team_and_identity"],
+  executive: ["P1_team_and_identity"],
+  team: ["P1_team_and_identity"],
+  founded: ["P1_team_and_identity", "P2_product_substance"],
+  launched: ["P2_product_substance", "P5_traction_and_liveness"],
+  launch_date: ["P2_product_substance", "P5_traction_and_liveness"],
+  product: ["P2_product_substance", "P5_traction_and_liveness"],
+  official_token: ["P3_token_conduct"],
+  token: ["P3_token_conduct"],
+  network: ["P2_product_substance", "P3_token_conduct"],
+  legal_entity: ["P1_team_and_identity", "P6_transparency_integrity"],
+  funding: ["P4_backing_and_partners"],
+  investor: ["P4_backing_and_partners"],
+  governance: ["P3_token_conduct", "P6_transparency_integrity"],
+  audit: ["P2_product_substance", "P6_transparency_integrity"],
+  audits: ["P2_product_substance", "P6_transparency_integrity"],
+  repository: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
+  repositories: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
+  traction: ["P5_traction_and_liveness"]
+};
 var SCORING_SUPPORTED_AXES = /* @__PURE__ */ new Set([
   ...Object.values(SECTION_AXIS_ELIGIBILITY).flat(),
   ...Object.values(FINDING_AXIS_ELIGIBILITY).flat(),
   ...Object.values(CHECK_AXIS_ELIGIBILITY).flat(),
-  ...Object.values(SOURCE_ARTIFACT_AXIS_ELIGIBILITY).flat()
+  ...Object.values(SOURCE_ARTIFACT_AXIS_ELIGIBILITY).flat(),
+  ...Object.values(BASIC_FACT_AXIS_ELIGIBILITY).flat()
 ]);
 var sourceArtifactKind = (value) => {
   const kind = typeof value.kind === "string" ? value.kind : "";
@@ -3049,16 +3090,16 @@ var sourceArtifactEligibleAxes = (value, sourceArtifactPeers = [], subjectHandle
   return SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind] ?? [];
 };
 var stableJson = (value) => {
-  const normalize = (candidate) => {
+  const normalize2 = (candidate) => {
     if (candidate == null || typeof candidate === "string" || typeof candidate === "boolean") return candidate;
     if (typeof candidate === "number") return Number.isFinite(candidate) ? candidate : null;
-    if (Array.isArray(candidate)) return candidate.map(normalize);
+    if (Array.isArray(candidate)) return candidate.map(normalize2);
     if (typeof candidate !== "object") return null;
     return Object.fromEntries(
-      Object.keys(candidate).sort().filter((key) => candidate[key] !== void 0).map((key) => [key, normalize(candidate[key])])
+      Object.keys(candidate).sort().filter((key) => candidate[key] !== void 0).map((key) => [key, normalize2(candidate[key])])
     );
   };
-  return JSON.stringify(normalize(value));
+  return JSON.stringify(normalize2(value));
 };
 var evidencePayload = (value) => {
   const base = value && typeof value === "object" && !Array.isArray(value) ? { ...value } : { value };
@@ -3072,7 +3113,7 @@ var eligibleAxesFor = (section, value, axisCatalog2, sourceArtifactPeers = [], s
     "P3_token_conduct",
     ...[value.marketCapUsd, value.volume24hUsd, value.liquidityUsd].some((metric) => typeof metric === "number" && Number.isFinite(metric) && metric > 0) ? ["P5_traction_and_liveness"] : []
   ] : [];
-  const eligible = section === "profile" && value.profile_collection_state !== "resolved" ? [] : section === "projectToken" ? projectTokenAxes : section === "findings" ? FINDING_AXIS_ELIGIBILITY[findingType] ?? [] : section === "checkOutcomes" && checkId ? CHECK_AXIS_ELIGIBILITY[checkId] ?? [] : section === "sourceArtifacts" ? sourceArtifactEligibleAxes(value, sourceArtifactPeers, subjectHandle, profile) : SECTION_AXIS_ELIGIBILITY[section] ?? [];
+  const eligible = section === "profile" && value.profile_collection_state !== "resolved" ? [] : section === "projectToken" ? projectTokenAxes : section === "findings" ? FINDING_AXIS_ELIGIBILITY[findingType] ?? [] : section === "checkOutcomes" && checkId ? CHECK_AXIS_ELIGIBILITY[checkId] ?? [] : section === "basicFacts" ? BASIC_FACT_AXIS_ELIGIBILITY[recordText(value, ["predicate"], 80)?.toLowerCase() ?? ""] ?? [] : section === "sourceArtifacts" ? sourceArtifactEligibleAxes(value, sourceArtifactPeers, subjectHandle, profile) : SECTION_AXIS_ELIGIBILITY[section] ?? [];
   const allowed = new Set(eligible);
   return [...new Set(axisCatalog2.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
 };
@@ -3188,10 +3229,19 @@ var verificationFor = (section, record2, sourceArtifactPeers = [], subjectHandle
   if (section === "projectToken") {
     return record2.verified === true && (record2.verification === "official_x" || record2.verification === "official_domain") ? "verified" : "unavailable";
   }
+  if (section === "basicFacts") {
+    const status = recordText(record2, ["status"], 40)?.toLowerCase();
+    return record2.artifact_verified === true && (status === "verified" || status === "corroborated") ? "verified" : status === "lead" ? "reported" : "unavailable";
+  }
   return "observed";
 };
 var DIRECT_SECTIONS = /* @__PURE__ */ new Set(["profile", "profileAuthenticity", "projectToken", "findings", "wallets", "promotions", "recentActivity"]);
 var providerFor = (section, payload) => {
+  if (section === "basicFacts" && Array.isArray(payload.sources)) {
+    const source = payload.sources.find((value) => value && typeof value === "object" && !Array.isArray(value));
+    const sourceProvider = source ? recordText(source, ["provider"], 100) : void 0;
+    if (sourceProvider) return sourceProvider;
+  }
   const declared = recordText(payload, ["provider"], 100);
   if (declared) return declared;
   if (section === "profile") {
@@ -3221,13 +3271,14 @@ var makeAxisArtifact = (section, value, axisCatalog2, eligibleOverride, sourceAr
   const artifactId = `art_v1_${contentHash}`;
   const eligibleAxes = eligibleOverride ?? eligibleAxesFor(section, payload, axisCatalog2, sourceArtifactPeers, subjectHandle, profile);
   const provider = providerFor(section, payload);
+  const basicFactSource = section === "basicFacts" && Array.isArray(payload.sources) ? payload.sources.find((value2) => value2 && typeof value2 === "object" && !Array.isArray(value2)) : void 0;
   const operationKey = recordText(payload, ["checkId", "check_id", "finding_type", "kind", "type"], 100);
-  const title = recordText(payload, ["title", "label", "claim", "name", "project_name", "handle", "axis"], 180) ?? `${section} evidence`;
-  const excerpt = recordText(payload, ["excerpt", "note", "rationale", "evidence", "bio", "detail", "text", "value"], 320);
+  const title = recordText(payload, ["title", "label", "claim", "name", "project_name", "handle", "axis", "value", "predicate"], 180) ?? `${section} evidence`;
+  const excerpt = (basicFactSource ? recordText(basicFactSource, ["excerpt"], 320) : void 0) ?? recordText(payload, ["excerpt", "note", "rationale", "evidence", "bio", "detail", "text", "value"], 320);
   const sourceUrl = safeArtifactSourceUrl(
     recordText(payload, ["sourceUrl", "source_url", "evidence_url", "url", "linkedin"], 420)
-  );
-  const capturedAt = recordText(payload, ["capturedAt", "captured_at", "profile_captured_at", "completedAt", "source_date"], 40);
+  ) ?? safeArtifactSourceUrl(basicFactSource ? recordText(basicFactSource, ["url", "sourceUrl"], 420) : void 0);
+  const capturedAt = recordText(payload, ["capturedAt", "captured_at", "profile_captured_at", "completedAt", "source_date"], 40) ?? (basicFactSource ? recordText(basicFactSource, ["capturedAt", "captured_at"], 40) : void 0);
   return {
     decorated: { ...payload, artifactId },
     catalog: {
@@ -3256,6 +3307,7 @@ var SCORING_ARRAY_SECTIONS = [
   "promotions",
   "wallets",
   "team",
+  "basicFacts",
   "notableFollowers",
   "recentActivity",
   "sourceArtifacts",
@@ -3381,6 +3433,7 @@ function serializeAnalystEvidencePacket(input, options) {
     promotions: 16,
     wallets: 12,
     team: 16,
+    basicFacts: 24,
     notableFollowers: 16,
     recentActivity: 12,
     sourceArtifacts: 24,
@@ -3481,6 +3534,7 @@ function serializeAnalystEvidencePacket(input, options) {
     "ventureTeams",
     "checkOutcomes",
     "sourceArtifacts",
+    "basicFacts",
     "team"
   ];
   const render = () => options.axisCatalog ? renderScoringPacket(packet, options.axisCatalog) : packet;
@@ -3540,7 +3594,7 @@ function serializeAnalystEvidencePacket(input, options) {
     }
   }
   let json = JSON.stringify(render());
-  const protectedEvidenceSections = /* @__PURE__ */ new Set(["checkOutcomes", "sourceArtifacts", "team"]);
+  const protectedEvidenceSections = /* @__PURE__ */ new Set(["checkOutcomes", "sourceArtifacts", "basicFacts", "team"]);
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
     if (!removeOneFrom(pruneOrder, (section) => !protectedEvidenceSections.has(section))) break;
     json = JSON.stringify(render());
@@ -4964,12 +5018,12 @@ ${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}` : "";
   return parseTeamJSON(text2, h, "X content");
 }
 async function findTeamOnSite(domain, projectName2) {
-  const clean3 = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
-  if (!clean3 && !projectName2) return [];
-  const anchor = clean3 ? `website ${clean3}${projectName2 ? ` (${projectName2})` : ""}` : `project "${projectName2}"`;
+  const clean4 = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  if (!clean4 && !projectName2) return [];
+  const anchor = clean4 ? `website ${clean4}${projectName2 ? ` (${projectName2})` : ""}` : `project "${projectName2}"`;
   const system = `You are a forensic OSINT researcher with live web and X search. Find EVERY real person behind the crypto/tech project: founders, cofounders, the WHOLE leadership team (CEO/CTO/COO/CFO/CMO), engineering and product leads, AND advisors/backers. DIG hard and be COMPLETE: Google the project + 'team'/'leadership'/'about', open the project's LinkedIn company page and read its 'People' tab (list the employees it shows), check Crunchbase people, the GitHub org's members, podcasts/interviews/press, and X. For an established project expect to name SEVERAL people. Do NOT stop at one or two; keep going until you have the full public roster you can verify. Connect each name to their X handle and LinkedIn where possible. Include ONLY real people genuinely tied to THIS specific project (match the domain/name; do not confuse same-named projects). EXCLUDE hype/shill accounts and generic mentions. Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT. Do NOT downgrade a founder to advisor. For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal. This exposes serial founders and cross-project ties. Reply with ONLY compact JSON: {"people":[{"name":"","handle":"@...","linkedin":"linkedin.com/in/...","role":"","kind":"team|advisor","evidence":"","projects":[{"name":"","role":""}]}]}. If nobody, {"people":[]}. NEVER invent. Never use em dashes.`;
-  const text2 = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean3 || projectName2}` });
-  return parseTeamJSON(text2, void 0, clean3 ? "web/LinkedIn search" : "web/LinkedIn (by name)");
+  const text2 = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean4 || projectName2}` });
+  return parseTeamJSON(text2, void 0, clean4 ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 async function enrichTeamIdentities(project, people) {
   if (!people.length) return [];
@@ -5942,10 +5996,10 @@ var headers2 = (key) => ({
 });
 var isRecord2 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 function validGithubResult(path, value) {
-  const clean3 = path.split("?")[0];
-  if (clean3 === "/search/users") return isRecord2(value) && Array.isArray(value.items);
-  if (/^\/users\/[^/]+\/(orgs|repos)$/.test(clean3)) return Array.isArray(value);
-  if (/^\/users\/[^/]+$/.test(clean3)) return isRecord2(value) && typeof value.login === "string" && !!value.login.trim();
+  const clean4 = path.split("?")[0];
+  if (clean4 === "/search/users") return isRecord2(value) && Array.isArray(value.items);
+  if (/^\/users\/[^/]+\/(orgs|repos)$/.test(clean4)) return Array.isArray(value);
+  if (/^\/users\/[^/]+$/.test(clean4)) return isRecord2(value) && typeof value.login === "string" && !!value.login.trim();
   return isRecord2(value) || Array.isArray(value);
 }
 async function ghJson(path, key) {
@@ -6544,8 +6598,611 @@ var onchainAdapter = {
   }
 };
 
-// server/adapters/offchain.ts
+// server/adapters/basicFacts.ts
 import { createHash as createHash4 } from "node:crypto";
+import { isIP as isIP2 } from "node:net";
+
+// server/publicWeb.ts
+import { createHash as createHash3 } from "node:crypto";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { isIP } from "node:net";
+import { Readable } from "node:stream";
+var MAX_TEXT_BYTES = 15e5;
+var MAX_REDIRECTS = 4;
+var SENSITIVE_URL_PARAM2 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
+var SAFE_CONTENT_TYPES = /* @__PURE__ */ new Set([
+  "application/json",
+  "application/ld+json",
+  "application/xhtml+xml",
+  "text/html",
+  "text/plain",
+  "text/xml"
+]);
+function isPublicIpAddress(address) {
+  const version = isIP(address);
+  if (version === 4) {
+    const [a, b] = address.split(".").map(Number);
+    return !(a === 0 || a === 10 || a === 127 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 0 || a === 192 && b === 168 || a === 198 && (b === 18 || b === 19) || a >= 224);
+  }
+  if (version === 6) {
+    const value = address.toLowerCase();
+    const parts = value.split(":");
+    const first = Number.parseInt(parts[0] || "0", 16);
+    const second = Number.parseInt(parts[1] || "0", 16);
+    if (!Number.isFinite(first) || first < 8192 || first > 16383) return false;
+    if (first === 8194 || first === 16382) return false;
+    if (first === 8193 && (second === 0 || second === 2 || second >= 16 && second <= 47 || second === 3512)) return false;
+    return true;
+  }
+  return false;
+}
+var defaultLookup = async (hostname) => dnsLookup(hostname, { all: true, verbatim: true });
+var normalizedHostname = (value) => value.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
+async function validatedPublicTarget(raw, base, lookup = defaultLookup) {
+  let url;
+  try {
+    url = base ? new URL(raw, base) : new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password) return null;
+  if (url.port && !(url.protocol === "https:" && url.port === "443" || url.protocol === "http:" && url.port === "80")) return null;
+  if ([...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM2.test(key))) return null;
+  const hostname = normalizedHostname(url.hostname);
+  if (!hostname || isIP(hostname) || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) return null;
+  try {
+    const resolved = await lookup(hostname);
+    if (!resolved.length) return null;
+    const addresses = resolved.map((entry) => ({
+      address: entry.address,
+      // Trust the parsed address rather than provider-supplied family metadata.
+      family: isIP(entry.address)
+    }));
+    if (addresses.some((entry) => !entry.family || !isPublicIpAddress(entry.address))) return null;
+    url.hash = "";
+    return {
+      url,
+      hostname,
+      addresses: Object.freeze(addresses.map((entry) => Object.freeze({ ...entry })))
+    };
+  } catch {
+    return null;
+  }
+}
+var pinnedLookupFor = (target) => (hostname, options, callback) => {
+  const requestedHost = normalizedHostname(hostname);
+  if (requestedHost !== target.hostname) {
+    const error = new Error("socket lookup hostname differed from validated target");
+    error.code = "EACCES";
+    callback(error, "", 0);
+    return;
+  }
+  const publicAddresses = target.addresses.filter((entry) => entry.family === isIP(entry.address) && isPublicIpAddress(entry.address));
+  const requestedFamily = options.family === "IPv4" ? 4 : options.family === "IPv6" ? 6 : options.family;
+  const eligible = requestedFamily === 4 || requestedFamily === 6 ? publicAddresses.filter((entry) => entry.family === requestedFamily) : publicAddresses;
+  if (!eligible.length) {
+    const error = new Error("validated target has no public address for requested family");
+    error.code = "EACCES";
+    callback(error, "", 0);
+    return;
+  }
+  if (options.all) callback(null, eligible.map((entry) => ({ ...entry })));
+  else callback(null, eligible[0].address, eligible[0].family);
+};
+var responseHeaders = (rawHeaders) => {
+  const headers4 = new Headers();
+  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
+    headers4.append(rawHeaders[index], rawHeaders[index + 1]);
+  }
+  return headers4;
+};
+var nativeRequest = (url, options) => new Promise((resolve, reject) => {
+  const request = url.protocol === "https:" ? httpsRequest : httpRequest;
+  const requestOptions = {
+    method: "GET",
+    headers: options.headers,
+    signal: options.signal,
+    lookup: options.lookup,
+    // Never reuse a socket whose connection was established under another DNS
+    // decision. Every hop must exercise this request's pinned lookup.
+    agent: false
+  };
+  const outgoing = request(url, requestOptions, (incoming) => {
+    const status = incoming.statusCode ?? 500;
+    const headers4 = responseHeaders(incoming.rawHeaders);
+    const noBody = status === 204 || status === 205 || status === 304 || status >= 300 && status < 400;
+    if (noBody) {
+      incoming.resume();
+      resolve(new Response(null, { status, statusText: incoming.statusMessage, headers: headers4 }));
+      return;
+    }
+    const body = Readable.toWeb(incoming);
+    resolve(new Response(body, { status, statusText: incoming.statusMessage, headers: headers4 }));
+  });
+  outgoing.once("error", reject);
+  outgoing.end();
+});
+async function readBoundedText(response) {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_TEXT_BYTES) return null;
+  if (!response.body) return Buffer.alloc(0);
+  const chunks = [];
+  const reader = response.body.getReader();
+  let total = 0;
+  for (; ; ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_TEXT_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks, total);
+}
+async function fetchPublicText(raw, dependencies = {}) {
+  const request = dependencies.request ?? nativeRequest;
+  const lookup = dependencies.lookup ?? defaultLookup;
+  let target = await validatedPublicTarget(raw, void 0, lookup);
+  if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
+  for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+    let response;
+    try {
+      response = await request(target.url, {
+        signal: AbortSignal.timeout(8e3),
+        headers: {
+          accept: "text/html,application/xhtml+xml,application/json,text/plain;q=0.8",
+          "user-agent": "ARGUS due-diligence evidence collector/1.0"
+        },
+        lookup: pinnedLookupFor(target)
+      });
+    } catch {
+      return { status: "failed", reason: "transport_error" };
+    }
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location || redirect === MAX_REDIRECTS) return { status: "failed", reason: "invalid_or_excessive_redirect" };
+      target = await validatedPublicTarget(location, target.url, lookup);
+      if (!target) return { status: "rejected", reason: "unsafe_redirect" };
+      continue;
+    }
+    if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
+    const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
+      return { status: "failed", reason: "unsupported_content_type" };
+    }
+    let bytes;
+    try {
+      bytes = await readBoundedText(response);
+    } catch {
+      return { status: "failed", reason: "response_stream_error" };
+    }
+    if (!bytes) return { status: "failed", reason: "response_too_large" };
+    const text2 = bytes.toString("utf8");
+    if (!text2.trim()) return { status: "failed", reason: "empty_response" };
+    return {
+      status: "ok",
+      url: target.url.toString(),
+      host: target.url.hostname.replace(/^www\./i, "").toLowerCase(),
+      contentType: contentType || "text/plain",
+      text: text2,
+      contentHash: createHash3("sha256").update(bytes).digest("hex"),
+      capturedAt: (dependencies.now?.() ?? /* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  return { status: "failed", reason: "redirect_loop" };
+}
+
+// server/adapters/basicFacts.ts
+var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
+var MAX_SEARCH_USES = 4;
+var MAX_LEADS = 16;
+var MAX_SOURCES = 12;
+var DISCOVERY_TIMEOUT_MS = 5e4;
+var SENSITIVE_URL_PARAM3 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
+var PREDICATES = /* @__PURE__ */ new Set([
+  "founder",
+  "executive",
+  "founded",
+  "launched",
+  "official_token",
+  "funding",
+  "investor",
+  "product",
+  "network",
+  "legal_entity",
+  "official_identity",
+  "governance",
+  "audit",
+  "repository",
+  "traction"
+]);
+var CRITICAL_PREDICATES = /* @__PURE__ */ new Set([
+  "official_identity",
+  "product",
+  "founder",
+  "executive",
+  "official_token"
+]);
+var clean = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
+var normalize = (value) => value.normalize("NFKC").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim();
+var searchable = (value) => normalize(value).toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
+function containsPhrase(text2, phrase) {
+  const haystack = ` ${searchable(text2)} `;
+  const needle = searchable(phrase);
+  return !!needle && haystack.includes(` ${needle} `);
+}
+function safeCandidateUrl(value) {
+  if (typeof value !== "string" || value.length > 2e3) return null;
+  try {
+    const url = new URL(value);
+    const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host || isIP2(host) || host === "localhost" || host.endsWith(".localhost") || host.endsWith(".local") || host.endsWith(".internal") || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM3.test(key))) return null;
+    url.hash = "";
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+function parsePayload(text2) {
+  const fenced = text2.match(/```(?:json)?\s*([\s\S]*?)```/i)?.[1];
+  const candidate = fenced ?? text2.match(/\{[\s\S]*\}/)?.[0];
+  if (!candidate) return null;
+  try {
+    const parsed = JSON.parse(candidate);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+function isAtomicValue(predicate, value) {
+  if (/[;\n]|\s(?:and|&)\s/i.test(value)) return false;
+  if (["founder", "executive", "investor"].includes(predicate) && value.includes(",")) return false;
+  return true;
+}
+function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-search") {
+  const payload = parsePayload(text2);
+  if (!payload || !Array.isArray(payload.facts)) return null;
+  const leads = [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const raw of payload.facts) {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const row = raw;
+    const predicate = clean(row.predicate, 40);
+    const subject = clean(expectedSubject ?? row.subject, 160);
+    const value = clean(row.value, 240);
+    const excerpt = clean(row.exact_excerpt ?? row.excerpt, 1200);
+    const sourceUrl = safeCandidateUrl(row.source_url ?? row.sourceUrl);
+    if (!predicate || !PREDICATES.has(predicate) || !subject || !value || !excerpt || !sourceUrl) continue;
+    if (!isAtomicValue(predicate, value)) continue;
+    const qualifier = clean(row.qualifier, 120);
+    const sourceTitle = clean(row.source_title ?? row.sourceTitle, 240);
+    const key = `${predicate}::${searchable(value)}::${sourceUrl}::${searchable(excerpt)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    leads.push({
+      subject,
+      predicate,
+      value,
+      ...qualifier ? { qualifier } : {},
+      excerpt,
+      sourceUrl,
+      ...sourceTitle ? { sourceTitle } : {},
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      provider
+    });
+    if (leads.length >= MAX_LEADS) break;
+  }
+  return leads;
+}
+function subjectName(ctx) {
+  return ctx.evidence.profile.resolved_name?.trim() || ctx.evidence.profile.display_name.trim() || ctx.handle.replace(/^@/, "");
+}
+function subjectAliases(ctx) {
+  const aliases = [
+    subjectName(ctx),
+    ctx.evidence.profile.display_name,
+    ctx.evidence.profile.resolved_name,
+    ctx.handle,
+    ctx.handle.replace(/^@/, "")
+  ].filter((value) => Boolean(value?.trim()));
+  return [...new Set(aliases.map((value) => value.trim()))];
+}
+function discoveryPrompt(ctx) {
+  const profile = ctx.evidence.profile;
+  return [
+    `Research foundational due-diligence facts for ${subjectName(ctx)} (${ctx.handle}).`,
+    profile.website ? `Known official website: ${profile.website}` : "",
+    profile.bio ? `Profile bio: ${profile.bio.slice(0, 800)}` : "",
+    "Find facts a competent analyst must not miss: official identity, every named founder and executive, founding and launch dates, official token, funding and named investors, core products, network/chain, legal entity, governance, security audits, source repositories, and concrete traction metrics.",
+    "Prefer official first-party pages and primary documents, then reputable independent reporting.",
+    "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
+    "Each exact_excerpt must be a verbatim one-to-three sentence passage that itself explicitly contains the subject identity, the claimed value, and language proving the predicate.",
+    "Do not infer. A search answer is only a lead; ARGUS will fetch and verify every URL independently.",
+    "Return JSON only in this exact shape:",
+    '{"facts":[{"subject":"...","predicate":"founder|executive|founded|launched|official_token|funding|investor|product|network|legal_entity|official_identity|governance|audit|repository|traction","value":"one atomic value","qualifier":"optional exact role or metric label","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"..."}]}'
+  ].filter(Boolean).join("\n");
+}
+function responseText(response) {
+  return (response.content ?? []).filter((block) => block.type === "text" && typeof block.text === "string").map((block) => block.text).join("\n");
+}
+function claudeRequestBody(prompt, assistantContent) {
+  return {
+    model: ANALYST_MODEL,
+    max_tokens: 3e3,
+    system: "You are ARGUS's basic-facts research scout. Search broadly, cite precisely, and return only the requested JSON. Never treat your own answer as verified evidence.",
+    messages: assistantContent ? [{ role: "user", content: prompt }, { role: "assistant", content: assistantContent }] : [{ role: "user", content: prompt }],
+    tools: [{ type: "web_search_20250305", name: "web_search", max_uses: MAX_SEARCH_USES }]
+  };
+}
+async function callClaudeSearch(prompt, request, assistantContent) {
+  let response;
+  try {
+    response = await request(ANTHROPIC_URL2, {
+      method: "POST",
+      headers: {
+        "x-api-key": env("ANTHROPIC_API_KEY") ?? "",
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(claudeRequestBody(prompt, assistantContent)),
+      signal: AbortSignal.timeout(DISCOVERY_TIMEOUT_MS)
+    });
+  } catch (error) {
+    addClaudeUsage(void 0, "basic-facts-search", "failed", error instanceof Error && error.name === "TimeoutError" ? `timeout_${DISCOVERY_TIMEOUT_MS}ms` : "transport_error");
+    return null;
+  }
+  if (!response.ok) {
+    addClaudeUsage(void 0, "basic-facts-search", "failed", `http_${response.status}`);
+    return null;
+  }
+  let data;
+  try {
+    data = await response.json();
+  } catch {
+    addClaudeUsage(void 0, "basic-facts-search", "failed", "response_json_error");
+    return null;
+  }
+  const text2 = responseText(data);
+  addClaudeUsage(
+    data.usage,
+    "basic-facts-search",
+    text2 || data.stop_reason === "pause_turn" ? "succeeded" : "partial",
+    text2 || data.stop_reason === "pause_turn" ? void 0 : "empty_output"
+  );
+  return data;
+}
+async function discoverBasicFactLeads(ctx, dependencies = {}) {
+  if (!env("ANTHROPIC_API_KEY") && !dependencies.request) return null;
+  const canonicalSubject = subjectName(ctx);
+  const cacheKey = `basic-facts:v1:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
+  const cacheRead = dependencies.cacheRead ?? ((key) => cacheGet(key, { operation: "basic-facts-hit", meta: "24h Claude web-search cache" }));
+  const cacheWrite = dependencies.cacheWrite ?? cacheSet;
+  const cached = await cacheRead(cacheKey);
+  if (cached) return parseBasicFactLeads(cached, canonicalSubject, "claude-web-search");
+  const request = dependencies.request ?? fetch;
+  const prompt = discoveryPrompt(ctx);
+  let response = await callClaudeSearch(prompt, request);
+  if (!response) return null;
+  if (response.stop_reason === "pause_turn" && response.content?.length) {
+    response = await callClaudeSearch(prompt, request, response.content);
+    if (!response) return null;
+  }
+  const text2 = responseText(response);
+  if (!text2) return null;
+  const parsed = parseBasicFactLeads(text2, canonicalSubject, "claude-web-search");
+  if (parsed) void cacheWrite(cacheKey, text2);
+  return parsed;
+}
+async function discoverWithFallback(ctx) {
+  const claude = await discoverBasicFactLeads(ctx);
+  if (claude?.length) return claude;
+  if (!env("XAI_API_KEY")) return claude;
+  const text2 = await grokSearch(
+    "You are ARGUS's basic-facts research scout. Use live web search. Return only the requested JSON. All output remains an unverified lead.",
+    discoveryPrompt(ctx),
+    { maxToolCalls: MAX_SEARCH_USES, cacheKey: `basic-facts-grok:v1:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}` }
+  );
+  return text2 ? parseBasicFactLeads(text2, subjectName(ctx), "grok") : claude;
+}
+function decodeHtmlEntities(value) {
+  const named = { amp: "&", apos: "'", gt: ">", lt: "<", nbsp: " ", quot: '"' };
+  return value.replace(/&(?:#(\d+)|#x([0-9a-f]+)|([a-z]+));/gi, (match, decimal, hex, name) => {
+    if (decimal) return String.fromCodePoint(Number.parseInt(decimal, 10));
+    if (hex) return String.fromCodePoint(Number.parseInt(hex, 16));
+    return name ? named[name.toLowerCase()] ?? match : match;
+  });
+}
+function documentText(document) {
+  if (!/html|xhtml/i.test(document.contentType)) return normalize(document.text);
+  return normalize(decodeHtmlEntities(document.text.replace(/<(?:script|style|noscript|svg)\b[^>]*>[\s\S]*?<\/(?:script|style|noscript|svg)>/gi, " ").replace(/<!--([\s\S]*?)-->/g, " ").replace(/<[^>]+>/g, " ")));
+}
+var PREDICATE_PATTERNS = {
+  founder: /\b(?:co[- ]?founders?|founders?|founded by)\b/i,
+  executive: /\b(?:chief executive officer|chief technology officer|chief operating officer|chief financial officer|ceo|cto|coo|cfo|president|executive|director|head of|lead)\b/i,
+  founded: /\b(?:founded|established|formed|incorporated)\b/i,
+  launched: /\b(?:launched|went live|debuted|released|introduced)\b/i,
+  official_token: /\b(?:official token|governance token|native token|utility token|token|ticker|symbol)\b/i,
+  funding: /\b(?:raised|raises|funding|financing|fundraise|round|capital)\b/i,
+  investor: /\b(?:invested|investment|investor|backed|backing|led the round|participated in)\b/i,
+  product: /\b(?:product|platform|protocol|service|aggregator|exchange|marketplace|wallet|application|app)\b/i,
+  network: /\b(?:blockchain|network|chain|mainnet|built on|deployed on|runs on)\b/i,
+  legal_entity: /\b(?:legal entity|company|corporation|incorporated|foundation|limited|ltd\.?|inc\.?|llc|labs)\b/i,
+  official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company)\b/i,
+  governance: /\b(?:governance|governed|dao|proposal|vote|voting|council|multisig|multi-sig)\b/i,
+  audit: /\b(?:audit|audited|security review|security assessment|formal verification)\b/i,
+  repository: /\b(?:github|source code|codebase|repository|repo|open source|open-source)\b/i,
+  traction: /\b(?:users?|customers?|volume|tvl|total value locked|transactions?|revenue|fees|usage|adoption|downloads?|active wallets?)\b/i
+};
+function predicateIsSupported(excerpt, predicate) {
+  const match = PREDICATE_PATTERNS[predicate].exec(excerpt);
+  if (!match) return false;
+  const local = excerpt.slice(Math.max(0, match.index - 45), match.index + match[0].length + 45);
+  return !/\b(?:not|never|no evidence|didn't|did not|denied|false claim)\b/i.test(local);
+}
+var normalizedHost = (host) => host.toLowerCase().replace(/\.$/, "").replace(/^www\./, "");
+var sameOfficialDomain = (host, officialHosts) => {
+  const candidate = normalizedHost(host);
+  return officialHosts.some((official) => {
+    const configured = normalizedHost(official);
+    return candidate === configured || candidate.endsWith(`.${configured}`);
+  });
+};
+function factId(subjectKey, predicate, value) {
+  return `basic_v1_${createHash4("sha256").update(`${subjectKey.toLowerCase()}::${predicate}::${searchable(value)}`).digest("hex")}`;
+}
+function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject, officialHosts = []) {
+  const page = documentText(document);
+  const excerpt = normalize(decodeHtmlEntities(lead.excerpt));
+  if (!excerpt || !page.includes(excerpt)) return null;
+  if (!aliases.some((alias) => containsPhrase(excerpt, alias))) return null;
+  if (!containsPhrase(excerpt, lead.value)) return null;
+  if (lead.qualifier && !containsPhrase(excerpt, lead.qualifier)) return null;
+  if (!isAtomicValue(lead.predicate, lead.value) || !predicateIsSupported(excerpt, lead.predicate)) return null;
+  const official = sameOfficialDomain(document.host, officialHosts);
+  return {
+    factId: factId(subjectKey, lead.predicate, lead.value),
+    subjectKey,
+    predicate: lead.predicate,
+    value: lead.value,
+    normalizedValue: searchable(lead.value),
+    status: official ? "verified" : "lead",
+    critical: CRITICAL_PREDICATES.has(lead.predicate),
+    sources: [{
+      url: document.url,
+      ...lead.sourceTitle ? { title: lead.sourceTitle } : {},
+      sourceClass: official ? "official_subject" : "independent_press",
+      relation: "supports",
+      excerpt,
+      contentHash: document.contentHash,
+      capturedAt: document.capturedAt,
+      provider: "public-web",
+      artifactVerified: true
+    }],
+    ...lead.qualifier ? { qualifier: lead.qualifier } : {},
+    evidence_origin: "deterministic",
+    artifact_verified: true,
+    provider: "public-web",
+    discoveryProvider: lead.provider
+  };
+}
+var MULTI_VALUE_PREDICATES = /* @__PURE__ */ new Set([
+  "founder",
+  "executive",
+  "product",
+  "funding",
+  "investor",
+  "governance",
+  "audit",
+  "repository",
+  "traction"
+]);
+function resolveBasicFactCandidates(candidates) {
+  const grouped = /* @__PURE__ */ new Map();
+  for (const candidate of candidates) {
+    const key = `${candidate.predicate}::${candidate.normalizedValue}`;
+    const rows = grouped.get(key) ?? [];
+    rows.push(candidate);
+    grouped.set(key, rows);
+  }
+  const resolved = [...grouped.values()].flatMap((rows) => {
+    const sources = [...new Map(rows.flatMap((row) => row.sources).map((source) => [source.url, source])).values()];
+    const official = sources.some((source) => source.sourceClass === "official_subject");
+    const independentHosts = new Set(sources.filter((source) => source.sourceClass === "independent_press").map((source) => new URL(source.url).hostname.replace(/^www\./, "")));
+    if (!official && independentHosts.size < 2) return [];
+    return [{
+      ...rows[0],
+      status: official ? "verified" : "corroborated",
+      sources
+    }];
+  });
+  const singletonPredicates = new Set(resolved.map((fact) => fact.predicate).filter((predicate) => !MULTI_VALUE_PREDICATES.has(predicate)));
+  for (const predicate of singletonPredicates) {
+    const values = resolved.filter((fact) => fact.predicate === predicate);
+    if (values.length > 1) values.forEach((fact) => {
+      fact.status = "conflicted";
+    });
+  }
+  return resolved;
+}
+async function collectBasicFacts(ctx, dependencies = {}) {
+  const discover = dependencies.discover ?? discoverWithFallback;
+  const fetchSource = dependencies.fetchSource ?? fetchPublicText;
+  if (!dependencies.discover && !env("ANTHROPIC_API_KEY") && !env("XAI_API_KEY")) {
+    return { state: "skipped", detail: "basic-facts web research is not configured" };
+  }
+  ctx.emit({
+    phase: "P0 \xB7 Intake",
+    label: "Basic facts research",
+    detail: "Searching for foundational facts, then independently fetching and checking every cited passage\u2026",
+    source: env("ANTHROPIC_API_KEY") ? "Claude web search \xB7 public source verification" : "Grok web search \xB7 public source verification",
+    tone: "neutral"
+  });
+  const leads = await discover(ctx);
+  if (!leads) return { state: "failed", detail: "basic-facts discovery failed" };
+  ctx.evidence.basicFactLeads = leads.slice(0, MAX_LEADS).map((lead) => ({ ...lead }));
+  if (!leads.length) {
+    ctx.evidence.basicFacts = [];
+    return { state: "partial", detail: "search returned no source-linked basic-fact candidates" };
+  }
+  const aliases = subjectAliases(ctx);
+  const officialHosts = [ctx.evidence.profile.website].filter((value) => Boolean(value)).flatMap((value) => {
+    try {
+      return [new URL(value).hostname];
+    } catch {
+      return [];
+    }
+  });
+  const sourceByUrl = /* @__PURE__ */ new Map();
+  const fetchOnce = (url) => {
+    const key = new URL(url).toString();
+    const existing = sourceByUrl.get(key);
+    if (existing) return existing;
+    const pending = fetchSource(url).then((result) => {
+      recordCall(
+        "basic-facts-web",
+        "source-fetch",
+        0,
+        result.status === "ok" ? "source_fetched" : result.reason,
+        result.status === "ok" ? "succeeded" : "failed"
+      );
+      return result;
+    }).catch(() => {
+      recordCall("basic-facts-web", "source-fetch", 0, "transport_error", "failed");
+      return { status: "failed", reason: "transport_error" };
+    });
+    sourceByUrl.set(key, pending);
+    return pending;
+  };
+  const boundedLeads = leads.slice(0, MAX_LEADS);
+  const allowedSources = new Set(boundedLeads.map((lead) => lead.sourceUrl).slice(0, MAX_SOURCES));
+  const verified = (await Promise.all(boundedLeads.filter((lead) => allowedSources.has(lead.sourceUrl)).map(async (lead) => {
+    const result = await fetchOnce(lead.sourceUrl);
+    return result.status === "ok" ? verifyBasicFactLead(lead, result, aliases, ctx.handle, officialHosts) : null;
+  }))).filter((fact) => fact !== null);
+  ctx.evidence.basicFacts = resolveBasicFactCandidates(verified);
+  ctx.emit({
+    phase: "P0 \xB7 Intake",
+    label: ctx.evidence.basicFacts.length ? "Basic facts verified" : "Basic facts need review",
+    detail: `${ctx.evidence.basicFacts.length}/${boundedLeads.length} cited facts passed exact source and predicate checks.`,
+    source: "public-web",
+    tone: ctx.evidence.basicFacts.length ? "good" : "warn"
+  });
+  return ctx.evidence.basicFacts.length ? { state: "executed", detail: `${ctx.evidence.basicFacts.length} verified \xB7 ${boundedLeads.length} leads` } : { state: "partial", detail: `${boundedLeads.length} leads \xB7 0 passed source verification` };
+}
+var basicFactsAdapter = {
+  id: "basic-facts",
+  label: "Basic facts research",
+  available: () => Boolean(env("ANTHROPIC_API_KEY") || env("XAI_API_KEY")),
+  run: collectBasicFacts
+};
+
+// server/adapters/offchain.ts
+import { createHash as createHash6 } from "node:crypto";
 
 // src/lib/offchainEvidence.ts
 var asRecord5 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -6929,8 +7586,8 @@ async function collectOfacName(rawName, options = {}) {
 }
 
 // server/adapters/profilePhoto.ts
-import { createHash as createHash3 } from "node:crypto";
-var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
+import { createHash as createHash5 } from "node:crypto";
+var ANTHROPIC_URL3 = "https://api.anthropic.com/v1/messages";
 var MAX_IMAGE_BYTES = 75e4;
 var MIN_IMAGE_BYTES = 256;
 var MIN_ACTIONABLE_CONFIDENCE = 0.7;
@@ -6950,7 +7607,7 @@ var REVIEW_LEADS = /* @__PURE__ */ new Set([
   "ai_generated",
   "celebrity_or_public_figure"
 ]);
-var sha2562 = (value) => createHash3("sha256").update(value).digest("hex");
+var sha2562 = (value) => createHash5("sha256").update(value).digest("hex");
 function safeOfficialAvatarUrl(raw) {
   try {
     const url = new URL(raw);
@@ -7067,7 +7724,7 @@ async function classifyImage(image) {
   if (!key) return null;
   let response;
   try {
-    response = await fetch(ANTHROPIC_URL2, {
+    response = await fetch(ANTHROPIC_URL3, {
       method: "POST",
       headers: {
         "x-api-key": key,
@@ -7272,7 +7929,7 @@ var asIso = (value) => {
   }
   return void 0;
 };
-var hashArtifact = (artifact) => createHash4("sha256").update(JSON.stringify({
+var hashArtifact = (artifact) => createHash6("sha256").update(JSON.stringify({
   kind: artifact.kind,
   provider: artifact.provider,
   title: artifact.title,
@@ -7531,11 +8188,11 @@ async function newestSnapshot(urlPath) {
   return { timestamp: last[ti], original: last[oi] };
 }
 async function archivedAffiliation(domain, name) {
-  const clean3 = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
-  if (!clean3 || !name) return null;
+  const clean4 = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  if (!clean4 || !name) return null;
   const needles = nameNeedles(name);
   if (!needles.length) return null;
-  const paths = [`${clean3}/team`, `${clean3}/about`, clean3];
+  const paths = [`${clean4}/team`, `${clean4}/about`, clean4];
   for (const p of paths) {
     const snap = await newestSnapshot(p);
     if (!snap) continue;
@@ -7564,7 +8221,7 @@ async function archivedAffiliation(domain, name) {
         return {
           url: `https://web.archive.org/web/${snap.timestamp}/${snap.original}`,
           year: snap.timestamp.slice(0, 4),
-          where: p.replace(clean3, "").replace(/^\//, "") || "homepage"
+          where: p.replace(clean4, "").replace(/^\//, "") || "homepage"
         };
       }
     } catch {
@@ -7692,7 +8349,7 @@ async function resolveForHandle(handle, text2, opts = {}) {
 }
 
 // server/adapters/trustgraph.ts
-import { createHash as createHash5 } from "node:crypto";
+import { createHash as createHash7 } from "node:crypto";
 
 // src/lib/reportPresentation.ts
 var VERDICT_COLORS = Object.freeze({
@@ -8171,7 +8828,7 @@ function stableValue(value) {
   );
 }
 function semanticHash(value) {
-  return createHash5("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
+  return createHash7("sha256").update(JSON.stringify(stableValue(value))).digest("hex");
 }
 function semanticContribution(contribution) {
   const stableJson2 = (value) => JSON.stringify(stableValue(value));
@@ -8499,212 +9156,18 @@ async function collectTrustGraph(ctx, current) {
 }
 
 // server/adapters/portfolio.ts
-import { createHash as createHash7 } from "node:crypto";
-import { isIP as isIP2 } from "node:net";
-
-// server/publicWeb.ts
-import { createHash as createHash6 } from "node:crypto";
-import { lookup as dnsLookup } from "node:dns/promises";
-import { request as httpRequest } from "node:http";
-import { request as httpsRequest } from "node:https";
-import { isIP } from "node:net";
-import { Readable } from "node:stream";
-var MAX_TEXT_BYTES = 15e5;
-var MAX_REDIRECTS = 4;
-var SENSITIVE_URL_PARAM2 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
-var SAFE_CONTENT_TYPES = /* @__PURE__ */ new Set([
-  "application/json",
-  "application/ld+json",
-  "application/xhtml+xml",
-  "text/html",
-  "text/plain",
-  "text/xml"
-]);
-function isPublicIpAddress(address) {
-  const version = isIP(address);
-  if (version === 4) {
-    const [a, b] = address.split(".").map(Number);
-    return !(a === 0 || a === 10 || a === 127 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 0 || a === 192 && b === 168 || a === 198 && (b === 18 || b === 19) || a >= 224);
-  }
-  if (version === 6) {
-    const value = address.toLowerCase();
-    const parts = value.split(":");
-    const first = Number.parseInt(parts[0] || "0", 16);
-    const second = Number.parseInt(parts[1] || "0", 16);
-    if (!Number.isFinite(first) || first < 8192 || first > 16383) return false;
-    if (first === 8194 || first === 16382) return false;
-    if (first === 8193 && (second === 0 || second === 2 || second >= 16 && second <= 47 || second === 3512)) return false;
-    return true;
-  }
-  return false;
-}
-var defaultLookup = async (hostname) => dnsLookup(hostname, { all: true, verbatim: true });
-var normalizedHostname = (value) => value.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
-async function validatedPublicTarget(raw, base, lookup = defaultLookup) {
-  let url;
-  try {
-    url = base ? new URL(raw, base) : new URL(raw);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password) return null;
-  if (url.port && !(url.protocol === "https:" && url.port === "443" || url.protocol === "http:" && url.port === "80")) return null;
-  if ([...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM2.test(key))) return null;
-  const hostname = normalizedHostname(url.hostname);
-  if (!hostname || isIP(hostname) || hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local") || hostname.endsWith(".internal")) return null;
-  try {
-    const resolved = await lookup(hostname);
-    if (!resolved.length) return null;
-    const addresses = resolved.map((entry) => ({
-      address: entry.address,
-      // Trust the parsed address rather than provider-supplied family metadata.
-      family: isIP(entry.address)
-    }));
-    if (addresses.some((entry) => !entry.family || !isPublicIpAddress(entry.address))) return null;
-    url.hash = "";
-    return {
-      url,
-      hostname,
-      addresses: Object.freeze(addresses.map((entry) => Object.freeze({ ...entry })))
-    };
-  } catch {
-    return null;
-  }
-}
-var pinnedLookupFor = (target) => (hostname, options, callback) => {
-  const requestedHost = normalizedHostname(hostname);
-  if (requestedHost !== target.hostname) {
-    const error = new Error("socket lookup hostname differed from validated target");
-    error.code = "EACCES";
-    callback(error, "", 0);
-    return;
-  }
-  const publicAddresses = target.addresses.filter((entry) => entry.family === isIP(entry.address) && isPublicIpAddress(entry.address));
-  const requestedFamily = options.family === "IPv4" ? 4 : options.family === "IPv6" ? 6 : options.family;
-  const eligible = requestedFamily === 4 || requestedFamily === 6 ? publicAddresses.filter((entry) => entry.family === requestedFamily) : publicAddresses;
-  if (!eligible.length) {
-    const error = new Error("validated target has no public address for requested family");
-    error.code = "EACCES";
-    callback(error, "", 0);
-    return;
-  }
-  if (options.all) callback(null, eligible.map((entry) => ({ ...entry })));
-  else callback(null, eligible[0].address, eligible[0].family);
-};
-var responseHeaders = (rawHeaders) => {
-  const headers4 = new Headers();
-  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
-    headers4.append(rawHeaders[index], rawHeaders[index + 1]);
-  }
-  return headers4;
-};
-var nativeRequest = (url, options) => new Promise((resolve, reject) => {
-  const request = url.protocol === "https:" ? httpsRequest : httpRequest;
-  const requestOptions = {
-    method: "GET",
-    headers: options.headers,
-    signal: options.signal,
-    lookup: options.lookup,
-    // Never reuse a socket whose connection was established under another DNS
-    // decision. Every hop must exercise this request's pinned lookup.
-    agent: false
-  };
-  const outgoing = request(url, requestOptions, (incoming) => {
-    const status = incoming.statusCode ?? 500;
-    const headers4 = responseHeaders(incoming.rawHeaders);
-    const noBody = status === 204 || status === 205 || status === 304 || status >= 300 && status < 400;
-    if (noBody) {
-      incoming.resume();
-      resolve(new Response(null, { status, statusText: incoming.statusMessage, headers: headers4 }));
-      return;
-    }
-    const body = Readable.toWeb(incoming);
-    resolve(new Response(body, { status, statusText: incoming.statusMessage, headers: headers4 }));
-  });
-  outgoing.once("error", reject);
-  outgoing.end();
-});
-async function readBoundedText(response) {
-  const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_TEXT_BYTES) return null;
-  if (!response.body) return Buffer.alloc(0);
-  const chunks = [];
-  const reader = response.body.getReader();
-  let total = 0;
-  for (; ; ) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_TEXT_BYTES) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(Buffer.from(value));
-  }
-  return Buffer.concat(chunks, total);
-}
-async function fetchPublicText(raw, dependencies = {}) {
-  const request = dependencies.request ?? nativeRequest;
-  const lookup = dependencies.lookup ?? defaultLookup;
-  let target = await validatedPublicTarget(raw, void 0, lookup);
-  if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
-  for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
-    let response;
-    try {
-      response = await request(target.url, {
-        signal: AbortSignal.timeout(8e3),
-        headers: {
-          accept: "text/html,application/xhtml+xml,application/json,text/plain;q=0.8",
-          "user-agent": "ARGUS due-diligence evidence collector/1.0"
-        },
-        lookup: pinnedLookupFor(target)
-      });
-    } catch {
-      return { status: "failed", reason: "transport_error" };
-    }
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (!location || redirect === MAX_REDIRECTS) return { status: "failed", reason: "invalid_or_excessive_redirect" };
-      target = await validatedPublicTarget(location, target.url, lookup);
-      if (!target) return { status: "rejected", reason: "unsafe_redirect" };
-      continue;
-    }
-    if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
-    const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
-      return { status: "failed", reason: "unsupported_content_type" };
-    }
-    let bytes;
-    try {
-      bytes = await readBoundedText(response);
-    } catch {
-      return { status: "failed", reason: "response_stream_error" };
-    }
-    if (!bytes) return { status: "failed", reason: "response_too_large" };
-    const text2 = bytes.toString("utf8");
-    if (!text2.trim()) return { status: "failed", reason: "empty_response" };
-    return {
-      status: "ok",
-      url: target.url.toString(),
-      host: target.url.hostname.replace(/^www\./i, "").toLowerCase(),
-      contentType: contentType || "text/plain",
-      text: text2,
-      contentHash: createHash6("sha256").update(bytes).digest("hex"),
-      capturedAt: (dependencies.now?.() ?? /* @__PURE__ */ new Date()).toISOString()
-    };
-  }
-  return { status: "failed", reason: "redirect_loop" };
-}
+import { createHash as createHash8 } from "node:crypto";
+import { isIP as isIP3 } from "node:net";
 
 // server/adapters/investorDiscovery.ts
 var discoveryByEvidence = /* @__PURE__ */ new WeakMap();
 var focusedPortfolioByEvidence = /* @__PURE__ */ new WeakMap();
 var focusedFundScaleByEvidence = /* @__PURE__ */ new WeakMap();
-var subjectName = (ctx) => ctx.evidence.profile.resolved_name || ctx.evidence.profile.display_name || ctx.handle;
+var subjectName2 = (ctx) => ctx.evidence.profile.resolved_name || ctx.evidence.profile.display_name || ctx.handle;
 var affiliationHints = (ctx) => ctx.evidence.ventures.slice(0, 12).map((venture) => `${venture.project_name} (${venture.role})`).join(", ");
 var subjectContext = (ctx) => {
   const hints = affiliationHints(ctx);
-  return `Audited subject: ${subjectName(ctx)} (X ${ctx.handle})${ctx.evidence.profile.website ? `, official website ${ctx.evidence.profile.website}` : ""}. Official X bio: ${ctx.evidence.profile.bio || "not available"}.${hints ? ` Affiliation leads to investigate without assuming: ${hints}.` : ""}`;
+  return `Audited subject: ${subjectName2(ctx)} (X ${ctx.handle})${ctx.evidence.profile.website ? `, official website ${ctx.evidence.profile.website}` : ""}. Official X bio: ${ctx.evidence.profile.bio || "not available"}.${hints ? ` Affiliation leads to investigate without assuming: ${hints}.` : ""}`;
 };
 var normalizedHandle = (ctx) => ctx.handle.replace(/^@/, "").toLowerCase();
 function discoverInvestorEvidenceText(ctx) {
@@ -8773,14 +9236,14 @@ var PRESS_HOSTS = [
 ];
 var PROFILE_AFFILIATION_MAX_AGE_MS = 24 * 60 * 60 * 1e3;
 var PROFILE_AFFILIATION_CLOCK_SKEW_MS = 5 * 60 * 1e3;
-var SENSITIVE_URL_PARAM3 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
+var SENSITIVE_URL_PARAM4 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 var MIN_VERIFIED_RELATIONSHIPS_FOR_PARTIAL_OUTCOME = 3;
 var MIN_VERIFIED_DISPOSITION_PERCENT = 75;
 function hasRecordedPartialPortfolioOutcome(verified, incomplete) {
   if (verified < MIN_VERIFIED_RELATIONSHIPS_FOR_PARTIAL_OUTCOME || incomplete <= 0) return false;
   return verified * 100 >= (verified + incomplete) * MIN_VERIFIED_DISPOSITION_PERCENT;
 }
-var clean = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
+var clean2 = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
 var hostMatches2 = (host, expected) => {
   const left = host.replace(/^www\./i, "").toLowerCase();
   const right = expected.replace(/^www\./i, "").toLowerCase();
@@ -8791,13 +9254,13 @@ function domainFromWebsite(value) {
   const scope = canonicalOfficialWebsite(value);
   return scope && isCredibleOfficialDomain(scope.domain) ? scope.domain : void 0;
 }
-function safeCandidateUrl(value) {
+function safeCandidateUrl2(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
   try {
     const url = new URL(value);
     const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host || isIP2(host) || host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return null;
-    if ([...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM3.test(key))) return null;
+    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host || isIP3(host) || host === "localhost" || host.endsWith(".local") || host.endsWith(".internal")) return null;
+    if ([...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM4.test(key))) return null;
     url.hash = "";
     return url.toString();
   } catch {
@@ -8825,34 +9288,34 @@ function parsePortfolioCandidates(text2) {
   for (const raw of rows) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
     const row = raw;
-    const projectName2 = clean(row.project, 120);
+    const projectName2 = clean2(row.project, 120);
     if (!projectName2) continue;
     const sources = [];
     const rawSources = Array.isArray(row.sources) ? row.sources : [];
     for (const candidate of rawSources) {
       if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
       const source = candidate;
-      const url = safeCandidateUrl(source.url);
+      const url = safeCandidateUrl2(source.url);
       if (!url) continue;
-      sources.push({ url, ...clean(source.title, 180) ? { title: clean(source.title, 180) } : {} });
+      sources.push({ url, ...clean2(source.title, 180) ? { title: clean2(source.title, 180) } : {} });
     }
-    const singularUrl = safeCandidateUrl(row.source_url);
+    const singularUrl = safeCandidateUrl2(row.source_url);
     if (singularUrl) sources.push({
       url: singularUrl,
-      ...clean(row.source_title, 180) ? { title: clean(row.source_title, 180) } : {}
+      ...clean2(row.source_title, 180) ? { title: clean2(row.source_title, 180) } : {}
     });
     const uniqueSources = sources.filter(
       (source, index) => sources.findIndex((candidate) => candidate.url === source.url) === index
     ).slice(0, MAX_SOURCES_PER_CANDIDATE);
-    const investorEntityName = clean(row.investor_entity, 120);
+    const investorEntityName = clean2(row.investor_entity, 120);
     const attribution = row.attribution === "affiliated_fund" ? "affiliated_fund" : row.attribution === "direct_subject" ? "direct_subject" : void 0;
     const key = `${investorEntityName?.toLowerCase() ?? ""}::${attribution ?? ""}::${projectName2.toLowerCase()}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const projectHandle = clean(row.project_x_handle ?? row.x_handle, 40)?.replace(/^@/, "");
-    const projectDomain = domainFromWebsite(clean(row.project_domain ?? row.domain, 300));
-    const investorHandle = clean(row.investor_x_handle, 40)?.replace(/^@/, "");
-    const contract = clean(row.contract, 90);
+    const projectHandle = clean2(row.project_x_handle ?? row.x_handle, 40)?.replace(/^@/, "");
+    const projectDomain = domainFromWebsite(clean2(row.project_domain ?? row.domain, 300));
+    const investorHandle = clean2(row.investor_x_handle, 40)?.replace(/^@/, "");
+    const contract = clean2(row.contract, 90);
     leads.push({
       projectName: projectName2,
       ...projectHandle && /^[A-Za-z0-9_]{2,30}$/.test(projectHandle) ? { projectHandle: `@${projectHandle}` } : {},
@@ -8861,11 +9324,11 @@ function parsePortfolioCandidates(text2) {
       ...investorHandle && /^[A-Za-z0-9_]{2,30}$/.test(investorHandle) ? { investorEntityHandle: `@${investorHandle}` } : {},
       ...attribution ? { attribution } : {},
       relationship: relationshipValue(row.relationship),
-      ...clean(row.stage, 60) ? { stage: clean(row.stage, 60) } : {},
-      ...clean(row.year, 20) ? { year: clean(row.year, 20) } : {},
-      ...clean(row.ticker, 20) ? { ticker: clean(row.ticker, 20) } : {},
+      ...clean2(row.stage, 60) ? { stage: clean2(row.stage, 60) } : {},
+      ...clean2(row.year, 20) ? { year: clean2(row.year, 20) } : {},
+      ...clean2(row.ticker, 20) ? { ticker: clean2(row.ticker, 20) } : {},
       ...contract && /^(?:0x[a-fA-F0-9]{40}|[1-9A-HJ-NP-Za-km-z]{32,44})$/.test(contract) ? { contract } : {},
-      ...clean(row.chain, 30) ? { chain: clean(row.chain, 30)?.toLowerCase() } : {},
+      ...clean2(row.chain, 30) ? { chain: clean2(row.chain, 30)?.toLowerCase() } : {},
       sources: uniqueSources,
       evidence_origin: "model_lead",
       artifact_verified: false,
@@ -8902,7 +9365,7 @@ var canonicalSubjectHandle = (value) => {
   const bare = value.trim().replace(/^@/, "");
   return /^[A-Za-z0-9_]{1,30}$/.test(bare) ? `@${bare.toLowerCase()}` : null;
 };
-var attributionProofHash = (value) => createHash7("sha256").update(JSON.stringify(value)).digest("hex");
+var attributionProofHash = (value) => createHash8("sha256").update(JSON.stringify(value)).digest("hex");
 function sourcePathBindsSubjectHandle(sourceUrl, subjectHandle) {
   try {
     const tokens = decodeURIComponent(new URL(sourceUrl).pathname).normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().split(/[^a-z0-9_]+/).filter(Boolean);
@@ -8945,8 +9408,8 @@ function ventureAffiliationEnded(venture) {
 }
 function verifiedVentureAffiliationProof(ctx, venture, now) {
   const subjectHandle = canonicalSubjectHandle(ctx.handle);
-  const sourceUrl = safeCandidateUrl(venture.evidence_url);
-  const provider = clean(venture.provider, 100);
+  const sourceUrl = safeCandidateUrl2(venture.evidence_url);
+  const provider = clean2(venture.provider, 100);
   if (!subjectHandle || !sourceUrl || !sourcePathBindsSubjectHandle(sourceUrl, subjectHandle) || !provider || !Number.isFinite(now.getTime()) || venture.artifact_verified !== true || venture.evidence_origin !== "deterministic" && venture.evidence_origin !== "human_verified" || ventureAffiliationEnded(venture)) return null;
   const attributionCapturedAt = now.toISOString();
   return {
@@ -9217,7 +9680,7 @@ function registrableApprox2(host) {
   return twoLevelSuffix.has(tail) ? parts.slice(-3).join(".") : tail;
 }
 function artifactHash(artifact) {
-  return createHash7("sha256").update(JSON.stringify(artifact)).digest("hex");
+  return createHash8("sha256").update(JSON.stringify(artifact)).digest("hex");
 }
 async function collectPortfolioRelationships(ctx, dependencies = {}) {
   const discover = dependencies.discover ?? discoverPortfolioCandidates;
@@ -9352,7 +9815,7 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
   for (const [project, rows] of byProject) {
     const authoritative = rows.some((row) => row.sourceClass === "first_party_subject" || row.sourceClass === "first_party_investor" || row.sourceClass === "public_primary");
     const pressDomains = new Set(rows.filter((row) => row.sourceClass === "independent_press").map((row) => registrableApprox2(row.document.host)));
-    const pressFingerprints = new Set(rows.filter((row) => row.sourceClass === "independent_press").map((row) => createHash7("sha256").update(normalized(row.match.excerpt ?? "")).digest("hex")));
+    const pressFingerprints = new Set(rows.filter((row) => row.sourceClass === "independent_press").map((row) => createHash8("sha256").update(normalized(row.match.excerpt ?? "")).digest("hex")));
     const pressConfirmed = pressDomains.size >= 2 && pressFingerprints.size >= 2;
     const confirmed = authoritative || pressConfirmed;
     confirmationByProject.set(project, { confirmed, pressConfirmed });
@@ -9447,8 +9910,8 @@ async function collectPortfolioRelationships(ctx, dependencies = {}) {
 }
 
 // server/adapters/fundScale.ts
-import { createHash as createHash8 } from "node:crypto";
-import { isIP as isIP3 } from "node:net";
+import { createHash as createHash9 } from "node:crypto";
+import { isIP as isIP4 } from "node:net";
 var MAX_CANDIDATES2 = 6;
 var MAX_SOURCES_PER_CANDIDATE2 = 3;
 var MIN_FUND_AMOUNT_USD = 1e5;
@@ -9477,8 +9940,8 @@ var PRESS_HOSTS2 = [
   "blockworks.co",
   "venturebeat.com"
 ];
-var SENSITIVE_URL_PARAM4 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
-var clean2 = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
+var SENSITIVE_URL_PARAM5 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
+var clean3 = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
 var normalized2 = (value) => value.normalize("NFKD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9@$._ -]+/g, " ").replace(/\s+/g, " ").trim();
 var compact2 = (value) => normalized2(value).replace(/[^a-z0-9]+/g, "");
 var regexEscape4 = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -9499,19 +9962,19 @@ function containsEntity2(text2, entity) {
   const caseSensitive = words.length === 1 && words[0].length <= 4;
   return entityPattern2(entity, caseSensitive)?.test(text2) ?? false;
 }
-function safeCandidateUrl2(value) {
+function safeCandidateUrl3(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
   try {
     const url = new URL(value);
     const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
-    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host || isIP3(host) || host === "localhost" || host.endsWith(".local") || host.endsWith(".internal") || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM4.test(key))) return null;
+    if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password || !host || isIP4(host) || host === "localhost" || host.endsWith(".local") || host.endsWith(".internal") || [...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM5.test(key))) return null;
     url.hash = "";
     return url.toString();
   } catch {
     return null;
   }
 }
-function parsePayload(text2) {
+function parsePayload2(text2) {
   const match = text2.match(/\{[\s\S]*\}/);
   if (!match) return null;
   try {
@@ -9522,34 +9985,34 @@ function parsePayload(text2) {
   }
 }
 function parseFundScaleCandidates(text2) {
-  const payload = parsePayload(text2);
+  const payload = parsePayload2(text2);
   if (!payload || !Array.isArray(payload.fund_scale)) return null;
   const leads = [];
   const seen = /* @__PURE__ */ new Set();
   for (const raw of payload.fund_scale) {
     if (!raw || typeof raw !== "object" || Array.isArray(raw)) continue;
     const row = raw;
-    const fundName = clean2(row.fund_name ?? row.investor_entity, 120);
+    const fundName = clean3(row.fund_name ?? row.investor_entity, 120);
     if (!fundName) continue;
     const sources = [];
     for (const sourceRaw of Array.isArray(row.sources) ? row.sources : []) {
       if (!sourceRaw || typeof sourceRaw !== "object" || Array.isArray(sourceRaw)) continue;
       const source = sourceRaw;
-      const url = safeCandidateUrl2(source.url);
+      const url = safeCandidateUrl3(source.url);
       if (!url) continue;
-      const title = clean2(source.title, 180);
+      const title = clean3(source.title, 180);
       sources.push({ url, ...title ? { title } : {} });
     }
-    const singularUrl = safeCandidateUrl2(row.source_url);
+    const singularUrl = safeCandidateUrl3(row.source_url);
     if (singularUrl) {
-      const title = clean2(row.source_title, 180);
+      const title = clean3(row.source_title, 180);
       sources.push({ url: singularUrl, ...title ? { title } : {} });
     }
     const uniqueSources = sources.filter(
       (source, index) => sources.findIndex((candidate) => candidate.url === source.url) === index
     ).slice(0, MAX_SOURCES_PER_CANDIDATE2);
-    const fundVehicleHint = clean2(row.fund_vehicle, 160);
-    const fundHandleRaw = clean2(row.fund_x_handle ?? row.investor_x_handle, 40)?.replace(/^@/, "");
+    const fundVehicleHint = clean3(row.fund_vehicle, 160);
+    const fundHandleRaw = clean3(row.fund_x_handle ?? row.investor_x_handle, 40)?.replace(/^@/, "");
     const fundHandle = fundHandleRaw && /^[A-Za-z0-9_]{2,30}$/.test(fundHandleRaw) ? `@${fundHandleRaw}` : void 0;
     const attribution = row.attribution === "affiliated_fund" ? "affiliated_fund" : row.attribution === "direct_subject" ? "direct_subject" : void 0;
     const metricHint = ["aum", "fund_vehicle", "first_close", "final_close"].includes(String(row.metric_hint)) ? row.metric_hint : void 0;
@@ -9883,7 +10346,7 @@ function claimGroupMetric(metric) {
   return metric;
 }
 function artifactHash2(artifact) {
-  return createHash8("sha256").update(JSON.stringify(artifact)).digest("hex");
+  return createHash9("sha256").update(JSON.stringify(artifact)).digest("hex");
 }
 function amountLabel(amountUsd) {
   if (amountUsd >= 1e12) return `$${(amountUsd / 1e12).toFixed(amountUsd % 1e12 ? 1 : 0)}T`;
@@ -9904,7 +10367,7 @@ function deterministicClaimId(base, rows) {
   const representativeAmount = amounts[Math.floor((amounts.length - 1) / 2)];
   const dates = rows.map((row) => row.match.asOf).filter((value) => Boolean(value)).map((value) => new Date(value).getTime()).sort((left, right) => left - right);
   const representativeDate = dates.length ? new Date(dates[Math.floor((dates.length - 1) / 2)]).toISOString().slice(0, 10) : "fixed";
-  const digest = createHash8("sha256").update(JSON.stringify({ base, representativeAmount, representativeDate })).digest("hex");
+  const digest = createHash9("sha256").update(JSON.stringify({ base, representativeAmount, representativeDate })).digest("hex");
   return `fund_scale_claim_v1_${digest}`;
 }
 function clusterSupportedRows(rows) {
@@ -10040,8 +10503,8 @@ async function collectFundScale(ctx, dependencies = {}) {
     const otherDomain = documentRegistrableDomain(other.document);
     const distinctDomains = Boolean(rowDomain && otherDomain && rowDomain !== otherDomain);
     const distinctContent = /^[a-f0-9]{64}$/i.test(row.document.contentHash) && /^[a-f0-9]{64}$/i.test(other.document.contentHash) && row.document.contentHash.toLowerCase() !== other.document.contentHash.toLowerCase();
-    const rowExcerptHash = createHash8("sha256").update(normalized2(row.match.excerpt)).digest("hex");
-    const otherExcerptHash = createHash8("sha256").update(normalized2(other.match.excerpt)).digest("hex");
+    const rowExcerptHash = createHash9("sha256").update(normalized2(row.match.excerpt)).digest("hex");
+    const otherExcerptHash = createHash9("sha256").update(normalized2(other.match.excerpt)).digest("hex");
     return distinctDomains && distinctContent && rowExcerptHash !== otherExcerptHash;
   };
   const pressRowCorroborated = (row, rows) => pressRowEligible(row) && rows.some((other) => other !== row && pressRowEligible(other) && independentPressPair(row, other));
@@ -10628,9 +11091,10 @@ var ADAPTERS = [
   dexscreenerAdapter,
   coingeckoAdapter,
   redditAdapter,
-  onchainAdapter
+  onchainAdapter,
+  basicFactsAdapter
 ];
-var KEYED = /* @__PURE__ */ new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain"]);
+var KEYED = /* @__PURE__ */ new Set(["x", "github", "peopledatalabs", "crunchbase", "reddit", "onchain", "basic-facts"]);
 var attemptTotals = (providers, operations) => {
   const allow = providers ? new Set(providers) : null;
   const allowOperations = operations ? new Set(operations) : null;
@@ -10778,10 +11242,12 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
   const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
   await collectProjectSiteSubstance(ctx, domain);
-  if (!analystAvailable()) return;
-  ctx.emit({ phase: "P0 \xB7 Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify\u2026", tone: "neutral" });
+  const canExtractClaims = analystAvailable();
+  if (canExtractClaims) {
+    ctx.emit({ phase: "P0 \xB7 Intake", label: "Extract claims", detail: "Reading the subject's bio and posts for self-claims to verify\u2026", tone: "neutral" });
+  }
   const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
-  const claimsPromise = extractClaims(ctx.handle, ctx.evidence.profile.bio, posts);
+  const claimsPromise = canExtractClaims ? extractClaims(ctx.handle, ctx.evidence.profile.bio, posts) : Promise.resolve(null);
   const discoveryPromise = Promise.all([
     discoverAffiliations(ctx.handle, ctx.evidence.profile.display_name, ctx.evidence.profile.prior_handles ?? []),
     // Team announcements are usually old, high-signal posts. `posts` is the
@@ -11185,6 +11651,60 @@ function providerBackedRoles(evidence) {
   }
   return [...roles];
 }
+function projectVerifiedBasicFacts(ctx) {
+  if (!providerBackedRoles(ctx.evidence).includes("PROJECT" /* PROJECT */)) return;
+  const facts = (ctx.evidence.basicFacts ?? []).filter(
+    (fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")
+  );
+  if (!facts.length) return;
+  const norm2 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const roster = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
+  const people = facts.filter((fact) => fact.predicate === "founder" || fact.predicate === "executive");
+  for (const fact of people) {
+    if (roster.some((member) => norm2(member.name) === norm2(fact.value))) continue;
+    const source = fact.sources.find((candidate) => candidate.relation === "supports") ?? fact.sources[0];
+    if (!source) continue;
+    roster.push({
+      name: fact.value,
+      role: fact.qualifier ?? (fact.predicate === "founder" ? "Founder" : "Executive"),
+      evidence: source.excerpt,
+      source: source.title ?? (source.sourceClass === "official_subject" ? "Official project source" : "Corroborated public sources"),
+      sourceUrl: source.url,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "basic-facts-web"
+    });
+  }
+  if (people.length) {
+    ctx.recordCheck?.({
+      id: "project-team-identity",
+      status: "confirmed",
+      note: `${people.length} founder or executive record${people.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+      provider: "basic-facts-web",
+      sourceCount: people.reduce((total, fact) => total + fact.sources.length, 0)
+    });
+  }
+  const products = facts.filter((fact) => fact.predicate === "product");
+  if (products.length) {
+    ctx.recordCheck?.({
+      id: "project-product-substance",
+      status: "confirmed",
+      note: `${products.length} core product description${products.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+      provider: "basic-facts-web",
+      sourceCount: products.reduce((total, fact) => total + fact.sources.length, 0)
+    });
+  }
+  const traction = facts.filter((fact) => fact.predicate === "traction");
+  if (traction.length) {
+    ctx.recordCheck?.({
+      id: "project-traction-liveness",
+      status: "confirmed",
+      note: `${traction.length} concrete traction or usage metric${traction.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+      provider: "basic-facts-web",
+      sourceCount: traction.reduce((total, fact) => total + fact.sources.length, 0)
+    });
+  }
+}
 var PROJECT_BACKING_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
 var PROJECT_BACKING_PROVIDERS = /* @__PURE__ */ new Set(["team-page", "twitterapi"]);
 function collectProjectCoreEvidenceOutcomes(ctx) {
@@ -11194,14 +11714,21 @@ function collectProjectCoreEvidenceOutcomes(ctx) {
   const verifiedBackers = (ctx.evidence.webTeam ?? []).slice(0, 32).filter(
     (member) => member.artifact_verified === true && member.evidence_origin !== "model_lead" && !!member.provider && PROJECT_BACKING_PROVIDERS.has(member.provider) && PROJECT_BACKING_ROLE.test(member.role)
   );
-  if (verifiedBackers.length) {
-    const providers = [...new Set(verifiedBackers.map((member) => member.provider))];
+  const verifiedInvestorFacts = (ctx.evidence.basicFacts ?? []).filter(
+    (fact) => fact.predicate === "investor" && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")
+  );
+  const backingCount = verifiedBackers.length + verifiedInvestorFacts.length;
+  if (backingCount) {
+    const providers = [.../* @__PURE__ */ new Set([
+      ...verifiedBackers.map((member) => member.provider),
+      ...verifiedInvestorFacts.length ? ["basic-facts-web"] : []
+    ])];
     ctx.recordCheck?.({
       id: "project-backing-partners",
       status: "confirmed",
-      note: `${verifiedBackers.length} named advisor, backer, or investor record${verifiedBackers.length === 1 ? " was" : "s were"} verified from first-party project team or account evidence; funding terms and institutional investment were not inferred`,
+      note: `${backingCount} named advisor, backer, or investor record${backingCount === 1 ? " was" : "s were"} verified from fetched public evidence; funding terms and institutional investment were not inferred beyond these named records`,
       provider: providers.join("/"),
-      sourceCount: verifiedBackers.length
+      sourceCount: verifiedBackers.length + verifiedInvestorFacts.reduce((total, fact) => total + fact.sources.length, 0)
     });
   } else {
     ctx.recordCheck?.({
@@ -11211,15 +11738,28 @@ function collectProjectCoreEvidenceOutcomes(ctx) {
       provider: "project-core-evidence"
     });
   }
-  ctx.recordCheck?.({
-    id: "project-transparency",
-    status: "unavailable",
-    note: "no bounded first-party tokenomics, governance, or direct audit-report collector ran; canonical token identity alone does not establish transparency",
-    provider: "project-disclosure-collector"
-  });
+  const verifiedDisclosures = (ctx.evidence.basicFacts ?? []).filter(
+    (fact) => (fact.predicate === "governance" || fact.predicate === "audit") && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")
+  );
+  if (verifiedDisclosures.length) {
+    ctx.recordCheck?.({
+      id: "project-transparency",
+      status: "confirmed",
+      note: `${verifiedDisclosures.length} governance or security-audit disclosure${verifiedDisclosures.length === 1 ? " was" : "s were"} verified against fetched, cited public sources`,
+      provider: "basic-facts-web",
+      sourceCount: verifiedDisclosures.reduce((total, fact) => total + fact.sources.length, 0)
+    });
+  } else {
+    ctx.recordCheck?.({
+      id: "project-transparency",
+      status: "unavailable",
+      note: "no fetched governance or direct audit-report source passed verification; canonical token identity alone does not establish transparency",
+      provider: "project-disclosure-collector"
+    });
+  }
   return {
     state: "partial",
-    detail: `bounded frozen-evidence scan completed with ${verifiedBackers.length} verified backing record${verifiedBackers.length === 1 ? "" : "s"}; the project-disclosure collector is not wired`
+    detail: `bounded frozen-evidence scan completed with ${backingCount} verified backing record${backingCount === 1 ? "" : "s"} and ${verifiedDisclosures.length} verified disclosure record${verifiedDisclosures.length === 1 ? "" : "s"}`
   };
 }
 var handleFrom = (s) => s?.match(/@([A-Za-z0-9_]{2,30})/)?.[1];
@@ -11611,7 +12151,9 @@ function downgradeFixtureEvidenceForLive(seed) {
     profileAuthenticity: void 0,
     trustGraphScreen: void 0,
     webTeam: [],
-    ventureTeams: []
+    ventureTeams: [],
+    basicFacts: [],
+    basicFactLeads: []
   };
 }
 async function runAuditWithLedger(rawHandle, emit, options) {
@@ -11723,6 +12265,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     }
     finishRuntimeStage(`adapter:${a.id}`, stageStartedAt);
   }
+  projectVerifiedBasicFacts(ctx);
   if (fixture) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
@@ -11889,6 +12432,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
     projectToken: evidence.projectToken,
+    basicFacts: evidence.basicFacts,
     checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
     providerRuns: checkTracker.providers().runs
   };

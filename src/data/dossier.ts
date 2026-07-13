@@ -19,9 +19,16 @@ import type {
   ProfileAuthenticityResult,
   ProjectTokenSnapshot,
   TrustGraphScreen,
+  BasicFact,
+  BasicFactLead,
+  BasicFactSource,
 } from "./evidence";
 import type { ReportPersistenceContext, ReportVersionContext } from "../lib/reportVersion";
 import type { ScanCheck } from "../lib/scanChecklist";
+
+export type DossierBasicFactSource = BasicFactSource;
+export type DossierBasicFact = BasicFact;
+export type DossierBasicFactLead = BasicFactLead;
 
 export interface Dossier {
   handle: string;
@@ -85,6 +92,10 @@ export interface Dossier {
   trustGraphScreen?: TrustGraphScreen;
   /** Verified project-owned token plus frozen market/chart context. */
   projectToken?: ProjectTokenSnapshot;
+  /** Plain-language answers to the project's core diligence questions. */
+  basicFacts?: DossierBasicFact[];
+  /** Model-discovered candidates that remain unverified and unscored. */
+  basicFactLeads?: DossierBasicFactLead[];
   report: AuditReport;
   // What the collector run spent on providers (attached server-side; persists
   // with the report so the library can show per-audit cost).
@@ -296,6 +307,18 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
         history: { ...ev.projectToken.history, points: [...ev.projectToken.history.points] },
       } : {}),
     } : undefined,
+    ...(ev.basicFacts?.length ? {
+      basicFacts: ev.basicFacts.map((fact) => ({
+        ...fact,
+        ...(fact.sources ? { sources: fact.sources.map((source) => ({ ...source })) } : {}),
+      })),
+    } : {}),
+    ...(ev.basicFactLeads?.length ? {
+      basicFactLeads: ev.basicFactLeads.map((lead) => ({
+        ...lead,
+        ...(lead.candidateUrls ? { candidateUrls: [...lead.candidateUrls] } : {}),
+      })),
+    } : {}),
     report,
     graph,
     founderSummary: ev.roles.includes(SubjectClass.FOUNDER) ? a.founderSummary() : undefined,

@@ -1174,6 +1174,34 @@ const SOURCE_ARTIFACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   ],
 };
 
+// Basic Facts are independently fetched, content-hashed facts. Discovery-only
+// answers never reach this section. Route each verified predicate narrowly so
+// a founder citation cannot score token conduct and a token page cannot stand
+// in for product or team evidence.
+const BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
+  official_identity: ["P1_team_and_identity", "P6_transparency_integrity"],
+  founder: ["P1_team_and_identity"],
+  founders: ["P1_team_and_identity"],
+  executive: ["P1_team_and_identity"],
+  team: ["P1_team_and_identity"],
+  founded: ["P1_team_and_identity", "P2_product_substance"],
+  launched: ["P2_product_substance", "P5_traction_and_liveness"],
+  launch_date: ["P2_product_substance", "P5_traction_and_liveness"],
+  product: ["P2_product_substance", "P5_traction_and_liveness"],
+  official_token: ["P3_token_conduct"],
+  token: ["P3_token_conduct"],
+  network: ["P2_product_substance", "P3_token_conduct"],
+  legal_entity: ["P1_team_and_identity", "P6_transparency_integrity"],
+  funding: ["P4_backing_and_partners"],
+  investor: ["P4_backing_and_partners"],
+  governance: ["P3_token_conduct", "P6_transparency_integrity"],
+  audit: ["P2_product_substance", "P6_transparency_integrity"],
+  audits: ["P2_product_substance", "P6_transparency_integrity"],
+  repository: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
+  repositories: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
+  traction: ["P5_traction_and_liveness"],
+};
+
 // A requested axis must be owned by at least one deterministic routing rule.
 // Synthesizing an unavailable gap for a misspelled or newly added-but-unwired
 // methodology axis would misdiagnose a configuration error as missing evidence.
@@ -1182,6 +1210,7 @@ const SCORING_SUPPORTED_AXES = new Set<string>([
   ...Object.values(FINDING_AXIS_ELIGIBILITY).flat(),
   ...Object.values(CHECK_AXIS_ELIGIBILITY).flat(),
   ...Object.values(SOURCE_ARTIFACT_AXIS_ELIGIBILITY).flat(),
+  ...Object.values(BASIC_FACT_AXIS_ELIGIBILITY).flat(),
 ]);
 
 const sourceArtifactKind = (value: Record<string, unknown>): string => {
@@ -1263,6 +1292,8 @@ const eligibleAxesFor = (
       ? FINDING_AXIS_ELIGIBILITY[findingType] ?? []
     : section === "checkOutcomes" && checkId
     ? CHECK_AXIS_ELIGIBILITY[checkId] ?? []
+    : section === "basicFacts"
+      ? BASIC_FACT_AXIS_ELIGIBILITY[recordText(value, ["predicate"], 80)?.toLowerCase() ?? ""] ?? []
     : section === "sourceArtifacts"
       ? sourceArtifactEligibleAxes(value, sourceArtifactPeers, subjectHandle, profile)
       : SECTION_AXIS_ELIGIBILITY[section] ?? [];
@@ -1392,12 +1423,25 @@ const verificationFor = (
       ? "verified"
       : "unavailable";
   }
+  if (section === "basicFacts") {
+    const status = recordText(record, ["status"], 40)?.toLowerCase();
+    return record.artifact_verified === true && (status === "verified" || status === "corroborated")
+      ? "verified"
+      : status === "lead"
+        ? "reported"
+        : "unavailable";
+  }
   return "observed";
 };
 
 const DIRECT_SECTIONS = new Set(["profile", "profileAuthenticity", "projectToken", "findings", "wallets", "promotions", "recentActivity"]);
 
 const providerFor = (section: string, payload: Record<string, unknown>): string => {
+  if (section === "basicFacts" && Array.isArray(payload.sources)) {
+    const source = payload.sources.find((value) => value && typeof value === "object" && !Array.isArray(value)) as Record<string, unknown> | undefined;
+    const sourceProvider = source ? recordText(source, ["provider"], 100) : undefined;
+    if (sourceProvider) return sourceProvider;
+  }
   const declared = recordText(payload, ["provider"], 100);
   if (declared) return declared;
   if (section === "profile") {
@@ -1440,14 +1484,22 @@ const makeAxisArtifact = (
   const artifactId = `art_v1_${contentHash}`;
   const eligibleAxes = eligibleOverride ?? eligibleAxesFor(section, payload, axisCatalog, sourceArtifactPeers, subjectHandle, profile);
   const provider = providerFor(section, payload);
+  const basicFactSource = section === "basicFacts" && Array.isArray(payload.sources)
+    ? payload.sources.find((value) => value && typeof value === "object" && !Array.isArray(value)) as Record<string, unknown> | undefined
+    : undefined;
   const operationKey = recordText(payload, ["checkId", "check_id", "finding_type", "kind", "type"], 100);
-  const title = recordText(payload, ["title", "label", "claim", "name", "project_name", "handle", "axis"], 180)
+  const title = recordText(payload, ["title", "label", "claim", "name", "project_name", "handle", "axis", "value", "predicate"], 180)
     ?? `${section} evidence`;
-  const excerpt = recordText(payload, ["excerpt", "note", "rationale", "evidence", "bio", "detail", "text", "value"], 320);
+  // A Basic Fact's value is the normalized answer, while its nested source
+  // excerpt is the actual fetched proof. Prefer that proof in the frozen
+  // catalog so the scorer and report citation retain the source's exact words.
+  const excerpt = (basicFactSource ? recordText(basicFactSource, ["excerpt"], 320) : undefined)
+    ?? recordText(payload, ["excerpt", "note", "rationale", "evidence", "bio", "detail", "text", "value"], 320);
   const sourceUrl = safeArtifactSourceUrl(
     recordText(payload, ["sourceUrl", "source_url", "evidence_url", "url", "linkedin"], 420),
-  );
-  const capturedAt = recordText(payload, ["capturedAt", "captured_at", "profile_captured_at", "completedAt", "source_date"], 40);
+  ) ?? safeArtifactSourceUrl(basicFactSource ? recordText(basicFactSource, ["url", "sourceUrl"], 420) : undefined);
+  const capturedAt = recordText(payload, ["capturedAt", "captured_at", "profile_captured_at", "completedAt", "source_date"], 40)
+    ?? (basicFactSource ? recordText(basicFactSource, ["capturedAt", "captured_at"], 40) : undefined);
   return {
     decorated: { ...payload, artifactId },
     catalog: {
@@ -1471,6 +1523,7 @@ const makeAxisArtifact = (
 const SCORING_SINGLE_SECTIONS = ["profile", "profileAuthenticity", "trustGraphScreen", "projectToken"] as const;
 const SCORING_ARRAY_SECTIONS = [
   "findings", "ventures", "testimonials", "advised", "promotions", "wallets", "team",
+  "basicFacts",
   "notableFollowers", "recentActivity", "sourceArtifacts", "checkOutcomes",
   "clientEngagements", "associates", "ventureTeams",
 ] as const;
@@ -1637,6 +1690,7 @@ function serializeAnalystEvidencePacket(
     promotions: 16,
     wallets: 12,
     team: 16,
+    basicFacts: 24,
     notableFollowers: 16,
     recentActivity: 12,
     sourceArtifacts: 24,
@@ -1778,6 +1832,7 @@ function serializeAnalystEvidencePacket(
     "ventureTeams",
     "checkOutcomes",
     "sourceArtifacts",
+    "basicFacts",
     "team",
   ];
   const render = () => options.axisCatalog
@@ -1857,7 +1912,7 @@ function serializeAnalystEvidencePacket(
   // project-team check outcome. Keep them through the first pruning pass so a
   // bounded packet cannot retain "2 team records confirmed" while dropping
   // the actual founder names those records established.
-  const protectedEvidenceSections = new Set(["checkOutcomes", "sourceArtifacts", "team"]);
+  const protectedEvidenceSections = new Set(["checkOutcomes", "sourceArtifacts", "basicFacts", "team"]);
   while (json.length > ANALYST_EVIDENCE_MAX_CHARS) {
     if (!removeOneFrom(pruneOrder, (section) => !protectedEvidenceSections.has(section))) break;
     json = JSON.stringify(render());

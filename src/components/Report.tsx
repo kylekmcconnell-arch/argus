@@ -4,6 +4,7 @@ import {
   ArrowsClockwise,
   Briefcase,
   Buildings,
+  CheckCircle,
   Cube,
   Database,
   DotsThree,
@@ -23,7 +24,7 @@ import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
 import type { Dossier } from "../data/dossier";
 import type { SourceArtifact } from "../data/evidence";
-import type { RoleReport, SubjectClass } from "../engine";
+import { SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import { getContributions } from "../graph/store";
@@ -63,6 +64,11 @@ import {
   type ReportCanvasNarrativeItem,
   type ReportCanvasRailItem,
 } from "./ReportCanvasPrimitives";
+import {
+  BasicFactsPanel,
+  type BasicFactLeadView,
+  type BasicFactView,
+} from "./BasicFactsPanel";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -146,6 +152,65 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
   );
 }
 
+const PROJECT_DILIGENCE_LABELS: Record<string, string> = {
+  P1_team_and_identity: "Team and leadership",
+  P2_product_substance: "Product and execution",
+  P3_token_conduct: "Token design and conduct",
+  P4_backing_and_partners: "Backers and partnerships",
+  P5_traction_and_liveness: "Traction and usage",
+  P6_transparency_integrity: "Transparency and integrity",
+};
+
+function diligenceAreaLabel(axis: string): string {
+  if (PROJECT_DILIGENCE_LABELS[axis]) return PROJECT_DILIGENCE_LABELS[axis];
+  const known = axisLabel(axis);
+  if (known !== axis) return known;
+  const plain = axis.replace(/^[A-Z]+\d+[\s_-]*/i, "").replace(/[_-]+/g, " ").trim();
+  return plain ? plain.replace(/^./, (letter) => letter.toUpperCase()) : "Diligence area";
+}
+
+function sourceProviderLabel(provider: string): string {
+  const known: Record<string, string> = {
+    "google-news": "Independent news",
+    "public-web": "Public web sources",
+    "portfolio-web": "Portfolio sources",
+    "fund-scale-web": "Fund disclosures",
+    twitterapi: "Official X profile",
+    grok: "Web research",
+    "claude-web-search": "Web research",
+    "claude-vision": "Image review",
+    github: "GitHub",
+    opensanctions: "Sanctions screening",
+    courtlistener: "Court records",
+  };
+  if (known[provider]) return known[provider];
+  const plain = provider.replace(/[_-]+/g, " ").trim();
+  return plain ? plain.replace(/^./, (letter) => letter.toUpperCase()) : "Source";
+}
+
+function evidenceStrength({
+  score,
+  weight,
+  supportCount,
+  counterCount = 0,
+  questionCount = 0,
+}: {
+  score: number;
+  weight: number;
+  supportCount: number;
+  counterCount?: number;
+  questionCount?: number;
+}): "Strong evidence" | "Moderate evidence" | "Limited evidence" {
+  const ratio = weight > 0 ? score / weight : 0;
+  if (supportCount >= 3 && ratio >= 0.72 && counterCount === 0 && questionCount === 0) return "Strong evidence";
+  if (supportCount >= 2 && ratio >= 0.48 && counterCount <= 1) return "Moderate evidence";
+  return "Limited evidence";
+}
+
+function questionMeta(count: number): string {
+  return count > 0 ? ` · ${count} ${count === 1 ? "question" : "questions"} to verify` : "";
+}
+
 // Copy a full wallet address (the row shows a truncated form).
 function CopyAddr({ text }: { text: string }) {
   const [done, setDone] = useState(false);
@@ -183,14 +248,15 @@ function AxisBar({
 }) {
   const ratio = weight ? score / weight : 0;
   const weak = ratio < 0.45;
+  const supportCount = evidenceRefs?.length ?? 0;
+  const counterCount = counterEvidenceRefs?.length ?? 0;
+  const questionCount = gaps?.length ?? 0;
+  const strength = evidenceStrength({ score, weight, supportCount, counterCount, questionCount });
   return (
     <div className="py-2">
       <div className="flex items-center justify-between gap-3">
-        <span className="text-[12.5px] text-ink-dim">{axisLabel(axis)}</span>
-        <span className="mono shrink-0 text-[11px] tabular text-ink-faint">
-          {score}
-          <span className="text-ink-faint/60">/{weight}</span>
-        </span>
+        <span className="text-[12.5px] text-ink-dim">{diligenceAreaLabel(axis)}</span>
+        <span className="shrink-0 text-[11px] text-ink-faint">{strength}</span>
       </div>
       <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-line">
         <div
@@ -204,9 +270,9 @@ function AxisBar({
           href={`#decision-basis-${axis}`}
           className="mt-1.5 inline-flex min-h-8 flex-wrap items-center gap-x-2 gap-y-1 rounded-md text-[12.5px] text-signal-lift underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
         >
-          <span>{evidenceRefs.length} evidence {evidenceRefs.length === 1 ? "artifact" : "artifacts"}</span>
-          {(counterEvidenceRefs?.length ?? 0) > 0 && <span className="text-caution">{counterEvidenceRefs!.length} counter</span>}
-          {(gaps?.length ?? 0) > 0 && <span className="text-caution">{gaps!.length} {gaps!.length === 1 ? "gap" : "gaps"}</span>}
+          <span>{supportCount} {supportCount === 1 ? "source" : "sources"} reviewed</span>
+          {counterCount > 0 && <span className="text-caution">{counterCount} {counterCount === 1 ? "source needs" : "sources need"} reconciliation</span>}
+          {questionCount > 0 && <span className="text-caution">{questionCount} {questionCount === 1 ? "question" : "questions"} to verify</span>}
           <span aria-hidden="true">↑</span>
         </a>
       )}
@@ -1220,6 +1286,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const unmatchedPortfolioLeadCount = portfolioLeads.filter((lead) =>
     !verifiedPortfolioProjectKeys.has(lead.projectName.trim().toLowerCase())).length;
   const roles = report.roles as SubjectClass[];
+  const basicFacts: BasicFactView[] = f.basicFacts ?? [];
+  const basicFactLeads: BasicFactLeadView[] = f.basicFactLeads ?? [];
+  const showBasicFacts = roles.includes(SubjectClass.PROJECT)
+    || basicFacts.length > 0
+    || basicFactLeads.length > 0;
   const governingRoleReport = report.role_reports.find((rr) => rr.role === report.governing_role)
     ?? report.role_reports[0];
   const governingAxes = Object.entries(governingRoleReport?.axes ?? {});
@@ -1477,6 +1548,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const unresolvedChecks = diligenceChecks.filter((check) =>
     check.status === "unknown" || check.status === "unavailable" || check.status === "stale",
   );
+  const investorOpenChecks = unresolvedChecks.filter((check) => {
+    const diagnostic = [check.label, check.note, check.provider].filter(Boolean).join(" ").toLowerCase();
+    const optionalSource = /\b(?:crunchbase|reddit|people data labs|pdl|grok|twitterapi(?:\.io)?|x provider)\b/.test(diagnostic);
+    const availabilityOnly = /\b(?:collection|provider|api|failed|failure|partial|unavailable|rate limit)\b/.test(diagnostic);
+    return !(optionalSource && availabilityOnly);
+  });
   const providerGaps = (f.providerSnapshot?.runs ?? []).filter((run) =>
     run.state === "partial" || run.state === "failed" || run.state === "unavailable",
   );
@@ -1487,13 +1564,23 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .filter((axis) => Boolean(axis.rationale) && axis.support.length > 0)
     .sort((left, right) => (right.weight ? right.score / right.weight : 0) - (left.weight ? left.score / left.weight : 0))
     .slice(0, 5)
-    .map((axis) => ({
-      id: `support-${axis.axis}`,
-      title: axis.rationale,
-      detail: `${axisLabel(axis.axis)} · ${axis.score}/${axis.weight}`,
-      provenance: `${axis.support.length} frozen supporting artifact${axis.support.length === 1 ? "" : "s"}`,
-      href: axisHref(axis.axis),
-    }));
+    .map((axis) => {
+      const questionCount = Math.max(axis.gaps.length, axis.gapArtifacts.length);
+      const strength = evidenceStrength({
+        score: axis.score,
+        weight: axis.weight,
+        supportCount: axis.support.length,
+        counterCount: axis.counter.length,
+        questionCount,
+      });
+      return {
+        id: `support-${axis.axis}`,
+        title: axis.rationale,
+        detail: `${diligenceAreaLabel(axis.axis)} · ${strength}`,
+        provenance: `${axis.support.length} ${axis.support.length === 1 ? "source" : "sources"} reviewed`,
+        href: axisHref(axis.axis),
+      };
+    });
 
   const confidenceLimits: ReportCanvasNarrativeItem[] = [
     ...(report.cap_applied ? [{
@@ -1521,30 +1608,35 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     ...decisionBasisSummary.rows.flatMap((axis) => axis.gaps.slice(0, 1).map((gap, index) => ({
       id: `gap-${axis.axis}-${index}`,
       title: gap,
-      detail: `${axisLabel(axis.axis)} evidence gap`,
-      provenance: "Frozen governing-axis lineage",
+      detail: `This limits confidence in ${diligenceAreaLabel(axis.axis).toLowerCase()}.`,
+      provenance: "Question to verify",
       href: axisHref(axis.axis),
     }))),
     ...decisionBasisSummary.rows
       .filter((axis) => axis.counter.length > 0)
       .map((axis) => ({
         id: `counter-${axis.axis}`,
-        title: `${axisLabel(axis.axis)} includes ${axis.counter.length} counter-evidence artifact${axis.counter.length === 1 ? "" : "s"}.`,
-        provenance: "Frozen governing-axis lineage",
+        title: `The evidence on ${diligenceAreaLabel(axis.axis).toLowerCase()} is mixed.`,
+        detail: `${axis.counter.length} ${axis.counter.length === 1 ? "source needs" : "sources need"} reconciliation.`,
+        provenance: "Review competing sources",
         href: axisHref(axis.axis),
       })),
   ].slice(0, 6);
-  const favorableVerdict = presentedVerdict === "PASS";
+  const favorableVerdict = presentedVerdict === "PASS"
+    || (presentedVerdict === "PROVISIONAL" && report.composite_verdict === "PASS");
   const lowAxisDrivers: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
     .filter((axis) => axis.weight > 0 && axis.score / axis.weight < 0.7)
     .sort((left, right) => (left.weight ? left.score / left.weight : 1) - (right.weight ? right.score / right.weight : 1))
-    .map((axis) => ({
-      id: `low-axis-${axis.axis}`,
-      title: `${axisLabel(axis.axis)} scored ${axis.score}/${axis.weight}.`,
-      detail: axis.rationale,
-      provenance: `${axis.support.length} support · ${axis.counter.length} counter · ${Math.max(axis.gaps.length, axis.gapArtifacts.length)} gaps`,
-      href: axisHref(axis.axis),
-    }));
+    .map((axis) => {
+      const questions = Math.max(axis.gaps.length, axis.gapArtifacts.length);
+      return {
+        id: `low-axis-${axis.axis}`,
+        title: `${diligenceAreaLabel(axis.axis)} needs more verification.`,
+        detail: axis.rationale,
+        provenance: `Limited evidence${questionMeta(questions)}`,
+        href: axisHref(axis.axis),
+      };
+    });
   const adverseVerdictNarrative = [...confidenceLimits, ...lowAxisDrivers]
     .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
     .slice(0, 6);
@@ -1562,22 +1654,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     ...(scoringOutputIncomplete ? [{
       id: "verify-scoring-pass",
       title: `Complete the ${resolvedRoleLabel} scoring pass`,
-      detail: `ARGUS resolved this subject to ${resolvedRoleLabel}, but the analyst did not return a complete, valid governing-axis result. Rerun the scoring pass without discarding the collected provider evidence.`,
-      provenance: "Analyst output incomplete",
+      detail: `ARGUS identified this as a ${resolvedRoleLabel.toLowerCase()}, but the decision review did not finish. Rerun it without discarding the evidence already collected.`,
+      provenance: "Decision review incomplete",
       href: "#decision-basis" as `#${string}`,
     }] : []),
-    ...unresolvedChecks.map((check, index) => ({
+    ...investorOpenChecks.map((check, index) => ({
       id: `verify-${check.checkId ?? index}`,
       title: check.label,
       detail: check.note,
-      provenance: [check.provider, check.status.replace(/-/g, " ")].filter(Boolean).join(" · "),
-      href: "#scan-methodology" as `#${string}`,
-    })),
-    ...providerGaps.map((run) => ({
-      id: `verify-provider-${run.id}`,
-      title: `${run.label} collection ${run.state}`,
-      detail: run.detail || "This provider path did not return a complete result.",
-      provenance: `Provider run · ${run.state}`,
+      provenance: "Needs verification",
       href: "#scan-methodology" as `#${string}`,
     })),
   ].filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index).slice(0, 8);
@@ -1620,22 +1705,40 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .filter((axis) => axis.support.length > 0)
     .sort((left, right) => right.support.length - left.support.length)
     .slice(0, 5)
-    .map((axis) => ({
-      id: `rail-evidence-${axis.axis}`,
-      label: axisLabel(axis.axis),
-      meta: `${axis.support.length} support · ${axis.counter.length} counter · ${Math.max(axis.gaps.length, axis.gapArtifacts.length)} gaps`,
-      href: axisHref(axis.axis),
-    }));
+    .map((axis) => {
+      const questions = Math.max(axis.gaps.length, axis.gapArtifacts.length);
+      return {
+        id: `rail-evidence-${axis.axis}`,
+        label: diligenceAreaLabel(axis.axis),
+        meta: `${evidenceStrength({
+          score: axis.score,
+          weight: axis.weight,
+          supportCount: axis.support.length,
+          counterCount: axis.counter.length,
+          questionCount: questions,
+        })}${questionMeta(questions)}`,
+        href: axisHref(axis.axis),
+      };
+    });
   const adverseDecisionEvidenceRail: ReportCanvasRailItem[] = decisionBasisSummary.rows
     .filter((axis) => axis.counter.length > 0 || axis.gaps.length > 0 || axis.gapArtifacts.length > 0 || (axis.weight > 0 && axis.score / axis.weight < 0.7))
     .sort((left, right) => (left.weight ? left.score / left.weight : 1) - (right.weight ? right.score / right.weight : 1))
     .slice(0, 5)
-    .map((axis) => ({
-      id: `rail-driver-${axis.axis}`,
-      label: axisLabel(axis.axis),
-      meta: `${axis.score}/${axis.weight} · ${axis.counter.length} counter · ${Math.max(axis.gaps.length, axis.gapArtifacts.length)} gaps`,
-      href: axisHref(axis.axis),
-    }));
+    .map((axis) => {
+      const questions = Math.max(axis.gaps.length, axis.gapArtifacts.length);
+      return {
+        id: `rail-driver-${axis.axis}`,
+        label: diligenceAreaLabel(axis.axis),
+        meta: `${evidenceStrength({
+          score: axis.score,
+          weight: axis.weight,
+          supportCount: axis.support.length,
+          counterCount: axis.counter.length,
+          questionCount: questions,
+        })}${questionMeta(questions)}`,
+        href: axisHref(axis.axis),
+      };
+    });
   const decisionRailItems = favorableVerdict ? decisionEvidenceRail : adverseDecisionEvidenceRail;
 
   const openQuestionRail: ReportCanvasRailItem[] = verificationNext.slice(0, 5).map((item, index) => ({
@@ -1651,8 +1754,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   }, new Map<string, number>())].sort((left, right) => right[1] - left[1]);
   const provenanceRail: ReportCanvasRailItem[] = artifactProviderCounts.slice(0, 5).map(([provider, count]) => ({
     id: `provider-${provider}`,
-    label: provider,
-    meta: `${count} frozen artifact${count === 1 ? "" : "s"}`,
+    label: sourceProviderLabel(provider),
+    meta: `${count} saved source${count === 1 ? "" : "s"}`,
     href: "#frozen-source-ledger",
   }));
   const finalizedLabel = /^20\d{2}-\d{2}-\d{2}T/.test(report.finalized_at ?? "")
@@ -1932,20 +2035,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <dl className="mt-3 grid gap-2 sm:grid-cols-4">
                   <div className="stat-tile">
                     <dt className="stat-label">
-                      {versionContext?.attestationState === "legacy_unattested" ? "Evidence coverage" : "Decision coverage"}
+                      {versionContext?.attestationState === "legacy_unattested" ? "Evidence coverage" : "Review coverage"}
                     </dt>
                     <dd className="stat-value mt-0.5 font-semibold">{readiness.coveragePercent}%</dd>
                   </div>
                   <div className="stat-tile">
-                    <dt className="stat-label">Recorded outcomes</dt>
+                    <dt className="stat-label">Checks completed</dt>
                     <dd className="stat-value mt-0.5 font-semibold">{readiness.successful} / {readiness.applicable}</dd>
                   </div>
                   <div className="stat-tile">
-                    <dt className="stat-label">Evidence-backed axes</dt>
+                    <dt className="stat-label">Areas with evidence</dt>
                     <dd className="stat-value mt-0.5 font-semibold">{evidenceBackedAxisCount} / {governingAxes.length}</dd>
                   </div>
                   <div className="stat-tile">
-                    <dt className="stat-label">Unresolved checks</dt>
+                    <dt className="stat-label">Questions remaining</dt>
                     <dd className={`stat-value mt-0.5 font-semibold ${readiness.unresolved ? "text-caution" : "text-ink"}`}>{readiness.unresolved}</dd>
                   </div>
                 </dl>
@@ -1961,7 +2064,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             items={[
               { href: "#decision-summary", label: "Summary", icon: <FileText aria-hidden="true" size={15} weight="bold" /> },
               ...(f.projectToken ? [{ href: "#project-token" as const, label: "Token", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
-              { href: "#decision-basis", label: "Claims", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
+              ...(showBasicFacts ? [{ href: "#basic-facts" as const, label: "Basics", icon: <CheckCircle aria-hidden="true" size={15} weight="bold" />, count: basicFacts.filter((fact) => fact.status === "verified" || fact.status === "corroborated").length }] : []),
+              { href: "#decision-basis", label: "Diligence", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
               { href: "#identity-evidence", label: "Identity", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
               ...(visibleIntelligenceCount > 0 ? [{ href: "#evidence-ledger" as const, label: "Evidence", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount }] : []),
               { href: "#relationships", label: "Relationships", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
@@ -1998,14 +2102,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   </h2>
                   <p className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">
                     {routingUnresolved
-                      ? "This account was not resolved to an evidence-backed project, organization, token, or person role. The material below remains useful for investigation, but there is no decision-ready score or verdict in this snapshot."
-                      : `The ${resolvedRoleLabel} role is evidence-backed, but the analyst did not return a complete, valid governing-axis score. The collected intelligence remains useful, but there is no decision-ready score or verdict in this snapshot.`}
+                      ? "ARGUS could not confirm whether this is a project, organization, token, or person. The evidence below is still useful, but this snapshot is not ready for an investment decision."
+                      : `ARGUS identified this as a ${resolvedRoleLabel.toLowerCase()}, but the decision review did not finish. The evidence below is still useful, but this snapshot is not ready for an investment decision.`}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
-                    <span className="chip tint-caution">0 governing axes</span>
-                    <span className="chip">{readiness.successful} provider checks recorded</span>
+                    <span className="chip tint-caution">No decision areas scored</span>
+                    <span className="chip">{readiness.successful} checks completed</span>
                     <span className="chip">{visibleIntelligenceCount} evidence items and leads</span>
-                    {providerGaps.length > 0 && <span className="chip tint-caution">{providerGaps.length} provider gaps</span>}
+                    {providerGaps.length > 0 && <span className="chip tint-caution">{providerGaps.length} source gaps</span>}
                   </div>
                 </div>
                 {onRescan && (
@@ -2026,16 +2130,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   ? "Verified artifacts and investigative leads stay visible while subject routing is unresolved. Leads remain explicitly unscored."
                   : "Verified artifacts and investigative leads stay visible even though the scoring pass was incomplete. Leads remain explicitly unscored."
                 : favorableVerdict
-                  ? "Only governing-axis rationales with frozen supporting citations appear here."
-                  : "Hard caps, contradictions, low-scoring axes, and unresolved evidence that drive this stored result appear here."}
+                  ? "Only decision areas with saved supporting citations appear here."
+                  : "Disqualifying findings, conflicting sources, weak areas, and unanswered questions that drive this result appear here."}
               tone={decisionNarrativeTone}
               items={decisionFrameworkUnavailable ? unscoredIntelNarrative : verdictNarrative}
               emptyCopy={decisionFrameworkUnavailable
                 ? routingUnresolved
-                  ? "No verified artifact or investigative lead was stored. Review provider failures and rerun after resolving the subject type."
-                  : "No verified artifact or investigative lead was stored. Review provider failures and retry the scoring investigation."
+                  ? "No usable evidence was saved. Confirm what this subject is, review source coverage, and rerun the investigation."
+                  : "No usable evidence was saved. Review source coverage and retry the investigation."
                 : favorableVerdict
-                  ? "No evidence-backed governing-axis rationale is available in this snapshot. Inspect the decision basis before relying on the stored score."
+                  ? "No cited rationale is available in this snapshot. Review the underlying evidence before relying on the score."
                   : "No adverse evidence driver is recorded for this result. Inspect the decision basis before relying on the stored verdict."}
             />
             <ReportCanvasNarrativeSection
@@ -2043,19 +2147,19 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               title={decisionFrameworkUnavailable ? "Why ARGUS withheld a verdict" : favorableVerdict ? "What limits confidence" : "What evidence pulls the other way"}
               description={decisionFrameworkUnavailable
                 ? routingUnresolved
-                  ? "A scored conclusion is blocked until ARGUS resolves a provider-backed role and governing methodology."
-                  : "A scored conclusion is blocked because the analyst did not return a complete, valid governing-axis result."
+                  ? "ARGUS needs to confirm what this subject is before it can apply the right review standard."
+                  : "ARGUS identified the subject, but the decision review did not finish."
                 : favorableVerdict
-                  ? "Coverage gaps, contradictions, counter-evidence, and policy caps remain visible even when the score is favorable."
-                  : "Evidence-backed positive findings stay visible so an adverse verdict is presented with its counterweight."}
+                  ? "Missing sources, conflicting evidence, unanswered questions, and policy limits remain visible even when the result is favorable."
+                  : "Verified positive findings stay visible so an adverse verdict is shown in context."}
               tone={decisionFrameworkUnavailable ? "caution" : favorableVerdict ? (report.cap_applied ? "avoid" : "caution") : "pass"}
               items={decisionFrameworkUnavailable ? confidenceLimits : countervailingNarrative}
               emptyCopy={decisionFrameworkUnavailable
                 ? routingUnresolved
-                  ? "No decision methodology was selected, so ARGUS correctly withheld the score."
-                  : "The role resolved, but no complete governing-axis result was stored, so ARGUS correctly withheld the score."
+                  ? "ARGUS could not confirm what this subject is, so it withheld the score."
+                  : "The subject was identified, but the review did not finish, so ARGUS withheld the score."
                 : favorableVerdict
-                  ? "No unresolved coverage gaps, contradictions, governing-axis counter-evidence, or hard cap are recorded in this report."
+                  ? "No missing sources, conflicting evidence, unanswered questions, or policy limit is recorded in this report."
                   : "No evidence-backed positive counterweight is recorded in this report."}
             />
             <ReportCanvasNarrativeSection
@@ -2072,25 +2176,26 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           <aside className="space-y-3" aria-label="Decision summary rail">
             <ReportCanvasRailCard
-              title="Decision evidence"
+              title="Diligence areas"
               tone={decisionNarrativeTone}
-              count={`${evidenceBackedAxisCount} / ${governingAxes.length} axes`}
+              count={`${evidenceBackedAxisCount} reviewed`}
               items={decisionRailItems}
-              footer={<a href="#decision-basis" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">Inspect the full decision basis</a>}
+              footer={<a href="#decision-basis" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">See all evidence</a>}
             />
             <ReportCanvasRailCard
               title="Open questions"
               tone="caution"
               count={`${verificationNext.length}`}
               items={openQuestionRail}
-              footer={verificationNext.length > 0 ? <a href="#verification-next" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">Review the verification plan</a> : undefined}
+              emptyCopy="No unresolved investor questions were recorded."
+              footer={verificationNext.length > 0 ? <a href="#verification-next" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">See what still needs checking</a> : undefined}
             />
             <ReportCanvasRailCard
-              title="Evidence and leads"
+              title="Where the evidence came from"
               tone="signal"
-              count={`${visibleIntelligenceCount} items`}
+              count={`${visibleIntelligenceCount} sources and leads`}
               items={provenanceRail}
-              footer={(f.sourceArtifacts?.length ?? 0) > 0 ? <a href="#frozen-source-ledger" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">Open frozen source ledger</a> : undefined}
+              footer={(f.sourceArtifacts?.length ?? 0) > 0 ? <a href="#frozen-source-ledger" className="inline-flex min-h-8 items-center text-signal-lift hover:underline">View source details</a> : undefined}
             />
             <ReportCanvasRailCard title="Report freshness" tone="neutral" items={freshnessRail} />
           </aside>
@@ -2105,6 +2210,16 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             onRescan={onRescan}
           />
         </div>
+
+        {showBasicFacts && (
+          <div className="mt-5">
+            <BasicFactsPanel
+              facts={basicFacts}
+              leads={basicFactLeads}
+              fillRequired={roles.includes(SubjectClass.PROJECT) || Boolean(f.projectToken)}
+            />
+          </div>
+        )}
 
         <div id="identity-evidence" className="scroll-mt-28">
         {/* Supplemental live checks are deliberately separated from the frozen
@@ -2697,9 +2812,28 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           )}
 
           {/* transparent scan methodology — what ARGUS checked on this person */}
-          {diligenceChecks.length > 0 && (
+          {(diligenceChecks.length > 0 || providerGaps.length > 0) && (
             <div className="min-w-0 lg:col-span-2">
-              <MethodologyChecklist id="scan-methodology" checks={diligenceChecks} />
+              {diligenceChecks.length > 0 && <MethodologyChecklist id="scan-methodology" checks={diligenceChecks} />}
+              {providerGaps.length > 0 && (
+                <details id={diligenceChecks.length > 0 ? "provider-data-coverage" : "scan-methodology"} className="panel mt-2 px-4 py-3">
+                  <summary className="cursor-pointer text-[12.5px] font-medium text-ink-dim">
+                    Data coverage notes · {providerGaps.length}
+                  </summary>
+                  <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
+                    These source availability notes explain coverage. They are not findings about the subject.
+                  </p>
+                  <ul className="mt-2 divide-y divide-line/60">
+                    {providerGaps.map((run) => (
+                      <li key={run.id} className="flex flex-wrap items-start justify-between gap-2 py-2 text-[11.5px]">
+                        <span className="text-ink-dim">{run.label}</span>
+                        <span className="text-ink-faint">{run.state}</span>
+                        {run.detail && <span className="w-full leading-relaxed text-ink-faint">{run.detail}</span>}
+                      </li>
+                    ))}
+                  </ul>
+                </details>
+              )}
             </div>
           )}
 

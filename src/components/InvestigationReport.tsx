@@ -40,6 +40,11 @@ import {
 } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
 import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
+import {
+  BasicFactsPanel,
+  type BasicFactLeadView,
+  type BasicFactView,
+} from "./BasicFactsPanel";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -120,6 +125,19 @@ export function InvestigationReport({
     || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
   );
   const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
+  const investigationBasicFactSnapshot = inv as Investigation & {
+    basicFacts?: BasicFactView[];
+    basicFactLeads?: BasicFactLeadView[];
+  };
+  const projectBasicFacts = projectAccount?.basicFacts
+    ?? investigationBasicFactSnapshot.basicFacts
+    ?? [];
+  const projectBasicFactLeads = projectAccount?.basicFactLeads
+    ?? investigationBasicFactSnapshot.basicFactLeads
+    ?? [];
+  const showProjectBasicFacts = Boolean(projectAccount)
+    || projectBasicFacts.length > 0
+    || projectBasicFactLeads.length > 0;
   const tokenSubjectGraphKey = String(token.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
   const diligenceChecks = inv.versionContext
     ? inv.versionContext.checks
@@ -416,6 +434,7 @@ export function InvestigationReport({
             items={[
               { href: "#report-summary", label: "Summary", icon: <ClipboardText size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
+              ...(showProjectBasicFacts ? [{ href: "#investigation-basic-facts" as const, label: "Basics", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
               { href: "#investigation-evidence", label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
               ...((teamPeople.length > 0 || advisors.length > 0) ? [{ href: "#investigation-team" as const, label: "Team", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
               ...(invGraph && invGraph.nodes.length > 1 ? [{ href: "#investigation-relationships" as const, label: "Relationships", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
@@ -440,6 +459,17 @@ export function InvestigationReport({
           evidenceHref="#investigation-evidence"
           methodologyHref="#investigation-methodology"
         />
+
+        {showProjectBasicFacts && (
+          <div className="mt-5">
+            <BasicFactsPanel
+              id="investigation-basic-facts"
+              facts={projectBasicFacts}
+              leads={projectBasicFactLeads}
+              fillRequired
+            />
+          </div>
+        )}
 
         <div id="investigation-evidence" className="scroll-mt-28 mt-5 grid gap-3 lg:grid-cols-2">
           {/* on-chain */}

@@ -1830,6 +1830,100 @@ describe("analyst verdict integrity", () => {
     }, axes, frozen)).toBeNull();
   });
 
+  it("routes verified basic facts narrowly and retains their fetched source proof", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "P1_team_and_identity", weight: 18, role: "PROJECT" },
+      { axis: "P3_token_conduct", weight: 17, role: "PROJECT" },
+      { axis: "P6_transparency_integrity", weight: 16, role: "PROJECT" },
+    ];
+    const founderExcerpt = "Jupiter was co-founded by Meow, who continues to lead the project.";
+    const governanceExcerpt = "Jupiter governance uses the JUP token for community voting on proposals.";
+    const packet = buildScoringEvidencePacket({
+      basicFacts: [
+        {
+          factId: "basic_fact_founder_meow",
+          subjectKey: "jupiter",
+          predicate: "founder",
+          value: "Meow",
+          normalizedValue: "meow",
+          status: "verified",
+          critical: true,
+          sources: [{
+            url: "https://docs.jup.ag/about/team",
+            title: "Jupiter team",
+            sourceClass: "official_subject",
+            relation: "supports",
+            excerpt: founderExcerpt,
+            contentHash: "a".repeat(64),
+            capturedAt: "2026-07-12T20:00:00.000Z",
+            provider: "public-web",
+            artifactVerified: true,
+          }],
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          provider: "public-web",
+          discoveryProvider: "claude-web-search",
+        },
+        {
+          factId: "basic_fact_governance_jup",
+          subjectKey: "jupiter",
+          predicate: "governance",
+          value: "JUP token voting",
+          normalizedValue: "jup token voting",
+          status: "corroborated",
+          critical: true,
+          sources: [{
+            url: "https://vote.jup.ag/",
+            title: "Jupiter governance",
+            sourceClass: "official_subject",
+            relation: "supports",
+            excerpt: governanceExcerpt,
+            contentHash: "b".repeat(64),
+            capturedAt: "2026-07-12T20:01:00.000Z",
+            provider: "public-web",
+            artifactVerified: true,
+          }],
+          evidence_origin: "deterministic",
+          artifact_verified: true,
+          provider: "public-web",
+          discoveryProvider: "grok",
+        },
+      ],
+    }, axes);
+    const parsed = JSON.parse(packet) as {
+      basicFacts: Array<{ sources: Array<{ url: string; excerpt: string }> }>;
+    };
+    const frozen = extractScoringEvidenceCatalog(packet)
+      .filter((artifact) => artifact.section === "basicFacts");
+    const founder = frozen.find((artifact) => artifact.operation === "basicFacts:collect" && artifact.title === "Meow");
+    const governance = frozen.find((artifact) => artifact.title === "JUP token voting");
+
+    expect(parsed.basicFacts[0].sources[0]).toMatchObject({
+      url: "https://docs.jup.ag/about/team",
+      excerpt: founderExcerpt,
+    });
+    expect(founder).toMatchObject({
+      provider: "public-web",
+      excerpt: founderExcerpt,
+      sourceUrl: "https://docs.jup.ag/about/team",
+      eligibleAxes: ["P1_team_and_identity"],
+      verification: "verified",
+    });
+    expect(governance).toMatchObject({
+      excerpt: governanceExcerpt,
+      sourceUrl: "https://vote.jup.ag/",
+      eligibleAxes: ["P3_token_conduct", "P6_transparency_integrity"],
+      verification: "verified",
+    });
+    expect(inspectAnalystScoringPreflight(axes, packet)).toEqual({
+      state: "ready",
+      requestedAxisCount: 3,
+      evidenceArtifactCount: 2,
+      missingSubstantiveAxes: [],
+      unsupportedAxes: [],
+    });
+  });
+
   it("freezes official token-market evidence without overstating product or transparency coverage", () => {
     const axes: AnalystAxis[] = [
       { axis: "P3_token_conduct", weight: 20, role: "PROJECT" },
