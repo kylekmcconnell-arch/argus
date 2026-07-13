@@ -1401,6 +1401,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     : undefined;
   const evidenceReportVersionId = versionContext?.reportVersionId
     ?? (livePersistence?.state === "persisted" ? livePersistence.reportVersionId ?? undefined : undefined);
+  const liveCoreSnapshotSaved = !versionContext
+    && livePersistence?.state === "persisted"
+    && Boolean(livePersistence.reportVersionId);
+  const immutableReviewHref = liveCoreSnapshotSaved && livePersistence?.reportVersionId
+    ? exactReportPath(livePersistence.reportVersionId)
+    : null;
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
   const currentIntelligenceEnabled = Boolean(
     versionContext && currentIntelligenceVersionId === versionContext.reportVersionId,
@@ -1878,12 +1884,24 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             New investigation
           </button>
           <span className="mono hidden text-[11px] text-ink-faint md:inline">/ {report.audit_id}</span>
-          <span
-            className={`chip ${!versionContext && f.live ? "tint-signal" : ""}`}
-            title={versionContext ? `Frozen immutable report version ${versionContext.version}` : f.live ? "Collected live from data providers" : "Curated dossier (no provider keys configured)"}
-          >
-            {versionContext ? `SNAPSHOT v${versionContext.version}` : f.live ? "● LIVE SCAN" : "CURATED"}
-          </span>
+          {immutableReviewHref ? (
+            <a
+              className="chip tint-signal"
+              href={immutableReviewHref}
+              target="_blank"
+              rel="noreferrer"
+              title="The core report is saved. Open the exact immutable snapshot; live supplemental panels remain outside its verdict."
+            >
+              CORE SNAPSHOT SAVED
+            </a>
+          ) : (
+            <span
+              className={`chip ${!versionContext && f.live ? "tint-signal" : ""}`}
+              title={versionContext ? `Frozen immutable report version ${versionContext.version}` : f.live ? "Collected live from data providers" : "Curated dossier (no provider keys configured)"}
+            >
+              {versionContext ? `SNAPSHOT v${versionContext.version}` : f.live ? "● LIVE SCAN" : "CURATED"}
+            </span>
+          )}
           <div className="scrollbar-none order-3 flex w-full items-center gap-2 overflow-x-auto pb-1 sm:order-none sm:ml-auto sm:w-auto sm:justify-end sm:overflow-visible sm:pb-0">
             {onRescan && (
               <button type="button" onClick={onRescan} title="Run this audit again, fresh" className="btn-chip tint-signal min-h-11 gap-1.5 px-3">
@@ -2039,7 +2057,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <div>
                 <dt className="stat-label">Report state</dt>
                 <dd className="mono mt-1 text-signal-lift">
-                  {versionContext ? `v${versionContext.version} · frozen` : f.live ? "live collection" : "curated dossier"}
+                  {versionContext
+                    ? `v${versionContext.version} · frozen`
+                    : liveCoreSnapshotSaved
+                      ? "core snapshot saved"
+                      : f.live
+                        ? "live collection"
+                        : "curated dossier"}
                 </dd>
               </div>
               {(capturedLabel || finalizedLabel) && (

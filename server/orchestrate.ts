@@ -1091,16 +1091,18 @@ const FOUNDER_DECISION_QUESTION_GROUPS: readonly FounderDecisionQuestionGroup[] 
   {
     id: "founder-asset-distinction",
     predicates: ["public_security", "official_token"],
-    answerMode: "all",
-    answeredNote: "public-security and official-token questions have separate verified or completed-empty outcomes",
-    emptyNote: "the source search completed separately for public securities and official crypto tokens; no asset was inferred",
+    answerMode: "any",
+    answeredNote: "every observed security or token claim is classified and verified in its own asset category",
+    emptyNote: "no security or token claim entered the frozen evidence set, so asset classification was not applicable",
   },
 ] as const;
 
 /**
  * Convert the role-aware question ledger into six investor-facing founder
- * outcomes. A completed empty search records the gap without claiming the
- * answer is negative; provider failures remain unavailable.
+ * outcomes. A completed empty search records the gap without claiming a
+ * negative. Provider failures remain unavailable for observed claims, while
+ * an asset class with no claim or candidate in the frozen evidence is not
+ * applicable rather than a fabricated negative finding.
  */
 export function collectFounderDecisionQuestionOutcomes(ctx: CollectContext): void {
   if (!ctx.evidence.roles.includes(SubjectClass.FOUNDER)) return;
@@ -1126,34 +1128,54 @@ export function collectFounderDecisionQuestionOutcomes(ctx: CollectContext): voi
       const assetOutcomes = group.predicates.map((predicate) => {
         const entry = entries.find((candidate) => candidate.predicate === predicate);
         const fact = facts.find((candidate) => candidate.predicate === predicate);
-        const outcome = fact
+        const verifiedProjectToken = predicate === "official_token" && ctx.evidence.projectToken?.verified
+          ? ctx.evidence.projectToken
+          : null;
+        const claimObserved = Boolean(
+          fact
+          || verifiedProjectToken
+          || (ctx.evidence.basicFactLeads ?? []).some((lead) => lead.predicate === predicate)
+          || entry?.status === "answered"
+        );
+        const outcome = fact || verifiedProjectToken
           ? "verified" as const
           : entry?.status === "unanswered" && basicFactQuestionOutcome(entry) === "checked_empty"
             ? "checked_empty" as const
-            : "unresolved" as const;
+            : claimObserved
+              ? "unresolved" as const
+              : "not_applicable" as const;
         const label = predicate === "public_security" ? "Public security" : "Official crypto token";
+        const verifiedValue = fact?.value
+          ?? (verifiedProjectToken ? `$${verifiedProjectToken.symbol}` : "");
         return {
           predicate,
           outcome,
           note: outcome === "verified"
-            ? `${label}: ${fact!.value} verified`
+            ? `${label}: ${verifiedValue} verified`
             : outcome === "checked_empty"
               ? `${label}: completed search found no verified asset`
-              : `${label}: unresolved`,
+              : outcome === "not_applicable"
+                ? `${label}: not applicable because no claim or candidate was observed in the frozen person/founder evidence`
+                : `${label}: unresolved`,
         };
       });
       const unresolvedAssets = assetOutcomes.filter((outcome) => outcome.outcome === "unresolved");
+      const applicableAssets = assetOutcomes.filter((outcome) => outcome.outcome !== "not_applicable");
       const sourceCount = facts.reduce((count, fact) => count + fact.sources.length, 0);
       ctx.recordCheck?.({
         id: group.id,
         status: unresolvedAssets.length
           ? "unavailable"
-          : facts.length
+          : applicableAssets.some((outcome) => outcome.outcome === "verified")
             ? "confirmed"
-            : "checked-empty",
+            : applicableAssets.some((outcome) => outcome.outcome === "checked_empty")
+              ? "checked-empty"
+              : "not-applicable",
         note: `${assetOutcomes.map((outcome) => outcome.note).join("; ")}. ${unresolvedAssets.length
-          ? "Both asset questions must have separate outcomes before this distinction is complete."
-          : "Stock and token were evaluated separately; no asset was inferred from the other category."}`,
+          ? "Each observed asset claim must be verified in its own category before this distinction is complete."
+          : applicableAssets.length
+            ? "Every observed asset was classified separately. A not-applicable category is not a provider-backed negative finding."
+            : "No asset claim entered the frozen evidence set, so this classification check does not govern readiness."}`,
         provider: "basic-facts-question-ledger",
         sourceCount,
       });

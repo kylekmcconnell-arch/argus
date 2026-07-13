@@ -143,6 +143,31 @@ describe("private person report evidence boundary", () => {
     }
   });
 
+  it("labels a persisted live result as saved and links the exact immutable snapshot", () => {
+    const reportVersionId = "00000000-0000-4000-8000-000000000201";
+    const dossier = {
+      ...buildReport(SUBJECTS[1]),
+      persistence: {
+        state: "persisted" as const,
+        reportVersionId,
+        panelCostToken: "signed-panel-capability",
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const snapshotLink = container.querySelector<HTMLAnchorElement>(`a[href="/?version=${reportVersionId}"]`);
+    expect(snapshotLink?.textContent?.trim()).toBe("CORE SNAPSHOT SAVED");
+    expect(snapshotLink?.title).toContain("exact immutable snapshot");
+    expect(snapshotLink?.target).toBe("_blank");
+    expect(container.textContent).toContain("core snapshot saved");
+    expect(container.textContent).not.toContain("live collection");
+    expect(container.textContent).toContain("Live supplemental intelligence");
+    expect(container.textContent).toContain("not included in the immutable Share payload or scored verdict");
+  });
+
   it("does not repeat frozen news, legal, and sanctions calls after a fresh saved audit", () => {
     const dossier = {
       ...buildReport(SUBJECTS[1]),

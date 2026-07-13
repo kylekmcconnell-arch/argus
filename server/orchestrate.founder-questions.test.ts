@@ -3,10 +3,13 @@ import { SubjectClass } from "../src/engine";
 import {
   emptyEvidence,
   type BasicFact,
+  type BasicFactLead,
   type BasicFactPredicate,
   type BasicFactQuestionLedgerEntry,
 } from "../src/data/evidence";
+import { deriveDecisionReadiness } from "../src/lib/decisionReadiness";
 import type { CheckObservation, CollectContext } from "./adapters/types";
+import { PersonCheckTracker } from "./checks";
 import { collectFounderDecisionQuestionOutcomes } from "./orchestrate";
 
 const run = (
@@ -53,14 +56,28 @@ const fact = (predicate: BasicFactPredicate, value: string): BasicFact => ({
   provider: "public-web",
 });
 
+const tokenLead = (value = "TOKEN"): BasicFactLead => ({
+  subject: "Founder Name",
+  predicate: "official_token",
+  value,
+  questionId: "person.official_token",
+  excerpt: `${value} is described as an official token candidate for the founder's venture.`,
+  sourceUrl: `https://candidate.example/${value.toLowerCase()}`,
+  evidence_origin: "model_lead",
+  artifact_verified: false,
+  provider: "claude-web-search",
+});
+
 function context(
   ledger: BasicFactQuestionLedgerEntry[],
   facts: BasicFact[] = [],
+  leads: BasicFactLead[] = [],
 ): { ctx: CollectContext; observations: CheckObservation[] } {
   const evidence = emptyEvidence("@founder");
   evidence.roles = [SubjectClass.FOUNDER];
   evidence.basicFactQuestionLedger = ledger;
   evidence.basicFacts = facts;
+  evidence.basicFactLeads = leads;
   const observations: CheckObservation[] = [];
   return {
     observations,
@@ -71,6 +88,27 @@ function context(
       recordCheck: (observation) => observations.push(observation),
     },
   };
+}
+
+function founderReadiness(assetObservation: CheckObservation) {
+  const tracker = new PersonCheckTracker();
+  for (const id of [
+    "founder-identity-authority",
+    "founder-company-relationships",
+    "founder-track-record",
+    "founder-control-conflicts",
+    "founder-legal-regulatory",
+  ] as const) {
+    tracker.record({
+      id,
+      status: "confirmed",
+      note: `${id} completed from frozen evidence`,
+      provider: "test",
+      sourceCount: 1,
+    });
+  }
+  tracker.record(assetObservation);
+  return deriveDecisionReadiness(tracker.snapshot([SubjectClass.FOUNDER], { resolvedRealName: true }));
 }
 
 describe("founder decision question outcomes", () => {
@@ -152,7 +190,7 @@ describe("founder decision question outcomes", () => {
     ]);
   });
 
-  it("does not let a verified stock close an unresolved token question", () => {
+  it("keeps a Brian-shaped founder decision-ready when COIN is verified and no token claim or candidate was observed", () => {
     const { ctx, observations } = context([
       run("public_security", "answered"),
       run("official_token", "unanswered", "failed"),
@@ -163,10 +201,100 @@ describe("founder decision question outcomes", () => {
     expect(observations).toEqual([
       expect.objectContaining({
         id: "founder-asset-distinction",
+        status: "confirmed",
+        sourceCount: 1,
+        note: expect.stringMatching(/Public security: NASDAQ: COIN verified; Official crypto token: not applicable because no claim or candidate was observed/),
+      }),
+    ]);
+    expect(observations[0]?.note).toContain("not a provider-backed negative finding");
+    expect(observations[0]?.note).not.toContain("completed search found no verified asset");
+    expect(founderReadiness(observations[0])).toMatchObject({
+      status: "ready",
+      coveragePercent: 100,
+      successful: 6,
+      applicable: 6,
+      unresolved: 0,
+    });
+  });
+
+  it("marks asset classification not applicable when the frozen founder evidence contains no asset claim", () => {
+    const { ctx, observations } = context([
+      run("public_security", "unanswered", "failed"),
+      run("official_token", "unanswered", "failed"),
+    ]);
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        id: "founder-asset-distinction",
+        status: "not-applicable",
+        sourceCount: 0,
+        note: expect.stringContaining("classification check does not govern readiness"),
+      }),
+    ]);
+    expect(founderReadiness(observations[0])).toMatchObject({
+      status: "ready",
+      coveragePercent: 100,
+      successful: 5,
+      applicable: 5,
+      unresolved: 0,
+    });
+  });
+
+  it("keeps a person with an unresolved official-token candidate provisional", () => {
+    const { ctx, observations } = context([
+      run("public_security", "answered"),
+      run("official_token", "unanswered", "failed"),
+    ], [fact("public_security", "NASDAQ: COIN")], [tokenLead("BASE")]);
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        id: "founder-asset-distinction",
         status: "unavailable",
         note: expect.stringMatching(/Public security: NASDAQ: COIN verified; Official crypto token: unresolved/),
       }),
     ]);
+    expect(observations[0]?.note).toContain("Each observed asset claim must be verified in its own category");
+    expect(founderReadiness(observations[0])).toMatchObject({
+      status: "provisional",
+      coveragePercent: 83,
+      successful: 5,
+      applicable: 6,
+      unresolved: 1,
+    });
+  });
+
+  it("never treats the COIN stock symbol as proof that an identically named token candidate was resolved", () => {
+    const { ctx, observations } = context([
+      run("public_security", "answered"),
+      run("official_token", "unanswered", "failed"),
+    ], [fact("public_security", "NASDAQ: COIN")], [tokenLead("COIN")]);
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        id: "founder-asset-distinction",
+        status: "unavailable",
+        sourceCount: 1,
+        note: expect.stringMatching(/Public security: NASDAQ: COIN verified; Official crypto token: unresolved/),
+      }),
+    ]);
+  });
+
+  it("does not apply the founder-only observation rule to a project report", () => {
+    const { ctx, observations } = context([
+      { ...run("public_security", "answered"), questionId: "project.public_security", audience: "project" },
+      { ...run("official_token", "unanswered", "failed"), questionId: "project.official_token", audience: "project" },
+    ], [fact("public_security", "NASDAQ: COIN")]);
+    ctx.evidence.roles = [SubjectClass.PROJECT];
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations).toEqual([]);
   });
 
   it.each([
