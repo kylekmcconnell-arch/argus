@@ -163,12 +163,15 @@ describe("provider-backed project routing", () => {
       }),
     ]);
     expect(checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "identity-resolution", status: "confirmed", provider: "basic-facts-web", sourceCount: 1 }),
+      expect.objectContaining({ id: "affiliations-associates", status: "confirmed", provider: "basic-facts-web", sourceCount: 1 }),
       expect.objectContaining({ id: "project-team-identity", status: "confirmed" }),
       expect.objectContaining({ id: "project-product-substance", status: "confirmed" }),
       expect.objectContaining({ id: "project-traction-liveness", status: "confirmed" }),
       expect.objectContaining({ id: "project-backing-partners", status: "confirmed" }),
       expect.objectContaining({ id: "project-transparency", status: "confirmed" }),
     ]));
+    expect(evidence.profile.identity_confidence).toBe("Probable");
     expect(outcome.detail).toContain("1 verified backing record");
     expect(outcome.detail).toContain("2 verified disclosure records");
   });

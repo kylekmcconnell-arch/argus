@@ -803,12 +803,33 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
   }
 
   if (people.length) {
+    const peopleSourceCount = people.reduce((total, fact) => total + fact.sources.length, 0);
+    if (
+      ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation"
+      && ctx.evidence.profile.identity_confidence === "Unverified"
+    ) {
+      ctx.evidence.profile.identity_confidence = "Probable";
+    }
+    ctx.recordCheck?.({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: `project identity resolved through ${people.length} founder or executive record${people.length === 1 ? "" : "s"} verified from fetched, cited public sources`,
+      provider: "basic-facts-web",
+      sourceCount: peopleSourceCount,
+    });
+    ctx.recordCheck?.({
+      id: "affiliations-associates",
+      status: "confirmed",
+      note: `${people.length} project team affiliation${people.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
+      provider: "basic-facts-web",
+      sourceCount: peopleSourceCount,
+    });
     ctx.recordCheck?.({
       id: "project-team-identity",
       status: "confirmed",
       note: `${people.length} founder or executive record${people.length === 1 ? " was" : "s were"} verified from fetched, cited public sources`,
       provider: "basic-facts-web",
-      sourceCount: people.reduce((total, fact) => total + fact.sources.length, 0),
+      sourceCount: peopleSourceCount,
     });
   }
 
