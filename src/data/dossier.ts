@@ -16,6 +16,7 @@ import type {
   WebTeamMember,
   SourceArtifact,
   AxisEvidenceRecord,
+  ProjectStrengthBandRecord,
   ProfileAuthenticityResult,
   ProjectTokenSnapshot,
   TrustGraphScreen,
@@ -52,6 +53,8 @@ export interface Dossier {
   axisCitationVersion?: 1;
   /** Content-addressed artifacts from the exact post-pruning scorer packet. */
   axisEvidenceCatalog?: AxisEvidenceRecord[];
+  /** Frozen evidence-strength ranges used to validate PROJECT axis scores. */
+  projectStrengthBands?: Record<string, ProjectStrengthBandRecord>;
   // Live collector runs freeze the checks the server actually completed into
   // the immutable payload. Older curated fixtures may omit these fields.
   checkRuns?: ScanCheck[];
@@ -289,7 +292,15 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
       axisEvidenceCatalog: ev.axisEvidenceCatalog.map((artifact) => ({
         ...artifact,
         eligibleAxes: [...artifact.eligibleAxes],
+        ...(artifact.counterEligibleAxes ? { counterEligibleAxes: [...artifact.counterEligibleAxes] } : {}),
       })),
+      ...(ev.projectStrengthBands ? {
+        projectStrengthBands: Object.fromEntries(Object.entries(ev.projectStrengthBands).map(([axis, band]) => [axis, {
+          ...band,
+          reasons: [...band.reasons],
+          anchorArtifactIds: [...band.anchorArtifactIds],
+        }])),
+      } : {}),
     } : {}),
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,

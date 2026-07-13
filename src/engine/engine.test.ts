@@ -1,5 +1,5 @@
-// Mirrors argus_p/tests/test_profiles.py exactly. Proves the TS port is
-// behaviourally identical to the Python engine you already trust.
+// Preserves the original argus_p profile behaviors while testing the TS-only
+// project and evidence-integrity extensions separately.
 import { describe, it, expect } from "vitest";
 import {
   Audit,
@@ -453,6 +453,25 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     const r = a.finalize();
     expect(r.role_reports[0].dox_bonus).toBe(5);
     expect(r.score_total).toBe(r.role_reports[0].raw_total! + 5);
+  });
+
+  it("does not double-count identity as a project disclosure bonus", () => {
+    const a = new Audit("@named_protocol", { subject_class: SubjectClass.PROJECT });
+    a.setIdentity("Confirmed");
+    for (const [axis, score] of [
+      ["P1_team_and_identity", 11],
+      ["P2_product_substance", 17],
+      ["P3_token_conduct", 13],
+      ["P4_backing_and_partners", 7],
+      ["P5_traction_and_liveness", 12],
+      ["P6_transparency_integrity", 9],
+    ] as [string, number][]) a.setAxis(axis, score);
+
+    const report = a.finalize();
+
+    expect(report.role_reports[0].dox_bonus).toBe(0);
+    expect(report.governing_score).toBe(69);
+    expect(report.composite_verdict).toBe("CAUTION");
   });
 
   it("4 unconfirmed testimonials -> I4 capped low, no cap trigger", () => {

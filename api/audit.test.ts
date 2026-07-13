@@ -438,7 +438,7 @@ describe("person audit input guard", () => {
 
     const versionWrite = vi.mocked(fetch).mock.calls[0]?.[1];
     expect(JSON.parse(String(versionWrite?.body))).toMatchObject({
-      p_methodology_version: "argus-person-v3-lineage",
+      p_methodology_version: "argus-person-v5-project-strength-bands",
     });
 
     expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledWith(

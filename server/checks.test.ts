@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveDecisionReadiness } from "../src/lib/decisionReadiness";
+import { presentPublicReport } from "../src/lib/reportPresentation";
 import { PersonCheckTracker, type PersonCheckScope } from "./checks";
 
 const byId = (tracker: PersonCheckTracker, roles: string[], id: string, scope?: PersonCheckScope) =>
@@ -113,6 +114,70 @@ describe("PersonCheckTracker", () => {
       expect(checks.find((check) => check.checkId === id)?.status).toBe("unknown");
     }
     expect(deriveDecisionReadiness(checks).status).not.toBe("ready");
+  });
+
+  it("presents a fully evidenced Jupiter-like project as final PASS, not provisional", () => {
+    const tracker = new PersonCheckTracker();
+    for (const id of [
+      "identity-resolution",
+      "code-footprint-github",
+      "identity-continuity",
+      "affiliations-associates",
+      "project-token-identity",
+      "project-product-substance",
+      "project-team-identity",
+      "project-backing-partners",
+      "project-traction-liveness",
+      "project-transparency",
+      "news-press",
+      "trust-graph-connections",
+    ] as const) {
+      tracker.record({
+        id,
+        status: "confirmed",
+        note: id === "project-transparency"
+          ? "governance, token economics, and an independent security audit were verified from cited sources"
+          : `${id} completed from frozen cited evidence`,
+        provider: "jupiter-canary",
+        sourceCount: 1,
+      });
+    }
+
+    const checks = tracker.snapshot(["PROJECT"], { resolvedRealName: false });
+    const readiness = deriveDecisionReadiness(checks, {
+      roleCount: 1,
+      decisionAxisTotal: 6,
+      evidenceBackedAxes: 6,
+    });
+    const completeness = tracker.completeness(["PROJECT"], { resolvedRealName: false });
+    const presentation = presentPublicReport({
+      verdict: "PASS",
+      score: 90,
+      completeness,
+      attestation: "server_collected",
+      checks,
+      readiness: {
+        ...readiness,
+        roleCount: 1,
+        neededEvidenceSummary: "No evidence checks remain open.",
+      },
+    });
+
+    expect(readiness).toMatchObject({
+      status: "ready",
+      successful: 12,
+      applicable: 12,
+      coveragePercent: 100,
+      unresolved: 0,
+    });
+    expect(completeness).toBe("complete");
+    expect(presentation).toMatchObject({
+      displayVerdict: "PASS",
+      readinessLabel: "EVIDENCE COVERAGE COMPLETE",
+      primaryScore: "90",
+      scoreLabel: "SCORE",
+      final: true,
+    });
   });
 
   it("keeps profile-photo integrity out of scope for a project-only brand account", () => {

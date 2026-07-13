@@ -57,9 +57,19 @@ describe("dossier finding scope", () => {
       title: "Resolved X profile",
       contentHash: "b".repeat(64),
       eligibleAxes: ["F1_identity_verifiability"],
-      verification: "observed",
+      verification: "verified",
+      counterEligibleAxes: ["F1_identity_verifiability"],
       scope: "direct_subject",
     }];
+    evidence.projectStrengthBands = {
+      P1_team_and_identity: {
+        tier: "solid",
+        minScore: 12,
+        maxScore: 13,
+        reasons: ["Named team and legal operator"],
+        anchorArtifactIds: [artifactId],
+      },
+    };
     evidence.axes = [{
       axis: "F1_identity_verifiability",
       score: 10,
@@ -73,11 +83,19 @@ describe("dossier finding scope", () => {
 
     expect(dossier.axisCitationVersion).toBe(1);
     expect(dossier.axisEvidenceCatalog).toEqual(evidence.axisEvidenceCatalog);
+    expect(dossier.projectStrengthBands).toEqual(evidence.projectStrengthBands);
     expect(dossier.report.role_reports[0].axes.F1_identity_verifiability).toMatchObject({
       evidenceRefs: [artifactId],
       counterEvidenceRefs: [],
       gaps: [],
     });
+
+    evidence.axisEvidenceCatalog[0].counterEligibleAxes?.push("F2_track_record");
+    evidence.projectStrengthBands.P1_team_and_identity.reasons.push("Mutated after freeze");
+    expect(dossier.axisEvidenceCatalog?.[0].counterEligibleAxes).toEqual(["F1_identity_verifiability"]);
+    expect(dossier.projectStrengthBands?.P1_team_and_identity.reasons).toEqual([
+      "Named team and legal operator",
+    ]);
   });
 
   it("keeps model relationship leads visible without admitting them to the authoritative graph", () => {

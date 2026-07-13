@@ -8,7 +8,12 @@
 import { createHash } from "node:crypto";
 import { ANALYST_MODEL, env } from "./config";
 import { addClaudeUsage } from "./cost";
-import type { AxisEvidenceRecord, Contradiction } from "../src/data/evidence";
+import type {
+  AxisEvidenceRecord,
+  Contradiction,
+  ProjectStrengthBandRecord,
+  ProjectStrengthTier,
+} from "../src/data/evidence";
 import { isStrictFundScaleArtifact } from "../src/lib/fundScaleEvidence";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
 
@@ -339,6 +344,35 @@ export interface AnalystAxis {
   role: string;
 }
 
+/**
+ * Project scores describe the quality and risk established by substantive
+ * evidence. Collection completeness is reported separately by decision
+ * readiness, so a provider miss cannot quietly become a second score penalty.
+ * Keep this policy explicit and model-facing because axis maxima alone do not
+ * define a calibrated scale.
+ */
+export const PROJECT_SCORING_POLICY = [
+  "PROJECT CALIBRATION POLICY:",
+  "Keep score and confidence separate. Score what substantive evidence establishes about project quality and risk. Record missing, unavailable, stale, or uncollected information in coverageRefs and gaps; those items reduce decision readiness outside this scorer and are not counter-evidence.",
+  "Never subtract points merely because a provider did not run, a database returned no record, a licensed identity lookup missed, or a fact was not collected. Never charge the same gap against several axes. A material gap may keep an otherwise strong axis out of the exceptional band, but a gap alone must not push solid verified fundamentals into the mixed or adverse bands.",
+  "Use the same evidence-strength bands on every project axis: 85 to 100 percent means exceptional, broad, current verification; 70 to 84 percent means solid verified fundamentals; 40 to 69 percent means an emerging, source-backed project with real but still limited demonstrated maturity or scale; 0 to 39 percent requires a severe verified weakness, contradiction, misconduct, or failure. Missing coverage is separate and never creates or lowers a strength tier.",
+  "If an axis has neither affirmative evidence nor verified adverse evidence, do not score it at zero. Mark it unscored and publish the investigation as INCOMPLETE. A zero is a severe assessment, not a synonym for missing data.",
+  "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
+  "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
+  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation.",
+  "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified.",
+  "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
+  "A severe canonical-token market drawdown is material counter-evidence for P5 and must be cited, but price performance alone only caps otherwise exceptional traction and liveness at the solid band. It cannot erase verified current protocol usage or imply token misconduct.",
+  "P6 transparency and integrity: a named legal operator, terms, public docs or repositories, governance materials, and consistent current disclosures justify a solid score. Published independent audits, treasury reporting, and fuller financial disclosures may justify the exceptional band. An unavailable disclosure path is a confidence gap unless a direct verified search establishes a material nondisclosure.",
+  "Only cite substantive counterEvidenceRefs for distinct verified facts that pull a score below its evidence-strength band. A verified adverse fact may be primary support for an adverse band, but positive support and score-limiting counter-evidence must otherwise remain separate citations. An emerging score reflects limited demonstrated maturity or scale and does not require adverse evidence. Never use absence wording or operational coverage telemetry as a reason to lower a band.",
+].join("\n");
+
+export function scoringPolicyForAxes(axisCatalog: readonly AnalystAxis[]): string {
+  return axisCatalog.some(({ role }) => role === "PROJECT")
+    ? PROJECT_SCORING_POLICY
+    : "";
+}
+
 // Anthropic compiles every strict tool schema into a grammar. Keep this schema
 // shallow and invariant across investigations so the compiled grammar remains
 // bounded and can be reused from the provider cache. Axis-specific semantics
@@ -401,6 +435,14 @@ const ARTIFACT_ID = /^art_v1_[a-f0-9]{64}$/;
 const COVERAGE_ONLY_VERIFICATIONS = new Set<AxisEvidenceRecord["verification"]>(["checked_empty", "unavailable"]);
 const isSubstantiveArtifact = (artifact: AxisEvidenceRecord | undefined): artifact is AxisEvidenceRecord =>
   !!artifact && !COVERAGE_ONLY_VERIFICATIONS.has(artifact.verification);
+
+const isVerifiedCounterArtifact = (
+  artifact: AxisEvidenceRecord | undefined,
+  axis: string,
+): artifact is AxisEvidenceRecord =>
+  artifact?.verification === "verified" && artifact.counterEligibleAxes?.includes(axis) === true;
+const isOneTierCounterArtifact = (artifact: AxisEvidenceRecord | undefined): boolean =>
+  artifact?.operation === "findings:ProjectTokenDrawdown";
 const UNRESOLVED_TEAM_IDENTITY_CLAIM = /(?:\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:remains?|is|are|was|were|appears?)\s+(?:still\s+)?(?:unresolved|unnamed|anonymous|unknown|incomplete|absent|missing)\b)|(?:\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:could\s+not\s+be|has\s+not\s+been|have\s+not\s+been)\s+(?:identified|named|resolved|verified|confirmed|corroborated|surfaced|disclosed|enumerated)\b)|(?:\b(?:unresolved|unnamed|anonymous|unknown|incomplete|absent|missing)\b(?:\s+[\w-]+){0,7}\s+\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\b(?:no|absent|absence\s+of|without|missing|lacks?)\s+(?:\w+\s+){0,6}(?:named\s+)?(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\babsence\s+of\s+named\s+(?:founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\b(?:named\s+)?(?:founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:(?:is|are|was|were)\s+)?not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b)/i;
 const describesGroundedTeamAsUnresolved = (value: string): boolean => {
   if (UNRESOLVED_TEAM_IDENTITY_CLAIM.test(value)) return true;
@@ -417,6 +459,7 @@ const describesGroundedTeamAsUnresolved = (value: string): boolean => {
 export function normalizeAnalystSupportCounterOverlap(
   value: unknown,
   evidenceCatalog: AxisEvidenceRecord[],
+  projectScoreBands: Readonly<Record<string, ProjectScoreBand>> = {},
 ): unknown {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const root = value as Record<string, unknown>;
@@ -431,7 +474,7 @@ export function normalizeAnalystSupportCounterOverlap(
     const alias = /^e\d+$/i.test(ref) ? ref.toLowerCase() : ref;
     return aliasToArtifactId.get(alias) ?? alias;
   };
-  const normalizeRow = (candidate: unknown): unknown => {
+  const normalizeRow = (candidate: unknown, axisHint?: string): unknown => {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return candidate;
     const row = candidate as Record<string, unknown>;
     if (
@@ -439,13 +482,25 @@ export function normalizeAnalystSupportCounterOverlap(
       || !Array.isArray(row.additionalEvidenceRefs)
       || !Array.isArray(row.counterEvidenceRefs)
     ) return candidate;
+    const axis = typeof row.axis === "string" ? row.axis : axisHint;
     const counterKeys = new Set(row.counterEvidenceRefs.map(refKey).filter((ref): ref is string => !!ref));
     const support = [row.primaryEvidenceRef, ...row.additionalEvidenceRefs];
+    if (axis && projectScoreBands[axis]?.tier === "adverse") {
+      const supportKeys = new Set(support.map(refKey).filter((ref): ref is string => !!ref));
+      const disjointCounter = row.counterEvidenceRefs.filter((ref) => {
+        const key = refKey(ref);
+        return !key || !supportKeys.has(key);
+      });
+      return disjointCounter.length === row.counterEvidenceRefs.length
+        ? candidate
+        : { ...row, counterEvidenceRefs: disjointCounter };
+    }
     const disjointSupport = support.filter((ref) => {
       const key = refKey(ref);
       return !key || !counterKeys.has(key);
     });
-    if (disjointSupport.length === support.length || disjointSupport.length === 0) return candidate;
+    if (disjointSupport.length === support.length) return candidate;
+    if (disjointSupport.length === 0) return candidate;
     return {
       ...row,
       primaryEvidenceRef: disjointSupport[0],
@@ -455,14 +510,14 @@ export function normalizeAnalystSupportCounterOverlap(
 
   if (Array.isArray(root.axes)) {
     const rawAxes = root.axes;
-    const axes = rawAxes.map(normalizeRow);
+    const axes = rawAxes.map((row) => normalizeRow(row));
     return axes.some((axis, index) => axis !== rawAxes[index]) ? { ...root, axes } : value;
   }
   if (root.axes && typeof root.axes === "object" && !Array.isArray(root.axes)) {
     const entries = Object.entries(root.axes as Record<string, unknown>);
     let changed = false;
     const axes = Object.fromEntries(entries.map(([axis, row]) => {
-      const normalized = normalizeRow(row);
+      const normalized = normalizeRow(row, axis);
       changed ||= normalized !== row;
       return [axis, normalized];
     }));
@@ -566,6 +621,7 @@ export function validateAnalystVerdict(
   axisCatalog: AnalystAxis[],
   evidenceCatalog: AxisEvidenceRecord[] = [],
   onReject?: (reason: string) => void,
+  options: { projectScoreBands?: Readonly<Record<string, ProjectScoreBand>> } = {},
 ): AnalystVerdict | null {
   const reject = (reason: string): null => {
     onReject?.(reason);
@@ -673,6 +729,7 @@ export function validateAnalystVerdict(
   };
 
   const seen = new Map<string, AnalystVerdict["axes"][number]>();
+  const outOfBandProjectScores: string[] = [];
   for (const candidate of candidates) {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
       return reject("axis-row-shape");
@@ -774,6 +831,48 @@ export function validateAnalystVerdict(
     if (!counterEvidenceRefs.every((ref) => isSubstantiveArtifact(artifacts.get(ref)))) {
       return reject(`non-substantive-counter-reference:${row.axis}`);
     }
+    if (
+      spec.role === "PROJECT"
+      && !counterEvidenceRefs.every((ref) => isVerifiedCounterArtifact(artifacts.get(ref), row.axis as string))
+    ) {
+      return reject(`project-counter-reference-not-score-limiting:${row.axis}`);
+    }
+    const projectBand = options.projectScoreBands?.[row.axis];
+    const requiredBoundedCounters = [...artifacts.values()].filter((artifact) =>
+      isOneTierCounterArtifact(artifact)
+      && isVerifiedCounterArtifact(artifact, row.axis as string));
+    if (
+      spec.role === "PROJECT"
+      && projectBand?.tier !== "adverse"
+      && requiredBoundedCounters.some((artifact) => !counterEvidenceRefs.includes(artifact.artifactId))
+    ) {
+      return reject(`project-required-counter-reference-missing:${row.axis}`);
+    }
+    const verifiedCounterArtifacts = counterEvidenceRefs
+      .map((ref) => artifacts.get(ref))
+      .filter((artifact): artifact is AxisEvidenceRecord =>
+        isVerifiedCounterArtifact(artifact, row.axis as string));
+    const hasVerifiedCounterEvidence = verifiedCounterArtifacts.length > 0
+      || (
+        projectBand?.tier === "adverse"
+        && supportRefs.some((ref) => isVerifiedCounterArtifact(artifacts.get(ref), row.axis as string))
+      );
+    const hasSevereCounterEvidence = verifiedCounterArtifacts.some((artifact) =>
+      !isOneTierCounterArtifact(artifact));
+    if (
+      spec.role === "PROJECT"
+      && options.projectScoreBands
+      && (
+        !projectBand
+        || projectBand.tier === "none"
+        || row.score > projectBand.maxScore
+        || (
+          projectBand.tier !== "adverse"
+          && row.score < projectBand.minScore
+          && (!hasVerifiedCounterEvidence || !hasSevereCounterEvidence)
+        )
+      )
+    ) outOfBandProjectScores.push(row.axis);
     seen.set(row.axis, {
       axis: row.axis,
       score: row.score,
@@ -784,6 +883,9 @@ export function validateAnalystVerdict(
     });
   }
   if (seen.size !== expected.size) return reject("incomplete-axis-set");
+  if (outOfBandProjectScores.length > 0) {
+    return reject(`project-scores-outside-evidence-strength-band:${outOfBandProjectScores.join(",")}`);
+  }
 
   return {
     // Canonical order makes downstream completeness checks and snapshots stable.
@@ -798,7 +900,7 @@ const SCORING_PACKET_STATE_FIELD = "scoring_packet_state";
 const SCORING_PACKET_OVERSIZE = "oversize";
 
 const scoringPacketOversizeJson = (requestedAxisCount: number, reason: string): string => JSON.stringify({
-  schema_version: 4,
+  schema_version: 5,
   [SCORING_PACKET_STATE_FIELD]: SCORING_PACKET_OVERSIZE,
   reason,
   limit_chars: ANALYST_EVIDENCE_MAX_CHARS,
@@ -838,6 +940,7 @@ const compactObject = (value: unknown, depth = 0): unknown => {
 const SCORING_PROFILE_FIELDS = [
   "handle", "display_name", "resolved_name", "bio", "website",
   "profile_collection_state", "profile_provider", "profile_captured_at",
+  "last_post_at", "days_since_post",
 ] as const;
 
 const compactScoringProfile = (value: unknown): Record<string, unknown> | undefined => {
@@ -900,6 +1003,67 @@ const compactSourceArtifact = (value: unknown): Record<string, unknown> | undefi
   }));
 };
 
+const MATERIAL_RELATIONSHIP_PRESS = /\b(?:partner(?:s|ed|ing|ship)?|integrat(?:e[ds]?|ion)|collaborat(?:e[ds]?|ion)|alliance|joint(?:ly)?|teams? up|backed by|invest(?:s|ed|ing|ment)|funding|launch(?:e[ds])?\s+(?:with|alongside))\b/i;
+const MULTI_PARTY_LAUNCH_PRESS = /^(?:[^,\n]{1,100},){2}[^,\n]{1,140}\blaunch(?:e[ds])?\b/i;
+const MATERIAL_RELATIONSHIP_DENIAL = /\b(?:den(?:y|ies|ied)|rumou?r(?:ed|s)?|alleg(?:e[ds]?|ation)|reportedly|false|fake|no partnership|not (?:a |an )?(?:partner|investor|backer)|end(?:s|ed)? (?:its |the )?(?:partnership|integration|collaboration)|terminat(?:e[ds]?|ion))\b/i;
+const PROJECT_PRODUCT_PRESS = /\b(?:product|protocol|platform|exchange|app(?:lication)?|mainnet|testnet|launch(?:e[ds])?|releas(?:e[ds])?|ship(?:s|ped)?|deploy(?:s|ed|ment)|upgrade|integration|developer|repository|open[ -]?source)\b/i;
+const PROJECT_TRACTION_PRESS = /\b(?:active users?|daily users?|monthly users?|transactions?|trading volume|volume|fees?|revenue|tvl|total value locked|market share|adoption|usage|liquidity|deposits?|borrow(?:ing|ers?)?)\b/i;
+const PROJECT_TRANSPARENCY_PRESS = /\b(?:governance|proposal|vote|audit|security review|security audit|treasury report|financial disclosure|disclosure|legal entity|terms of service|multisig|multi-sig|incident report)\b/i;
+const isFreshPublishedArtifact = (artifact: Record<string, unknown>, maxAgeDays = 90): boolean => {
+  const publishedAt = Date.parse(String(artifact.publishedAt ?? ""));
+  const capturedAt = Date.parse(String(artifact.capturedAt ?? ""));
+  if (!Number.isFinite(publishedAt) || !Number.isFinite(capturedAt)) return false;
+  const ageMs = capturedAt - publishedAt;
+  return ageMs >= -86_400_000 && ageMs <= maxAgeDays * 86_400_000;
+};
+
+const datedMetricTimestamps = (fact: Record<string, unknown>): number[] => {
+  const sources = Array.isArray(fact.sources)
+    ? fact.sources.filter((value): value is Record<string, unknown> =>
+      !!value && typeof value === "object" && !Array.isArray(value))
+    : [];
+  const text = [
+    String(fact.qualifier ?? ""),
+    String(fact.value ?? ""),
+    ...sources.map((source) => String(source.excerpt ?? "")),
+  ].join(" ");
+  const matches = [
+    ...text.matchAll(/\b20\d{2}-\d{2}-\d{2}\b/g),
+    ...text.matchAll(/\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(?:\d{1,2},?\s+)?20\d{2}\b/gi),
+  ];
+  const quarters = [...text.matchAll(/\bQ([1-4])\s+(20\d{2})\b/gi)]
+    .map((match) => {
+      const quarter = Number(match[1]);
+      const year = Number(match[2]);
+      return Date.UTC(year, quarter * 3, 0);
+    });
+  return [
+    ...matches
+    .map((match) => Date.parse(match[0]))
+    .filter((timestamp) => Number.isFinite(timestamp)),
+    ...quarters.filter((timestamp) => Number.isFinite(timestamp)),
+  ];
+};
+
+const hasFreshDatedMetric = (
+  fact: Record<string, unknown>,
+  referenceCapturedAt: number,
+  maxAgeDays = 90,
+): boolean => datedMetricTimestamps(fact).some((timestamp) => {
+  const ageMs = referenceCapturedAt - timestamp;
+  return ageMs >= -86_400_000 && ageMs <= maxAgeDays * 86_400_000;
+});
+
+const relationshipStoryKey = (artifact: Record<string, unknown>): string => {
+  const headline = String(artifact.title ?? "")
+    .split(/\s+[|]\s+|\s+-\s+(?=[^-]+$)/)[0]
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return headline || String(artifact.contentHash ?? artifact.sourceUrl ?? "").toLowerCase();
+};
+
 const sourceArtifactPriority = (value: unknown): number => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return 9;
   const row = value as Record<string, unknown>;
@@ -908,6 +1072,17 @@ const sourceArtifactPriority = (value: unknown): number => {
   if (row.match === "risk_signal") return 2;
   if (row.kind === "fund_scale") return 3;
   if (row.kind === "portfolio_relationship") return 4;
+  // Independently reported integrations and counterparties are the governing
+  // evidence for project backing. Keep them ahead of generic press so adding
+  // more news cannot evict the exact partnership record and reverse the score.
+  if (
+    row.kind === "press"
+    && !MATERIAL_RELATIONSHIP_DENIAL.test(`${String(row.title ?? "")} ${String(row.excerpt ?? "")}`)
+    && (
+      MATERIAL_RELATIONSHIP_PRESS.test(`${String(row.title ?? "")} ${String(row.excerpt ?? "")}`)
+      || MULTI_PARTY_LAUNCH_PRESS.test(String(row.title ?? ""))
+    )
+  ) return 5;
   if (row.kind === "legal_case" || row.kind === "sanctions_screen" || row.kind === "trust_graph") return 5;
   return 6;
 };
@@ -917,6 +1092,258 @@ const retainSourceArtifacts = (source: readonly unknown[], limit: number): unkno
   .sort((left, right) => left.priority - right.priority || left.index - right.index)
   .slice(0, limit)
   .map(({ value }) => value);
+
+export type ProjectScoreBand = ProjectStrengthBandRecord;
+
+const PROJECT_EARLY_STAGE = /\b(?:alpha|beta|testnet|prototype|demo|pilot|coming soon|pre-?launch|waitlist)\b/i;
+const PROJECT_MATURE_STAGE = /\b(?:live|mainnet|production|in production|operational|operating)\b/i;
+const TOKEN_MARKET_ONLY_TRACTION = /\b(?:token|trading volume|volume|market cap|liquidity|price|fdv)\b/i;
+const PROJECT_PROTOCOL_TRACTION = /\b(?:protocol|platform|exchange|aggregator|product|active users?|daily users?|monthly users?|transactions?|swaps?|orders?|fees?|revenue|tvl|total value locked|adoption|usage)\b/i;
+const PROJECT_LEADER_TEAM_ROLE = /\b(?:co-?founder|founder|chief(?:\s+\w+){0,3}\s+officer|ceo|cto|cfo|coo|president|executive director|managing director|general manager|head of (?:engineering|product|operations|protocol|research))\b/i;
+const PROJECT_PRODUCT_ACTIVITY = /\b(?:product|protocol|platform|exchange|app(?:lication)?|mainnet|testnet|launch(?:e[ds])?|releas(?:e[ds])?|ship(?:s|ped)?|deploy(?:s|ed|ment)|upgrade|integration|developer|repository|open[ -]?source)\b/i;
+
+const trustedProjectProfileDaysSincePost = (profile: Record<string, unknown> | undefined): number | null => {
+  if (
+    !profile
+    || profile.profile_collection_state !== "resolved"
+    || profile.profile_provider !== "twitterapi"
+    || typeof profile.profile_captured_at !== "string"
+    || !Number.isFinite(Date.parse(profile.profile_captured_at))
+    || typeof profile.days_since_post !== "number"
+    || !Number.isFinite(profile.days_since_post)
+    || profile.days_since_post < 0
+  ) return null;
+  return profile.days_since_post;
+};
+
+const projectBandRange = (weight: number, tier: ProjectStrengthTier): Pick<ProjectScoreBand, "minScore" | "maxScore"> => {
+  if (tier === "none") return { minScore: 0, maxScore: 0 };
+  if (tier === "adverse") return { minScore: 0, maxScore: Math.floor(weight * 0.39) };
+  if (tier === "emerging") return { minScore: Math.ceil(weight * 0.4), maxScore: Math.floor(weight * 0.69) };
+  if (tier === "solid") return { minScore: Math.ceil(weight * 0.7), maxScore: Math.floor(weight * 0.84) };
+  return { minScore: Math.ceil(weight * 0.85), maxScore: weight };
+};
+
+/** Derive axis-specific maturity bands from the exact frozen scoring packet. */
+export function deriveProjectStrengthBands(
+  evidenceJson: string,
+  axisCatalog: readonly AnalystAxis[],
+): Record<string, ProjectScoreBand> {
+  const projectAxes = axisCatalog.filter(({ role }) => role === "PROJECT");
+  if (projectAxes.length === 0) return {};
+  let packet: Record<string, unknown>;
+  try {
+    const parsed = JSON.parse(evidenceJson) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    packet = parsed as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+  const records = (value: unknown): Record<string, unknown>[] => Array.isArray(value)
+    ? value.filter((row): row is Record<string, unknown> =>
+      Boolean(row && typeof row === "object" && !Array.isArray(row)))
+    : [];
+  const artifactIds = (values: readonly Record<string, unknown>[]): string[] => [...new Set(values
+    .map((row) => typeof row.artifactId === "string" ? row.artifactId : "")
+    .filter(Boolean))];
+  const basicFacts = records(packet.basicFacts);
+  const verifiedFacts = (...predicates: string[]): Record<string, unknown>[] => basicFacts.filter((fact) =>
+    predicates.includes(String(fact.predicate ?? "").toLowerCase())
+    && fact.artifact_verified === true
+    && (fact.status === "verified" || fact.status === "corroborated"));
+  const factText = (facts: readonly Record<string, unknown>[]): string => facts
+    .map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`)
+    .join(" ");
+  const team = records(packet.team).filter((member) =>
+    member.artifact_verified === true && member.evidence_origin !== "model_lead");
+  const leaders = team.filter((member) => PROJECT_LEADER_TEAM_ROLE.test(String(member.role ?? "")));
+  const leaderNames = new Set(leaders.map((member) => String(member.name ?? "").trim().toLowerCase()).filter(Boolean));
+  const profile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile)
+    ? packet.profile as Record<string, unknown>
+    : undefined;
+  const sourceArtifacts = records(packet.sourceArtifacts);
+  const productPress = sourceArtifacts.filter((artifact) => {
+    const text = `${String(artifact.title ?? "")} ${String(artifact.excerpt ?? "")}`;
+    return artifact.kind === "press"
+      && !MATERIAL_RELATIONSHIP_DENIAL.test(text)
+      && PROJECT_PRODUCT_PRESS.test(text);
+  });
+  const freshProductPress = productPress.filter((artifact) => isFreshPublishedArtifact(artifact));
+  const relationshipPress = sourceArtifacts.filter((artifact) => {
+    const text = `${String(artifact.title ?? "")} ${String(artifact.excerpt ?? "")}`;
+    return artifact.kind === "press"
+      && !MATERIAL_RELATIONSHIP_DENIAL.test(text)
+      && (MATERIAL_RELATIONSHIP_PRESS.test(text)
+        || MULTI_PARTY_LAUNCH_PRESS.test(String(artifact.title ?? "")));
+  });
+  // Syndicated copies of one announcement are one relationship story, even
+  // when aggregators expose them through different URLs.
+  const distinctRelationshipKeys = new Set(relationshipPress.map(relationshipStoryKey).filter(Boolean));
+  const recentActivity = records(packet.recentActivity);
+  const productActivity = recentActivity.filter((row) =>
+    PROJECT_PRODUCT_ACTIVITY.test(String(row.text ?? row.value ?? row.claim ?? row.title ?? "")));
+  const token = packet.projectToken && typeof packet.projectToken === "object" && !Array.isArray(packet.projectToken)
+    ? packet.projectToken as Record<string, unknown>
+    : undefined;
+  const verifiedToken = token?.verified === true
+    && (token.verification === "official_x" || token.verification === "official_domain");
+  const rank = typeof token?.rank === "number" ? token.rank : Number.POSITIVE_INFINITY;
+  const marketCap = typeof token?.marketCapUsd === "number" ? token.marketCapUsd : 0;
+  const volume = typeof token?.volume24hUsd === "number" ? token.volume24hUsd : 0;
+  const liquidity = typeof token?.liquidityUsd === "number" ? token.liquidityUsd : 0;
+  const moderateMarket = verifiedToken && (rank <= 500 || marketCap >= 10_000_000 || volume >= 250_000 || liquidity >= 1_000_000);
+  const scaleSignals = [rank <= 200, marketCap >= 100_000_000, volume >= 5_000_000, liquidity >= 5_000_000]
+    .filter(Boolean).length;
+  const tokenProviders = Array.isArray(token?.providers)
+    ? new Set(token.providers.filter((provider) => typeof provider === "string")).size
+    : 0;
+  const daysSincePost = trustedProjectProfileDaysSincePost(profile);
+  const currentSocialActivity = daysSincePost !== null && daysSincePost < 21;
+  const repositoryFacts = verifiedFacts("repository", "repositories");
+  const leaderFacts = verifiedFacts("founder", "founders", "executive");
+  const productFacts = verifiedFacts("product", "launched", "launch_date");
+  const auditFacts = verifiedFacts("audit", "audits");
+  const governanceFacts = verifiedFacts("governance");
+  const tokenDisclosureFacts = verifiedFacts("tokenomics", "vesting", "treasury");
+  const legalFacts = verifiedFacts("legal_entity");
+  const officialFacts = verifiedFacts("official_identity");
+  const fundingFacts = verifiedFacts("funding");
+  const investorFacts = verifiedFacts("investor");
+  const tractionFacts = verifiedFacts("traction");
+  const protocolTractionFacts = tractionFacts.filter((fact) => {
+    const text = factText([fact]);
+    return PROJECT_PROTOCOL_TRACTION.test(text) || !TOKEN_MARKET_ONLY_TRACTION.test(text);
+  });
+  const referenceCapturedAt = Date.parse(String(profile?.profile_captured_at ?? token?.capturedAt ?? ""));
+  const currentProtocolTractionFacts = Number.isFinite(referenceCapturedAt)
+    ? protocolTractionFacts.filter((fact) => hasFreshDatedMetric(fact, referenceCapturedAt))
+    : [];
+  // Posting cadence is only one liveness signal. Recent dated product coverage
+  // can establish current operation without X, while an undated historical
+  // usage claim remains traction evidence and cannot manufacture liveness.
+  const currentActivity = currentSocialActivity || freshProductPress.length > 0;
+  const advisorTeam = team.filter((member) => {
+    const role = String(member.role ?? "");
+    return PROJECT_BACKING_TEAM_ROLE.test(role) && !PROJECT_NON_BACKING_TEAM_ROLE.test(role);
+  });
+  const productStageText = [
+    factText(productFacts),
+    ...productActivity.map((row) => String(row.text ?? row.value ?? "")),
+    ...productPress.map((row) => `${String(row.title ?? "")} ${String(row.excerpt ?? "")}`),
+  ].join(" ");
+  const earlyStage = PROJECT_EARLY_STAGE.test(productStageText)
+    && !PROJECT_MATURE_STAGE.test(productStageText);
+  const catalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog);
+  const limitingByAxis = new Map(projectAxes.map(({ axis }) => [axis, catalog
+    .filter((artifact) => isVerifiedCounterArtifact(artifact, axis))
+    .map((artifact) => artifact.artifactId)]));
+  const bands: Record<string, ProjectScoreBand> = {};
+  const setBand = (
+    axis: string,
+    tier: ProjectStrengthTier,
+    reasons: string[],
+    anchors: string[],
+  ) => {
+    const spec = projectAxes.find((candidate) => candidate.axis === axis);
+    if (!spec) return;
+    const limiting = limitingByAxis.get(axis) ?? [];
+    const effectiveTier = tier === "none" && limiting.length > 0 ? "adverse" : tier;
+    bands[axis] = {
+      tier: effectiveTier,
+      ...projectBandRange(spec.weight, effectiveTier),
+      reasons: effectiveTier !== tier ? ["verified score-limiting evidence", ...reasons] : reasons,
+      anchorArtifactIds: [...new Set([...anchors, ...limiting])],
+    };
+  };
+
+  const namedLeaderCount = Math.max(leaderNames.size, new Set(leaderFacts
+    .map((fact) => String(fact.value ?? "").trim().toLowerCase())
+    .filter(Boolean)).size);
+  const p1Badges = [namedLeaderCount > 0, Boolean(profile?.website) || officialFacts.length > 0, legalFacts.length > 0 || namedLeaderCount >= 2];
+  setBand("P1_team_and_identity", p1Badges.filter(Boolean).length >= 3 ? "exceptional" : p1Badges.filter(Boolean).length >= 2 ? "solid" : p1Badges.some(Boolean) ? "emerging" : "none", [
+    ...(namedLeaderCount ? [`${namedLeaderCount} source-backed leader${namedLeaderCount === 1 ? "" : "s"}`] : []),
+    ...((Boolean(profile?.website) || officialFacts.length) ? ["official identity linkage"] : []),
+    ...((legalFacts.length || namedLeaderCount >= 2) ? ["operator corroboration"] : []),
+  ], artifactIds([...leaders, ...leaderFacts, ...officialFacts, ...legalFacts, ...(profile ? [profile] : [])]));
+
+  const p2Anchors = [...repositoryFacts, ...productFacts, ...auditFacts, ...productPress, ...productActivity];
+  const productProof = productFacts.length > 0 || productPress.length > 0 || productActivity.length > 0;
+  let p2Tier: ProjectStrengthTier = repositoryFacts.length || productProof ? "emerging" : "none";
+  if (!earlyStage && repositoryFacts.length > 0 && productProof) p2Tier = "solid";
+  if (!earlyStage && repositoryFacts.length > 0 && productProof && (auditFacts.length > 0 || productPress.length >= 2)) p2Tier = "exceptional";
+  setBand("P2_product_substance", p2Tier, [
+    ...(repositoryFacts.length ? ["verified public repository"] : []),
+    ...(productProof ? ["source-backed product operation"] : []),
+    ...(earlyStage ? ["explicit early-stage product marker"] : []),
+  ], artifactIds(p2Anchors));
+
+  const tokenDisclosures = [...tokenDisclosureFacts];
+  const p3Tier: ProjectStrengthTier = !verifiedToken ? "none"
+    : scaleSignals >= 2
+      && tokenDisclosures.length > 0
+      && auditFacts.length > 0 ? "exceptional"
+      : moderateMarket ? "solid" : "emerging";
+  setBand("P3_token_conduct", p3Tier, [
+    ...(verifiedToken ? ["canonical token verified"] : []),
+    ...(moderateMarket ? ["measured market activity"] : []),
+    ...(governanceFacts.length ? ["verified token governance"] : []),
+    ...(tokenDisclosures.length ? ["verified token economic disclosure"] : []),
+    ...(auditFacts.length ? ["verified security review"] : []),
+  ], artifactIds([...(token ? [token] : []), ...governanceFacts, ...tokenDisclosures, ...auditFacts]));
+
+  const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
+  let p4Tier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || advisorTeam.length || relationshipPress.length ? "emerging" : "none";
+  if (relationshipPress.length > 0 || investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4Tier = "solid";
+  if (distinctRelationshipKeys.size >= 2) p4Tier = "exceptional";
+  setBand("P4_backing_and_partners", p4Tier, [
+    ...(relationshipPress.length ? [`${distinctRelationshipKeys.size} material relationship source${distinctRelationshipKeys.size === 1 ? "" : "s"}`] : []),
+    ...(fundingFacts.length ? ["source-backed financing state"] : []),
+    ...(advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : []),
+  ], artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...advisorTeam]));
+
+  let p5Tier: ProjectStrengthTier = currentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
+  if (currentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5Tier = "solid";
+  if (currentActivity && currentProtocolTractionFacts.length > 0 && scaleSignals >= 2 && tokenProviders >= 2) p5Tier = "exceptional";
+  const severeProjectTokenDrawdown = catalog.some((artifact) =>
+    artifact.operation === "findings:ProjectTokenDrawdown"
+    && artifact.counterEligibleAxes?.includes("P5_traction_and_liveness"));
+  if (severeProjectTokenDrawdown && p5Tier === "exceptional") p5Tier = "solid";
+  setBand("P5_traction_and_liveness", p5Tier, [
+    ...(currentActivity ? ["current operating activity"] : []),
+    ...(protocolTractionFacts.length ? ["verified protocol usage metric"] : []),
+    ...(currentProtocolTractionFacts.length ? ["dated current protocol metric"] : []),
+    ...(moderateMarket ? ["measured token-market corroboration"] : []),
+    ...(severeProjectTokenDrawdown ? ["severe canonical-token drawdown caps exceptional traction"] : []),
+  ], artifactIds([
+    ...(currentSocialActivity && daysSincePost !== null && profile ? [profile] : []),
+    ...freshProductPress,
+    ...protocolTractionFacts,
+    ...(token ? [token] : []),
+  ]));
+
+  const disclosureBase = [...legalFacts, ...officialFacts, ...repositoryFacts];
+  let p6Tier: ProjectStrengthTier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
+  if (
+    ((governanceFacts.length > 0 || auditFacts.length > 0) && disclosureBase.length > 0)
+    || (legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0)
+  ) p6Tier = "solid";
+  if (governanceFacts.length && auditFacts.length && (legalFacts.length || repositoryFacts.length)) p6Tier = "exceptional";
+  setBand("P6_transparency_integrity", p6Tier, [
+    ...(legalFacts.length ? ["verified legal operator"] : []),
+    ...(repositoryFacts.length ? ["public repository disclosure"] : []),
+    ...(governanceFacts.length ? ["verified governance disclosure"] : []),
+    ...(auditFacts.length ? ["verified audit disclosure"] : []),
+  ], artifactIds([...disclosureBase, ...governanceFacts, ...auditFacts]));
+  return bands;
+}
+
+export function projectScoreFloorsForPacket(
+  evidenceJson: string,
+  axisCatalog: readonly AnalystAxis[],
+): Record<string, number> {
+  return Object.fromEntries(Object.entries(deriveProjectStrengthBands(evidenceJson, axisCatalog))
+    .map(([axis, band]) => [axis, band.minScore]));
+}
 
 const compactProfileAuthenticity = (value: unknown): Record<string, unknown> | undefined => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
@@ -1043,7 +1470,7 @@ const compactFinding = (value: unknown): Record<string, unknown> | null => {
 const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   profile: [
     "F1_identity_verifiability", "F5_reputation_integrity",
-    "P1_team_and_identity", "P5_traction_and_liveness", "P6_transparency_integrity",
+    "P1_team_and_identity",
     "K1_identity_roster", "K3_disclosure_deletion",
     "I1_identity_legitimacy", "AG1_identity_legitimacy",
     "AD1_identity_verifiability", "ME1_identity", "ME2_role_authenticity", "ME3_conduct_reputation",
@@ -1077,7 +1504,7 @@ const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
     "P1_team_and_identity", "P2_product_substance", "P4_backing_and_partners", "I1_identity_legitimacy",
     "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity", "ME2_role_authenticity",
   ],
-  notableFollowers: ["F6_network_quality", "P4_backing_and_partners", "P5_traction_and_liveness", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
+  notableFollowers: ["F6_network_quality", "P5_traction_and_liveness", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
   recentActivity: [
     "F2_track_record", "F4_build_substance", "F5_reputation_integrity", "P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity",
     "K2_call_performance", "K3_disclosure_deletion", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud",
@@ -1110,8 +1537,14 @@ const FINDING_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   CommunityFUD: REPUTATION_FINDING_AXES,
   LegalCaseNameLead: IDENTITY_LEAD_FINDING_AXES,
   SanctionsNameLead: IDENTITY_LEAD_FINDING_AXES,
-  SiteNotLive: ["F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
+  // A failed official product surface is one product-substance finding. Do not
+  // triple-charge the same fetch against liveness and transparency as well.
+  SiteNotLive: ["F4_build_substance", "P2_product_substance"],
   TokenCollapse: ["F5_reputation_integrity", "P3_token_conduct", "K2_call_performance", "K4_onchain_conduct"],
+  // Price performance limits traction/liveness, not token conduct. Keep this
+  // distinct from a promoted-token collapse so the report never implies that
+  // market drawdown by itself proves misconduct.
+  ProjectTokenDrawdown: ["P5_traction_and_liveness"],
   CadenceDecay: ["F4_build_substance", "P5_traction_and_liveness", "ME3_conduct_reputation"],
   TrustGraphConnection: SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
   AdvisoryRug: ["F5_reputation_integrity", "AD2_advised_outcomes", "AD4_advisory_conduct", "AD5_reputation_fud"],
@@ -1125,15 +1558,17 @@ const FINDING_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   MeridianExit: ["F2_track_record", "F3_repeat_backing", "F4_build_substance", "I2_portfolio_quality"],
   InvestigatorCallout: [
     ...REPUTATION_FINDING_AXES,
-    "P3_token_conduct", "K3_disclosure_deletion", "K4_onchain_conduct", "AG3_service_integrity", "AD4_advisory_conduct",
+    "K3_disclosure_deletion", "K4_onchain_conduct", "AG3_service_integrity", "AD4_advisory_conduct",
   ],
 };
+
+const INVESTIGATOR_TOKEN_CONDUCT = /\b(?:token|vesting|treasury|unlock|supply|liquidity|wash trad(?:e|ing)|market manipulation|on-?chain|wallet|dump(?:ed|ing)?|insider sell(?:ing)?|mint)\b/i;
 
 const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "identity-resolution": ["F1_identity_verifiability", "P1_team_and_identity", "K1_identity_roster", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
   "profile-photo-authenticity": [],
   "code-footprint-github": ["F2_track_record", "F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
-  "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
+  "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
   "affiliations-associates": ["F2_track_record", "F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I4_testimonial_corroboration", "AD3_relationship_corroboration", "ME2_role_authenticity"],
   "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
   "project-token-identity": ["P3_token_conduct"],
@@ -1143,7 +1578,7 @@ const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "project-traction-liveness": ["P5_traction_and_liveness"],
   "project-transparency": ["P3_token_conduct", "P6_transparency_integrity"],
   "vc-portfolio-track-record": ["I2_portfolio_quality"],
-  "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "ofac-sanctions-name": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation"],
   "trust-graph-connections": SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
@@ -1195,12 +1630,20 @@ const BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   funding: ["P4_backing_and_partners"],
   investor: ["P4_backing_and_partners"],
   governance: ["P3_token_conduct", "P6_transparency_integrity"],
-  audit: ["P2_product_substance", "P6_transparency_integrity"],
-  audits: ["P2_product_substance", "P6_transparency_integrity"],
+  tokenomics: ["P3_token_conduct", "P6_transparency_integrity"],
+  vesting: ["P3_token_conduct", "P6_transparency_integrity"],
+  treasury: ["P3_token_conduct", "P6_transparency_integrity"],
+  audit: ["P2_product_substance", "P3_token_conduct", "P6_transparency_integrity"],
+  audits: ["P2_product_substance", "P3_token_conduct", "P6_transparency_integrity"],
   repository: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
   repositories: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
   traction: ["P5_traction_and_liveness"],
 };
+
+const PROJECT_BACKING_TEAM_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
+const PROJECT_NON_BACKING_TEAM_ROLE = /\binvestor relations?\b/i;
+const PROJECT_TOKEN_ACTIVITY = /\b(?:tokenomics|vesting|token unlock|unlock schedule|emission(?:s| schedule)?|token supply|circulating supply|total supply|max(?:imum)? supply|treasury|token burn|burn mechanism|liquidity|contract address|token contract|airdrop|staking)\b/i;
+const PROJECT_TRANSPARENCY_ACTIVITY = /\b(?:governance|proposal|vote|treasury|audit|security audit|security review|vulnerability|incident|disclosure|transparency|multisig|multi-sig)\b/i;
 
 // A requested axis must be owned by at least one deterministic routing rule.
 // Synthesizing an unavailable gap for a misspelled or newly added-but-unwired
@@ -1238,7 +1681,27 @@ const sourceArtifactEligibleAxes = (
   // and prevents a single press report from becoming investment proof.
   if (kind === "portfolio_relationship" && value.match !== "relationship_confirmed") return [];
   if (kind === "fund_scale" && !isStrictFundScaleArtifact(value, sourceArtifactPeers, { subjectHandle, profile })) return [];
-  return SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind] ?? [];
+  const eligible = SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind] ?? [];
+  if (kind === "press") {
+    const relationshipText = `${String(value.title ?? "")} ${String(value.excerpt ?? "")}`;
+    const speculativeOrDenied = MATERIAL_RELATIONSHIP_DENIAL.test(relationshipText);
+    const affirmativeRelationship = !speculativeOrDenied
+      && (MATERIAL_RELATIONSHIP_PRESS.test(relationshipText)
+        || MULTI_PARTY_LAUNCH_PRESS.test(String(value.title ?? "")));
+    return eligible.filter((axis) => {
+      if (!axis.startsWith("P")) return true;
+      if (speculativeOrDenied) return false;
+      if (axis === "P2_product_substance") return PROJECT_PRODUCT_PRESS.test(relationshipText);
+      if (axis === "P4_backing_and_partners") return affirmativeRelationship;
+      if (axis === "P5_traction_and_liveness") {
+        return PROJECT_TRACTION_PRESS.test(relationshipText)
+          || (PROJECT_PRODUCT_PRESS.test(relationshipText) && isFreshPublishedArtifact(value));
+      }
+      if (axis === "P6_transparency_integrity") return PROJECT_TRANSPARENCY_PRESS.test(relationshipText);
+      return false;
+    });
+  }
+  return eligible;
 };
 
 const stableJson = (value: unknown): string => {
@@ -1275,6 +1738,25 @@ const eligibleAxesFor = (
 ): string[] => {
   const checkId = typeof value.checkId === "string" ? value.checkId : typeof value.check_id === "string" ? value.check_id : "";
   const findingType = typeof value.finding_type === "string" ? value.finding_type : "";
+  const findingText = section === "findings"
+    ? recordText(value, ["claim", "title", "excerpt", "detail"], 2_000) ?? ""
+    : "";
+  const findingAxes = section === "findings"
+    ? [
+        ...(FINDING_AXIS_ELIGIBILITY[findingType] ?? []),
+        ...(findingType === "InvestigatorCallout" && INVESTIGATOR_TOKEN_CONDUCT.test(findingText)
+          ? ["P3_token_conduct"]
+          : []),
+      ]
+    : [];
+  const profileAxes = section === "profile" && value.profile_collection_state === "resolved"
+    ? [
+        ...SECTION_AXIS_ELIGIBILITY.profile,
+        ...(trustedProjectProfileDaysSincePost(value) !== null
+          ? ["P5_traction_and_liveness"]
+          : []),
+      ]
+    : [];
   const projectTokenAxes = section === "projectToken"
     ? [
         "P3_token_conduct",
@@ -1284,12 +1766,32 @@ const eligibleAxesFor = (
           : []),
       ]
     : [];
-  const eligible = section === "profile" && value.profile_collection_state !== "resolved"
-    ? []
+  const teamAxes = section === "team"
+    ? SECTION_AXIS_ELIGIBILITY.team.filter((axis) =>
+        axis !== "P2_product_substance"
+        && (axis !== "P4_backing_and_partners" || (
+          PROJECT_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? "")
+          && !PROJECT_NON_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? "")
+        )))
+    : [];
+  const recentActivityText = section === "recentActivity"
+    ? recordText(value, ["text", "value", "claim", "title"], 1_000) ?? ""
+    : "";
+  const recentActivityAxes = section === "recentActivity"
+    ? SECTION_AXIS_ELIGIBILITY.recentActivity.filter((axis) =>
+        (axis !== "P3_token_conduct" || PROJECT_TOKEN_ACTIVITY.test(recentActivityText))
+        && (axis !== "P6_transparency_integrity" || PROJECT_TRANSPARENCY_ACTIVITY.test(recentActivityText)))
+    : [];
+  const eligible = section === "profile"
+    ? profileAxes
     : section === "projectToken"
       ? projectTokenAxes
-      : section === "findings"
-      ? FINDING_AXIS_ELIGIBILITY[findingType] ?? []
+    : section === "team"
+      ? teamAxes
+    : section === "recentActivity"
+      ? recentActivityAxes
+    : section === "findings"
+      ? findingAxes
     : section === "checkOutcomes" && checkId
     ? CHECK_AXIS_ELIGIBILITY[checkId] ?? []
     : section === "basicFacts"
@@ -1434,6 +1936,29 @@ const verificationFor = (
   return "observed";
 };
 
+const counterEligibleAxesFor = (
+  section: string,
+  record: Record<string, unknown>,
+  verification: AxisEvidenceRecord["verification"],
+  eligibleAxes: readonly string[],
+): string[] => {
+  if (verification !== "verified") return [];
+  if (
+    section === "findings"
+    && typeof record.polarity === "number"
+    && record.polarity < 0
+  ) return [...eligibleAxes];
+  if (
+    section === "sourceArtifacts"
+    && record.match === "risk_signal"
+  ) return [...eligibleAxes];
+  if (
+    section === "trustGraphScreen"
+    && (record.severity === "caution" || record.severity === "avoid")
+  ) return [...eligibleAxes];
+  return [];
+};
+
 const DIRECT_SECTIONS = new Set(["profile", "profileAuthenticity", "projectToken", "findings", "wallets", "promotions", "recentActivity"]);
 
 const providerFor = (section: string, payload: Record<string, unknown>): string => {
@@ -1500,6 +2025,8 @@ const makeAxisArtifact = (
   ) ?? safeArtifactSourceUrl(basicFactSource ? recordText(basicFactSource, ["url", "sourceUrl"], 420) : undefined);
   const capturedAt = recordText(payload, ["capturedAt", "captured_at", "profile_captured_at", "completedAt", "source_date"], 40)
     ?? (basicFactSource ? recordText(basicFactSource, ["capturedAt", "captured_at"], 40) : undefined);
+  const verification = verificationFor(section, payload, sourceArtifactPeers, subjectHandle, profile);
+  const counterEligibleAxes = counterEligibleAxesFor(section, payload, verification, eligibleAxes);
   return {
     decorated: { ...payload, artifactId },
     catalog: {
@@ -1514,7 +2041,10 @@ const makeAxisArtifact = (
       ...(capturedAt ? { capturedAt } : {}),
       contentHash,
       eligibleAxes,
-      verification: verificationFor(section, payload, sourceArtifactPeers, subjectHandle, profile),
+      verification,
+      ...(counterEligibleAxes.length
+        ? { counterEligibleAxes }
+        : {}),
       scope: DIRECT_SECTIONS.has(section) ? "direct_subject" : "subject_context",
     },
   };
@@ -1529,7 +2059,7 @@ const SCORING_ARRAY_SECTIONS = [
 ] as const;
 
 function renderScoringPacket(packet: Record<string, unknown>, axisCatalog: AnalystAxis[]): Record<string, unknown> {
-  const rendered: Record<string, unknown> = { ...packet, schema_version: 4 };
+  const rendered: Record<string, unknown> = { ...packet, schema_version: 5 };
   const packetProfile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile)
     ? packet.profile as Record<string, unknown>
     : undefined;
@@ -1610,11 +2140,20 @@ const isAxisEvidenceRecord = (value: unknown): value is AxisEvidenceRecord => {
     && row.eligibleAxes.every((axis) => typeof axis === "string" && !!axis)
     && new Set(row.eligibleAxes).size === row.eligibleAxes.length
     && ["verified", "reported", "observed", "checked_empty", "unavailable"].includes(String(row.verification))
+    && (row.counterEligibleAxes === undefined || (
+      Array.isArray(row.counterEligibleAxes)
+      && row.counterEligibleAxes.length > 0
+      && row.counterEligibleAxes.every((axis) => typeof axis === "string" && row.eligibleAxes?.includes(axis))
+      && new Set(row.counterEligibleAxes).size === row.counterEligibleAxes.length
+    ))
     && (row.scope === "direct_subject" || row.scope === "subject_context");
 };
 
 /** Parse and integrity-check the concise catalog frozen into a scorer packet. */
-export function extractScoringEvidenceCatalog(json: string): AxisEvidenceRecord[] {
+export function extractScoringEvidenceCatalog(
+  json: string,
+  axisCatalog?: readonly AnalystAxis[],
+): AxisEvidenceRecord[] {
   let packet: Record<string, unknown>;
   try {
     const value = JSON.parse(json) as unknown;
@@ -1624,9 +2163,26 @@ export function extractScoringEvidenceCatalog(json: string): AxisEvidenceRecord[
     return [];
   }
   if (!Array.isArray(packet.evidenceCatalog) || !packet.evidenceCatalog.every(isAxisEvidenceRecord)) return [];
+  if (axisCatalog && axisCatalog.length > 0 && packet.schema_version !== 5) return [];
   const catalog = packet.evidenceCatalog as AxisEvidenceRecord[];
   const byId = new Map(catalog.map((record) => [record.artifactId, record]));
   if (byId.size !== catalog.length) return [];
+  const strictCatalog = packet.schema_version === 5;
+  const requestedAxes = axisCatalog && axisCatalog.length > 0
+    && new Set(axisCatalog.map(({ axis }) => axis)).size === axisCatalog.length
+    ? [...axisCatalog]
+    : undefined;
+
+  const packetProfile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile)
+    ? evidencePayload(packet.profile)
+    : undefined;
+  const subjectHandle = recordText(packetProfile ?? {}, ["handle"], 80);
+  const sourceArtifactPeers = Array.isArray(packet.sourceArtifacts)
+    ? packet.sourceArtifacts
+      .filter((value) => value && typeof value === "object" && !Array.isArray(value))
+      .map((value) => sanitizeArtifactUrls(evidencePayload(value)))
+      .filter((value): value is Record<string, unknown> => Boolean(value && typeof value === "object" && !Array.isArray(value)))
+    : [];
 
   const represented = new Set<string>();
   const inspect = (section: string, value: unknown) => {
@@ -1638,13 +2194,52 @@ export function extractScoringEvidenceCatalog(json: string): AxisEvidenceRecord[
     const contentHash = createHash("sha256").update(stableJson({ section, payload })).digest("hex");
     const catalogRecord = byId.get(artifactId);
     if (artifactId !== `art_v1_${contentHash}` || catalogRecord?.section !== section || catalogRecord.contentHash !== contentHash) return;
+    const verification = verificationFor(section, payload, sourceArtifactPeers, subjectHandle, packetProfile);
+    if (strictCatalog && catalogRecord.verification !== verification) return;
+    const expectedEligibleAxes = requestedAxes
+      ? section === "axisGaps"
+        ? requestedAxes.some(({ axis }) => axis === payload.axis) && typeof payload.axis === "string"
+          ? [payload.axis]
+          : []
+        : eligibleAxesFor(section, payload, [...requestedAxes], sourceArtifactPeers, subjectHandle, packetProfile)
+      : catalogRecord.eligibleAxes;
+    if (
+      strictCatalog
+      && requestedAxes
+      && (
+        expectedEligibleAxes.length !== catalogRecord.eligibleAxes.length
+        || expectedEligibleAxes.some((axis, index) => axis !== catalogRecord.eligibleAxes[index])
+      )
+    ) return;
+    const expectedCounterAxes = counterEligibleAxesFor(
+      section,
+      payload,
+      verification,
+      expectedEligibleAxes,
+    );
+    const actualCounterAxes = catalogRecord.counterEligibleAxes ?? [];
+    if (
+      (strictCatalog || catalogRecord.counterEligibleAxes !== undefined)
+      && (
+        expectedCounterAxes.length !== actualCounterAxes.length
+        || expectedCounterAxes.some((axis, index) => axis !== actualCounterAxes[index])
+      )
+    ) {
+      return;
+    }
     represented.add(artifactId);
   };
   for (const section of SCORING_SINGLE_SECTIONS) inspect(section, packet[section]);
   for (const section of [...SCORING_ARRAY_SECTIONS, "axisGaps"] as const) {
     if (Array.isArray(packet[section])) (packet[section] as unknown[]).forEach((value) => inspect(section, value));
   }
-  return represented.size === catalog.length ? catalog.map((record) => ({ ...record, eligibleAxes: [...record.eligibleAxes] })) : [];
+  return represented.size === catalog.length
+    ? catalog.map((record) => ({
+      ...record,
+      eligibleAxes: [...record.eligibleAxes],
+      ...(record.counterEligibleAxes ? { counterEligibleAxes: [...record.counterEligibleAxes] } : {}),
+    }))
+    : [];
 }
 
 const pruneTrustGraphPacket = (packet: Record<string, unknown>): boolean => {
@@ -1850,20 +2445,37 @@ function serializeAnalystEvidencePacket(
   // supported axis into a coverage-only gap merely because that evidence lived
   // in a lower-priority section (for example, the sole testimonial supporting
   // I4 in a large multi-role packet).
+  const initialRenderedPacket = render();
   const requiredSubstantiveAxes = options.axisCatalog
-    ? substantiveAxesIn(render())
+    ? substantiveAxesIn(initialRenderedPacket)
     : new Set<string>();
+  const requiredProjectBandRanges = options.axisCatalog
+    ? Object.fromEntries(Object.entries(deriveProjectStrengthBands(
+        JSON.stringify(initialRenderedPacket),
+        options.axisCatalog,
+      )).map(([axis, band]) => [axis, `${band.tier}:${band.minScore}-${band.maxScore}`]))
+    : {};
   const preservesSubstantiveCoverage = (): boolean => {
     if (!options.axisCatalog || requiredSubstantiveAxes.size === 0) return true;
     const retained = substantiveAxesIn(render());
     return [...requiredSubstantiveAxes].every((axis) => retained.has(axis));
   };
+  const preservesProjectBandRanges = (): boolean => {
+    if (!options.axisCatalog || Object.keys(requiredProjectBandRanges).length === 0) return true;
+    const retainedBands = deriveProjectStrengthBands(JSON.stringify(render()), options.axisCatalog);
+    return Object.entries(requiredProjectBandRanges).every(([axis, required]) => {
+      const band = retainedBands[axis];
+      return band && `${band.tier}:${band.minScore}-${band.maxScore}` === required;
+    });
+  };
+  const preservesDecisionSemantics = (): boolean =>
+    preservesSubstantiveCoverage() && preservesProjectBandRanges();
   const removeOneArrayItem = (section: string, minimumLength = 0): boolean => {
     const values = Array.isArray(packet[section]) ? packet[section] as unknown[] : [];
     if (values.length <= minimumLength) return false;
     for (let index = values.length - 1; index >= minimumLength; index -= 1) {
       const [removed] = values.splice(index, 1);
-      if (preservesSubstantiveCoverage()) {
+      if (preservesDecisionSemantics()) {
         if (coverage[section]) coverage[section].included = values.length;
         return true;
       }
@@ -1882,7 +2494,7 @@ function serializeAnalystEvidencePacket(
       ? undefined
       : structuredClone(packet.trustGraphScreen);
     if (!pruneTrustGraphPacket(packet)) return false;
-    if (preservesSubstantiveCoverage()) return true;
+    if (preservesDecisionSemantics()) return true;
     if (previous === undefined) delete packet.trustGraphScreen;
     else packet.trustGraphScreen = previous;
     return false;
@@ -1891,7 +2503,7 @@ function serializeAnalystEvidencePacket(
     if (packet.profile == null) return false;
     const previous = packet.profile;
     delete packet.profile;
-    if (preservesSubstantiveCoverage()) return true;
+    if (preservesDecisionSemantics()) return true;
     packet.profile = previous;
     return false;
   };
@@ -2043,7 +2655,7 @@ export function inspectAnalystScoringPreflight(
   } catch {
     // The catalog integrity check below owns malformed JSON classification.
   }
-  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
+  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog);
   if (!evidenceCatalog.length) {
     return {
       state: "invalid_catalog",
@@ -2053,9 +2665,12 @@ export function inspectAnalystScoringPreflight(
       unsupportedAxes: [],
     };
   }
+  const projectBands = deriveProjectStrengthBands(evidenceJson, axisCatalog);
   const missingSubstantiveAxes = axisCatalog
-    .filter((axis) => !evidenceCatalog.some((artifact) =>
-      isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis)))
+    .filter((axis) =>
+      !evidenceCatalog.some((artifact) =>
+        isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis))
+      || (axis.role === "PROJECT" && projectBands[axis.axis]?.tier === "none"))
     .map(({ axis }) => axis);
   return {
     state: missingSubstantiveAxes.length > 0 ? "insufficient_evidence" : "ready",
@@ -2085,7 +2700,7 @@ export async function analyzeSubject(
     ...preflight,
   }));
   if (preflight.state !== "ready") return null;
-  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
+  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog);
   const citationAliases = evidenceCatalog.map((artifact, index) => ({
     alias: `e${String(index + 1).padStart(3, "0")}`,
     artifact,
@@ -2093,6 +2708,9 @@ export async function analyzeSubject(
   const substantiveAliasesForAxis = (axis: string): string[] => citationAliases
     .filter(({ artifact }) => artifact.eligibleAxes.includes(axis)
       && isSubstantiveArtifact(artifact))
+    .map(({ alias }) => alias);
+  const verifiedScoreLimitingAliasesForAxis = (axis: string): string[] => citationAliases
+    .filter(({ artifact }) => isVerifiedCounterArtifact(artifact, axis))
     .map(({ alias }) => alias);
   const preferredCoverageAliasesForAxis = (axis: string): string[] => citationAliases
     .filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && !isSubstantiveArtifact(artifact))
@@ -2113,6 +2731,8 @@ export async function analyzeSubject(
   const citationEligibilityTable = axisCatalog
     .map(({ axis }) => `${axis} | substantive aliases (choose 1 primary; do not ` +
       `exhaustively copy): ${formatAliases(substantiveAliasesForAxis(axis))}` +
+      ` | verified score-limiting aliases (the only counterEvidenceRefs that can justify ` +
+      `a PROJECT score below its evidence-strength band): ${formatAliases(verifiedScoreLimitingAliasesForAxis(axis))}` +
       ` | coverageRefs preferred return set (optional; return 0-4 total, never ` +
       `the whole coverage catalog): ${formatAliases(preferredCoverageAliasesForAxis(axis))}`)
     .join("\n");
@@ -2122,10 +2742,28 @@ export async function analyzeSubject(
     "story never papers over a disqualifying fact. Score conservatively when " +
     "evidence is thin. Each axis score must be between 0 and its weight. Write one " +
     "tight rationale per axis citing the evidence. Never use em dashes.";
+  const roleSpecificScoringPolicy = scoringPolicyForAxes(axisCatalog);
+  const projectScoreBands = deriveProjectStrengthBands(evidenceJson, axisCatalog);
+  const projectBandPolicy = axisCatalog
+    .filter(({ role }) => role === "PROJECT")
+    .map(({ axis }) => {
+      const band = projectScoreBands[axis];
+      return band
+        ? `${axis}: ${band.tier} evidence, allowed ${band.minScore}-${band.maxScore}` +
+          (band.tier === "adverse"
+            ? "; cite a verified harmful alias as primary support for the adverse assessment and leave that alias out of counterEvidenceRefs"
+            : "")
+        : `${axis}: no affirmative strength band`;
+    })
+    .join("; ");
   const user =
     `Subject: ${handle}\nHeld roles: ${roles.join(", ")}\n\n` +
     `Axes to score (axis | weight | role):\n` +
     axisCatalog.map((a) => `- ${a.axis} | max ${a.weight} | ${a.role}`).join("\n") +
+    (roleSpecificScoringPolicy ? `\n\n${roleSpecificScoringPolicy}` : "") +
+    (projectBandPolicy
+      ? `\n\nPROJECT EVIDENCE-STRENGTH BANDS FOR THIS FROZEN PACKET: ${projectBandPolicy}. Stay inside each range. Going below a positive axis's minimum requires a distinct severe verified score-limiting alias in counterEvidenceRefs; positive support alone never authorizes a lower score. A listed canonical-token drawdown alias must be cited in P5 counterEvidenceRefs, and its solid-band cap is already reflected in the frozen range, so it does not authorize scoring below that range. No evidence may justify exceeding the maximum. Never duplicate one alias on both sides. For an adverse band, the harmful fact supports the adverse assessment: cite it as primary evidence rather than duplicating it in counter-evidence.`
+      : "") +
     `\n\nCollected evidence (JSON):\n${evidenceJson}\n\n` +
     `Citation aliases (return these short aliases in the tool call; ARGUS maps ` +
     `them back to the exact immutable artifact IDs):\n${citationAliasTable}\n\n` +
@@ -2135,7 +2773,8 @@ export async function analyzeSubject(
     `coverage artifacts remain frozen in the evidence packet and need not be cited. ` +
     `primaryEvidenceRef and additionalEvidenceRefs may use only the substantive ` +
     `aliases. For this call, coverageRefs may use only the preferred return set. ` +
-    `counterEvidenceRefs may use only unused substantive aliases):\n` +
+    `counterEvidenceRefs for PROJECT axes may use only the listed verified ` +
+    `score-limiting aliases; other roles may use unused substantive aliases):\n` +
     `${citationEligibilityTable}\n\n` +
     `Score every listed axis, write the composite headline (one sentence on what ` +
     `governs the verdict), and an identity note.\n\n` +
@@ -2216,7 +2855,7 @@ export async function analyzeSubject(
     firstAttemptTimeoutMs,
   );
   let rejectionReason = "unknown";
-  let normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog);
+  let normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog, projectScoreBands);
   normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
   if (normalizedRaw !== raw) {
     console.info("[agent] normalized analyst citation placement before strict validation");
@@ -2226,6 +2865,7 @@ export async function analyzeSubject(
     axisCatalog,
     evidenceCatalog,
     (reason) => { rejectionReason = reason; },
+    { projectScoreBands },
   );
   if (raw && !validated) {
     console.warn(`[agent] rejected incomplete or invalid analyst axis set (${rejectionReason})`);
@@ -2244,27 +2884,44 @@ export async function analyzeSubject(
     const rejectedAxis = axisNames.find((axis) => rejectionReason.endsWith(`:${axis}`));
     const coverageLimitMatch = rejectionReason.match(/^coverage-reference-limit-observed-(\d+)-max-4:/);
     const supportCounterOverlap = rejectionReason.startsWith("support-counter-overlap:");
-    const rejectedAxisHint = rejectionReason === "grounded-team-described-as-unresolved"
-      ? " The frozen packet contains substantive named-team artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge the public team. Do not claim there is no, absent, unnamed, unresolved, anonymous, unknown, or undisclosed project founder, operator, executive, leader, or team. Keep a failed licensed-identity-provider lookup separate from the first-party founder evidence; it does not erase the named team."
-      : rejectedAxis
-      ? coverageLimitMatch
-        ? ` The prior ${rejectedAxis} coverageRefs contained ${coverageLimitMatch[1]} aliases; ` +
-          `the maximum is 4. Return no more than these four preferred aliases: ` +
-          `${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}. Do not append ` +
-          `or move omitted coverage aliases into support or counter fields.`
-        : supportCounterOverlap
-          ? ` For ${rejectedAxis}, the same alias appeared in support and counter-evidence. ` +
-            `Counter-evidence wins: keep that alias only in counterEvidenceRefs, then choose ` +
-            `a different unused substantive alias as primaryEvidenceRef from ` +
-            `${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. No alias may appear ` +
-            `in both primary/additional support and counter-evidence.`
-        : ` For ${rejectedAxis}, choose exactly one primary from the substantive aliases ` +
-          `${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. Assign each other ` +
-          `substantive alias to at most one array. Return coverageRefs as zero to four ` +
-          `distinct values chosen only from ` +
-          `${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}; [] is valid ` +
-          `and you must not exhaustively copy coverage artifacts.`
+    const outOfBandProjectAxes = rejectionReason
+      .match(/^project-scores-outside-evidence-strength-band:(.+)$/)?.[1]
+      ?.split(",")
+      .filter((axis) => axisNames.includes(axis)) ?? [];
+    const verifiedScoreLimitingRepairAliases = outOfBandProjectAxes
+      .map((axis) => `${axis}: ${formatAliases(verifiedScoreLimitingAliasesForAxis(axis))}`)
+      .join("; ");
+    const calibratedRepairBands = outOfBandProjectAxes
+      .map((axis) => {
+        const band = projectScoreBands[axis];
+        return `${axis}: ${band?.minScore}-${band?.maxScore} (${band?.tier ?? "none"})`;
+      })
+      .join("; ");
+    const projectBandRepair = outOfBandProjectAxes.length > 0
+      ? ` The prior ${outOfBandProjectAxes.join(", ")} score${outOfBandProjectAxes.length === 1 ? " was" : "s were"} outside the evidence-strength band. Recheck every PROJECT axis against the calibration policy. Required bands by axis: ${calibratedRepairBands}. Stay inside the listed range unless a verified score-limiting alias justifies going below the minimum; never exceed the maximum. Verified score-limiting aliases by axis: ${verifiedScoreLimitingRepairAliases}. Missing coverage, unavailable providers, unanswered questions, and positive context belong in coverageRefs, gaps, or support and cannot justify a lower score.`
       : "";
+    let rejectedAxisHint = "";
+    if (rejectionReason === "grounded-team-described-as-unresolved") {
+      rejectedAxisHint = " The frozen packet contains substantive named-team artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge the public team. Do not claim there is no, absent, unnamed, unresolved, anonymous, unknown, or undisclosed project founder, operator, executive, leader, or team. Keep a failed licensed-identity-provider lookup separate from the first-party founder evidence; it does not erase the named team.";
+    } else if (projectBandRepair) {
+      rejectedAxisHint = projectBandRepair;
+    } else if (rejectedAxis && coverageLimitMatch) {
+      rejectedAxisHint = ` The prior ${rejectedAxis} coverageRefs contained ${coverageLimitMatch[1]} aliases; ` +
+        `the maximum is 4. Return no more than these four preferred aliases: ` +
+        `${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}. Do not append ` +
+        `or move omitted coverage aliases into support or counter fields.`;
+    } else if (rejectedAxis && supportCounterOverlap) {
+      rejectedAxisHint = projectScoreBands[rejectedAxis]?.tier === "adverse"
+        ? ` For adverse ${rejectedAxis}, the verified harmful alias is primary support for the adverse assessment. Keep one of ${formatAliases(verifiedScoreLimitingAliasesForAxis(rejectedAxis))} as primaryEvidenceRef and remove it from counterEvidenceRefs. Leave counterEvidenceRefs empty unless a distinct verified score-limiting alias remains; no alias may appear on both sides.`
+        : ` For ${rejectedAxis}, the same alias appeared in support and counter-evidence. Counter-evidence wins only when it is a verified score-limiting alias: keep that alias only in counterEvidenceRefs, then choose a different unused substantive alias as primaryEvidenceRef from ${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. No alias may appear in both primary/additional support and counter-evidence.`;
+    } else if (rejectedAxis) {
+      rejectedAxisHint = ` For ${rejectedAxis}, choose exactly one primary from the substantive aliases ` +
+        `${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. Assign each other ` +
+        `substantive alias to at most one array. Return coverageRefs as zero to four ` +
+        `distinct values chosen only from ` +
+        `${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}; [] is valid ` +
+        `and you must not exhaustively copy coverage artifacts.`;
+    }
     const repairUser = `${user}\n\nREPAIR REQUIRED: the prior record_verdict tool payload was rejected by ` +
       `deterministic validation with reason "${rejectionReason}". Make one fresh ` +
       `record_verdict call. Recheck the exact axis set, per-axis score bounds, ` +
@@ -2280,7 +2937,7 @@ export async function analyzeSubject(
       ANALYST_REPAIR_TIMEOUT_MS,
     );
     rejectionReason = "unknown";
-    normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog);
+    normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog, projectScoreBands);
     normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
     if (normalizedRaw !== raw) {
       console.info("[agent] normalized repaired citation placement before strict validation");
@@ -2290,6 +2947,7 @@ export async function analyzeSubject(
       axisCatalog,
       evidenceCatalog,
       (reason) => { rejectionReason = reason; },
+      { projectScoreBands },
     );
     if (raw && !validated) {
       console.warn(`[agent] rejected analyst repair axis set (${rejectionReason})`);

@@ -4,6 +4,7 @@ import type { PublicTextDocument, PublicTextResult } from "../publicWeb";
 import type { CollectContext } from "./types";
 import {
   collectBasicFacts,
+  discoverBasicFactLeads,
   parseBasicFactLeads,
   verifyBasicFactLead,
 } from "./basicFacts";
@@ -54,6 +55,32 @@ const fetchDocuments = (documents: Record<string, PublicTextDocument>) =>
   });
 
 describe("basic-facts lead parsing", () => {
+  it("asks discovery to copy only source-stated traction reporting periods", async () => {
+    const { ctx } = context();
+    let requestBody: Record<string, unknown> | undefined;
+    const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBody = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({
+        content: [{ type: "text", text: '{"facts":[]}' }],
+        stop_reason: "end_turn",
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+
+    await discoverBasicFactLeads(ctx, {
+      request,
+      cacheRead: async () => null,
+      cacheWrite: async () => undefined,
+    });
+
+    const messages = requestBody?.messages as Array<{ content?: string }> | undefined;
+    expect(messages?.[0]?.content).toContain(
+      "copy the source's exact as-of date or reporting period into qualifier",
+    );
+    expect(messages?.[0]?.content).toContain("Never infer, normalize, or invent a date");
+    expect(messages?.[0]?.content).toContain("traction as-of/reporting period present in exact_excerpt");
+  });
+
   it.each([
     "Meow and Siong",
     "Meow, Siong",
@@ -105,6 +132,43 @@ describe("basic-facts lead parsing", () => {
       candidateUrls: ["https://decrypt.co/jupiter"],
     }));
   });
+
+  it("keeps required due-diligence categories when more than 16 facts are returned", () => {
+    const founders = Array.from({ length: 16 }, (_, index) => ({
+      subject: "Jupiter",
+      predicate: "founder",
+      value: `Founder ${index + 1}`,
+      exact_excerpt: `Jupiter was founded by Founder ${index + 1}.`,
+      source_url: `https://jup.ag/team/founder-${index + 1}`,
+    }));
+    const required = [
+      ["product", "Jupiter Swap", "Jupiter Swap is the core exchange product."],
+      ["tokenomics", "50% community allocation", "Jupiter tokenomics specify a 50% community allocation."],
+      ["vesting", "two-year contributor vesting", "Jupiter publishes two-year contributor vesting."],
+      ["treasury", "Jupiter DAO treasury", "Jupiter discloses the Jupiter DAO treasury."],
+      ["audit", "OtterSec audit", "Jupiter completed an OtterSec security audit."],
+      ["traction", "$1B monthly volume", "Jupiter processed $1B in monthly trading volume."],
+    ].map(([predicate, value, exact_excerpt]) => ({
+      subject: "Jupiter",
+      predicate,
+      value,
+      exact_excerpt,
+      source_url: `https://jup.ag/${predicate}`,
+    }));
+
+    const parsed = parseBasicFactLeads(JSON.stringify({ facts: [...founders, ...required] }));
+
+    expect(parsed).toHaveLength(16);
+    expect(parsed?.map((fact) => fact.predicate)).toEqual([
+      ...Array.from({ length: 10 }, () => "founder"),
+      "product",
+      "tokenomics",
+      "vesting",
+      "treasury",
+      "audit",
+      "traction",
+    ]);
+  });
 });
 
 describe("basic-facts source verification", () => {
@@ -129,6 +193,81 @@ describe("basic-facts source verification", () => {
           artifactVerified: true,
         })],
       }),
+    ]);
+  });
+
+  it("fetches every selected category primary before early corroborating URLs consume the source cap", async () => {
+    const { ctx, evidence } = context();
+    const founders = Array.from({ length: 16 }, (_, index) => lead({
+      value: `Founder ${index + 1}`,
+      excerpt: `Jupiter was founded by Founder ${index + 1}.`,
+      sourceUrl: `https://jup.ag/team/founder-${index + 1}`,
+      candidateUrls: Array.from({ length: 3 }, (_unused, candidateIndex) =>
+        `https://docs.jup.ag/team/founder-${index + 1}-${candidateIndex + 1}`),
+    }));
+    const required = [
+      lead({
+        predicate: "product",
+        value: "Jupiter Swap",
+        excerpt: "Jupiter Swap is the core exchange product.",
+        sourceUrl: "https://jup.ag/product",
+      }),
+      lead({
+        predicate: "tokenomics",
+        value: "50% community allocation",
+        excerpt: "Jupiter tokenomics specify a 50% community allocation.",
+        sourceUrl: "https://jup.ag/tokenomics",
+      }),
+      lead({
+        predicate: "vesting",
+        value: "two-year contributor vesting",
+        excerpt: "Jupiter publishes two-year contributor vesting.",
+        sourceUrl: "https://jup.ag/vesting",
+      }),
+      lead({
+        predicate: "treasury",
+        value: "Jupiter DAO treasury",
+        excerpt: "Jupiter discloses the Jupiter DAO treasury.",
+        sourceUrl: "https://jup.ag/treasury",
+      }),
+      lead({
+        predicate: "audit",
+        value: "OtterSec audit",
+        excerpt: "Jupiter completed an OtterSec audit and security review.",
+        sourceUrl: "https://jup.ag/audit",
+      }),
+      lead({
+        predicate: "traction",
+        value: "$1B monthly volume",
+        excerpt: "Jupiter reported $1B monthly volume across the exchange.",
+        sourceUrl: "https://jup.ag/traction",
+      }),
+    ];
+    const requiredDocuments = Object.fromEntries(required.map((fact, index) => [
+      fact.sourceUrl,
+      document({
+        url: fact.sourceUrl,
+        text: `<html><body><p>${fact.excerpt}</p></body></html>`,
+        contentHash: String(index + 1).repeat(64),
+      }),
+    ]));
+    const fetchSource = fetchDocuments(requiredDocuments);
+
+    const result = await collectBasicFacts(ctx, {
+      discover: async () => [...founders, ...required],
+      fetchSource,
+    });
+
+    expect(result).toEqual(expect.objectContaining({ state: "executed" }));
+    expect(fetchSource).toHaveBeenCalledTimes(24);
+    required.forEach((fact) => expect(fetchSource).toHaveBeenCalledWith(fact.sourceUrl));
+    expect(evidence.basicFacts?.map((fact) => fact.predicate)).toEqual([
+      "product",
+      "tokenomics",
+      "vesting",
+      "treasury",
+      "audit",
+      "traction",
     ]);
   });
 
@@ -157,6 +296,44 @@ describe("basic-facts source verification", () => {
     expect(fact).not.toHaveProperty("qualifier");
   });
 
+  it("freezes a traction reporting period only when the fetched passage states it", () => {
+    const supported = verifyBasicFactLead(
+      lead({
+        predicate: "traction",
+        value: "$1B monthly volume",
+        qualifier: "Q2 2026",
+        excerpt: "Jupiter reported $1B monthly volume in Q2 2026.",
+        sourceUrl: "https://jup.ag/traction",
+      }),
+      document({
+        url: "https://jup.ag/traction",
+        text: "<html><body><p>Jupiter reported $1B monthly volume in Q2 2026.</p></body></html>",
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["jup.ag"],
+    );
+    const invented = verifyBasicFactLead(
+      lead({
+        predicate: "traction",
+        value: "$1B monthly volume",
+        qualifier: "as of July 12, 2026",
+        excerpt: "Jupiter reported $1B monthly volume in Q2 2026.",
+        sourceUrl: "https://jup.ag/traction",
+      }),
+      document({
+        url: "https://jup.ag/traction",
+        text: "<html><body><p>Jupiter reported $1B monthly volume in Q2 2026.</p></body></html>",
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["jup.ag"],
+    );
+
+    expect(supported).toEqual(expect.objectContaining({ qualifier: "Q2 2026" }));
+    expect(invented).not.toHaveProperty("qualifier");
+  });
+
   it("accepts common chain wording on a fetched official page", () => {
     expect(verifyBasicFactLead(
       lead({
@@ -171,6 +348,32 @@ describe("basic-facts source verification", () => {
     )).toEqual(expect.objectContaining({
       predicate: "network",
       value: "Solana",
+      status: "verified",
+    }));
+  });
+
+  it.each([
+    ["tokenomics", "50% community allocation", "Jupiter tokenomics specify a 50% community allocation."],
+    ["vesting", "two-year contributor vesting", "Jupiter publishes two-year contributor vesting with a defined unlock schedule."],
+    ["treasury", "Jupiter DAO treasury", "Jupiter discloses the Jupiter DAO treasury and its multisig controls."],
+  ] as const)("verifies an official %s disclosure as a first-class fact", (predicate, value, sentence) => {
+    expect(verifyBasicFactLead(
+      lead({
+        predicate,
+        value,
+        excerpt: sentence,
+        sourceUrl: `https://jup.ag/${predicate}`,
+      }),
+      document({
+        url: `https://jup.ag/${predicate}`,
+        text: `<html><body><p>${sentence}</p></body></html>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["jup.ag"],
+    )).toEqual(expect.objectContaining({
+      predicate,
+      value,
       status: "verified",
     }));
   });

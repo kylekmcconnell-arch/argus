@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../src/data/evidence";
 import { SubjectClass } from "../src/engine";
 import type { CheckObservation, CollectContext } from "./adapters/types";
-import { collectProjectCoreEvidenceOutcomes } from "./orchestrate";
+import { collectProjectCoreEvidenceOutcomes, recordProjectTokenDrawdownFinding } from "./orchestrate";
 
 function context() {
   const evidence = emptyEvidence("@project");
@@ -18,6 +18,53 @@ function context() {
 }
 
 describe("project core evidence outcomes", () => {
+  it("freezes a severe canonical-token drawdown once without calling it misconduct", () => {
+    const { evidence } = context();
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Drawdown Control",
+      symbol: "DOWN",
+      coingeckoId: "drawdown-control",
+      rank: 500,
+      address: "0x000000000000000000000000000000000000d000",
+      chain: "ethereum",
+      sourceUrl: "https://www.coingecko.com/en/coins/drawdown-control",
+      capturedAt: "2026-07-12T17:00:00.000Z",
+      providers: ["coingecko", "dexscreener"],
+      history: {
+        points: [1, 0.2],
+        first: 1,
+        last: 0.2,
+        peak: 1,
+        changePct: -80,
+        drawdownPct: -80,
+        timeframe: "day",
+        poolAddress: "down-usdc-pool",
+        sourceUrl: "https://api.geckoterminal.com/api/v2/networks/eth/pools/down-usdc-pool/ohlcv/day?aggregate=1&limit=90&currency=usd",
+      },
+    };
+
+    expect(recordProjectTokenDrawdownFinding(evidence)).toBe(true);
+    expect(recordProjectTokenDrawdownFinding(evidence)).toBe(false);
+    expect(evidence.findings).toHaveLength(1);
+    expect(evidence.findings[0]).toMatchObject({
+      finding_type: "ProjectTokenDrawdown",
+      verification_status: "Verified",
+      polarity: -1,
+      artifact_verified: true,
+      independent_source_count: 1,
+      source_author: "geckoterminal",
+      source_url: "https://api.geckoterminal.com/api/v2/networks/eth/pools/down-usdc-pool/ohlcv/day?aggregate=1&limit=90&currency=usd",
+    });
+    expect(evidence.findings[0].claim).toContain("does not establish misconduct");
+
+    evidence.findings = [];
+    evidence.projectToken.history!.drawdownPct = -20;
+    expect(recordProjectTokenDrawdownFinding(evidence)).toBe(false);
+    expect(evidence.findings).toEqual([]);
+  });
+
   it("confirms backing only from a verified first-party advisor or backer record", () => {
     const { ctx, evidence, outcomes } = context();
     evidence.webTeam = [

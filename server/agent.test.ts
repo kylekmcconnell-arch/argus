@@ -1,15 +1,19 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ANALYST_EVIDENCE_MAX_CHARS,
+  PROJECT_SCORING_POLICY,
   RECORD_VERDICT_INPUT_SCHEMA,
   analyzeSubject,
   buildAnalystEvidencePacket,
   buildScoringEvidencePacket,
+  deriveProjectStrengthBands,
   extractScoringEvidenceCatalog,
   inspectAnalystScoringPreflight,
   normalizeAnalystCitationEligibility,
   normalizeAnalystSupportCounterOverlap,
+  projectScoreFloorsForPacket,
   scanContradictions,
+  scoringPolicyForAxes,
   structured,
   validateAnalystVerdict,
   type AnalystAxis,
@@ -63,6 +67,7 @@ const axisArtifact = (
   artifactId: string,
   eligibleAxes: string[],
   verification: AxisEvidenceRecord["verification"] = "verified",
+  counterEligibleAxes?: string[],
 ): AxisEvidenceRecord => ({
   artifactId,
   kind: "axis_evidence",
@@ -73,6 +78,7 @@ const axisArtifact = (
   contentHash: artifactId.slice("art_v1_".length),
   eligibleAxes,
   verification,
+  ...(counterEligibleAxes ? { counterEligibleAxes } : {}),
   scope: "direct_subject",
 });
 
@@ -146,6 +152,530 @@ describe("analyst verdict integrity", () => {
       optional: 0,
       unions: 0,
     });
+  });
+
+  it("separates project fundamentals from collection confidence with an explicit scoring rubric", () => {
+    const projectAxes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+
+    expect(scoringPolicyForAxes(projectAxes)).toBe(PROJECT_SCORING_POLICY);
+    expect(scoringPolicyForAxes(catalog)).toBe("");
+    expect(PROJECT_SCORING_POLICY).toContain("Keep score and confidence separate");
+    expect(PROJECT_SCORING_POLICY).toContain("Missing coverage is separate and never creates or lowers a strength tier");
+    expect(PROJECT_SCORING_POLICY).toContain("A bootstrapped project is not weaker merely because no VC round was found");
+    expect(PROJECT_SCORING_POLICY).toContain("Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps");
+    expect(PROJECT_SCORING_POLICY).toContain("Only cite substantive counterEvidenceRefs for distinct verified facts that pull a score below its evidence-strength band");
+  });
+
+  it("derives exceptional evidence bands for established projects without using fame or artifact counts", () => {
+    const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@established_project",
+        display_name: "Established Project",
+        website: "https://established.example",
+        days_since_post: 0,
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-12T12:00:00.000Z",
+      },
+      team: [
+        { name: "Founder One", role: "Co-founder", provider: "team-page", artifact_verified: true },
+        { name: "Founder Two", role: "Co-founder", provider: "team-page", artifact_verified: true },
+      ],
+      basicFacts: [
+        { predicate: "legal_entity", value: "Established Labs S.A.", status: "verified", artifact_verified: true },
+        { predicate: "official_identity", value: "Established Project", status: "verified", artifact_verified: true },
+        { predicate: "repository", value: "github.com/example/established", status: "verified", artifact_verified: true },
+        { predicate: "governance", value: "Token-holder governance", status: "verified", artifact_verified: true },
+        { predicate: "tokenomics", value: "Published token allocation and supply schedule", status: "verified", artifact_verified: true },
+        { predicate: "audit", value: "Independent protocol audit", status: "verified", artifact_verified: true },
+        { predicate: "traction", value: "$25M verified daily protocol volume", qualifier: "as of 2026-07-10", status: "verified", artifact_verified: true },
+      ],
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Established Project",
+        symbol: "EST",
+        coingeckoId: "established-project",
+        rank: 75,
+        address: "0x0000000000000000000000000000000000000e57",
+        chain: "ethereum",
+        sourceUrl: "https://established.example/token",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        providers: ["coingecko", "dexscreener", "geckoterminal"],
+        marketCapUsd: 662_000_000,
+        volume24hUsd: 18_000_000,
+        liquidityUsd: 1_100_000,
+      },
+      recentActivity: [{
+        provider: "twitterapi",
+        text: "Released a production protocol upgrade and published current operating metrics.",
+      }],
+      sourceArtifacts: [{
+        kind: "press",
+        provider: "google-news",
+        title: "Securitize, Jump, Established Project launch regulated onchain trading",
+        excerpt: "The three companies launched the product together.",
+        sourceUrl: "https://news.example/established-integration",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        contentHash: "8".repeat(64),
+        match: "exact_handle",
+      }],
+    }, axes);
+
+    const floors = projectScoreFloorsForPacket(packet, axes);
+    expect(floors).toEqual({
+      P1_team_and_identity: 14,
+      P2_product_substance: 21,
+      P3_token_conduct: 17,
+      P4_backing_and_partners: 10,
+      P5_traction_and_liveness: 12,
+      P6_transparency_integrity: 11,
+    });
+    expect(Object.values(floors).reduce((total, score) => total + score, 0)).toBe(85);
+    expect(Object.fromEntries(Object.entries(deriveProjectStrengthBands(packet, axes))
+      .map(([axis, band]) => [axis, band.tier]))).toEqual({
+      P1_team_and_identity: "exceptional",
+      P2_product_substance: "exceptional",
+      P3_token_conduct: "exceptional",
+      P4_backing_and_partners: "solid",
+      P5_traction_and_liveness: "exceptional",
+      P6_transparency_integrity: "exceptional",
+    });
+  });
+
+  it("keeps a Jupiter-like established exchange fully scoreable above the old 72 calibration", () => {
+    const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@JupiterExchange",
+        display_name: "Jupiter",
+        website: "https://jup.ag",
+        days_since_post: 0,
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-12T20:00:00.000Z",
+      },
+      team: [
+        { name: "Meow", role: "Co-founder", sourceUrl: "https://jup.ag/team", provider: "team-page", artifact_verified: true },
+        { name: "Siong", role: "Co-founder", sourceUrl: "https://jup.ag/team", provider: "team-page", artifact_verified: true },
+      ],
+      basicFacts: [
+        { predicate: "legal_entity", value: "Block Raccoon S.A.", status: "verified", artifact_verified: true },
+        { predicate: "official_identity", value: "Jupiter", status: "verified", artifact_verified: true },
+        { predicate: "product", value: "Live production Solana swap exchange", status: "verified", artifact_verified: true },
+        { predicate: "repository", value: "github.com/jup-ag", status: "verified", artifact_verified: true },
+        { predicate: "governance", value: "JUP token-holder governance", status: "verified", artifact_verified: true },
+        { predicate: "tokenomics", value: "Published JUP allocation and supply schedule", status: "verified", artifact_verified: true },
+        { predicate: "vesting", value: "Published contributor unlock schedule", status: "verified", artifact_verified: true },
+        { predicate: "audit", value: "Independent protocol security reviews", status: "verified", artifact_verified: true },
+        { predicate: "traction", value: "$1B verified daily protocol trading volume", qualifier: "as of 2026-07-10", status: "verified", artifact_verified: true },
+      ],
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Jupiter",
+        symbol: "JUP",
+        coingeckoId: "jupiter-exchange-solana",
+        rank: 90,
+        address: "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",
+        chain: "solana",
+        sourceUrl: "https://www.coingecko.com/en/coins/jupiter-exchange-solana",
+        capturedAt: "2026-07-12T20:00:00.000Z",
+        providers: ["coingecko", "dexscreener", "geckoterminal"],
+        marketCapUsd: 662_000_000,
+        volume24hUsd: 18_090_000,
+        liquidityUsd: 5_100_000,
+      },
+      sourceArtifacts: [{
+        kind: "press",
+        provider: "google-news",
+        title: "Securitize, Jump, Jupiter launch regulated onchain trading on Solana",
+        excerpt: "Securitize, Jump Crypto, and Jupiter launched the integration together.",
+        sourceUrl: "https://news.example/securitize-jump-jupiter",
+        capturedAt: "2026-07-12T20:00:00.000Z",
+        publishedAt: "2026-07-10T12:00:00.000Z",
+        contentHash: "9".repeat(64),
+        match: "exact_handle",
+      }],
+    }, axes);
+    const preflight = inspectAnalystScoringPreflight(axes, packet);
+    const bands = deriveProjectStrengthBands(packet, axes);
+    const floors = Object.values(bands).reduce((total, band) => total + band.minScore, 0);
+
+    expect(preflight).toMatchObject({ state: "ready", missingSubstantiveAxes: [] });
+    expect(Object.fromEntries(Object.entries(bands).map(([axis, band]) => [axis, band.tier]))).toEqual({
+      P1_team_and_identity: "exceptional",
+      P2_product_substance: "exceptional",
+      P3_token_conduct: "exceptional",
+      P4_backing_and_partners: "solid",
+      P5_traction_and_liveness: "exceptional",
+      P6_transparency_integrity: "exceptional",
+    });
+    expect(floors).toBeGreaterThanOrEqual(85);
+  });
+
+  it("counts syndicated relationship coverage as one story instead of exceptional corroboration", () => {
+    const axes: AnalystAxis[] = [{
+      axis: "P4_backing_and_partners",
+      weight: 14,
+      role: SubjectClass.PROJECT,
+    }];
+    const syndicated = [
+      {
+        kind: "press",
+        provider: "google-news",
+        title: "Jupiter partners with Counterparty on regulated trading",
+        excerpt: "Jupiter and Counterparty launched a regulated trading integration.",
+        sourceUrl: "https://wire-a.example/jupiter-counterparty",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        publishedAt: "2026-07-10T12:00:00.000Z",
+        contentHash: "a".repeat(64),
+        match: "exact_handle",
+      },
+      {
+        kind: "press",
+        provider: "google-news",
+        title: "Jupiter partners with Counterparty on regulated trading | Syndicated News",
+        excerpt: "Jupiter and Counterparty launched a regulated trading integration.",
+        sourceUrl: "https://wire-b.example/copied-jupiter-counterparty",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        publishedAt: "2026-07-10T12:00:00.000Z",
+        contentHash: "b".repeat(64),
+        match: "exact_handle",
+      },
+    ];
+    const syndicatedPacket = buildScoringEvidencePacket({ sourceArtifacts: syndicated }, axes);
+    const independentlyCorroboratedPacket = buildScoringEvidencePacket({
+      sourceArtifacts: [
+        ...syndicated,
+        {
+          ...syndicated[0],
+          title: "Counterparty confirms its production integration with Jupiter",
+          sourceUrl: "https://counterparty.example/news/jupiter-integration",
+          contentHash: "c".repeat(64),
+        },
+      ],
+    }, axes);
+
+    expect(deriveProjectStrengthBands(syndicatedPacket, axes).P4_backing_and_partners.tier).toBe("solid");
+    expect(deriveProjectStrengthBands(independentlyCorroboratedPacket, axes).P4_backing_and_partners.tier).toBe("exceptional");
+  });
+
+  it("keeps staff, generic posts, and unrelated beta mentions from inflating project strength", () => {
+    const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@project",
+        display_name: "Project",
+        website: "https://project.example",
+        days_since_post: 2,
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-12T12:00:00.000Z",
+      },
+      team: [
+        { name: "Community Lead", role: "Community manager", provider: "team-page", artifact_verified: true },
+        { name: "Support Lead", role: "Support specialist", provider: "team-page", artifact_verified: true },
+      ],
+      basicFacts: [
+        { predicate: "repository", value: "github.com/project/protocol", status: "verified", artifact_verified: true },
+        { predicate: "product", value: "Live production exchange", status: "verified", artifact_verified: true },
+        { predicate: "audit", value: "Independent protocol audit", status: "verified", artifact_verified: true },
+      ],
+      recentActivity: [
+        { provider: "twitterapi", text: "gm everyone, have a great weekend" },
+        { provider: "twitterapi", text: "Launched a beta community ambassador program while the production exchange remains live." },
+      ],
+    }, axes);
+    const bands = deriveProjectStrengthBands(packet, axes);
+
+    expect(bands.P1_team_and_identity.tier).toBe("emerging");
+    expect(bands.P2_product_substance.tier).toBe("exceptional");
+    expect(bands.P2_product_substance.reasons).not.toContain("explicit early-stage product marker");
+  });
+
+  it("requires token disclosure, not an unrelated audit alone, for exceptional token conduct", () => {
+    const axes: AnalystAxis[] = [{ axis: "P3_token_conduct", weight: 20, role: SubjectClass.PROJECT }];
+    const token = {
+      verified: true as const,
+      verification: "official_domain" as const,
+      name: "Project Token",
+      symbol: "PRJ",
+      coingeckoId: "project-token",
+      rank: 50,
+      address: "0x0000000000000000000000000000000000000123",
+      chain: "ethereum",
+      sourceUrl: "https://project.example/token",
+      capturedAt: "2026-07-12T12:00:00.000Z",
+      providers: ["coingecko" as const, "dexscreener" as const],
+      marketCapUsd: 500_000_000,
+      volume24hUsd: 25_000_000,
+      liquidityUsd: 10_000_000,
+    };
+    const auditOnly = buildScoringEvidencePacket({
+      projectToken: token,
+      basicFacts: [{ predicate: "audit", value: "Independent protocol audit", status: "verified", artifact_verified: true }],
+    }, axes);
+    const governanceOnly = buildScoringEvidencePacket({
+      projectToken: token,
+      basicFacts: [{ predicate: "governance", value: "Token-holder governance", status: "verified", artifact_verified: true }],
+    }, axes);
+    const disclosedWithoutSecurity = buildScoringEvidencePacket({
+      projectToken: token,
+      basicFacts: [
+        { predicate: "governance", value: "Token-holder governance", status: "verified", artifact_verified: true },
+        { predicate: "tokenomics", value: "Published token allocation and supply schedule", status: "verified", artifact_verified: true },
+      ],
+    }, axes);
+    const disclosedAndAudited = buildScoringEvidencePacket({
+      projectToken: token,
+      basicFacts: [
+        { predicate: "audit", value: "Independent protocol audit", status: "verified", artifact_verified: true },
+        { predicate: "tokenomics", value: "Published token allocation and supply schedule", status: "verified", artifact_verified: true },
+      ],
+    }, axes);
+
+    expect(deriveProjectStrengthBands(auditOnly, axes).P3_token_conduct.tier).toBe("solid");
+    expect(deriveProjectStrengthBands(governanceOnly, axes).P3_token_conduct.tier).toBe("solid");
+    expect(deriveProjectStrengthBands(disclosedWithoutSecurity, axes).P3_token_conduct.tier).toBe("solid");
+    expect(deriveProjectStrengthBands(disclosedAndAudited, axes).P3_token_conduct.tier).toBe("exceptional");
+  });
+
+  it("distinguishes protocol volume from token trading and freezes profile recency for P5", () => {
+    const axes: AnalystAxis[] = [{ axis: "P5_traction_and_liveness", weight: 14, role: SubjectClass.PROJECT }];
+    const base = {
+      profile: {
+        handle: "@exchange",
+        display_name: "Exchange",
+        days_since_post: 1,
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-12T12:00:00.000Z",
+      },
+      projectToken: {
+        verified: true as const,
+        verification: "official_x" as const,
+        name: "Exchange Token",
+        symbol: "EX",
+        coingeckoId: "exchange-token",
+        rank: 40,
+        address: "0x0000000000000000000000000000000000000456",
+        chain: "ethereum",
+        sourceUrl: "https://exchange.example/token",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        providers: ["coingecko" as const, "dexscreener" as const, "geckoterminal" as const],
+        marketCapUsd: 900_000_000,
+        volume24hUsd: 30_000_000,
+        liquidityUsd: 20_000_000,
+      },
+    };
+    const protocolPacket = buildScoringEvidencePacket({
+      ...base,
+      basicFacts: [{ predicate: "traction", value: "$1B daily protocol trading volume", qualifier: "as of 2026-07-10", status: "verified", artifact_verified: true }],
+    }, axes);
+    const undatedProtocolPacket = buildScoringEvidencePacket({
+      ...base,
+      basicFacts: [{ predicate: "traction", value: "$1B daily protocol trading volume", status: "verified", artifact_verified: true }],
+    }, axes);
+    const staleDatedProtocolPacket = buildScoringEvidencePacket({
+      ...base,
+      basicFacts: [{ predicate: "traction", value: "$1B daily protocol trading volume", qualifier: "as of 2025-01-10", status: "verified", artifact_verified: true }],
+    }, axes);
+    const tokenOnlyPacket = buildScoringEvidencePacket({
+      ...base,
+      basicFacts: [{ predicate: "traction", value: "$30M token trading volume", status: "verified", artifact_verified: true }],
+    }, axes);
+    const stalePacket = buildScoringEvidencePacket({
+      ...base,
+      profile: { ...base.profile, days_since_post: 21 },
+      recentActivity: [{ provider: "twitterapi", text: "Generic undated post" }],
+    }, axes);
+    const recentFallbackPacket = buildScoringEvidencePacket({
+      projectToken: base.projectToken,
+      recentActivity: [{ provider: "twitterapi", text: "Released the latest production router upgrade." }],
+    }, axes);
+    const protocolWithoutXPacket = buildScoringEvidencePacket({
+      projectToken: base.projectToken,
+      basicFacts: [{ predicate: "traction", value: "$1B daily protocol trading volume", status: "verified", artifact_verified: true }],
+    }, axes);
+    const currentProtocolWithoutXPacket = buildScoringEvidencePacket({
+      projectToken: base.projectToken,
+      basicFacts: [{ predicate: "traction", value: "$1B daily protocol trading volume", status: "verified", artifact_verified: true }],
+      sourceArtifacts: [{
+        kind: "press",
+        provider: "google-news",
+        title: "Exchange releases production routing upgrade",
+        excerpt: "The exchange shipped its current production routing release.",
+        sourceUrl: "https://news.example/current-exchange-release",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        publishedAt: "2026-07-10T12:00:00.000Z",
+        contentHash: "7".repeat(64),
+        match: "exact_handle",
+      }],
+    }, axes);
+    const datedCurrentProtocolWithoutXPacket = buildScoringEvidencePacket({
+      projectToken: base.projectToken,
+      basicFacts: [{ predicate: "traction", value: "$1B daily protocol trading volume", qualifier: "as of 2026-07-10", status: "verified", artifact_verified: true }],
+      sourceArtifacts: [{
+        kind: "press",
+        provider: "google-news",
+        title: "Exchange releases production routing upgrade",
+        excerpt: "The exchange shipped its current production routing release.",
+        sourceUrl: "https://news.example/current-exchange-release",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        publishedAt: "2026-07-10T12:00:00.000Z",
+        contentHash: "7".repeat(64),
+        match: "exact_handle",
+      }],
+    }, axes);
+    const untrustedCadencePacket = buildScoringEvidencePacket({
+      profile: {
+        handle: "@exchange",
+        display_name: "Exchange",
+        days_since_post: 1,
+        profile_collection_state: "resolved",
+      },
+      projectToken: base.projectToken,
+    }, axes);
+
+    expect(deriveProjectStrengthBands(protocolPacket, axes).P5_traction_and_liveness.tier).toBe("exceptional");
+    expect(deriveProjectStrengthBands(undatedProtocolPacket, axes).P5_traction_and_liveness.tier).toBe("solid");
+    expect(deriveProjectStrengthBands(staleDatedProtocolPacket, axes).P5_traction_and_liveness.tier).toBe("solid");
+    expect(deriveProjectStrengthBands(tokenOnlyPacket, axes).P5_traction_and_liveness.tier).toBe("solid");
+    expect(deriveProjectStrengthBands(stalePacket, axes).P5_traction_and_liveness.tier).toBe("emerging");
+    expect(deriveProjectStrengthBands(recentFallbackPacket, axes).P5_traction_and_liveness.tier).toBe("emerging");
+    expect(deriveProjectStrengthBands(protocolWithoutXPacket, axes).P5_traction_and_liveness.tier).toBe("emerging");
+    expect(deriveProjectStrengthBands(currentProtocolWithoutXPacket, axes).P5_traction_and_liveness.tier).toBe("solid");
+    expect(deriveProjectStrengthBands(datedCurrentProtocolWithoutXPacket, axes).P5_traction_and_liveness.tier).toBe("exceptional");
+    expect(deriveProjectStrengthBands(untrustedCadencePacket, axes).P5_traction_and_liveness.tier).toBe("emerging");
+    expect(extractScoringEvidenceCatalog(protocolPacket, axes)
+      .find((artifact) => artifact.section === "profile")?.eligibleAxes)
+      .toContain("P5_traction_and_liveness");
+    expect(extractScoringEvidenceCatalog(untrustedCadencePacket, axes)
+      .some((artifact) => artifact.section === "profile" && artifact.eligibleAxes.includes("P5_traction_and_liveness")))
+      .toBe(false);
+  });
+
+  it("uses an adverse band for verified harm and never turns missing evidence into zero", () => {
+    const axes: AnalystAxis[] = [{ axis: "P3_token_conduct", weight: 20, role: SubjectClass.PROJECT }];
+    const harmfulPacket = buildScoringEvidencePacket({
+      findings: [{
+        finding_type: "TokenCollapse",
+        claim: "The canonical token suffered a verified collapse.",
+        source_url: "https://investigator.example/token-collapse",
+        verification_status: "Verified",
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }],
+    }, axes);
+    const emptyPacket = buildScoringEvidencePacket({}, axes);
+    const harmfulCatalog = extractScoringEvidenceCatalog(harmfulPacket, axes);
+    const harmfulBand = deriveProjectStrengthBands(harmfulPacket, axes);
+    const finding = harmfulCatalog.find((artifact) => artifact.section === "findings")!;
+
+    expect(harmfulBand.P3_token_conduct).toMatchObject({ tier: "adverse", minScore: 0, maxScore: 7 });
+    expect(inspectAnalystScoringPreflight(axes, harmfulPacket).state).toBe("ready");
+    expect(validateAnalystVerdict({
+      axes: [validAxis("P3_token_conduct", 3, finding.artifactId)],
+      headline: "Verified token collapse governs the assessment.",
+      identity_note: "Identity is not material to this adverse token finding.",
+    }, axes, harmfulCatalog, undefined, { projectScoreBands: harmfulBand })).not.toBeNull();
+
+    expect(deriveProjectStrengthBands(emptyPacket, axes).P3_token_conduct).toEqual({
+      tier: "none",
+      minScore: 0,
+      maxScore: 0,
+      reasons: [],
+      anchorArtifactIds: [],
+    });
+    expect(inspectAnalystScoringPreflight(axes, emptyPacket)).toMatchObject({
+      state: "insufficient_evidence",
+      missingSubstantiveAxes: ["P3_token_conduct"],
+    });
+  });
+
+  it("requires verified score-limiting evidence below a project band and enforces its ceiling", () => {
+    const projectAxes: AnalystAxis[] = [
+      { axis: "P1_team_and_identity", weight: 16, role: SubjectClass.PROJECT },
+      { axis: "P4_backing_and_partners", weight: 14, role: SubjectClass.PROJECT },
+    ];
+    const p1Support = `art_v1_${"a".repeat(64)}`;
+    const p4Support = `art_v1_${"b".repeat(64)}`;
+    const positiveP4Context = `art_v1_${"c".repeat(64)}`;
+    const adverseP4Finding = `art_v1_${"d".repeat(64)}`;
+    const evidence = [
+      axisArtifact(p1Support, [projectAxes[0].axis]),
+      axisArtifact(p4Support, [projectAxes[1].axis]),
+      axisArtifact(positiveP4Context, [projectAxes[1].axis], "verified"),
+      axisArtifact(adverseP4Finding, [projectAxes[1].axis], "verified", [projectAxes[1].axis]),
+    ];
+    const payload = (p1Score: number, p4Score: number, p4Counter: string[] = []) => ({
+      axes: [
+        validAxis(projectAxes[0].axis, p1Score, p1Support),
+        { ...validAxis(projectAxes[1].axis, p4Score, p4Support), counterEvidenceRefs: p4Counter },
+      ],
+      headline: "Evidence-backed project result",
+      identity_note: "Named team is verified",
+    });
+    const solidBands = {
+      P1_team_and_identity: {
+        tier: "solid" as const,
+        minScore: 12,
+        maxScore: 13,
+        reasons: ["solid identity anchors"],
+        anchorArtifactIds: [p1Support],
+      },
+      P4_backing_and_partners: {
+        tier: "solid" as const,
+        minScore: 10,
+        maxScore: 11,
+        reasons: ["solid relationship anchors"],
+        anchorArtifactIds: [p4Support],
+      },
+    };
+
+    const rejection = vi.fn();
+    expect(validateAnalystVerdict(payload(11, 9), projectAxes, evidence, rejection, {
+      projectScoreBands: solidBands,
+    })).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith(
+      "project-scores-outside-evidence-strength-band:P1_team_and_identity,P4_backing_and_partners",
+    );
+    expect(validateAnalystVerdict(payload(12, 10), projectAxes, evidence, undefined, {
+      projectScoreBands: solidBands,
+    })).not.toBeNull();
+    const positiveCounterRejection = vi.fn();
+    expect(validateAnalystVerdict(payload(12, 10, [positiveP4Context]), projectAxes, evidence, positiveCounterRejection, {
+      projectScoreBands: solidBands,
+    })).toBeNull();
+    expect(positiveCounterRejection).toHaveBeenLastCalledWith(
+      "project-counter-reference-not-score-limiting:P4_backing_and_partners",
+    );
+    expect(validateAnalystVerdict(payload(12, 9, [positiveP4Context]), projectAxes, evidence, undefined, {
+      projectScoreBands: solidBands,
+    })).toBeNull();
+    expect(validateAnalystVerdict(payload(12, 9, [adverseP4Finding]), projectAxes, evidence, undefined, {
+      projectScoreBands: solidBands,
+    })).not.toBeNull();
+    expect(validateAnalystVerdict(payload(14, 11), projectAxes, evidence, undefined, {
+      projectScoreBands: solidBands,
+    })).toBeNull();
+    const exceptionalBands = {
+      P1_team_and_identity: { ...solidBands.P1_team_and_identity, tier: "exceptional" as const, minScore: 14, maxScore: 16 },
+      P4_backing_and_partners: { ...solidBands.P4_backing_and_partners, tier: "solid" as const, minScore: 10, maxScore: 11 },
+    };
+    expect(validateAnalystVerdict(payload(12, 10), projectAxes, evidence, undefined, {
+      projectScoreBands: exceptionalBands,
+    })).toBeNull();
+    expect(validateAnalystVerdict(payload(14, 11), projectAxes, evidence, undefined, {
+      projectScoreBands: exceptionalBands,
+    })).not.toBeNull();
   });
 
   it("accepts exactly one finite, in-range score per requested axis", () => {
@@ -1147,6 +1677,69 @@ describe("analyst verdict integrity", () => {
     expect(frozen.filter((artifact) => artifact.section === "team")).toHaveLength(2);
   });
 
+  it("does not let generic founder and activity rows manufacture project token or backing coverage", () => {
+    const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@sparse_project",
+        display_name: "Sparse Project",
+        bio: "Building a live software product",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      team: [{
+        name: "Named Founder",
+        role: "Founder and head of Investor Relations",
+        provider: "team-page",
+        sourceUrl: "https://sparse.example/team",
+        artifact_verified: true,
+      }],
+      recentActivity: [{
+        provider: "twitterapi",
+        text: "Released a product update for a supply chain contract workflow.",
+      }],
+    }, axes);
+    const catalog = extractScoringEvidenceCatalog(packet);
+    const team = catalog.find((artifact) => artifact.section === "team");
+    const activity = catalog.find((artifact) => artifact.section === "recentActivity");
+
+    expect(team?.eligibleAxes).not.toContain("P4_backing_and_partners");
+    expect(activity?.eligibleAxes).not.toContain("P3_token_conduct");
+    expect(activity?.eligibleAxes).not.toContain("P6_transparency_integrity");
+    expect(inspectAnalystScoringPreflight(axes, packet)).toMatchObject({
+      state: "insufficient_evidence",
+      missingSubstantiveAxes: ["P3_token_conduct", "P4_backing_and_partners", "P5_traction_and_liveness", "P6_transparency_integrity"],
+    });
+  });
+
+  it("routes explicit project advisor, token, and governance evidence to their own axes", () => {
+    const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      team: [{
+        name: "Named Advisor",
+        role: "Strategic advisor and seed investor",
+        provider: "team-page",
+        sourceUrl: "https://project.example/advisors",
+        artifact_verified: true,
+      }],
+      recentActivity: [{
+        provider: "twitterapi",
+        text: "Published the token contract address, vesting schedule, governance proposal, and security audit.",
+      }],
+    }, axes);
+    const catalog = extractScoringEvidenceCatalog(packet);
+    const team = catalog.find((artifact) => artifact.section === "team");
+    const activity = catalog.find((artifact) => artifact.section === "recentActivity");
+
+    expect(team?.eligibleAxes).toContain("P4_backing_and_partners");
+    expect(activity?.eligibleAxes).toEqual(expect.arrayContaining([
+      "P3_token_conduct",
+      "P6_transparency_integrity",
+    ]));
+  });
+
   it("preserves a lower-priority covered axis before applying the 24-row source cap", () => {
     const axes: AnalystAxis[] = [
       { axis: "I2_portfolio_quality", weight: 25, role: "INVESTOR" },
@@ -1202,6 +1795,140 @@ describe("analyst verdict integrity", () => {
       state: "ready",
       missingSubstantiveAxes: [],
     });
+  });
+
+  it("retains a material project integration when generic press reaches the source cap", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "P4_backing_and_partners", weight: 14, role: "PROJECT" },
+    ];
+    const generic = Array.from({ length: 24 }, (_, index) => ({
+      kind: "press" as const,
+      provider: "google-news" as const,
+      title: `Generic project update ${index + 1}`,
+      excerpt: "The project published another general market update.",
+      sourceUrl: `https://news.example/project-update-${index + 1}`,
+      capturedAt: "2026-07-12T12:00:00.000Z",
+      contentHash: (index + 1).toString(16).padStart(64, "0"),
+      match: "exact_handle" as const,
+    }));
+    const integration = {
+      kind: "press" as const,
+      provider: "google-news" as const,
+      title: "Securitize, Jump, JupiterExchange launch regulated onchain trading on Solana",
+      excerpt: "The three companies launched the regulated trading product together.",
+      sourceUrl: "https://news.example/material-integration",
+      capturedAt: "2026-07-12T12:00:00.000Z",
+      contentHash: "f".repeat(64),
+      match: "exact_handle" as const,
+    };
+
+    const packet = buildScoringEvidencePacket({ sourceArtifacts: [...generic, integration] }, axes);
+    const parsed = JSON.parse(packet) as { sourceArtifacts: SourceArtifact[] };
+
+    expect(parsed.sourceArtifacts.length).toBeLessThanOrEqual(24);
+    expect(parsed.sourceArtifacts.length).toBeGreaterThan(0);
+    expect(parsed.sourceArtifacts).toContainEqual(expect.objectContaining({
+      sourceUrl: "https://news.example/material-integration",
+    }));
+  });
+
+  it("does not treat generic price news as project product, traction, or transparency evidence", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "P2_product_substance", weight: 24, role: "PROJECT" },
+      { axis: "P5_traction_and_liveness", weight: 14, role: "PROJECT" },
+      { axis: "P6_transparency_integrity", weight: 12, role: "PROJECT" },
+    ];
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [{
+        kind: "press",
+        provider: "google-news",
+        title: "Token price rises after broad crypto market move",
+        excerpt: "The asset changed price during a volatile trading session.",
+        sourceUrl: "https://news.example/generic-price-update",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        contentHash: "9".repeat(64),
+        match: "exact_handle",
+      }],
+    }, axes);
+    const parsed = JSON.parse(packet) as { sourceArtifacts: SourceArtifact[] };
+
+    expect(parsed.sourceArtifacts).toEqual([]);
+    expect(inspectAnalystScoringPreflight(axes, packet)).toMatchObject({
+      state: "insufficient_evidence",
+      missingSubstantiveAxes: axes.map(({ axis }) => axis),
+    });
+  });
+
+  it("does not promote denied or rumored partnerships as project backing evidence", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "P4_backing_and_partners", weight: 14, role: "PROJECT" },
+    ];
+    const generic = Array.from({ length: 23 }, (_, index) => ({
+      kind: "press" as const,
+      provider: "google-news" as const,
+      title: `Generic project update ${index + 1}`,
+      excerpt: "The project published another general market update.",
+      sourceUrl: `https://news.example/generic-${index + 1}`,
+      capturedAt: "2026-07-12T12:00:00.000Z",
+      contentHash: (index + 1).toString(16).padStart(64, "0"),
+      match: "exact_handle" as const,
+    }));
+    const confirmedLaunch = {
+      ...generic[0],
+      title: "Securitize, Jump, JupiterExchange launch regulated trading on Solana",
+      excerpt: "The three companies launched the product together.",
+      sourceUrl: "https://news.example/confirmed-launch",
+      contentHash: "e".repeat(64),
+    };
+    const denial = {
+      ...generic[0],
+      title: "Protocol denies rumored partnership with Major Exchange",
+      excerpt: "The team said the alleged integration is false and no partnership exists.",
+      sourceUrl: "https://news.example/partnership-denial",
+      contentHash: "f".repeat(64),
+    };
+    const rumor = {
+      ...generic[0],
+      title: "Rumor: Protocol partnership with Major Exchange",
+      excerpt: "An unconfirmed post alleged the companies may be working together.",
+      sourceUrl: "https://news.example/partnership-rumor",
+      contentHash: "d".repeat(64),
+    };
+
+    const parsed = JSON.parse(buildScoringEvidencePacket({
+      sourceArtifacts: [...generic, confirmedLaunch, denial, rumor],
+    }, axes)) as { sourceArtifacts: SourceArtifact[] };
+
+    expect(parsed.sourceArtifacts.length).toBeLessThanOrEqual(24);
+    expect(parsed.sourceArtifacts.length).toBeGreaterThan(0);
+    expect(parsed.sourceArtifacts).toContainEqual(expect.objectContaining({
+      sourceUrl: "https://news.example/confirmed-launch",
+    }));
+    expect(parsed.sourceArtifacts).not.toContainEqual(expect.objectContaining({
+      sourceUrl: "https://news.example/partnership-denial",
+    }));
+    expect(parsed.sourceArtifacts).not.toContainEqual(expect.objectContaining({
+      sourceUrl: "https://news.example/partnership-rumor",
+    }));
+    for (const speculative of [denial, rumor]) {
+      const underCap = JSON.parse(buildScoringEvidencePacket({
+        sourceArtifacts: [speculative],
+      }, axes)) as { sourceArtifacts: SourceArtifact[] };
+      expect(underCap.sourceArtifacts).toEqual([]);
+    }
+    const presentTense = {
+      ...generic[0],
+      title: "Jupiter partners with Securitize on regulated trading",
+      excerpt: "Jupiter invests engineering resources in the shared integration.",
+      sourceUrl: "https://news.example/present-tense-partnership",
+      contentHash: "c".repeat(64),
+    };
+    const affirmative = JSON.parse(buildScoringEvidencePacket({
+      sourceArtifacts: [presentTense],
+    }, axes)) as { sourceArtifacts: SourceArtifact[] };
+    expect(affirmative.sourceArtifacts).toContainEqual(expect.objectContaining({
+      sourceUrl: "https://news.example/present-tense-partnership",
+    }));
   });
 
   it("uses an existing unavailable check as the gap artifact instead of synthesizing a duplicate", () => {
@@ -1916,10 +2643,10 @@ describe("analyst verdict integrity", () => {
       verification: "verified",
     });
     expect(inspectAnalystScoringPreflight(axes, packet)).toEqual({
-      state: "ready",
+      state: "insufficient_evidence",
       requestedAxisCount: 3,
       evidenceArtifactCount: 2,
-      missingSubstantiveAxes: [],
+      missingSubstantiveAxes: ["P3_token_conduct"],
       unsupportedAxes: [],
     });
   });
@@ -1972,6 +2699,200 @@ describe("analyst verdict integrity", () => {
       scope: "direct_subject",
       eligibleAxes: axes.map(({ axis }) => axis),
     });
+    expect(tokenArtifact).not.toHaveProperty("counterEligibleAxes");
+  });
+
+  it("separates a severe project-token drawdown from positive token evidence and limits it to traction", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "P3_token_conduct", weight: 20, role: "PROJECT" },
+      { axis: "P5_traction_and_liveness", weight: 14, role: "PROJECT" },
+    ];
+    const packet = buildScoringEvidencePacket({
+      profile: {
+        handle: "@drawdown_control",
+        display_name: "Drawdown Control",
+        days_since_post: 0,
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-12T17:00:00.000Z",
+      },
+      projectToken: {
+        verified: true,
+        verification: "official_x",
+        name: "Drawdown Control",
+        symbol: "DOWN",
+        coingeckoId: "drawdown-control",
+        rank: 50,
+        address: "0x000000000000000000000000000000000000d000",
+        chain: "ethereum",
+        officialX: "@drawdown_control",
+        sourceUrl: "https://www.coingecko.com/en/coins/drawdown-control",
+        capturedAt: "2026-07-12T17:00:00.000Z",
+        providers: ["coingecko", "dexscreener", "geckoterminal"],
+        marketCapUsd: 500_000_000,
+        volume24hUsd: 25_000,
+        liquidityUsd: 10_000_000,
+        history: {
+          first: 1,
+          last: 0.2,
+          peak: 1,
+          changePct: -80,
+          drawdownPct: -80,
+          timeframe: "day",
+          poolAddress: "down-usdc-pool",
+        },
+      },
+      findings: [{
+        finding_type: "ProjectTokenDrawdown",
+        claim: "$DOWN recorded a verified 80.0% peak-to-latest drawdown in the captured daily market window. Price drawdown alone does not establish misconduct.",
+        source_url: "https://www.coingecko.com/en/coins/drawdown-control",
+        source_date: "2026-07-12T17:00:00.000Z",
+        source_author: "coingecko",
+        verification_status: "Verified",
+        independent_source_count: 1,
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }],
+      basicFacts: [{
+        predicate: "traction",
+        value: "$30M verified daily protocol swap volume",
+        status: "verified",
+        artifact_verified: true,
+      }],
+    }, axes);
+    const catalog = extractScoringEvidenceCatalog(packet, axes);
+    const tokenArtifact = catalog.find((artifact) => artifact.section === "projectToken");
+    const drawdownArtifact = catalog.find((artifact) => artifact.section === "findings");
+
+    expect(tokenArtifact).not.toHaveProperty("counterEligibleAxes");
+    expect(drawdownArtifact).toMatchObject({
+      eligibleAxes: ["P5_traction_and_liveness"],
+      counterEligibleAxes: ["P5_traction_and_liveness"],
+    });
+    const bands = deriveProjectStrengthBands(packet, axes);
+    const tractionArtifact = catalog.find((artifact) => artifact.section === "basicFacts")!;
+    const verdict = (score: number) => ({
+      axes: [
+        validAxis("P3_token_conduct", bands.P3_token_conduct.minScore, tokenArtifact!.artifactId),
+        {
+          ...validAxis("P5_traction_and_liveness", score, tractionArtifact.artifactId),
+          counterEvidenceRefs: [drawdownArtifact!.artifactId],
+        },
+      ],
+      headline: "Current protocol traction remains verified despite severe token drawdown.",
+      identity_note: "Canonical project token identity is verified.",
+    });
+
+    expect(bands.P5_traction_and_liveness).toMatchObject({
+      tier: "solid",
+      minScore: 10,
+      maxScore: 11,
+    });
+    expect(bands.P5_traction_and_liveness.reasons).toContain(
+      "severe canonical-token drawdown caps exceptional traction",
+    );
+    expect(validateAnalystVerdict(verdict(0), axes, catalog, undefined, {
+      projectScoreBands: bands,
+    })).toBeNull();
+    expect(validateAnalystVerdict(verdict(10), axes, catalog, undefined, {
+      projectScoreBands: bands,
+    })).not.toBeNull();
+    const missingCounter = verdict(10);
+    missingCounter.axes[1].counterEvidenceRefs = [];
+    const rejection = vi.fn();
+    expect(validateAnalystVerdict(missingCounter, axes, catalog, rejection, {
+      projectScoreBands: bands,
+    })).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith(
+      "project-required-counter-reference-missing:P5_traction_and_liveness",
+    );
+  });
+
+  it("rejects catalog tampering that broadens a negative finding to an unrelated project axis", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "P1_team_and_identity", weight: 16, role: "PROJECT" },
+      { axis: "P3_token_conduct", weight: 20, role: "PROJECT" },
+    ];
+    const packet = buildScoringEvidencePacket({
+      findings: [{
+        finding_type: "TokenCollapse",
+        claim: "The canonical token suffered a verified collapse.",
+        source_url: "https://investigator.example/token-collapse",
+        source_date: "2026-07-12",
+        verification_status: "Verified",
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }],
+    }, axes);
+    const parsed = JSON.parse(packet) as {
+      evidenceCatalog: AxisEvidenceRecord[];
+    };
+    const finding = parsed.evidenceCatalog.find((artifact) => artifact.section === "findings")!;
+    expect(finding.eligibleAxes).toEqual(["P3_token_conduct"]);
+    expect(finding.counterEligibleAxes).toEqual(["P3_token_conduct"]);
+
+    finding.eligibleAxes = ["P1_team_and_identity", "P3_token_conduct"];
+    finding.counterEligibleAxes = ["P1_team_and_identity", "P3_token_conduct"];
+
+    expect(extractScoringEvidenceCatalog(JSON.stringify(parsed), axes)).toEqual([]);
+    (parsed as { schema_version?: number }).schema_version = 4;
+    expect(extractScoringEvidenceCatalog(JSON.stringify(parsed), axes)).toEqual([]);
+  });
+
+  it("charges an unreachable project site to product substance once, not three axes", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "P2_product_substance", weight: 24, role: SubjectClass.PROJECT },
+      { axis: "P5_traction_and_liveness", weight: 14, role: SubjectClass.PROJECT },
+      { axis: "P6_transparency_integrity", weight: 12, role: SubjectClass.PROJECT },
+    ];
+    const packet = buildScoringEvidencePacket({
+      findings: [{
+        finding_type: "SiteNotLive",
+        claim: "The official project product surface does not resolve.",
+        source_url: "https://offline.example",
+        verification_status: "Verified",
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }],
+    }, axes);
+    const finding = extractScoringEvidenceCatalog(packet, axes)
+      .find((artifact) => artifact.section === "findings")!;
+    const bands = deriveProjectStrengthBands(packet, axes);
+
+    expect(finding.eligibleAxes).toEqual(["P2_product_substance"]);
+    expect(finding.counterEligibleAxes).toEqual(["P2_product_substance"]);
+    expect(bands.P2_product_substance.tier).toBe("adverse");
+    expect(bands.P5_traction_and_liveness.tier).toBe("none");
+    expect(bands.P6_transparency_integrity.tier).toBe("none");
+  });
+
+  it("routes investigator callouts to token conduct only when the claim is token-specific", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "P3_token_conduct", weight: 20, role: SubjectClass.PROJECT },
+      { axis: "P6_transparency_integrity", weight: 12, role: SubjectClass.PROJECT },
+    ];
+    const finding = (claim: string) => ({
+      finding_type: "InvestigatorCallout",
+      claim,
+      source_url: "https://investigator.example/report",
+      verification_status: "Verified",
+      independent_source_count: 2,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+    const generic = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      findings: [finding("The team made false claims about its corporate history.")],
+    }, axes), axes).find((artifact) => artifact.section === "findings")!;
+    const tokenSpecific = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      findings: [finding("The team concealed insider token dumps from attributed wallets.")],
+    }, axes), axes).find((artifact) => artifact.section === "findings")!;
+
+    expect(generic.eligibleAxes).toEqual(["P6_transparency_integrity"]);
+    expect(tokenSpecific.eligibleAxes).toEqual(["P3_token_conduct", "P6_transparency_integrity"]);
   });
 
   it("attributes an identity-only project-token snapshot to CoinGecko alone", () => {
@@ -2261,9 +3182,16 @@ describe("analyst verdict integrity", () => {
       && artifact.eligibleAxes.includes("F1_identity_verifiability")
         ? [`e${String(index + 1).padStart(3, "0")}`]
         : []);
+    const expectedF1AdverseAliases = scorerCatalog.flatMap((artifact, index) =>
+      artifact.verification === "verified"
+      && artifact.counterEligibleAxes?.includes("F1_identity_verifiability")
+        ? [`e${String(index + 1).padStart(3, "0")}`]
+        : []);
     expect(scoringPrompt).toContain(
       `F1_identity_verifiability | substantive aliases (choose 1 primary; do not exhaustively ` +
       `copy): ${expectedF1SubstantiveAliases.join(", ") || "(none)"}` +
+      ` | verified score-limiting aliases (the only counterEvidenceRefs that can justify ` +
+      `a PROJECT score below its evidence-strength band): ${expectedF1AdverseAliases.join(", ") || "(none)"}` +
       ` | coverageRefs preferred return set (optional; return 0-4 total, never the whole ` +
       `coverage catalog): ` +
       `${expectedF1CoverageAliases.join(", ") || "(none)"}`,
@@ -2526,10 +3454,40 @@ describe("analyst verdict integrity", () => {
       }],
       team: [{
         name: "Named Teammate",
-        role: "CTO",
+        role: "CTO and strategic advisor",
         linkedin: "https://linkedin.com/in/named-teammate",
         artifact_verified: true,
+      }, {
+        name: "Named Co-founder",
+        role: "Co-founder",
+        artifact_verified: true,
       }],
+      basicFacts: [
+        { predicate: "official_identity", value: "Subject", status: "verified", artifact_verified: true },
+        { predicate: "legal_entity", value: "Subject Labs", status: "verified", artifact_verified: true },
+        { predicate: "product", value: "Live protocol", status: "verified", artifact_verified: true },
+        { predicate: "repository", value: "github.com/subject/protocol", status: "verified", artifact_verified: true },
+        { predicate: "governance", value: "Token-holder governance", status: "verified", artifact_verified: true },
+        { predicate: "audit", value: "Independent protocol audit", status: "verified", artifact_verified: true },
+        { predicate: "funding", value: "Bootstrapped with a disclosed treasury", status: "verified", artifact_verified: true },
+        { predicate: "traction", value: "Verified protocol transaction volume", status: "verified", artifact_verified: true },
+      ],
+      projectToken: {
+        verified: true,
+        verification: "official_domain",
+        name: "Subject Token",
+        symbol: "SUBJ",
+        coingeckoId: "subject-token",
+        rank: 100,
+        address: "0x0000000000000000000000000000000000005ab1",
+        chain: "ethereum",
+        sourceUrl: "https://subject.example/token",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        providers: ["coingecko", "dexscreener", "geckoterminal"],
+        marketCapUsd: 250_000_000,
+        volume24hUsd: 8_000_000,
+        liquidityUsd: 6_000_000,
+      },
       recentActivity: [{
         provider: "twitterapi",
         text: "Documented product, portfolio, promotional, advisory, agency, and community activity",
@@ -2554,9 +3512,19 @@ describe("analyst verdict integrity", () => {
         subjectName: "Subject",
         projectName: "Verified Portfolio Company",
         sourceClass: "first_party_subject",
-      }, verifiedFundScaleArtifact({ contentHash: "c".repeat(64), sourceContentHash: "d".repeat(64) })],
+      }, verifiedFundScaleArtifact({ contentHash: "c".repeat(64), sourceContentHash: "d".repeat(64) }), {
+        kind: "press",
+        provider: "google-news",
+        title: "Subject partners with Regulated Counterparty and launches production integration",
+        excerpt: "The companies launched the live protocol integration together.",
+        sourceUrl: "https://news.example/subject-integration",
+        capturedAt: "2026-07-11T12:00:00.000Z",
+        contentHash: "e".repeat(64),
+        match: "exact_handle",
+      }],
     }, allAxes);
     const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const projectBands = deriveProjectStrengthBands(evidenceJson, allAxes);
     const aliasFor = (axis: string) => {
       const index = scorerCatalog.findIndex((artifact) =>
         artifact.verification !== "unavailable"
@@ -2577,9 +3545,11 @@ describe("analyst verdict integrity", () => {
           type: "tool_use",
           name: request.tool_choice.name,
           input: {
-            axes: allAxes.map(({ axis, weight }) => ({
+            axes: allAxes.map(({ axis, weight, role }) => ({
               axis,
-              score: Math.floor(weight * 0.7),
+              score: role === SubjectClass.PROJECT
+                ? projectBands[axis].minScore
+                : Math.floor(weight * 0.7),
               rationale: `Evidence-backed rationale for ${axis}`,
               primaryEvidenceRef: aliasFor(axis),
               additionalEvidenceRefs: [],
@@ -2698,6 +3668,63 @@ describe("analyst verdict integrity", () => {
     expect(verdict?.axes[0]).toMatchObject({
       evidenceRefs: [scorerCatalog[Number.parseInt(f1Aliases[1].slice(1), 10) - 1].artifactId],
       counterEvidenceRefs: [scorerCatalog[Number.parseInt(f1Aliases[0].slice(1), 10) - 1].artifactId],
+    });
+  });
+
+  it("treats the sole harmful artifact as primary support for an adverse project band", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const axes: AnalystAxis[] = [{ axis: "P3_token_conduct", weight: 20, role: SubjectClass.PROJECT }];
+    const evidenceJson = buildScoringEvidencePacket({
+      findings: [{
+        finding_type: "TokenCollapse",
+        claim: "The canonical token suffered a verified collapse.",
+        source_url: "https://investigator.example/token-collapse",
+        verification_status: "Verified",
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }],
+    }, axes);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson, axes);
+    const alias = "e001";
+    let prompt = "";
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
+      prompt = body.messages[0].content;
+      return new Response(JSON.stringify({
+        content: [{
+          type: "tool_use",
+          name: "record_verdict",
+          input: {
+            axes: [{
+              axis: "P3_token_conduct",
+              score: 3,
+              rationale: "The verified collapse is direct adverse token-conduct evidence.",
+              primaryEvidenceRef: alias,
+              additionalEvidenceRefs: [],
+              counterEvidenceRefs: [alias],
+              coverageRefs: [],
+              gaps: [],
+            }],
+            headline: "Verified token collapse governs the assessment.",
+            identity_note: "Identity is not material to the verified token finding.",
+          },
+        }],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 100, output_tokens: 20 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const verdict = await analyzeSubject("@harmful", [SubjectClass.PROJECT], axes, evidenceJson);
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(prompt).toContain("cite a verified harmful alias as primary support");
+    expect(verdict?.axes[0]).toMatchObject({
+      score: 3,
+      evidenceRefs: [scorerCatalog[0].artifactId],
+      counterEvidenceRefs: [],
     });
   });
 
@@ -2828,6 +3855,104 @@ describe("analyst verdict integrity", () => {
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
+  });
+
+  it("repairs every project axis outside its evidence-strength band in one retry", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const projectAxes: AnalystAxis[] = [
+      { axis: "P1_team_and_identity", weight: 16, role: SubjectClass.PROJECT },
+      { axis: "P4_backing_and_partners", weight: 14, role: SubjectClass.PROJECT },
+    ];
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@established_project",
+        display_name: "Established Project",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      team: [
+        { name: "Founder One", role: "Co-founder", provider: "team-page", artifact_verified: true },
+        { name: "Founder Two", role: "Co-founder", provider: "team-page", artifact_verified: true },
+      ],
+      basicFacts: [{
+        predicate: "official_identity",
+        value: "Established Project",
+        status: "verified",
+        artifact_verified: true,
+      }],
+      sourceArtifacts: [{
+        kind: "press",
+        provider: "google-news",
+        title: "Established Project partners with Regulated Counterparty",
+        excerpt: "The companies launched the integration together.",
+        sourceUrl: "https://news.example/established-partnership",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+        contentHash: "7".repeat(64),
+        match: "exact_handle",
+      }],
+    }, projectAxes);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson, projectAxes);
+    const aliasFor = (axis: string) => {
+      const index = scorerCatalog.findIndex((artifact) =>
+        artifact.verification !== "unavailable"
+        && artifact.verification !== "checked_empty"
+        && artifact.eligibleAxes.includes(axis));
+      expect(index).toBeGreaterThanOrEqual(0);
+      return `e${String(index + 1).padStart(3, "0")}`;
+    };
+    let attempt = 0;
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      attempt += 1;
+      const request = JSON.parse(String(init?.body)) as {
+        messages: Array<{ content: string }>;
+        tool_choice: { name: string };
+      };
+      if (attempt === 1) {
+        expect(request.messages[0].content).toContain(
+          "P1_team_and_identity: exceptional evidence, allowed 14-16; P4_backing_and_partners: solid evidence, allowed 10-11",
+        );
+      } else {
+        expect(request.messages[0].content).toContain(
+          "project-scores-outside-evidence-strength-band:P1_team_and_identity,P4_backing_and_partners",
+        );
+        expect(request.messages[0].content).toContain(
+          "Required bands by axis: P1_team_and_identity: 14-16 (exceptional); P4_backing_and_partners: 10-11 (solid)",
+        );
+      }
+      const input = {
+        axes: projectAxes.map(({ axis }) => ({
+          axis,
+          score: attempt === 1
+            ? axis === "P1_team_and_identity" ? 12 : 9
+            : axis === "P1_team_and_identity" ? 14 : 11,
+          rationale: `Evidence-backed rationale for ${axis}`,
+          primaryEvidenceRef: aliasFor(axis),
+          additionalEvidenceRefs: [],
+          counterEvidenceRefs: [],
+          coverageRefs: [],
+          gaps: [],
+        })),
+        headline: "Established project with verified fundamentals",
+        identity_note: "Two named founders are verified",
+      };
+      return new Response(JSON.stringify({
+        content: [{ type: "tool_use", name: request.tool_choice.name, input }],
+        stop_reason: "tool_use",
+        usage: { input_tokens: 100, output_tokens: 20 },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const verdict = await analyzeSubject(
+      "@established_project",
+      [SubjectClass.PROJECT],
+      projectAxes,
+      evidenceJson,
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(verdict?.axes.map(({ score }) => score)).toEqual([14, 11]);
   });
 
   it("promotes already-selected substantive support when the primary is coverage-only", async () => {

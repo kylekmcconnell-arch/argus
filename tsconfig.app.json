@@ -25,6 +25,7 @@
   "include": ["src"],
   "exclude": [
     "src/calibration/calibrate.ts",
+    "src/calibration/calibration.test.ts",
     "src/**/* 2.ts",
     "src/**/* 2.tsx"
   ]

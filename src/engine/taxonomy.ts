@@ -1,4 +1,4 @@
-// ARGUS-P v2 taxonomy — faithful TS port of argus_p/taxonomy.py
+// ARGUS-P taxonomy, based on argus_p/taxonomy.py and extended for projects.
 //
 // The central correction in v2 is that a "person" is not one thing: a founder,
 // a KOL, an investor, an agency, and a community member are evaluated against
@@ -25,7 +25,8 @@ export enum SubjectClass {
 // pseudonymity. Only genuine impersonation / identity fraud blocks publication.
 export const HARD_IDENTITY_GATE_CLASSES: Set<SubjectClass> = new Set();
 
-// Reward for verifiable real-world identity, added to each role's score.
+// Reward for verifiable real-world identity on person methodologies. PROJECT
+// scores team and operating identity directly in P1, so it does not add this.
 export const DOX_BONUS: Record<string, number> = { Confirmed: 5, Probable: 3 };
 
 // --------------------------------------------------------------------------

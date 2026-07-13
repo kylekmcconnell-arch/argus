@@ -107,6 +107,7 @@ describe("verified project-token collection", () => {
         drawdownPct: expect.closeTo(-16.6667, 3),
         timeframe: "day",
         poolAddress: "pool-valid",
+        sourceUrl: "https://api.geckoterminal.com/api/v2/networks/solana/pools/pool-valid/ohlcv/day?aggregate=1&limit=90&currency=usd",
       },
     });
     expect(captured.cost.calls).toEqual(expect.arrayContaining([

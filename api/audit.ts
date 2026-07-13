@@ -27,7 +27,7 @@ interface ServerDossier extends Dossier {
   providers?: unknown;
 }
 
-const LINEAGE_METHODOLOGY_VERSION = "argus-person-v3-lineage";
+const LINEAGE_METHODOLOGY_VERSION = "argus-person-v5-project-strength-bands";
 const FINAL_GRAPH_VERDICTS = new Set(["PASS", "CAUTION", "FAIL", "AVOID", "UNVERIFIABLE_IDENTITY"]);
 
 const normRef = (value: string) =>

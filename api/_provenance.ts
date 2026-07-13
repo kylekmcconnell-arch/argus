@@ -30,10 +30,12 @@ const ROLE_ID = /^[A-Z][A-Z0-9_]{0,79}$/;
 const VERIFICATIONS = new Set(["verified", "reported", "observed", "checked_empty", "unavailable"]);
 const ABSENCE_VERIFICATIONS = new Set(["checked_empty", "unavailable"]);
 const SCOPES = new Set(["direct_subject", "subject_context"]);
+const PROJECT_STRENGTH_TIERS = new Set(["none", "adverse", "emerging", "solid", "exceptional"]);
 const CATALOG_ARTIFACT_KEYS = new Set([
   "artifactId", "kind", "provider", "operation", "section", "title", "excerpt",
-  "sourceUrl", "capturedAt", "contentHash", "eligibleAxes", "verification", "scope",
+  "sourceUrl", "capturedAt", "contentHash", "eligibleAxes", "verification", "counterEligibleAxes", "scope",
 ]);
+const PROJECT_BAND_KEYS = new Set(["tier", "minScore", "maxScore", "reasons", "anchorArtifactIds"]);
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
 // Keep the serverless provenance boundary self-contained. Importing the
@@ -195,6 +197,8 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
   const persistenceCapturedAt = new Date().toISOString();
   const eligibleByArtifact = new Map<string, Set<string>>();
   const verificationByArtifact = new Map<string, string>();
+  const counterEligibleByArtifact = new Map<string, Set<string>>();
+  const operationByArtifact = new Map<string, string>();
   for (const candidate of catalog) {
     const artifact = asRecord(candidate);
     if (!artifact || Object.keys(artifact).some((key) => !CATALOG_ARTIFACT_KEYS.has(key))) {
@@ -229,6 +233,20 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
       itemMax: 160,
       pattern: AXIS_ID,
     });
+    const counterEligibleAxes = artifact.counterEligibleAxes === undefined
+      ? []
+      : strictStringArray(artifact.counterEligibleAxes, "counterEligibleAxes", {
+        min: 1,
+        max: 80,
+        itemMax: 160,
+        pattern: AXIS_ID,
+      });
+    if (
+      counterEligibleAxes.some((axis) => !eligibleAxes.includes(axis))
+      || (counterEligibleAxes.length > 0 && verification !== "verified")
+    ) {
+      throw new Error("invalid axis evidence lineage: counter eligibility");
+    }
     const rawSourceUrl = optionalStrictText(artifact, "sourceUrl", 2_000);
     const sourceUrl = rawSourceUrl ? safeSourceUrl(rawSourceUrl) : null;
     if (rawSourceUrl && (!sourceUrl || rawSourceUrl !== sourceUrl || hasSensitiveUrlParam(rawSourceUrl))) {
@@ -253,11 +271,14 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
       contentHash,
       eligibleAxes,
       verification,
+      ...(counterEligibleAxes.length ? { counterEligibleAxes } : {}),
       scope,
     };
 
     eligibleByArtifact.set(artifactId, new Set(eligibleAxes));
     verificationByArtifact.set(artifactId, verification);
+    counterEligibleByArtifact.set(artifactId, new Set(counterEligibleAxes));
+    operationByArtifact.set(artifactId, operation);
     evidenceRows.push({
       organization_id: context.organizationId,
       report_version_id: context.reportVersionId,
@@ -283,9 +304,62 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
         section,
         eligibleAxes,
         verification,
+        ...(counterEligibleAxes.length ? { counterEligibleAxes } : {}),
         scope,
         catalogArtifact: normalizedArtifact,
       },
+    });
+  }
+
+  const rawProjectBands = payload.projectStrengthBands === undefined
+    ? null
+    : asRecord(payload.projectStrengthBands);
+  if (payload.projectStrengthBands !== undefined && !rawProjectBands) {
+    throw new Error("invalid axis evidence lineage: projectStrengthBands");
+  }
+  const projectBands = new Map<string, {
+    tier: string;
+    minScore: number;
+    maxScore: number;
+    reasons: string[];
+    anchorArtifactIds: string[];
+  }>();
+  for (const [axisId, candidate] of Object.entries(rawProjectBands ?? {})) {
+    const band = asRecord(candidate);
+    const tier = String(band?.tier ?? "");
+    if (
+      !AXIS_ID.test(axisId)
+      || !band
+      || Object.keys(band).some((key) => !PROJECT_BAND_KEYS.has(key))
+      || !PROJECT_STRENGTH_TIERS.has(tier)
+      || !Number.isInteger(band.minScore)
+      || !Number.isInteger(band.maxScore)
+    ) {
+      throw new Error("invalid axis evidence lineage: project strength band");
+    }
+    const reasons = strictStringArray(band.reasons, `${axisId}.band.reasons`, {
+      min: tier === "none" ? 0 : 1,
+      max: 12,
+      itemMax: 240,
+    });
+    const anchorArtifactIds = strictStringArray(band.anchorArtifactIds, `${axisId}.band.anchorArtifactIds`, {
+      min: tier === "none" ? 0 : 1,
+      max: 32,
+      itemMax: 71,
+      pattern: ARTIFACT_ID,
+    });
+    if (
+      tier === "none"
+      && (band.minScore !== 0 || band.maxScore !== 0 || reasons.length > 0 || anchorArtifactIds.length > 0)
+    ) {
+      throw new Error("invalid axis evidence lineage: empty project strength band");
+    }
+    projectBands.set(axisId, {
+      tier,
+      minScore: band.minScore as number,
+      maxScore: band.maxScore as number,
+      reasons,
+      anchorArtifactIds,
     });
   }
 
@@ -352,6 +426,24 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
       if (counter.some((artifactId) => ABSENCE_VERIFICATIONS.has(verificationByArtifact.get(artifactId) ?? ""))) {
         throw new Error(`invalid axis evidence lineage: ${axisId} cites absence evidence as counter-evidence`);
       }
+      if (
+        role === "PROJECT"
+        && counter.some((artifactId) => !counterEligibleByArtifact.get(artifactId)?.has(axisId))
+      ) {
+        throw new Error(`invalid axis evidence lineage: ${axisId} cites non-limiting project counter-evidence`);
+      }
+      const requiredDrawdownCounters = [...operationByArtifact.entries()]
+        .filter(([artifactId, operation]) =>
+          operation === "findings:ProjectTokenDrawdown"
+          && counterEligibleByArtifact.get(artifactId)?.has(axisId))
+        .map(([artifactId]) => artifactId);
+      if (
+        role === "PROJECT"
+        && projectBands.get(axisId)?.tier !== "adverse"
+        && requiredDrawdownCounters.some((artifactId) => !counter.includes(artifactId))
+      ) {
+        throw new Error(`invalid axis evidence lineage: ${axisId} omits required project counter-evidence`);
+      }
       for (const [relation, references] of [["support", support], ["counter", counter]] as const) {
         references.forEach((artifactId, ordinal) => {
           const eligibleAxes = eligibleByArtifact.get(artifactId);
@@ -383,6 +475,37 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
       ) {
         throw new Error(`invalid axis evidence lineage: ${axisId} violates the scoring contract`);
       }
+      if (role === "PROJECT") {
+        const band = projectBands.get(axisId);
+        if (!band || band.tier === "none") {
+          throw new Error(`invalid axis evidence lineage: ${axisId} missing project strength band`);
+        }
+        const expectedRange = band.tier === "adverse"
+          ? { min: 0, max: Math.floor(expectedWeight * 0.39) }
+          : band.tier === "emerging"
+            ? { min: Math.ceil(expectedWeight * 0.4), max: Math.floor(expectedWeight * 0.69) }
+            : band.tier === "solid"
+              ? { min: Math.ceil(expectedWeight * 0.7), max: Math.floor(expectedWeight * 0.84) }
+              : { min: Math.ceil(expectedWeight * 0.85), max: expectedWeight };
+        const verifiedCounters = counter.filter((artifactId) =>
+          counterEligibleByArtifact.get(artifactId)?.has(axisId));
+        const hasSevereCounter = verifiedCounters.some((artifactId) =>
+          operationByArtifact.get(artifactId) !== "findings:ProjectTokenDrawdown");
+        if (
+          band.minScore !== expectedRange.min
+          || band.maxScore !== expectedRange.max
+          || axis.score > band.maxScore
+          || (band.tier !== "adverse" && axis.score < band.minScore && !hasSevereCounter)
+          || (requiredDrawdownCounters.length > 0 && band.tier === "exceptional")
+          || band.anchorArtifactIds.some((artifactId) =>
+            !eligibleByArtifact.get(artifactId)?.has(axisId)
+            || ABSENCE_VERIFICATIONS.has(verificationByArtifact.get(artifactId) ?? ""))
+          || (band.tier === "adverse" && !band.anchorArtifactIds.some((artifactId) =>
+            counterEligibleByArtifact.get(artifactId)?.has(axisId)))
+        ) {
+          throw new Error(`invalid axis evidence lineage: ${axisId} violates project strength band`);
+        }
+      }
     }
     const expectedAxisIds = Object.keys(roleAxes).sort();
     const receivedAxisIds = axisEntries.map(([axisId]) => axisId).sort();
@@ -391,6 +514,16 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
       || expectedAxisIds.some((axisId, index) => axisId !== receivedAxisIds[index])
     )) {
       throw new Error(`invalid axis evidence lineage: ${role} axis set is incomplete or non-canonical`);
+    }
+    if (role === "PROJECT" && !isIncomplete) {
+      const expectedBandIds = Object.keys(roleAxes).sort();
+      const receivedBandIds = [...projectBands.keys()].sort();
+      if (
+        expectedBandIds.length !== receivedBandIds.length
+        || expectedBandIds.some((axisId, index) => axisId !== receivedBandIds[index])
+      ) {
+        throw new Error("invalid axis evidence lineage: PROJECT strength band set is incomplete or non-canonical");
+      }
     }
   }
   const declaredRoles = strictStringArray(report.roles, "report.roles", {

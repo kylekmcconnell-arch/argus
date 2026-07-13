@@ -779,9 +779,10 @@ var Audit = class {
   finalize() {
     const identity = this.identity;
     const sharedKeys = this.sharedCapsTriggered();
-    const doxBonus = identity ? DOX_BONUS[identity] ?? 0 : 0;
+    const identityBonus = identity ? DOX_BONUS[identity] ?? 0 : 0;
     const roleReports = [];
     for (const role of this.roles) {
+      const doxBonus = role === "PROJECT" /* PROJECT */ ? 0 : identityBonus;
       const axes = {};
       for (const [ax, a] of Object.entries(this.axisScores)) {
         if (classForAxis(ax) === role) axes[ax] = a;
@@ -1121,8 +1122,16 @@ function assembleDossier(ev, live) {
       axisCitationVersion: 1,
       axisEvidenceCatalog: ev.axisEvidenceCatalog.map((artifact) => ({
         ...artifact,
-        eligibleAxes: [...artifact.eligibleAxes]
-      }))
+        eligibleAxes: [...artifact.eligibleAxes],
+        ...artifact.counterEligibleAxes ? { counterEligibleAxes: [...artifact.counterEligibleAxes] } : {}
+      })),
+      ...ev.projectStrengthBands ? {
+        projectStrengthBands: Object.fromEntries(Object.entries(ev.projectStrengthBands).map(([axis, band2]) => [axis, {
+          ...band2,
+          reasons: [...band2.reasons],
+          anchorArtifactIds: [...band2.anchorArtifactIds]
+        }]))
+      } : {}
     } : {},
     notableFollowers: ev.notableFollowers,
     contradictions: ev.contradictions,
@@ -2221,6 +2230,24 @@ ${evidenceJson}`;
   if (!r) return null;
   return (r.contradictions ?? []).filter((c) => c && c.claim?.trim() && c.conflict?.trim()).map((c) => ({ claim: c.claim.trim(), conflict: c.conflict.trim(), severity: lvl(c.severity), confidence: lvl(c.confidence) })).slice(0, 10);
 }
+var PROJECT_SCORING_POLICY = [
+  "PROJECT CALIBRATION POLICY:",
+  "Keep score and confidence separate. Score what substantive evidence establishes about project quality and risk. Record missing, unavailable, stale, or uncollected information in coverageRefs and gaps; those items reduce decision readiness outside this scorer and are not counter-evidence.",
+  "Never subtract points merely because a provider did not run, a database returned no record, a licensed identity lookup missed, or a fact was not collected. Never charge the same gap against several axes. A material gap may keep an otherwise strong axis out of the exceptional band, but a gap alone must not push solid verified fundamentals into the mixed or adverse bands.",
+  "Use the same evidence-strength bands on every project axis: 85 to 100 percent means exceptional, broad, current verification; 70 to 84 percent means solid verified fundamentals; 40 to 69 percent means an emerging, source-backed project with real but still limited demonstrated maturity or scale; 0 to 39 percent requires a severe verified weakness, contradiction, misconduct, or failure. Missing coverage is separate and never creates or lowers a strength tier.",
+  "If an axis has neither affirmative evidence nor verified adverse evidence, do not score it at zero. Mark it unscored and publish the investigation as INCOMPLETE. A zero is a severe assessment, not a synonym for missing data.",
+  "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
+  "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
+  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation.",
+  "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified.",
+  "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
+  "A severe canonical-token market drawdown is material counter-evidence for P5 and must be cited, but price performance alone only caps otherwise exceptional traction and liveness at the solid band. It cannot erase verified current protocol usage or imply token misconduct.",
+  "P6 transparency and integrity: a named legal operator, terms, public docs or repositories, governance materials, and consistent current disclosures justify a solid score. Published independent audits, treasury reporting, and fuller financial disclosures may justify the exceptional band. An unavailable disclosure path is a confidence gap unless a direct verified search establishes a material nondisclosure.",
+  "Only cite substantive counterEvidenceRefs for distinct verified facts that pull a score below its evidence-strength band. A verified adverse fact may be primary support for an adverse band, but positive support and score-limiting counter-evidence must otherwise remain separate citations. An emerging score reflects limited demonstrated maturity or scale and does not require adverse evidence. Never use absence wording or operational coverage telemetry as a reason to lower a band."
+].join("\n");
+function scoringPolicyForAxes(axisCatalog2) {
+  return axisCatalog2.some(({ role }) => role === "PROJECT") ? PROJECT_SCORING_POLICY : "";
+}
 var RECORD_VERDICT_INPUT_SCHEMA = {
   type: "object",
   properties: {
@@ -2276,13 +2303,15 @@ var RECORD_VERDICT_INPUT_SCHEMA = {
 var ARTIFACT_ID = /^art_v1_[a-f0-9]{64}$/;
 var COVERAGE_ONLY_VERIFICATIONS = /* @__PURE__ */ new Set(["checked_empty", "unavailable"]);
 var isSubstantiveArtifact = (artifact) => !!artifact && !COVERAGE_ONLY_VERIFICATIONS.has(artifact.verification);
+var isVerifiedCounterArtifact = (artifact, axis) => artifact?.verification === "verified" && artifact.counterEligibleAxes?.includes(axis) === true;
+var isOneTierCounterArtifact = (artifact) => artifact?.operation === "findings:ProjectTokenDrawdown";
 var UNRESOLVED_TEAM_IDENTITY_CLAIM = /(?:\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:remains?|is|are|was|were|appears?)\s+(?:still\s+)?(?:unresolved|unnamed|anonymous|unknown|incomplete|absent|missing)\b)|(?:\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:could\s+not\s+be|has\s+not\s+been|have\s+not\s+been)\s+(?:identified|named|resolved|verified|confirmed|corroborated|surfaced|disclosed|enumerated)\b)|(?:\b(?:unresolved|unnamed|anonymous|unknown|incomplete|absent|missing)\b(?:\s+[\w-]+){0,7}\s+\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\b(?:no|absent|absence\s+of|without|missing|lacks?)\s+(?:\w+\s+){0,6}(?:named\s+)?(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\babsence\s+of\s+named\s+(?:founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\b(?:named\s+)?(?:founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:(?:is|are|was|were)\s+)?not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b)/i;
 var describesGroundedTeamAsUnresolved = (value) => {
   if (UNRESOLVED_TEAM_IDENTITY_CLAIM.test(value)) return true;
   const normalized4 = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
   return /\bnamed\s+(?:founders?|co\s+founders?|leaders?|leadership|team|executives?|ceo)(?:\s+\w+){0,12}\s+not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b/.test(normalized4);
 };
-function normalizeAnalystSupportCounterOverlap(value, evidenceCatalog) {
+function normalizeAnalystSupportCounterOverlap(value, evidenceCatalog, projectScoreBands = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const root = value;
   const aliasToArtifactId = new Map(
@@ -2296,17 +2325,27 @@ function normalizeAnalystSupportCounterOverlap(value, evidenceCatalog) {
     const alias = /^e\d+$/i.test(ref) ? ref.toLowerCase() : ref;
     return aliasToArtifactId.get(alias) ?? alias;
   };
-  const normalizeRow = (candidate) => {
+  const normalizeRow = (candidate, axisHint) => {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return candidate;
     const row = candidate;
     if (typeof row.primaryEvidenceRef !== "string" || !Array.isArray(row.additionalEvidenceRefs) || !Array.isArray(row.counterEvidenceRefs)) return candidate;
+    const axis = typeof row.axis === "string" ? row.axis : axisHint;
     const counterKeys = new Set(row.counterEvidenceRefs.map(refKey).filter((ref) => !!ref));
     const support = [row.primaryEvidenceRef, ...row.additionalEvidenceRefs];
+    if (axis && projectScoreBands[axis]?.tier === "adverse") {
+      const supportKeys = new Set(support.map(refKey).filter((ref) => !!ref));
+      const disjointCounter = row.counterEvidenceRefs.filter((ref) => {
+        const key = refKey(ref);
+        return !key || !supportKeys.has(key);
+      });
+      return disjointCounter.length === row.counterEvidenceRefs.length ? candidate : { ...row, counterEvidenceRefs: disjointCounter };
+    }
     const disjointSupport = support.filter((ref) => {
       const key = refKey(ref);
       return !key || !counterKeys.has(key);
     });
-    if (disjointSupport.length === support.length || disjointSupport.length === 0) return candidate;
+    if (disjointSupport.length === support.length) return candidate;
+    if (disjointSupport.length === 0) return candidate;
     return {
       ...row,
       primaryEvidenceRef: disjointSupport[0],
@@ -2315,14 +2354,14 @@ function normalizeAnalystSupportCounterOverlap(value, evidenceCatalog) {
   };
   if (Array.isArray(root.axes)) {
     const rawAxes = root.axes;
-    const axes = rawAxes.map(normalizeRow);
+    const axes = rawAxes.map((row) => normalizeRow(row));
     return axes.some((axis, index) => axis !== rawAxes[index]) ? { ...root, axes } : value;
   }
   if (root.axes && typeof root.axes === "object" && !Array.isArray(root.axes)) {
     const entries = Object.entries(root.axes);
     let changed = false;
     const axes = Object.fromEntries(entries.map(([axis, row]) => {
-      const normalized4 = normalizeRow(row);
+      const normalized4 = normalizeRow(row, axis);
       changed ||= normalized4 !== row;
       return [axis, normalized4];
     }));
@@ -2387,7 +2426,7 @@ function normalizeAnalystCitationEligibility(value, evidenceCatalog) {
   }
   return value;
 }
-function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onReject) {
+function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onReject, options = {}) {
   const reject = (reason) => {
     onReject?.(reason);
     return null;
@@ -2465,6 +2504,7 @@ function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onRej
     return gaps;
   };
   const seen = /* @__PURE__ */ new Map();
+  const outOfBandProjectScores = [];
   for (const candidate of candidates) {
     if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) {
       return reject("axis-row-shape");
@@ -2539,6 +2579,18 @@ function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onRej
     if (!counterEvidenceRefs.every((ref) => isSubstantiveArtifact(artifacts.get(ref)))) {
       return reject(`non-substantive-counter-reference:${row.axis}`);
     }
+    if (spec.role === "PROJECT" && !counterEvidenceRefs.every((ref) => isVerifiedCounterArtifact(artifacts.get(ref), row.axis))) {
+      return reject(`project-counter-reference-not-score-limiting:${row.axis}`);
+    }
+    const projectBand = options.projectScoreBands?.[row.axis];
+    const requiredBoundedCounters = [...artifacts.values()].filter((artifact) => isOneTierCounterArtifact(artifact) && isVerifiedCounterArtifact(artifact, row.axis));
+    if (spec.role === "PROJECT" && projectBand?.tier !== "adverse" && requiredBoundedCounters.some((artifact) => !counterEvidenceRefs.includes(artifact.artifactId))) {
+      return reject(`project-required-counter-reference-missing:${row.axis}`);
+    }
+    const verifiedCounterArtifacts = counterEvidenceRefs.map((ref) => artifacts.get(ref)).filter((artifact) => isVerifiedCounterArtifact(artifact, row.axis));
+    const hasVerifiedCounterEvidence = verifiedCounterArtifacts.length > 0 || projectBand?.tier === "adverse" && supportRefs.some((ref) => isVerifiedCounterArtifact(artifacts.get(ref), row.axis));
+    const hasSevereCounterEvidence = verifiedCounterArtifacts.some((artifact) => !isOneTierCounterArtifact(artifact));
+    if (spec.role === "PROJECT" && options.projectScoreBands && (!projectBand || projectBand.tier === "none" || row.score > projectBand.maxScore || projectBand.tier !== "adverse" && row.score < projectBand.minScore && (!hasVerifiedCounterEvidence || !hasSevereCounterEvidence))) outOfBandProjectScores.push(row.axis);
     seen.set(row.axis, {
       axis: row.axis,
       score: row.score,
@@ -2549,6 +2601,9 @@ function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onRej
     });
   }
   if (seen.size !== expected.size) return reject("incomplete-axis-set");
+  if (outOfBandProjectScores.length > 0) {
+    return reject(`project-scores-outside-evidence-strength-band:${outOfBandProjectScores.join(",")}`);
+  }
   return {
     // Canonical order makes downstream completeness checks and snapshots stable.
     axes: axisCatalog2.map((spec) => seen.get(spec.axis)),
@@ -2560,7 +2615,7 @@ var ANALYST_EVIDENCE_MAX_CHARS = 24e3;
 var SCORING_PACKET_STATE_FIELD = "scoring_packet_state";
 var SCORING_PACKET_OVERSIZE = "oversize";
 var scoringPacketOversizeJson = (requestedAxisCount, reason) => JSON.stringify({
-  schema_version: 4,
+  schema_version: 5,
   [SCORING_PACKET_STATE_FIELD]: SCORING_PACKET_OVERSIZE,
   reason,
   limit_chars: ANALYST_EVIDENCE_MAX_CHARS,
@@ -2590,7 +2645,9 @@ var SCORING_PROFILE_FIELDS = [
   "website",
   "profile_collection_state",
   "profile_provider",
-  "profile_captured_at"
+  "profile_captured_at",
+  "last_post_at",
+  "days_since_post"
 ];
 var compactScoringProfile = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
@@ -2680,6 +2737,48 @@ var compactSourceArtifact = (value) => {
     return compacted === void 0 ? [] : [[key, compacted]];
   }));
 };
+var MATERIAL_RELATIONSHIP_PRESS = /\b(?:partner(?:s|ed|ing|ship)?|integrat(?:e[ds]?|ion)|collaborat(?:e[ds]?|ion)|alliance|joint(?:ly)?|teams? up|backed by|invest(?:s|ed|ing|ment)|funding|launch(?:e[ds])?\s+(?:with|alongside))\b/i;
+var MULTI_PARTY_LAUNCH_PRESS = /^(?:[^,\n]{1,100},){2}[^,\n]{1,140}\blaunch(?:e[ds])?\b/i;
+var MATERIAL_RELATIONSHIP_DENIAL = /\b(?:den(?:y|ies|ied)|rumou?r(?:ed|s)?|alleg(?:e[ds]?|ation)|reportedly|false|fake|no partnership|not (?:a |an )?(?:partner|investor|backer)|end(?:s|ed)? (?:its |the )?(?:partnership|integration|collaboration)|terminat(?:e[ds]?|ion))\b/i;
+var PROJECT_PRODUCT_PRESS = /\b(?:product|protocol|platform|exchange|app(?:lication)?|mainnet|testnet|launch(?:e[ds])?|releas(?:e[ds])?|ship(?:s|ped)?|deploy(?:s|ed|ment)|upgrade|integration|developer|repository|open[ -]?source)\b/i;
+var PROJECT_TRACTION_PRESS = /\b(?:active users?|daily users?|monthly users?|transactions?|trading volume|volume|fees?|revenue|tvl|total value locked|market share|adoption|usage|liquidity|deposits?|borrow(?:ing|ers?)?)\b/i;
+var PROJECT_TRANSPARENCY_PRESS = /\b(?:governance|proposal|vote|audit|security review|security audit|treasury report|financial disclosure|disclosure|legal entity|terms of service|multisig|multi-sig|incident report)\b/i;
+var isFreshPublishedArtifact = (artifact, maxAgeDays = 90) => {
+  const publishedAt = Date.parse(String(artifact.publishedAt ?? ""));
+  const capturedAt = Date.parse(String(artifact.capturedAt ?? ""));
+  if (!Number.isFinite(publishedAt) || !Number.isFinite(capturedAt)) return false;
+  const ageMs = capturedAt - publishedAt;
+  return ageMs >= -864e5 && ageMs <= maxAgeDays * 864e5;
+};
+var datedMetricTimestamps = (fact) => {
+  const sources = Array.isArray(fact.sources) ? fact.sources.filter((value) => !!value && typeof value === "object" && !Array.isArray(value)) : [];
+  const text2 = [
+    String(fact.qualifier ?? ""),
+    String(fact.value ?? ""),
+    ...sources.map((source2) => String(source2.excerpt ?? ""))
+  ].join(" ");
+  const matches = [
+    ...text2.matchAll(/\b20\d{2}-\d{2}-\d{2}\b/g),
+    ...text2.matchAll(/\b(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+(?:\d{1,2},?\s+)?20\d{2}\b/gi)
+  ];
+  const quarters = [...text2.matchAll(/\bQ([1-4])\s+(20\d{2})\b/gi)].map((match) => {
+    const quarter = Number(match[1]);
+    const year = Number(match[2]);
+    return Date.UTC(year, quarter * 3, 0);
+  });
+  return [
+    ...matches.map((match) => Date.parse(match[0])).filter((timestamp) => Number.isFinite(timestamp)),
+    ...quarters.filter((timestamp) => Number.isFinite(timestamp))
+  ];
+};
+var hasFreshDatedMetric = (fact, referenceCapturedAt, maxAgeDays = 90) => datedMetricTimestamps(fact).some((timestamp) => {
+  const ageMs = referenceCapturedAt - timestamp;
+  return ageMs >= -864e5 && ageMs <= maxAgeDays * 864e5;
+});
+var relationshipStoryKey = (artifact) => {
+  const headline = String(artifact.title ?? "").split(/\s+[|]\s+|\s+-\s+(?=[^-]+$)/)[0].toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
+  return headline || String(artifact.contentHash ?? artifact.sourceUrl ?? "").toLowerCase();
+};
 var sourceArtifactPriority = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return 9;
   const row = value;
@@ -2688,10 +2787,179 @@ var sourceArtifactPriority = (value) => {
   if (row.match === "risk_signal") return 2;
   if (row.kind === "fund_scale") return 3;
   if (row.kind === "portfolio_relationship") return 4;
+  if (row.kind === "press" && !MATERIAL_RELATIONSHIP_DENIAL.test(`${String(row.title ?? "")} ${String(row.excerpt ?? "")}`) && (MATERIAL_RELATIONSHIP_PRESS.test(`${String(row.title ?? "")} ${String(row.excerpt ?? "")}`) || MULTI_PARTY_LAUNCH_PRESS.test(String(row.title ?? "")))) return 5;
   if (row.kind === "legal_case" || row.kind === "sanctions_screen" || row.kind === "trust_graph") return 5;
   return 6;
 };
 var retainSourceArtifacts = (source2, limit) => source2.map((value, index) => ({ value, index, priority: sourceArtifactPriority(value) })).sort((left, right) => left.priority - right.priority || left.index - right.index).slice(0, limit).map(({ value }) => value);
+var PROJECT_EARLY_STAGE = /\b(?:alpha|beta|testnet|prototype|demo|pilot|coming soon|pre-?launch|waitlist)\b/i;
+var PROJECT_MATURE_STAGE = /\b(?:live|mainnet|production|in production|operational|operating)\b/i;
+var TOKEN_MARKET_ONLY_TRACTION = /\b(?:token|trading volume|volume|market cap|liquidity|price|fdv)\b/i;
+var PROJECT_PROTOCOL_TRACTION = /\b(?:protocol|platform|exchange|aggregator|product|active users?|daily users?|monthly users?|transactions?|swaps?|orders?|fees?|revenue|tvl|total value locked|adoption|usage)\b/i;
+var PROJECT_LEADER_TEAM_ROLE = /\b(?:co-?founder|founder|chief(?:\s+\w+){0,3}\s+officer|ceo|cto|cfo|coo|president|executive director|managing director|general manager|head of (?:engineering|product|operations|protocol|research))\b/i;
+var PROJECT_PRODUCT_ACTIVITY = /\b(?:product|protocol|platform|exchange|app(?:lication)?|mainnet|testnet|launch(?:e[ds])?|releas(?:e[ds])?|ship(?:s|ped)?|deploy(?:s|ed|ment)|upgrade|integration|developer|repository|open[ -]?source)\b/i;
+var trustedProjectProfileDaysSincePost = (profile) => {
+  if (!profile || profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi" || typeof profile.profile_captured_at !== "string" || !Number.isFinite(Date.parse(profile.profile_captured_at)) || typeof profile.days_since_post !== "number" || !Number.isFinite(profile.days_since_post) || profile.days_since_post < 0) return null;
+  return profile.days_since_post;
+};
+var projectBandRange = (weight, tier) => {
+  if (tier === "none") return { minScore: 0, maxScore: 0 };
+  if (tier === "adverse") return { minScore: 0, maxScore: Math.floor(weight * 0.39) };
+  if (tier === "emerging") return { minScore: Math.ceil(weight * 0.4), maxScore: Math.floor(weight * 0.69) };
+  if (tier === "solid") return { minScore: Math.ceil(weight * 0.7), maxScore: Math.floor(weight * 0.84) };
+  return { minScore: Math.ceil(weight * 0.85), maxScore: weight };
+};
+function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
+  const projectAxes = axisCatalog2.filter(({ role }) => role === "PROJECT");
+  if (projectAxes.length === 0) return {};
+  let packet;
+  try {
+    const parsed = JSON.parse(evidenceJson);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    packet = parsed;
+  } catch {
+    return {};
+  }
+  const records = (value) => Array.isArray(value) ? value.filter((row) => Boolean(row && typeof row === "object" && !Array.isArray(row))) : [];
+  const artifactIds = (values) => [...new Set(values.map((row) => typeof row.artifactId === "string" ? row.artifactId : "").filter(Boolean))];
+  const basicFacts = records(packet.basicFacts);
+  const verifiedFacts = (...predicates) => basicFacts.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated"));
+  const factText = (facts) => facts.map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`).join(" ");
+  const team = records(packet.team).filter((member) => member.artifact_verified === true && member.evidence_origin !== "model_lead");
+  const leaders = team.filter((member) => PROJECT_LEADER_TEAM_ROLE.test(String(member.role ?? "")));
+  const leaderNames = new Set(leaders.map((member) => String(member.name ?? "").trim().toLowerCase()).filter(Boolean));
+  const profile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile) ? packet.profile : void 0;
+  const sourceArtifacts = records(packet.sourceArtifacts);
+  const productPress = sourceArtifacts.filter((artifact) => {
+    const text2 = `${String(artifact.title ?? "")} ${String(artifact.excerpt ?? "")}`;
+    return artifact.kind === "press" && !MATERIAL_RELATIONSHIP_DENIAL.test(text2) && PROJECT_PRODUCT_PRESS.test(text2);
+  });
+  const freshProductPress = productPress.filter((artifact) => isFreshPublishedArtifact(artifact));
+  const relationshipPress = sourceArtifacts.filter((artifact) => {
+    const text2 = `${String(artifact.title ?? "")} ${String(artifact.excerpt ?? "")}`;
+    return artifact.kind === "press" && !MATERIAL_RELATIONSHIP_DENIAL.test(text2) && (MATERIAL_RELATIONSHIP_PRESS.test(text2) || MULTI_PARTY_LAUNCH_PRESS.test(String(artifact.title ?? "")));
+  });
+  const distinctRelationshipKeys = new Set(relationshipPress.map(relationshipStoryKey).filter(Boolean));
+  const recentActivity = records(packet.recentActivity);
+  const productActivity = recentActivity.filter((row) => PROJECT_PRODUCT_ACTIVITY.test(String(row.text ?? row.value ?? row.claim ?? row.title ?? "")));
+  const token = packet.projectToken && typeof packet.projectToken === "object" && !Array.isArray(packet.projectToken) ? packet.projectToken : void 0;
+  const verifiedToken = token?.verified === true && (token.verification === "official_x" || token.verification === "official_domain");
+  const rank = typeof token?.rank === "number" ? token.rank : Number.POSITIVE_INFINITY;
+  const marketCap = typeof token?.marketCapUsd === "number" ? token.marketCapUsd : 0;
+  const volume = typeof token?.volume24hUsd === "number" ? token.volume24hUsd : 0;
+  const liquidity = typeof token?.liquidityUsd === "number" ? token.liquidityUsd : 0;
+  const moderateMarket = verifiedToken && (rank <= 500 || marketCap >= 1e7 || volume >= 25e4 || liquidity >= 1e6);
+  const scaleSignals = [rank <= 200, marketCap >= 1e8, volume >= 5e6, liquidity >= 5e6].filter(Boolean).length;
+  const tokenProviders = Array.isArray(token?.providers) ? new Set(token.providers.filter((provider) => typeof provider === "string")).size : 0;
+  const daysSincePost = trustedProjectProfileDaysSincePost(profile);
+  const currentSocialActivity = daysSincePost !== null && daysSincePost < 21;
+  const repositoryFacts = verifiedFacts("repository", "repositories");
+  const leaderFacts = verifiedFacts("founder", "founders", "executive");
+  const productFacts = verifiedFacts("product", "launched", "launch_date");
+  const auditFacts = verifiedFacts("audit", "audits");
+  const governanceFacts = verifiedFacts("governance");
+  const tokenDisclosureFacts = verifiedFacts("tokenomics", "vesting", "treasury");
+  const legalFacts = verifiedFacts("legal_entity");
+  const officialFacts = verifiedFacts("official_identity");
+  const fundingFacts = verifiedFacts("funding");
+  const investorFacts = verifiedFacts("investor");
+  const tractionFacts = verifiedFacts("traction");
+  const protocolTractionFacts = tractionFacts.filter((fact) => {
+    const text2 = factText([fact]);
+    return PROJECT_PROTOCOL_TRACTION.test(text2) || !TOKEN_MARKET_ONLY_TRACTION.test(text2);
+  });
+  const referenceCapturedAt = Date.parse(String(profile?.profile_captured_at ?? token?.capturedAt ?? ""));
+  const currentProtocolTractionFacts = Number.isFinite(referenceCapturedAt) ? protocolTractionFacts.filter((fact) => hasFreshDatedMetric(fact, referenceCapturedAt)) : [];
+  const currentActivity = currentSocialActivity || freshProductPress.length > 0;
+  const advisorTeam = team.filter((member) => {
+    const role = String(member.role ?? "");
+    return PROJECT_BACKING_TEAM_ROLE.test(role) && !PROJECT_NON_BACKING_TEAM_ROLE.test(role);
+  });
+  const productStageText = [
+    factText(productFacts),
+    ...productActivity.map((row) => String(row.text ?? row.value ?? "")),
+    ...productPress.map((row) => `${String(row.title ?? "")} ${String(row.excerpt ?? "")}`)
+  ].join(" ");
+  const earlyStage = PROJECT_EARLY_STAGE.test(productStageText) && !PROJECT_MATURE_STAGE.test(productStageText);
+  const catalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog2);
+  const limitingByAxis = new Map(projectAxes.map(({ axis }) => [axis, catalog.filter((artifact) => isVerifiedCounterArtifact(artifact, axis)).map((artifact) => artifact.artifactId)]));
+  const bands = {};
+  const setBand = (axis, tier, reasons, anchors) => {
+    const spec = projectAxes.find((candidate) => candidate.axis === axis);
+    if (!spec) return;
+    const limiting = limitingByAxis.get(axis) ?? [];
+    const effectiveTier = tier === "none" && limiting.length > 0 ? "adverse" : tier;
+    bands[axis] = {
+      tier: effectiveTier,
+      ...projectBandRange(spec.weight, effectiveTier),
+      reasons: effectiveTier !== tier ? ["verified score-limiting evidence", ...reasons] : reasons,
+      anchorArtifactIds: [.../* @__PURE__ */ new Set([...anchors, ...limiting])]
+    };
+  };
+  const namedLeaderCount = Math.max(leaderNames.size, new Set(leaderFacts.map((fact) => String(fact.value ?? "").trim().toLowerCase()).filter(Boolean)).size);
+  const p1Badges = [namedLeaderCount > 0, Boolean(profile?.website) || officialFacts.length > 0, legalFacts.length > 0 || namedLeaderCount >= 2];
+  setBand("P1_team_and_identity", p1Badges.filter(Boolean).length >= 3 ? "exceptional" : p1Badges.filter(Boolean).length >= 2 ? "solid" : p1Badges.some(Boolean) ? "emerging" : "none", [
+    ...namedLeaderCount ? [`${namedLeaderCount} source-backed leader${namedLeaderCount === 1 ? "" : "s"}`] : [],
+    ...Boolean(profile?.website) || officialFacts.length ? ["official identity linkage"] : [],
+    ...legalFacts.length || namedLeaderCount >= 2 ? ["operator corroboration"] : []
+  ], artifactIds([...leaders, ...leaderFacts, ...officialFacts, ...legalFacts, ...profile ? [profile] : []]));
+  const p2Anchors = [...repositoryFacts, ...productFacts, ...auditFacts, ...productPress, ...productActivity];
+  const productProof = productFacts.length > 0 || productPress.length > 0 || productActivity.length > 0;
+  let p2Tier = repositoryFacts.length || productProof ? "emerging" : "none";
+  if (!earlyStage && repositoryFacts.length > 0 && productProof) p2Tier = "solid";
+  if (!earlyStage && repositoryFacts.length > 0 && productProof && (auditFacts.length > 0 || productPress.length >= 2)) p2Tier = "exceptional";
+  setBand("P2_product_substance", p2Tier, [
+    ...repositoryFacts.length ? ["verified public repository"] : [],
+    ...productProof ? ["source-backed product operation"] : [],
+    ...earlyStage ? ["explicit early-stage product marker"] : []
+  ], artifactIds(p2Anchors));
+  const tokenDisclosures = [...tokenDisclosureFacts];
+  const p3Tier = !verifiedToken ? "none" : scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging";
+  setBand("P3_token_conduct", p3Tier, [
+    ...verifiedToken ? ["canonical token verified"] : [],
+    ...moderateMarket ? ["measured market activity"] : [],
+    ...governanceFacts.length ? ["verified token governance"] : [],
+    ...tokenDisclosures.length ? ["verified token economic disclosure"] : [],
+    ...auditFacts.length ? ["verified security review"] : []
+  ], artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts]));
+  const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
+  let p4Tier = fundingFacts.length || investorFacts.length || advisorTeam.length || relationshipPress.length ? "emerging" : "none";
+  if (relationshipPress.length > 0 || investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4Tier = "solid";
+  if (distinctRelationshipKeys.size >= 2) p4Tier = "exceptional";
+  setBand("P4_backing_and_partners", p4Tier, [
+    ...relationshipPress.length ? [`${distinctRelationshipKeys.size} material relationship source${distinctRelationshipKeys.size === 1 ? "" : "s"}`] : [],
+    ...fundingFacts.length ? ["source-backed financing state"] : [],
+    ...advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : []
+  ], artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...advisorTeam]));
+  let p5Tier = currentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
+  if (currentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5Tier = "solid";
+  if (currentActivity && currentProtocolTractionFacts.length > 0 && scaleSignals >= 2 && tokenProviders >= 2) p5Tier = "exceptional";
+  const severeProjectTokenDrawdown = catalog.some((artifact) => artifact.operation === "findings:ProjectTokenDrawdown" && artifact.counterEligibleAxes?.includes("P5_traction_and_liveness"));
+  if (severeProjectTokenDrawdown && p5Tier === "exceptional") p5Tier = "solid";
+  setBand("P5_traction_and_liveness", p5Tier, [
+    ...currentActivity ? ["current operating activity"] : [],
+    ...protocolTractionFacts.length ? ["verified protocol usage metric"] : [],
+    ...currentProtocolTractionFacts.length ? ["dated current protocol metric"] : [],
+    ...moderateMarket ? ["measured token-market corroboration"] : [],
+    ...severeProjectTokenDrawdown ? ["severe canonical-token drawdown caps exceptional traction"] : []
+  ], artifactIds([
+    ...currentSocialActivity && daysSincePost !== null && profile ? [profile] : [],
+    ...freshProductPress,
+    ...protocolTractionFacts,
+    ...token ? [token] : []
+  ]));
+  const disclosureBase = [...legalFacts, ...officialFacts, ...repositoryFacts];
+  let p6Tier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
+  if ((governanceFacts.length > 0 || auditFacts.length > 0) && disclosureBase.length > 0 || legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0) p6Tier = "solid";
+  if (governanceFacts.length && auditFacts.length && (legalFacts.length || repositoryFacts.length)) p6Tier = "exceptional";
+  setBand("P6_transparency_integrity", p6Tier, [
+    ...legalFacts.length ? ["verified legal operator"] : [],
+    ...repositoryFacts.length ? ["public repository disclosure"] : [],
+    ...governanceFacts.length ? ["verified governance disclosure"] : [],
+    ...auditFacts.length ? ["verified audit disclosure"] : []
+  ], artifactIds([...disclosureBase, ...governanceFacts, ...auditFacts]));
+  return bands;
+}
 var compactProfileAuthenticity = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return void 0;
   const row = value;
@@ -2802,8 +3070,6 @@ var SECTION_AXIS_ELIGIBILITY = {
     "F1_identity_verifiability",
     "F5_reputation_integrity",
     "P1_team_and_identity",
-    "P5_traction_and_liveness",
-    "P6_transparency_integrity",
     "K1_identity_roster",
     "K3_disclosure_deletion",
     "I1_identity_legitimacy",
@@ -2875,7 +3141,7 @@ var SECTION_AXIS_ELIGIBILITY = {
     "ME1_identity",
     "ME2_role_authenticity"
   ],
-  notableFollowers: ["F6_network_quality", "P4_backing_and_partners", "P5_traction_and_liveness", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
+  notableFollowers: ["F6_network_quality", "P5_traction_and_liveness", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
   recentActivity: [
     "F2_track_record",
     "F4_build_substance",
@@ -2936,8 +3202,14 @@ var FINDING_AXIS_ELIGIBILITY = {
   CommunityFUD: REPUTATION_FINDING_AXES,
   LegalCaseNameLead: IDENTITY_LEAD_FINDING_AXES,
   SanctionsNameLead: IDENTITY_LEAD_FINDING_AXES,
-  SiteNotLive: ["F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
+  // A failed official product surface is one product-substance finding. Do not
+  // triple-charge the same fetch against liveness and transparency as well.
+  SiteNotLive: ["F4_build_substance", "P2_product_substance"],
   TokenCollapse: ["F5_reputation_integrity", "P3_token_conduct", "K2_call_performance", "K4_onchain_conduct"],
+  // Price performance limits traction/liveness, not token conduct. Keep this
+  // distinct from a promoted-token collapse so the report never implies that
+  // market drawdown by itself proves misconduct.
+  ProjectTokenDrawdown: ["P5_traction_and_liveness"],
   CadenceDecay: ["F4_build_substance", "P5_traction_and_liveness", "ME3_conduct_reputation"],
   TrustGraphConnection: SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
   AdvisoryRug: ["F5_reputation_integrity", "AD2_advised_outcomes", "AD4_advisory_conduct", "AD5_reputation_fud"],
@@ -2960,18 +3232,18 @@ var FINDING_AXIS_ELIGIBILITY = {
   MeridianExit: ["F2_track_record", "F3_repeat_backing", "F4_build_substance", "I2_portfolio_quality"],
   InvestigatorCallout: [
     ...REPUTATION_FINDING_AXES,
-    "P3_token_conduct",
     "K3_disclosure_deletion",
     "K4_onchain_conduct",
     "AG3_service_integrity",
     "AD4_advisory_conduct"
   ]
 };
+var INVESTIGATOR_TOKEN_CONDUCT = /\b(?:token|vesting|treasury|unlock|supply|liquidity|wash trad(?:e|ing)|market manipulation|on-?chain|wallet|dump(?:ed|ing)?|insider sell(?:ing)?|mint)\b/i;
 var CHECK_AXIS_ELIGIBILITY = {
   "identity-resolution": ["F1_identity_verifiability", "P1_team_and_identity", "K1_identity_roster", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
   "profile-photo-authenticity": [],
   "code-footprint-github": ["F2_track_record", "F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
-  "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
+  "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
   "affiliations-associates": ["F2_track_record", "F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I4_testimonial_corroboration", "AD3_relationship_corroboration", "ME2_role_authenticity"],
   "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
   "project-token-identity": ["P3_token_conduct"],
@@ -2981,7 +3253,7 @@ var CHECK_AXIS_ELIGIBILITY = {
   "project-traction-liveness": ["P5_traction_and_liveness"],
   "project-transparency": ["P3_token_conduct", "P6_transparency_integrity"],
   "vc-portfolio-track-record": ["I2_portfolio_quality"],
-  "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P4_backing_and_partners", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "ofac-sanctions-name": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation"],
   "trust-graph-connections": SECTION_AXIS_ELIGIBILITY.trustGraphScreen
@@ -3059,12 +3331,19 @@ var BASIC_FACT_AXIS_ELIGIBILITY = {
   funding: ["P4_backing_and_partners"],
   investor: ["P4_backing_and_partners"],
   governance: ["P3_token_conduct", "P6_transparency_integrity"],
-  audit: ["P2_product_substance", "P6_transparency_integrity"],
-  audits: ["P2_product_substance", "P6_transparency_integrity"],
+  tokenomics: ["P3_token_conduct", "P6_transparency_integrity"],
+  vesting: ["P3_token_conduct", "P6_transparency_integrity"],
+  treasury: ["P3_token_conduct", "P6_transparency_integrity"],
+  audit: ["P2_product_substance", "P3_token_conduct", "P6_transparency_integrity"],
+  audits: ["P2_product_substance", "P3_token_conduct", "P6_transparency_integrity"],
   repository: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
   repositories: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
   traction: ["P5_traction_and_liveness"]
 };
+var PROJECT_BACKING_TEAM_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
+var PROJECT_NON_BACKING_TEAM_ROLE = /\binvestor relations?\b/i;
+var PROJECT_TOKEN_ACTIVITY = /\b(?:tokenomics|vesting|token unlock|unlock schedule|emission(?:s| schedule)?|token supply|circulating supply|total supply|max(?:imum)? supply|treasury|token burn|burn mechanism|liquidity|contract address|token contract|airdrop|staking)\b/i;
+var PROJECT_TRANSPARENCY_ACTIVITY = /\b(?:governance|proposal|vote|treasury|audit|security audit|security review|vulnerability|incident|disclosure|transparency|multisig|multi-sig)\b/i;
 var SCORING_SUPPORTED_AXES = /* @__PURE__ */ new Set([
   ...Object.values(SECTION_AXIS_ELIGIBILITY).flat(),
   ...Object.values(FINDING_AXIS_ELIGIBILITY).flat(),
@@ -3087,7 +3366,24 @@ var sourceArtifactEligibleAxes = (value, sourceArtifactPeers = [], subjectHandle
   const kind = sourceArtifactKind(value);
   if (kind === "portfolio_relationship" && value.match !== "relationship_confirmed") return [];
   if (kind === "fund_scale" && !isStrictFundScaleArtifact(value, sourceArtifactPeers, { subjectHandle, profile })) return [];
-  return SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind] ?? [];
+  const eligible = SOURCE_ARTIFACT_AXIS_ELIGIBILITY[kind] ?? [];
+  if (kind === "press") {
+    const relationshipText = `${String(value.title ?? "")} ${String(value.excerpt ?? "")}`;
+    const speculativeOrDenied = MATERIAL_RELATIONSHIP_DENIAL.test(relationshipText);
+    const affirmativeRelationship = !speculativeOrDenied && (MATERIAL_RELATIONSHIP_PRESS.test(relationshipText) || MULTI_PARTY_LAUNCH_PRESS.test(String(value.title ?? "")));
+    return eligible.filter((axis) => {
+      if (!axis.startsWith("P")) return true;
+      if (speculativeOrDenied) return false;
+      if (axis === "P2_product_substance") return PROJECT_PRODUCT_PRESS.test(relationshipText);
+      if (axis === "P4_backing_and_partners") return affirmativeRelationship;
+      if (axis === "P5_traction_and_liveness") {
+        return PROJECT_TRACTION_PRESS.test(relationshipText) || PROJECT_PRODUCT_PRESS.test(relationshipText) && isFreshPublishedArtifact(value);
+      }
+      if (axis === "P6_transparency_integrity") return PROJECT_TRANSPARENCY_PRESS.test(relationshipText);
+      return false;
+    });
+  }
+  return eligible;
 };
 var stableJson = (value) => {
   const normalize2 = (candidate) => {
@@ -3109,11 +3405,23 @@ var evidencePayload = (value) => {
 var eligibleAxesFor = (section, value, axisCatalog2, sourceArtifactPeers = [], subjectHandle, profile) => {
   const checkId = typeof value.checkId === "string" ? value.checkId : typeof value.check_id === "string" ? value.check_id : "";
   const findingType = typeof value.finding_type === "string" ? value.finding_type : "";
+  const findingText = section === "findings" ? recordText(value, ["claim", "title", "excerpt", "detail"], 2e3) ?? "" : "";
+  const findingAxes = section === "findings" ? [
+    ...FINDING_AXIS_ELIGIBILITY[findingType] ?? [],
+    ...findingType === "InvestigatorCallout" && INVESTIGATOR_TOKEN_CONDUCT.test(findingText) ? ["P3_token_conduct"] : []
+  ] : [];
+  const profileAxes = section === "profile" && value.profile_collection_state === "resolved" ? [
+    ...SECTION_AXIS_ELIGIBILITY.profile,
+    ...trustedProjectProfileDaysSincePost(value) !== null ? ["P5_traction_and_liveness"] : []
+  ] : [];
   const projectTokenAxes = section === "projectToken" ? [
     "P3_token_conduct",
     ...[value.marketCapUsd, value.volume24hUsd, value.liquidityUsd].some((metric) => typeof metric === "number" && Number.isFinite(metric) && metric > 0) ? ["P5_traction_and_liveness"] : []
   ] : [];
-  const eligible = section === "profile" && value.profile_collection_state !== "resolved" ? [] : section === "projectToken" ? projectTokenAxes : section === "findings" ? FINDING_AXIS_ELIGIBILITY[findingType] ?? [] : section === "checkOutcomes" && checkId ? CHECK_AXIS_ELIGIBILITY[checkId] ?? [] : section === "basicFacts" ? BASIC_FACT_AXIS_ELIGIBILITY[recordText(value, ["predicate"], 80)?.toLowerCase() ?? ""] ?? [] : section === "sourceArtifacts" ? sourceArtifactEligibleAxes(value, sourceArtifactPeers, subjectHandle, profile) : SECTION_AXIS_ELIGIBILITY[section] ?? [];
+  const teamAxes = section === "team" ? SECTION_AXIS_ELIGIBILITY.team.filter((axis) => axis !== "P2_product_substance" && (axis !== "P4_backing_and_partners" || PROJECT_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? "") && !PROJECT_NON_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? ""))) : [];
+  const recentActivityText = section === "recentActivity" ? recordText(value, ["text", "value", "claim", "title"], 1e3) ?? "" : "";
+  const recentActivityAxes = section === "recentActivity" ? SECTION_AXIS_ELIGIBILITY.recentActivity.filter((axis) => (axis !== "P3_token_conduct" || PROJECT_TOKEN_ACTIVITY.test(recentActivityText)) && (axis !== "P6_transparency_integrity" || PROJECT_TRANSPARENCY_ACTIVITY.test(recentActivityText))) : [];
+  const eligible = section === "profile" ? profileAxes : section === "projectToken" ? projectTokenAxes : section === "team" ? teamAxes : section === "recentActivity" ? recentActivityAxes : section === "findings" ? findingAxes : section === "checkOutcomes" && checkId ? CHECK_AXIS_ELIGIBILITY[checkId] ?? [] : section === "basicFacts" ? BASIC_FACT_AXIS_ELIGIBILITY[recordText(value, ["predicate"], 80)?.toLowerCase() ?? ""] ?? [] : section === "sourceArtifacts" ? sourceArtifactEligibleAxes(value, sourceArtifactPeers, subjectHandle, profile) : SECTION_AXIS_ELIGIBILITY[section] ?? [];
   const allowed = new Set(eligible);
   return [...new Set(axisCatalog2.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
 };
@@ -3235,6 +3543,13 @@ var verificationFor = (section, record2, sourceArtifactPeers = [], subjectHandle
   }
   return "observed";
 };
+var counterEligibleAxesFor = (section, record2, verification, eligibleAxes) => {
+  if (verification !== "verified") return [];
+  if (section === "findings" && typeof record2.polarity === "number" && record2.polarity < 0) return [...eligibleAxes];
+  if (section === "sourceArtifacts" && record2.match === "risk_signal") return [...eligibleAxes];
+  if (section === "trustGraphScreen" && (record2.severity === "caution" || record2.severity === "avoid")) return [...eligibleAxes];
+  return [];
+};
 var DIRECT_SECTIONS = /* @__PURE__ */ new Set(["profile", "profileAuthenticity", "projectToken", "findings", "wallets", "promotions", "recentActivity"]);
 var providerFor = (section, payload) => {
   if (section === "basicFacts" && Array.isArray(payload.sources)) {
@@ -3279,6 +3594,8 @@ var makeAxisArtifact = (section, value, axisCatalog2, eligibleOverride, sourceAr
     recordText(payload, ["sourceUrl", "source_url", "evidence_url", "url", "linkedin"], 420)
   ) ?? safeArtifactSourceUrl(basicFactSource ? recordText(basicFactSource, ["url", "sourceUrl"], 420) : void 0);
   const capturedAt = recordText(payload, ["capturedAt", "captured_at", "profile_captured_at", "completedAt", "source_date"], 40) ?? (basicFactSource ? recordText(basicFactSource, ["capturedAt", "captured_at"], 40) : void 0);
+  const verification = verificationFor(section, payload, sourceArtifactPeers, subjectHandle, profile);
+  const counterEligibleAxes = counterEligibleAxesFor(section, payload, verification, eligibleAxes);
   return {
     decorated: { ...payload, artifactId },
     catalog: {
@@ -3293,7 +3610,8 @@ var makeAxisArtifact = (section, value, axisCatalog2, eligibleOverride, sourceAr
       ...capturedAt ? { capturedAt } : {},
       contentHash,
       eligibleAxes,
-      verification: verificationFor(section, payload, sourceArtifactPeers, subjectHandle, profile),
+      verification,
+      ...counterEligibleAxes.length ? { counterEligibleAxes } : {},
       scope: DIRECT_SECTIONS.has(section) ? "direct_subject" : "subject_context"
     }
   };
@@ -3317,7 +3635,7 @@ var SCORING_ARRAY_SECTIONS = [
   "ventureTeams"
 ];
 function renderScoringPacket(packet, axisCatalog2) {
-  const rendered = { ...packet, schema_version: 4 };
+  const rendered = { ...packet, schema_version: 5 };
   const packetProfile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile) ? packet.profile : void 0;
   const subjectHandle = recordText(packetProfile ?? {}, ["handle"], 80);
   const packetCoverage = packet.coverage && typeof packet.coverage === "object" && !Array.isArray(packet.coverage) ? packet.coverage : {};
@@ -3367,9 +3685,9 @@ function renderScoringPacket(packet, axisCatalog2) {
 var isAxisEvidenceRecord = (value) => {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const row = value;
-  return typeof row.artifactId === "string" && ARTIFACT_ID.test(row.artifactId) && row.kind === "axis_evidence" && typeof row.provider === "string" && !!row.provider && typeof row.operation === "string" && !!row.operation && typeof row.section === "string" && !!row.section && typeof row.title === "string" && !!row.title && (row.excerpt === void 0 || typeof row.excerpt === "string") && (row.sourceUrl === void 0 || typeof row.sourceUrl === "string") && (row.capturedAt === void 0 || typeof row.capturedAt === "string") && typeof row.contentHash === "string" && row.contentHash === row.artifactId.slice("art_v1_".length) && Array.isArray(row.eligibleAxes) && row.eligibleAxes.length > 0 && row.eligibleAxes.every((axis) => typeof axis === "string" && !!axis) && new Set(row.eligibleAxes).size === row.eligibleAxes.length && ["verified", "reported", "observed", "checked_empty", "unavailable"].includes(String(row.verification)) && (row.scope === "direct_subject" || row.scope === "subject_context");
+  return typeof row.artifactId === "string" && ARTIFACT_ID.test(row.artifactId) && row.kind === "axis_evidence" && typeof row.provider === "string" && !!row.provider && typeof row.operation === "string" && !!row.operation && typeof row.section === "string" && !!row.section && typeof row.title === "string" && !!row.title && (row.excerpt === void 0 || typeof row.excerpt === "string") && (row.sourceUrl === void 0 || typeof row.sourceUrl === "string") && (row.capturedAt === void 0 || typeof row.capturedAt === "string") && typeof row.contentHash === "string" && row.contentHash === row.artifactId.slice("art_v1_".length) && Array.isArray(row.eligibleAxes) && row.eligibleAxes.length > 0 && row.eligibleAxes.every((axis) => typeof axis === "string" && !!axis) && new Set(row.eligibleAxes).size === row.eligibleAxes.length && ["verified", "reported", "observed", "checked_empty", "unavailable"].includes(String(row.verification)) && (row.counterEligibleAxes === void 0 || Array.isArray(row.counterEligibleAxes) && row.counterEligibleAxes.length > 0 && row.counterEligibleAxes.every((axis) => typeof axis === "string" && row.eligibleAxes?.includes(axis)) && new Set(row.counterEligibleAxes).size === row.counterEligibleAxes.length) && (row.scope === "direct_subject" || row.scope === "subject_context");
 };
-function extractScoringEvidenceCatalog(json) {
+function extractScoringEvidenceCatalog(json, axisCatalog2) {
   let packet;
   try {
     const value = JSON.parse(json);
@@ -3379,9 +3697,15 @@ function extractScoringEvidenceCatalog(json) {
     return [];
   }
   if (!Array.isArray(packet.evidenceCatalog) || !packet.evidenceCatalog.every(isAxisEvidenceRecord)) return [];
+  if (axisCatalog2 && axisCatalog2.length > 0 && packet.schema_version !== 5) return [];
   const catalog = packet.evidenceCatalog;
   const byId = new Map(catalog.map((record2) => [record2.artifactId, record2]));
   if (byId.size !== catalog.length) return [];
+  const strictCatalog = packet.schema_version === 5;
+  const requestedAxes = axisCatalog2 && axisCatalog2.length > 0 && new Set(axisCatalog2.map(({ axis }) => axis)).size === axisCatalog2.length ? [...axisCatalog2] : void 0;
+  const packetProfile = packet.profile && typeof packet.profile === "object" && !Array.isArray(packet.profile) ? evidencePayload(packet.profile) : void 0;
+  const subjectHandle = recordText(packetProfile ?? {}, ["handle"], 80);
+  const sourceArtifactPeers = Array.isArray(packet.sourceArtifacts) ? packet.sourceArtifacts.filter((value) => value && typeof value === "object" && !Array.isArray(value)).map((value) => sanitizeArtifactUrls(evidencePayload(value))).filter((value) => Boolean(value && typeof value === "object" && !Array.isArray(value))) : [];
   const represented = /* @__PURE__ */ new Set();
   const inspect = (section, value) => {
     if (!value || typeof value !== "object" || Array.isArray(value)) return;
@@ -3392,13 +3716,31 @@ function extractScoringEvidenceCatalog(json) {
     const contentHash = createHash("sha256").update(stableJson({ section, payload })).digest("hex");
     const catalogRecord = byId.get(artifactId);
     if (artifactId !== `art_v1_${contentHash}` || catalogRecord?.section !== section || catalogRecord.contentHash !== contentHash) return;
+    const verification = verificationFor(section, payload, sourceArtifactPeers, subjectHandle, packetProfile);
+    if (strictCatalog && catalogRecord.verification !== verification) return;
+    const expectedEligibleAxes = requestedAxes ? section === "axisGaps" ? requestedAxes.some(({ axis }) => axis === payload.axis) && typeof payload.axis === "string" ? [payload.axis] : [] : eligibleAxesFor(section, payload, [...requestedAxes], sourceArtifactPeers, subjectHandle, packetProfile) : catalogRecord.eligibleAxes;
+    if (strictCatalog && requestedAxes && (expectedEligibleAxes.length !== catalogRecord.eligibleAxes.length || expectedEligibleAxes.some((axis, index) => axis !== catalogRecord.eligibleAxes[index]))) return;
+    const expectedCounterAxes = counterEligibleAxesFor(
+      section,
+      payload,
+      verification,
+      expectedEligibleAxes
+    );
+    const actualCounterAxes = catalogRecord.counterEligibleAxes ?? [];
+    if ((strictCatalog || catalogRecord.counterEligibleAxes !== void 0) && (expectedCounterAxes.length !== actualCounterAxes.length || expectedCounterAxes.some((axis, index) => axis !== actualCounterAxes[index]))) {
+      return;
+    }
     represented.add(artifactId);
   };
   for (const section of SCORING_SINGLE_SECTIONS) inspect(section, packet[section]);
   for (const section of [...SCORING_ARRAY_SECTIONS, "axisGaps"]) {
     if (Array.isArray(packet[section])) packet[section].forEach((value) => inspect(section, value));
   }
-  return represented.size === catalog.length ? catalog.map((record2) => ({ ...record2, eligibleAxes: [...record2.eligibleAxes] })) : [];
+  return represented.size === catalog.length ? catalog.map((record2) => ({
+    ...record2,
+    eligibleAxes: [...record2.eligibleAxes],
+    ...record2.counterEligibleAxes ? { counterEligibleAxes: [...record2.counterEligibleAxes] } : {}
+  })) : [];
 }
 var pruneTrustGraphPacket = (packet) => {
   const screen = packet.trustGraphScreen;
@@ -3542,18 +3884,32 @@ function serializeAnalystEvidencePacket(input, options) {
     if (!Array.isArray(rendered.evidenceCatalog)) return /* @__PURE__ */ new Set();
     return new Set(rendered.evidenceCatalog.flatMap((value) => isAxisEvidenceRecord(value) && isSubstantiveArtifact(value) ? value.eligibleAxes : []));
   };
-  const requiredSubstantiveAxes = options.axisCatalog ? substantiveAxesIn(render()) : /* @__PURE__ */ new Set();
+  const initialRenderedPacket = render();
+  const requiredSubstantiveAxes = options.axisCatalog ? substantiveAxesIn(initialRenderedPacket) : /* @__PURE__ */ new Set();
+  const requiredProjectBandRanges = options.axisCatalog ? Object.fromEntries(Object.entries(deriveProjectStrengthBands(
+    JSON.stringify(initialRenderedPacket),
+    options.axisCatalog
+  )).map(([axis, band2]) => [axis, `${band2.tier}:${band2.minScore}-${band2.maxScore}`])) : {};
   const preservesSubstantiveCoverage = () => {
     if (!options.axisCatalog || requiredSubstantiveAxes.size === 0) return true;
     const retained = substantiveAxesIn(render());
     return [...requiredSubstantiveAxes].every((axis) => retained.has(axis));
   };
+  const preservesProjectBandRanges = () => {
+    if (!options.axisCatalog || Object.keys(requiredProjectBandRanges).length === 0) return true;
+    const retainedBands = deriveProjectStrengthBands(JSON.stringify(render()), options.axisCatalog);
+    return Object.entries(requiredProjectBandRanges).every(([axis, required]) => {
+      const band2 = retainedBands[axis];
+      return band2 && `${band2.tier}:${band2.minScore}-${band2.maxScore}` === required;
+    });
+  };
+  const preservesDecisionSemantics = () => preservesSubstantiveCoverage() && preservesProjectBandRanges();
   const removeOneArrayItem = (section, minimumLength = 0) => {
     const values = Array.isArray(packet[section]) ? packet[section] : [];
     if (values.length <= minimumLength) return false;
     for (let index = values.length - 1; index >= minimumLength; index -= 1) {
       const [removed] = values.splice(index, 1);
-      if (preservesSubstantiveCoverage()) {
+      if (preservesDecisionSemantics()) {
         if (coverage[section]) coverage[section].included = values.length;
         return true;
       }
@@ -3570,7 +3926,7 @@ function serializeAnalystEvidencePacket(input, options) {
   const pruneTrustGraphPreservingCoverage = () => {
     const previous = packet.trustGraphScreen == null ? void 0 : structuredClone(packet.trustGraphScreen);
     if (!pruneTrustGraphPacket(packet)) return false;
-    if (preservesSubstantiveCoverage()) return true;
+    if (preservesDecisionSemantics()) return true;
     if (previous === void 0) delete packet.trustGraphScreen;
     else packet.trustGraphScreen = previous;
     return false;
@@ -3579,7 +3935,7 @@ function serializeAnalystEvidencePacket(input, options) {
     if (packet.profile == null) return false;
     const previous = packet.profile;
     delete packet.profile;
-    if (preservesSubstantiveCoverage()) return true;
+    if (preservesDecisionSemantics()) return true;
     packet.profile = previous;
     return false;
   };
@@ -3671,7 +4027,7 @@ function inspectAnalystScoringPreflight(axisCatalog2, evidenceJson) {
     }
   } catch {
   }
-  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
+  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog2);
   if (!evidenceCatalog.length) {
     return {
       state: "invalid_catalog",
@@ -3681,7 +4037,8 @@ function inspectAnalystScoringPreflight(axisCatalog2, evidenceJson) {
       unsupportedAxes: []
     };
   }
-  const missingSubstantiveAxes = axisCatalog2.filter((axis) => !evidenceCatalog.some((artifact) => isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis))).map(({ axis }) => axis);
+  const projectBands = deriveProjectStrengthBands(evidenceJson, axisCatalog2);
+  const missingSubstantiveAxes = axisCatalog2.filter((axis) => !evidenceCatalog.some((artifact) => isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis.axis)) || axis.role === "PROJECT" && projectBands[axis.axis]?.tier === "none").map(({ axis }) => axis);
   return {
     state: missingSubstantiveAxes.length > 0 ? "insufficient_evidence" : "ready",
     requestedAxisCount: axisCatalog2.length,
@@ -3699,22 +4056,33 @@ async function analyzeSubject(handle, roles, axisCatalog2, evidenceJson, options
     ...preflight
   }));
   if (preflight.state !== "ready") return null;
-  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson);
+  const evidenceCatalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog2);
   const citationAliases = evidenceCatalog.map((artifact, index) => ({
     alias: `e${String(index + 1).padStart(3, "0")}`,
     artifact
   }));
   const substantiveAliasesForAxis = (axis) => citationAliases.filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && isSubstantiveArtifact(artifact)).map(({ alias }) => alias);
+  const verifiedScoreLimitingAliasesForAxis = (axis) => citationAliases.filter(({ artifact }) => isVerifiedCounterArtifact(artifact, axis)).map(({ alias }) => alias);
   const preferredCoverageAliasesForAxis = (axis) => citationAliases.filter(({ artifact }) => artifact.eligibleAxes.includes(axis) && !isSubstantiveArtifact(artifact)).sort((a, b) => Number(b.artifact.verification === "unavailable") - Number(a.artifact.verification === "unavailable")).slice(0, 4).map(({ alias }) => alias);
   const formatAliases = (aliases) => aliases.length > 0 ? aliases.join(", ") : "(none)";
   const citationAliasTable = citationAliases.map(({ alias, artifact }) => `${alias} = ${artifact.artifactId}`).join("\n");
-  const citationEligibilityTable = axisCatalog2.map(({ axis }) => `${axis} | substantive aliases (choose 1 primary; do not exhaustively copy): ${formatAliases(substantiveAliasesForAxis(axis))} | coverageRefs preferred return set (optional; return 0-4 total, never the whole coverage catalog): ${formatAliases(preferredCoverageAliasesForAxis(axis))}`).join("\n");
+  const citationEligibilityTable = axisCatalog2.map(({ axis }) => `${axis} | substantive aliases (choose 1 primary; do not exhaustively copy): ${formatAliases(substantiveAliasesForAxis(axis))} | verified score-limiting aliases (the only counterEvidenceRefs that can justify a PROJECT score below its evidence-strength band): ${formatAliases(verifiedScoreLimitingAliasesForAxis(axis))} | coverageRefs preferred return set (optional; return 0-4 total, never the whole coverage catalog): ${formatAliases(preferredCoverageAliasesForAxis(axis))}`).join("\n");
   const system = "You are ARGUS, a forensic crypto due-diligence analyst. You score a subject on a fixed set of axes from collected evidence only. Be skeptical: a strong story never papers over a disqualifying fact. Score conservatively when evidence is thin. Each axis score must be between 0 and its weight. Write one tight rationale per axis citing the evidence. Never use em dashes.";
+  const roleSpecificScoringPolicy = scoringPolicyForAxes(axisCatalog2);
+  const projectScoreBands = deriveProjectStrengthBands(evidenceJson, axisCatalog2);
+  const projectBandPolicy = axisCatalog2.filter(({ role }) => role === "PROJECT").map(({ axis }) => {
+    const band2 = projectScoreBands[axis];
+    return band2 ? `${axis}: ${band2.tier} evidence, allowed ${band2.minScore}-${band2.maxScore}` + (band2.tier === "adverse" ? "; cite a verified harmful alias as primary support for the adverse assessment and leave that alias out of counterEvidenceRefs" : "") : `${axis}: no affirmative strength band`;
+  }).join("; ");
   const user = `Subject: ${handle}
 Held roles: ${roles.join(", ")}
 
 Axes to score (axis | weight | role):
-` + axisCatalog2.map((a) => `- ${a.axis} | max ${a.weight} | ${a.role}`).join("\n") + `
+` + axisCatalog2.map((a) => `- ${a.axis} | max ${a.weight} | ${a.role}`).join("\n") + (roleSpecificScoringPolicy ? `
+
+${roleSpecificScoringPolicy}` : "") + (projectBandPolicy ? `
+
+PROJECT EVIDENCE-STRENGTH BANDS FOR THIS FROZEN PACKET: ${projectBandPolicy}. Stay inside each range. Going below a positive axis's minimum requires a distinct severe verified score-limiting alias in counterEvidenceRefs; positive support alone never authorizes a lower score. A listed canonical-token drawdown alias must be cited in P5 counterEvidenceRefs, and its solid-band cap is already reflected in the frozen range, so it does not authorize scoring below that range. No evidence may justify exceeding the maximum. Never duplicate one alias on both sides. For an adverse band, the harmful fact supports the adverse assessment: cite it as primary evidence rather than duplicating it in counter-evidence.` : "") + `
 
 Collected evidence (JSON):
 ${evidenceJson}
@@ -3722,7 +4090,7 @@ ${evidenceJson}
 Citation aliases (return these short aliases in the tool call; ARGUS maps them back to the exact immutable artifact IDs):
 ${citationAliasTable}
 
-Axis citation guidance (the substantive aliases are authoritative, while each coverageRefs preferred return set is intentionally bounded. These are candidate sets, not checklists: never copy every available artifact. Other eligible coverage artifacts remain frozen in the evidence packet and need not be cited. primaryEvidenceRef and additionalEvidenceRefs may use only the substantive aliases. For this call, coverageRefs may use only the preferred return set. counterEvidenceRefs may use only unused substantive aliases):
+Axis citation guidance (the substantive aliases are authoritative, while each coverageRefs preferred return set is intentionally bounded. These are candidate sets, not checklists: never copy every available artifact. Other eligible coverage artifacts remain frozen in the evidence packet and need not be cited. primaryEvidenceRef and additionalEvidenceRefs may use only the substantive aliases. For this call, coverageRefs may use only the preferred return set. counterEvidenceRefs for PROJECT axes may use only the listed verified score-limiting aliases; other roles may use unused substantive aliases):
 ${citationEligibilityTable}
 
 Score every listed axis, write the composite headline (one sentence on what governs the verdict), and an identity note.
@@ -3765,7 +4133,7 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
     firstAttemptTimeoutMs
   );
   let rejectionReason = "unknown";
-  let normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog);
+  let normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog, projectScoreBands);
   normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
   if (normalizedRaw !== raw) {
     console.info("[agent] normalized analyst citation placement before strict validation");
@@ -3776,7 +4144,8 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
     evidenceCatalog,
     (reason) => {
       rejectionReason = reason;
-    }
+    },
+    { projectScoreBands }
   );
   if (raw && !validated) {
     console.warn(`[agent] rejected incomplete or invalid analyst axis set (${rejectionReason})`);
@@ -3792,7 +4161,25 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
     const rejectedAxis = axisNames.find((axis) => rejectionReason.endsWith(`:${axis}`));
     const coverageLimitMatch = rejectionReason.match(/^coverage-reference-limit-observed-(\d+)-max-4:/);
     const supportCounterOverlap = rejectionReason.startsWith("support-counter-overlap:");
-    const rejectedAxisHint = rejectionReason === "grounded-team-described-as-unresolved" ? " The frozen packet contains substantive named-team artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge the public team. Do not claim there is no, absent, unnamed, unresolved, anonymous, unknown, or undisclosed project founder, operator, executive, leader, or team. Keep a failed licensed-identity-provider lookup separate from the first-party founder evidence; it does not erase the named team." : rejectedAxis ? coverageLimitMatch ? ` The prior ${rejectedAxis} coverageRefs contained ${coverageLimitMatch[1]} aliases; the maximum is 4. Return no more than these four preferred aliases: ${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}. Do not append or move omitted coverage aliases into support or counter fields.` : supportCounterOverlap ? ` For ${rejectedAxis}, the same alias appeared in support and counter-evidence. Counter-evidence wins: keep that alias only in counterEvidenceRefs, then choose a different unused substantive alias as primaryEvidenceRef from ${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. No alias may appear in both primary/additional support and counter-evidence.` : ` For ${rejectedAxis}, choose exactly one primary from the substantive aliases ${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. Assign each other substantive alias to at most one array. Return coverageRefs as zero to four distinct values chosen only from ${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}; [] is valid and you must not exhaustively copy coverage artifacts.` : "";
+    const outOfBandProjectAxes = rejectionReason.match(/^project-scores-outside-evidence-strength-band:(.+)$/)?.[1]?.split(",").filter((axis) => axisNames.includes(axis)) ?? [];
+    const verifiedScoreLimitingRepairAliases = outOfBandProjectAxes.map((axis) => `${axis}: ${formatAliases(verifiedScoreLimitingAliasesForAxis(axis))}`).join("; ");
+    const calibratedRepairBands = outOfBandProjectAxes.map((axis) => {
+      const band2 = projectScoreBands[axis];
+      return `${axis}: ${band2?.minScore}-${band2?.maxScore} (${band2?.tier ?? "none"})`;
+    }).join("; ");
+    const projectBandRepair = outOfBandProjectAxes.length > 0 ? ` The prior ${outOfBandProjectAxes.join(", ")} score${outOfBandProjectAxes.length === 1 ? " was" : "s were"} outside the evidence-strength band. Recheck every PROJECT axis against the calibration policy. Required bands by axis: ${calibratedRepairBands}. Stay inside the listed range unless a verified score-limiting alias justifies going below the minimum; never exceed the maximum. Verified score-limiting aliases by axis: ${verifiedScoreLimitingRepairAliases}. Missing coverage, unavailable providers, unanswered questions, and positive context belong in coverageRefs, gaps, or support and cannot justify a lower score.` : "";
+    let rejectedAxisHint = "";
+    if (rejectionReason === "grounded-team-described-as-unresolved") {
+      rejectedAxisHint = " The frozen packet contains substantive named-team artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge the public team. Do not claim there is no, absent, unnamed, unresolved, anonymous, unknown, or undisclosed project founder, operator, executive, leader, or team. Keep a failed licensed-identity-provider lookup separate from the first-party founder evidence; it does not erase the named team.";
+    } else if (projectBandRepair) {
+      rejectedAxisHint = projectBandRepair;
+    } else if (rejectedAxis && coverageLimitMatch) {
+      rejectedAxisHint = ` The prior ${rejectedAxis} coverageRefs contained ${coverageLimitMatch[1]} aliases; the maximum is 4. Return no more than these four preferred aliases: ${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}. Do not append or move omitted coverage aliases into support or counter fields.`;
+    } else if (rejectedAxis && supportCounterOverlap) {
+      rejectedAxisHint = projectScoreBands[rejectedAxis]?.tier === "adverse" ? ` For adverse ${rejectedAxis}, the verified harmful alias is primary support for the adverse assessment. Keep one of ${formatAliases(verifiedScoreLimitingAliasesForAxis(rejectedAxis))} as primaryEvidenceRef and remove it from counterEvidenceRefs. Leave counterEvidenceRefs empty unless a distinct verified score-limiting alias remains; no alias may appear on both sides.` : ` For ${rejectedAxis}, the same alias appeared in support and counter-evidence. Counter-evidence wins only when it is a verified score-limiting alias: keep that alias only in counterEvidenceRefs, then choose a different unused substantive alias as primaryEvidenceRef from ${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. No alias may appear in both primary/additional support and counter-evidence.`;
+    } else if (rejectedAxis) {
+      rejectedAxisHint = ` For ${rejectedAxis}, choose exactly one primary from the substantive aliases ${formatAliases(substantiveAliasesForAxis(rejectedAxis))}. Assign each other substantive alias to at most one array. Return coverageRefs as zero to four distinct values chosen only from ${formatAliases(preferredCoverageAliasesForAxis(rejectedAxis))}; [] is valid and you must not exhaustively copy coverage artifacts.`;
+    }
     const repairUser = `${user}
 
 REPAIR REQUIRED: the prior record_verdict tool payload was rejected by deterministic validation with reason "${rejectionReason}". Make one fresh record_verdict call. Recheck the exact axis set, per-axis score bounds, citation eligibility, duplicate aliases, support/counter overlap, and the array limits (seven additional support, eight counter, four coverage, and six gaps), plus the requirement that any returned coverageRefs have a material gap description. Do not invent evidence or fill a missing fact.${rejectedAxisHint}`;
@@ -3804,7 +4191,7 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
       ANALYST_REPAIR_TIMEOUT_MS
     );
     rejectionReason = "unknown";
-    normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog);
+    normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog, projectScoreBands);
     normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
     if (normalizedRaw !== raw) {
       console.info("[agent] normalized repaired citation placement before strict validation");
@@ -3815,7 +4202,8 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
       evidenceCatalog,
       (reason) => {
         rejectionReason = reason;
-      }
+      },
+      { projectScoreBands }
     );
     if (raw && !validated) {
       console.warn(`[agent] rejected analyst repair axis set (${rejectionReason})`);
@@ -6817,6 +7205,9 @@ var PREDICATES = /* @__PURE__ */ new Set([
   "legal_entity",
   "official_identity",
   "governance",
+  "tokenomics",
+  "vesting",
+  "treasury",
   "audit",
   "repository",
   "traction"
@@ -6828,6 +7219,35 @@ var CRITICAL_PREDICATES = /* @__PURE__ */ new Set([
   "executive",
   "official_token"
 ]);
+var LEAD_COVERAGE_CATEGORIES = [
+  ["founder"],
+  ["executive"],
+  ["product"],
+  ["official_identity", "legal_entity"],
+  ["official_token"],
+  ["tokenomics"],
+  ["vesting"],
+  ["treasury"],
+  ["audit"],
+  ["traction"],
+  ["governance"],
+  ["repository"],
+  ["funding", "investor"],
+  ["network"],
+  ["founded", "launched"]
+];
+function selectBasicFactLeads(leads) {
+  if (leads.length <= MAX_LEADS) return leads.slice();
+  const selected = /* @__PURE__ */ new Set();
+  for (const predicates of LEAD_COVERAGE_CATEGORIES) {
+    const index = leads.findIndex((lead, leadIndex) => !selected.has(leadIndex) && predicates.includes(lead.predicate));
+    if (index >= 0) selected.add(index);
+  }
+  for (let index = 0; index < leads.length && selected.size < MAX_LEADS; index += 1) {
+    selected.add(index);
+  }
+  return leads.filter((_lead, index) => selected.has(index)).slice(0, MAX_LEADS);
+}
 var clean = (value, max) => typeof value === "string" && value.trim() ? value.trim().slice(0, max) : void 0;
 var normalize = (value) => value.normalize("NFKC").replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\s+/g, " ").trim();
 var searchable = (value) => normalize(value).toLowerCase().replace(/[^a-z0-9@$.'-]+/g, " ").replace(/\s+/g, " ").trim();
@@ -6903,9 +7323,8 @@ function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-sear
       artifact_verified: false,
       provider
     });
-    if (leads.length >= MAX_LEADS) break;
   }
-  return leads;
+  return selectBasicFactLeads(leads);
 }
 function subjectName(ctx) {
   return ctx.evidence.profile.resolved_name?.trim() || ctx.evidence.profile.display_name.trim() || ctx.handle.replace(/^@/, "");
@@ -6926,14 +7345,15 @@ function discoveryPrompt(ctx) {
     `Research foundational due-diligence facts for ${subjectName(ctx)} (${ctx.handle}).`,
     profile.website ? `Known official website: ${profile.website}` : "",
     profile.bio ? `Profile bio: ${profile.bio.slice(0, 800)}` : "",
-    "Find facts a competent analyst must not miss: official identity, every named founder and executive, founding and launch dates, official token, funding and named investors, core products, network/chain, legal entity, governance, security audits, source repositories, and concrete traction metrics.",
+    "Find facts a competent analyst must not miss: official identity, every named founder and executive, founding and launch dates, official token, funding and named investors, core products, network/chain, legal entity, governance, tokenomics and allocation, vesting and unlock schedules, treasury disclosures, security audits, source repositories, and concrete traction metrics.",
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
     "Each exact_excerpt must be a verbatim one-to-three sentence passage that itself explicitly contains the subject identity, the claimed value, and language proving the predicate.",
+    "For traction facts, copy the source's exact as-of date or reporting period into qualifier, preferably an explicit date phrase, only when that phrase appears in exact_excerpt. Never infer, normalize, or invent a date. Omit qualifier when the source does not state a period.",
     "For candidate_urls, include up to three additional public pages that explicitly state the same atomic fact. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url.",
     "Do not infer. A search answer is only a lead; ARGUS will fetch and verify every URL independently.",
     "Return JSON only in this exact shape:",
-    '{"facts":[{"subject":"...","predicate":"founder|executive|founded|launched|official_token|funding|investor|product|network|legal_entity|official_identity|governance|audit|repository|traction","value":"one atomic value","qualifier":"optional exact role or metric label","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}'
+    '{"facts":[{"subject":"...","predicate":"founder|executive|founded|launched|official_token|funding|investor|product|network|legal_entity|official_identity|governance|tokenomics|vesting|treasury|audit|repository|traction","value":"one atomic value","qualifier":"optional verbatim role, metric label, or traction as-of/reporting period present in exact_excerpt","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}'
   ].filter(Boolean).join("\n");
 }
 function responseText(response) {
@@ -6988,7 +7408,7 @@ async function callClaudeSearch(prompt, request, assistantContent) {
 async function discoverBasicFactLeads(ctx, dependencies = {}) {
   if (!env("ANTHROPIC_API_KEY") && !dependencies.request) return null;
   const canonicalSubject = subjectName(ctx);
-  const cacheKey = `basic-facts:v2:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
+  const cacheKey = `basic-facts:v3:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
   const cacheRead = dependencies.cacheRead ?? ((key) => cacheGet(key, { operation: "basic-facts-hit", meta: "24h Claude web-search cache" }));
   const cacheWrite = dependencies.cacheWrite ?? cacheSet;
   const cached = await cacheRead(cacheKey);
@@ -7014,7 +7434,7 @@ async function discoverWithFallback(ctx) {
   const text2 = await grokSearch(
     "You are ARGUS's basic-facts research scout. Use live web search. Return only the requested JSON. All output remains an unverified lead.",
     discoveryPrompt(ctx),
-    { maxToolCalls: MAX_SEARCH_USES, cacheKey: `basic-facts-grok:v2:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}` }
+    { maxToolCalls: MAX_SEARCH_USES, cacheKey: `basic-facts-grok:v3:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}` }
   );
   return text2 ? parseBasicFactLeads(text2, subjectName(ctx), "grok") : claude;
 }
@@ -7043,6 +7463,9 @@ var PREDICATE_PATTERNS = {
   legal_entity: /\b(?:legal entity|company|corporation|incorporated|foundation|limited|ltd\.?|inc\.?|llc|labs)\b/i,
   official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company)\b/i,
   governance: /\b(?:governance|governed|dao|proposal|vote|voting|council|multisig|multi-sig)\b/i,
+  tokenomics: /\b(?:tokenomics|token allocation|token distribution|allocation|distribution|emissions?|circulating supply|total supply|max(?:imum)? supply)\b/i,
+  vesting: /\b(?:vesting|vested|unlock(?:s|ed|ing)?|cliff|lockup|lock-up|release schedule)\b/i,
+  treasury: /\b(?:treasury|reserves?|treasury wallet|treasury report|multisig|multi-sig)\b/i,
   audit: /\b(?:audit|audited|security review|security assessment|formal verification)\b/i,
   repository: /\b(?:github|source code|codebase|repository|repo|open source|open-source)\b/i,
   traction: /\b(?:users?|customers?|volume|tvl|total value locked|transactions?|revenue|fees|usage|adoption|downloads?|active wallets?)\b/i
@@ -7177,6 +7600,9 @@ var MULTI_VALUE_PREDICATES = /* @__PURE__ */ new Set([
   "funding",
   "investor",
   "governance",
+  "tokenomics",
+  "vesting",
+  "treasury",
   "audit",
   "repository",
   "traction"
@@ -7264,8 +7690,9 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   });
   const leads = await discover(ctx);
   if (!leads) return { state: "failed", detail: "basic-facts discovery failed" };
-  ctx.evidence.basicFactLeads = leads.slice(0, MAX_LEADS).map((lead) => ({ ...lead }));
-  if (!leads.length) {
+  const boundedLeads = selectBasicFactLeads(leads);
+  ctx.evidence.basicFactLeads = boundedLeads.map((lead) => ({ ...lead }));
+  if (!boundedLeads.length) {
     ctx.evidence.basicFacts = [];
     return { state: "partial", detail: "search returned no source-linked basic-fact candidates" };
   }
@@ -7298,9 +7725,17 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     sourceByUrl.set(key, pending);
     return pending;
   };
-  const boundedLeads = leads.slice(0, MAX_LEADS);
   const variants = verificationLeadVariants(ctx, boundedLeads, officialHosts);
-  const allowedSources = new Set([...new Set(variants.map(({ lead }) => lead.sourceUrl))].slice(0, MAX_SOURCES));
+  const primarySources = boundedLeads.flatMap((lead) => {
+    const sourceUrl = safeCandidateUrl(lead.sourceUrl);
+    return sourceUrl ? [sourceUrl] : [];
+  });
+  const allowedSources = new Set([.../* @__PURE__ */ new Set([
+    ...primarySources,
+    // Variants are already sorted by official-domain and primary/candidate
+    // priority, so the remaining source slots retain deterministic quality.
+    ...variants.map(({ lead }) => lead.sourceUrl)
+  ])].slice(0, MAX_SOURCES));
   const verified = (await Promise.all(variants.filter(({ lead }) => allowedSources.has(lead.sourceUrl)).map(async ({ lead }) => {
     const result = await fetchOnce(lead.sourceUrl);
     return result.status === "ok" ? verifyBasicFactLead(lead, result, aliases, ctx.handle, officialHosts) : null;
@@ -10787,6 +11222,10 @@ var GECKOTERMINAL_NETWORK = {
   optimism: "optimism",
   avalanche: "avax"
 };
+var geckoTerminalOhlcvUrl = (chain, poolAddress, timeframe) => {
+  const network = GECKOTERMINAL_NETWORK[chain];
+  return network ? `${GECKOTERMINAL}/networks/${encodeURIComponent(network)}/pools/${encodeURIComponent(poolAddress)}/ohlcv/${timeframe}?aggregate=1&limit=${MAX_HISTORY_POINTS}&currency=usd` : null;
+};
 var isRecord3 = (value) => !!value && typeof value === "object" && !Array.isArray(value);
 var finiteNumber = (value) => {
   const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
@@ -11036,9 +11475,8 @@ function selectPriceCorroboratedPair(rows, token, coingeckoPrice) {
   )[0] ?? null;
 }
 async function ohlcv(chain, poolAddress, timeframe) {
-  const network = GECKOTERMINAL_NETWORK[chain];
-  if (!network) return null;
-  const url = `${GECKOTERMINAL}/networks/${encodeURIComponent(network)}/pools/${encodeURIComponent(poolAddress)}/ohlcv/${timeframe}?aggregate=1&limit=${MAX_HISTORY_POINTS}&currency=usd`;
+  const url = geckoTerminalOhlcvUrl(chain, poolAddress, timeframe);
+  if (!url) return null;
   let response;
   try {
     response = await fetch(url, { signal: AbortSignal.timeout(8e3) });
@@ -11102,7 +11540,10 @@ async function tokenHistory(chain, poolAddress) {
       changePct: first > 0 ? (last - first) / first * 100 : 0,
       drawdownPct: peak > 0 ? (last - peak) / peak * 100 : 0,
       timeframe,
-      poolAddress
+      poolAddress,
+      ...geckoTerminalOhlcvUrl(chain, poolAddress, timeframe) ? {
+        sourceUrl: geckoTerminalOhlcvUrl(chain, poolAddress, timeframe)
+      } : {}
     }
   };
 }
@@ -12031,6 +12472,31 @@ function collectProjectCoreEvidenceOutcomes(ctx) {
     detail: `bounded frozen-evidence scan completed with ${backingCount} verified backing record${backingCount === 1 ? "" : "s"} and ${verifiedDisclosures.length} verified disclosure record${verifiedDisclosures.length === 1 ? "" : "s"}`
   };
 }
+function recordProjectTokenDrawdownFinding(evidence) {
+  const token = evidence.projectToken;
+  const drawdownPct = token?.history?.drawdownPct;
+  const historySourceUrl = token?.history?.sourceUrl;
+  if (!token || typeof drawdownPct !== "number" || !Number.isFinite(drawdownPct) || drawdownPct > -70 || !historySourceUrl) {
+    return false;
+  }
+  if (evidence.findings.some(
+    (finding) => finding.finding_type === "ProjectTokenDrawdown" && finding.source_url === historySourceUrl
+  )) return false;
+  const timeframe = token.history.timeframe === "hour" ? "hourly" : "daily";
+  evidence.findings.push({
+    finding_type: "ProjectTokenDrawdown",
+    claim: `$${token.symbol} recorded a verified ${Math.abs(drawdownPct).toFixed(1)}% peak-to-latest drawdown in the captured GeckoTerminal ${timeframe} OHLCV window. CoinGecko and DexScreener established canonical token and pool context; price drawdown alone does not establish misconduct.`,
+    source_url: historySourceUrl,
+    source_date: token.capturedAt,
+    source_author: "geckoterminal",
+    verification_status: "Verified",
+    independent_source_count: 1,
+    polarity: -1,
+    evidence_origin: "deterministic",
+    artifact_verified: true
+  });
+  return true;
+}
 var handleFrom = (s) => s?.match(/@([A-Za-z0-9_]{2,30})/)?.[1];
 function adverseSignalToFinding(sig) {
   const hasCandidateArtifact = !!sig.source_url;
@@ -12483,6 +12949,16 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     const before = attemptTotals(providers);
     try {
       const result = await collectProjectTokenIdentity(ctx);
+      const recordedDrawdown = recordProjectTokenDrawdownFinding(evidence);
+      if (recordedDrawdown) {
+        emit({
+          phase: "Token",
+          label: "Canonical token drawdown",
+          detail: `${evidence.projectToken?.symbol ?? "Token"} market drawdown was frozen as traction counter-evidence; it is not treated as misconduct.`,
+          source: "project-token-market",
+          tone: "warn"
+        });
+      }
       const attempts = attemptDelta(before, attemptTotals(providers));
       const state = adapterRunState(result, attempts);
       checkTracker.provider(
@@ -12710,7 +13186,8 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   if (analystAvailable()) {
     const requestedAxes = axisCatalog(evidence.roles);
     const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
-    const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson);
+    const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson, requestedAxes);
+    const projectStrengthBands = deriveProjectStrengthBands(evidenceJson, requestedAxes);
     const scoringPreflight = inspectAnalystScoringPreflight(requestedAxes, evidenceJson);
     const decisionPacketUsable = scoringPreflight.state === "ready" || scoringPreflight.state === "insufficient_evidence";
     if (decisionPacketUsable) {
@@ -12722,6 +13199,9 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     if (frozenAxisEvidence.length > 0) {
       evidence.axisCitationVersion = 1;
       evidence.axisEvidenceCatalog = frozenAxisEvidence;
+      if (Object.keys(projectStrengthBands).length > 0) {
+        evidence.projectStrengthBands = projectStrengthBands;
+      }
     }
     evidence.axes = [];
     const contradictionBefore = attemptTotals(["claude"], ["record_contradictions"]);

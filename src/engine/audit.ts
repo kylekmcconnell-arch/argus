@@ -1,4 +1,5 @@
-// ARGUS-P v2 audit orchestrator (multi-role) — faithful TS port of argus_p/audit.py
+// ARGUS-P multi-role audit orchestrator, based on argus_p/audit.py and extended
+// with project-specific scoring and evidence-integrity rules.
 //
 // A subject can hold several roles at once. Each held role is scored on its own
 // track with its own axes, caps and identity rule; the composite verdict is
@@ -560,10 +561,15 @@ export class Audit {
   finalize(): AuditReport {
     const identity = this.identity;
     const sharedKeys = this.sharedCapsTriggered();
-    const doxBonus = identity ? DOX_BONUS[identity] ?? 0 : 0;
+    const identityBonus = identity ? DOX_BONUS[identity] ?? 0 : 0;
 
     const roleReports: RoleReport[] = [];
     for (const role of this.roles) {
+      // A project's accountable team and operating identity are already scored
+      // directly in P1. Applying the person-level disclosure bonus again would
+      // double-count identity and can move a weak raw project score across a
+      // verdict boundary without any change in project fundamentals.
+      const doxBonus = role === SubjectClass.PROJECT ? 0 : identityBonus;
       const axes: Record<string, AxisScore> = {};
       for (const [ax, a] of Object.entries(this.axisScores)) {
         if (classForAxis(ax) === role) axes[ax] = a;

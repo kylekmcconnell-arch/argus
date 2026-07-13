@@ -79,7 +79,23 @@ export interface AxisEvidenceRecord {
   contentHash: string;
   eligibleAxes: string[];
   verification: AxisEvidenceVerification;
+  /**
+   * Axes for which the represented payload is a deterministically verified
+   * score-limiting fact. Older frozen catalogs may omit this field; omission
+   * must never be interpreted as negative or limiting evidence.
+   */
+  counterEligibleAxes?: string[];
   scope: "direct_subject" | "subject_context";
+}
+
+export type ProjectStrengthTier = "none" | "adverse" | "emerging" | "solid" | "exceptional";
+
+export interface ProjectStrengthBandRecord {
+  tier: ProjectStrengthTier;
+  minScore: number;
+  maxScore: number;
+  reasons: string[];
+  anchorArtifactIds: string[];
 }
 
 // A high-signal account (respected caller, founder, VC, or infra) that follows
@@ -148,6 +164,8 @@ export interface ProjectTokenSnapshot {
     drawdownPct: number;
     timeframe: "day" | "hour";
     poolAddress: string;
+    /** Exact GeckoTerminal OHLCV endpoint used for the frozen series. */
+    sourceUrl?: string;
   };
 }
 
@@ -303,6 +321,9 @@ export type BasicFactPredicate =
   | "funding"
   | "investor"
   | "governance"
+  | "tokenomics"
+  | "vesting"
+  | "treasury"
   | "audit"
   | "repository"
   | "traction";
@@ -406,6 +427,8 @@ export interface CollectedEvidence {
   axisCitationVersion?: 1;
   /** Frozen registry from the exact scorer packet; never reconstructed later. */
   axisEvidenceCatalog?: AxisEvidenceRecord[];
+  /** Deterministic PROJECT maturity bands derived from that same frozen packet. */
+  projectStrengthBands?: Record<string, ProjectStrengthBandRecord>;
   headline: string;
   recentActivity: string[]; // recent post text, fuel for claim extraction
   notableFollowers: NotableFollower[]; // respected accounts that follow the subject

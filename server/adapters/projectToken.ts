@@ -38,6 +38,17 @@ const GECKOTERMINAL_NETWORK: Record<string, string> = {
   avalanche: "avax",
 };
 
+const geckoTerminalOhlcvUrl = (
+  chain: string,
+  poolAddress: string,
+  timeframe: "day" | "hour",
+): string | null => {
+  const network = GECKOTERMINAL_NETWORK[chain];
+  return network
+    ? `${GECKOTERMINAL}/networks/${encodeURIComponent(network)}/pools/${encodeURIComponent(poolAddress)}/ohlcv/${timeframe}?aggregate=1&limit=${MAX_HISTORY_POINTS}&currency=usd`
+    : null;
+};
+
 type JsonRecord = Record<string, unknown>;
 
 interface CoinSearchRow {
@@ -355,9 +366,8 @@ async function ohlcv(
   poolAddress: string,
   timeframe: "day" | "hour",
 ): Promise<number[][] | null> {
-  const network = GECKOTERMINAL_NETWORK[chain];
-  if (!network) return null;
-  const url = `${GECKOTERMINAL}/networks/${encodeURIComponent(network)}/pools/${encodeURIComponent(poolAddress)}/ohlcv/${timeframe}?aggregate=1&limit=${MAX_HISTORY_POINTS}&currency=usd`;
+  const url = geckoTerminalOhlcvUrl(chain, poolAddress, timeframe);
+  if (!url) return null;
   let response: Response;
   try {
     response = await fetch(url, { signal: AbortSignal.timeout(8_000) });
@@ -428,6 +438,9 @@ async function tokenHistory(
       drawdownPct: peak > 0 ? ((last - peak) / peak) * 100 : 0,
       timeframe,
       poolAddress,
+      ...(geckoTerminalOhlcvUrl(chain, poolAddress, timeframe) ? {
+        sourceUrl: geckoTerminalOhlcvUrl(chain, poolAddress, timeframe)!,
+      } : {}),
     },
   };
 }

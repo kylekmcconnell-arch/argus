@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { AXIS_SCORING_CONTRACT, persistProvenance } from "./_provenance";
 import { getProfile, PROFILES, SubjectClass } from "../src/engine";
+import type { AxisEvidenceRecord } from "../src/data/evidence";
 
 const FOUNDER_WEIGHTS = getProfile(SubjectClass.FOUNDER).axes;
 interface TestAxisScore {
@@ -88,7 +89,8 @@ describe("frozen source artifact provenance", () => {
             section: "reputation",
             title: "One adverse exact-name result",
             eligibleAxes: ["F1_identity_verifiability"],
-            verification: "reported",
+            verification: "verified",
+            counterEligibleAxes: ["F1_identity_verifiability"],
             scope: "direct_subject",
           },
         ],
@@ -158,6 +160,12 @@ describe("frozen source artifact provenance", () => {
     });
     expect(evidenceRows[1].captured_at).toEqual(expect.any(String));
     expect(Number.isNaN(Date.parse(evidenceRows[1].captured_at))).toBe(false);
+    expect(evidenceRows[1].metadata).toMatchObject({
+      counterEligibleAxes: ["F1_identity_verifiability"],
+      catalogArtifact: {
+        counterEligibleAxes: ["F1_identity_verifiability"],
+      },
+    });
     expect(Object.keys(evidenceRows[1]).sort()).toEqual(Object.keys(evidenceRows[0]).sort());
 
     const axisRows = JSON.parse(String((fetchMock.mock.calls[2][1] as RequestInit).body));
@@ -178,6 +186,149 @@ describe("frozen source artifact provenance", () => {
         ordinal: 0,
       }),
     ]));
+  });
+
+  it("requires and re-enforces frozen PROJECT strength bands at persistence", async () => {
+    const weights = getProfile(SubjectClass.PROJECT).axes;
+    const artifacts: AxisEvidenceRecord[] = Object.keys(weights).map((axis, index) => {
+      const contentHash = (index + 1).toString(16).repeat(64);
+      return {
+        artifactId: `art_v1_${contentHash}`,
+        contentHash,
+        kind: "axis_evidence",
+        provider: "project-control",
+        operation: "verified-project-anchor",
+        section: "basicFacts",
+        title: `Verified anchor for ${axis}`,
+        eligibleAxes: [axis],
+        verification: "verified",
+        scope: "direct_subject",
+      };
+    });
+    const projectStrengthBands = Object.fromEntries(Object.entries(weights).map(([axis, weight], index) => [axis, {
+      tier: "emerging",
+      minScore: Math.ceil(weight * 0.4),
+      maxScore: Math.floor(weight * 0.69),
+      reasons: [`Source-backed emerging evidence for ${axis}`],
+      anchorArtifactIds: [artifacts[index].artifactId],
+    }]));
+    const payload = {
+      axisCitationVersion: 1,
+      axisEvidenceCatalog: artifacts,
+      projectStrengthBands,
+      report: {
+        composite_verdict: "CAUTION",
+        governing_score: 42,
+        roles: ["PROJECT"],
+        role_reports: [{
+          role: "PROJECT",
+          axes: Object.fromEntries(Object.entries(weights).map(([axis, weight], index) => [axis, {
+            score: projectStrengthBands[axis].minScore,
+            weight,
+            rationale: `Emerging evidence supports ${axis}.`,
+            role: "PROJECT",
+            evidenceRefs: [artifacts[index].artifactId],
+            counterEvidenceRefs: [],
+            gaps: [],
+          }])),
+        }],
+      },
+    };
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const credentials = { url: "https://database.example", key: "sb_secret_test" };
+    const context = {
+      organizationId: "00000000-0000-4000-8000-000000000011",
+      reportVersionId: "00000000-0000-4000-8000-000000000022",
+      attestationState: "server_collected" as const,
+    };
+
+    await expect(persistProvenance(credentials, context, payload, [])).resolves.toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+
+    const missingBands = structuredClone(payload) as Partial<typeof payload>;
+    Reflect.deleteProperty(missingBands, "projectStrengthBands");
+    await expect(persistProvenance(credentials, context, missingBands, [])).rejects.toThrow(
+      "missing project strength band",
+    );
+
+    const inflated = structuredClone(payload);
+    inflated.report.role_reports[0].axes.P1_team_and_identity.score = 12;
+    await expect(persistProvenance(credentials, context, inflated, [])).rejects.toThrow(
+      "violates project strength band",
+    );
+
+    const positiveCounter = structuredClone(payload);
+    const positiveCounterHash = "f".repeat(64);
+    positiveCounter.axisEvidenceCatalog.push({
+      artifactId: `art_v1_${positiveCounterHash}`,
+      contentHash: positiveCounterHash,
+      kind: "axis_evidence",
+      provider: "project-control",
+      operation: "positive-project-context",
+      section: "basicFacts",
+      title: "Additional positive identity context",
+      eligibleAxes: ["P1_team_and_identity"],
+      verification: "verified",
+      scope: "direct_subject",
+    });
+    (positiveCounter.report.role_reports[0].axes.P1_team_and_identity.counterEvidenceRefs as string[])
+      .push(`art_v1_${positiveCounterHash}`);
+    await expect(persistProvenance(credentials, context, positiveCounter, [])).rejects.toThrow(
+      "cites non-limiting project counter-evidence",
+    );
+
+    const verifiedDrawdown = structuredClone(payload);
+    const drawdownHash = "e".repeat(64);
+    verifiedDrawdown.axisEvidenceCatalog.push({
+      artifactId: `art_v1_${drawdownHash}`,
+      contentHash: drawdownHash,
+      kind: "axis_evidence",
+      provider: "coingecko/dexscreener",
+      operation: "findings:ProjectTokenDrawdown",
+      section: "findings",
+      title: "Verified severe canonical-token market drawdown",
+      eligibleAxes: ["P5_traction_and_liveness"],
+      verification: "verified",
+      counterEligibleAxes: ["P5_traction_and_liveness"],
+      scope: "direct_subject",
+    });
+    verifiedDrawdown.projectStrengthBands.P5_traction_and_liveness = {
+      ...verifiedDrawdown.projectStrengthBands.P5_traction_and_liveness,
+      tier: "solid",
+      minScore: 10,
+      maxScore: 11,
+      reasons: ["Current protocol usage remains verified; severe token drawdown caps the axis at solid"],
+    };
+    verifiedDrawdown.report.role_reports[0].axes.P5_traction_and_liveness.score = 10;
+    (verifiedDrawdown.report.role_reports[0].axes.P5_traction_and_liveness.counterEvidenceRefs as string[])
+      .push(`art_v1_${drawdownHash}`);
+    await expect(persistProvenance(credentials, context, verifiedDrawdown, [])).resolves.toBeUndefined();
+
+    const overPenalizedDrawdown = structuredClone(verifiedDrawdown);
+    overPenalizedDrawdown.report.role_reports[0].axes.P5_traction_and_liveness.score = 9;
+    await expect(persistProvenance(credentials, context, overPenalizedDrawdown, [])).rejects.toThrow(
+      "violates project strength band",
+    );
+
+    const hiddenDrawdown = structuredClone(verifiedDrawdown);
+    hiddenDrawdown.report.role_reports[0].axes.P5_traction_and_liveness.counterEvidenceRefs = [];
+    await expect(persistProvenance(credentials, context, hiddenDrawdown, [])).rejects.toThrow(
+      "omits required project counter-evidence",
+    );
+
+    const forgedAdverse = structuredClone(payload);
+    forgedAdverse.projectStrengthBands.P1_team_and_identity = {
+      tier: "adverse",
+      minScore: 0,
+      maxScore: 6,
+      reasons: ["Purported adverse identity evidence"],
+      anchorArtifactIds: [artifacts[0].artifactId],
+    };
+    forgedAdverse.report.role_reports[0].axes.P1_team_and_identity.score = 3;
+    await expect(persistProvenance(credentials, context, forgedAdverse, [])).rejects.toThrow(
+      "violates project strength band",
+    );
   });
 
   it("rejects a scored role that omits any canonical axis", async () => {
@@ -353,6 +504,54 @@ describe("frozen source artifact provenance", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain("/evidence_items?");
     const rows = JSON.parse(String((fetchMock.mock.calls[0][1] as RequestInit).body));
     expect(rows).toEqual([expect.objectContaining({ evidence_key: artifactId })]);
+  });
+
+  it("persists PROJECT none bands as unscored INCOMPLETE evidence, never numeric zero", async () => {
+    const artifactId = `art_v1_${"e".repeat(64)}`;
+    const fetchMock = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const projectStrengthBands = Object.fromEntries(Object.keys(getProfile(SubjectClass.PROJECT).axes)
+      .map((axis) => [axis, {
+        tier: "none",
+        minScore: 0,
+        maxScore: 0,
+        reasons: [],
+        anchorArtifactIds: [],
+      }]));
+
+    await expect(persistProvenance(
+      { url: "https://database.example", key: "sb_secret_test" },
+      {
+        organizationId: "00000000-0000-4000-8000-000000000011",
+        reportVersionId: "00000000-0000-4000-8000-000000000022",
+        attestationState: "server_collected",
+      },
+      {
+        axisCitationVersion: 1,
+        axisEvidenceCatalog: [{
+          artifactId,
+          contentHash: "e".repeat(64),
+          kind: "axis_evidence",
+          provider: "argus-coverage",
+          operation: "coverage_gap:P1_team_and_identity",
+          section: "axisGaps",
+          title: "No retained project identity evidence",
+          eligibleAxes: ["P1_team_and_identity"],
+          verification: "unavailable",
+          scope: "direct_subject",
+        }],
+        projectStrengthBands,
+        report: {
+          composite_verdict: "INCOMPLETE",
+          governing_score: null,
+          roles: ["PROJECT"],
+          role_reports: [{ role: "PROJECT", score_total: null, axes: {} }],
+        },
+      },
+      [],
+    )).resolves.toBeUndefined();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it("treats an undefined lineage version as legacy payload shape", async () => {

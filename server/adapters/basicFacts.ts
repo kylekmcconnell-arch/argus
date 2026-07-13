@@ -32,6 +32,9 @@ const PREDICATES = new Set<BasicFactPredicate>([
   "legal_entity",
   "official_identity",
   "governance",
+  "tokenomics",
+  "vesting",
+  "treasury",
   "audit",
   "repository",
   "traction",
@@ -40,6 +43,52 @@ const PREDICATES = new Set<BasicFactPredicate>([
 const CRITICAL_PREDICATES = new Set<BasicFactPredicate>([
   "official_identity", "product", "founder", "executive", "official_token",
 ]);
+
+/**
+ * Reserve one model-ordered lead from each due-diligence category before the
+ * remaining slots are filled in model order. A broad response often starts
+ * with a long founder or investor roster; a plain `slice(0, MAX_LEADS)` would
+ * then discard later token, security, and traction disclosures entirely.
+ *
+ * There are fewer categories than MAX_LEADS, so a response that covers every
+ * category still retains room for additional atomic people, products, or
+ * investors from the model's original ordering.
+ */
+const LEAD_COVERAGE_CATEGORIES: readonly (readonly BasicFactPredicate[])[] = [
+  ["founder"],
+  ["executive"],
+  ["product"],
+  ["official_identity", "legal_entity"],
+  ["official_token"],
+  ["tokenomics"],
+  ["vesting"],
+  ["treasury"],
+  ["audit"],
+  ["traction"],
+  ["governance"],
+  ["repository"],
+  ["funding", "investor"],
+  ["network"],
+  ["founded", "launched"],
+];
+
+function selectBasicFactLeads(leads: readonly BasicFactLead[]): BasicFactLead[] {
+  if (leads.length <= MAX_LEADS) return leads.slice();
+
+  const selected = new Set<number>();
+  for (const predicates of LEAD_COVERAGE_CATEGORIES) {
+    const index = leads.findIndex((lead, leadIndex) =>
+      !selected.has(leadIndex) && predicates.includes(lead.predicate));
+    if (index >= 0) selected.add(index);
+  }
+  for (let index = 0; index < leads.length && selected.size < MAX_LEADS; index += 1) {
+    selected.add(index);
+  }
+
+  // Filtering by original index keeps the model's ordering stable while the
+  // selected set guarantees later categories cannot be starved by early rows.
+  return leads.filter((_lead, index) => selected.has(index)).slice(0, MAX_LEADS);
+}
 
 type DiscoveryProvider = BasicFactLead["provider"];
 type RequestFn = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
@@ -188,9 +237,8 @@ export function parseBasicFactLeads(
       artifact_verified: false,
       provider,
     });
-    if (leads.length >= MAX_LEADS) break;
   }
-  return leads;
+  return selectBasicFactLeads(leads);
 }
 
 function subjectName(ctx: CollectContext): string {
@@ -216,14 +264,15 @@ function discoveryPrompt(ctx: CollectContext): string {
     `Research foundational due-diligence facts for ${subjectName(ctx)} (${ctx.handle}).`,
     profile.website ? `Known official website: ${profile.website}` : "",
     profile.bio ? `Profile bio: ${profile.bio.slice(0, 800)}` : "",
-    "Find facts a competent analyst must not miss: official identity, every named founder and executive, founding and launch dates, official token, funding and named investors, core products, network/chain, legal entity, governance, security audits, source repositories, and concrete traction metrics.",
+    "Find facts a competent analyst must not miss: official identity, every named founder and executive, founding and launch dates, official token, funding and named investors, core products, network/chain, legal entity, governance, tokenomics and allocation, vesting and unlock schedules, treasury disclosures, security audits, source repositories, and concrete traction metrics.",
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
     "Each exact_excerpt must be a verbatim one-to-three sentence passage that itself explicitly contains the subject identity, the claimed value, and language proving the predicate.",
+    "For traction facts, copy the source's exact as-of date or reporting period into qualifier, preferably an explicit date phrase, only when that phrase appears in exact_excerpt. Never infer, normalize, or invent a date. Omit qualifier when the source does not state a period.",
     "For candidate_urls, include up to three additional public pages that explicitly state the same atomic fact. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url.",
     "Do not infer. A search answer is only a lead; ARGUS will fetch and verify every URL independently.",
     "Return JSON only in this exact shape:",
-    '{"facts":[{"subject":"...","predicate":"founder|executive|founded|launched|official_token|funding|investor|product|network|legal_entity|official_identity|governance|audit|repository|traction","value":"one atomic value","qualifier":"optional exact role or metric label","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}',
+    '{"facts":[{"subject":"...","predicate":"founder|executive|founded|launched|official_token|funding|investor|product|network|legal_entity|official_identity|governance|tokenomics|vesting|treasury|audit|repository|traction","value":"one atomic value","qualifier":"optional verbatim role, metric label, or traction as-of/reporting period present in exact_excerpt","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}',
   ].filter(Boolean).join("\n");
 }
 
@@ -295,7 +344,7 @@ export async function discoverBasicFactLeads(
 ): Promise<BasicFactLead[] | null> {
   if (!env("ANTHROPIC_API_KEY") && !dependencies.request) return null;
   const canonicalSubject = subjectName(ctx);
-  const cacheKey = `basic-facts:v2:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
+  const cacheKey = `basic-facts:v3:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}:${ctx.evidence.profile.website ?? ""}`;
   const cacheRead = dependencies.cacheRead ?? ((key: string) => cacheGet(key, { operation: "basic-facts-hit", meta: "24h Claude web-search cache" }));
   const cacheWrite = dependencies.cacheWrite ?? cacheSet;
   const cached = await cacheRead(cacheKey);
@@ -323,7 +372,7 @@ async function discoverWithFallback(ctx: CollectContext): Promise<BasicFactLead[
   const text = await grokSearch(
     "You are ARGUS's basic-facts research scout. Use live web search. Return only the requested JSON. All output remains an unverified lead.",
     discoveryPrompt(ctx),
-    { maxToolCalls: MAX_SEARCH_USES, cacheKey: `basic-facts-grok:v2:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}` },
+    { maxToolCalls: MAX_SEARCH_USES, cacheKey: `basic-facts-grok:v3:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}` },
   );
   return text ? parseBasicFactLeads(text, subjectName(ctx), "grok") : claude;
 }
@@ -362,6 +411,9 @@ const PREDICATE_PATTERNS: Record<BasicFactPredicate, RegExp> = {
   legal_entity: /\b(?:legal entity|company|corporation|incorporated|foundation|limited|ltd\.?|inc\.?|llc|labs)\b/i,
   official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company)\b/i,
   governance: /\b(?:governance|governed|dao|proposal|vote|voting|council|multisig|multi-sig)\b/i,
+  tokenomics: /\b(?:tokenomics|token allocation|token distribution|allocation|distribution|emissions?|circulating supply|total supply|max(?:imum)? supply)\b/i,
+  vesting: /\b(?:vesting|vested|unlock(?:s|ed|ing)?|cliff|lockup|lock-up|release schedule)\b/i,
+  treasury: /\b(?:treasury|reserves?|treasury wallet|treasury report|multisig|multi-sig)\b/i,
   audit: /\b(?:audit|audited|security review|security assessment|formal verification)\b/i,
   repository: /\b(?:github|source code|codebase|repository|repo|open source|open-source)\b/i,
   traction: /\b(?:users?|customers?|volume|tvl|total value locked|transactions?|revenue|fees|usage|adoption|downloads?|active wallets?)\b/i,
@@ -554,6 +606,7 @@ export function verifyBasicFactLead(
 
 const MULTI_VALUE_PREDICATES = new Set<BasicFactPredicate>([
   "founder", "executive", "product", "funding", "investor", "governance",
+  "tokenomics", "vesting", "treasury",
   "audit", "repository", "traction",
 ]);
 
@@ -666,8 +719,9 @@ export async function collectBasicFacts(
 
   const leads = await discover(ctx);
   if (!leads) return { state: "failed", detail: "basic-facts discovery failed" };
-  ctx.evidence.basicFactLeads = leads.slice(0, MAX_LEADS).map((lead) => ({ ...lead }));
-  if (!leads.length) {
+  const boundedLeads = selectBasicFactLeads(leads);
+  ctx.evidence.basicFactLeads = boundedLeads.map((lead) => ({ ...lead }));
+  if (!boundedLeads.length) {
     ctx.evidence.basicFacts = [];
     return { state: "partial", detail: "search returned no source-linked basic-fact candidates" };
   }
@@ -700,9 +754,21 @@ export async function collectBasicFacts(
     return pending;
   };
 
-  const boundedLeads = leads.slice(0, MAX_LEADS);
   const variants = verificationLeadVariants(ctx, boundedLeads, officialHosts);
-  const allowedSources = new Set([...new Set(variants.map(({ lead }) => lead.sourceUrl))].slice(0, MAX_SOURCES));
+  // Give every selected lead one verification attempt before spending the
+  // remaining budget on corroboration. Otherwise several official candidate
+  // URLs attached to early people can consume the global source cap before a
+  // later tokenomics, security, or traction lead's primary source is fetched.
+  const primarySources = boundedLeads.flatMap((lead): string[] => {
+    const sourceUrl = safeCandidateUrl(lead.sourceUrl);
+    return sourceUrl ? [sourceUrl] : [];
+  });
+  const allowedSources = new Set([...new Set([
+    ...primarySources,
+    // Variants are already sorted by official-domain and primary/candidate
+    // priority, so the remaining source slots retain deterministic quality.
+    ...variants.map(({ lead }) => lead.sourceUrl),
+  ])].slice(0, MAX_SOURCES));
   const verified = (await Promise.all(variants
     .filter(({ lead }) => allowedSources.has(lead.sourceUrl))
     .map(async ({ lead }) => {

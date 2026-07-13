@@ -21,6 +21,7 @@ import {
   analystAvailable,
   analyzeSubject,
   buildScoringEvidencePacket,
+  deriveProjectStrengthBands,
   extractClaims,
   extractScoringEvidenceCatalog,
   inspectAnalystScoringPreflight,
@@ -841,7 +842,8 @@ const PROJECT_BACKING_PROVIDERS = new Set(["team-page", "twitterapi"]);
  * Record the project-check outcomes that core collection can defend today.
  * This deliberately does not turn model search, notable followers, or a
  * generic "partner" title into evidence of project backing. Transparency stays
- * unavailable until a dedicated first-party disclosure collector is wired.
+ * unavailable until a fetched source directly proves a governance or audit
+ * disclosure instead of merely appearing on a governance-themed URL.
  */
 export function collectProjectCoreEvidenceOutcomes(ctx: CollectContext): {
   state: "partial" | "skipped";
@@ -917,6 +919,46 @@ export function collectProjectCoreEvidenceOutcomes(ctx: CollectContext): {
     state: "partial",
     detail: `bounded frozen-evidence scan completed with ${backingCount} verified backing record${backingCount === 1 ? "" : "s"} and ${verifiedDisclosures.length} verified disclosure record${verifiedDisclosures.length === 1 ? "" : "s"}`,
   };
+}
+
+/**
+ * Freeze a severe canonical-token drawdown as its own score-limiting fact.
+ * The verified project-token snapshot remains positive identity/market
+ * evidence; this separate record prevents one citation from appearing as both
+ * support and counter-evidence. Drawdown alone is explicitly not misconduct.
+ */
+export function recordProjectTokenDrawdownFinding(evidence: CollectedEvidence): boolean {
+  const token = evidence.projectToken;
+  const drawdownPct = token?.history?.drawdownPct;
+  const historySourceUrl = token?.history?.sourceUrl;
+  if (
+    !token
+    || typeof drawdownPct !== "number"
+    || !Number.isFinite(drawdownPct)
+    || drawdownPct > -70
+    || !historySourceUrl
+  ) {
+    return false;
+  }
+  if (evidence.findings.some((finding) =>
+    finding.finding_type === "ProjectTokenDrawdown"
+    && finding.source_url === historySourceUrl,
+  )) return false;
+
+  const timeframe = token.history!.timeframe === "hour" ? "hourly" : "daily";
+  evidence.findings.push({
+    finding_type: "ProjectTokenDrawdown",
+    claim: `$${token.symbol} recorded a verified ${Math.abs(drawdownPct).toFixed(1)}% peak-to-latest drawdown in the captured GeckoTerminal ${timeframe} OHLCV window. CoinGecko and DexScreener established canonical token and pool context; price drawdown alone does not establish misconduct.`,
+    source_url: historySourceUrl,
+    source_date: token.capturedAt,
+    source_author: "geckoterminal",
+    verification_status: "Verified",
+    independent_source_count: 1,
+    polarity: -1,
+    evidence_origin: "deterministic",
+    artifact_verified: true,
+  });
+  return true;
 }
 
 // ── Phase 3.5: adverse-signal sweep, manipulation-tooling flag, cross-project
@@ -1467,6 +1509,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     const before = attemptTotals(providers);
     try {
       const result = await collectProjectTokenIdentity(ctx);
+      const recordedDrawdown = recordProjectTokenDrawdownFinding(evidence);
+      if (recordedDrawdown) {
+        emit({
+          phase: "Token",
+          label: "Canonical token drawdown",
+          detail: `${evidence.projectToken?.symbol ?? "Token"} market drawdown was frozen as traction counter-evidence; it is not treated as misconduct.`,
+          source: "project-token-market",
+          tone: "warn",
+        });
+      }
       const attempts = attemptDelta(before, attemptTotals(providers));
       const state = adapterRunState(result, attempts);
       checkTracker.provider(
@@ -1595,9 +1647,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     emit({ phase: "P0 · Routing", label: "Role unresolved", detail: "No deterministic or provider-corroborated role evidence was collected. Model role candidates remain leads; the report will publish INCOMPLETE.", tone: "warn" });
   }
 
-  // Project backing is a bounded read over already-frozen first-party evidence.
-  // Transparency remains explicitly unavailable until a first-party docs/audit
-  // collector exists; an official token binding is not allowed to complete it.
+  // Project backing and disclosure outcomes are bounded reads over already
+  // frozen first-party evidence. An official token binding alone is never
+  // allowed to complete transparency.
   try {
     const projectOutcomes = collectProjectCoreEvidenceOutcomes(ctx);
     checkTracker.provider(
@@ -1757,7 +1809,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     // both the subject scorer and contradiction analyzer context.
     const requestedAxes = axisCatalog(evidence.roles);
     const evidenceJson = buildScoringEvidencePacket(baseEvidence, requestedAxes);
-    const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson);
+    const frozenAxisEvidence = extractScoringEvidenceCatalog(evidenceJson, requestedAxes);
+    const projectStrengthBands = deriveProjectStrengthBands(evidenceJson, requestedAxes);
     const scoringPreflight = inspectAnalystScoringPreflight(requestedAxes, evidenceJson);
     const decisionPacketUsable = scoringPreflight.state === "ready"
       || scoringPreflight.state === "insufficient_evidence";
@@ -1770,6 +1823,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     if (frozenAxisEvidence.length > 0) {
       evidence.axisCitationVersion = 1;
       evidence.axisEvidenceCatalog = frozenAxisEvidence;
+      if (Object.keys(projectStrengthBands).length > 0) {
+        evidence.projectStrengthBands = projectStrengthBands;
+      }
     }
     // The validator accepts all requested axes or none, and the collector ledger
     // must independently confirm that a fresh analyst attempt occurred.
