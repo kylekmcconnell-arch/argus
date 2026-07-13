@@ -1382,6 +1382,62 @@ describe("report bundle migration contract (static SQL assertions only)", () => 
   });
 });
 
+describe("report bundle ambiguity repair migration", () => {
+  const originalSql = readFileSync(
+    new URL("../supabase/migrations/20260713181834_persist_report_version_bundle.sql", import.meta.url),
+    "utf8",
+  );
+  const sql = readFileSync(
+    new URL(
+      "../supabase/migrations/20260713185911_fix_persist_report_version_bundle_ambiguity.sql",
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  it("uses named constraints instead of ambiguous RETURNS TABLE output names", () => {
+    expect(sql).toContain(
+      "on conflict on constraint evidence_items_report_key_unique do nothing",
+    );
+    expect(sql).toContain(
+      "on conflict on constraint check_runs_report_version_id_check_id_key do nothing",
+    );
+    expect(sql).toContain(
+      "on conflict on constraint report_axis_evidence_pkey do nothing",
+    );
+    expect(sql).not.toMatch(/on conflict\s*\(\s*report_version_id\b/i);
+  });
+
+  it("changes only the three ambiguous conflict targets", () => {
+    const functionStart = sql.indexOf("-- Persist the immutable report parent");
+    const normalizedRepair = sql
+      .slice(functionStart)
+      .replace(
+        "on conflict on constraint evidence_items_report_key_unique do nothing",
+        "on conflict (report_version_id, evidence_key) do nothing",
+      )
+      .replace(
+        "on conflict on constraint check_runs_report_version_id_check_id_key do nothing",
+        "on conflict (report_version_id, check_id) do nothing",
+      )
+      .replace(
+        "on conflict on constraint report_axis_evidence_pkey do nothing",
+        "on conflict (report_version_id, role, axis_id, relation, ordinal) do nothing",
+      );
+    expect(functionStart).toBeGreaterThan(-1);
+    expect(normalizedRepair).toBe(originalSql);
+  });
+
+  it("preserves the bounded service-only atomic RPC contract", () => {
+    expect(sql).toContain("create or replace function public.persist_report_version_bundle");
+    expect(sql).toContain("security invoker");
+    expect(sql).toContain("set search_path = ''");
+    expect(sql).toContain("immutable report provenance materialization mismatch");
+    expect(sql).toContain(") from public, anon, authenticated, service_role;");
+    expect(sql).toContain(") to service_role;");
+  });
+});
+
 describe("axis evidence migration contract (static SQL assertions only)", () => {
   const sql = readFileSync(
     new URL("../supabase/migrations/20260711212542_axis_evidence_lineage.sql", import.meta.url),

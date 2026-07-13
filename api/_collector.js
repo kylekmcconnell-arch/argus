@@ -7761,7 +7761,8 @@ var CRITICAL_PREDICATES = /* @__PURE__ */ new Set([
   "founder",
   "executive",
   "track_record",
-  "official_token"
+  "official_token",
+  "public_security"
 ]);
 var LEAD_COVERAGE_CATEGORIES = [
   ["official_identity"],
@@ -7834,8 +7835,8 @@ var PERSON_QUESTIONS2 = [
   { batch: "track_record", predicate: "product", question: "What products or protocols did this person materially build or lead? Return one per answer." },
   { batch: "track_record", predicate: "exit", question: "What acquisitions, IPOs, sales, shutdowns, or other venture exits are source-backed? Return one event per answer." },
   { batch: "track_record", predicate: "track_record", question: "What concrete operating or investment outcomes establish this person's track record? Return one measurable outcome per answer." },
-  { batch: "structure_risk", predicate: "official_token", question: "Which crypto token is officially tied to a venture this person controls, if any? Do not report public-company stock here." },
-  { batch: "structure_risk", predicate: "public_security", question: "Which publicly traded equity or debt security is tied to a company this person controls, if any? Do not report a crypto token here." },
+  { batch: "structure_risk", predicate: "official_token", question: "Which crypto token is officially tied to a venture this person controls, if any? Do not report public-company stock here.", critical: true },
+  { batch: "structure_risk", predicate: "public_security", question: "Which publicly traded equity or debt security is tied to a company this person controls, if any? Do not report a crypto token here.", critical: true },
   { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events explicitly name this person, and what is each event's stated status? Never transfer a company-only event to the person." },
   { batch: "structure_risk", predicate: "governance", question: "What formal governance roles does this person hold?" },
   { batch: "structure_risk", predicate: "control", question: "What ownership, voting, board, admin-key, multisig, or treasury control is explicitly attributed to this person?" },
@@ -7854,8 +7855,8 @@ var INVESTOR_QUESTIONS2 = [
   { batch: "track_record", predicate: "product", question: "What products, protocols, or investment platforms did this person materially build or lead?" },
   { batch: "track_record", predicate: "exit", question: "Which portfolio exits or realized outcomes are source-backed and correctly attributed?" },
   { batch: "track_record", predicate: "track_record", question: "What concrete fund, portfolio, or operating outcomes establish this investor's track record?", critical: true },
-  { batch: "structure_risk", predicate: "public_security", question: "Which publicly traded security is directly relevant to this investor or controlled company, if any?" },
-  { batch: "structure_risk", predicate: "official_token", question: "Which official crypto token is directly tied to a venture this investor controls, if any? Do not treat a stock ticker as a token." },
+  { batch: "structure_risk", predicate: "public_security", question: "Which publicly traded security is directly relevant to this investor or controlled company, if any?", critical: true },
+  { batch: "structure_risk", predicate: "official_token", question: "Which official crypto token is directly tied to a venture this investor controls, if any? Do not treat a stock ticker as a token.", critical: true },
   { batch: "structure_risk", predicate: "legal_entity", question: "Which legal entity employs the investor or manages the disclosed fund?" },
   { batch: "structure_risk", predicate: "legal_regulatory_event", question: "What material legal or regulatory events explicitly name this investor or their firm, with exact attribution and current stated status?" },
   { batch: "structure_risk", predicate: "governance", question: "What formal board, governance, or voting roles are documented?" },
@@ -9573,26 +9574,60 @@ function mergeLeads(primary, repair) {
   });
   return selectBasicFactLeads(merged);
 }
+var SEC_EXCHANGE_REGISTRY_URL = "https://www.sec.gov/files/company_tickers_exchange.json";
 var CURRENT_CONTROL_ROLE = /\b(?:co[- ]?founder|founder|chief executive officer|ceo|chair(?:man|woman|person)?|owner|controlling)\b/i;
 var CURRENT_PERIOD = /\b(?:current|currently|now|ongoing|present|today)\b/i;
 var VENTURE_IDENTITY_STOP_WORDS = /* @__PURE__ */ new Set([
+  "co",
   "company",
+  "corp",
+  "corporation",
   "dao",
   "exchange",
   "foundation",
   "global",
   "group",
+  "holding",
   "holdings",
   "inc",
   "labs",
   "limited",
   "llc",
+  "ltd",
   "network",
+  "plc",
   "project",
   "protocol",
   "technologies",
   "technology",
   "the"
+]);
+var COMMON_COUNTRY_PUBLIC_SUFFIX_LABELS = /* @__PURE__ */ new Set([
+  "ac",
+  "co",
+  "com",
+  "edu",
+  "gov",
+  "net",
+  "org"
+]);
+var REGISTRY_LEGAL_ENTITY_TOKENS = /* @__PURE__ */ new Set([
+  "company",
+  "corp",
+  "corporation",
+  "inc",
+  "incorporated",
+  "limited",
+  "llc",
+  "ltd",
+  "plc",
+  "the"
+]);
+var REGISTRY_SHORTHAND_QUALIFIERS = /* @__PURE__ */ new Set([
+  "global",
+  "group",
+  "holding",
+  "holdings"
 ]);
 function safeVentureScope(value) {
   if (!value?.trim()) return null;
@@ -9640,6 +9675,157 @@ function verifiedVentureAssetRelationships(ctx) {
     if (venture.artifact_verified !== true || venture.evidence_origin === "model_lead" || !venture.project_name?.trim() || !CURRENT_CONTROL_ROLE.test(venture.role ?? "") || !CURRENT_PERIOD.test(venture.period ?? "")) return [];
     const officialScopes = verifiedVentureOfficialScopes(venture);
     return officialScopes.length ? [{ name: venture.project_name.trim(), officialScopes }] : [];
+  });
+}
+function currentRoleRelationshipParts(value) {
+  const direct = /^(.{2,160}?)\s+(?:at|of)\s+(.{2,160})$/i.exec(normalize(value));
+  const comma = direct ? null : /^(.{2,160}?),\s+(.{2,160})$/.exec(normalize(value));
+  const role = clean(direct?.[1] ?? comma?.[1], 160);
+  const name = clean(direct?.[2] ?? comma?.[2], 160);
+  return role && name && CURRENT_CONTROL_ROLE.test(role) ? { role, name } : null;
+}
+function scopeMatchesOrganizationIdentity(scope, name) {
+  let url;
+  try {
+    url = new URL(scope);
+  } catch {
+    return false;
+  }
+  const identityTokens = looseTokens(name).filter((token) => token.length >= 4 && !VENTURE_IDENTITY_STOP_WORDS.has(token));
+  if (!identityTokens.length) return false;
+  const host = normalizedHost(url.hostname);
+  if (PATH_TENANTED_HOSTS.has(host)) {
+    let decodedPath;
+    try {
+      decodedPath = decodeURIComponent(url.pathname);
+    } catch {
+      return false;
+    }
+    const pathTokens = looseTokens(decodedPath);
+    return identityTokens.some((token) => pathTokens.includes(token));
+  }
+  const hostLabels = host.split(".").map((label) => label.replace(/[^a-z0-9]/g, ""));
+  const lastLabel = hostLabels.at(-1) ?? "";
+  const penultimateLabel = hostLabels.at(-2) ?? "";
+  const suffixWidth = hostLabels.length >= 3 && lastLabel.length === 2 && COMMON_COUNTRY_PUBLIC_SUFFIX_LABELS.has(penultimateLabel) ? 2 : 1;
+  const organizationLabel = hostLabels.at(-(suffixWidth + 1));
+  return Boolean(organizationLabel && identityTokens.includes(organizationLabel));
+}
+function verifiedFactAssetRelationships(ctx, facts) {
+  const aliases = subjectAliases(ctx);
+  return facts.flatMap((fact) => {
+    if (fact.predicate !== "current_role" || fact.artifact_verified !== true || fact.status !== "verified" && fact.status !== "corroborated") return [];
+    const relationship = currentRoleRelationshipParts(fact.value);
+    if (!relationship) return [];
+    const scopes = fact.sources.flatMap((source2) => {
+      if (source2.artifactVerified !== true || source2.relation !== "supports" || !hasSubjectAlias(source2.excerpt, aliases) || !CURRENT_CONTROL_ROLE.test(source2.excerpt) || !PREDICATE_PATTERNS.current_role.test(source2.excerpt) || !scopeMatchesOrganizationIdentity(source2.url, relationship.name)) return [];
+      const scope = safeVentureScope(source2.url);
+      return scope ? [scope] : [];
+    });
+    return scopes.length ? [{ name: relationship.name, officialScopes: [...new Set(scopes)] }] : [];
+  });
+}
+function mergeVentureAssetRelationships(relationships) {
+  const merged = /* @__PURE__ */ new Map();
+  for (const relationship of relationships) {
+    const key = ventureRegistryIdentity(relationship.name);
+    if (!key) continue;
+    const existing = merged.get(key);
+    if (!existing) {
+      merged.set(key, { name: relationship.name, officialScopes: [...new Set(relationship.officialScopes)] });
+      continue;
+    }
+    existing.officialScopes = [.../* @__PURE__ */ new Set([...existing.officialScopes, ...relationship.officialScopes])];
+  }
+  return [...merged.values()];
+}
+function secExchangeRegistryRows(document) {
+  let payload;
+  try {
+    payload = JSON.parse(document.text);
+  } catch {
+    return null;
+  }
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return null;
+  const fields = payload.fields;
+  const data = payload.data;
+  if (!Array.isArray(fields) || !Array.isArray(data)) return null;
+  const indexes = new Map(fields.map((field, index) => [String(field).trim().toLowerCase(), index]));
+  const cikIndex = indexes.get("cik");
+  const nameIndex = indexes.get("name");
+  const tickerIndex = indexes.get("ticker");
+  const exchangeIndex = indexes.get("exchange");
+  if ([cikIndex, nameIndex, tickerIndex, exchangeIndex].some((index) => index === void 0)) return null;
+  return data.flatMap((raw) => {
+    if (!Array.isArray(raw)) return [];
+    const cik = Number(raw[cikIndex]);
+    const name = clean(raw[nameIndex], 240);
+    const ticker = clean(raw[tickerIndex], 24)?.toUpperCase();
+    const exchange = clean(raw[exchangeIndex], 80);
+    if (!Number.isSafeInteger(cik) || cik <= 0 || !name || !ticker || !exchange || !/^[A-Z0-9][A-Z0-9.-]{0,23}$/.test(ticker)) return [];
+    return [{ cik, name, ticker, exchange, raw }];
+  });
+}
+function ventureRegistryIdentity(value) {
+  return looseTokens(value).filter((token) => token.length >= 2 && !REGISTRY_LEGAL_ENTITY_TOKENS.has(token)).join(" ");
+}
+function registryIssuerMatchesRelationship(issuerName, relationshipName) {
+  const issuerTokens = ventureRegistryIdentity(issuerName).split(" ").filter(Boolean);
+  const relationshipTokens = ventureRegistryIdentity(relationshipName).split(" ").filter(Boolean);
+  if (!issuerTokens.length || !relationshipTokens.length) return false;
+  if (issuerTokens.length === relationshipTokens.length) {
+    return issuerTokens.every((token, index) => token === relationshipTokens[index]);
+  }
+  return issuerTokens.length > relationshipTokens.length && relationshipTokens.every((token, index) => token === issuerTokens[index]) && issuerTokens.slice(relationshipTokens.length).every((token) => REGISTRY_SHORTHAND_QUALIFIERS.has(token));
+}
+function exactSecRegistryExcerpt(document, raw) {
+  const serialized = JSON.stringify(raw);
+  const exactIndex = document.text.indexOf(serialized);
+  if (exactIndex >= 0) return document.text.slice(exactIndex, exactIndex + serialized.length);
+  const values = raw.map((value) => escapedPattern(String(value)));
+  const pattern = new RegExp(`\\[\\s*${values.join("\\s*,\\s*")}\\s*\\]`);
+  return document.text.match(pattern)?.[0] ?? null;
+}
+function secRegistryPublicSecurityFacts(ctx, document, relationships, questionId) {
+  const rows = secExchangeRegistryRows(document);
+  if (!rows) return [];
+  const retrievalProvider = "retrievalProvider" in document && document.retrievalProvider === "jina-reader" ? "jina-reader" : "public-web";
+  return relationships.flatMap((relationship) => {
+    const relationshipIdentity = ventureRegistryIdentity(relationship.name);
+    if (!relationshipIdentity) return [];
+    const matches = rows.filter((row) => registryIssuerMatchesRelationship(row.name, relationship.name));
+    const issuerCiks = new Set(matches.map((row) => row.cik));
+    if (issuerCiks.size !== 1) return [];
+    return matches.flatMap((row) => {
+      const excerpt = exactSecRegistryExcerpt(document, row.raw);
+      if (!excerpt) return [];
+      const venue = row.exchange.toUpperCase() === "NASDAQ" ? "NASDAQ" : row.exchange.toUpperCase();
+      const value = `${row.ticker} (${relationship.name}, ${venue}-listed security)`;
+      return [{
+        factId: factId(ctx.handle, "public_security", value),
+        subjectKey: ctx.handle,
+        predicate: "public_security",
+        value,
+        normalizedValue: canonicalBasicFactComparisonValue("public_security", searchable(value)),
+        status: "verified",
+        critical: true,
+        questionId,
+        sources: [{
+          url: document.url,
+          title: "SEC company ticker and exchange registry",
+          sourceClass: "regulatory_or_onchain",
+          relation: "supports",
+          excerpt,
+          contentHash: document.contentHash,
+          capturedAt: document.capturedAt,
+          provider: retrievalProvider,
+          artifactVerified: true
+        }],
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "public-web"
+      }];
+    });
   });
 }
 function verifiedCounterpartyHosts(ctx) {
@@ -9816,8 +10002,26 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   }
   const repairLeads = selectBasicFactLeads(repair.leads);
   const repairVerified = await verifyLeads(repairLeads, Math.min(12, MAX_SOURCES));
+  const sourceVerifiedBeforeRegistry = resolveBasicFactCandidates([...primaryVerified, ...repairVerified]);
+  const authoritativeAssetRelationships = mergeVentureAssetRelationships([
+    ...ventureAssetRelationships,
+    ...verifiedFactAssetRelationships(ctx, sourceVerifiedBeforeRegistry)
+  ]);
+  let registryVerified = [];
+  const publicSecurityQuestion = questions.find((question) => question.predicate === "public_security");
+  if (publicSecurityQuestion && authoritativeAssetRelationships.length && !sourceVerifiedBeforeRegistry.some((fact) => fact.predicate === "public_security" && (fact.status === "verified" || fact.status === "corroborated"))) {
+    const registry = await fetchOnce(SEC_EXCHANGE_REGISTRY_URL);
+    if (registry.status === "ok") {
+      registryVerified = secRegistryPublicSecurityFacts(
+        ctx,
+        registry,
+        authoritativeAssetRelationships,
+        publicSecurityQuestion.id
+      );
+    }
+  }
   const allLeads = mergeLeads(primaryLeads, repairLeads);
-  const verified = [...primaryVerified, ...repairVerified];
+  const verified = [...primaryVerified, ...registryVerified, ...repairVerified];
   ctx.evidence.basicFactLeads = allLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = resolveBasicFactCandidates(verified);
   const repairQuestionIds = new Set(missingCritical.map((question) => question.id));

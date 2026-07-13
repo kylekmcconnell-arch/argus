@@ -127,6 +127,16 @@ describe("basic-facts lead parsing", () => {
     ]));
     expect(founder.find((question) => question.id === "person.founder")?.critical).toBe(true);
     expect(founder.find((question) => question.id === "person.track_record")?.critical).toBe(true);
+    expect(founder.find((question) => question.id === "person.public_security")?.critical).toBe(true);
+    expect(founder.find((question) => question.id === "person.official_token")?.critical).toBe(true);
+
+    // Founder routing can crystallize from the facts collected in this pass.
+    // The generic-person ledger must therefore repair the two asset questions
+    // before that later routing decision, rather than discovering them too late.
+    ctx.evidence.roles = [SubjectClass.MEMBER];
+    const person = basicFactsResearchQuestions(ctx);
+    expect(person.find((question) => question.id === "person.public_security")?.critical).toBe(true);
+    expect(person.find((question) => question.id === "person.official_token")?.critical).toBe(true);
 
     ctx.evidence.roles = [SubjectClass.INVESTOR, SubjectClass.FOUNDER];
     const investor = basicFactsResearchQuestions(ctx);
@@ -139,6 +149,8 @@ describe("basic-facts lead parsing", () => {
     ]));
     expect(investor.find((question) => question.id === "investor.investor")?.critical).toBe(true);
     expect(investor.find((question) => question.id === "investor.founder")?.critical).toBe(true);
+    expect(investor.find((question) => question.id === "investor.public_security")?.critical).toBe(true);
+    expect(investor.find((question) => question.id === "investor.official_token")?.critical).toBe(true);
   });
 
   it.each([
@@ -2015,6 +2027,300 @@ describe("basic-facts source verification", () => {
           expect.objectContaining({ phase: "repair", state: "completed_empty" }),
         ]),
       }));
+  });
+
+  it("recovers Brian's COIN distinction from the SEC registry when model discovery fails", async () => {
+    const { ctx, evidence } = context("https://brianarmstrong.org");
+    ctx.handle = "@brian_armstrong";
+    evidence.profile.handle = "@brian_armstrong";
+    evidence.profile.display_name = "Brian Armstrong";
+    evidence.profile.resolved_name = "Brian Armstrong";
+    // Deliberately begin as a generic person. This mirrors the live failure in
+    // which founder routing and the verified company relationship became
+    // definitive only from repair-produced facts.
+    evidence.roles = [SubjectClass.MEMBER];
+    const boardUrl = "https://investor.coinbase.com/governance/board-of-directors/default.aspx";
+    const xUrl = "https://x.com/brian_armstrong";
+    const currentRoleValue = "Co-founder and CEO at Coinbase";
+    const registryUrl = "https://www.sec.gov/files/company_tickers_exchange.json";
+    const registryPayload = {
+      fields: ["cik", "name", "ticker", "exchange"],
+      data: [[1679788, "Coinbase Global, Inc.", "COIN", "Nasdaq"]],
+    };
+    let repairQuestionIds: string[] = [];
+
+    await collectBasicFacts(ctx, {
+      discover: async () => ({
+        provider: "claude-web-search",
+        state: "failed",
+        leads: [],
+        attempts: 1,
+        completedBatches: 0,
+        failedBatches: 3,
+        batchStates: { identity: "failed", track_record: "failed", structure_risk: "failed" },
+      }),
+      repair: async (_repairContext, questions) => {
+        repairQuestionIds = questions.map((question) => question.id);
+        return {
+          provider: "grok",
+          state: "partial",
+          leads: [
+            lead({
+              subject: "Brian Armstrong",
+              predicate: "current_role",
+              value: currentRoleValue,
+              questionId: "person.current_role",
+              excerpt: "At Coinbase, Brian Armstrong is our co-founder and has served as our Chief Executive Officer since 2012.",
+              sourceUrl: boardUrl,
+              provider: "grok",
+            }),
+            lead({
+              subject: "Brian Armstrong",
+              predicate: "current_role",
+              value: currentRoleValue,
+              questionId: "person.current_role",
+              excerpt: "Brian Armstrong is Co-founder and CEO at Coinbase.",
+              sourceUrl: xUrl,
+              provider: "grok",
+            }),
+          ],
+          attempts: 2,
+          completedBatches: 1,
+          failedBatches: 1,
+          batchStates: { identity: "succeeded", structure_risk: "partial" },
+          questionStates: { "person.official_token": "completed_empty" },
+          questionProviders: { "person.official_token": "claude-web-search" },
+        };
+      },
+      fetchSource: fetchDocuments({
+        [boardUrl]: document({
+          url: boardUrl,
+          host: "investor.coinbase.com",
+          text: "<p>At Coinbase, Brian Armstrong is our co-founder and has served as our Chief Executive Officer since 2012.</p>",
+          contentHash: "7".repeat(64),
+        }),
+        [xUrl]: document({
+          url: xUrl,
+          host: "x.com",
+          text: "<p>Brian Armstrong is Co-founder and CEO at Coinbase.</p>",
+          contentHash: "8".repeat(64),
+        }),
+        [registryUrl]: document({
+          url: registryUrl,
+          host: "www.sec.gov",
+          contentType: "application/json",
+          text: JSON.stringify(registryPayload),
+          contentHash: "9".repeat(64),
+        }),
+      }),
+    });
+
+    expect(repairQuestionIds).toContain("person.official_token");
+    expect(repairQuestionIds).toContain("person.public_security");
+    expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
+      predicate: "current_role",
+      value: currentRoleValue,
+      status: "corroborated",
+    }));
+    expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
+      predicate: "public_security",
+      value: "COIN (Coinbase, NASDAQ-listed security)",
+      status: "verified",
+      critical: true,
+      sources: [expect.objectContaining({
+        url: registryUrl,
+        sourceClass: "regulatory_or_onchain",
+        relation: "supports",
+        excerpt: JSON.stringify(registryPayload.data[0]),
+      })],
+    }));
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "official_token")).toBe(false);
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.public_security"))
+      .toEqual(expect.objectContaining({ status: "answered" }));
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.official_token"))
+      .toEqual(expect.objectContaining({
+        status: "unanswered",
+        providerRuns: expect.arrayContaining([
+          expect.objectContaining({
+            phase: "repair",
+            provider: "claude-web-search",
+            state: "completed_empty",
+          }),
+        ]),
+      }));
+  });
+
+  it("does not treat an organization-named attacker subdomain as first-party scope", async () => {
+    const { ctx, evidence } = context("https://brianarmstrong.org");
+    ctx.handle = "@brian_armstrong";
+    evidence.profile.handle = "@brian_armstrong";
+    evidence.profile.display_name = "Brian Armstrong";
+    evidence.profile.resolved_name = "Brian Armstrong";
+    evidence.roles = [SubjectClass.MEMBER];
+    const attackerUrl = "https://coinbase.attacker.com/leadership";
+    const secondUrl = "https://research.example.net/brian-armstrong";
+    const registryUrl = "https://www.sec.gov/files/company_tickers_exchange.json";
+    const passage = "Brian Armstrong is Co-founder and CEO at Coinbase.";
+    const fetchSource = fetchDocuments({
+      [attackerUrl]: document({
+        url: attackerUrl,
+        host: "coinbase.attacker.com",
+        text: `<p>${passage}</p>`,
+        contentHash: "a".repeat(64),
+      }),
+      [secondUrl]: document({
+        url: secondUrl,
+        host: "research.example.net",
+        text: `<p>${passage}</p>`,
+        contentHash: "b".repeat(64),
+      }),
+      [registryUrl]: document({
+        url: registryUrl,
+        host: "www.sec.gov",
+        contentType: "application/json",
+        text: JSON.stringify({
+          fields: ["cik", "name", "ticker", "exchange"],
+          data: [[1679788, "Coinbase Global, Inc.", "COIN", "Nasdaq"]],
+        }),
+      }),
+    });
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [
+        lead({
+          subject: "Brian Armstrong",
+          predicate: "current_role",
+          value: "Co-founder and CEO at Coinbase",
+          questionId: "person.current_role",
+          excerpt: passage,
+          sourceUrl: attackerUrl,
+        }),
+        lead({
+          subject: "Brian Armstrong",
+          predicate: "current_role",
+          value: "Co-founder and CEO at Coinbase",
+          questionId: "person.current_role",
+          excerpt: passage,
+          sourceUrl: secondUrl,
+        }),
+      ],
+      repair: async () => [],
+      fetchSource,
+    });
+
+    expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
+      predicate: "current_role",
+      value: "Co-founder and CEO at Coinbase",
+      status: "corroborated",
+    }));
+    expect(fetchSource).not.toHaveBeenCalledWith(registryUrl);
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "public_security")).toBe(false);
+  });
+
+  it("does not collapse different material issuer qualifiers into one SEC identity", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Acme Global",
+      domain: "acmeglobal.example",
+      role: "Founder and CEO",
+      period: "2024-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://acmeglobal.example/team",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const registryUrl = "https://www.sec.gov/files/company_tickers_exchange.json";
+    const fetchSource = fetchDocuments({
+      [registryUrl]: document({
+        url: registryUrl,
+        host: "www.sec.gov",
+        contentType: "application/json",
+        text: JSON.stringify({
+          fields: ["cik", "name", "ticker", "exchange"],
+          data: [[111, "Acme Holdings, Inc.", "ACMH", "Nasdaq"]],
+        }),
+      }),
+    });
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [],
+      repair: async () => [],
+      fetchSource,
+    });
+
+    expect(fetchSource).toHaveBeenCalledWith(registryUrl);
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "public_security")).toBe(false);
+  });
+
+  it("fails closed when the SEC registry issuer match is ambiguous", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Acme",
+      domain: "acme.example",
+      role: "Founder and CEO",
+      period: "2024-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://acme.example/team",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const registryUrl = "https://www.sec.gov/files/company_tickers_exchange.json";
+    await collectBasicFacts(ctx, {
+      discover: async () => [],
+      repair: async () => [],
+      fetchSource: fetchDocuments({
+        [registryUrl]: document({
+          url: registryUrl,
+          host: "www.sec.gov",
+          contentType: "application/json",
+          text: JSON.stringify({
+            fields: ["cik", "name", "ticker", "exchange"],
+            data: [
+              [111, "Acme Global, Inc.", "ACM", "Nasdaq"],
+              [222, "Acme Holdings, Inc.", "ACME", "NYSE"],
+            ],
+          }),
+        }),
+      }),
+    });
+
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "public_security")).toBe(false);
+  });
+
+  it("never queries or binds the SEC registry without a verified current-control relationship", async () => {
+    const { ctx, evidence } = context("https://alice.example");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Coinbase",
+      domain: "coinbase.com",
+      role: "Co-founder and CEO",
+      period: "2012-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://coinbase.com",
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      provider: "grok",
+    });
+    const fetchSource = vi.fn(async (): Promise<PublicTextResult> => ({ status: "failed", reason: "not_found" }));
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [],
+      repair: async () => [],
+      fetchSource,
+    });
+
+    expect(fetchSource).not.toHaveBeenCalledWith("https://www.sec.gov/files/company_tickers_exchange.json");
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "public_security")).toBe(false);
   });
 
   it("binds a founder's official token through a verified current venture and that venture's fetched first-party docs", async () => {
