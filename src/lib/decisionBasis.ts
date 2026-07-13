@@ -58,7 +58,10 @@ const COUNTER_VERIFICATIONS = new Set<AxisEvidenceRecord["verification"]>([
   "observed",
 ]);
 
-const GAP_VERIFICATIONS = new Set<AxisEvidenceRecord["verification"]>(["checked_empty", "unavailable"]);
+// A completed clear screen is an observed outcome, not missing coverage. Keep
+// it in the frozen catalog for auditability, but never turn it into an investor
+// open question. Only genuinely unavailable coverage belongs in gapArtifacts.
+const GAP_VERIFICATIONS = new Set<AxisEvidenceRecord["verification"]>(["unavailable"]);
 
 function cleanText(value: unknown, max = 240): string | null {
   if (typeof value !== "string") return null;

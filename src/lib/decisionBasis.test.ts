@@ -136,6 +136,35 @@ describe("buildDecisionBasis", () => {
     });
   });
 
+  it("does not turn a completed clear screen into a gap or open question", () => {
+    const support = artifact("support-1", "F5_reputation_integrity");
+    const clearScreen = artifact("ofac-clear", "F5_reputation_integrity", {
+      provider: "opensanctions",
+      operation: "ofac-sanctions-name",
+      title: "OFAC sanctions name screen found no exact match",
+      verification: "checked_empty",
+    });
+    const model = buildDecisionBasis(report({
+      F5_reputation_integrity: {
+        score: 18,
+        weight: 20,
+        role: "FOUNDER",
+        rationale: "No verified adverse conduct was found.",
+        evidenceRefs: [support.artifactId, clearScreen.artifactId],
+        counterEvidenceRefs: [],
+        gaps: [],
+      },
+    }), [support, clearScreen], 1);
+
+    expect(model.rows[0]).toMatchObject({
+      status: "grounded",
+      support: [{ artifactId: support.artifactId }],
+      counter: [],
+      gapArtifacts: [],
+      gaps: [],
+    });
+  });
+
   it("never infers lineage for legacy or unsupported versions", () => {
     const support = artifact("support-1", "F2_track_record");
     const role = report({

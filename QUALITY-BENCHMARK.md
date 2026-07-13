@@ -21,6 +21,32 @@ The build does not ship when any of these are true:
 - a company legal event is attributed to a founder without an exact source;
 - a public stock is shown as a crypto token, or vice versa.
 
+Passing the obvious-facts gate is necessary but not sufficient. At least one
+live founder and one live project canary must also produce a decision-changing
+connection a generic biography would normally miss: control or governance,
+capital and counterparty concentration, a dated contradiction, an entity-level
+legal distinction, an insider or token-economic exposure, or a material change
+from the prior frozen report. That connection must cite every edge in the chain
+and show the strongest evidence against the conclusion.
+
+## Live acceptance contract
+
+For each named canary, the live collector must find 100% of adjudicated must-have
+facts and at least 90% of all adjudicated core facts. It may publish no critical
+false fact, entity-attribution error, or stock-token conflation. Every accepted
+fact needs an exact fetched passage, stable URL, capture time, and immutable report
+version.
+
+Each live gate runs the complete lifecycle: scan, targeted repair for unanswered
+critical questions, persist, reopen without rescanning, and answer fixed questions
+from frozen evidence only. A report that looks correct before persistence but
+cannot reproduce the same evidence after reopen fails.
+
+The adviser experience also fails when the first viewport does not clearly show
+the verdict or readiness state, one-sentence rationale, one to three material
+risks, and the next action; when internal axis IDs or provider failures occupy the
+decision layer; or when a required token chart or citation is missing.
+
 ## Live founder canaries
 
 These are release gates, not hand-authored demo dossiers. Each case must run
@@ -51,6 +77,35 @@ and answer grounded follow-up questions from the frozen evidence.
 - Seven-count conviction, 25-year sentence, and forfeiture.
 - SEC allegations remain separate from the criminal conviction.
 - Expected useful result: FAIL below 20.
+
+### Jupiter
+
+- Jupiter Exchange, JUP DAO, the operating contributors, and related products
+  remain distinct and clearly attributed.
+- Meow and other publicly documented founders or leaders are surfaced with
+  source-backed roles.
+- Canonical JUP contract, market chart, liquidity, supply, unlock, governance,
+  treasury, and material concentration evidence are shown when available.
+- Product activity and trading usage are not reduced to social metrics.
+- Expected useful result: decision-ready PASS or CAUTION with a JUP chart and a
+  concise explanation of the risks that could change the investment case.
+
+Jupiter additionally requires at least 30 frozen chart points with timeframe,
+pool, and source; at least two non-social product or usage measures; and explicit
+outcomes for liquidity, supply, unlocks, governance, treasury, and concentration.
+Known-available evidence cannot disappear silently. If a collector cannot obtain
+it, the report must preserve the exact partial or unavailable state.
+
+## Generic-model comparison
+
+The direct superiority claim remains a product target until a repeatable
+head-to-head gate exists. The planned gate asks ARGUS and a generic ChatGPT or
+Claude session the same fixed diligence questions for the named subjects, verifies
+both outputs against fetched sources, and fails if the generic answer finds a
+verified foundational fact ARGUS missed. ARGUS must match the baseline on
+foundational recall, retain full citation and attribution precision for published
+claims, and add at least one cited decision-changing connection for a live founder
+and a live project.
 
 ## Deterministic release canary
 

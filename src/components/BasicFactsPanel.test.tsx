@@ -238,6 +238,35 @@ describe("BasicFactsPanel", () => {
     },
   );
 
+  it("labels a namesake legal event as identity-unresolved", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          audience="person"
+          facts={[{
+            factId: "legal-namesake",
+            predicate: "legal_regulatory_event",
+            value: "An SEC settlement names Brian Armstrong.",
+            eventStatus: "resolved",
+            attributedEntity: "Brian Armstrong",
+            attributionScope: "identity_unresolved",
+            status: "verified",
+            sources: [{ url: "https://example.com/regulator-order", relation: "supports" }],
+          }]}
+        />,
+      );
+    });
+
+    const metadata = container.querySelector('[aria-label="Legal event details"]');
+    expect(metadata?.textContent).toContain("Exact name only, identity not confirmed");
+    expect(metadata?.textContent).not.toContain("Directly attributed");
+    expect(container.querySelector('[aria-label="Confirmed basic facts"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Identity review required"]')?.textContent)
+      .toContain("Same name, identity not confirmed");
+    expect(container.querySelector('[aria-label="Basic facts coverage"]')?.textContent)
+      .toContain("0 confirmed");
+  });
+
   it("keeps conflicting legal statuses in separate visible cards", () => {
     act(() => {
       root.render(
@@ -315,7 +344,7 @@ describe("BasicFactsPanel", () => {
           audience="founder"
           fillRequired
           questionLedger={[
-            { predicate: "public_security", status: "unanswered", providerRuns: [{ state: "succeeded" }] },
+            { predicate: "public_security", status: "unanswered", providerRuns: [{ state: "completed_empty" }] },
             { predicate: "official_token", status: "unanswered", providerRuns: [{ state: "completed_empty" }] },
           ]}
         />,

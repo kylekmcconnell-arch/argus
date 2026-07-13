@@ -7,7 +7,16 @@ import { Readable } from "node:stream";
 
 const MAX_TEXT_BYTES = 1_500_000;
 const MAX_REDIRECTS = 4;
+const JINA_READER_ORIGIN = "https://r.jina.ai/";
+const PUBLIC_WEB_USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
+const JINA_RECOVERABLE_FAILURES = new Set([
+  "http_403",
+  "http_429",
+  "transport_error",
+  "response_stream_error",
+]);
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
+const CAPABILITY_PATH_LABEL = /^(?:auth|invite|magic|private|secret|share|signed|token)$/i;
 const SAFE_CONTENT_TYPES = new Set([
   "application/json",
   "application/ld+json",
@@ -35,6 +44,40 @@ export interface PublicTextFailure {
 
 export type PublicTextResult = PublicTextDocument | PublicTextFailure;
 
+export interface RetrievedPublicTextDocument extends PublicTextDocument {
+  /** How the bytes were obtained, independently of the evidence URL. */
+  retrievalMethod: "direct" | "reader_recovery";
+  /** Network service that returned the bytes. */
+  retrievalProvider: "origin" | "jina-reader";
+  /** Actual fetched URL; differs from `url` only for reader recovery. */
+  retrievalUrl: string;
+}
+
+export type PublicTextWithRecoveryResult = RetrievedPublicTextDocument | PublicTextFailure;
+
+function normalizedJinaSource(text: string): string | null {
+  const matches = [...text.matchAll(/^URL Source:\s*(\S+)\s*$/gm)];
+  if (matches.length !== 1) return null;
+  try {
+    const source = new URL(matches[0][1]);
+    if ((source.protocol !== "https:" && source.protocol !== "http:") || source.username || source.password) return null;
+    source.hash = "";
+    return source.toString();
+  } catch {
+    return null;
+  }
+}
+
+function pathnameMayContainCapability(url: URL): boolean {
+  const segments = url.pathname.split("/").filter(Boolean).map((segment) => {
+    try { return decodeURIComponent(segment); } catch { return segment; }
+  });
+  return segments.some((segment, index) => {
+    if (CAPABILITY_PATH_LABEL.test(segment) && Boolean(segments[index + 1])) return true;
+    return /^(?:share|invite|token|secret)[-_][A-Za-z0-9_-]{12,}$/i.test(segment);
+  });
+}
+
 type LookupAddress = { address: string; family: number };
 type LookupFn = (hostname: string) => Promise<LookupAddress[]>;
 
@@ -56,7 +99,7 @@ export interface PublicWebDependencies {
 export function isPublicIpAddress(address: string): boolean {
   const version = isIP(address);
   if (version === 4) {
-    const [a, b] = address.split(".").map(Number);
+    const [a, b, c] = address.split(".").map(Number);
     return !(
       a === 0
       || a === 10
@@ -64,9 +107,13 @@ export function isPublicIpAddress(address: string): boolean {
       || (a === 100 && b >= 64 && b <= 127)
       || (a === 169 && b === 254)
       || (a === 172 && b >= 16 && b <= 31)
-      || (a === 192 && b === 0)
+      || (a === 192 && b === 0 && c === 0)
+      || (a === 192 && b === 0 && c === 2)
+      || (a === 192 && b === 88 && c === 99)
       || (a === 192 && b === 168)
       || (a === 198 && (b === 18 || b === 19))
+      || (a === 198 && b === 51 && c === 100)
+      || (a === 203 && b === 0 && c === 113)
       || a >= 224
     );
   }
@@ -245,14 +292,14 @@ async function readBoundedText(response: Response): Promise<Buffer | null> {
   return Buffer.concat(chunks, total);
 }
 
-export async function fetchPublicText(
-  raw: string,
+async function fetchValidatedPublicText(
+  initialTarget: ValidatedPublicTarget,
   dependencies: PublicWebDependencies = {},
+  accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8",
 ): Promise<PublicTextResult> {
   const request = dependencies.request ?? nativeRequest;
   const lookup = dependencies.lookup ?? defaultLookup;
-  let target = await validatedPublicTarget(raw, undefined, lookup);
-  if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
+  let target: ValidatedPublicTarget | null = initialTarget;
 
   for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
     let response: Response;
@@ -260,8 +307,8 @@ export async function fetchPublicText(
       response = await request(target.url, {
         signal: AbortSignal.timeout(8_000),
         headers: {
-          accept: "text/html,application/xhtml+xml,application/json,text/plain;q=0.8",
-          "user-agent": "ARGUS due-diligence evidence collector/1.0",
+          accept,
+          "user-agent": PUBLIC_WEB_USER_AGENT,
         },
         lookup: pinnedLookupFor(target),
       });
@@ -303,4 +350,78 @@ export async function fetchPublicText(
     };
   }
   return { status: "failed", reason: "redirect_loop" };
+}
+
+export async function fetchPublicText(
+  raw: string,
+  dependencies: PublicWebDependencies = {},
+): Promise<PublicTextResult> {
+  const lookup = dependencies.lookup ?? defaultLookup;
+  const target = await validatedPublicTarget(raw, undefined, lookup);
+  if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
+  return fetchValidatedPublicText(target, dependencies);
+}
+
+/**
+ * Fetch source text directly, then make one bounded keyless Jina Reader attempt
+ * only when the validated origin returned an ordinary retrieval failure.
+ * Unsafe origins and unsafe redirects remain rejected and never reach a proxy.
+ */
+export async function fetchPublicTextWithRecovery(
+  raw: string,
+  dependencies: PublicWebDependencies = {},
+): Promise<PublicTextWithRecoveryResult> {
+  const lookup = dependencies.lookup ?? defaultLookup;
+  const originalTarget = await validatedPublicTarget(raw, undefined, lookup);
+  if (!originalTarget) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
+
+  const direct = await fetchValidatedPublicText(originalTarget, dependencies);
+  if (direct.status === "ok") {
+    return {
+      ...direct,
+      retrievalMethod: "direct",
+      retrievalProvider: "origin",
+      retrievalUrl: direct.url,
+    };
+  }
+  // Rejected redirects are security decisions, not recoverable availability
+  // failures. Never disclose their target to a third-party reader.
+  if (direct.status === "rejected") return direct;
+  if (!JINA_RECOVERABLE_FAILURES.has(direct.reason)) return direct;
+  // Query strings routinely carry share tokens, OAuth codes, and other opaque
+  // capabilities whose names cannot be exhaustively classified. Never forward
+  // any query-bearing evidence URL to a third-party rendering service.
+  if (originalTarget.url.search) return direct;
+  // Some products put the same bearer capability in a path segment. Direct
+  // origin retrieval remains allowed, but a likely token/share/invite path or
+  // opaque high-entropy segment must never be disclosed to the reader proxy.
+  if (pathnameMayContainCapability(originalTarget.url)) return direct;
+
+  const readerTarget = await validatedPublicTarget(
+    `${JINA_READER_ORIGIN}${originalTarget.url.toString()}`,
+    undefined,
+    lookup,
+  );
+  if (!readerTarget) return { status: "failed", reason: "reader_target_validation_failed" };
+  const recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
+  if (recovered.status !== "ok") {
+    return { status: "failed", reason: `reader_recovery_failed_${recovered.reason}` };
+  }
+  if (recovered.url !== readerTarget.url.toString()) {
+    return { status: "failed", reason: "reader_redirect_mismatch" };
+  }
+  if (normalizedJinaSource(recovered.text) !== originalTarget.url.toString()) {
+    return { status: "failed", reason: "reader_source_mismatch" };
+  }
+
+  return {
+    ...recovered,
+    // Evidence classification and citations must stay bound to the source the
+    // model named, never to the rendering intermediary.
+    url: originalTarget.url.toString(),
+    host: originalTarget.hostname.replace(/^www\./i, "").toLowerCase(),
+    retrievalMethod: "reader_recovery",
+    retrievalProvider: "jina-reader",
+    retrievalUrl: recovered.url,
+  };
 }

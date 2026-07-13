@@ -1,0 +1,457 @@
+<!--
+  ARGUS Methodology & Field Manual
+  Version-controlled source for the published Claude artifact:
+  https://claude.ai/code/artifact/4599c1f2-73cb-462c-9382-65282945a087
+
+  Update this file with every material product or methodology change, then
+  republish it to the same artifact URL from the Claude desktop Artifact tool.
+-->
+<style>
+  :root {
+    --bg: #f6f8fb; --bg2: #eef2f7; --panel: #ffffff; --line: #dde3ea; --line2: #c8d1db;
+    --ink: #10151c; --dim: #47525f; --faint: #79838f;
+    --accent: #1f6feb; --accent-soft: #1f6feb14;
+    --pass: #1a7f37; --caution: #9a6700; --avoid: #cf222e;
+    --mono: ui-monospace, "SF Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --grid: #1f6feb0d;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0b0e13; --bg2: #0f131a; --panel: #12161d; --line: #222a35; --line2: #313c4a;
+      --ink: #e8edf3; --dim: #9aa6b3; --faint: #616d7b;
+      --accent: #4aa3ff; --accent-soft: #4aa3ff1f;
+      --pass: #3fb950; --caution: #d29922; --avoid: #f85149;
+      --grid: #4aa3ff12;
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: #f6f8fb; --bg2: #eef2f7; --panel: #ffffff; --line: #dde3ea; --line2: #c8d1db;
+    --ink: #10151c; --dim: #47525f; --faint: #79838f;
+    --accent: #1f6feb; --accent-soft: #1f6feb14;
+    --pass: #1a7f37; --caution: #9a6700; --avoid: #cf222e; --grid: #1f6feb0d;
+  }
+  :root[data-theme="dark"] {
+    --bg: #0b0e13; --bg2: #0f131a; --panel: #12161d; --line: #222a35; --line2: #313c4a;
+    --ink: #e8edf3; --dim: #9aa6b3; --faint: #616d7b;
+    --accent: #4aa3ff; --accent-soft: #4aa3ff1f;
+    --pass: #3fb950; --caution: #d29922; --avoid: #f85149; --grid: #4aa3ff12;
+  }
+
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--sans); line-height: 1.6; -webkit-font-smoothing: antialiased; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px; }
+
+  /* ---------- header ---------- */
+  header.top {
+    border-bottom: 1px solid var(--line);
+    background:
+      linear-gradient(var(--grid) 1px, transparent 1px) 0 0 / 100% 26px,
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px) 0 0 / 26px 100%,
+      radial-gradient(120% 120% at 85% -20%, var(--accent-soft), transparent 55%),
+      var(--bg2);
+  }
+  .top .wrap { padding-top: 46px; padding-bottom: 40px; }
+  .brand { display: flex; align-items: center; gap: 11px; }
+  .mark { width: 26px; height: 26px; border-radius: 6px; background: var(--accent); display: grid; place-items: center; color: #fff; }
+  .mark svg { width: 15px; height: 15px; }
+  .wordmark { font-family: var(--mono); font-weight: 700; letter-spacing: 6px; font-size: 20px; }
+  .kicker { font-family: var(--mono); font-size: 11px; letter-spacing: 3px; text-transform: uppercase; color: var(--faint); }
+  h1.title { font-family: var(--mono); font-weight: 600; font-size: clamp(28px, 5vw, 46px); letter-spacing: -0.5px; line-height: 1.05; margin: 20px 0 0; text-wrap: balance; }
+  .lede { margin: 16px 0 0; max-width: 68ch; font-size: 16.5px; color: var(--dim); }
+  .lede b { color: var(--ink); font-weight: 600; }
+  .meta { margin-top: 22px; display: flex; flex-wrap: wrap; gap: 8px; }
+  .tagpill { font-family: var(--mono); font-size: 11px; letter-spacing: .5px; color: var(--dim); border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 4px 11px; }
+
+  /* ---------- layout ---------- */
+  .shell { display: grid; grid-template-columns: 220px 1fr; gap: 44px; align-items: start; padding: 48px 0 80px; }
+  nav.toc { position: sticky; top: 24px; font-size: 13px; }
+  nav.toc .navlabel { font-family: var(--mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--faint); margin-bottom: 10px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; counter-reset: n; }
+  nav.toc li { counter-increment: n; }
+  nav.toc a { display: flex; gap: 9px; padding: 5px 0; color: var(--dim); border-left: 2px solid transparent; padding-left: 12px; margin-left: -2px; }
+  nav.toc a:hover { color: var(--ink); text-decoration: none; border-left-color: var(--line2); }
+  nav.toc a::before { content: counter(n, decimal-leading-zero); font-family: var(--mono); font-size: 10px; color: var(--faint); padding-top: 2px; }
+
+  main { min-width: 0; }
+  section { padding-top: 8px; margin-bottom: 52px; scroll-margin-top: 20px; }
+  .sec-h { display: flex; align-items: baseline; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); margin-bottom: 22px; }
+  .sec-h .num { font-family: var(--mono); font-size: 12px; color: var(--accent); }
+  h2 { font-family: var(--mono); font-weight: 600; font-size: 21px; letter-spacing: -0.2px; margin: 0; }
+  h2 + .subhead { color: var(--faint); font-size: 13px; margin-left: auto; text-align: right; }
+  p { max-width: 70ch; }
+  p.body { color: var(--dim); }
+  p.body b, p.body strong { color: var(--ink); font-weight: 600; }
+
+  /* ---------- pipeline ---------- */
+  .flow { display: grid; gap: 0; border-left: 2px solid var(--line); margin-left: 6px; }
+  .step { position: relative; padding: 0 0 22px 26px; }
+  .step:last-child { padding-bottom: 0; }
+  .step::before { content: ""; position: absolute; left: -7px; top: 4px; width: 12px; height: 12px; border-radius: 50%; background: var(--bg); border: 2px solid var(--accent); }
+  .step h3 { font-family: var(--mono); font-size: 13.5px; margin: 0 0 3px; letter-spacing: .3px; }
+  .step h3 .ph { color: var(--faint); font-size: 11px; margin-left: 8px; }
+  .step p { margin: 0; font-size: 13.5px; color: var(--dim); max-width: 74ch; }
+
+  /* ---------- tool grid ---------- */
+  .group { margin-bottom: 26px; }
+  .group-h { font-family: var(--mono); font-size: 11px; letter-spacing: 2px; text-transform: uppercase; color: var(--faint); display: flex; align-items: center; gap: 10px; margin: 0 0 12px; }
+  .group-h::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(255px, 1fr)); gap: 12px; }
+  .tool { border: 1px solid var(--line); background: var(--panel); border-radius: 11px; padding: 13px 14px; }
+  .tool-top { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .tool-name { font-weight: 600; font-size: 13.5px; }
+  .flag { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+  .tool p { font-size: 12.5px; color: var(--dim); margin: 0; max-width: none; }
+  .tool .src { display: block; margin-top: 8px; font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+
+  /* ---------- feature rows ---------- */
+  .rows { display: grid; gap: 10px; }
+  .row { display: grid; grid-template-columns: 172px 1fr; gap: 16px; border: 1px solid var(--line); background: var(--panel); border-radius: 11px; padding: 13px 15px; }
+  .row .rk { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+  .row p { margin: 0; font-size: 13px; color: var(--dim); }
+  @media (max-width: 560px) { .row { grid-template-columns: 1fr; gap: 4px; } }
+
+  /* ---------- table ---------- */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 11px; }
+  table { border-collapse: collapse; width: 100%; font-size: 13px; min-width: 560px; }
+  th, td { text-align: left; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  thead th { font-family: var(--mono); font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; color: var(--faint); font-weight: 500; background: var(--bg2); }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.prov { font-weight: 600; }
+  td .powers { color: var(--dim); }
+  .tier { font-family: var(--mono); font-size: 10px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line2); color: var(--dim); white-space: nowrap; }
+  .tier.keyless { color: var(--pass); border-color: color-mix(in srgb, var(--pass) 40%, var(--line2)); }
+
+  /* ---------- callouts ---------- */
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; font-size: 12px; color: var(--dim); margin: 2px 0 20px; }
+  .legend span { display: inline-flex; align-items: center; gap: 6px; }
+  .principles { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 12px; }
+  .principle { border: 1px solid var(--line); border-left: 3px solid var(--accent); background: var(--panel); border-radius: 0 10px 10px 0; padding: 13px 15px; }
+  .principle h4 { margin: 0 0 4px; font-size: 13.5px; }
+  .principle p { margin: 0; font-size: 12.5px; color: var(--dim); max-width: none; }
+
+
+  .plays { display: grid; gap: 14px; }
+  .play { border: 1px solid var(--line); background: var(--panel); border-radius: 12px; padding: 16px 18px; }
+  .play h3 { font-family: var(--mono); font-size: 13.5px; margin: 0 0 10px; letter-spacing: .2px; display: flex; align-items: center; gap: 8px; }
+  .play h3 .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none; }
+  .play ol { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 8px; }
+  .play li { counter-increment: s; position: relative; padding-left: 30px; font-size: 13px; color: var(--dim); max-width: 78ch; }
+  .play li::before { content: counter(s); position: absolute; left: 0; top: -1px; width: 19px; height: 19px; border-radius: 50%; background: var(--accent-soft); color: var(--accent); font-family: var(--mono); font-size: 10.5px; display: grid; place-items: center; font-weight: 600; }
+  .play li b { color: var(--ink); font-weight: 600; }
+
+  code { font-family: var(--mono); font-size: .9em; background: var(--bg2); border: 1px solid var(--line); border-radius: 4px; padding: 1px 5px; color: var(--ink); }
+
+  footer { border-top: 1px solid var(--line); }
+  footer .wrap { padding: 22px 24px 36px; display: flex; flex-wrap: wrap; gap: 8px 18px; justify-content: space-between; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+  @media (max-width: 820px) {
+    .shell { grid-template-columns: 1fr; gap: 0; padding-top: 28px; }
+    nav.toc { display: none; }
+  }
+</style>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <span class="mark"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"></path><circle cx="12" cy="12" r="3"></circle></svg></span>
+      <span class="wordmark">ARGUS</span>
+      <span class="kicker" style="margin-left:6px;">Source of Truth</span>
+    </div>
+    <h1 class="title">Methodology &amp; Field Manual</h1>
+    <p class="lede">How ARGUS turns a single X handle, token contract, or website into a grounded due-diligence verdict. <b>Every accepted claim is tied to the right subject, an exact fetched passage, and an immutable report version.</b> This is the canonical map of what ARGUS does, what is proven, and what still has to pass live validation.</p>
+    <div class="meta">
+      <span class="tagpill">Forensic due-diligence</span>
+      <span class="tagpill">v3.0</span>
+      <span class="tagpill">Source-backed · versioned evidence</span>
+      <span class="tagpill">EVM + Solana</span>
+      <span class="tagpill">On-chain + off-chain + identity</span>
+      <span class="tagpill" style="border-color:var(--accent);color:var(--accent);">Living document · updated July 13, 2026</span>
+    </div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="shell">
+    <nav class="toc">
+      <div class="navlabel">Contents</div>
+      <ol>
+        <li><a href="#thesis">The thesis</a></li>
+        <li><a href="#pipeline">How a scan runs</a></li>
+        <li><a href="#subjects">What you can scan</a></li>
+        <li><a href="#method">The method, step by step</a></li>
+        <li><a href="#onchain">On-chain forensics</a></li>
+        <li><a href="#identity">Identity &amp; people</a></li>
+        <li><a href="#offchain">Off-chain &amp; legal</a></li>
+        <li><a href="#market">Market &amp; documents</a></li>
+        <li><a href="#graph">The trust graph</a></li>
+        <li><a href="#scoring">Scoring &amp; verdict</a></li>
+        <li><a href="#analyst">The analyst layer</a></li>
+        <li><a href="#sources">Data sources</a></li>
+        <li><a href="#release">Release gates</a></li>
+        <li><a href="#principles">Principles</a></li>
+      </ol>
+    </nav>
+
+    <main>
+      <section id="thesis">
+        <div class="sec-h"><span class="num">01</span><h2>The thesis</h2></div>
+        <p class="body">Crypto due-diligence fails in three predictable ways: the people behind a project are <b>anonymous</b>, the connections between them are <b>invisible</b>, and the "facts" a subject presents are <b>unverified</b>. ARGUS is built to close all three.</p>
+        <p class="body" style="margin-top:12px;">It does three jobs at every layer: <b>name the anonymous</b>, putting a real-world entity on a wallet, handle, or developer; <b>connect the disconnected</b>, surfacing the deployers, funders, teams, and infrastructure that tie separate operations together; and <b>prove or hold</b>, verifying each claim against an exact fetched source or keeping it outside the decision. The output is never a black-box score. It is a reproducible investment case with receipts.</p>
+        <div class="rows" style="margin-top:18px;">
+          <div class="row"><span class="rk">Table stakes</span><p>Get the founders, current roles, product, token or public security, major funding, and headline legal history right. A famous subject missing an obvious fact is a release failure.</p></div>
+          <div class="row"><span class="rk">The ARGUS edge</span><p>Show who controls the company, protocol, contracts, treasury, governance, and public narrative; connect capital, counterparties, insiders, prior outcomes, and contradictions; then show the strongest evidence against the conclusion.</p></div>
+          <div class="row"><span class="rk">Decision standard</span><p>Answer four questions in plain language: what is true, what is material, what could change the decision, and what ARGUS found that a normal web summary would probably miss.</p></div>
+          <div class="row"><span class="rk">Proof status</span><p>Implemented invariants are regression-tested. Brian Armstrong, Hayden Adams, Sam Bankman-Fried, and Jupiter remain live release gates. Generic-model comparison, semantic report diffs, and cost-ranked next steps remain explicit targets until measured.</p></div>
+        </div>
+      </section>
+
+      <section id="pipeline">
+        <div class="sec-h"><span class="num">02</span><h2>How a scan runs</h2><span class="subhead">the pipeline, phase by phase</span></div>
+        <p class="body" style="margin-bottom:20px;">A person or handle audit streams through these phases live; a token or site scan runs the on-chain and web branches in parallel. An optional source failure records a coverage state instead of becoming subject risk. A core attribution, persistence, or scoring failure blocks publication.</p>
+        <div class="flow">
+          <div class="step"><h3>Intake <span class="ph">P0</span></h3><p>Resolve the profile, handle-change history (rebrands), and a claim corpus from recent posts + keyword search over full history. Extract the self-claims - ventures, endorsements, advisory seats, promoted tokens - that everything downstream will try to verify.</p></div>
+          <div class="step"><h3>Routing <span class="ph">P0</span></h3><p>Classify the subject - Founder, Project, KOL, VC/Investor, Agency, or Member - which decides the axes it's scored on and the specialist reports it earns.</p></div>
+          <div class="step"><h3>Team &amp; affiliations <span class="ph">P1</span></h3><p>Three angles in parallel: what the account is tied to, who has publicly named them, and the team named in their own posts - corroborated against an independent source (the project's follow-graph, an archived team page). A brand handle over a named team is not an anonymity flag.</p></div>
+          <div class="step"><h3>Network expansion <span class="ph">Network</span></h3><p>Second hop: go into the subject's ventures and pull the people behind each, so the graph traverses <em>subject → venture → its team</em> - and cross-links when a venture's teammate is also a known associate.</p></div>
+          <div class="step"><h3>On-chain &amp; adverse <span class="ph">Token · Adverse</span></h3><p>Trace the deployer's funding, sweep for serial launches, screen for rug/drain/FUD complaints across the subject and every discovered project and associate, and flag any manipulation tooling they build or operate.</p></div>
+          <div class="step"><h3>Contradictions <span class="ph">Contradictions</span></h3><p>Cross-reference every claim against the collected evidence for internal contradictions - a stated launch date that the on-chain history disproves, a claimed endorser who has never acknowledged the project.</p></div>
+          <div class="step"><h3>Analyst scoring <span class="ph">Analyst</span></h3><p>The Claude analyst scores each axis from the assembled evidence, an adversarial pass tries to break the verdict in both directions, and the composite is governed by role with hard caps applied.</p></div>
+          <div class="step"><h3>Finalize &amp; graph <span class="ph">Finalize</span></h3><p>Package the dossier, record every entity into the shared trust graph with canonical keys, and reconcile the verdict against the graph - a hard tie to an already-failed subject overrides a clean headline.</p></div>
+        </div>
+      </section>
+
+      <section id="subjects">
+        <div class="sec-h"><span class="num">03</span><h2>What you can scan</h2></div>
+        <div class="rows">
+          <div class="row"><span class="rk">Person / handle</span><p>An X handle or name → a full people-audit: identity resolution, affiliations, GitHub footprint, promoted-token performance (KOLs), portfolio track record (VCs), legal &amp; sanctions screens, and the connection web.</p></div>
+          <div class="row"><span class="rk">Token / contract</span><p>A contract address → the on-chain forensic suite plus the project behind it: safety, holders, clustering, operator trace, deployer &amp; bytecode, market intel, docs, and the team investigation.</p></div>
+          <div class="row"><span class="rk">Website / recon</span><p>A domain → fetch-or-render the site, resolve its official X account and team, link its infrastructure to other operations, and - when the site <em>is</em> a real token's homepage - route straight to the full on-chain report.</p></div>
+        </div>
+      </section>
+
+      <section id="method">
+        <div class="sec-h"><span class="num">04</span><h2>The method, step by step</h2><span class="subhead">how a subject actually gets resolved</span></div>
+        <p class="body" style="margin-bottom:20px;">The tools below are the instruments; these are the plays that run them. Each is the real sequence, with the source each step draws on.</p>
+        <div class="plays">
+          <div class="play">
+            <h3><span class="dot"></span>Finding a project's team &amp; founders</h3>
+            <ol>
+              <li>Read the project's <b>own team page</b> - including a <code>docs.</code> subdomain - and extract the roster with Claude, since a Grok summary misses the JavaScript-rendered page.</li>
+              <li><b>Reverse-mention search:</b> project and partner accounts that ever named, tagged, or announced a person as founder or team. Co-founder announcements and "meet the team" posts are often years old, on the project's own timeline, so historical posts are searched too.</li>
+              <li>Mine the account's <b>own X posts</b> for team members it names.</li>
+              <li>Deep <b>web + LinkedIn + primary-source</b> search by name for anyone still name-only. Company team pages, filings, portfolio pages, repositories, and reputable reporting replace dependency on an expensive Crunchbase API.</li>
+              <li><b>Corroborate before attributing:</b> a team is only taken as the account's identity when the account itself vouches - its handle is among them, it links its own site, or its posts name them. A by-name match to a <em>same-name</em> project's team is dropped as a collision, not presented as identity.</li>
+              <li><b>Enrich:</b> resolve name-only members to their X / LinkedIn; a LinkedIn-corroborated leader lifts the project's identity to Confirmed. A brand handle over a public, named team is not an anonymity flag.</li>
+            </ol>
+          </div>
+          <div class="play">
+            <h3><span class="dot"></span>Resolving a person's real identity</h3>
+            <ol>
+              <li>Pull the profile and follower / following graph; check <b>handle-change history</b> (rebrands) so old posts and mentions travel into the search.</li>
+              <li>Assemble a <b>claim corpus</b> - recent originals plus keyword search over full history - and extract the self-claims: ventures, endorsements, advisory seats, promoted tokens.</li>
+              <li>Discover affiliations from <b>two angles</b>: the person's own footprint (accelerator and portfolio pages, press, filings, and GitHub orgs) and reverse mentions (projects that announced them). Capture each venture's own X handle and domain, the canonical keys that bridge it to the rest of the graph.</li>
+              <li><b>Corroborate each claim</b> against an independent source, and resolve professional records to confirm or contradict a claimed background.</li>
+              <li><b>Cross-platform sweep:</b> prior handles and the same username across GitHub, Farcaster, Reddit, Telegram; and a Claude-vision check on the profile photo (AI / stock / celebrity / logo).</li>
+            </ol>
+          </div>
+          <div class="play">
+            <h3><span class="dot"></span>Tracing the operator behind a token</h3>
+            <ol>
+              <li>Resolve the <b>deployer</b> and the wallet that funded its gas.</li>
+              <li>Trace the funding <b>up-chain to the topmost anonymous hub</b>, recursing when a hub is itself funded by another anon wallet - and stop at a CEX, a known off-ramp.</li>
+              <li>From that hub, trace <b>forward to every sibling launch</b> it seeded - the other tokens behind the same hand.</li>
+              <li>Flag serial launches and dead tokens, <b>name every wallet via Arkham</b>, and score each for hacker / mixer / sanctioned exposure.</li>
+            </ol>
+          </div>
+          <div class="play">
+            <h3><span class="dot"></span>Reading a token's holders</h3>
+            <ol>
+              <li>Pull the holder list and <b>separate DEX / CEX / LP liquidity</b> from private-wallet concentration - an exchange's holdings are not a rug.</li>
+              <li><b>Cluster</b> wallets funded from a common source and collapse them, sized as a single % of supply; detect bundled buys.</li>
+              <li>Weigh creator holdings and LP-lock - a broadly-held mega-cap reads differently from a thin memecoin with a hidden top-10.</li>
+            </ol>
+          </div>
+          <div class="play">
+            <h3><span class="dot"></span>Proving two operations are one hand</h3>
+            <ol>
+              <li>Every entity is recorded on a <b>canonical key</b> - an X handle, a domain, a wallet, a contract fingerprint, a dev email, an analytics ID - never a fuzzy name.</li>
+              <li>When a new audit emits a key another audit already holds, they <b>bridge to one node</b>. The connection appears without anyone drawing it.</li>
+              <li>A <b>hard tie</b> - shared deployer, funder, bytecode, or dev email - to an already-failed subject overrides a clean verdict; a shared person or domain warrants caution.</li>
+            </ol>
+          </div>
+          <div class="play">
+            <h3><span class="dot"></span>Verifying - or holding - a claim</h3>
+            <ol>
+              <li>An added fact is first checked to <b>exist on source</b> (the GitHub resolves, the site loads, the token trades). A non-existent target is rejected.</li>
+              <li>Then ARGUS tries to <b>prove it belongs to the subject</b> - e.g. the GitHub's profile links back to this same X. Proven → published live.</li>
+              <li>Verified-but-unprovable → <b>held pending human approval</b>; on approval, ARGUS diagnoses why it missed the fact and proposes one concrete pipeline fix.</li>
+            </ol>
+          </div>
+        </div>
+      </section>
+
+      <section id="onchain">
+        <div class="sec-h"><span class="num">05</span><h2>On-chain forensics</h2><span class="subhead">the money &amp; the code</span></div>
+        <div class="legend">
+          <span><i class="flag" style="background:var(--avoid)"></i> disqualifying signal</span>
+          <span><i class="flag" style="background:var(--caution)"></i> caution signal</span>
+          <span><i class="flag" style="background:var(--accent)"></i> context &amp; attribution</span>
+        </div>
+        <div class="grid">
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--avoid)"></i><span class="tool-name">Contract safety</span></div><p>Honeypot, mintable supply, freeze &amp; reclaimable ownership, transfer restrictions, buy/sell taxes - via a real buy/sell simulation, not just static flags.</p><span class="src">GoPlus · honeypot.is</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">Holder distribution</span></div><p>Top-holder concentration with DEX/CEX/LP liquidity separated from private wallets, insider clusters, creator holdings, LP-lock. Healthy base or a rug in a costume?</p><span class="src">RugCheck · on-chain</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">Wallet clustering</span></div><p>How many "top holders" are really one hand - wallets funded from a common source, bundled buys, collapsed and sized as a % of supply.</p><span class="src">Helius · Bitquery</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--avoid)"></i><span class="tool-name">Operator trace</span></div><p>Chase the deployer's money past the first hop to every launch behind the same funding hand - the serial-scammer signal. Recursive, Solana + EVM.</p><span class="src">Helius · Etherscan · Bitquery</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">Deployer trail</span></div><p>Who deployed it, who funded the gas, wallet age, how many tokens the wallet has minted, whether the trail terminates at a CEX.</p><span class="src">Helius · Etherscan</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--avoid)"></i><span class="tool-name">Bytecode fingerprint</span></div><p>Resolve proxies to the real implementation and catch redeployed rug templates - a byte-identical clone of a contract already flagged as a rug. EVM.</p><span class="src">on-chain RPC</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">Arkham entity labels</span></div><p>Put a real name on an anonymous wallet - "Binance", "Wintermute", or a named individual with their Twitter - across EVM and Solana.</p><span class="src">Arkham Intel</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--avoid)"></i><span class="tool-name">Arkham risk score</span></div><p>Hacker / mixer / sanctioned exposure per wallet: whether it <em>is</em> a flagged bad actor, its greatest risk category, and its risk-weighted USD inflow.</p><span class="src">Arkham Risk</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--avoid)"></i><span class="tool-name">Arkham risk paths</span></div><p><em>Why</em> a wallet is flagged, traced to the source: the named hacker / mixer / sanctioned entity it's exposed to, the direction, how many hops away, and the USD that flowed - "$72M, 1 hop from Tornado.Cash". The receipt under the risk score.</p><span class="src">Arkham Risk paths</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">Arkham counterparties</span></div><p>Who a wallet actually transacts with, already named - the funds, individuals, mixers, and exchanges its money moves through, with total USD and direction. Named non-exchange counterparties become verified edges in the trust graph.</p><span class="src">Arkham Counterparties</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">Arkham holdings</span></div><p>What the operator actually holds now: net worth, 24h move, and the token breakdown. The bite is the shape of the bag - a deployer whose net worth <em>is</em> the coin they launched has nothing realized and every reason to defend the price; one parked in stables has already taken money off the table.</p><span class="src">Arkham Balances</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--avoid)"></i><span class="tool-name">OFAC address screen</span></div><p>The deployer and top holders checked against the live US Treasury OFAC sanctioned-wallet list - an instant, legal-grade AVOID.</p><span class="src">US Treasury SDN</span></div>
+        </div>
+      </section>
+
+      <section id="identity">
+        <div class="sec-h"><span class="num">06</span><h2>Identity &amp; people</h2><span class="subhead">who is actually behind it</span></div>
+        <div class="grid">
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">Team &amp; affiliations</span></div><p>Every company or project a person founded, led, worked at, or advised - from their own footprint and from projects that announced them - each corroborated, and each venture's own team pulled in.</p><span class="src">Grok live web + X</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">GitHub forensics</span></div><p>De-anonymize the devs behind a repo via commit-author email metadata, and weigh whether a "builder" persona has real code substance.</p><span class="src">GitHub API</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">Notable followers</span></div><p>Reverse-check ~370 hand-curated top VCs, founders, and callers - who among the people that matter actually follows this account. Auto-grows from verified scans.</p><span class="src">twitterapi.io</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">Profile-photo check</span></div><p>Is the face real, or AI-generated / stock / a celebrity / a logo standing in for a person? Claude vision on the profile image.</p><span class="src">Claude vision</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">Past-identity sweep</span></div><p>Prior handles (rebrands) and the same username across GitHub, Farcaster, Reddit, Telegram - the cross-platform trail an operator forgets to scrub.</p><span class="src">memory.lol · cross-platform</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">Professional records</span></div><p>Real-world employment and company records corroborate or contradict a claimed background. Public primary sources and reputable reporting continue the search when a commercial profile provider is unavailable.</p><span class="src">People Data Labs · primary sources</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">Name → wallet</span></div><p>Resolve an ENS name, Farcaster account, or handle to the wallets it controls - the bridge from a person to their on-chain activity.</p><span class="src">web3.bio · ENS · Bonfida</span></div>
+        </div>
+      </section>
+
+      <section id="offchain">
+        <div class="sec-h"><span class="num">07</span><h2>Off-chain &amp; legal</h2><span class="subhead">the paper trail</span></div>
+        <div class="grid">
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--avoid)"></i><span class="tool-name">OFAC name screen</span></div><p>A resolved real founder name checked against the US Treasury SDN list of sanctioned individuals - exact-match, so a clean result is trustworthy.</p><span class="src">OpenSanctions / OFAC SDN</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">US legal history</span></div><p>A resolved name → US federal &amp; state court records: fraud suits, SEC/CFTC enforcement, bankruptcy. Diligence gold that lives entirely off-chain.</p><span class="src">CourtListener / RECAP</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">Site-infra linking</span></div><p>Link a website to other operations the same hand ran - shared analytics/monetization IDs (GA, GTM, AdSense, Meta Pixel), co-registered domains, and hosting neighbours.</p><span class="src">page source · Cert Transparency · urlscan</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">Domain intelligence</span></div><p>Domain age and claimed-audit detection - an established brand on a two-week-old domain is a contradiction worth surfacing.</p><span class="src">RDAP</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">News &amp; press</span></div><p>The press trail - funding, launches, hacks, exits, media coverage. A project claiming traction with an empty news trail is itself a soft flag.</p><span class="src">Google News</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">Documents &amp; audits</span></div><p>The whitepaper, security audits (auditor + a linkable report), and the project's real docs - API, about, team, tokenomics, governance.</p><span class="src">Grok · on-site crawl</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">Deleted-content archaeology</span></div><p>Diff a site's earliest archive against the live version - scrubbed team pages, deleted advisor sections, removed claims.</p><span class="src">Wayback Machine</span></div>
+        </div>
+      </section>
+
+      <section id="market">
+        <div class="sec-h"><span class="num">08</span><h2>Market &amp; documents</h2><span class="subhead">the ground truth of a token</span></div>
+        <div class="grid">
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--accent)"></i><span class="tool-name">Market data</span></div><p>Price, liquidity, volume, pairs, and the shape of the chart - the pump/dump/drawdown context a verdict reads against.</p><span class="src">DexScreener · GeckoTerminal</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--pass)"></i><span class="tool-name">Exchange presence</span></div><p>Real centralized-exchange listings, market-cap rank, official links, and the project's own description - a strong legitimacy signal a rug can't buy.</p><span class="src">CoinGecko</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">Market intelligence</span></div><p>ATH drawdown, dilution, VC-backed / vesting / upcoming-unlock flags, ticker-impersonation detection, wash-volume signal.</p><span class="src">CryptoRank</span></div>
+          <div class="tool"><div class="tool-top"><i class="flag" style="background:var(--caution)"></i><span class="tool-name">Namesake check</span></div><p>Who a token is named after, and whether they actually created, endorsed, or denied it - the provenance question for a person-named coin.</p><span class="src">Grok knowledge + search</span></div>
+        </div>
+      </section>
+
+      <section id="graph">
+        <div class="sec-h"><span class="num">09</span><h2>The trust graph</h2><span class="subhead">how audits compound</span></div>
+        <p class="body">Every audit contributes its entities - people, projects, wallets, emails, domains, analytics IDs - to a shared graph. The engine is what turns a stack of separate reports into one connected map.</p>
+        <div class="rows" style="margin-top:16px;">
+          <div class="row"><span class="rk">Canonical keys</span><p>An entity resolves to a stable identifier (an X handle, a domain, a wallet, a contract fingerprint) - never a fuzzy name - so "Deks" and "Deks Protocol" collapse to one node, and a person's founded project lands on that project's own token/site audit.</p></div>
+          <div class="row"><span class="rk">Bridging</span><p>When two audits emit the same key - a shared deployer, funder, dev email, GA property, or contract bytecode - they bridge to one node. The connection nobody drew by hand appears on its own.</p></div>
+          <div class="row"><span class="rk">Ring alerts</span><p>Every new report auto-checks its subject against the accumulated graph and flags any connection to an already-FAILED / AVOID subject, showing the exact entity that links them.</p></div>
+          <div class="row"><span class="rk">Verdict reconciliation</span><p>A hard on-chain or identity tie to a flagged subject overrides a clean headline - a shared deployer, funder, bytecode, or dev email with a failed subject is the same operation, regardless of how the contract itself scans.</p></div>
+        </div>
+      </section>
+
+      <section id="scoring">
+        <div class="sec-h"><span class="num">10</span><h2>Scoring &amp; verdict</h2></div>
+        <p class="body">The score is a weighted read across role-appropriate axes, then governed by three disciplines so it stays honest:</p>
+        <div class="rows" style="margin-top:16px;">
+          <div class="row"><span class="rk">Hard caps</span><p>Disqualifying findings - a honeypot, reclaimable ownership, a serial-scammer deployer, a non-transferable token - cap the score regardless of a clean market. A pretty chart never papers over an unsafe contract.</p></div>
+          <div class="row"><span class="rk">Legitimacy weighting</span><p>A capability a rug can't fake - real CEX presence, deep market cap - relaxes the softer caps, so a genuine listed project isn't failed for a mint authority it will never abuse. Hard caps stay hard.</p></div>
+          <div class="row"><span class="rk">Confidence &amp; negative space</span><p>A coverage-based confidence indicator says how much of the verdict rests on verified data, and a "what we couldn't verify" section states the gaps outright. An adversarial second opinion stress-tests the verdict in both directions before it's final.</p></div>
+        </div>
+      </section>
+
+      <section id="analyst">
+        <div class="sec-h"><span class="num">11</span><h2>The analyst layer</h2><span class="subhead">a human in the loop</span></div>
+        <p class="body">ARGUS is a force multiplier, not an oracle. Every report exposes the tools to check its work and improve it:</p>
+        <div class="rows" style="margin-top:16px;">
+          <div class="row"><span class="rk">Scan methodology</span><p>A transparent checklist on every report - every check that ran, and its real outcome: passed, flagged, nothing found, skipped-and-why, or couldn't-verify.</p></div>
+          <div class="row"><span class="rk">Propose an edit</span><p>Add something the scan missed. ARGUS verifies it exists on source, then tries to <em>prove</em> it belongs to the subject - proven → published live; verified-but-unprovable → held pending your approval; non-existent → rejected.</p></div>
+          <div class="row"><span class="rk">Hard link</span><p>Manually bridge the subject to another entity. The target is verified, then wired as a canonical edge in the trust graph - it shows in the connection web and triggers ring alerts.</p></div>
+          <div class="row"><span class="rk">Ask the report</span><p>A grounded chat over a finished report - "why didn't you connect this to X?" - answered only from that report's own evidence, pointing you to the fix when a link is warranted.</p></div>
+          <div class="row"><span class="rk">Self-learning</span><p>When you approve a missed fact, ARGUS diagnoses <em>why</em> its scan missed it and proposes one concrete pipeline fix - the engine gets sharper every time it's corrected.</p></div>
+        </div>
+      </section>
+
+      <section id="sources">
+        <div class="sec-h"><span class="num">12</span><h2>Data sources</h2><span class="subhead">the full stack</span></div>
+        <div class="tablewrap">
+          <table>
+            <thead><tr><th>Source</th><th>What it powers</th><th>Access</th></tr></thead>
+            <tbody>
+              <tr><td class="prov">Claude (Anthropic)</td><td class="powers">Structured analyst, adversarial review, basic-fact lead discovery, vision, self-learning, and grounded report answers. Model output remains a lead until the cited page is fetched and verified.</td><td><span class="tier">keyed</span></td></tr>
+              <tr><td class="prov">Grok (xAI)</td><td class="powers">Live web + X search - team &amp; affiliation discovery, docs, namesake</td><td><span class="tier">keyed</span></td></tr>
+              <tr><td class="prov">twitterapi.io</td><td class="powers">X profile, posts, follower / following graph</td><td><span class="tier">keyed</span></td></tr>
+              <tr><td class="prov">Arkham Intel</td><td class="powers">Wallet entity labels + risk scoring (hacker / mixer / sanctioned exposure)</td><td><span class="tier">keyed</span></td></tr>
+              <tr><td class="prov">Helius</td><td class="powers">Solana deployer, funding trails, mint history, serial-launch sweep</td><td><span class="tier">keyed</span></td></tr>
+              <tr><td class="prov">Etherscan · Bitquery</td><td class="powers">EVM deployer, contract-creation, funding &amp; token-transfer tracing across chains</td><td><span class="tier">keyed</span></td></tr>
+              <tr><td class="prov">GitHub</td><td class="powers">Org / repos + commit-author forensics, dev resolution</td><td><span class="tier">keyed</span></td></tr>
+              <tr><td class="prov">People Data Labs</td><td class="powers">Professional identity and employment records when configured</td><td><span class="tier">keyed</span></td></tr>
+              <tr><td class="prov">Official sites · filings · reputable reporting</td><td class="powers">Company, role, portfolio, funding, governance, and legal verification without a Crunchbase dependency</td><td><span class="tier keyless">public</span></td></tr>
+              <tr><td class="prov">Public web fetch · Jina Reader</td><td class="powers">Exact supporting passages with bounded recovery for eligible public pages; original evidence URLs are preserved</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">Google News · Reddit</td><td class="powers">Independent reporting and community leads that require source-level verification before scoring</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">CryptoRank</td><td class="powers">Market intel: rank, drawdown, dilution, vesting / unlock flags</td><td><span class="tier">keyed</span></td></tr>
+              <tr><td class="prov">Supabase</td><td class="powers">Shared trust graph + shared audit log (community feed)</td><td><span class="tier">infra</span></td></tr>
+              <tr><td class="prov">DexScreener</td><td class="powers">Token market, liquidity &amp; pair data</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">GoPlus · honeypot.is</td><td class="powers">Contract safety + honeypot simulation</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">CoinGecko · GeckoTerminal</td><td class="powers">CEX listings, rank, official links, on-chain price history</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">OFAC SDN · OpenSanctions</td><td class="powers">Sanctioned wallet &amp; individual screening</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">CourtListener</td><td class="powers">US litigation &amp; enforcement records</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">Cert Transparency · urlscan · RDAP</td><td class="powers">Site-infra operator linking, hosting, domain age</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">Wayback · memory.lol · Farcaster</td><td class="powers">Deleted-content diffs, handle history, casts &amp; wallets</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">web3.bio · ENS · Bonfida · SEC EDGAR</td><td class="powers">Name → wallet resolution, US securities filings</td><td><span class="tier keyless">keyless</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="body" style="margin-top:14px; font-size:13px; color:var(--faint);">Keyed sources need an API key; public and keyless sources run without one. A missing key records an unavailable provider state. It never becomes adverse evidence about the subject, and it does not silently answer the underlying diligence question.</p>
+      </section>
+
+      <section id="release">
+        <div class="sec-h"><span class="num">13</span><h2>Release gates</h2><span class="subhead">what must work live</span></div>
+        <p class="body">A release must be more useful than a generic ChatGPT or Claude scan. Unit tests prove invariants; the live collector must still find the adjudicated facts itself. Each named case must scan, run targeted repair, persist an immutable report, reopen without rescanning, and answer fixed questions from frozen citations.</p>
+        <div class="rows" style="margin-top:16px;">
+          <div class="row"><span class="rk">Brian Armstrong</span><p>Coinbase cofounder, chair, and CEO; Fred Ehrsam; former Airbnb role; COIN as a public security rather than a crypto token; Base with no native token; and the Coinbase SEC matter kept separate from Armstrong personally.</p></div>
+          <div class="row"><span class="rk">Hayden Adams</span><p>Uniswap Labs founder and CEO; protocol launch; Labs, protocol, and Foundation kept distinct; canonical UNI contract and chart; GitHub footprint; and legal events attributed to the exact entity and current status.</p></div>
+          <div class="row"><span class="rk">Sam Bankman-Fried</span><p>Former FTX and Alameda roles, cofounders, founding and bankruptcy; historical or distressed FTT; seven-count conviction, 25-year sentence, and forfeiture; criminal findings kept separate from SEC allegations.</p></div>
+          <div class="row"><span class="rk">Jupiter</span><p>Jupiter Exchange, JUP DAO, contributors, and related products kept distinct; Meow and documented leaders; canonical JUP chart and contract; liquidity, supply, unlock, governance, treasury, concentration, and at least two non-social product-usage measures.</p></div>
+          <div class="row"><span class="rk">Recall</span><p>Find every must-have fact and at least 90% of adjudicated core facts. A critical false fact, entity-attribution error, stock-token conflation, silent known-data omission, or missing required chart fails the release.</p></div>
+          <div class="row"><span class="rk">ARGUS advantage</span><p>At least one live founder and Jupiter must surface a cited, decision-changing connection beyond a generic biography, plus the strongest credible evidence against the conclusion.</p></div>
+        </div>
+      </section>
+
+      <section id="principles">
+        <div class="sec-h"><span class="num">14</span><h2>Principles</h2><span class="subhead">the rules that keep it honest</span></div>
+        <div class="principles">
+          <div class="principle"><h4>Never invent a founder</h4><p>Names without a verified handle are shown but not audited, and a project's brand account is never treated as a person behind it.</p></div>
+          <div class="principle"><h4>Existence isn't proof</h4><p>A verified thing that can't be tied to the subject is held, not published. The bar to go live is corroboration, not existence.</p></div>
+          <div class="principle"><h4>Nearby is not attributable</h4><p>A partner, portfolio company, competitor, namesake, nearby executive, or another tenant on a shared host cannot lend its facts to the audited subject. Subject, predicate, value, qualifier, and status must form one bounded claim.</p></div>
+          <div class="principle"><h4>Absence is a claim too</h4><p>A failed fetch is a coverage gap, never a confident "anonymous team." A blank batched search is unresolved, not a completed empty screen for every question.</p></div>
+          <div class="principle"><h4>Explain, don't just score</h4><p>Every verdict traces to the evidence and the checks that produced it, making the conclusion reproducible and open to challenge.</p></div>
+          <div class="principle"><h4>The names lie, the keys don't</h4><p>Entities connect on stable identifiers such as wallets, handles, bytecode, and emails, not fuzzy name-matching that can merge unrelated actors.</p></div>
+          <div class="principle"><h4>Prove the release, not just the code</h4><p>Green tests establish invariants. Named live canaries must still find the facts, persist the report, reopen the same snapshot, and answer from frozen citations before a release is called shipped.</p></div>
+          <div class="principle"><h4>Get sharper on correction</h4><p>Every approved edit teaches the pipeline why it missed and what to change, so the system compounds with use.</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<footer>
+  <div class="wrap">
+    <span>ARGUS · Methodology &amp; Field Manual</span>
+    <span>Internal source of truth · confidential</span>
+  </div>
+</footer>

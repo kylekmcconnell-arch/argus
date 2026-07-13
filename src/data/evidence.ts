@@ -388,7 +388,7 @@ export interface BasicFact {
   /** Exact person, project, or legal entity to which the source attributes an event. */
   attributedEntity?: string;
   /** Whether that exact attributed entity is the audited subject or only related context. */
-  attributionScope?: "direct_subject" | "related_entity";
+  attributionScope?: "direct_subject" | "related_entity" | "identity_unresolved";
   evidence_origin: "deterministic";
   artifact_verified: true;
   provider: "public-web";

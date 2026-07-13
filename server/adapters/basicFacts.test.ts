@@ -290,7 +290,7 @@ describe("basic-facts lead parsing", () => {
 });
 
 describe("basic-facts source verification", () => {
-  it("marks an explicit completed no-match without calling the provider unavailable", async () => {
+  it("does not turn one empty batch into a checked-empty result for every question", async () => {
     const { ctx, evidence } = context();
     const result = await collectBasicFacts(ctx, {
       discover: async () => [],
@@ -299,13 +299,13 @@ describe("basic-facts source verification", () => {
 
     expect(result).toEqual(expect.objectContaining({
       state: "partial",
-      detail: expect.stringContaining("search completed"),
-      explicitEmptyChecks: ["project-transparency"],
+      detail: expect.stringContaining("individual questions remain unresolved"),
     }));
+    expect(result).not.toHaveProperty("explicitEmptyChecks");
     expect(evidence.basicFactLeads).toEqual([]);
     expect(evidence.basicFacts).toEqual([]);
     expect(evidence.basicFactQuestionLedger?.every((entry) =>
-      entry.providerRuns[0]?.state === "completed_empty")).toBe(true);
+      entry.providerRuns[0]?.state === "partial")).toBe(true);
   });
 
   it("repairs only critical questions that remain unanswered after source verification", async () => {
@@ -630,6 +630,961 @@ describe("basic-facts source verification", () => {
     expect(fact).not.toHaveProperty("qualifier");
   });
 
+  it("verifies a live-shaped role when the official title reorders the same structured value", () => {
+    const sourceUrl = "https://investor.coinbase.com/news/news-details/2025/Coinbase-to-Host-X-Spaces-With-Co-Founder-and-CEO-Brian-Armstrong-and-CFO-Alesia-Haas/default.aspx";
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "Co-Founder and CEO, Coinbase",
+        excerpt: "Coinbase to Host X Spaces With Co-Founder and CEO Brian Armstrong and CFO Alesia Haas",
+        sourceUrl,
+      }),
+      document({
+        url: sourceUrl,
+        host: "investor.coinbase.com",
+        text: "<html><head><title>Coinbase to Host X Spaces With Co-Founder and CEO Brian Armstrong and CFO Alesia Haas</title></head><body></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      predicate: "current_role",
+      value: "Co-Founder and CEO, Coinbase",
+      status: "verified",
+    }));
+  });
+
+  it("does not assign the CFO in a shared leadership title to Brian Armstrong", () => {
+    const sourceUrl = "https://investor.coinbase.com/news/leadership-event";
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "CFO, Coinbase",
+        excerpt: "Coinbase to Host X Spaces With Co-Founder and CEO Brian Armstrong and CFO Alesia Haas.",
+        sourceUrl,
+      }),
+      document({
+        url: sourceUrl,
+        host: "investor.coinbase.com",
+        text: "<html><body><h1>Coinbase to Host X Spaces With Co-Founder and CEO Brian Armstrong and CFO Alesia Haas.</h1></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    )).toBeNull();
+  });
+
+  it("binds coordinated executive titles by the source's respectively ordering", () => {
+    const passage = "Brian Armstrong and Alesia Haas are CEO and CFO of Coinbase, respectively.";
+    const sourceUrl = "https://investor.coinbase.com/governance/leadership";
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "CEO, Coinbase",
+        excerpt: passage,
+        sourceUrl,
+      }),
+      document({
+        url: sourceUrl,
+        host: "investor.coinbase.com",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["https://investor.coinbase.com"],
+    )).toEqual(expect.objectContaining({
+      predicate: "current_role",
+      value: "CEO, Coinbase",
+      status: "verified",
+    }));
+  });
+
+  it("verifies the common Chief Executive title without requiring the word Officer", () => {
+    const passage = "Brian Armstrong is the Chief Executive of Coinbase.";
+    const sourceUrl = "https://investor.coinbase.com/governance/leadership";
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "Chief Executive, Coinbase",
+        excerpt: passage,
+        sourceUrl,
+      }),
+      document({
+        url: sourceUrl,
+        host: "investor.coinbase.com",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["https://investor.coinbase.com"],
+    )).toEqual(expect.objectContaining({
+      predicate: "current_role",
+      value: "Chief Executive, Coinbase",
+      status: "verified",
+    }));
+  });
+
+  it("binds expanded executive titles and does not hardcode one company name", () => {
+    const brian = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "CEO, Coinbase",
+        excerpt: "Brian Armstrong currently serves as the Chief Executive Officer of Coinbase.",
+        sourceUrl: "https://investor.coinbase.com/leadership",
+      }),
+      document({
+        url: "https://investor.coinbase.com/leadership",
+        host: "investor.coinbase.com",
+        text: "<p>Brian Armstrong currently serves as the Chief Executive Officer of Coinbase.</p>",
+      }),
+      ["Brian Armstrong"],
+      "@brian_armstrong",
+      ["https://investor.coinbase.com"],
+    );
+    const alice = verifyBasicFactLead(
+      lead({
+        subject: "Alice Smith",
+        predicate: "current_role",
+        value: "CEO, Acme Labs",
+        excerpt: "Alice Smith is Acme Labs CEO.",
+        sourceUrl: "https://acme.example/team",
+      }),
+      document({
+        url: "https://acme.example/team",
+        host: "acme.example",
+        text: "<p>Alice Smith is Acme Labs CEO.</p>",
+      }),
+      ["Alice Smith"],
+      "@alice",
+      ["https://acme.example"],
+    );
+
+    expect(brian).toEqual(expect.objectContaining({ value: "CEO, Coinbase", status: "verified" }));
+    expect(alice).toEqual(expect.objectContaining({ value: "CEO, Acme Labs", status: "verified" }));
+  });
+
+  it("binds single-name crypto leaders to their own role", () => {
+    const passage = "Jupiter leadership: Founder Meow, CTO Siong.";
+    const source = document({ text: `<p>${passage}</p>` });
+    const meowFounder = lead({
+      subject: "Meow",
+      predicate: "current_role",
+      value: "Founder, Jupiter",
+      excerpt: passage,
+    });
+    const meowCto = { ...meowFounder, value: "CTO, Jupiter" };
+
+    expect(verifyBasicFactLead(meowFounder, source, ["Meow"], "@weremeow", ["https://jup.ag"]))
+      .toEqual(expect.objectContaining({ value: "Founder, Jupiter", status: "verified" }));
+    expect(verifyBasicFactLead(meowCto, source, ["Meow"], "@weremeow", ["https://jup.ag"]))
+      .toBeNull();
+  });
+
+  it("binds each project executive's name and title as one pair", () => {
+    const passage = "Jupiter leadership: CEO Meow, CTO Siong.";
+    const source = document({ text: `<p>${passage}</p>` });
+    const executive = (value: string) => verifyBasicFactLead(
+      lead({ predicate: "executive", value, excerpt: passage }),
+      source,
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    );
+
+    expect(executive("CEO Meow")).toEqual(expect.objectContaining({ value: "CEO Meow" }));
+    expect(executive("CTO Siong")).toEqual(expect.objectContaining({ value: "CTO Siong" }));
+    expect(executive("CTO Meow")).toBeNull();
+    expect(executive("CEO Siong")).toBeNull();
+  });
+
+  it("attributes a verified reader-recovered passage without replacing its evidence URL", () => {
+    const sourceUrl = "https://investor.coinbase.com/governance/board-of-directors/default.aspx";
+    const recovered = {
+      ...document({
+        url: sourceUrl,
+        host: "investor.coinbase.com",
+        contentType: "text/plain",
+        text: "Brian Armstrong is the co-founder and CEO of Coinbase.",
+      }),
+      retrievalMethod: "reader_recovery" as const,
+      retrievalProvider: "jina-reader" as const,
+      retrievalUrl: `https://r.jina.ai/${sourceUrl}`,
+    };
+
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "Co-Founder and CEO, Coinbase",
+        excerpt: "Brian Armstrong is the co-founder and CEO of Coinbase.",
+        sourceUrl,
+      }),
+      recovered,
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    );
+
+    expect(fact?.sources[0]).toEqual(expect.objectContaining({
+      url: sourceUrl,
+      provider: "jina-reader",
+      artifactVerified: true,
+    }));
+  });
+
+  it("verifies an official biography role despite connective words and punctuation", () => {
+    const sourceUrl = "https://investor.coinbase.com/governance/board-of-directors/default.aspx";
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "prior_role",
+        value: "Software engineer, Airbnb",
+        excerpt: "Brian Armstrong. Before our founding, Mr. Armstrong served as a software engineer at Airbnb, Inc.",
+        sourceUrl,
+      }),
+      document({
+        url: sourceUrl,
+        host: "investor.coinbase.com",
+        text: "<html><body><h2>Brian Armstrong</h2><p>Before our founding, Mr. Armstrong served as a software engineer at Airbnb, Inc.</p></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      predicate: "prior_role",
+      value: "Software engineer, Airbnb",
+      status: "verified",
+    }));
+  });
+
+  it("verifies a Coinbase-board-shaped biography from bounded JSON-LD", () => {
+    const sourceUrl = "https://investor.coinbase.com/governance/board-of-directors/default.aspx";
+    const schema = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Person",
+      name: "Brian Armstrong",
+      jobTitle: "Co-Founder, Chief Executive Officer and Chairman of the Board",
+      description: "<p>Brian Armstrong is our co-founder and has served as our Chief Executive Officer since our inception in May 2012. Before our founding, Mr. Armstrong served as a software engineer at Airbnb, Inc., from May 2011 to June 2012.</p>",
+    });
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "prior_role",
+        value: "Software engineer, Airbnb",
+        excerpt: "Before our founding, Mr. Armstrong served as a software engineer at Airbnb, Inc., from May 2011 to June 2012.",
+        sourceUrl,
+      }),
+      document({
+        url: sourceUrl,
+        host: "investor.coinbase.com",
+        text: `<html><body><script type="application/ld+json">${schema}</script><div id="app"></div></body></html>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      predicate: "prior_role",
+      value: "Software engineer, Airbnb",
+      status: "verified",
+      sources: [expect.objectContaining({
+        excerpt: expect.stringContaining("software engineer at Airbnb"),
+      })],
+    }));
+    expect(fact?.sources[0]?.excerpt).not.toContain("<p");
+  });
+
+  it("never treats an arbitrary executable script as evidence text", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "prior_role",
+        value: "Software engineer, Airbnb",
+        excerpt: "Brian Armstrong served as a software engineer at Airbnb.",
+      }),
+      document({
+        text: "<html><body><script>window.fake = 'Brian Armstrong served as a software engineer at Airbnb.'</script><div id='app'></div></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["jup.ag"],
+    )).toBeNull();
+  });
+
+  it("never joins separate JSON-LD people into one role claim", () => {
+    const schema = JSON.stringify({
+      "@context": "https://schema.org",
+      "@graph": [
+        {
+          "@type": "Person",
+          name: "Brian Armstrong",
+          description: "Brian Armstrong works at Coinbase.",
+        },
+        {
+          "@type": "Person",
+          name: "Alesia Haas",
+          jobTitle: "Chief Financial Officer",
+        },
+      ],
+    });
+
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "Chief Financial Officer, Coinbase",
+        excerpt: "Brian Armstrong works at Coinbase. Alesia Haas is Chief Financial Officer.",
+        sourceUrl: "https://investor.coinbase.com/governance/leadership/default.aspx",
+      }),
+      document({
+        url: "https://investor.coinbase.com/governance/leadership/default.aspx",
+        host: "investor.coinbase.com",
+        text: `<html><body><script type="application/ld+json">${schema}</script></body></html>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    )).toBeNull();
+  });
+
+  it("accepts co-founder and inception language for a dated founding fact", () => {
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "founded",
+        value: "Coinbase (May 2012)",
+        excerpt: "Brian Armstrong was a Coinbase co-founder at its inception in May 2012.",
+        sourceUrl: "https://investor.coinbase.com/governance/board-of-directors/default.aspx",
+      }),
+      document({
+        url: "https://investor.coinbase.com/governance/board-of-directors/default.aspx",
+        host: "investor.coinbase.com",
+        text: "<html><body><p>Brian Armstrong was a Coinbase co-founder at its inception in May 2012.</p></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      predicate: "founded",
+      value: "Coinbase (May 2012)",
+      status: "verified",
+    }));
+  });
+
+  it("uses a verified counterparty host only for a missing organization anchor", () => {
+    const sourceUrl = "https://investor.coinbase.com/governance/board-of-directors/default.aspx";
+    const passage = "Brian Armstrong is our co-founder and has served since our inception in May 2012.";
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "founded",
+        value: "Coinbase (May 2012)",
+        excerpt: passage,
+        sourceUrl,
+      }),
+      document({
+        url: sourceUrl,
+        host: "investor.coinbase.com",
+        text: `<html><body><p>${passage}</p></body></html>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      [],
+      ["coinbase.com"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      predicate: "founded",
+      value: "Coinbase (May 2012)",
+      status: "verified",
+      sources: [expect.objectContaining({ sourceClass: "official_counterparty" })],
+    }));
+  });
+
+  it("never supplies a missing organization anchor from an unrelated host", () => {
+    const passage = "Brian Armstrong is our co-founder and has served since our inception in May 2012.";
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "founded",
+        value: "Coinbase (May 2012)",
+        excerpt: passage,
+        sourceUrl: "https://coinbase-report.example/brian",
+      }),
+      document({
+        url: "https://coinbase-report.example/brian",
+        host: "coinbase-report.example",
+        text: `<html><body><p>${passage}</p></body></html>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      [],
+      ["coinbase.com"],
+    )).toBeNull();
+  });
+
+  it.each([
+    [
+      "product",
+      "Coinbase cryptocurrency exchange platform",
+      "Brian Armstrong built Coinbase, a cryptocurrency exchange used by customers globally.",
+    ],
+    [
+      "exit",
+      "Coinbase direct listing on Nasdaq (April 14, 2021)",
+      "Brian Armstrong took Coinbase public through a direct listing on Nasdaq on April 14, 2021.",
+    ],
+    [
+      "track_record",
+      "Coinbase 108 million users (2023)",
+      "Brian Armstrong led Coinbase as it reported 108 million users in 2023.",
+    ],
+    [
+      "public_security",
+      "COIN (Coinbase Global, Inc. Class A common stock, NASDAQ)",
+      "Brian Armstrong is Coinbase's co-founder. Coinbase went public on Nasdaq under ticker COIN.",
+    ],
+  ] as const)("verifies a live-shaped %s value from the same fetched passage", (predicate, value, sentence) => {
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate,
+        value,
+        excerpt: sentence,
+        sourceUrl: "https://investor.coinbase.com/evidence",
+      }),
+      document({
+        url: "https://investor.coinbase.com/evidence",
+        host: "investor.coinbase.com",
+        text: `<html><body><p>${sentence}</p></body></html>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({ predicate, status: "verified" }));
+    if (predicate === "public_security") {
+      expect(fact?.value).toBe("COIN (Coinbase, NASDAQ-listed security)");
+      expect(fact?.value).not.toContain("Class A");
+    } else {
+      expect(fact?.value).toBe(value);
+    }
+  });
+
+  it("does not join one person's organization with another person's title", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "CEO, Coinbase",
+        excerpt: "Brian Armstrong co-founded Coinbase. Alesia Haas is CEO.",
+        sourceUrl: "https://example.com/leadership",
+      }),
+      document({
+        url: "https://example.com/leadership",
+        host: "example.com",
+        text: "<html><body><p>Brian Armstrong co-founded Coinbase. Alesia Haas is CEO.</p></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+    )).toBeNull();
+  });
+
+  it("binds a project founder to founder grammar, not another name in the sentence", () => {
+    const passage = "Jupiter was founded by Meow and engineering is led by Siong.";
+    const source = document({ text: `<html><body><p>${passage}</p></body></html>` });
+    expect(verifyBasicFactLead(
+      lead({ value: "Meow", excerpt: passage }),
+      source,
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["jup.ag"],
+    )).toEqual(expect.objectContaining({ value: "Meow", status: "verified" }));
+    expect(verifyBasicFactLead(
+      lead({ value: "Siong", excerpt: passage }),
+      source,
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["jup.ag"],
+    )).toBeNull();
+  });
+
+  it("accepts each atomic member of an explicit founder list", () => {
+    const passage = "Jupiter founders include Meow and Siong.";
+    const source = document({ text: `<p>${passage}</p>` });
+    for (const value of ["Meow", "Siong"]) {
+      expect(verifyBasicFactLead(
+        lead({ value, excerpt: passage }),
+        source,
+        ["Jupiter", "@JupiterExchange"],
+        "@JupiterExchange",
+        ["https://jup.ag"],
+      )).toEqual(expect.objectContaining({ value, status: "verified" }));
+    }
+  });
+
+  it.each([
+    "Jupiter co-founder Meow introduced the protocol.",
+    "Jupiter's co-founder is Meow.",
+    "Meow, co-founder of Jupiter, introduced the protocol.",
+    "Jupiter co-founders Meow and Siong introduced the protocol.",
+  ])("verifies a common explicit founder construction: %s", (passage) => {
+    expect(verifyBasicFactLead(
+      lead({ value: "Meow", excerpt: passage }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toEqual(expect.objectContaining({
+      predicate: "founder",
+      value: "Meow",
+      status: "verified",
+    }));
+  });
+
+  it.each([
+    ["advisor", "Jupiter founders: Meow and advisor Siong."],
+    ["investor", "Jupiter founders include Meow and investor Siong."],
+    ["employee", "Jupiter founders are Meow and employee Siong."],
+    ["director", "Jupiter founders include Meow and director Siong."],
+  ] as const)("does not turn a listed %s into a founder", (_role, passage) => {
+    expect(verifyBasicFactLead(
+      lead({ value: "Siong", excerpt: passage }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
+  });
+
+  it.each([
+    "Jupiter founder Meow interviewed Siong.",
+    "Jupiter founder Meow said Siong leads engineering.",
+    "Jupiter founder allegations named Siong in a complaint.",
+  ])("does not turn a later unrelated person into the project's founder: %s", (passage) => {
+    expect(verifyBasicFactLead(
+      lead({ value: "Siong", excerpt: passage }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
+  });
+
+  it("does not transfer another company's metric through a shared sentence", () => {
+    const passage = "Brian Armstrong leads Coinbase, while ResearchHub reported 108 million users in 2023.";
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "track_record",
+        value: "Coinbase 108 million users (2023)",
+        excerpt: passage,
+        sourceUrl: "https://example.com/metrics",
+      }),
+      document({
+        url: "https://example.com/metrics",
+        host: "example.com",
+        text: `<html><body><p>${passage}</p></body></html>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+    )).toBeNull();
+  });
+
+  it.each([
+    ["official_token", "UNI", "Jupiter competes with Uniswap. Uniswap official token is UNI."],
+    ["traction", "$1B monthly volume", "Jupiter competes with Acme. Acme reported $1B monthly volume."],
+    ["funding", "$100 million Series A", "Jupiter competes with Acme. Acme raised a $100 million Series A."],
+    ["audit", "Trail of Bits audit", "Jupiter competes with Acme. Acme completed a Trail of Bits audit."],
+    ["network", "Ethereum", "Jupiter competes with Acme. Acme is deployed on Ethereum."],
+    ["governance", "Acme DAO", "Jupiter competes with Acme. Acme governance is managed by the Acme DAO."],
+    ["repository", "github.com/acme/repo", "Jupiter competes with Acme. Acme source code is at github.com/acme/repo."],
+  ] as const)("does not transfer another project's %s fact", (predicate, value, passage) => {
+    expect(verifyBasicFactLead(
+      lead({ predicate, value, excerpt: passage }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
+  });
+
+  it("does not turn a nearby token denial into another project's token", () => {
+    const passage = "Jupiter has no token. Uniswap official token is UNI.";
+    expect(verifyBasicFactLead(
+      lead({ predicate: "official_token", value: "UNI", excerpt: passage }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
+  });
+
+  it.each([
+    ["funding", "$100 million Series A", "Jupiter and Acme Labs raised a $100 million Series A."],
+    ["traction", "$1B monthly volume", "Jupiter partner Acme Labs reported $1B monthly volume."],
+    ["funding", "$100 million Series A", "Jupiter partner Acme Labs raised a $100 million Series A."],
+    ["funding", "$100 million Series A", "Jupiter announced Acme Labs raised a $100 million Series A."],
+    ["audit", "Trail of Bits audit", "Jupiter portfolio company Acme Labs completed a Trail of Bits audit."],
+    ["network", "Ethereum", "Jupiter integration partner Acme Labs is deployed on Ethereum."],
+    ["governance", "Acme DAO", "Jupiter partner Acme Labs governance is managed by the Acme DAO."],
+    ["official_token", "ACME", "Jupiter partner Acme Labs official token is ACME."],
+    ["traction", "$1B monthly volume", "Jupiter said Acme Labs reported $1B monthly volume."],
+  ] as const)("does not transfer a named related company's %s claim to the project", (predicate, value, passage) => {
+    expect(verifyBasicFactLead(
+      lead({ predicate, value, excerpt: passage }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
+  });
+
+  it.each([
+    ["traction", "$1B monthly volume", "Jupiter partner acme labs reported $1B monthly volume."],
+    ["traction", "$1B monthly volume", "Jupiter partner dYdX reported $1B monthly volume."],
+    ["funding", "$100 million Series A", "Jupiter announced acme labs raised a $100 million Series A."],
+    ["official_token", "ACME", "Jupiter partner acme labs official token is ACME."],
+    ["funding", "$100 million Series A", "Jupiter announced that Acme Labs raised a $100 million Series A."],
+    ["traction", "$1B monthly volume", "Jupiter said that Acme Labs reported $1B monthly volume."],
+    ["funding", "$100 million Series A", "Jupiter reported that Acme Labs raised a $100 million Series A."],
+    ["funding", "$100 million Series A", "Jupiter confirmed that Acme Labs raised a $100 million Series A."],
+    ["funding", "$100 million Series A", "According to Jupiter, Acme Labs raised a $100 million Series A."],
+    ["funding", "$100 million Series A", "Jupiter's partner, Acme Labs, raised a $100 million Series A."],
+    ["traction", "$1B monthly volume", "Jupiter's portfolio company, Acme Labs, reported $1B monthly volume."],
+    ["funding", "$100 million Series A", "Jupiter's announcement says Acme Labs raised a $100 million Series A."],
+    ["official_token", "ACME", "Jupiter partner's official token is ACME."],
+    ["official_token", "ACME", "Jupiter's subsidiary's official token is ACME."],
+    ["funding", "$100 million Series A", "A $100 million Series A was raised by Acme Labs, according to Jupiter."],
+    ["official_token", "ACME", "ACME is the official token of Acme Labs, Jupiter said."],
+    ["traction", "$1B monthly volume", "Acme Labs reported $1B monthly volume, Jupiter confirmed."],
+    ["audit", "Trail of Bits audit", "Acme Labs completed a Trail of Bits audit, Jupiter announced."],
+    ["traction", "$1B monthly volume", "Jupiter reported $1B monthly volume for Acme Labs."],
+    ["traction", "$1B monthly volume", "Jupiter reported $1B monthly volume generated by Acme Labs."],
+    ["funding", "$100 million funding round", "Jupiter announced a $100 million funding round for Acme Labs."],
+    ["audit", "Trail of Bits audit", "Jupiter completed a Trail of Bits audit for Acme Labs."],
+    ["traction", "$1B monthly volume", "Jupiter reported that volume for Acme Labs reached $1B monthly volume."],
+  ] as const)("does not transfer a lowercase, reported, appositive, or trailing-attribution %s claim", (predicate, value, passage) => {
+    expect(verifyBasicFactLead(
+      lead({ predicate, value, excerpt: passage }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
+  });
+
+  it.each([
+    [
+      "public_security",
+      "COIN (Coinbase, NASDAQ)",
+      "Brian Armstrong founded Coinbase. Coinbase partner Acme Global is publicly traded on Nasdaq under ticker COIN.",
+    ],
+    [
+      "track_record",
+      "Coinbase 108 million users",
+      "Brian Armstrong led Coinbase. Coinbase partner Acme Global reported 108 million users.",
+    ],
+    [
+      "track_record",
+      "Coinbase 108 million users",
+      "Brian Armstrong led Coinbase. Coinbase portfolio company Acme Global reported 108 million users.",
+    ],
+    [
+      "track_record",
+      "Coinbase 108 million users",
+      "Brian Armstrong led Coinbase. Coinbase reported 108 million users for Acme Labs.",
+    ],
+  ] as const)("does not transfer a related company's %s through the subject's relationship anchor", (predicate, value, passage) => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate,
+        value,
+        excerpt: passage,
+        sourceUrl: "https://brianarmstrong.org/portfolio",
+      }),
+      document({
+        url: "https://brianarmstrong.org/portfolio",
+        host: "brianarmstrong.org",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["https://brianarmstrong.org"],
+    )).toBeNull();
+  });
+
+  it.each([
+    ["audit", "Trail of Bits audit", "Jupiter announced the completion of its Trail of Bits audit."],
+    ["traction", "$1B monthly volume", "Jupiter reported a record $1B monthly volume."],
+    ["governance", "Proposal 42", "Jupiter announced the approval of governance Proposal 42."],
+  ] as const)("preserves a clear subject-owned %s announcement", (predicate, value, passage) => {
+    expect(verifyBasicFactLead(
+      lead({ predicate, value, excerpt: passage }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toEqual(expect.objectContaining({ predicate, value, status: "verified" }));
+  });
+
+  it.each([
+    ["funding", "$100 million funding round", "We announced that Acme Labs raised a $100 million funding round."],
+    ["traction", "$1B monthly volume", "Our company partner Acme Labs reported $1B monthly volume."],
+  ] as const)("does not transfer a peer's %s claim through official first-person context", (predicate, value, sentence) => {
+    const passage = `Jupiter. ${sentence}`;
+    expect(verifyBasicFactLead(
+      lead({ predicate, value, excerpt: passage }),
+      document({ text: `<h1>Jupiter</h1><p>${sentence}</p>` }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
+  });
+
+  it.each([
+    "Brian Armstrong leads Coinbase. Unlike Coinbase, ResearchHub reported 108 million users in 2023.",
+    "Brian Armstrong leads Coinbase. Coinbase competitor ResearchHub reported 108 million users in 2023.",
+  ])("does not transfer a competitor metric through an anchor mention", (passage) => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "track_record",
+        value: "Coinbase 108 million users (2023)",
+        excerpt: passage,
+      }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Brian Armstrong"],
+      "@brian_armstrong",
+      ["https://brianarmstrong.org"],
+    )).toBeNull();
+  });
+
+  it("does not transfer a competitor's listing to Coinbase", () => {
+    const passage = "Brian Armstrong leads Coinbase. Unlike Coinbase, ResearchHub is listed on Nasdaq under ticker COIN.";
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "public_security",
+        value: "COIN (Coinbase, NASDAQ)",
+        excerpt: passage,
+      }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Brian Armstrong"],
+      "@brian_armstrong",
+      ["https://brianarmstrong.org"],
+    )).toBeNull();
+  });
+
+  it("never inherits parent JSON-LD narrative into a nested person's role", () => {
+    const schema = JSON.stringify({
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      name: "Coinbase",
+      description: "Brian Armstrong works at Coinbase.",
+      founder: {
+        "@type": "Person",
+        name: "Alesia Haas",
+        jobTitle: "Chief Financial Officer",
+      },
+    });
+
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "Chief Financial Officer, Coinbase",
+        excerpt: "Brian Armstrong works at Coinbase. Alesia Haas is Chief Financial Officer.",
+        sourceUrl: "https://investor.coinbase.com/leadership",
+      }),
+      document({
+        url: "https://investor.coinbase.com/leadership",
+        host: "investor.coinbase.com",
+        text: `<html><body><script type="application/ld+json">${schema}</script></body></html>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    )).toBeNull();
+  });
+
+  it("does not treat an unlabeled currency code as a public-security ticker", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "public_security",
+        value: "USD (Coinbase, NASDAQ)",
+        excerpt: "Coinbase reports revenue in USD and is publicly traded on Nasdaq.",
+        sourceUrl: "https://investor.coinbase.com/results",
+      }),
+      document({
+        url: "https://investor.coinbase.com/results",
+        host: "investor.coinbase.com",
+        text: "<html><body><p>Brian Armstrong co-founded Coinbase. Coinbase reports revenue in USD and is publicly traded on Nasdaq.</p></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    )).toBeNull();
+  });
+
+  it("rejects a claimed exchange when the fetched source names a different venue", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "public_security",
+        value: "COIN (Coinbase, NYSE)",
+        excerpt: "Coinbase went public on Nasdaq under ticker COIN.",
+        sourceUrl: "https://investor.coinbase.com/listing",
+      }),
+      document({
+        url: "https://investor.coinbase.com/listing",
+        host: "investor.coinbase.com",
+        text: "<html><body><p>Brian Armstrong co-founded Coinbase. Coinbase went public on Nasdaq under ticker COIN.</p></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    )).toBeNull();
+  });
+
+  it("accepts standard issuer-first exchange ticker notation without freezing unsupported class detail", () => {
+    const passage = "Brian Armstrong co-founded Coinbase. Coinbase Global, Inc. (NASDAQ: COIN) is publicly traded.";
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "public_security",
+        value: "Coinbase Global, Inc. (NASDAQ: COIN)",
+        excerpt: passage,
+        sourceUrl: "https://investor.coinbase.com/listing",
+      }),
+      document({
+        url: "https://investor.coinbase.com/listing",
+        host: "investor.coinbase.com",
+        text: `<html><body><p>${passage}</p></body></html>`,
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["investor.coinbase.com"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      predicate: "public_security",
+      value: "COIN (Coinbase, NASDAQ-listed security)",
+      status: "verified",
+    }));
+  });
+
+  it("does not borrow a security class from another issuer", () => {
+    const passage = "Brian Armstrong co-founded Coinbase. Coinbase went public on Nasdaq under ticker COIN. Acme has Class A common stock.";
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "public_security",
+        value: "COIN (Coinbase Class A common stock, NASDAQ)",
+        excerpt: passage,
+      }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Brian Armstrong"],
+      "@brian_armstrong",
+      ["https://brianarmstrong.org"],
+    );
+    expect(fact?.value).toBe("COIN (Coinbase, NASDAQ-listed security)");
+  });
+
+  it("does not borrow a metric qualifier from another company", () => {
+    const passage = "Brian Armstrong led Coinbase as it reported 108 million users. ResearchHub launched in 2023.";
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "track_record",
+        value: "Coinbase 108 million users",
+        qualifier: "2023",
+        excerpt: passage,
+      }),
+      document({ text: `<p>${passage}</p>` }),
+      ["Brian Armstrong"],
+      "@brian_armstrong",
+      ["https://brianarmstrong.org"],
+    );
+    expect(fact).toEqual(expect.objectContaining({ value: "Coinbase 108 million users" }));
+    expect(fact).not.toHaveProperty("qualifier");
+  });
+
+  it("does not let fuzzy role structure substitute a different organization", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "Co-Founder and CEO, Coinbase",
+        excerpt: "Brian Armstrong is co-founder and CEO of ResearchHub.",
+        sourceUrl: "https://brianarmstrong.org/bio",
+      }),
+      document({
+        url: "https://brianarmstrong.org/bio",
+        host: "brianarmstrong.org",
+        text: "<html><body><p>Brian Armstrong is co-founder and CEO of ResearchHub.</p></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["brianarmstrong.org"],
+    )).toBeNull();
+  });
+
+  it("does not let fuzzy track-record matching change a claimed metric", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "track_record",
+        value: "Coinbase 108 million users (2023)",
+        excerpt: "Brian Armstrong led Coinbase as it reported 98 million users in 2023.",
+        sourceUrl: "https://coinbase.example/metrics",
+      }),
+      document({
+        url: "https://coinbase.example/metrics",
+        host: "coinbase.example",
+        text: "<html><body><p>Brian Armstrong led Coinbase as it reported 98 million users in 2023.</p></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["coinbase.example"],
+    )).toBeNull();
+  });
+
+  it("does not let the same track-record numbers substitute a different metric", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "track_record",
+        value: "Coinbase 108 million users (2023)",
+        excerpt: "Brian Armstrong led Coinbase as it reported 108 million in trading volume in 2023.",
+        sourceUrl: "https://coinbase.example/metrics",
+      }),
+      document({
+        url: "https://coinbase.example/metrics",
+        host: "coinbase.example",
+        text: "<html><body><p>Brian Armstrong led Coinbase as it reported 108 million in trading volume in 2023.</p></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["coinbase.example"],
+    )).toBeNull();
+  });
+
   it("freezes a traction reporting period only when the fetched passage states it", () => {
     const supported = verifyBasicFactLead(
       lead({
@@ -895,6 +1850,313 @@ describe("basic-facts source verification", () => {
       "@alice",
       ["alice.example"],
     )).toBeNull();
+  });
+
+  it("does not transfer an adjacent company settlement to a named founder", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Alice",
+        predicate: "legal_regulatory_event",
+        value: "SEC settlement",
+        eventStatus: "settled",
+        attributedEntity: "Alice",
+        excerpt: "Alice founded Acme. Acme settled an SEC settlement.",
+        sourceUrl: "https://www.sec.gov/newsroom/acme",
+      }),
+      document({
+        url: "https://www.sec.gov/newsroom/acme",
+        host: "www.sec.gov",
+        text: "<html><body><p>Alice founded Acme. Acme settled an SEC settlement.</p></body></html>",
+      }),
+      ["Alice"],
+      "@alice",
+      ["alice.example"],
+    )).toBeNull();
+  });
+
+  it.each([
+    "The company founded by Alice, Acme, settled an SEC settlement and the matter is resolved.",
+    "Alice-founded Acme settled an SEC settlement and the matter is resolved.",
+    "Alice's company Acme settled an SEC settlement and the matter is resolved.",
+  ])("does not grammatically transfer a company event to its founder: %s", (passage) => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Alice",
+        predicate: "legal_regulatory_event",
+        value: "SEC settlement",
+        questionId: "person.legal_regulatory_event",
+        eventStatus: "resolved",
+        attributedEntity: "Alice",
+        excerpt: passage,
+        sourceUrl: "https://www.sec.gov/newsroom/acme",
+      }),
+      document({
+        url: "https://www.sec.gov/newsroom/acme",
+        host: "www.sec.gov",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Alice"],
+      "@alice",
+      ["https://alice.example"],
+      ["acme.com"],
+    )).toBeNull();
+  });
+
+  it("does not attribute a lowercase related entity's legal event to the audited project", () => {
+    const passage = "Jupiter and acme labs settled an SEC settlement and the matter is resolved.";
+    expect(verifyBasicFactLead(
+      lead({
+        predicate: "legal_regulatory_event",
+        value: "SEC settlement",
+        questionId: "project.legal_regulatory_event",
+        eventStatus: "resolved",
+        attributedEntity: "Jupiter",
+        excerpt: passage,
+        sourceUrl: "https://jup.ag/legal",
+      }),
+      document({
+        url: "https://jup.ag/legal",
+        host: "jup.ag",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
+  });
+
+  it("does not attribute a peer settlement to a project merely quoted after the event", () => {
+    const passage = "The SEC settlement against Acme Labs was resolved, according to Jupiter.";
+    expect(verifyBasicFactLead(
+      lead({
+        predicate: "legal_regulatory_event",
+        value: "SEC settlement",
+        questionId: "project.legal_regulatory_event",
+        eventStatus: "resolved",
+        attributedEntity: "Jupiter",
+        excerpt: passage,
+        sourceUrl: "https://jup.ag/legal",
+      }),
+      document({
+        url: "https://jup.ag/legal",
+        host: "jup.ag",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
+  });
+
+  it("accepts passive funding language that binds the round to the subject", () => {
+    const passage = "A $100 million Series A was raised by Jupiter.";
+    expect(verifyBasicFactLead(
+      lead({
+        predicate: "funding",
+        value: "$100 million Series A",
+        questionId: "project.funding",
+        excerpt: passage,
+        sourceUrl: "https://jup.ag/news/series-a",
+      }),
+      document({
+        url: "https://jup.ag/news/series-a",
+        host: "jup.ag",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toEqual(expect.objectContaining({ predicate: "funding", status: "verified" }));
+  });
+
+  it("accepts an official token construction whose subject follows the predicate", () => {
+    const passage = "JUP is the official token of Jupiter.";
+    expect(verifyBasicFactLead(
+      lead({
+        predicate: "official_token",
+        value: "JUP",
+        questionId: "project.official_token",
+        excerpt: passage,
+        sourceUrl: "https://jup.ag/jup",
+      }),
+      document({
+        url: "https://jup.ag/jup",
+        host: "jup.ag",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toEqual(expect.objectContaining({ predicate: "official_token", status: "verified" }));
+  });
+
+  it("keeps dated reporting periods attached to the subject metric", () => {
+    const passage = "Jupiter reported $1B monthly volume for the quarter ended June 30, 2026.";
+    expect(verifyBasicFactLead(
+      lead({
+        predicate: "traction",
+        value: "$1B monthly volume",
+        questionId: "project.traction",
+        excerpt: passage,
+        sourceUrl: "https://jup.ag/quarterly-report",
+      }),
+      document({
+        url: "https://jup.ag/quarterly-report",
+        host: "jup.ag",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toEqual(expect.objectContaining({ predicate: "traction", status: "verified" }));
+  });
+
+  it("does not assign an adverse legal event to the organization that merely reported it", () => {
+    const passage = "Jupiter reported an SEC settlement against Acme Labs and the matter is resolved.";
+    expect(verifyBasicFactLead(
+      lead({
+        predicate: "legal_regulatory_event",
+        value: "SEC settlement",
+        questionId: "project.legal_regulatory_event",
+        eventStatus: "resolved",
+        attributedEntity: "Jupiter",
+        excerpt: passage,
+        sourceUrl: "https://jup.ag/legal",
+      }),
+      document({
+        url: "https://jup.ag/legal",
+        host: "jup.ag",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
+  });
+
+  it("does not let a shared-host tenant become an official source", () => {
+    const fact = verifyBasicFactLead(
+      lead({
+        predicate: "official_token",
+        value: "SCAM",
+        excerpt: "Jupiter official token is SCAM.",
+        sourceUrl: "https://github.com/attacker/fake-jupiter",
+      }),
+      document({
+        url: "https://github.com/attacker/fake-jupiter",
+        host: "github.com",
+        text: "<p>Jupiter official token is SCAM.</p>",
+      }),
+      ["Jupiter"],
+      "@JupiterExchange",
+      ["https://github.com/jupiterexchange"],
+    );
+    expect(fact).toEqual(expect.objectContaining({ status: "lead" }));
+    expect(fact?.sources[0]?.sourceClass).toBe("independent_press");
+  });
+
+  it("does not let another subdomain of a shared host bypass configured path ownership", () => {
+    const fact = verifyBasicFactLead(
+      lead({
+        predicate: "official_token",
+        value: "SCAM",
+        excerpt: "Jupiter official token is SCAM.",
+        sourceUrl: "https://gist.github.com/attacker/fake-jupiter",
+      }),
+      document({
+        url: "https://gist.github.com/attacker/fake-jupiter",
+        host: "gist.github.com",
+        text: "<p>Jupiter official token is SCAM.</p>",
+      }),
+      ["Jupiter"],
+      "@JupiterExchange",
+      ["https://github.com/jupiterexchange"],
+    );
+    expect(fact).toEqual(expect.objectContaining({ status: "lead" }));
+    expect(fact?.sources[0]?.sourceClass).toBe("independent_press");
+  });
+
+  it.each([
+    [
+      "https://github.com/jupiterexchange",
+      "https://github.com/JupiterExchange/repository",
+    ],
+    [
+      "https://x.com/JupiterExchange",
+      "https://x.com/jupiterexchange/status/123456789",
+    ],
+  ] as const)("recognizes case-insensitive shared-host account ownership for %s", (officialScope, sourceUrl) => {
+    const fact = verifyBasicFactLead(
+      lead({
+        predicate: "official_token",
+        value: "JUP",
+        excerpt: "Jupiter official token is JUP.",
+        sourceUrl,
+      }),
+      document({
+        url: sourceUrl,
+        host: new URL(sourceUrl).hostname,
+        text: "<p>Jupiter official token is JUP.</p>",
+      }),
+      ["Jupiter"],
+      "@JupiterExchange",
+      [officialScope],
+    );
+    expect(fact).toEqual(expect.objectContaining({ status: "verified" }));
+    expect(fact?.sources[0]?.sourceClass).toBe("official_subject");
+  });
+
+  it.each([
+    "Brian Armstrong is our CEO at the ResearchHub.",
+    "Brian Armstrong serves as our CEO for the ResearchHub.",
+    "Brian Armstrong is our CEO, ResearchHub.",
+  ])("does not let an official hostname override an explicit company: %s", (passage) => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "current_role",
+        value: "CEO, Coinbase",
+        excerpt: passage,
+        sourceUrl: "https://investor.coinbase.com/leadership",
+      }),
+      document({
+        url: "https://investor.coinbase.com/leadership",
+        host: "investor.coinbase.com",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Brian Armstrong"],
+      "@brian_armstrong",
+      ["https://investor.coinbase.com"],
+    )).toBeNull();
+  });
+
+  it("keeps an exact-name regulator event out of person scoring until identity is bound", () => {
+    const unresolved = verifyBasicFactLead(
+      lead({
+        subject: "Brian Armstrong",
+        predicate: "legal_regulatory_event",
+        value: "SEC settlement",
+        questionId: "person.legal_regulatory_event",
+        eventStatus: "resolved",
+        attributedEntity: "Brian Armstrong",
+        excerpt: "Brian Armstrong entered an SEC settlement and the matter is resolved.",
+        sourceUrl: "https://www.sec.gov/newsroom/example",
+      }),
+      document({
+        url: "https://www.sec.gov/newsroom/example",
+        host: "www.sec.gov",
+        text: "<html><body><p>Brian Armstrong entered an SEC settlement and the matter is resolved.</p></body></html>",
+      }),
+      ["Brian Armstrong", "@brian_armstrong"],
+      "@brian_armstrong",
+      ["brianarmstrong.org"],
+      ["coinbase.com"],
+    );
+
+    expect(unresolved).toEqual(expect.objectContaining({
+      status: "verified",
+      attributionScope: "identity_unresolved",
+    }));
   });
 
   it("accepts common chain wording on a fetched official page", () => {

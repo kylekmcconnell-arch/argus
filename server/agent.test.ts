@@ -1098,28 +1098,45 @@ describe("analyst verdict integrity", () => {
     },
   );
 
-  it.each([F2_UNAVAILABLE_REF, F2_CHECKED_EMPTY_REF])(
-    "preserves a coverage-gap ref only alongside substantive support and an explicit gap (%s)",
-    (coverageRef) => {
-      const result = validateAnalystVerdict({
-        axes: [
-          validAxis("F1_identity_verifiability", 10, F1_REF),
-          {
-            ...validAxis("F2_track_record", 8, F2_REF),
-            coverageRefs: [coverageRef],
-            gaps: ["One track-record provider did not return a result."],
-          },
-        ],
-        headline: "Substantive evidence with a disclosed coverage gap",
-        identity_note: "Identity resolved",
-      }, catalog, validationCatalog);
+  it("requires a gap only for genuinely unavailable coverage", () => {
+    const result = validateAnalystVerdict({
+      axes: [
+        validAxis("F1_identity_verifiability", 10, F1_REF),
+        {
+          ...validAxis("F2_track_record", 8, F2_REF),
+          coverageRefs: [F2_UNAVAILABLE_REF],
+          gaps: ["One track-record provider did not return a result."],
+        },
+      ],
+      headline: "Substantive evidence with a disclosed coverage gap",
+      identity_note: "Identity resolved",
+    }, catalog, validationCatalog);
 
-      expect(result?.axes[1]).toMatchObject({
-        evidenceRefs: [F2_REF, coverageRef],
-        gaps: ["One track-record provider did not return a result."],
-      });
-    },
-  );
+    expect(result?.axes[1]).toMatchObject({
+      evidenceRefs: [F2_REF, F2_UNAVAILABLE_REF],
+      gaps: ["One track-record provider did not return a result."],
+    });
+  });
+
+  it("keeps a completed checked-empty screen without inventing a gap", () => {
+    const result = validateAnalystVerdict({
+      axes: [
+        validAxis("F1_identity_verifiability", 10, F1_REF),
+        {
+          ...validAxis("F2_track_record", 8, F2_REF),
+          coverageRefs: [F2_CHECKED_EMPTY_REF],
+          gaps: [],
+        },
+      ],
+      headline: "Substantive evidence with a completed clear screen",
+      identity_note: "Identity resolved",
+    }, catalog, validationCatalog);
+
+    expect(result?.axes[1]).toMatchObject({
+      evidenceRefs: [F2_REF, F2_CHECKED_EMPTY_REF],
+      gaps: [],
+    });
+  });
 
   it("accepts every documented array boundary and rejects one item beyond each limit", () => {
     const axis = "F1_identity_verifiability";
@@ -1392,7 +1409,7 @@ describe("analyst verdict integrity", () => {
 
   it("completely removes investigative leads from the scorer packet while retaining legitimate evidence", () => {
     const direct = {
-      finding_type: "LegalCaseNameLead",
+      finding_type: "Exit",
       claim: "DIRECT_SUBJECT_FINDING_RETAINED",
       source_url: "https://example.com/direct",
       verification_status: "Verified",
@@ -1485,6 +1502,129 @@ describe("analyst verdict integrity", () => {
     expect(packet).not.toContain("FIXTURE_PROMO");
     expect(packet).not.toContain("model_lead");
     expect(packet).not.toContain("@associate");
+  });
+
+  it("keeps namesake legal and sanctions leads visible to investigators but outside scoring", () => {
+    const findingScope = {
+      scope: "direct_subject",
+      target_entity_key: "@subject",
+      target_entity_type: "person",
+      relationship_to_subject: "self",
+    };
+    const namesakeFindings = [
+      {
+        finding_type: "LegalCaseNameLead",
+        claim: "COURT_NAME_ONLY_REVIEW_LEAD",
+        source_url: "https://example.com/court-name-lead",
+        verification_status: "Verified",
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        finding_scope: findingScope,
+      },
+      {
+        finding_type: "SanctionsNameLead",
+        claim: "SANCTIONS_NAME_ONLY_REVIEW_LEAD",
+        source_url: "https://example.com/sanctions-name-lead",
+        verification_status: "Verified",
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        finding_scope: findingScope,
+      },
+    ];
+    const sourceArtifacts = [
+      {
+        kind: "legal_case",
+        provider: "courtlistener",
+        match: "candidate",
+        title: "COURT_CAPTION_CANDIDATE",
+        sourceUrl: "https://example.com/court-candidate",
+      },
+      {
+        kind: "sanctions_screen",
+        provider: "opensanctions",
+        match: "exact_name",
+        title: "SANCTIONS_EXACT_NAME_CANDIDATE",
+        sourceUrl: "https://example.com/sanctions-candidate",
+      },
+    ];
+    const checkOutcomes = [
+      {
+        checkId: "us-legal-history",
+        status: "finding",
+        provider: "courtlistener",
+        note: "COURT_CHECK_IDENTITY_REVIEW",
+      },
+      {
+        checkId: "ofac-sanctions-name",
+        status: "finding",
+        provider: "opensanctions",
+        note: "SANCTIONS_CHECK_IDENTITY_REVIEW",
+      },
+    ];
+    const legalFact = (scope: "direct_subject" | "related_entity", suffix: string) => ({
+      factId: `basic_fact_legal_${suffix}`,
+      subjectKey: "@subject",
+      predicate: "legal_regulatory_event",
+      value: `SEC settlement ${suffix}`,
+      normalizedValue: `sec settlement ${suffix}`,
+      status: "verified",
+      critical: true,
+      eventStatus: "settled",
+      attributedEntity: scope === "direct_subject" ? "Subject Person" : "Related Company",
+      attributionScope: scope,
+      sources: [{
+        url: `https://www.sec.gov/example-${suffix}`,
+        sourceClass: "regulatory_or_onchain",
+        relation: "supports",
+        excerpt: scope === "direct_subject"
+          ? "The SEC states that Subject Person settled the attributed matter."
+          : "The SEC states that Related Company settled the attributed matter.",
+        contentHash: suffix.padEnd(64, suffix[0]),
+        capturedAt: "2026-07-13T12:00:00.000Z",
+        provider: "public-web",
+        artifactVerified: true,
+      }],
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const input = {
+      findings: namesakeFindings,
+      sourceArtifacts,
+      checkOutcomes,
+      basicFacts: [legalFact("direct_subject", "direct"), legalFact("related_entity", "related")],
+    };
+    const investigatorPacket = buildAnalystEvidencePacket(input);
+    const axes: AnalystAxis[] = [
+      { axis: "F5_reputation_integrity", weight: 18, role: "FOUNDER" },
+    ];
+    const scoringPacket = buildScoringEvidencePacket(input, axes);
+    const parsed = JSON.parse(scoringPacket);
+    const frozen = extractScoringEvidenceCatalog(scoringPacket, axes);
+
+    expect(investigatorPacket).toContain("COURT_NAME_ONLY_REVIEW_LEAD");
+    expect(investigatorPacket).toContain("SANCTIONS_NAME_ONLY_REVIEW_LEAD");
+    expect(investigatorPacket).toContain("COURT_CAPTION_CANDIDATE");
+    expect(investigatorPacket).toContain("SANCTIONS_EXACT_NAME_CANDIDATE");
+    expect(investigatorPacket).toContain("COURT_CHECK_IDENTITY_REVIEW");
+    expect(investigatorPacket).toContain("SANCTIONS_CHECK_IDENTITY_REVIEW");
+    expect(parsed.findings).toEqual([]);
+    expect(parsed.sourceArtifacts).toEqual([]);
+    expect(parsed.checkOutcomes).toEqual([]);
+    expect(parsed.basicFacts).toEqual([
+      expect.objectContaining({ factId: "basic_fact_legal_direct", attributionScope: "direct_subject" }),
+    ]);
+    expect(frozen).toContainEqual(expect.objectContaining({
+      section: "basicFacts",
+      title: "SEC settlement direct",
+      verification: "verified",
+      eligibleAxes: ["F5_reputation_integrity"],
+    }));
+    expect(frozen.some((artifact) => artifact.operation === "findings:LegalCaseNameLead")).toBe(false);
+    expect(frozen.some((artifact) => artifact.operation === "findings:SanctionsNameLead")).toBe(false);
+    expect(parsed.axisGaps).toEqual([]);
   });
 
   it("uses deterministic content-addressed IDs and synthesizes only missing-axis gap artifacts", () => {
@@ -2651,6 +2791,139 @@ describe("analyst verdict integrity", () => {
     });
   });
 
+  it("routes verified founder facts narrowly without treating one backer fact as repeat backing", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "F1_identity_verifiability", weight: 12, role: "FOUNDER" },
+      { axis: "F2_track_record", weight: 28, role: "FOUNDER" },
+      { axis: "F3_repeat_backing", weight: 15, role: "FOUNDER" },
+      { axis: "F4_build_substance", weight: 15, role: "FOUNDER" },
+      { axis: "F5_reputation_integrity", weight: 18, role: "FOUNDER" },
+      { axis: "F6_network_quality", weight: 12, role: "FOUNDER" },
+    ];
+    const fact = (predicate: string, value: string) => ({
+      factId: `basic_fact_${predicate}_${value.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
+      subjectKey: "famous-founder",
+      predicate,
+      value,
+      normalizedValue: value.toLowerCase(),
+      status: "verified",
+      critical: true,
+      sources: [{
+        url: `https://example.com/${predicate}`,
+        title: `${predicate} source`,
+        sourceClass: "official_subject",
+        relation: "supports",
+        excerpt: `${value} is confirmed by the cited source.`,
+        contentHash: "f".repeat(64),
+        capturedAt: "2026-07-13T12:00:00.000Z",
+        provider: "public-web",
+        artifactVerified: true,
+      }],
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const packet = buildScoringEvidencePacket({
+      basicFacts: [
+        fact("official_identity", "Verified founder identity"),
+        fact("current_role", "CEO at Acme"),
+        fact("prior_role", "Previously engineering lead at Example"),
+        fact("founded", "Founded Acme in 2020"),
+        fact("product", "Built Acme Protocol"),
+        fact("exit", "Acme acquired in 2024"),
+        fact("track_record", "Scaled Acme to one million users"),
+        fact("funding", "Raised two rounds from the same lead investor"),
+        fact("investor", "Paradigm backed two of the founder's ventures"),
+        fact("network", "Named repeat founder and investor network"),
+      ],
+    }, axes);
+    const founderFacts = extractScoringEvidenceCatalog(packet, axes)
+      .filter((artifact) => artifact.section === "basicFacts");
+    const eligibleAxes = (title: string) =>
+      founderFacts.find((artifact) => artifact.title === title)?.eligibleAxes;
+
+    expect(eligibleAxes("Verified founder identity")).toEqual(["F1_identity_verifiability"]);
+    expect(eligibleAxes("CEO at Acme")).toEqual(["F1_identity_verifiability"]);
+    expect(eligibleAxes("Previously engineering lead at Example")).toEqual(["F2_track_record"]);
+    expect(eligibleAxes("Founded Acme in 2020")).toEqual(["F2_track_record"]);
+    expect(eligibleAxes("Built Acme Protocol")).toEqual(["F2_track_record", "F4_build_substance"]);
+    expect(eligibleAxes("Acme acquired in 2024")).toEqual(["F2_track_record"]);
+    expect(eligibleAxes("Scaled Acme to one million users")).toEqual(["F2_track_record"]);
+    expect(eligibleAxes("Raised two rounds from the same lead investor")).toBeUndefined();
+    expect(eligibleAxes("Paradigm backed two of the founder's ventures")).toEqual(["F6_network_quality"]);
+    expect(founderFacts.flatMap((artifact) => artifact.eligibleAxes)).not.toContain("F3_repeat_backing");
+    expect(eligibleAxes("Named repeat founder and investor network")).toEqual(["F6_network_quality"]);
+  });
+
+  it("routes verified investor facts narrowly and excludes related-entity legal facts", () => {
+    const axes: AnalystAxis[] = [
+      { axis: "I1_identity_legitimacy", weight: 24, role: "INVESTOR" },
+      { axis: "I2_portfolio_quality", weight: 24, role: "INVESTOR" },
+      { axis: "I3_fund_scale_tier", weight: 20, role: "INVESTOR" },
+      { axis: "I4_testimonial_signal", weight: 12, role: "INVESTOR" },
+      { axis: "I5_reputation_fud", weight: 20, role: "INVESTOR" },
+    ];
+    const fact = (
+      predicate: string,
+      value: string,
+      attributionScope?: "direct_subject" | "related_entity",
+    ) => ({
+      factId: `basic_fact_${predicate}_${value.toLowerCase().replace(/[^a-z0-9]+/g, "_")}`,
+      subjectKey: "famous-investor",
+      predicate,
+      value,
+      normalizedValue: value.toLowerCase(),
+      status: "verified",
+      critical: true,
+      ...(attributionScope ? { attributionScope } : {}),
+      sources: [{
+        url: `https://example.com/${predicate}`,
+        title: `${predicate} source`,
+        sourceClass: predicate === "legal_regulatory_event" ? "regulatory_or_onchain" : "official_subject",
+        relation: "supports",
+        excerpt: `${value} is confirmed by the cited source.`,
+        contentHash: "i".repeat(64),
+        capturedAt: "2026-07-13T12:00:00.000Z",
+        provider: "public-web",
+        artifactVerified: true,
+      }],
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const packet = buildScoringEvidencePacket({
+      basicFacts: [
+        fact("official_identity", "Verified investor identity"),
+        fact("current_role", "Partner at Example Ventures"),
+        fact("prior_role", "Previously operator at Acme"),
+        fact("founder", "Founded Example Ventures"),
+        fact("investor", "Personally invested in Portfolio Co"),
+        fact("track_record", "Three source-backed portfolio exits"),
+        fact("legal_regulatory_event", "Direct attributed regulatory event", "direct_subject"),
+        fact("legal_regulatory_event", "Portfolio company regulatory event", "related_entity"),
+      ],
+    }, axes);
+    const parsed = JSON.parse(packet) as { basicFacts: Array<{ value: string }> };
+    const investorFacts = extractScoringEvidenceCatalog(packet, axes)
+      .filter((artifact) => artifact.section === "basicFacts");
+    const eligibleAxes = (title: string) =>
+      investorFacts.find((artifact) => artifact.title === title)?.eligibleAxes;
+
+    expect(eligibleAxes("Verified investor identity")).toEqual(["I1_identity_legitimacy"]);
+    expect(eligibleAxes("Partner at Example Ventures")).toEqual(["I1_identity_legitimacy"]);
+    expect(eligibleAxes("Previously operator at Acme")).toEqual(["I2_portfolio_quality"]);
+    expect(eligibleAxes("Founded Example Ventures")).toEqual(["I2_portfolio_quality"]);
+    expect(eligibleAxes("Personally invested in Portfolio Co")).toEqual(["I2_portfolio_quality"]);
+    expect(eligibleAxes("Three source-backed portfolio exits")).toEqual(["I2_portfolio_quality"]);
+    expect(eligibleAxes("Direct attributed regulatory event")).toEqual(["I5_reputation_fud"]);
+    expect(parsed.basicFacts.map((basicFact) => basicFact.value)).not.toContain(
+      "Portfolio company regulatory event",
+    );
+    const everyEligibleAxis = investorFacts.flatMap((artifact) => artifact.eligibleAxes);
+    expect(everyEligibleAxis).not.toContain("I3_fund_scale_tier");
+    expect(everyEligibleAxis).not.toContain("I4_testimonial_signal");
+  });
+
   it("freezes official token-market evidence without overstating product or transparency coverage", () => {
     const axes: AnalystAxis[] = [
       { axis: "P3_token_conduct", weight: 20, role: "PROJECT" },
@@ -3605,12 +3878,11 @@ describe("analyst verdict integrity", () => {
         outcome: "Active",
         artifact_verified: true,
       }],
-      sourceArtifacts: [{
-        kind: "legal_case",
-        provider: "courtlistener",
-        match: "candidate",
-        title: "Exact-name legal-history candidate requiring review",
-        sourceUrl: "https://example.com/case",
+      checkOutcomes: [{
+        checkId: "identity-resolution",
+        status: "confirmed",
+        provider: "github",
+        note: "The subject controls a long-lived, independently attributed account.",
       }],
     }, catalog);
     const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
@@ -4107,6 +4379,16 @@ describe("analyst verdict integrity", () => {
         messages: Array<{ content: string }>;
         tool_choice: { name: string };
       };
+      expect(request.messages[0].content).toContain("PUBLIC DILIGENCE GAP RULE");
+      expect(request.messages[0].content).toContain("government-issued ID, passport, SSN or tax ID, home address");
+      expect(request.messages[0].content).toContain("private account credentials");
+      expect(request.messages[0].content).toContain("other non-public personal proof");
+      expect(request.messages[0].content).toContain(
+        "A checked-empty reference records a completed clear or negative screen",
+      );
+      expect(request.messages[0].content).toContain(
+        "it is not an evidence gap and must not create a gap line by itself",
+      );
       const eligibilityLine = request.messages[0].content.split("\n")
         .find((line) => line.startsWith("F1_identity_verifiability |")) ?? "";
       expect(eligibilityLine).toContain(

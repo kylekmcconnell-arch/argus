@@ -44,7 +44,7 @@ export interface BasicFactView {
   qualifier?: string;
   eventStatus?: string;
   attributedEntity?: string;
-  attributionScope?: "direct_subject" | "related_entity";
+  attributionScope?: "direct_subject" | "related_entity" | "identity_unresolved";
   status: BasicFactStatus;
   critical?: boolean;
   sources?: BasicFactSourceView[];
@@ -161,6 +161,7 @@ function legalAttributionScopeLabel(
   audience: BasicFactsAudience,
 ): string {
   if (scope === "direct_subject") return "Directly attributed";
+  if (scope === "identity_unresolved") return "Exact name only, identity not confirmed";
   if (scope !== "related_entity") return "";
   if (audience === "founder" || audience === "person") return "Related entity, not this person";
   if (audience === "project") return "Related entity, not this project";
@@ -194,7 +195,7 @@ function LegalEventMetadata({
       )}
       {scopeLabel && (
         <span
-          className={`chip normal-case tracking-normal ${fact.attributionScope === "related_entity" ? "tint-caution text-caution" : "tint-signal text-signal-lift"}`}
+          className={`chip normal-case tracking-normal ${fact.attributionScope === "direct_subject" ? "tint-signal text-signal-lift" : "tint-caution text-caution"}`}
           role="listitem"
         >
           {scopeLabel}
@@ -337,12 +338,17 @@ export function BasicFactsPanel({
   const discoveryLeads = leadRows(facts, leads);
   if (!rows.length && !discoveryLeads.length) return null;
 
-  const answered = rows.filter((fact) => fact.status === "verified" || fact.status === "corroborated").length;
+  const identityReviewRows = rows.filter((fact) => fact.attributionScope === "identity_unresolved");
+  const answered = rows.filter((fact) =>
+    (fact.status === "verified" || fact.status === "corroborated")
+    && fact.attributionScope !== "identity_unresolved").length;
   const checkedEmpty = rows.filter((fact) => fact.status === "checked_empty").length;
   const conflicted = rows.filter((fact) => fact.status === "conflicted").length;
-  const unresolved = rows.filter((fact) => fact.status === "unresolved").length;
+  const unresolved = rows.filter((fact) => fact.status === "unresolved").length + identityReviewRows.length;
   const applicable = rows.filter((fact) => fact.status !== "not_applicable").length;
-  const answeredRows = rows.filter((fact) => fact.status === "verified" || fact.status === "corroborated");
+  const answeredRows = rows.filter((fact) =>
+    (fact.status === "verified" || fact.status === "corroborated")
+    && fact.attributionScope !== "identity_unresolved");
   const checkedEmptyRows = rows.filter((fact) => fact.status === "checked_empty");
   const conflictedRows = rows.filter((fact) => fact.status === "conflicted");
   const unresolvedRows = rows.filter((fact) => fact.status === "unresolved");
@@ -416,7 +422,7 @@ export function BasicFactsPanel({
             );
           })}
         </ul>
-      ) : checkedEmptyRows.length === 0 ? (
+      ) : checkedEmptyRows.length === 0 && identityReviewRows.length === 0 ? (
         <div className="px-4 py-5 sm:px-5">
           <div className="panel-inset flex items-start gap-3 px-3.5 py-3.5">
             <MagnifyingGlass aria-hidden="true" size={18} weight="bold" className="mt-0.5 shrink-0 text-caution" />
@@ -497,6 +503,39 @@ export function BasicFactsPanel({
                       })}
                     </div>
                   )}
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      )}
+
+      {identityReviewRows.length > 0 && (
+        <div className="border-t border-caution/30 bg-caution/[0.025] px-4 py-4 sm:px-5" aria-label="Identity review required">
+          <div className="flex items-start gap-2.5">
+            <Warning aria-hidden="true" size={18} weight="fill" className="mt-0.5 shrink-0 text-caution" />
+            <div>
+              <h3 className="text-[13px] font-semibold text-ink">Same name, identity not confirmed</h3>
+              <p className="mt-0.5 text-[11px] leading-relaxed text-ink-faint">Kept for review and excluded from the verdict until the source ties the record to this exact person.</p>
+            </div>
+          </div>
+          <ul className="mt-3 grid gap-2 sm:grid-cols-2">
+            {identityReviewRows.map((fact, index) => {
+              const sources = dedupeSources(fact.sources ?? []);
+              return (
+                <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset min-w-0 px-3.5 py-3.5">
+                  <p className="text-[10.5px] leading-relaxed text-ink-faint">{basicFactQuestionFor(fact.predicate, audience)}</p>
+                  <p className="mt-1 text-[13px] font-medium leading-snug text-ink-dim">{answerFor(fact)}</p>
+                  <LegalEventMetadata fact={fact} audience={audience} />
+                  {sources[0] && (() => {
+                    const url = safeHttpUrl(sources[0].url)!;
+                    return (
+                      <a href={url} target="_blank" rel="noopener noreferrer" className="btn-chip mt-2 min-h-8 max-w-full tint-caution normal-case tracking-normal">
+                        <ArrowSquareOut aria-hidden="true" size={12} weight="bold" />
+                        <span className="max-w-52 truncate">{sourceLabel(sources[0], url)}</span>
+                      </a>
+                    );
+                  })()}
                 </li>
               );
             })}

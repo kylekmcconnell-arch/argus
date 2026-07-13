@@ -28,6 +28,55 @@ changed between scans.
 The report should feel like a sharp financial adviser who can show every receipt,
 not a provider log or a data sheet.
 
+## The ARGUS advantage
+
+Getting the biography, founders, token, product, and headline legal history right
+is the minimum acceptable result. The investigation earns its value by connecting
+facts a generic answer normally leaves separate. Where the evidence exists, ARGUS
+should surface:
+
+- who actually controls the company, protocol, contracts, treasury, governance,
+  and public narrative;
+- how founder claims compare with dated launches, funding, code, product usage,
+  token activity, and prior outcomes;
+- where capital came from, which entities received it, what insiders can unlock
+  or sell, and which counterparties create concentration risk;
+- direct legal or regulatory events separately from company events, associates,
+  and same-name records;
+- contradictions between first-party claims, historical pages, filings, market
+  data, repositories, and independent reporting;
+- the strongest evidence against ARGUS's own conclusion, not only evidence that
+  supports it;
+- what changed since the prior immutable report and whether the investment case
+  is strengthening or deteriorating; and
+- a short, ranked diligence plan framed as decision-changing questions, with the
+  cheapest reliable way to answer each one.
+
+The summary must answer four questions in plain language: what is true, what is
+material, what could change the decision, and what ARGUS found that a normal web
+summary would probably miss. Raw source inventories and provider telemetry belong
+below that decision layer.
+
+## Proof status
+
+This manual separates implemented behavior from release validation and product
+targets. A target is not described as shipped until a production report proves it.
+
+- **Implemented and regression-tested:** immutable versions, organization-scoped
+  access, source fetch attribution, verified-passage promotion, role-aware scoring,
+  direct-versus-related legal attribution, stock-versus-token separation, and
+  provider-state truth.
+- **Release validation:** the named Brian Armstrong, Hayden Adams, Sam
+  Bankman-Fried, and Jupiter canaries; live persistence and reopen; frozen-evidence
+  answers; and first-viewport adviser UX.
+- **Target:** a repeatable head-to-head benchmark against generic ChatGPT and
+  Claude, semantic change analysis between report versions, and next steps ranked
+  by decision impact, cost, and reliability.
+
+Green unit tests prove invariants, not live research recall. A famous-person or
+major-project release stays in validation until the live collector finds the
+adjudicated facts itself.
+
 ## Evidence contract
 
 Every published decision fact needs:
@@ -45,6 +94,17 @@ The evidence states remain distinct: `verified`, `corroborated`, `conflicted`,
 `lead`, `unanswered`, `checked_empty`, `unavailable`, `partial`, and `failed`.
 Search models discover leads only. They cannot promote a claim without an exact URL
 and a passage that was fetched and checked.
+
+Promotion also requires bounded attribution. The subject, predicate, atomic value,
+and any date, class, qualifier, or legal status must belong to the same claim. A
+partner, portfolio company, competitor, namesake, nearby executive, or another
+tenant on a shared host cannot lend its facts to the audited subject. Exact-name
+legal or sanctions matches remain identity-review leads until the source binds the
+record to the investigated identity.
+
+A batched search that returns no result is unresolved, not `checked_empty` for
+every question in the batch. Only a question-specific completed screen can create
+a checked-empty outcome. Access failures remain unavailable or partial.
 
 ## Investigation standard
 
@@ -129,5 +189,12 @@ verified-passage promotion, founder decision checks, direct-versus-related legal
 attribution, separate token and public-security outcomes, coverage-qualified
 readiness, one open-question count, adviser-style report framing, immutable
 evidence semantics, and access-gap-safe site checks.
+
+The verifier now binds executives to their own titles, including ordered
+"respectively" statements; accepts explicit founder lists without turning
+advisers, investors, employees, or directors into founders; rejects related-company
+metrics, funding, token, network, audit, governance, and security claims; preserves
+original source URLs after reader recovery; and enforces path ownership on shared
+hosts such as GitHub.
 
 These changes remain a release candidate until the production canaries above pass.

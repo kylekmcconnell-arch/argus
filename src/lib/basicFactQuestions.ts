@@ -19,13 +19,17 @@ export type BasicFactQuestionOutcome = "answered" | "checked_empty" | "unresolve
 
 const EXPLICIT_EMPTY_PREDICATES = new Set(["official_token", "public_security"]);
 
-/** A successful bounded pass can establish that no publishable answer was found. */
+/** Only an explicit completed-empty pass establishes that no answer was found. */
 export function basicFactQuestionOutcome(
   entry: BasicFactQuestionOutcomeInput | undefined,
 ): BasicFactQuestionOutcome {
   if (!entry) return "unresolved";
   if (entry.status === "answered") return "answered";
-  return entry.providerRuns.some((run) => run.state === "succeeded" || run.state === "completed_empty")
+  // Runs are persisted in chronological order (primary, then targeted repair).
+  // A later lead-producing, partial, failed, or skipped repair supersedes an
+  // earlier empty pass. Otherwise stale `completed_empty` telemetry can hide a
+  // newly discovered but still-unverified asset lead as "none found".
+  return entry.providerRuns.at(-1)?.state === "completed_empty"
     ? "checked_empty"
     : "unresolved";
 }

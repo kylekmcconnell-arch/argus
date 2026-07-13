@@ -825,7 +825,9 @@ export function validateAnalystVerdict(
     if (!coverageRefs.every((ref) => !isSubstantiveArtifact(artifacts.get(ref)))) {
       return reject(`substantive-coverage-reference:${row.axis}`);
     }
-    if (evidenceRefs.some((ref) => !isSubstantiveArtifact(artifacts.get(ref))) && gaps.length === 0) {
+    const hasUnavailableCoverage = coverageRefs.some((ref) =>
+      artifacts.get(ref)?.verification === "unavailable");
+    if (hasUnavailableCoverage && gaps.length === 0) {
       return reject(`coverage-without-gap:${row.axis}`);
     }
     if (!counterEvidenceRefs.every((ref) => isSubstantiveArtifact(artifacts.get(ref)))) {
@@ -1525,18 +1527,14 @@ const REPUTATION_FINDING_AXES = [
   "I5_reputation_fud", "AG4_reputation_fud", "AD5_reputation_fud", "ME3_conduct_reputation",
 ] as const;
 
-const IDENTITY_LEAD_FINDING_AXES = [
-  "F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity",
-  "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud",
-  "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud",
-  "ME1_identity", "ME3_conduct_reputation",
-] as const;
-
 /** Methodology-owned semantic routing for direct-subject finding artifacts. */
 const FINDING_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   CommunityFUD: REPUTATION_FINDING_AXES,
-  LegalCaseNameLead: IDENTITY_LEAD_FINDING_AXES,
-  SanctionsNameLead: IDENTITY_LEAD_FINDING_AXES,
+  // Exact-name screens are triage leads, not proof that the result belongs to
+  // the audited subject. Keep them in the investigator packet but outside the
+  // frozen scorer packet until a direct-subject event is independently proven.
+  LegalCaseNameLead: [],
+  SanctionsNameLead: [],
   // A failed official product surface is one product-substance finding. Do not
   // triple-charge the same fetch against liveness and transparency as well.
   SiteNotLive: ["F4_build_substance", "P2_product_substance"],
@@ -1616,10 +1614,10 @@ const SOURCE_ARTIFACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
 };
 
 // Basic Facts are independently fetched, content-hashed facts. Discovery-only
-// answers never reach this section. Route each verified predicate narrowly so
-// a founder citation cannot score token conduct and a token page cannot stand
-// in for product or team evidence.
-const BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
+// answers never reach this section. Keep predicate ownership role-aware so a
+// person fact can support the corresponding person methodology without making
+// that same predicate evidence for an unrelated project or fund axis.
+const PROJECT_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   official_identity: ["P1_team_and_identity", "P6_transparency_integrity"],
   founder: ["P1_team_and_identity"],
   founders: ["P1_team_and_identity"],
@@ -1644,7 +1642,89 @@ const BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   repository: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
   repositories: ["P2_product_substance", "P5_traction_and_liveness", "P6_transparency_integrity"],
   traction: ["P5_traction_and_liveness"],
+  legal_regulatory_event: ["P6_transparency_integrity"],
 };
+
+const FOUNDER_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
+  official_identity: ["F1_identity_verifiability"],
+  current_role: ["F1_identity_verifiability"],
+  executive: ["F1_identity_verifiability"],
+  education: ["F1_identity_verifiability"],
+  founder: ["F2_track_record"],
+  founders: ["F2_track_record"],
+  prior_role: ["F2_track_record"],
+  founded: ["F2_track_record"],
+  launched: ["F2_track_record", "F4_build_substance"],
+  launch_date: ["F2_track_record", "F4_build_substance"],
+  product: ["F2_track_record", "F4_build_substance"],
+  exit: ["F2_track_record"],
+  track_record: ["F2_track_record"],
+  repository: ["F4_build_substance"],
+  repositories: ["F4_build_substance"],
+  audit: ["F4_build_substance"],
+  audits: ["F4_build_substance"],
+  traction: ["F2_track_record"],
+  // One round or named backer is network evidence, not proof of repeat
+  // backing. F3 remains reserved for deterministic multi-round/venture
+  // aggregation elsewhere in the frozen evidence catalog.
+  investor: ["F6_network_quality"],
+  backer: ["F6_network_quality"],
+  network: ["F6_network_quality"],
+  governance: ["F5_reputation_integrity"],
+  control: ["F5_reputation_integrity"],
+  conflict_of_interest: ["F5_reputation_integrity"],
+  legal_regulatory_event: ["F5_reputation_integrity"],
+};
+
+const INVESTOR_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
+  official_identity: ["I1_identity_legitimacy"],
+  current_role: ["I1_identity_legitimacy"],
+  executive: ["I1_identity_legitimacy"],
+  education: ["I1_identity_legitimacy"],
+  legal_entity: ["I1_identity_legitimacy"],
+  governance: ["I1_identity_legitimacy"],
+  control: ["I1_identity_legitimacy"],
+  prior_role: ["I2_portfolio_quality"],
+  founder: ["I2_portfolio_quality"],
+  founders: ["I2_portfolio_quality"],
+  founded: ["I2_portfolio_quality"],
+  product: ["I2_portfolio_quality"],
+  exit: ["I2_portfolio_quality"],
+  track_record: ["I2_portfolio_quality"],
+  funding: ["I2_portfolio_quality"],
+  investor: ["I2_portfolio_quality"],
+  traction: ["I2_portfolio_quality"],
+  conflict_of_interest: ["I5_reputation_fud"],
+  legal_regulatory_event: ["I5_reputation_fud"],
+};
+
+const OTHER_ROLE_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
+  legal_regulatory_event: [
+    "K5_cabal_fud",
+    "AG4_reputation_fud",
+    "AD5_reputation_fud",
+    "ME3_conduct_reputation",
+  ],
+};
+
+const mergeAxisEligibility = (
+  ...maps: readonly Record<string, readonly string[]>[]
+): Record<string, readonly string[]> => {
+  const merged: Record<string, string[]> = {};
+  for (const map of maps) {
+    for (const [predicate, axes] of Object.entries(map)) {
+      merged[predicate] = [...new Set([...(merged[predicate] ?? []), ...axes])];
+    }
+  }
+  return merged;
+};
+
+const BASIC_FACT_AXIS_ELIGIBILITY = mergeAxisEligibility(
+  PROJECT_BASIC_FACT_AXIS_ELIGIBILITY,
+  FOUNDER_BASIC_FACT_AXIS_ELIGIBILITY,
+  INVESTOR_BASIC_FACT_AXIS_ELIGIBILITY,
+  OTHER_ROLE_BASIC_FACT_AXIS_ELIGIBILITY,
+);
 
 const PROJECT_BACKING_TEAM_ROLE = /\b(?:advisor|adviser|backer|investor)\b/i;
 const PROJECT_NON_BACKING_TEAM_ROLE = /\binvestor relations?\b/i;
@@ -1681,6 +1761,12 @@ const sourceArtifactEligibleAxes = (
   profile?: Record<string, unknown>,
 ): readonly string[] => {
   const kind = sourceArtifactKind(value);
+  const match = recordText(value, ["match"], 40)?.toLowerCase();
+  // A CourtListener caption or sanctions-name match remains investigator-facing
+  // context only. Exact names do not establish identity, so these artifacts
+  // cannot support or limit a score without a separately verified event.
+  if (kind === "legal_case" && match === "candidate") return [];
+  if (kind === "sanctions_screen" && (match === "candidate" || match === "exact_name")) return [];
   // A fetched page that mentions a relationship can remain visible as a
   // reported lead, but only a deterministic confirmation threshold may move
   // portfolio quality. This keeps the scoring boundary aligned with the UI
@@ -1747,6 +1833,19 @@ const eligibleAxesFor = (
   const findingText = section === "findings"
     ? recordText(value, ["claim", "title", "excerpt", "detail"], 2_000) ?? ""
     : "";
+  const checkStatus = section === "checkOutcomes"
+    ? recordText(value, ["status"], 40)?.toLowerCase()
+    : undefined;
+  const candidateOnlyNameScreen = section === "checkOutcomes"
+    && checkStatus === "finding"
+    && (checkId === "us-legal-history" || checkId === "ofac-sanctions-name");
+  const basicFactPredicate = section === "basicFacts"
+    ? recordText(value, ["predicate"], 80)?.toLowerCase() ?? ""
+    : "";
+  const basicFactAxes = basicFactPredicate === "legal_regulatory_event"
+    && value.attributionScope !== "direct_subject"
+    ? []
+    : BASIC_FACT_AXIS_ELIGIBILITY[basicFactPredicate] ?? [];
   const findingAxes = section === "findings"
     ? [
         ...(FINDING_AXIS_ELIGIBILITY[findingType] ?? []),
@@ -1799,9 +1898,9 @@ const eligibleAxesFor = (
     : section === "findings"
       ? findingAxes
     : section === "checkOutcomes" && checkId
-    ? CHECK_AXIS_ELIGIBILITY[checkId] ?? []
+    ? candidateOnlyNameScreen ? [] : CHECK_AXIS_ELIGIBILITY[checkId] ?? []
     : section === "basicFacts"
-      ? BASIC_FACT_AXIS_ELIGIBILITY[recordText(value, ["predicate"], 80)?.toLowerCase() ?? ""] ?? []
+      ? basicFactAxes
     : section === "sourceArtifacts"
       ? sourceArtifactEligibleAxes(value, sourceArtifactPeers, subjectHandle, profile)
       : SECTION_AXIS_ELIGIBILITY[section] ?? [];
@@ -2799,6 +2898,13 @@ export async function analyzeSubject(
     `to identity notes, axis rationales, and gap lines: a licensed identity-provider ` +
     `miss does not erase first-party founder evidence. Only treat identity ` +
     `as unresolved when the evidence genuinely names no one behind the project.\n\n` +
+    `PUBLIC DILIGENCE GAP RULE: identity gaps must be resolvable through public ` +
+    `or consensually supplied professional records. Never request or recommend ` +
+    `collecting a government-issued ID, passport, SSN or tax ID, home address, ` +
+    `private account credentials, private financial records, or any other ` +
+    `non-public personal proof. When public evidence is insufficient, say the ` +
+    `public identity or role evidence remains unresolved and name the public ` +
+    `source that should be checked next.\n\n` +
     `PROFILE PHOTO RULE: profileAuthenticity is a visual-integrity triage screen, ` +
     `not identity proof. A real-looking photo never establishes who operates the ` +
     `account, and an AI, stock, celebrity, logo, cartoon, unclear, or missing photo ` +
@@ -2825,9 +2931,10 @@ export async function analyzeSubject(
     `be one substantive alias eligible for that axis. additionalEvidenceRefs ` +
     `contains zero to seven other substantive aliases, without duplicates. Always ` +
     `return coverageRefs, using an empty array when none apply; it may contain zero ` +
-    `to four checked-empty or unavailable aliases eligible for that axis, and if any are ` +
-    `returned, gaps must ` +
-    `include a material missing-coverage description. counterEvidenceRefs contains zero ` +
+    `to four checked-empty or unavailable aliases eligible for that axis. Gaps must ` +
+    `include a material missing-coverage description for every unavailable coverage ` +
+    `reference. A checked-empty reference records a completed clear or negative screen; ` +
+    `it is not an evidence gap and must not create a gap line by itself. counterEvidenceRefs contains zero ` +
     `to eight substantive aliases that credibly pull against the score. Never ` +
     `repeat an alias or place it on both sides. gaps contains zero to six short ` +
     `descriptions of material unresolved evidence. providerRuns operational ` +
@@ -2838,7 +2945,7 @@ export async function analyzeSubject(
     `deterministically after your axis scoring; do not invent or strengthen one.`;
   const tool: ToolSchema = {
     name: "record_verdict",
-    description: "Record one complete forensic score row for every requested axis, plus a composite headline and identity note. Coverage-only citations belong only in coverageRefs and require a material missing-coverage gap when any are returned; they never count as substantive support or counter-evidence. Every declared field must be returned, even when an array is empty. ARGUS deterministically validates the exact axis set, score bounds, and citation eligibility before accepting the result.",
+    description: "Record one complete forensic score row for every requested axis, plus a composite headline and identity note. Coverage-only citations belong only in coverageRefs. Unavailable coverage requires a material gap; checked-empty coverage records a completed screen and does not. Coverage never counts as substantive support or counter-evidence. Every declared field must be returned, even when an array is empty. ARGUS deterministically validates the exact axis set, score bounds, and citation eligibility before accepting the result.",
     strict: true,
     input_schema: RECORD_VERDICT_INPUT_SCHEMA,
   };
