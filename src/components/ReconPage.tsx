@@ -378,7 +378,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
             const v = recon.verdict!;
             const m = verdictMeta(v.verdict);
             return (
-              <div className="mt-4 rounded-xl border bg-panel p-5" style={{ borderColor: m.color + "66", background: m.glow }}>
+              <div className="mt-4 rounded-xl border bg-panel p-5" style={{ borderColor: `color-mix(in oklab, ${m.color} 42%, transparent)` }}>
                 <div className="flex items-center gap-4">
                   <Ring score={v.score} color={m.color} />
                   <div className="min-w-0">

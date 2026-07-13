@@ -141,7 +141,10 @@ describe("DecisionBasis", () => {
     expect(container.textContent).toContain("How ARGUS reached this view");
     expect(container.textContent).toContain("Founder");
     expect(container.textContent).toContain("1 of 2 diligence areas have cited support");
-    expect(container.textContent).toContain("Mixed evidence");
+    // Status labels state the evidence reality plainly (no euphemism): a
+    // conflict is "Contested", zero support is "No qualifying support".
+    expect(container.textContent).toContain("Contested evidence");
+    expect(container.textContent).toContain("No qualifying support");
     expect(container.textContent).toContain("what still needs to be verified");
 
     const axisButtons = [...container.querySelectorAll<HTMLButtonElement>('button[role="tab"]')];

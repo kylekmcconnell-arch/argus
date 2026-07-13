@@ -364,7 +364,7 @@ describe("person audit input guard", () => {
       roles: ["PROJECT"],
       roleReports: [{ role: "PROJECT", axes: {} }],
     },
-  ])("saves a $label without activating it", async ({ auditId, roles, roleReports }) => {
+  ])("saves a $label and delegates supersession to the DB activation guard", async ({ auditId, roles, roleReports }) => {
     const reportVersionId = "00000000-0000-4000-8000-000000000307";
     vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
     vi.mocked(serviceCredentials).mockReturnValue({ url: "https://database.example", key: "service-key" });
@@ -387,8 +387,15 @@ describe("person audit input guard", () => {
     await handler(request("world_xyz"), res);
 
     expect(persistReportVersionBundle).toHaveBeenCalledOnce();
-    expect(activateReportVersionWithAuthoritativeGraph).not.toHaveBeenCalled();
-    expect(activateReportVersion).not.toHaveBeenCalled();
+    // The API no longer withholds activation for a decisionless-incomplete
+    // report: the authoritative-graph write self-skips on partial completeness,
+    // and activate_report_version (the DB guard) is what preserves a prior
+    // decision report while still activating a brand-new subject's first report.
+    expect(activateReportVersionWithAuthoritativeGraph).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ completeness: "partial" }),
+    );
+    expect(activateReportVersion).toHaveBeenCalledWith(expect.anything(), AUTH_ORGANIZATION_ID, reportVersionId);
     expect(issuePanelCostToken).toHaveBeenCalledWith(AUTH_ORGANIZATION_ID, reportVersionId);
     const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
     expect(done.persistence).toMatchObject({ state: "persisted", reportVersionId });

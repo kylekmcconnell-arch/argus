@@ -107,6 +107,11 @@ function founderReadiness(assetObservation: CheckObservation) {
       sourceCount: 1,
     });
   }
+  // The legal-grade decision gates a real founder audit always resolves. These
+  // are decision-critical for every role, so a "fully answered" founder must
+  // complete them before the asset check alone determines readiness.
+  tracker.record({ id: "ofac-sanctions-name", status: "checked-empty", note: "no SDN match for the resolved name", provider: "ofac-sdn" });
+  tracker.record({ id: "trust-graph-connections", status: "checked-empty", note: "no flagged-subject ties", provider: "trust-graph" });
   tracker.record(assetObservation);
   return deriveDecisionReadiness(tracker.snapshot([SubjectClass.FOUNDER], { resolvedRealName: true }));
 }
@@ -211,8 +216,8 @@ describe("founder decision question outcomes", () => {
     expect(founderReadiness(observations[0])).toMatchObject({
       status: "ready",
       coveragePercent: 100,
-      successful: 6,
-      applicable: 6,
+      successful: 8,
+      applicable: 8,
       unresolved: 0,
     });
   });
@@ -236,8 +241,8 @@ describe("founder decision question outcomes", () => {
     expect(founderReadiness(observations[0])).toMatchObject({
       status: "ready",
       coveragePercent: 100,
-      successful: 5,
-      applicable: 5,
+      successful: 7,
+      applicable: 7,
       unresolved: 0,
     });
   });
@@ -260,9 +265,9 @@ describe("founder decision question outcomes", () => {
     expect(observations[0]?.note).toContain("Each observed asset claim must be verified in its own category");
     expect(founderReadiness(observations[0])).toMatchObject({
       status: "provisional",
-      coveragePercent: 83,
-      successful: 5,
-      applicable: 6,
+      coveragePercent: 87,
+      successful: 7,
+      applicable: 8,
       unresolved: 1,
     });
   });

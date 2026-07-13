@@ -423,8 +423,10 @@
 .field:focus {
   border-color: var(--color-signal);
 }
+/* Dark mode: lift toward the accessible signal-lift so the focused border is
+   visibly distinct from the resting control-line border (they were identical). */
 :root[data-theme="dark"] .field:focus {
-  border-color: var(--color-control-line);
+  border-color: var(--color-signal-lift);
 }
 :root[data-theme="light"] .field {
   background: #ffffff;

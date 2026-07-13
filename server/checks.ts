@@ -67,9 +67,39 @@ const CHECKS: readonly CheckDefinition[] = [
   { id: "founder-asset-distinction", label: "Related assets and security/token distinction", defaultNote: "related public securities, native tokens, and other assets were not clearly distinguished", role: "FOUNDER", criticalFor: ["FOUNDER"] },
   { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR", criticalFor: ["INVESTOR"] },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
-  { id: "us-legal-history", label: "US legal history", defaultNote: "server collector did not run a legal-history check", requiresResolvedRealName: true },
-  { id: "ofac-sanctions-name", label: "OFAC sanctions (name)", defaultNote: "server collector did not run a name-sanctions check", requiresResolvedRealName: true },
-  { id: "trust-graph-connections", label: "Trust-graph connections", defaultNote: "server collector did not run flagged-subject graph reconciliation" },
+  // Sanctions, legal history, and flagged-subject graph reconciliation are
+  // legal-grade decision gates, not provider diagnostics. A report must never
+  // present as decision-ready clearance while they are unresolved.
+  //  - us-legal-history gates every person role EXCEPT founders, whose
+  //    founder-legal-regulatory question is the stronger, attribution-verified
+  //    form of the same gate (a raw CourtListener name screen stays visible as
+  //    a diagnostic for them).
+  //  - ofac-sanctions-name gates EVERY person role including founders: no
+  //    research check substitutes for an SDN screen.
+  //  - trust-graph-connections gates every role: a subject tied to a flagged
+  //    operation is the exact signal this product exists to surface.
+  // All three stay conditional on scope (requiresResolvedRealName marks the
+  // name screens not-applicable, never silently complete).
+  {
+    id: "us-legal-history",
+    label: "US legal history",
+    defaultNote: "server collector did not run a legal-history check",
+    requiresResolvedRealName: true,
+    criticalFor: ["KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"],
+  },
+  {
+    id: "ofac-sanctions-name",
+    label: "OFAC sanctions (name)",
+    defaultNote: "server collector did not run a name-sanctions check",
+    requiresResolvedRealName: true,
+    criticalFor: ["FOUNDER", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER"],
+  },
+  {
+    id: "trust-graph-connections",
+    label: "Trust-graph connections",
+    defaultNote: "server collector did not run flagged-subject graph reconciliation",
+    criticalFor: ["FOUNDER", "KOL", "INVESTOR", "ADVISOR", "AGENCY", "MEMBER", "PROJECT"],
+  },
 ] as const;
 
 /** Stable persisted checklist contract used to qualify immutable reports. */

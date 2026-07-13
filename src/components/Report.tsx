@@ -1393,7 +1393,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         ? "text-fail"
         : presentedVerdict === "AVOID"
           ? "text-avoid"
-          : "text-unverifiable";
+          // Only a suspected-impersonation verdict is "unverifiable" (purple);
+          // INCOMPLETE means insufficient evidence, which is neutral, not a
+          // finding about identity — never borrow the impersonation color.
+          : presentedVerdict === "UNVERIFIABLE_IDENTITY"
+            ? "text-unverifiable"
+            : "text-ink-dim";
   const embeddedFacet = Boolean(f.viewVersionContext || f.viewPersistence);
   const livePersistence = f.viewPersistence ?? f.persistence;
   const panelCostToken = !versionContext && livePersistence?.state === "persisted"

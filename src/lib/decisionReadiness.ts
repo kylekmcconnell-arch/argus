@@ -142,10 +142,19 @@ export function deriveDecisionReadiness(
   }
 
   if (missingAxisSupport > 0) {
+    // The title must agree with the computed status: a report that is still
+    // "incomplete" (below the provisional coverage floor) must never present
+    // itself with provisional wording.
     return {
       ...base,
-      title: evidenceBackedAxes === 0 ? "Decision evidence missing" : "Assessment is provisional",
-      guidance: `${plural(missingAxisSupport, "governing axis", "governing axes")} ${missingAxisSupport === 1 ? "has" : "have"} no qualifying frozen support. Treat the score and verdict as provisional until the decision evidence is complete.`,
+      title: evidenceBackedAxes === 0
+        ? "Decision evidence missing"
+        : status === "provisional"
+          ? "Assessment is provisional"
+          : "Investigation incomplete",
+      guidance: `${plural(missingAxisSupport, "governing axis", "governing axes")} ${missingAxisSupport === 1 ? "has" : "have"} no qualifying frozen support. ${status === "provisional"
+        ? "Treat the score and verdict as provisional until the decision evidence is complete."
+        : "Do not treat the score or verdict as decision-ready until the decision evidence is complete."}`,
     };
   }
 

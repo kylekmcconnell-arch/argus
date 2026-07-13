@@ -12,11 +12,14 @@ export interface DecisionBasisProps {
   onRescan?: () => void;
 }
 
+// Labels must state the evidence reality plainly. `gap` means ZERO qualifying
+// support (decisionBasis.ts) — "No support", not a softer euphemism — and
+// `contested` means verified evidence conflicts.
 const STATUS_META: Record<DecisionBasisStatus, { label: string; color: string }> = {
   grounded: { label: "Strong evidence", color: "var(--color-pass)" },
   partial: { label: "Moderate evidence", color: "var(--color-caution)" },
-  contested: { label: "Mixed evidence", color: "var(--color-avoid)" },
-  gap: { label: "Limited evidence", color: "var(--color-caution)" },
+  contested: { label: "Contested evidence", color: "var(--color-avoid)" },
+  gap: { label: "No qualifying support", color: "var(--color-caution)" },
 };
 
 const RELATION_LABEL = {
@@ -40,6 +43,10 @@ function safeExternalSource(value?: string): string | null {
 
 function compactId(value: string): string {
   return value.length > 12 ? `${value.slice(0, 12)}…` : value;
+}
+
+function plural(count: number, singular: string, pluralForm = `${singular}s`): string {
+  return `${count} ${count === 1 ? singular : pluralForm}`;
 }
 
 function capturedLabel(value?: string): string | null {
@@ -97,6 +104,13 @@ function investorQuestions(row: DecisionBasisRow): string[] {
     const question = investorQuestion(gap);
     return question ? [question] : [];
   }))];
+}
+
+// Gaps that map to provider/coverage plumbing rather than an investor-facing
+// question are still real recorded gaps — count them so the report never hides
+// that coverage is incomplete, even when the individual line reads as noise.
+function coverageOnlyGapCount(row: DecisionBasisRow): number {
+  return new Set(row.gaps.filter((gap) => investorQuestion(gap) === null && evidenceTitle(gap).trim())).size;
 }
 
 function EvidenceRecord({ record, relation }: { record: AxisEvidenceRecord; relation: "support" | "counter" | "gap" }) {
@@ -203,6 +217,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
   const selected = model.rows.find((row) => row.axis === activeAxis) ?? null;
   const selectedTriggerId = selected ? axisAnchorId(selected.axis) : undefined;
   const selectedQuestions = selected ? investorQuestions(selected) : [];
+  const selectedCoverageGaps = selected ? coverageOnlyGapCount(selected) : 0;
   const selectAxis = (axis: string, updateHash = false) => {
     setSelectedAxis(axis);
     if (updateHash && typeof window !== "undefined") {
@@ -305,12 +320,19 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                 </div>
               </div>
 
-              {selectedQuestions.length > 0 && (
+              {(selectedQuestions.length > 0 || selectedCoverageGaps > 0) && (
                 <div className="mt-3 border-t border-line/60 pt-2.5">
                   <h5 className="eyebrow">Questions to verify</h5>
-                  <ul className="mt-1.5 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-caution">
-                    {selectedQuestions.map((question) => <li key={question}>{question}</li>)}
-                  </ul>
+                  {selectedQuestions.length > 0 && (
+                    <ul className="mt-1.5 list-disc space-y-1 pl-4 text-[11px] leading-relaxed text-caution">
+                      {selectedQuestions.map((question) => <li key={question}>{question}</li>)}
+                    </ul>
+                  )}
+                  {selectedCoverageGaps > 0 && (
+                    <p className="mt-1.5 text-[11px] leading-relaxed text-ink-faint">
+                      {plural(selectedCoverageGaps, "additional coverage gap")} recorded on this axis (provider or collection gaps, not an investor question).
+                    </p>
+                  )}
                 </div>
               )}
             </div>
