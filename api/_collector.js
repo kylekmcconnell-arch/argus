@@ -15779,6 +15779,14 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
 }
 
 // server/orchestrate.ts
+var MONID_ENRICHMENT_BUDGET_MS = 25e3;
+var withWallClockBox = (work, budgetMs) => Promise.race([
+  work,
+  new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), budgetMs);
+    if (typeof timer === "object" && "unref" in timer) timer.unref();
+  })
+]);
 var ADAPTERS = [
   xAdapter,
   githubAdapter,
@@ -17249,10 +17257,13 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         if (tvlOutcome.available) evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
         if (fundingOutcome.available) evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
         if (!fundingOutcome.available) {
-          const enrichment = await collectCompanyEnrichment(projectName2, {
-            sections: ["funding_detail", "management_profile", "firmographic"]
-          });
-          if (enrichment.available) evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+          const enrichment = await withWallClockBox(
+            collectCompanyEnrichment(projectName2, {
+              sections: ["funding_detail", "management_profile", "firmographic"]
+            }),
+            MONID_ENRICHMENT_BUDGET_MS
+          );
+          if (enrichment?.available) evidence.companyEnrichment = { ...enrichment.value, capturedAt };
         }
       } catch (error) {
         emit({ phase: "Token", label: "Backing enrichment error", detail: String(error), tone: "warn" });
@@ -17329,10 +17340,13 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     const primaryVenture = evidence.ventures.find((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead" && venture.project_name.trim() && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
     if (primaryVenture) {
       try {
-        const enrichment = await collectCompanyEnrichment(primaryVenture.project_name.trim(), {
-          sections: ["funding_detail", "firmographic"]
-        });
-        if (enrichment.available) {
+        const enrichment = await withWallClockBox(
+          collectCompanyEnrichment(primaryVenture.project_name.trim(), {
+            sections: ["funding_detail", "firmographic"]
+          }),
+          MONID_ENRICHMENT_BUDGET_MS
+        );
+        if (enrichment?.available) {
           evidence.companyEnrichment = { ...enrichment.value, capturedAt: (/* @__PURE__ */ new Date()).toISOString() };
         }
       } catch (error) {

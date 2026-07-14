@@ -64,6 +64,21 @@ import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 import { collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
 import { collectCompanyEnrichment } from "./adapters/monid";
 
+// Monid enrichment polls asynchronous runs (1-120s). An audit already runs
+// minutes against a bounded platform function budget, so enrichment gets a
+// hard wall-clock box: over budget degrades to a skipped enrichment, never a
+// dead run. The adapter's own polling keeps its result cheap to discard.
+const MONID_ENRICHMENT_BUDGET_MS = 25_000;
+const withWallClockBox = <T>(work: Promise<T>, budgetMs: number): Promise<T | null> =>
+  Promise.race([
+    work,
+    new Promise<null>((resolve) => {
+      const timer = setTimeout(() => resolve(null), budgetMs);
+      // Do not hold the event loop open for the box itself.
+      if (typeof timer === "object" && "unref" in timer) timer.unref();
+    }),
+  ]);
+
 const ADAPTERS: Adapter[] = [
   xAdapter,
   githubAdapter,
@@ -1975,10 +1990,17 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         if (tvlOutcome.available) evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
         if (fundingOutcome.available) evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
         if (!fundingOutcome.available) {
-          const enrichment = await collectCompanyEnrichment(projectName, {
-            sections: ["funding_detail", "management_profile", "firmographic"],
-          });
-          if (enrichment.available) evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+          // Hard wall-clock box: Monid runs poll asynchronously (1-120s) and an
+          // audit already runs minutes; an over-budget enrichment must degrade
+          // to a skipped path, never push the whole run past the platform
+          // function budget.
+          const enrichment = await withWallClockBox(
+            collectCompanyEnrichment(projectName, {
+              sections: ["funding_detail", "management_profile", "firmographic"],
+            }),
+            MONID_ENRICHMENT_BUDGET_MS,
+          );
+          if (enrichment?.available) evidence.companyEnrichment = { ...enrichment.value, capturedAt };
         }
       } catch (error) {
         emit({ phase: "Token", label: "Backing enrichment error", detail: String(error), tone: "warn" });
@@ -2079,10 +2101,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
     if (primaryVenture) {
       try {
-        const enrichment = await collectCompanyEnrichment(primaryVenture.project_name.trim(), {
-          sections: ["funding_detail", "firmographic"],
-        });
-        if (enrichment.available) {
+        const enrichment = await withWallClockBox(
+          collectCompanyEnrichment(primaryVenture.project_name.trim(), {
+            sections: ["funding_detail", "firmographic"],
+          }),
+          MONID_ENRICHMENT_BUDGET_MS,
+        );
+        if (enrichment?.available) {
           evidence.companyEnrichment = { ...enrichment.value, capturedAt: new Date().toISOString() };
         }
       } catch (error) {
