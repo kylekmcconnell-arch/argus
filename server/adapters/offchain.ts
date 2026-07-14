@@ -95,6 +95,234 @@ const failedCheckNote = (label: string, status: OffchainAttemptStatus, attempts:
   return `${label} ${status === "partial" ? "completed only partially" : "was unavailable"}${details.length ? ` (${[...new Set(details)].join(", ")})` : ""}`;
 };
 
+type NewsOutcome = Awaited<ReturnType<typeof collectNews>>;
+type LegalOutcome = Awaited<ReturnType<typeof collectLegalCases>>;
+type OfacOutcome = Awaited<ReturnType<typeof collectOfacName>>;
+
+const incompleteSingleNameQuery = (ctx: CollectContext, resolvedName: string | null): boolean => {
+  if (resolvedName || ctx.evidence.roles.every((role) => role === "PROJECT")) return false;
+  const display = ctx.evidence.profile.display_name.trim();
+  const displayToken = display.toLowerCase().replace(/[^a-z0-9]/g, "");
+  const handle = ctx.handle.replace(/^@/, "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  return Boolean(
+    displayToken
+    && !isPlausibleFullName(display)
+    && handle.startsWith(displayToken)
+    && handle.slice(displayToken.length).length >= 3,
+  );
+};
+
+const freezeNewsOutcome = (
+  ctx: CollectContext,
+  news: NewsOutcome,
+  capturedAt: string,
+  provisionalNameQuery: boolean,
+): void => {
+  if (news.status !== "succeeded") {
+    ctx.recordCheck?.({
+      id: "news-press",
+      status: "unavailable",
+      note: failedCheckNote("Google News search", news.status, news.attempts),
+      provider: "google-news",
+    });
+  } else if (provisionalNameQuery && !news.value.articles.length) {
+    ctx.recordCheck?.({
+      id: "news-press",
+      status: "unavailable",
+      note: "single-name and handle search returned no matching article; a verified full-name search is still required",
+      provider: "google-news",
+    });
+  } else {
+    ctx.recordCheck?.({
+      id: "news-press",
+      status: news.value.articles.length ? "confirmed" : "checked-empty",
+      note: news.value.articles.length
+        ? `${news.value.articles.length} exact-name or exact-handle crypto press result${news.value.articles.length === 1 ? "" : "s"} frozen`
+        : "exact-name and exact-handle crypto press searches returned no matching article",
+      provider: "google-news",
+      sourceCount: news.value.articles.length,
+    });
+  }
+  for (const article of news.value.articles) {
+    if (!article.url) continue;
+    addArtifact(ctx, {
+      kind: "press",
+      provider: "google-news",
+      title: article.title,
+      sourceUrl: article.url,
+      capturedAt,
+      ...(asIso(article.publishedAt) ? { publishedAt: asIso(article.publishedAt) } : {}),
+      excerpt: article.source,
+      match: news.matches[(article.url ?? article.title).toLowerCase()] ?? "exact_name",
+    });
+  }
+};
+
+const freezeLegalOutcome = (
+  ctx: CollectContext,
+  legal: LegalOutcome,
+  name: string,
+  capturedAt: string,
+): void => {
+  const exactCases = legal.value.available
+    ? legal.value.cases.filter((item) => legalCaptionHasFullName(item.caseName, name))
+    : [];
+  const inspectableCases = exactCases.filter(
+    (item): item is typeof item & { url: string } => Boolean(item.url),
+  );
+  const legalIncomplete = !legal.value.available
+    || legal.status !== "succeeded"
+    || inspectableCases.length !== exactCases.length;
+  if (legalIncomplete) {
+    ctx.recordCheck?.({
+      id: "us-legal-history",
+      status: "unavailable",
+      note: inspectableCases.length !== exactCases.length
+        ? "CourtListener returned a matching caption without an inspectable docket URL"
+        : failedCheckNote("CourtListener search", legal.status, legal.attempts),
+      provider: "courtlistener",
+      sourceCount: inspectableCases.length,
+    });
+  } else {
+    ctx.recordCheck?.({
+      id: "us-legal-history",
+      status: exactCases.length ? "finding" : "checked-empty",
+      note: exactCases.length
+        ? `${exactCases.length} CourtListener case caption${exactCases.length === 1 ? "" : "s"} contained the full resolved name; identity match requires review${legal.status === "partial" ? " (other returned rows were malformed)" : ""}`
+        : "CourtListener returned no case caption containing the full resolved name",
+      provider: "courtlistener",
+      sourceCount: exactCases.length,
+    });
+  }
+  for (const item of inspectableCases) {
+    addArtifact(ctx, {
+      kind: "legal_case",
+      provider: "courtlistener",
+      title: item.caseName || "CourtListener case",
+      sourceUrl: item.url,
+      capturedAt,
+      ...(asIso(item.date) ? { publishedAt: asIso(item.date) } : {}),
+      excerpt: [item.court, item.docket == null ? "" : String(item.docket)].filter(Boolean).join(" · "),
+      match: "candidate",
+    });
+    addFinding(ctx, {
+      finding_type: "LegalCaseNameLead",
+      claim: `${name} appears by full name in the caption of ${item.caseName || "a US court record"}; verify that the named party is the audited subject.`,
+      source_url: item.url,
+      source_date: asIso(item.date)?.slice(0, 10) ?? "",
+      source_author: "CourtListener / RECAP",
+      verification_status: "Reported",
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+  }
+};
+
+const freezeOfacOutcome = (
+  ctx: CollectContext,
+  ofac: OfacOutcome,
+  name: string,
+  capturedAt: string,
+): void => {
+  if (ofac.status !== "succeeded" || !ofac.value.available) {
+    ctx.recordCheck?.({
+      id: "ofac-sanctions-name",
+      status: "unavailable",
+      note: failedCheckNote("OFAC name screen", ofac.status, ofac.attempts),
+      provider: "opensanctions",
+    });
+    return;
+  }
+  ctx.recordCheck?.({
+    id: "ofac-sanctions-name",
+    status: ofac.value.sanctioned ? "finding" : "checked-empty",
+    note: ofac.value.sanctioned
+      ? "exact full-name or alias match in the US Treasury OFAC SDN mirror; identity match requires review"
+      : `exact full-name and reversed-name screen completed against ${ofac.value.listSize.toLocaleString()} OFAC SDN names with no match`,
+    provider: "opensanctions",
+    sourceCount: 1,
+  });
+  addArtifact(ctx, {
+    kind: "sanctions_screen",
+    provider: "opensanctions",
+    title: "US Treasury OFAC SDN exact-name screen",
+    sourceUrl: OFAC_SOURCE_URL,
+    capturedAt,
+    excerpt: ofac.value.sanctioned
+      ? `Exact name/alias match for ${name}; identity requires verification.`
+      : `No exact full-name or reversed-name match for ${name} across ${ofac.value.listSize} indexed names.`,
+    match: ofac.value.sanctioned ? "exact_name" : "no_match",
+    ...(ofac.indexHash ? { sourceContentHash: ofac.indexHash } : {}),
+  });
+  if (ofac.value.sanctioned) {
+    addFinding(ctx, {
+      finding_type: "SanctionsNameLead",
+      claim: `${name} exactly matches a person name or alias in the US Treasury OFAC SDN mirror; verify the identity before drawing a conclusion.`,
+      source_url: OFAC_SOURCE_URL,
+      source_date: capturedAt.slice(0, 10),
+      source_author: "OpenSanctions mirror of US Treasury OFAC SDN",
+      verification_status: "Reported",
+      independent_source_count: 1,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+  }
+};
+
+const ofacSearch = (name: string) => collectOfacName(name, {
+  cache: {
+    read: () => cacheGet("ofacname:v2", {
+      operation: "ofac-name-index-hit",
+      meta: "24h OFAC name-index cache",
+    }),
+    write: (names) => cacheSet("ofacname:v2", names),
+  },
+});
+
+export function resolvedOffchainName(ctx: CollectContext): string | null {
+  return resolvedRealName(ctx);
+}
+
+/** Rerun only the identity-sensitive screens after Basic Facts resolves a full
+ * name. The profile-photo provider is intentionally not called twice. */
+export async function refreshResolvedNameOffchain(ctx: CollectContext): Promise<AdapterRunResult> {
+  const name = resolvedRealName(ctx);
+  if (!name) return { state: "skipped", detail: "no newly resolved full name" };
+  const capturedAt = new Date().toISOString();
+  ctx.emit({
+    phase: "Off-chain",
+    label: "Full-name diligence refresh",
+    detail: `Refreshing exact-name news, US court, and OFAC outcomes for ${name}.`,
+    tone: "neutral",
+  });
+  const [news, legal, ofac] = await Promise.all([
+    collectNews(name, ctx.handle),
+    collectLegalCases(name),
+    ofacSearch(name),
+  ]);
+  recordAttempts(news.attempts);
+  recordAttempts(legal.attempts);
+  recordAttempts(ofac.attempts);
+  freezeNewsOutcome(ctx, news, capturedAt, false);
+  freezeLegalOutcome(ctx, legal, name, capturedAt);
+  freezeOfacOutcome(ctx, ofac, name, capturedAt);
+  const statuses = [news.status, legal.status, ofac.status];
+  const failed = statuses.filter((status) => status === "failed").length;
+  const partial = statuses.filter((status) => status === "partial").length;
+  const state: AdapterRunResult["state"] = failed === statuses.length
+    ? "failed"
+    : failed || partial
+      ? "partial"
+      : "executed";
+  return {
+    state,
+    detail: `full-name refresh for ${name} · ${failed} failed · ${partial} partial`,
+  };
+}
+
 export const offchainAdapter: Adapter = {
   id: "offchain-diligence",
   label: "Photo, news, legal, and sanctions",
@@ -114,17 +342,7 @@ export const offchainAdapter: Adapter = {
     const newsPromise = collectNews(name ?? ctx.evidence.profile.display_name, ctx.handle);
     const profilePhotoPromise = collectProfilePhoto(ctx);
     const legalPromise = name ? collectLegalCases(name) : null;
-    const ofacPromise = name
-      ? collectOfacName(name, {
-          cache: {
-            read: () => cacheGet("ofacname:v2", {
-              operation: "ofac-name-index-hit",
-              meta: "24h OFAC name-index cache",
-            }),
-            write: (names) => cacheSet("ofacname:v2", names),
-          },
-        })
-      : null;
+    const ofacPromise = name ? ofacSearch(name) : null;
 
     const [news, profilePhoto, legal, ofac] = await Promise.all([
       newsPromise,
@@ -136,141 +354,11 @@ export const offchainAdapter: Adapter = {
     if (legal) recordAttempts(legal.attempts);
     if (ofac) recordAttempts(ofac.attempts);
 
-    if (news.status !== "succeeded") {
-      ctx.recordCheck?.({
-        id: "news-press",
-        status: "unavailable",
-        note: failedCheckNote("Google News search", news.status, news.attempts),
-        provider: "google-news",
-      });
-    } else {
-      ctx.recordCheck?.({
-        id: "news-press",
-        status: news.value.articles.length ? "confirmed" : "checked-empty",
-        note: news.value.articles.length
-          ? `${news.value.articles.length} exact-name or exact-handle crypto press result${news.value.articles.length === 1 ? "" : "s"} frozen`
-          : "exact-name and exact-handle crypto press searches returned no matching article",
-        provider: "google-news",
-        sourceCount: news.value.articles.length,
-      });
-    }
-    for (const article of news.value.articles) {
-      if (!article.url) continue;
-      addArtifact(ctx, {
-        kind: "press",
-        provider: "google-news",
-        title: article.title,
-        sourceUrl: article.url,
-        capturedAt,
-        ...(asIso(article.publishedAt) ? { publishedAt: asIso(article.publishedAt) } : {}),
-        excerpt: article.source,
-        match: news.matches[(article.url ?? article.title).toLowerCase()] ?? "exact_name",
-      });
-    }
+    freezeNewsOutcome(ctx, news, capturedAt, incompleteSingleNameQuery(ctx, name));
 
-    if (legal) {
-      const exactCases = legal.value.available
-        ? legal.value.cases.filter((item) => legalCaptionHasFullName(item.caseName, name!))
-        : [];
-      const inspectableCases = exactCases.filter(
-        (item): item is typeof item & { url: string } => Boolean(item.url),
-      );
-      const legalIncomplete = !legal.value.available
-        || legal.status !== "succeeded"
-        || inspectableCases.length !== exactCases.length;
-      if (legalIncomplete) {
-        ctx.recordCheck?.({
-          id: "us-legal-history",
-          status: "unavailable",
-          note: inspectableCases.length !== exactCases.length
-            ? "CourtListener returned a matching caption without an inspectable docket URL"
-            : failedCheckNote("CourtListener search", legal.status, legal.attempts),
-          provider: "courtlistener",
-          sourceCount: inspectableCases.length,
-        });
-      } else {
-        ctx.recordCheck?.({
-          id: "us-legal-history",
-          status: exactCases.length ? "finding" : "checked-empty",
-          note: exactCases.length
-            ? `${exactCases.length} CourtListener case caption${exactCases.length === 1 ? "" : "s"} contained the full resolved name; identity match requires review${legal.status === "partial" ? " (other returned rows were malformed)" : ""}`
-            : "CourtListener returned no case caption containing the full resolved name",
-          provider: "courtlistener",
-          sourceCount: exactCases.length,
-        });
-      }
-      for (const item of inspectableCases) {
-        addArtifact(ctx, {
-          kind: "legal_case",
-          provider: "courtlistener",
-          title: item.caseName || "CourtListener case",
-          sourceUrl: item.url,
-          capturedAt,
-          ...(asIso(item.date) ? { publishedAt: asIso(item.date) } : {}),
-          excerpt: [item.court, item.docket == null ? "" : String(item.docket)].filter(Boolean).join(" · "),
-          match: "candidate",
-        });
-        addFinding(ctx, {
-          finding_type: "LegalCaseNameLead",
-          claim: `${name} appears by full name in the caption of ${item.caseName || "a US court record"}; verify that the named party is the audited subject.`,
-          source_url: item.url,
-          source_date: asIso(item.date)?.slice(0, 10) ?? "",
-          source_author: "CourtListener / RECAP",
-          verification_status: "Reported",
-          independent_source_count: 1,
-          polarity: -1,
-          evidence_origin: "deterministic",
-          artifact_verified: true,
-        });
-      }
-    }
+    if (legal && name) freezeLegalOutcome(ctx, legal, name, capturedAt);
 
-    if (ofac) {
-      if (ofac.status !== "succeeded" || !ofac.value.available) {
-        ctx.recordCheck?.({
-          id: "ofac-sanctions-name",
-          status: "unavailable",
-          note: failedCheckNote("OFAC name screen", ofac.status, ofac.attempts),
-          provider: "opensanctions",
-        });
-      } else {
-        ctx.recordCheck?.({
-          id: "ofac-sanctions-name",
-          status: ofac.value.sanctioned ? "finding" : "checked-empty",
-          note: ofac.value.sanctioned
-            ? "exact full-name or alias match in the US Treasury OFAC SDN mirror; identity match requires review"
-            : `exact full-name and reversed-name screen completed against ${ofac.value.listSize.toLocaleString()} OFAC SDN names with no match`,
-          provider: "opensanctions",
-          sourceCount: 1,
-        });
-        addArtifact(ctx, {
-          kind: "sanctions_screen",
-          provider: "opensanctions",
-          title: "US Treasury OFAC SDN exact-name screen",
-          sourceUrl: OFAC_SOURCE_URL,
-          capturedAt,
-          excerpt: ofac.value.sanctioned
-            ? `Exact name/alias match for ${name}; identity requires verification.`
-            : `No exact full-name or reversed-name match for ${name} across ${ofac.value.listSize} indexed names.`,
-          match: ofac.value.sanctioned ? "exact_name" : "no_match",
-          ...(ofac.indexHash ? { sourceContentHash: ofac.indexHash } : {}),
-        });
-        if (ofac.value.sanctioned) {
-          addFinding(ctx, {
-            finding_type: "SanctionsNameLead",
-            claim: `${name} exactly matches a person name or alias in the US Treasury OFAC SDN mirror; verify the identity before drawing a conclusion.`,
-            source_url: OFAC_SOURCE_URL,
-            source_date: capturedAt.slice(0, 10),
-            source_author: "OpenSanctions mirror of US Treasury OFAC SDN",
-            verification_status: "Reported",
-            independent_source_count: 1,
-            polarity: -1,
-            evidence_origin: "deterministic",
-            artifact_verified: true,
-          });
-        }
-      }
-    }
+    if (ofac && name) freezeOfacOutcome(ctx, ofac, name, capturedAt);
 
     const statuses = [news.status, profilePhoto.status, legal?.status, ofac?.status].filter(
       (status): status is OffchainAttemptStatus => Boolean(status),

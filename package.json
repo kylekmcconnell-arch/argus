@@ -15,6 +15,8 @@
     "calibrate:json": "tsx src/calibration/calibrate.ts --json",
     "canary:offline": "tsx scripts/release-canary.ts",
     "canary:offline:json": "tsx scripts/release-canary.ts --json",
+    "canary:identity:live": "tsx scripts/canary-stani-identity.ts",
+    "canary:founder-verdict:live": "tsx scripts/canary-stani-verdict.ts",
     "truth:check": "tsx scripts/source-of-truth-check.ts",
     "quality": "npm run truth:check && npm run canary:offline && npm run calibrate && npm test && npm run typecheck",
     "seed:local-report": "tsx scripts/seed-local-report.ts",

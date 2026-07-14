@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   ANALYST_EVIDENCE_MAX_CHARS,
+  FOUNDER_SCORING_POLICY,
   PROJECT_SCORING_POLICY,
   RECORD_VERDICT_INPUT_SCHEMA,
   analyzeSubject,
+  analystAvailable,
   buildAnalystEvidencePacket,
   buildScoringEvidencePacket,
   deriveProjectStrengthBands,
@@ -164,12 +166,15 @@ describe("analyst verdict integrity", () => {
       .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
 
     expect(scoringPolicyForAxes(projectAxes)).toBe(PROJECT_SCORING_POLICY);
-    expect(scoringPolicyForAxes(catalog)).toBe("");
+    expect(scoringPolicyForAxes(catalog)).toBe(FOUNDER_SCORING_POLICY);
     expect(PROJECT_SCORING_POLICY).toContain("Keep score and confidence separate");
     expect(PROJECT_SCORING_POLICY).toContain("Missing coverage is separate and never creates or lowers a strength tier");
     expect(PROJECT_SCORING_POLICY).toContain("A bootstrapped project is not weaker merely because no VC round was found");
     expect(PROJECT_SCORING_POLICY).toContain("Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps");
     expect(PROJECT_SCORING_POLICY).toContain("Only cite substantive counterEvidenceRefs for distinct verified facts that pull a score below its evidence-strength band");
+    expect(FOUNDER_SCORING_POLICY).toContain("Follower count, posting cadence, profile biography, fame, and X follow relationships never establish a founder role or track record");
+    expect(FOUNDER_SCORING_POLICY).toContain("A personal GitHub account is optional and its absence cannot negate a verified live product");
+    expect(FOUNDER_SCORING_POLICY).toContain("Social follows, mutual follows, and generic affiliations are network context, not repeat backing");
   });
 
   it("derives exceptional evidence bands for established projects without using fame or artifact counts", () => {
@@ -1007,6 +1012,230 @@ describe("analyst verdict integrity", () => {
       headline: "Identity is resolved through a named public team, while tokenomics remain unknown.",
       identity_note: "Identity is resolved through the named co-founder in official project documentation.",
     }, projectAxes, frozen)).not.toBeNull();
+  });
+
+  it("keeps social affiliations, empty news, and missing personal GitHub out of founder track record", () => {
+    const founderAxes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.FOUNDER).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.FOUNDER }));
+    const frozen = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      checkOutcomes: [
+        {
+          checkId: "affiliations-associates",
+          status: "confirmed",
+          note: "4 of 6 claimed relationships were observed in the X follow graph",
+          provider: "twitterapi.io",
+        },
+        {
+          checkId: "code-footprint-github",
+          status: "unavailable",
+          note: "No personal GitHub account was resolved",
+          provider: "github",
+        },
+        {
+          checkId: "news-press",
+          status: "checked-empty",
+          note: "The exact-name RSS query returned no matching article",
+          provider: "google-news",
+        },
+      ],
+      basicFacts: [{
+        predicate: "founder",
+        value: "Aave Protocol",
+        status: "verified",
+        artifact_verified: true,
+        sources: [{
+          url: "https://aave.com/about",
+          excerpt: "Stani Kulechov founded the Aave Protocol.",
+          provider: "public-web",
+          artifactVerified: true,
+        }],
+      }],
+    }, founderAxes));
+
+    const affiliation = frozen.find((artifact) => artifact.operation === "checkOutcomes:affiliations-associates")!;
+    const github = frozen.find((artifact) => artifact.operation === "checkOutcomes:code-footprint-github")!;
+    const news = frozen.find((artifact) => artifact.operation === "checkOutcomes:news-press")!;
+    const founder = frozen.find((artifact) => artifact.operation === "basicFacts:founder")!;
+
+    expect(affiliation.eligibleAxes).toEqual(["F6_network_quality"]);
+    expect(github.eligibleAxes).not.toContain("F2_track_record");
+    expect(news.eligibleAxes).not.toContain("F2_track_record");
+    expect(news.eligibleAxes).not.toContain("F3_repeat_backing");
+    expect(founder.verification).toBe("verified");
+    expect(founder.eligibleAxes).toContain("F2_track_record");
+  });
+
+  it("rejects a social-only or claimed-role narrative when frozen facts verify the founder", () => {
+    const founderAxes: AnalystAxis[] = [
+      { axis: "F1_identity_verifiability", weight: 12, role: "FOUNDER" },
+      { axis: "F2_track_record", weight: 28, role: "FOUNDER" },
+    ];
+    const frozen = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      basicFacts: [
+        {
+          predicate: "current_role",
+          value: "Founder and CEO, Aave Labs",
+          status: "verified",
+          artifact_verified: true,
+          sources: [{
+            url: "https://investor.mastercard.com/aave-agent-pay",
+            excerpt: "Stani Kulechov, founder and CEO of Aave Labs, commented on the launch.",
+            provider: "public-web",
+            artifactVerified: true,
+          }],
+        },
+        {
+          predicate: "founder",
+          value: "Aave Protocol",
+          status: "verified",
+          artifact_verified: true,
+          sources: [{
+            url: "https://aave.com/about",
+            excerpt: "Stani Kulechov founded the Aave Protocol after launching ETHLend.",
+            provider: "public-web",
+            artifactVerified: true,
+          }],
+        },
+      ],
+    }, founderAxes));
+    const role = frozen.find((artifact) => artifact.operation === "basicFacts:current_role")!;
+    const founder = frozen.find((artifact) => artifact.operation === "basicFacts:founder")!;
+    const rejection = vi.fn();
+    const badParagraph = "The subject presents as Founder & CEO of Aave. The subject's track record is inferred from the high-profile claimed role and follower base rather than independently verified artifacts in this evidence packet.";
+
+    expect(validateAnalystVerdict({
+      axes: [
+        validAxis("F1_identity_verifiability", 10, role.artifactId),
+        {
+          ...validAxis("F2_track_record", 22, founder.artifactId),
+          rationale: badParagraph,
+        },
+      ],
+      headline: "Stani is publicly associated with Aave.",
+      identity_note: "Stani Kulechov founded Aave.",
+    }, founderAxes, frozen, rejection)).toBeNull();
+    expect([
+      "founder-fundamentals-cite-network-only-evidence",
+      "grounded-founder-role-described-as-unverified",
+      "grounded-founder-track-record-described-as-social-only",
+    ]).toContain(rejection.mock.calls.at(-1)?.[0]);
+
+    expect(validateAnalystVerdict({
+      axes: [
+        validAxis("F1_identity_verifiability", 10, role.artifactId),
+        {
+          ...validAxis("F2_track_record", 22, founder.artifactId),
+          rationale: "Independent sources verify that Stani founded Aave; additional measurable venture outcomes remain incomplete.",
+        },
+      ],
+      headline: "Independent sources verify Stani Kulechov as an Aave founder.",
+      identity_note: "Stani Kulechov is founder and CEO of Aave Labs and founder of the Aave Protocol.",
+    }, founderAxes, frozen)).not.toBeNull();
+  });
+
+  it("never lets social reach stand in for a founder track record", () => {
+    const rejection = vi.fn();
+    expect(validateAnalystVerdict({
+      axes: [
+        validAxis("F1_identity_verifiability", 8, F1_REF),
+        {
+          ...validAxis("F2_track_record", 8, F2_REF),
+          rationale: "The track record is inferred from follower count and the claimed role rather than independently verified artifacts.",
+        },
+      ],
+      headline: "The evidence packet has limited operating-history coverage.",
+      identity_note: "Public identity evidence remains limited.",
+    }, catalog, validationCatalog, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("founder-track-record-described-as-social-only");
+  });
+
+  it("rejects network-only language in F2 even when it avoids saying track record", () => {
+    const rejection = vi.fn();
+    expect(validateAnalystVerdict({
+      axes: [
+        validAxis("F1_identity_verifiability", 8, F1_REF),
+        {
+          ...validAxis("F2_track_record", 8, F2_REF),
+          rationale: "301K followers and four observed X follows support an established operating history.",
+        },
+      ],
+      headline: "The evidence packet has limited operating-history coverage.",
+      identity_note: "Public identity evidence remains limited.",
+    }, catalog, validationCatalog, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("founder-fundamentals-cite-network-only-evidence");
+  });
+
+  it("allows an explicit warning that followers do not establish track record", () => {
+    const result = validateAnalystVerdict({
+      axes: [
+        validAxis("F1_identity_verifiability", 8, F1_REF),
+        {
+          ...validAxis("F2_track_record", 8, F2_REF),
+          rationale: "Follower count is network context only and does not establish track record.",
+        },
+      ],
+      headline: "The evidence packet has limited operating-history coverage.",
+      identity_note: "Public identity evidence remains limited.",
+    }, catalog, validationCatalog);
+
+    expect(result).not.toBeNull();
+  });
+
+  it("does not treat a verified CEO or current role as verified founder status", () => {
+    const founderAxes: AnalystAxis[] = [
+      { axis: "F1_identity_verifiability", weight: 12, role: "FOUNDER" },
+    ];
+    const frozen = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      basicFacts: [{
+        predicate: "current_role",
+        value: "CEO, Example Labs",
+        status: "verified",
+        artifact_verified: true,
+        sources: [{
+          url: "https://example.com/leadership",
+          excerpt: "The subject serves as CEO of Example Labs.",
+          provider: "public-web",
+          artifactVerified: true,
+        }],
+      }],
+    }, founderAxes));
+    const role = frozen.find((artifact) => artifact.operation === "basicFacts:current_role")!;
+
+    expect(validateAnalystVerdict({
+      axes: [{
+        ...validAxis("F1_identity_verifiability", 9, role.artifactId),
+        rationale: "The current CEO role is verified, while founder status remains unverified.",
+      }],
+      headline: "The current CEO role is verified, but founder status remains unverified.",
+      identity_note: "The evidence confirms an executive role, not a founder relationship.",
+    }, founderAxes, frozen)).not.toBeNull();
+  });
+
+  it("does treat a verified founder-company relationship as grounded founder status", () => {
+    const founderAxes: AnalystAxis[] = [
+      { axis: "F2_track_record", weight: 28, role: "FOUNDER" },
+    ];
+    const frozen = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      checkOutcomes: [{
+        checkId: "founder-company-relationships",
+        status: "confirmed",
+        note: "Independent sources confirm the subject founded Example Labs.",
+        provider: "public-web",
+      }],
+    }, founderAxes));
+    const relationship = frozen.find((artifact) =>
+      artifact.operation === "checkOutcomes:founder-company-relationships")!;
+    const rejection = vi.fn();
+
+    expect(validateAnalystVerdict({
+      axes: [{
+        ...validAxis("F2_track_record", 18, relationship.artifactId),
+        rationale: "The founder relationship remains unverified.",
+      }],
+      headline: "The founder relationship remains unverified.",
+      identity_note: "The subject is publicly associated with Example Labs.",
+    }, founderAxes, frozen, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("grounded-founder-role-described-as-unverified");
   });
 
   it.each([
@@ -2925,7 +3154,7 @@ describe("analyst verdict integrity", () => {
     };
     const frozen = extractScoringEvidenceCatalog(packet)
       .filter((artifact) => artifact.section === "basicFacts");
-    const founder = frozen.find((artifact) => artifact.operation === "basicFacts:collect" && artifact.title === "Meow");
+    const founder = frozen.find((artifact) => artifact.operation === "basicFacts:founder" && artifact.title === "Meow");
     const governance = frozen.find((artifact) => artifact.title === "JUP token voting");
 
     expect(parsed.basicFacts[0].sources[0]).toMatchObject({
@@ -4839,9 +5068,131 @@ describe("analyst verdict integrity", () => {
     expect(timeoutSpy).toHaveBeenCalledWith(ANALYST_SCORING_TIMEOUT_MS);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("falls back from an Anthropic 400 to a valid Grok JSON-schema verdict", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{
+        project_name: "Verified Venture",
+        role: "founder",
+        outcome: "Active",
+        artifact_verified: true,
+      }],
+    }, catalog);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson, catalog);
+    const aliasFor = (axis: string) => {
+      const index = scorerCatalog.findIndex((artifact) =>
+        artifact.verification !== "unavailable"
+        && artifact.verification !== "checked_empty"
+        && artifact.eligibleAxes.includes(axis));
+      expect(index).toBeGreaterThanOrEqual(0);
+      return `e${String(index + 1).padStart(3, "0")}`;
+    };
+    const grokVerdict = {
+      axes: [
+        {
+          axis: "F1_identity_verifiability",
+          score: 10,
+          rationale: "The resolved provider profile names the subject.",
+          primaryEvidenceRef: aliasFor("F1_identity_verifiability"),
+          additionalEvidenceRefs: [],
+          counterEvidenceRefs: [],
+          coverageRefs: [],
+          gaps: [],
+        },
+        {
+          axis: "F2_track_record",
+          score: 20,
+          rationale: "The frozen venture record documents an active operating history.",
+          primaryEvidenceRef: aliasFor("F2_track_record"),
+          additionalEvidenceRefs: [],
+          counterEvidenceRefs: [],
+          coverageRefs: [],
+          gaps: [],
+        },
+      ],
+      headline: "Verified profile and venture evidence support the founder assessment.",
+      identity_note: "Collected profile evidence resolves the subject's public identity.",
+    };
+    const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url === "https://api.anthropic.com/v1/messages") {
+        return new Response(JSON.stringify({
+          type: "error",
+          error: { type: "invalid_request_error", message: "Credit balance is too low." },
+        }), { status: 400, headers: { "content-type": "application/json" } });
+      }
+      if (url === "https://api.x.ai/v1/chat/completions") {
+        const request = JSON.parse(String(init?.body)) as {
+          messages?: Array<{ role?: string; content?: string }>;
+          response_format?: {
+            type?: string;
+            json_schema?: { name?: string; strict?: boolean; schema?: unknown };
+          };
+        };
+        expect(request.messages?.find((message) => message.role === "user")?.content)
+          .toContain("Axes to score");
+        expect(request.response_format).toEqual({
+          type: "json_schema",
+          json_schema: {
+            name: "record_verdict",
+            strict: true,
+            schema: RECORD_VERDICT_INPUT_SCHEMA,
+          },
+        });
+        return new Response(JSON.stringify({
+          choices: [{ message: { content: JSON.stringify(grokVerdict) } }],
+          usage: { prompt_tokens: 120, completion_tokens: 40 },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error(`unexpected provider URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "info").mockImplementation(() => undefined);
+
+    const captured = await withCostLedger(async () => {
+      const verdict = await analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson);
+      return { verdict, cost: getCost() };
+    });
+
+    expect(fetchMock.mock.calls.map(([input]) => String(input))).toEqual([
+      "https://api.anthropic.com/v1/messages",
+      "https://api.x.ai/v1/chat/completions",
+    ]);
+    expect(captured.verdict?.axes.map((axis) => axis.axis)).toEqual([
+      "F1_identity_verifiability",
+      "F2_track_record",
+    ]);
+    expect(captured.cost.claudeCalls).toBe(1);
+    expect(captured.cost.grokCalls).toBe(1);
+    expect(captured.cost.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        provider: "claude",
+        op: "record_verdict",
+        calls: 1,
+        failed: 1,
+        meta: expect.stringContaining("http_400"),
+      }),
+      expect.objectContaining({
+        provider: "grok",
+        op: "record_verdict",
+        calls: 1,
+        succeeded: 1,
+      }),
+    ]));
+  });
 });
 
-describe("Claude attempt accounting", () => {
+describe("AI analyst attempt accounting", () => {
   const tool = {
     name: "record_test",
     description: "Record a test result.",
@@ -4852,6 +5203,13 @@ describe("Claude attempt accounting", () => {
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+  });
+
+  it("is available with Grok as the only configured analyst provider", () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+
+    expect(analystAvailable()).toBe(true);
   });
 
   it("records an HTTP failure as a failed paid attempt", async () => {

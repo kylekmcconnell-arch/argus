@@ -33,13 +33,20 @@ const twitterProviderFailure = (payload: JsonRecord): string | null => {
 
 // Grok search via the current Responses API + tools (the legacy search_parameters
 // Live Search API was retired -> 410 Gone). Returns the model's text, or null.
-export async function grokSearch(system: string, user: string, opts?: { maxToolCalls?: number; cacheKey?: string }): Promise<string | null> {
+export async function grokSearch(system: string, user: string, opts?: {
+  maxToolCalls?: number;
+  cacheKey?: string;
+  /** Force a fresh provider call for release canaries and failover checks. */
+  bypassCache?: boolean;
+  /** Shared physical-call budget used by bounded multi-question repair. */
+  claimProviderCall?: () => boolean;
+}): Promise<string | null> {
   const key = env("XAI_API_KEY");
   if (!key) return null;
   // 24h read-through cache: a subject's team/affiliations don't change
   // hour-to-hour, and live search is the dominant spend. Keyed by the CALLER's
   // stable subject key (never the raw prompt — prompts embed volatile posts).
-  if (opts?.cacheKey) {
+  if (opts?.cacheKey && !opts.bypassCache) {
     const hit = await cacheGet(opts.cacheKey);
     if (hit) return hit;
   }
@@ -48,7 +55,10 @@ export async function grokSearch(system: string, user: string, opts?: { maxToolC
   // search loop (the dominant spend); if the API rejects the param we retry
   // once without it. Every physical attempt is recorded, including the rejected
   // compatibility call and transport/parse failures.
-  const call = async (withCap: boolean): Promise<{ status: number | null; text: string | null }> => {
+  const call = async (withCap: boolean): Promise<{ status: number | null; text: string | null; budgetExhausted?: boolean }> => {
+    if (opts?.claimProviderCall && !opts.claimProviderCall()) {
+      return { status: null, text: null, budgetExhausted: true };
+    }
     let res: Response;
     try {
       res = await fetch("https://api.x.ai/v1/responses", {
@@ -104,8 +114,8 @@ export async function grokSearch(system: string, user: string, opts?: { maxToolC
   };
 
   let result = await call(true);
-  if (result.status === 400) result = await call(false); // param unsupported -> compat retry
-  if (result.text && opts?.cacheKey) void cacheSet(opts.cacheKey, result.text);
+  if (result.status === 400 && !result.budgetExhausted) result = await call(false); // param unsupported -> compat retry
+  if (result.text && opts?.cacheKey && !opts.bypassCache) void cacheSet(opts.cacheKey, result.text);
   return result.text;
 }
 

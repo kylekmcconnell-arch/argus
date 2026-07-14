@@ -392,10 +392,10 @@ export interface BasicFact {
   evidence_origin: "deterministic";
   artifact_verified: true;
   provider: "public-web";
-  discoveryProvider?: "claude-web-search" | "grok";
+  discoveryProvider?: "claude-web-search" | "grok" | "argus-identity-bootstrap";
 }
 
-/** Model-discovered answer and candidate source. It is never scoreable. */
+/** Unverified answer and candidate source. It is never scoreable. */
 export interface BasicFactLead {
   subject: string;
   predicate: BasicFactPredicate;
@@ -411,9 +411,10 @@ export interface BasicFactLead {
   sourceUrl: string;
   sourceTitle?: string;
   candidateUrls?: string[];
-  evidence_origin: "model_lead";
+  /** Whether a model proposed the row or ARGUS derived a bounded candidate. */
+  evidence_origin: "model_lead" | "deterministic_bootstrap";
   artifact_verified: false;
-  provider: "claude-web-search" | "grok";
+  provider: "claude-web-search" | "grok" | "argus-identity-bootstrap";
 }
 
 export interface BasicFactQuestionLedgerEntry {

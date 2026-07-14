@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence, type BasicFactLead } from "../../src/data/evidence";
 import { SubjectClass, VentureOutcome } from "../../src/engine";
 import type { PublicTextDocument, PublicTextResult } from "../publicWeb";
@@ -8,11 +8,18 @@ import {
   basicFactsResearchQuestions,
   discoverBasicFactLeads,
   discoverBasicFactLeadsDetailed,
+  discoverGrokBasicFactLeadsDetailed,
   parseBasicFactLeads,
   verifyBasicFactLead,
 } from "./basicFacts";
 
 const NOW = "2026-07-12T12:00:00.000Z";
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  vi.restoreAllMocks();
+});
 
 const lead = (overrides: Partial<BasicFactLead> = {}): BasicFactLead => ({
   subject: "Jupiter",
@@ -183,6 +190,67 @@ describe("basic-facts lead parsing", () => {
         value: "Chair and CEO at Coinbase",
       }),
     ]);
+  });
+
+  it("reduces a role-suffixed identity answer to the atomic full name", () => {
+    expect(parseBasicFactLeads(JSON.stringify({
+      facts: [{
+        question_id: "person.official_identity",
+        subject: "Stani",
+        predicate: "official_identity",
+        value: "Stani Kulechov, Founder & CEO of Aave Labs",
+        exact_excerpt: "Stani Kulechov, founder of Aave Labs, described the acquisition.",
+        source_url: "https://aave.com/blog/stable-acquire",
+      }],
+    }), "Stani", "grok", [{
+      id: "person.official_identity",
+      audience: "person",
+      batch: "identity",
+      predicate: "official_identity",
+      question: "What is this person's source-backed public identity?",
+      critical: true,
+    }])).toEqual([
+      expect.objectContaining({
+        predicate: "official_identity",
+        value: "Stani Kulechov",
+      }),
+    ]);
+  });
+
+  it("does not turn a delimited roster into one identity", () => {
+    expect(parseBasicFactLeads(JSON.stringify({
+      facts: [{
+        subject: "Stani",
+        predicate: "official_identity",
+        value: "Stani Kulechov, and Alice Example",
+        exact_excerpt: "Stani Kulechov and Alice Example spoke at the event.",
+        source_url: "https://example.com/event",
+      }],
+    }))).toEqual([]);
+  });
+
+  it.each([
+    "Stani Kulechov, alleged founder of Aave",
+    "Stani Kulechov, claimed CEO of Aave Labs",
+    "Stani Kulechov, speaker at an Aave event",
+  ])("does not canonicalize a speculative or non-role identity suffix: %s", (value) => {
+    expect(parseBasicFactLeads(JSON.stringify({
+      facts: [{
+        question_id: "person.official_identity",
+        subject: "Stani",
+        predicate: "official_identity",
+        value,
+        exact_excerpt: `${value}.`,
+        source_url: "https://example.com/profile",
+      }],
+    }), "Stani", "grok", [{
+      id: "person.official_identity",
+      audience: "person",
+      batch: "identity",
+      predicate: "official_identity",
+      question: "What is this person's source-backed public identity?",
+      critical: true,
+    }])).toEqual([]);
   });
 
   it("reduces descriptive official-token answers to their atomic symbol", () => {
@@ -471,6 +539,363 @@ describe("question-specific asset search", () => {
   });
 });
 
+describe("critical-gap search recovery", () => {
+  it("records Grok as the governing provider after Claude primary search fails", async () => {
+    const { ctx, evidence } = context();
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("SUPABASE_URL", "");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "");
+    vi.stubEnv("SUPABASE_SERVICE_ROLE_KEY", "");
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://api.anthropic.com/v1/messages") {
+        return new Response(JSON.stringify({ error: "credits exhausted" }), { status: 400 });
+      }
+      if (url === "https://api.x.ai/v1/responses") {
+        return new Response(JSON.stringify({
+          output_text: '{"facts":[]}',
+          output: [{ type: "web_search_call" }],
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      throw new Error(`unexpected provider URL: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const result = await collectBasicFacts(ctx, {
+      repair: async () => [],
+      fetchSource: vi.fn(),
+    });
+
+    const primaryRuns = evidence.basicFactQuestionLedger
+      ?.flatMap((entry) => entry.providerRuns)
+      .filter((run) => run.phase === "primary") ?? [];
+    const anthropicCalls = fetchMock.mock.calls.filter(([input]) =>
+      String(input) === "https://api.anthropic.com/v1/messages").length;
+    const grokCalls = fetchMock.mock.calls.filter(([input]) =>
+      String(input) === "https://api.x.ai/v1/responses").length;
+
+    expect(result.detail).toContain("primary grok:completed_empty");
+    expect(new Set(primaryRuns.map((run) => run.provider))).toEqual(new Set(["grok"]));
+    expect(primaryRuns.some((run) => run.provider === "claude-web-search")).toBe(false);
+    expect(anthropicCalls).toBeGreaterThan(0);
+    expect(grokCalls).toBeGreaterThan(0);
+    expect(result.attempts).toBeGreaterThanOrEqual(anthropicCalls + grokCalls);
+  });
+
+  it("reports both physical Grok calls when compatibility retry follows a 400", async () => {
+    const { ctx } = context();
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ error: "unsupported max_tool_calls" }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        output_text: '{"facts":[]}',
+        output: [{ type: "web_search_call" }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+    const questions = basicFactsResearchQuestions(ctx).filter((question) =>
+      question.id === "project.product");
+
+    const result = await discoverGrokBasicFactLeadsDetailed(
+      ctx,
+      questions,
+      "repair",
+      { bypassCache: true },
+    );
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(result.attempts).toBe(2);
+    expect(result.questionStates).toEqual({ "project.product": "partial" });
+  });
+
+  it("uses a camel-cased handle only as an official-site identity search hint", async () => {
+    const { ctx, evidence } = context("https://aave.com/");
+    ctx.handle = "@StaniKulechov";
+    evidence.profile.handle = "@StaniKulechov";
+    evidence.profile.display_name = "Stani";
+    evidence.profile.resolved_name = "Stani";
+    evidence.roles = [SubjectClass.FOUNDER];
+    let prompt = "";
+    const question = basicFactsResearchQuestions(ctx).filter((candidate) =>
+      candidate.id === "person.official_identity");
+
+    await discoverBasicFactLeadsDetailed(ctx, {
+      request: async (_input, init) => {
+        const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }> };
+        prompt = body.messages?.[0]?.content ?? "";
+        return new Response(JSON.stringify({
+          content: [{ type: "text", text: '{"facts":[]}' }],
+          stop_reason: "end_turn",
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            server_tool_use: { web_search_requests: 1 },
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+      cacheRead: async () => null,
+      cacheWrite: async () => undefined,
+    }, question, "repair");
+
+    expect(prompt).toContain('Handle-derived full-name candidate: "Stani Kulechov"');
+    expect(prompt).toContain('site:aave.com "Stani Kulechov"');
+    expect(prompt).toContain("Use it to find evidence, never as evidence itself");
+    expect(prompt).toContain("value must contain only the person's full public name");
+  });
+
+  it("checks a handle-derived full name against bounded first-party identity pages", async () => {
+    const { ctx, evidence } = context("https://aave.com/");
+    ctx.handle = "@StaniKulechov";
+    evidence.profile.handle = "@StaniKulechov";
+    evidence.profile.display_name = "Stani";
+    evidence.profile.resolved_name = "Stani";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const aboutUrl = "https://aave.com/about";
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [],
+      repair: async () => [],
+      fetchSource: fetchDocuments({
+        [aboutUrl]: document({
+          url: aboutUrl,
+          host: "aave.com",
+          text: "<p>Aave Labs CEO Stani Kulechov leads the original protocol contributor.</p>",
+        }),
+      }),
+    });
+
+    expect(evidence.profile.resolved_name).toBe("Stani Kulechov");
+    expect(evidence.profile.identity_confidence).toBe("Probable");
+    expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
+      predicate: "official_identity",
+      value: "Stani Kulechov",
+      status: "verified",
+      discoveryProvider: "argus-identity-bootstrap",
+      sources: [expect.objectContaining({ url: aboutUrl, sourceClass: "official_subject" })],
+    }));
+    expect(evidence.basicFactLeads).toContainEqual(expect.objectContaining({
+      predicate: "official_identity",
+      value: "Stani Kulechov",
+      evidence_origin: "deterministic_bootstrap",
+      artifact_verified: false,
+      provider: "argus-identity-bootstrap",
+    }));
+  });
+
+  it("keeps an unfetched identity bootstrap candidate outside verified facts", async () => {
+    const { ctx, evidence } = context("https://aave.com/");
+    ctx.handle = "@StaniKulechov";
+    evidence.profile.handle = "@StaniKulechov";
+    evidence.profile.display_name = "Stani";
+    evidence.profile.resolved_name = "Stani";
+    evidence.roles = [SubjectClass.FOUNDER];
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [],
+      repair: async () => [],
+      fetchSource: vi.fn(async (): Promise<PublicTextResult> => ({
+        status: "failed",
+        reason: "not_found",
+      })),
+    });
+
+    expect(evidence.basicFactLeads).toContainEqual(expect.objectContaining({
+      predicate: "official_identity",
+      value: "Stani Kulechov",
+      evidence_origin: "deterministic_bootstrap",
+      artifact_verified: false,
+      provider: "argus-identity-bootstrap",
+    }));
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "official_identity")).toBe(false);
+    expect(evidence.profile.resolved_name).toBe("Stani");
+    expect(evidence.profile.identity_confidence).not.toBe("Probable");
+  });
+
+  it("binds a title-before-name caption to the exact public identity", () => {
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Stani",
+        predicate: "official_identity",
+        value: "Stani Kulechov",
+        questionId: "person.official_identity",
+        excerpt: "Stani Kulechov",
+        sourceUrl: "https://aave.com/about",
+      }),
+      document({
+        url: "https://aave.com/about",
+        host: "aave.com",
+        text: "<p>Aave Labs CEO Stani Kulechov at DeFi Summer Day.</p>",
+      }),
+      ["Stani", "@StaniKulechov"],
+      "@StaniKulechov",
+      ["https://aave.com/"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      predicate: "official_identity",
+      value: "Stani Kulechov",
+      status: "verified",
+    }));
+  });
+
+  it("does not borrow another nearby person's title for identity binding", () => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Stani",
+        predicate: "official_identity",
+        value: "Stani Kulechov",
+        questionId: "person.official_identity",
+        excerpt: "Stani Kulechov",
+        sourceUrl: "https://aave.com/about",
+      }),
+      document({
+        url: "https://aave.com/about",
+        host: "aave.com",
+        text: "<p>Aave Labs CEO Alice Example met Stani Kulechov at DeFi Summer Day.</p>",
+      }),
+      ["Stani", "@StaniKulechov"],
+      "@StaniKulechov",
+      ["https://aave.com/"],
+    )).toBeNull();
+  });
+
+  it.each([
+    "Alice Example is CEO and Stani Kulechov were photographed at the event.",
+    "The CEO and Stani Kulechov spoke together.",
+    "Stani Kulechov and CEO Alice Example spoke together.",
+  ])("does not use a conjunction to transfer a title onto an identity: %s", (passage) => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Stani",
+        predicate: "official_identity",
+        value: "Stani Kulechov",
+        questionId: "person.official_identity",
+        excerpt: "Stani Kulechov",
+        sourceUrl: "https://aave.com/about",
+      }),
+      document({
+        url: "https://aave.com/about",
+        host: "aave.com",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Stani", "@StaniKulechov"],
+      "@StaniKulechov",
+      ["https://aave.com/"],
+    )).toBeNull();
+  });
+
+  it("gives every repair question its own attributable search", async () => {
+    const { ctx } = context();
+    const prompts: string[] = [];
+    const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }> };
+      prompts.push(body.messages?.[0]?.content ?? "");
+      return new Response(JSON.stringify({
+        content: [{ type: "text", text: '{"facts":[]}' }],
+        stop_reason: "end_turn",
+        usage: {
+          input_tokens: 1,
+          output_tokens: 1,
+          server_tool_use: { web_search_requests: 1 },
+        },
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    const questions = basicFactsResearchQuestions(ctx).filter((question) =>
+      question.predicate === "product" || question.predicate === "funding");
+
+    const result = await discoverBasicFactLeadsDetailed(ctx, {
+      request,
+      cacheRead: async () => null,
+      cacheWrite: async () => undefined,
+    }, questions, "repair");
+
+    expect(request).toHaveBeenCalledTimes(2);
+    expect(prompts.filter((prompt) => prompt.includes("[project.product]")).every((prompt) =>
+      !prompt.includes("[project.funding]"))).toBe(true);
+    expect(prompts.filter((prompt) => prompt.includes("[project.funding]")).every((prompt) =>
+      !prompt.includes("[project.product]"))).toBe(true);
+    expect(result.questionStates).toEqual({
+      "project.product": "completed_empty",
+      "project.funding": "completed_empty",
+    });
+  });
+
+  it("retries one malformed hosted-search response before giving up the gap", async () => {
+    const { ctx } = context();
+    const question = basicFactsResearchQuestions(ctx).filter((candidate) =>
+      candidate.predicate === "product");
+    let calls = 0;
+    const result = await discoverBasicFactLeadsDetailed(ctx, {
+      request: async () => {
+        calls += 1;
+        const text = calls === 1
+          ? "I found Jupiter Swap but failed to format the response."
+          : JSON.stringify({
+              facts: [{
+                question_id: "project.product",
+                subject: "Jupiter",
+                predicate: "product",
+                value: "Jupiter Swap",
+                exact_excerpt: "Jupiter operates Jupiter Swap as its live exchange product.",
+                source_url: "https://jup.ag/swap",
+              }],
+            });
+        return new Response(JSON.stringify({
+          content: [{ type: "text", text }],
+          stop_reason: "end_turn",
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            server_tool_use: { web_search_requests: 1 },
+          },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      },
+      cacheRead: async () => null,
+      cacheWrite: async () => undefined,
+    }, question, "repair");
+
+    expect(calls).toBe(2);
+    expect(result.attempts).toBe(2);
+    expect(result.leads).toEqual([
+      expect.objectContaining({
+        questionId: "project.product",
+        predicate: "product",
+        value: "Jupiter Swap",
+      }),
+    ]);
+  });
+
+  it("caps repair at eight physical Claude calls across continuations and retries", async () => {
+    const { ctx } = context();
+    const questions = basicFactsResearchQuestions(ctx).filter((question) => question.critical).slice(0, 8);
+    const request = vi.fn(async () => new Response(JSON.stringify({
+      content: [{ type: "text", text: "malformed" }],
+      stop_reason: "pause_turn",
+      usage: { input_tokens: 1, output_tokens: 1 },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+
+    const result = await discoverBasicFactLeadsDetailed(ctx, {
+      request,
+      cacheRead: async () => null,
+      cacheWrite: async () => undefined,
+    }, questions, "repair");
+
+    expect(questions).toHaveLength(8);
+    expect(request).toHaveBeenCalledTimes(8);
+    expect(result.attempts).toBe(8);
+    expect(Object.keys(result.questionStates ?? {})).toHaveLength(8);
+    expect(Object.values(result.questionStates ?? {})).not.toContain("completed_empty");
+    expect(result.detail).toContain("repair provider-call budget exhausted at 8 calls");
+  });
+});
+
 describe("basic-facts source verification", () => {
   it("does not turn one empty batch into a checked-empty result for every question", async () => {
     const { ctx, evidence } = context();
@@ -555,6 +980,185 @@ describe("basic-facts source verification", () => {
           expect.objectContaining({ phase: "repair", state: "succeeded" }),
         ],
       }));
+  });
+
+  it("caps founder repair at eight decision-priority searches", async () => {
+    const { ctx, evidence } = context("https://aave.com/");
+    ctx.handle = "@StaniKulechov";
+    evidence.profile.handle = "@StaniKulechov";
+    evidence.profile.display_name = "Stani";
+    evidence.profile.resolved_name = "Stani";
+    evidence.roles = [SubjectClass.FOUNDER];
+    let repairQuestionIds: string[] = [];
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [],
+      repair: async (_repairContext, questions) => {
+        repairQuestionIds = questions.map((question) => question.id);
+        return [];
+      },
+      fetchSource: vi.fn(),
+    });
+
+    expect(repairQuestionIds).toEqual([
+      "person.official_identity",
+      "person.current_role",
+      "person.founder",
+      "person.product",
+      "person.control",
+      "person.legal_regulatory_event",
+      "person.official_token",
+      "person.public_security",
+    ]);
+  });
+
+  it("repairs Stani's incomplete display identity, promotes Aave's official role source, and reuses the full name in the same pass", async () => {
+    const { ctx, evidence } = context("https://aave.com");
+    ctx.handle = "@StaniKulechov";
+    evidence.profile.handle = "@StaniKulechov";
+    evidence.profile.display_name = "Stani";
+    evidence.profile.resolved_name = "Stani";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const aboutUrl = "https://aave.com/about";
+    const identityUrl = "https://aave.com/blog/stable-acquire";
+    const productUrl = "https://aave.com/history";
+    const primary = [
+      lead({
+        subject: "Stani",
+        predicate: "current_role",
+        value: "CEO at Aave Labs",
+        questionId: "person.current_role",
+        excerpt: "Aave Labs CEO Stani Kulechov leads the original protocol contributor.",
+        sourceUrl: aboutUrl,
+      }),
+      lead({
+        subject: "Stani",
+        predicate: "product",
+        value: "Aave Protocol",
+        questionId: "person.product",
+        excerpt: "Stani Kulechov built the Aave Protocol.",
+        sourceUrl: productUrl,
+      }),
+    ];
+    const repairIds: string[] = [];
+
+    await collectBasicFacts(ctx, {
+      discover: async () => primary,
+      repair: async (_repairContext, questions) => {
+        repairIds.push(...questions.map((question) => question.id));
+        return [lead({
+          subject: "Stani",
+          predicate: "official_identity",
+          value: "Stani Kulechov",
+          questionId: "person.official_identity",
+          excerpt: "said Stani Kulechov, founder of Aave Labs.",
+          sourceUrl: identityUrl,
+        })];
+      },
+      fetchSource: fetchDocuments({
+        [aboutUrl]: document({
+          url: aboutUrl,
+          host: "aave.com",
+          text: "<p>Aave Labs CEO Stani Kulechov leads the original protocol contributor.</p>",
+          contentHash: "a".repeat(64),
+        }),
+        [identityUrl]: document({
+          url: identityUrl,
+          host: "aave.com",
+          text: "<p>This acquisition expands Aave's savings product, said Stani Kulechov, founder of Aave Labs.</p>",
+          contentHash: "c".repeat(64),
+        }),
+        [productUrl]: document({
+          url: productUrl,
+          host: "aave.com",
+          text: "<p>Stani Kulechov built the Aave Protocol.</p>",
+          contentHash: "b".repeat(64),
+        }),
+      }),
+    });
+
+    expect(repairIds).not.toContain("person.official_identity");
+    expect(evidence.profile.resolved_name).toBe("Stani Kulechov");
+    expect(evidence.profile.identity_confidence).toBe("Probable");
+    expect(evidence.basicFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        predicate: "official_identity",
+        value: "Stani Kulechov",
+        status: "verified",
+      }),
+      expect.objectContaining({
+        predicate: "current_role",
+        value: "CEO at Aave Labs",
+        status: "verified",
+      }),
+      expect.objectContaining({
+        predicate: "product",
+        value: "Aave Protocol",
+        status: "verified",
+      }),
+      expect.objectContaining({
+        predicate: "founder",
+        value: "Aave Labs",
+        status: "verified",
+      }),
+    ]));
+    expect(evidence.basicFactQuestionLedger?.find((entry) =>
+      entry.questionId === "person.official_identity")).toEqual(expect.objectContaining({ status: "answered" }));
+    expect(evidence.basicFactQuestionLedger?.find((entry) =>
+      entry.questionId === "person.founder")).toEqual(expect.objectContaining({ status: "answered" }));
+  });
+
+  it("does not recover another person's founder title from a shared official passage", async () => {
+    const { ctx, evidence } = context("https://aave.com");
+    ctx.handle = "@StaniKulechov";
+    evidence.profile.handle = "@StaniKulechov";
+    evidence.profile.display_name = "Stani";
+    evidence.profile.resolved_name = "Stani";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const identityUrl = "https://aave.com/profile/stani";
+    const roleUrl = "https://aave.com/about";
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [
+        lead({
+          subject: "Stani",
+          predicate: "official_identity",
+          value: "Stani Kulechov",
+          questionId: "person.official_identity",
+          excerpt: "Stani Kulechov is an entrepreneur.",
+          sourceUrl: identityUrl,
+        }),
+        lead({
+          subject: "Stani",
+          predicate: "current_role",
+          value: "CEO of Aave Labs",
+          questionId: "person.current_role",
+          excerpt: "Stani Kulechov is CEO of Aave Labs, while Alice Example is founder of Aave Labs.",
+          sourceUrl: roleUrl,
+        }),
+      ],
+      repair: async () => [],
+      fetchSource: fetchDocuments({
+        [identityUrl]: document({
+          url: identityUrl,
+          host: "aave.com",
+          text: "<p>Stani Kulechov is an entrepreneur.</p>",
+        }),
+        [roleUrl]: document({
+          url: roleUrl,
+          host: "aave.com",
+          text: "<p>Stani Kulechov is CEO of Aave Labs, while Alice Example is founder of Aave Labs.</p>",
+        }),
+      }),
+    });
+
+    expect(evidence.basicFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ predicate: "official_identity", value: "Stani Kulechov" }),
+      expect.objectContaining({ predicate: "current_role", value: "CEO of Aave Labs" }),
+    ]));
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "founder")).toBe(false);
   });
 
   it("does not let a thin Jupiter pass suppress repair of obvious project facts", async () => {
@@ -1363,6 +1967,109 @@ describe("basic-facts source verification", () => {
     }));
   });
 
+  it("does not truncate a longer venture name into a founder relationship", () => {
+    const passage = "Stani Kulechov founded Aave Labs Ventures.";
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Stani Kulechov",
+        predicate: "founder",
+        value: "Aave Labs",
+        questionId: "person.founder",
+        excerpt: passage,
+        sourceUrl: "https://aave.com/about",
+      }),
+      document({
+        url: "https://aave.com/about",
+        host: "aave.com",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Stani Kulechov", "@StaniKulechov"],
+      "@StaniKulechov",
+      ["https://aave.com/"],
+    )).toBeNull();
+  });
+
+  it.each([
+    ["current_role", "CEO at Aave Labs", "Aave Labs CEO Stani Kulechov leads the original protocol contributor."],
+    ["founder", "Aave Protocol", "Stani Kulechov is the founder of the Aave Protocol."],
+    ["founder", "Aave", "Stani Kulechov is the founder of Aave."],
+  ] as const)("treats a previously verified Aave scope as authoritative for a bounded person %s relationship", (predicate, value, passage) => {
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Stani Kulechov",
+        predicate,
+        value,
+        questionId: `person.${predicate}`,
+        excerpt: passage,
+        sourceUrl: "https://aave.com/about",
+      }),
+      document({
+        url: "https://aave.com/about",
+        host: "aave.com",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Stani Kulechov", "@StaniKulechov"],
+      "@StaniKulechov",
+      [],
+      ["https://aave.com"],
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      predicate,
+      value,
+      status: "verified",
+      sources: [expect.objectContaining({ sourceClass: "official_counterparty" })],
+    }));
+  });
+
+  it.each([
+    ["https://coindesk.com/stani", "coindesk.com", "Aave"],
+    ["https://medium.com/aave/stani", "medium.com", "Aave"],
+    ["https://aave.attacker.com/stani", "aave.attacker.com", "Aave"],
+    ["https://lens.xyz/stani", "lens.xyz", "Aave"],
+    ["https://aave.com/about", "aave.com", "Aave Capital"],
+  ])("does not infer organization authority from an editorial, shared, lookalike, or mismatched host: %s", (url, host, value) => {
+    const passage = `Stani Kulechov is the founder of ${value}.`;
+    const fact = verifyBasicFactLead(
+      lead({
+        subject: "Stani Kulechov",
+        predicate: "founder",
+        value,
+        questionId: "person.founder",
+        excerpt: passage,
+        sourceUrl: url,
+      }),
+      document({ url, host, text: `<p>${passage}</p>` }),
+      ["Stani Kulechov", "@StaniKulechov"],
+      "@StaniKulechov",
+    );
+
+    expect(fact).toEqual(expect.objectContaining({
+      status: "lead",
+      sources: [expect.objectContaining({ sourceClass: "independent_press" })],
+    }));
+  });
+
+  it("rejects a model-combined Aave and ETHLend founder value instead of merging two ventures", () => {
+    const { ctx, evidence } = context();
+    ctx.handle = "@StaniKulechov";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.profile.handle = "@StaniKulechov";
+    evidence.profile.display_name = "Stani";
+    evidence.profile.resolved_name = "Stani";
+    const questions = basicFactsResearchQuestions(ctx);
+    expect(parseBasicFactLeads(JSON.stringify({
+      facts: [{
+        question_id: "person.founder",
+        subject: "Stani Kulechov",
+        predicate: "founder",
+        value: "Aave (originally ETHLend)",
+        exact_excerpt: "Stani Kulechov founded Aave, which was originally known as ETHLend.",
+        source_url: "https://aave.com/about",
+      }],
+    }), "Stani", "claude-web-search", questions)).toEqual([]);
+  });
+
   it.each([
     "Stani Kulechov is the founder and CEO of Lens. Alice is the founder of Aave.",
     "Stani Kulechov introduced Alice, Founder and CEO of Aave.",
@@ -2128,6 +2835,17 @@ describe("basic-facts source verification", () => {
     // which founder routing and the verified company relationship became
     // definitive only from repair-produced facts.
     evidence.roles = [SubjectClass.MEMBER];
+    evidence.ventures.push({
+      project_name: "Coinbase",
+      domain: "coinbase.com",
+      role: "Co-founder and CEO",
+      period: "2012-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://investor.coinbase.com/governance/board-of-directors/default.aspx",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
     const boardUrl = "https://investor.coinbase.com/governance/board-of-directors/default.aspx";
     const xUrl = "https://x.com/brian_armstrong";
     const currentRoleValue = "Co-founder and CEO at Coinbase";
@@ -2217,7 +2935,7 @@ describe("basic-facts source verification", () => {
     expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
       predicate: "current_role",
       value: currentRoleValue,
-      status: "corroborated",
+      status: "verified",
     }));
     expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
       predicate: "public_security",
@@ -2254,6 +2972,17 @@ describe("basic-facts source verification", () => {
     evidence.profile.display_name = "Brian Armstrong";
     evidence.profile.resolved_name = "Brian Armstrong";
     evidence.roles = [SubjectClass.MEMBER];
+    evidence.ventures.push({
+      project_name: "Coinbase",
+      domain: "coinbase.com",
+      role: "Co-founder and CEO",
+      period: "2012-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://investor.coinbase.com/governance/board-of-directors/default.aspx",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
     const boardUrl = "https://investor.coinbase.com/governance/board-of-directors/default.aspx";
     const xUrl = "https://x.com/brian_armstrong";
     const cbBtcUrl = "https://www.coinbase.com/blog/coinbase-wrapped-btc-cbbtc-is-now-live";
@@ -2343,7 +3072,7 @@ describe("basic-facts source verification", () => {
     expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
       predicate: "current_role",
       value: "Co-founder and CEO at Coinbase",
-      status: "corroborated",
+      status: "verified",
     }));
     const tokens = evidence.basicFacts?.filter((fact) => fact.predicate === "official_token") ?? [];
     expect(tokens).toEqual(expect.arrayContaining([
@@ -2813,6 +3542,92 @@ WBTC is an ERC-20 wrapped token issued by BitGo. Coinbase customers can trade WB
       fact.predicate === "official_token" && fact.value === symbol)).toBe(false);
     expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.official_token"))
       .toEqual(expect.objectContaining({ status: "unanswered", answerRefs: [] }));
+  });
+
+  it.each([
+    { label: "corroborated press role", includeOfficialRole: false, expectedRoleStatus: "corroborated" },
+    { label: "verified role with a mixed press source", includeOfficialRole: true, expectedRoleStatus: "verified" },
+  ] as const)("does not promote an organization-named press host from a $label", async ({
+    includeOfficialRole,
+    expectedRoleStatus,
+  }) => {
+    const { ctx, evidence } = context("https://stani.example");
+    ctx.handle = "@StaniKulechov";
+    evidence.profile.handle = "@StaniKulechov";
+    evidence.profile.display_name = "Stani";
+    evidence.profile.resolved_name = "Stani";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const identityUrl = "https://stani.example/about";
+    const officialRoleUrl = "https://stani.example/role";
+    const misleadingHostUrl = "https://aave.net/stani";
+    const pressUrl = "https://news.example/stani";
+    const registryUrl = "https://www.sec.gov/files/company_tickers_exchange.json";
+    const identityPassage = "Stani Kulechov is an entrepreneur and protocol builder.";
+    const officialRolePassage = "Stani Kulechov is CEO at Aave.";
+    const founderPassage = "Stani Kulechov is founder and CEO at Aave.";
+    const pressRolePassage = "Stani Kulechov is CEO at Aave.";
+    const leads = [
+      lead({
+        subject: "Stani Kulechov",
+        predicate: "official_identity",
+        value: "Stani Kulechov",
+        questionId: "person.official_identity",
+        excerpt: identityPassage,
+        sourceUrl: identityUrl,
+      }),
+      lead({
+        subject: "Stani Kulechov",
+        predicate: "current_role",
+        value: "CEO at Aave",
+        questionId: "person.current_role",
+        excerpt: founderPassage,
+        sourceUrl: misleadingHostUrl,
+      }),
+      lead({
+        subject: "Stani Kulechov",
+        predicate: "current_role",
+        value: "CEO at Aave",
+        questionId: "person.current_role",
+        excerpt: includeOfficialRole ? officialRolePassage : pressRolePassage,
+        sourceUrl: includeOfficialRole ? officialRoleUrl : pressUrl,
+      }),
+    ];
+    const fetchSource = fetchDocuments({
+      [identityUrl]: document({
+        url: identityUrl,
+        host: "stani.example",
+        text: `<p>${identityPassage}</p>`,
+      }),
+      [officialRoleUrl]: document({
+        url: officialRoleUrl,
+        host: "stani.example",
+        text: `<p>${officialRolePassage}</p>`,
+      }),
+      [misleadingHostUrl]: document({
+        url: misleadingHostUrl,
+        host: "aave.net",
+        text: `<p>${founderPassage}</p>`,
+      }),
+      [pressUrl]: document({
+        url: pressUrl,
+        host: "news.example",
+        text: `<p>${pressRolePassage}</p>`,
+      }),
+    });
+
+    await collectBasicFacts(ctx, {
+      discover: async () => leads,
+      repair: async () => [],
+      fetchSource,
+    });
+
+    const role = evidence.basicFacts?.find((fact) =>
+      fact.predicate === "current_role" && fact.value === "CEO at Aave");
+    expect(role).toEqual(expect.objectContaining({ status: expectedRoleStatus }));
+    expect(role?.sources.find((source) => source.url === misleadingHostUrl)?.sourceClass)
+      .toBe("independent_press");
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "founder")).toBe(false);
+    expect(fetchSource).not.toHaveBeenCalledWith(registryUrl);
   });
 
   it("does not treat an organization-named attacker subdomain as first-party scope", async () => {

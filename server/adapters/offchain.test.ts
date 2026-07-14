@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
 import type { CheckObservation, CollectContext } from "./types";
-import { offchainAdapter } from "./offchain";
+import { offchainAdapter, refreshResolvedNameOffchain, resolvedOffchainName } from "./offchain";
 
 const { collectProfilePhoto } = vi.hoisted(() => ({ collectProfilePhoto: vi.fn() }));
 vi.mock("./profilePhoto", () => ({ collectProfilePhoto }));
@@ -175,6 +175,71 @@ describe("frozen off-chain diligence adapter", () => {
     expect(result).toMatchObject({ state: "executed" });
     expect(checks.map((check) => check.id)).toEqual(["news-press"]);
     expect(fetcher).toHaveBeenCalledTimes(1);
+  });
+
+  it("keeps a Stani-only news miss provisional until the full handle-shaped identity is resolved", async () => {
+    const { ctx, checks } = context();
+    ctx.handle = "@StaniKulechov";
+    ctx.evidence.profile.handle = "@StaniKulechov";
+    ctx.evidence.profile.display_name = "Stani";
+    ctx.evidence.profile.resolved_name = "Stani";
+    ctx.evidence.profile.identity_confidence = "Confirmed";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("<rss><channel></channel></rss>", { status: 200 }),
+    ));
+
+    await offchainAdapter.run(ctx);
+
+    expect(resolvedOffchainName(ctx)).toBeNull();
+    expect(checks).toEqual([
+      expect.objectContaining({
+        id: "news-press",
+        status: "unavailable",
+        note: expect.stringContaining("verified full-name search is still required"),
+      }),
+    ]);
+  });
+
+  it("refreshes news, legal, and OFAC after Basic Facts resolves a full name without rerunning the photo screen", async () => {
+    const staniRss = `<rss><channel><item>
+      <title>Stani Kulechov founded Aave - Example News</title>
+      <source>Example News</source>
+      <link>https://example.com/stani-aave</link>
+      <pubDate>Mon, 13 Jul 2026 12:00:00 GMT</pubDate>
+      <description>Stani Kulechov is the founder of the Aave Protocol.</description>
+    </item></channel></rss>`;
+    const fetcher = vi.fn().mockImplementation((input: string | URL | Request) => {
+      const url = String(input);
+      if (url.startsWith("https://news.google.com/")) return Promise.resolve(new Response(staniRss, { status: 200 }));
+      if (url.startsWith("https://www.courtlistener.com/")) return Promise.resolve(json({ count: 0, results: [] }));
+      if (url.startsWith("https://data.opensanctions.org/")) {
+        return Promise.resolve(new Response(validOfacCsv(), { status: 200 }));
+      }
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetcher);
+    const { ctx, checks } = context();
+    ctx.handle = "@StaniKulechov";
+    ctx.evidence.profile.handle = "@StaniKulechov";
+    ctx.evidence.profile.display_name = "Stani";
+    ctx.evidence.profile.resolved_name = "Stani Kulechov";
+    ctx.evidence.profile.identity_confidence = "Probable";
+    collectProfilePhoto.mockClear();
+
+    const result = await refreshResolvedNameOffchain(ctx);
+
+    expect(result).toMatchObject({ state: "executed", detail: expect.stringContaining("Stani Kulechov") });
+    expect(collectProfilePhoto).not.toHaveBeenCalled();
+    expect(checks).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: "news-press", status: "confirmed", sourceCount: 1 }),
+      expect.objectContaining({ id: "us-legal-history", status: "checked-empty" }),
+      expect.objectContaining({ id: "ofac-sanctions-name", status: "checked-empty" }),
+    ]));
+    expect(fetcher.mock.calls.some(([input]) => decodeURIComponent(String(input)).includes('"Stani Kulechov"'))).toBe(true);
+    expect(ctx.evidence.sourceArtifacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: "press", sourceUrl: "https://example.com/stani-aave" }),
+      expect.objectContaining({ kind: "sanctions_screen" }),
+    ]));
   });
 
   it("does not treat a two-word pseudonym as a resolved legal identity", async () => {

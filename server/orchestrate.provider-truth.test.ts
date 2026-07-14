@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { providerStatus } from "./config";
-import { runAudit } from "./orchestrate";
+import { addClaudeUsage, addGrokUsage, withCostLedger } from "./cost";
+import { analystAttemptTotals, runAudit } from "./orchestrate";
 
 const PROVIDER_ENV = [
   "ANTHROPIC_API_KEY",
@@ -36,6 +37,23 @@ describe("orchestrator provider execution truth", () => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+  });
+
+  it("counts Claude failure and Grok fallback as one analyst attempt trail", () => {
+    const attempts = withCostLedger(() => {
+      addClaudeUsage(undefined, "record_verdict", "failed", "http_400");
+      addGrokUsage({ input_tokens: 120, output_tokens: 40 }, 0, "record_verdict", "succeeded");
+      addGrokUsage({ input_tokens: 1, output_tokens: 1 }, 0, "unrelated-operation", "succeeded");
+      return analystAttemptTotals(["record_verdict"]);
+    });
+
+    expect(attempts).toEqual({
+      total: 2,
+      succeeded: 1,
+      partial: 0,
+      failed: 1,
+      cached: 0,
+    });
   });
 
   it("keeps a fixture curated when Bitquery is the only configured credential", async () => {
@@ -104,7 +122,7 @@ describe("orchestrator provider execution truth", () => {
       const request = JSON.parse(String(init?.body)) as { tool_choice?: { name?: string } };
       return request.tool_choice?.name ? [request.tool_choice.name] : [];
     });
-    const analystRun = dossier?.providerSnapshot?.runs.find((run) => run.id === "claude-analyst");
+    const analystRun = dossier?.providerSnapshot?.runs.find((run) => run.id === "ai-analyst");
 
     expect(dossier).toMatchObject({
       live: true,
@@ -120,6 +138,7 @@ describe("orchestrator provider execution truth", () => {
     expect(anthropicTools).not.toContain("record_contradictions");
     expect(anthropicTools).not.toContain("record_verdict");
     expect(analystRun).toMatchObject({
+      label: "AI analyst",
       state: "skipped",
       detail: expect.stringContaining("no provider-backed methodology axes"),
     });
@@ -220,7 +239,7 @@ describe("orchestrator provider execution truth", () => {
     const anthropicBodies = fetchMock.mock.calls.flatMap(([input, init]) =>
       String(input).includes("api.anthropic.com") ? [String(init?.body ?? "")] : [],
     );
-    const analystRun = dossier?.providerSnapshot?.runs.find((run) => run.id === "claude-analyst");
+    const analystRun = dossier?.providerSnapshot?.runs.find((run) => run.id === "ai-analyst");
 
     expect(anthropicBodies.some((body) =>
       body.includes("Which investments are explicitly attributed to this person"),
@@ -235,6 +254,7 @@ describe("orchestrator provider execution truth", () => {
       detail: expect.stringContaining("lack substantive eligible evidence"),
     }));
     expect(analystRun).toMatchObject({
+      label: "AI analyst",
       state: "skipped",
       detail: expect.stringContaining("coverage preflight abstained"),
     });

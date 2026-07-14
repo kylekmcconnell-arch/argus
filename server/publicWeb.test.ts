@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   fetchPublicText,
   fetchPublicTextWithRecovery,
+  fetchCompatibleResponseStatus,
   isPublicIpAddress,
   validatedPublicUrl,
   type PinnedRequestOptions,
@@ -11,6 +12,15 @@ import {
 const publicLookup = vi.fn(async () => [{ address: "93.184.216.34", family: 4 }]);
 
 describe("public web evidence fetcher", () => {
+  it("normalizes non-standard Node HTTP statuses before constructing a Response", () => {
+    expect(fetchCompatibleResponseStatus(200)).toBe(200);
+    expect(fetchCompatibleResponseStatus(599)).toBe(599);
+    expect(fetchCompatibleResponseStatus(700)).toBe(403);
+    expect(fetchCompatibleResponseStatus(999)).toBe(403);
+    expect(fetchCompatibleResponseStatus(101)).toBe(502);
+    expect(fetchCompatibleResponseStatus(undefined)).toBe(502);
+  });
+
   it("rejects private, loopback, and reserved addresses", () => {
     expect(isPublicIpAddress("127.0.0.1")).toBe(false);
     expect(isPublicIpAddress("10.0.0.4")).toBe(false);

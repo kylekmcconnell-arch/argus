@@ -157,6 +157,28 @@ describe("founder decision question outcomes", () => {
     expect(observations).toHaveLength(6);
   });
 
+  it.each([
+    ["founded", "Aave Protocol founded in 2020"],
+    ["product", "Aave Protocol"],
+    ["launched", "Aave Protocol launched in 2020"],
+    ["traction", "$20 billion supplied to Aave"],
+  ] as const)("lets a verified %s artifact establish founder track record", (predicate, value) => {
+    const { ctx, observations } = context([
+      run(predicate, "answered"),
+    ], [fact(predicate, value)]);
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        id: "founder-track-record",
+        status: "confirmed",
+        sourceCount: 1,
+        note: expect.stringContaining("founded venture, shipped product, traction result"),
+      }),
+    ]);
+  });
+
   it("keeps failed question passes unavailable instead of calling them an empty result", () => {
     const { ctx, observations } = context([
       run("legal_regulatory_event", "unanswered", "failed"),

@@ -1,13 +1,11 @@
-// Claude analyst agent. The engine needs axis scores with rationales, venture
+// AI analyst agent. The engine needs axis scores with rationales, venture
 // outcome classifications, and a one-line headline. Raw provider data is messy;
-// this is the step where judgement lives. We force structured output via a tool
-// so the model returns validated JSON, never prose.
-//
-// Gated on ANTHROPIC_API_KEY. With no key, callers fall back to heuristics.
+// this is the step where judgement lives. Every provider is constrained to the
+// same JSON schema and every result passes the same deterministic validators.
 
 import { createHash } from "node:crypto";
 import { ANALYST_MODEL, env } from "./config";
-import { addClaudeUsage } from "./cost";
+import { addClaudeUsage, addGrokUsage } from "./cost";
 import type {
   AxisEvidenceRecord,
   Contradiction,
@@ -18,6 +16,7 @@ import { isStrictFundScaleArtifact } from "../src/lib/fundScaleEvidence";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
+const XAI_CHAT_URL = "https://api.x.ai/v1/chat/completions";
 const SCHEMA_COMPILATION_ERROR = /compiled grammar is too large|schema is too complex for compilation/i;
 const failureMeta = (error: unknown, timeoutMs: number, fallback: string): string =>
   error instanceof Error && error.name === "TimeoutError"
@@ -25,7 +24,7 @@ const failureMeta = (error: unknown, timeoutMs: number, fallback: string): strin
     : fallback;
 
 export function analystAvailable(): boolean {
-  return !!env("ANTHROPIC_API_KEY");
+  return Boolean(env("ANTHROPIC_API_KEY") || env("XAI_API_KEY"));
 }
 
 interface ToolSchema {
@@ -35,14 +34,32 @@ interface ToolSchema {
   strict?: boolean;
 }
 
-// Calls the Anthropic Messages API and forces a single tool call, returning the
-// tool input as the structured result. Returns null on any failure.
 export async function structured<T>(
   system: string,
   user: string,
   tool: ToolSchema,
   maxTokens = 2048,
   timeoutMs = 60_000,
+): Promise<T | null> {
+  const deadlineAt = Date.now() + Math.max(0, timeoutMs);
+  const claude = env("ANTHROPIC_API_KEY")
+    ? await structuredClaude<T>(system, user, tool, maxTokens, timeoutMs)
+    : null;
+  if (claude !== null || !env("XAI_API_KEY")) return claude;
+  const remainingMs = Math.max(0, deadlineAt - Date.now());
+  if (remainingMs < 1) return null;
+  return structuredGrok<T>(system, user, tool, maxTokens, remainingMs);
+}
+
+// Calls the Anthropic Messages API and forces a single tool call, returning the
+// tool input as the structured result. Returns null on any failure so the
+// governing wrapper can fail over to another configured analyst provider.
+async function structuredClaude<T>(
+  system: string,
+  user: string,
+  tool: ToolSchema,
+  maxTokens: number,
+  timeoutMs: number,
 ): Promise<T | null> {
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
@@ -161,6 +178,130 @@ export async function structured<T>(
     ...(block ? {} : { failure: partialReason }),
   }));
   return (block?.input as T) ?? null;
+}
+
+/** xAI structured-output fallback for scoring, contradiction, and intake tools.
+ * It receives the same schema and evidence packet, then passes through every
+ * existing deterministic validator before any result can affect a report. */
+async function structuredGrok<T>(
+  system: string,
+  user: string,
+  tool: ToolSchema,
+  maxTokens: number,
+  timeoutMs: number,
+): Promise<T | null> {
+  const key = env("XAI_API_KEY");
+  if (!key) return null;
+  const startedAt = Date.now();
+  const requestBody = JSON.stringify({
+    model: env("ARGUS_GROK_ANALYST_MODEL") || env("ARGUS_GROK_MODEL") || "grok-4-fast",
+    max_tokens: maxTokens,
+    messages: [
+      { role: "system", content: `${system}\n\nReturn exactly one ${tool.name} object. ${tool.description}` },
+      { role: "user", content: user },
+    ],
+    response_format: {
+      type: "json_schema",
+      json_schema: {
+        name: tool.name,
+        strict: true,
+        schema: tool.input_schema,
+      },
+    },
+  });
+  const requestMetrics = {
+    provider: "grok",
+    tool: tool.name,
+    requestBytes: Buffer.byteLength(requestBody),
+    schemaBytes: Buffer.byteLength(JSON.stringify(tool.input_schema)),
+    userBytes: Buffer.byteLength(user),
+    timeoutMs,
+  };
+  let response: Response;
+  try {
+    response = await fetch(XAI_CHAT_URL, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${key}`,
+        "content-type": "application/json",
+      },
+      body: requestBody,
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (error) {
+    const failure = failureMeta(error, timeoutMs, "transport_error");
+    addGrokUsage(undefined, 0, tool.name, "failed", failure);
+    console.info("[agent-call]", JSON.stringify({
+      ...requestMetrics,
+      state: "failed",
+      failure,
+      elapsedMs: Date.now() - startedAt,
+    }));
+    return null;
+  }
+  const requestId = response.headers.get("x-request-id") || response.headers.get("request-id");
+  if (!response.ok) {
+    addGrokUsage(undefined, 0, tool.name, "failed", `http_${response.status}`);
+    console.info("[agent-call]", JSON.stringify({
+      ...requestMetrics,
+      state: "failed",
+      failure: `http_${response.status}`,
+      httpStatus: response.status,
+      requestId,
+      elapsedMs: Date.now() - startedAt,
+    }));
+    return null;
+  }
+
+  let data: {
+    choices?: Array<{ message?: { content?: unknown } }>;
+    usage?: {
+      prompt_tokens?: number;
+      completion_tokens?: number;
+      num_sources_used?: number;
+    };
+  };
+  try {
+    data = await response.json() as typeof data;
+  } catch (error) {
+    const failure = failureMeta(error, timeoutMs, "response_json_error");
+    addGrokUsage(undefined, 0, tool.name, "failed", failure);
+    console.info("[agent-call]", JSON.stringify({
+      ...requestMetrics,
+      state: "failed",
+      failure,
+      httpStatus: response.status,
+      requestId,
+      elapsedMs: Date.now() - startedAt,
+    }));
+    return null;
+  }
+  const content = data.choices?.[0]?.message?.content;
+  const parsed: unknown = (() => {
+    try {
+      return typeof content === "string" ? JSON.parse(content) : content;
+    } catch {
+      return null;
+    }
+  })();
+  const usage = {
+    input_tokens: data.usage?.prompt_tokens,
+    output_tokens: data.usage?.completion_tokens,
+    num_sources_used: data.usage?.num_sources_used,
+  };
+  const valid = parsed !== null && typeof parsed === "object" && !Array.isArray(parsed);
+  addGrokUsage(usage, 0, tool.name, valid ? "succeeded" : "partial", valid ? undefined : "invalid_structured_output");
+  console.info("[agent-call]", JSON.stringify({
+    ...requestMetrics,
+    state: valid ? "succeeded" : "partial",
+    httpStatus: response.status,
+    requestId,
+    inputTokens: usage.input_tokens ?? null,
+    outputTokens: usage.output_tokens ?? null,
+    elapsedMs: Date.now() - startedAt,
+    ...(valid ? {} : { failure: "invalid_structured_output" }),
+  }));
+  return valid ? parsed as T : null;
 }
 
 // Claim extraction: for an UNKNOWN handle, read the subject's own surfaces (bio
@@ -367,10 +508,29 @@ export const PROJECT_SCORING_POLICY = [
   "Only cite substantive counterEvidenceRefs for distinct verified facts that pull a score below its evidence-strength band. A verified adverse fact may be primary support for an adverse band, but positive support and score-limiting counter-evidence must otherwise remain separate citations. An emerging score reflects limited demonstrated maturity or scale and does not require adverse evidence. Never use absence wording or operational coverage telemetry as a reason to lower a band.",
 ].join("\n");
 
+/**
+ * Founder scores describe verified operating history and conduct, not how many
+ * optional providers happened to return a row. Keep social reach and evidence
+ * coverage in their own lanes so a famous, well-documented builder cannot be
+ * reduced to a claimed identity when one database or exact-name query misses.
+ */
+export const FOUNDER_SCORING_POLICY = [
+  "FOUNDER CALIBRATION POLICY:",
+  "Keep score and confidence separate. Score source-backed identity, operating history, products, outcomes, conduct, and network quality. Record unavailable, stale, checked-empty, or uncollected information in coverageRefs and gaps. Missing coverage is not counter-evidence and never erases a verified fact.",
+  "F1 identity verifiability: a fetched first-party organization page, regulator or institutional counterparty record, or two independent fetched sources can establish identity and current authority. A People Data Labs miss, an empty exact-name news query, or a missing personal GitHub profile is only a coverage gap.",
+  "F2 track record: use verified founder and executive relationships, prior roles, products, launches, exits, and concrete operating outcomes. Follower count, posting cadence, profile biography, fame, and X follow relationships never establish a founder role or track record.",
+  "F3 repeat backing: require actual source-backed financing, investor, or repeat-counterparty records across distinct events. Social follows, mutual follows, and generic affiliations are network context, not repeat backing.",
+  "F4 build substance: verified live products, protocols, documentation, audits, usage, releases, or organization repositories establish build substance. A personal GitHub account is optional and its absence cannot negate a verified live product.",
+  "F5 reputation and integrity: use direct-subject, source-verified conduct, legal, regulatory, sanctions, governance, or conflict evidence. A completed clear screen is coverage context, not affirmative character evidence, and an unavailable screen is not adverse evidence.",
+  "F6 network quality: use observed professional relationships and notable network evidence only for network quality. Never transfer that evidence into identity, track record, repeat backing, or build substance.",
+  "Preserve the entity named by each source. A person may be CEO of an operating company and founder of a related protocol; do not transfer the company title onto the protocol or DAO.",
+].join("\n");
+
 export function scoringPolicyForAxes(axisCatalog: readonly AnalystAxis[]): string {
-  return axisCatalog.some(({ role }) => role === "PROJECT")
-    ? PROJECT_SCORING_POLICY
-    : "";
+  return [
+    ...(axisCatalog.some(({ role }) => role === "PROJECT") ? [PROJECT_SCORING_POLICY] : []),
+    ...(axisCatalog.some(({ role }) => role === "FOUNDER") ? [FOUNDER_SCORING_POLICY] : []),
+  ].join("\n\n");
 }
 
 // Anthropic compiles every strict tool schema into a grammar. Keep this schema
@@ -490,6 +650,40 @@ const describesGroundedTeamAsUnresolved = (value: string): boolean => {
   const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
   return /\bnamed\s+(?:founders?|co\s+founders?|leaders?|leadership|team|executives?|ceo)(?:\s+\w+){0,12}\s+not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b/.test(normalized);
 };
+const UNVERIFIED_FOUNDER_ROLE_CLAIMS = [
+  /\b(?:founder(?:ship)?|co[- ]?founder|chief executive|ceo|current\s+(?:operating\s+)?role|operating\s+role|founder\s+relationship)\b[^.!?]{0,140}\b(?:alleged|claimed|inferred|purported|self[- ]?(?:described|reported)|unconfirmed|uncorroborated|unresolved|unverified|not\s+(?:independently\s+)?(?:confirmed|corroborated|verified))\b/i,
+  /\b(?:alleged|claimed|purported|self[- ]?(?:described|reported)|unconfirmed|uncorroborated|unverified)\b[^.!?]{0,100}\b(?:founder|co[- ]?founder|chief executive|ceo|current\s+(?:operating\s+)?role)\b/i,
+  /\b(?:presents?|positions?)\s+(?:himself|herself|themself|themselves|the\s+subject)?\s*as\b[^.!?]{0,100}\b(?:founder|co[- ]?founder|chief executive|ceo)\b/i,
+  /\b(?:identity|current\s+role|operating\s+role|founder\s+status)\b[^.!?]{0,100}\b(?:formally\s+)?(?:remains?\s+)?(?:unresolved|unverified|unconfirmed|uncorroborated)\b/i,
+] as const;
+const SOCIAL_ONLY_TRACK_RECORD_CLAIM = /(?:\btrack\s+record\b[^.!?]{0,220}\b(?:inferred|rests?\s+on|based\s+(?:only|primarily)\s+on|not\s+independently\s+(?:verified|corroborated))\b[^.!?]{0,220}\b(?:claimed\s+role|follower(?:s|\s+base|\s+count)?|social\s+(?:graph|reach)|profile\s+bio)|\b(?:claimed\s+role|follower(?:s|\s+base|\s+count)?|social\s+(?:graph|reach))\b[^.!?]{0,220}\b(?:rather\s+than|without)\b[^.!?]{0,120}\b(?:independent|verified|source-backed)\s+(?:artifacts?|evidence|sources?)\b)/i;
+const describesGroundedFounderRoleAsUnverified = (value: string): boolean =>
+  UNVERIFIED_FOUNDER_ROLE_CLAIMS.some((claim) => claim.test(value));
+const describesGroundedTrackRecordAsSocialOnly = (value: string): boolean =>
+  SOCIAL_ONLY_TRACK_RECORD_CLAIM.test(value);
+const FOUNDER_SOCIAL_EVIDENCE = /\b(?:followers?|follower\s+(?:base|count)|follow\s+graph|mutual\s+follows?|notable\s+followers?|posting\s+cadence|profile\s+bio(?:graphy)?|social\s+(?:graph|reach))\b/i;
+const FOUNDER_OPERATING_FUNDAMENTAL = /\b(?:track\s+record|operating\s+history|operating\s+track\s+record|repeat\s+backing|venture\s+outcomes?|founder\s+history)\b/i;
+const SOCIAL_SUPPORT_VERB = /\b(?:establish(?:es|ed)?|support(?:s|ed)?|prove(?:s|d)?|demonstrat(?:e[sd]?|ed)|confirm(?:s|ed)?|validate(?:s|d)?|evidence(?:s|d)?|show(?:s|ed)?)\b/i;
+const SOCIAL_SUPPORT_NEGATION = /\b(?:do|does|did|can|could|would|should)\s+not\s+(?:itself\s+)?(?:directly\s+)?(?:establish|support|prove|demonstrate|confirm|validate|evidence|show)\b|\b(?:cannot|can't|never|insufficient\s+to|not\s+enough\s+to)\s+(?:itself\s+)?(?:directly\s+)?(?:establish|support|prove|demonstrate|confirm|validate|evidence|show)\b|\b(?:is|are|was|were)\s+not\s+(?:established|supported|proven|demonstrated|confirmed|validated|evidenced|shown)\s+(?:by|from)\b/i;
+const founderFundamentalsAffirmativelyRelyOnSocial = (value: string): boolean =>
+  value.split(/[.!?]+/).some((sentence) => {
+    if (
+      !FOUNDER_SOCIAL_EVIDENCE.test(sentence)
+      || !FOUNDER_OPERATING_FUNDAMENTAL.test(sentence)
+      || SOCIAL_SUPPORT_NEGATION.test(sentence)
+    ) return false;
+    const social = FOUNDER_SOCIAL_EVIDENCE.exec(sentence);
+    const fundamental = FOUNDER_OPERATING_FUNDAMENTAL.exec(sentence);
+    if (!social || social.index === undefined || !fundamental || fundamental.index === undefined) return false;
+    const support = SOCIAL_SUPPORT_VERB.exec(sentence);
+    if (support?.index !== undefined) {
+      return social.index < support.index && support.index < fundamental.index;
+    }
+    return fundamental.index < social.index
+      && /\b(?:based|grounded|rest(?:s|ed)?|founded)\s+(?:on|in)\b/i.test(
+        sentence.slice(fundamental.index, social.index),
+      );
+  });
 const ABSENT_NOTABLE_FOLLOWERS_CLAIM = /(?:\b(?:no|zero)\s+(?:named\s+|verified\s+|documented\s+|structured\s+|observed\s+)?notable\s+followers?\b|\b(?:absence|lack|missing)\s+of\s+(?:named\s+|verified\s+|documented\s+|observed\s+)?notable\s+followers?\b|\bnotable\s+followers?\b(?:\s+[\w-]+){0,10}\s+(?:are|were|remain)?\s*not\s+(?:listed|documented|present|included|provided|available|observed|surfaced)\b|\b(?:notable\s+followers?|observed\s+network)(?:\s+(?:evidence|data|array|list|collection|section))?\s+(?:is|was|remains?)\s+(?:empty|absent|missing|unavailable|not\s+present)\b|\bnone\b(?:\s+[\w-]+){0,8}\s+notable\s+followers?\b|\bno\s+direct\s+observed\s+network\s+evidence\b)/i;
 const describesGroundedNotableFollowersAsAbsent = (value: string): boolean =>
   ABSENT_NOTABLE_FOLLOWERS_CLAIM.test(value);
@@ -722,6 +916,65 @@ export function validateAnalystVerdict(
       || describesGroundedTeamAsUnresolved(axisNarrative))
   ) {
     return reject("grounded-team-described-as-unresolved");
+  }
+  const hasFounderAxis = [...expected.values()].some((axis) => axis.role === "FOUNDER");
+  const rawAxisRow = (axis: string): unknown => {
+    if (Array.isArray(raw.axes)) {
+      return raw.axes.find((candidate) =>
+        candidate && typeof candidate === "object" && !Array.isArray(candidate)
+        && (candidate as Record<string, unknown>).axis === axis);
+    }
+    return raw.axes && typeof raw.axes === "object" && !Array.isArray(raw.axes)
+      ? (raw.axes as Record<string, unknown>)[axis]
+      : undefined;
+  };
+  const networkMisusedForFounderFundamentals = ["F2_track_record", "F3_repeat_backing"]
+    .filter((axis) => expected.get(axis)?.role === "FOUNDER")
+    .some((axis) => founderFundamentalsAffirmativelyRelyOnSocial(
+      JSON.stringify(rawAxisRow(axis) ?? ""),
+    ));
+  if (networkMisusedForFounderFundamentals) {
+    return reject("founder-fundamentals-cite-network-only-evidence");
+  }
+  const hasGroundedFounderRole = hasFounderAxis && evidenceCatalog.some((artifact) =>
+    artifact.verification === "verified"
+    && (
+      artifact.operation === "basicFacts:founder"
+      || artifact.operation === "checkOutcomes:founder-company-relationships"
+    ));
+  if (
+    hasGroundedFounderRole
+    && (describesGroundedFounderRoleAsUnverified(headline)
+      || describesGroundedFounderRoleAsUnverified(identityNote)
+      || describesGroundedFounderRoleAsUnverified(axisNarrative))
+  ) {
+    return reject("grounded-founder-role-described-as-unverified");
+  }
+  const hasGroundedFounderTrackRecord = hasFounderAxis && evidenceCatalog.some((artifact) =>
+    artifact.verification === "verified"
+    && (
+      (artifact.section === "basicFacts" && [
+        "basicFacts:founder",
+        "basicFacts:founded",
+        "basicFacts:prior_role",
+        "basicFacts:product",
+        "basicFacts:launched",
+        "basicFacts:exit",
+        "basicFacts:track_record",
+        "basicFacts:traction",
+      ].includes(artifact.operation))
+      || (artifact.section === "checkOutcomes"
+        && artifact.operation === "checkOutcomes:founder-track-record")
+    ));
+  if (
+    hasFounderAxis
+    && (describesGroundedTrackRecordAsSocialOnly(headline)
+      || describesGroundedTrackRecordAsSocialOnly(identityNote)
+      || describesGroundedTrackRecordAsSocialOnly(axisNarrative))
+  ) {
+    return reject(hasGroundedFounderTrackRecord
+      ? "grounded-founder-track-record-described-as-social-only"
+      : "founder-track-record-described-as-social-only");
   }
   const hasGroundedNotableFollowers = expected.has("F6_network_quality")
     && evidenceCatalog.some((artifact) =>
@@ -1602,7 +1855,7 @@ const SECTION_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   ],
   notableFollowers: ["F6_network_quality", "P5_traction_and_liveness", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud", "AG4_reputation_fud", "AD3_relationship_corroboration", "AD5_reputation_fud", "ME2_role_authenticity", "ME3_conduct_reputation"],
   recentActivity: [
-    "F2_track_record", "F4_build_substance", "F5_reputation_integrity", "P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity",
+    "F4_build_substance", "F5_reputation_integrity", "P2_product_substance", "P3_token_conduct", "P5_traction_and_liveness", "P6_transparency_integrity",
     "K2_call_performance", "K3_disclosure_deletion", "K5_cabal_fud", "I4_testimonial_corroboration", "I5_reputation_fud",
     "AG2_client_outcomes", "AG3_service_integrity", "AG4_reputation_fud", "AD2_advised_outcomes", "AD3_relationship_corroboration", "AD4_advisory_conduct", "AD5_reputation_fud",
     "ME2_role_authenticity", "ME3_conduct_reputation",
@@ -1659,9 +1912,9 @@ const INVESTIGATOR_TOKEN_CONDUCT = /\b(?:token|vesting|treasury|unlock|supply|li
 const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "identity-resolution": ["F1_identity_verifiability", "P1_team_and_identity", "K1_identity_roster", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
   "profile-photo-authenticity": [],
-  "code-footprint-github": ["F2_track_record", "F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
+  "code-footprint-github": ["F4_build_substance", "P2_product_substance", "P5_traction_and_liveness", "ME2_role_authenticity"],
   "identity-continuity": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "K1_identity_roster", "K3_disclosure_deletion", "I1_identity_legitimacy", "AG1_identity_legitimacy", "AD1_identity_verifiability", "ME1_identity"],
-  "affiliations-associates": ["F2_track_record", "F3_repeat_backing", "F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I4_testimonial_corroboration", "AD3_relationship_corroboration", "ME2_role_authenticity"],
+  "affiliations-associates": ["F6_network_quality", "P4_backing_and_partners", "K5_cabal_fud", "I4_testimonial_corroboration", "AD3_relationship_corroboration", "ME2_role_authenticity"],
   "promoted-token-performance": ["P3_token_conduct", "K2_call_performance", "K3_disclosure_deletion", "K4_onchain_conduct", "K5_cabal_fud"],
   "project-token-identity": ["P3_token_conduct"],
   "project-product-substance": ["P2_product_substance", "P5_traction_and_liveness"],
@@ -1670,13 +1923,13 @@ const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "project-traction-liveness": ["P5_traction_and_liveness"],
   "project-transparency": ["P3_token_conduct", "P6_transparency_integrity"],
   "founder-identity-authority": ["F1_identity_verifiability"],
-  "founder-company-relationships": ["F2_track_record", "F3_repeat_backing", "F6_network_quality"],
-  "founder-track-record": ["F2_track_record", "F3_repeat_backing", "F4_build_substance"],
+  "founder-company-relationships": ["F2_track_record", "F6_network_quality"],
+  "founder-track-record": ["F2_track_record", "F4_build_substance"],
   "founder-control-conflicts": ["F5_reputation_integrity"],
   "founder-legal-regulatory": ["F5_reputation_integrity"],
   "founder-asset-distinction": ["F4_build_substance", "F5_reputation_integrity"],
   "vc-portfolio-track-record": ["I2_portfolio_quality"],
-  "news-press": ["F2_track_record", "F3_repeat_backing", "F5_reputation_integrity", "P2_product_substance", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
+  "news-press": ["F5_reputation_integrity", "P2_product_substance", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "ofac-sanctions-name": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation"],
   "trust-graph-connections": SECTION_AXIS_ELIGIBILITY.trustGraphScreen,
@@ -2211,7 +2464,9 @@ const makeAxisArtifact = (
   const basicFactSource = section === "basicFacts" && Array.isArray(payload.sources)
     ? payload.sources.find((value) => value && typeof value === "object" && !Array.isArray(value)) as Record<string, unknown> | undefined
     : undefined;
-  const operationKey = recordText(payload, ["checkId", "check_id", "finding_type", "kind", "type"], 100);
+  const operationKey = section === "basicFacts"
+    ? recordText(payload, ["predicate"], 100)
+    : recordText(payload, ["checkId", "check_id", "finding_type", "kind", "type"], 100);
   const title = recordText(payload, ["title", "label", "claim", "name", "project_name", "handle", "axis", "value", "predicate"], 180)
     ?? `${section} evidence`;
   // A Basic Fact's value is the normalized answer, while its nested source
@@ -2996,6 +3251,17 @@ export async function analyzeSubject(
     `to identity notes, axis rationales, and gap lines: a licensed identity-provider ` +
     `miss does not erase first-party founder evidence. Only treat identity ` +
     `as unresolved when the evidence genuinely names no one behind the project.\n\n` +
+    `FOUNDER IDENTITY AND TRACK RECORD RULE: for a FOUNDER report, a verified ` +
+    `Basic Fact or founder decision check governs the person's role. Describe ` +
+    `that role as verified, not claimed, inferred, self-reported, or unresolved. ` +
+    `Follower count, profile biography, posting cadence, notable followers, and ` +
+    `X follow relationships may inform F6 network quality only. They never prove ` +
+    `identity, founder status, track record, repeat backing, or build substance. ` +
+    `A missing personal GitHub profile, People Data Labs miss, or checked-empty ` +
+    `exact-name news query is a coverage limitation and cannot erase verified ` +
+    `founder, company, product, or outcome evidence. Preserve source-specific ` +
+    `entities: being CEO of an operating company does not make the person CEO of ` +
+    `a related protocol or DAO.\n\n` +
     `PUBLIC DILIGENCE GAP RULE: identity gaps must be resolvable through public ` +
     `or consensually supplied professional records. Never request or recommend ` +
     `collecting a government-issued ID, passport, SSN or tax ID, home address, ` +
@@ -3114,6 +3380,14 @@ export async function analyzeSubject(
     let rejectedAxisHint = "";
     if (rejectionReason === "grounded-team-described-as-unresolved") {
       rejectedAxisHint = " The frozen packet contains substantive named-team artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge the public team. Do not claim there is no, absent, unnamed, unresolved, anonymous, unknown, or undisclosed project founder, operator, executive, leader, or team. Keep a failed licensed-identity-provider lookup separate from the first-party founder evidence; it does not erase the named team.";
+    } else if (rejectionReason === "founder-fundamentals-cite-network-only-evidence") {
+      rejectedAxisHint = " F2 track record and F3 repeat backing may not cite follower count, profile biography, posting cadence, notable followers, or X follow relationships. Remove that network-only context from those rows. Use it only in F6 network quality, and score F2 or F3 only from source-backed roles, ventures, products, outcomes, financing, investors, or repeat counterparties.";
+    } else if (rejectionReason === "grounded-founder-role-described-as-unverified") {
+      rejectedAxisHint = " The frozen packet contains verified founder or current-role evidence. Rewrite the headline, identity note, every axis rationale, and every gap line to state the verified relationship directly. Do not call that role claimed, inferred, self-reported, unconfirmed, uncorroborated, unresolved, or unverified. Missing People Data Labs, GitHub, or exact-name news coverage may remain a separate coverage gap but cannot erase the verified role.";
+    } else if (rejectionReason === "grounded-founder-track-record-described-as-social-only") {
+      rejectedAxisHint = " The frozen packet contains verified founder, product, role, or outcome evidence for F2. Rewrite F2 and the report summary from those source-backed artifacts. Followers, profile biography, posting cadence, and follow relationships may inform F6 only. You may say that additional measurable outcomes remain incomplete, but do not say the track record is inferred from social reach or a claimed role.";
+    } else if (rejectionReason === "founder-track-record-described-as-social-only") {
+      rejectedAxisHint = " Followers, profile biography, posting cadence, and follow relationships may inform F6 network quality only. They cannot establish F2 track record. If the frozen packet has no source-backed founder, role, product, or outcome artifacts, state that the track record remains unscored and publish the investigation as incomplete rather than inferring it from social reach.";
     } else if (rejectionReason === "grounded-notable-followers-described-as-absent") {
       rejectedAxisHint = " The frozen packet contains observed notable-follower artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge those accounts. You may describe provider coverage as partial, but do not claim that no notable followers were found, listed, documented, present, included, or observed. Name representative observed accounts in the F6 network-quality rationale.";
     } else if (projectBandRepair) {

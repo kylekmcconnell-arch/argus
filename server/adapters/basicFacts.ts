@@ -18,10 +18,14 @@ import type { Adapter, AdapterRunResult, CollectContext } from "./types";
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
 const PRIMARY_SEARCH_USES_PER_BATCH = 3;
 const REPAIR_SEARCH_USES = 4;
+const DISCOVERY_BATCH_CONCURRENCY = 3;
+const DISCOVERY_RETRY_DELAY_MS = 350;
 const MAX_LEADS = 28;
 const MAX_SOURCES = 32;
+const MAX_REPAIR_QUESTIONS = 8;
+const MAX_REPAIR_PROVIDER_CALLS = 8;
 const DISCOVERY_TIMEOUT_MS = 50_000;
-const RESEARCH_CACHE_VERSION = "v6";
+const RESEARCH_CACHE_VERSION = "v7";
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
 const PREDICATES = new Set<BasicFactPredicate>([
@@ -112,7 +116,7 @@ function selectBasicFactLeads(leads: readonly BasicFactLead[]): BasicFactLead[] 
   return leads.filter((_lead, index) => selected.has(index)).slice(0, MAX_LEADS);
 }
 
-type DiscoveryProvider = BasicFactLead["provider"];
+type DiscoveryProvider = Extract<BasicFactLead["provider"], "claude-web-search" | "grok">;
 type RequestFn = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export type BasicFactsResearchAudience = "person" | "project" | "investor";
@@ -224,6 +228,44 @@ const INVESTOR_QUESTIONS: readonly QuestionTemplate[] = [
 const FOUNDER_REPAIR_PREDICATES = new Set<BasicFactPredicate>(
   PERSON_QUESTIONS.map((question) => question.predicate),
 );
+
+const REPAIR_PRIORITY: Record<BasicFactsResearchAudience, readonly BasicFactPredicate[]> = {
+  person: [
+    "official_identity", "current_role", "founder", "product",
+    "control", "legal_regulatory_event", "official_token", "public_security",
+    "track_record", "executive", "governance", "conflict_of_interest",
+    "founded", "exit", "prior_role", "education",
+  ],
+  project: [
+    "official_identity", "founder", "executive", "product",
+    "official_token", "traction", "audit", "legal_entity",
+    "network", "launched", "funding", "repository", "governance",
+  ],
+  investor: [
+    "official_identity", "current_role", "investor", "track_record",
+    "founder", "control", "public_security", "official_token",
+    "product", "legal_regulatory_event", "funding", "governance",
+  ],
+};
+
+/** Keep production repair within a fixed call budget while covering each
+ * decision domain before lower-value biography enrichment. */
+function boundedRepairQuestions(
+  questions: readonly BasicFactsResearchQuestion[],
+): BasicFactsResearchQuestion[] {
+  if (questions.length <= MAX_REPAIR_QUESTIONS) return questions.slice();
+  const audience = questions[0]?.audience ?? "person";
+  const priorities = REPAIR_PRIORITY[audience];
+  const rank = new Map(priorities.map((predicate, index) => [predicate, index]));
+  return questions
+    .map((question, index) => ({ question, index }))
+    .sort((left, right) =>
+      (rank.get(left.question.predicate) ?? Number.MAX_SAFE_INTEGER)
+      - (rank.get(right.question.predicate) ?? Number.MAX_SAFE_INTEGER)
+      || left.index - right.index)
+    .slice(0, MAX_REPAIR_QUESTIONS)
+    .map(({ question }) => question);
+}
 type ClaudeContentBlock = {
   type?: string;
   text?: string;
@@ -597,6 +639,20 @@ function isAtomicValue(predicate: BasicFactPredicate, value: string): boolean {
   return true;
 }
 
+function atomicPersonVentureValue(value: string): string | null {
+  const candidate = normalize(value);
+  if (
+    !candidate
+    || candidate.length > 120
+    || /[()[\]{}/|;]/.test(candidate)
+    || /\b(?:also known as|formerly|originally|previously|rebrand(?:ed)?|aka)\b/i.test(candidate)
+    || /\b(?:co[- ]?)?founder\s+(?:of|at)\b/i.test(candidate)
+    || /\s(?:and|&)\s/i.test(candidate)
+  ) return null;
+  const tokens = looseTokens(candidate);
+  return tokens.length >= 1 && tokens.length <= 8 ? candidate : null;
+}
+
 /**
  * Web-search models sometimes answer an asset question with a symbol followed
  * by a prose description, for example `cbBTC (Coinbase Wrapped BTC) · ERC20
@@ -614,6 +670,26 @@ function canonicalOfficialTokenLeadValue(value: string): string {
   if (delimited) return delimited;
   const named = new RegExp(`^[^();]{2,100}\\(\\s*(${symbol})\\s*\\)\\s*(?:[·:\\u2013\\u2014]|\\s-\\s|$)`).exec(normalized)?.[1];
   return named ?? normalized;
+}
+
+/**
+ * Hosted search sometimes puts a role after the requested full name. Strip
+ * only an unmistakable, delimited role suffix. The fetched source still has
+ * to prove the resulting name, so this turns model formatting into a lead and
+ * never into identity evidence by itself.
+ */
+function canonicalOfficialIdentityLeadValue(value: string): string | null {
+  const normalized = normalize(value);
+  if (/\b(?:alleged|claimed|purported|self[- ]?described|unconfirmed|unverified)\b/i.test(normalized)) return null;
+  const nameToken = "[\\p{L}\\p{M}][\\p{L}\\p{M}'’.-]*";
+  const role = "(?:co[- ]?)?founder|chief executive officer|chief technology officer|chief operating officer|chief financial officer|ceo|cto|coo|cfo|president|chair(?:man|woman|person)?|partner|principal|entrepreneur|investor";
+  const match = new RegExp(
+    `^(${nameToken}(?:\\s+${nameToken}){1,5})\\s*(?:,\\s*|:\\s*|[\\u2013\\u2014]\\s*|\\s-\\s+|\\(\\s*)(?=${role}\\b)`,
+    "iu",
+  ).exec(normalized);
+  if (!match?.[1]) return /[,;:()[\]\u2013\u2014]/u.test(normalized) ? null : normalized;
+  const candidate = normalize(match[1]);
+  return plausiblePersonIdentity(candidate) ? candidate : null;
 }
 
 /**
@@ -658,18 +734,27 @@ export function parseBasicFactLeads(
     const excerpt = clean(row.exact_excerpt ?? row.excerpt, 1_200);
     const sourceUrl = safeCandidateUrl(row.source_url ?? row.sourceUrl);
     if (!predicate || !PREDICATES.has(predicate) || !subject || !rawValue || !excerpt || !sourceUrl) continue;
+    const suppliedQuestionId = clean(row.question_id ?? row.questionId, 100);
     const value = predicate === "official_token"
       ? canonicalOfficialTokenLeadValue(rawValue)
-      : rawValue;
+      : predicate === "official_identity" && /^(?:person|investor)\./.test(suppliedQuestionId ?? "")
+        ? canonicalOfficialIdentityLeadValue(rawValue)
+        : rawValue;
+    if (!value) continue;
     if (isEmptyAssetPlaceholder(predicate, value)) continue;
     if (!isAtomicValue(predicate, value)) continue;
-    const suppliedQuestionId = clean(row.question_id ?? row.questionId, 100);
     const suppliedQuestion = suppliedQuestionId ? questionById.get(suppliedQuestionId) : undefined;
     if (questions.length && suppliedQuestionId && !suppliedQuestion) continue;
     if (questions.length && !(questionsByPredicate.get(predicate)?.length)) continue;
     if (suppliedQuestion && suppliedQuestion.predicate !== predicate) continue;
     const inferredQuestion = suppliedQuestion
       ?? (questionsByPredicate.get(predicate)?.length === 1 ? questionsByPredicate.get(predicate)?.[0] : undefined);
+    if (
+      predicate === "founder"
+      && inferredQuestion
+      && inferredQuestion.audience !== "project"
+      && !atomicPersonVentureValue(value)
+    ) continue;
     const qualifier = clean(row.qualifier, 120);
     const eventStatus = clean(row.event_status ?? row.eventStatus, 160);
     const attributedEntity = clean(row.attributed_entity ?? row.attributedEntity, 200);
@@ -712,6 +797,79 @@ function subjectName(ctx: CollectContext): string {
     || ctx.handle.replace(/^@/, "");
 }
 
+/**
+ * A camel-cased handle can expose the missing surname when the public profile
+ * uses only a first name, for example Stani + @StaniKulechov. This is a search
+ * hint only. It is never written to the profile until fetched source evidence
+ * independently verifies the full name.
+ */
+function handleDerivedPersonName(ctx: CollectContext): string | null {
+  if (researchAudience(ctx) === "project") return null;
+  const display = normalize(ctx.evidence.profile.display_name);
+  if (looseTokens(display).length !== 1 || !/^\p{L}[\p{L}\p{M}'’.-]*$/u.test(display)) return null;
+  const handle = ctx.handle.replace(/^@/, "").trim();
+  if (!handle.toLocaleLowerCase().startsWith(display.toLocaleLowerCase())) return null;
+  const rawSuffix = handle.slice(display.length).replace(/^[_-]+/, "");
+  if (!rawSuffix || /\d/u.test(rawSuffix)) return null;
+  const suffixParts = rawSuffix.includes("_") || rawSuffix.includes("-")
+    ? rawSuffix.split(/[_-]+/u)
+    : [rawSuffix];
+  if (
+    !suffixParts.length
+    || suffixParts.length > 3
+    || suffixParts.some((part) => !/^\p{L}[\p{L}\p{M}'’]{2,30}$/u.test(part))
+  ) return null;
+  const genericSuffixes = new Set([
+    "aave", "crypto", "dao", "defi", "eth", "ethereum", "labs", "nft",
+    "official", "sol", "solana", "web3",
+  ]);
+  if (suffixParts.some((part) => genericSuffixes.has(part.toLocaleLowerCase()))) return null;
+  const suffix = suffixParts
+    .map((part) => `${part.slice(0, 1).toLocaleUpperCase()}${part.slice(1)}`)
+    .join(" ");
+  const candidate = `${display} ${suffix}`;
+  return plausiblePersonIdentity(candidate) ? candidate : null;
+}
+
+/**
+ * A handle-derived full name is never evidence, but it is a safe hypothesis to
+ * check against the subject-linked website. Search models sometimes prefer a
+ * legal-name registry result and miss an obvious first-party About page. These
+ * bounded page candidates still pass through the normal fetch, passage, and
+ * first-party verification gates before they can publish anything.
+ */
+function officialIdentityBootstrapLeads(
+  ctx: CollectContext,
+): BasicFactLead[] {
+  const candidate = handleDerivedPersonName(ctx);
+  const rawWebsite = ctx.evidence.profile.website;
+  if (!candidate || !rawWebsite) return [];
+  let website: URL;
+  try { website = new URL(rawWebsite); } catch { return []; }
+  if (!/^https?:$/.test(website.protocol) || PATH_TENANTED_HOSTS.has(normalizedHost(website.hostname))) return [];
+  const urls = [...new Set([
+    new URL("/about", website.origin).toString(),
+    new URL("/", website.origin).toString(),
+    new URL("/team", website.origin).toString(),
+    new URL("/leadership", website.origin).toString(),
+  ].map(safeCandidateUrl).filter((value): value is string => Boolean(value)))];
+  const [sourceUrl, ...candidateUrls] = urls;
+  if (!sourceUrl) return [];
+  return [{
+    subject: subjectName(ctx),
+    predicate: "official_identity",
+    value: candidate,
+    questionId: `${researchAudience(ctx)}.official_identity`,
+    excerpt: candidate,
+    sourceUrl,
+    sourceTitle: "Official identity page candidate",
+    candidateUrls,
+    evidence_origin: "deterministic_bootstrap",
+    artifact_verified: false,
+    provider: "argus-identity-bootstrap",
+  }];
+}
+
 function subjectAliases(ctx: CollectContext): string[] {
   const aliases = [
     subjectName(ctx),
@@ -738,6 +896,23 @@ function discoveryPrompt(
     : questions.length === 1 && questions[0]?.predicate === "official_token"
       ? "This is a question-specific official-token search. Search the official sites and documentation of the subject's verified current ventures. Return a row only for an affirmatively named official crypto token. If the completed search finds no affirmative source-linked token candidate, return {\"facts\":[]}; never serialize none, no token, a public-company stock, or an unlaunched token plan as a fact."
       : "";
+  const identitySearchHint = handleDerivedPersonName(ctx);
+  let officialSearchHost = "";
+  try { officialSearchHost = profile.website ? new URL(profile.website).hostname : ""; } catch { /* invalid profile URL stays a non-authoritative hint */ }
+  const targetedIdentityInstruction = questions.length === 1
+    && questions[0]?.predicate === "official_identity"
+    && audience !== "project"
+    ? [
+        "This is an identity-bootstrap search. The profile display name may be incomplete.",
+        identitySearchHint
+          ? `Handle-derived full-name candidate: "${identitySearchHint}". Use it only as a search query and verify it from the cited page.`
+          : "Search for the person's exact full public name using the handle, bio, and official website.",
+        officialSearchHost && identitySearchHint
+          ? `Start with a query equivalent to site:${officialSearchHost} "${identitySearchHint}", then check independent primary or reputable sources.`
+          : "",
+        "The value must contain only the person's full public name. Do not append a title, role, organization, biography, or second person.",
+      ].filter(Boolean).join(" ")
+    : "";
   const verifiedVentureContext = verifiedVentureAssetRelationships(ctx)
     .map((relationship) => `${relationship.name} (${relationship.officialScopes.join(", ")})`)
     .join("; ");
@@ -746,12 +921,16 @@ function discoveryPrompt(
     `Research audience: ${audience}. Answer only the targeted questions below; do not pad the response with adjacent facts.`,
     profile.website ? `Known official website: ${profile.website}` : "",
     profile.bio ? `Profile bio: ${profile.bio.slice(0, 800)}` : "",
+    identitySearchHint
+      ? `Unverified full-name search hint derived from the public handle: ${identitySearchHint}. Use it to find evidence, never as evidence itself.`
+      : "",
     verifiedVentureContext
       ? `Verified current venture relationships (relationship evidence only, not proof of any stock or token): ${verifiedVentureContext}`
       : "",
     "Targeted question ledger:",
     questionLedger,
     targetedAssetInstruction,
+    targetedIdentityInstruction,
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
@@ -905,16 +1084,21 @@ function questionSearchGroups(
   phase: "primary" | "repair",
 ): QuestionSearchGroup[] {
   const batches: Array<Exclude<BasicFactsResearchBatch, "repair">> = ["identity", "track_record", "structure_risk"];
-  const isolateExplicitEmptyQuestion = (question: BasicFactsResearchQuestion): boolean =>
-    supportsExplicitEmptyBasicFact(question.predicate)
-    && (phase === "repair" || questions.length === 1);
+  // A repair pass exists because a broad batch did not produce a verified
+  // answer. Give every remaining critical question its own search context so
+  // the scout cannot spend the whole response on an easier neighboring fact.
+  // Asset questions retain that isolation when explicitly invoked alone
+  // because only a question-attributable search may record completed-empty.
+  const isolateQuestion = (question: BasicFactsResearchQuestion): boolean =>
+    phase === "repair"
+    || (supportsExplicitEmptyBasicFact(question.predicate) && questions.length === 1);
   const grouped = batches.flatMap((batch): QuestionSearchGroup[] => {
     const selected = questions.filter((question) =>
-      question.batch === batch && !isolateExplicitEmptyQuestion(question));
+      question.batch === batch && !isolateQuestion(question));
     return selected.length ? [{ key: batch, batch, questions: selected, questionSpecific: false }] : [];
   });
   const targeted = questions
-    .filter(isolateExplicitEmptyQuestion)
+    .filter(isolateQuestion)
     .map((question): QuestionSearchGroup => ({
       key: question.id,
       batch: question.batch,
@@ -922,6 +1106,27 @@ function questionSearchGroups(
       questionSpecific: true,
     }));
   return [...grouped, ...targeted];
+}
+
+async function mapDiscoveryGroups<T>(
+  groups: readonly QuestionSearchGroup[],
+  work: (group: QuestionSearchGroup) => Promise<T>,
+): Promise<T[]> {
+  if (!groups.length) return [];
+  const output = new Array<T>(groups.length);
+  let cursor = 0;
+  const workers = Array.from(
+    { length: Math.min(DISCOVERY_BATCH_CONCURRENCY, groups.length) },
+    async () => {
+      while (cursor < groups.length) {
+        const index = cursor;
+        cursor += 1;
+        output[index] = await work(groups[index]);
+      }
+    },
+  );
+  await Promise.all(workers);
+  return output;
 }
 
 /** Claude hosted search discovery with an attributable state per targeted batch. */
@@ -940,7 +1145,9 @@ export async function discoverBasicFactLeadsDetailed(
   const request = dependencies.request ?? fetch;
   const audience = questions[0]?.audience ?? researchAudience(ctx);
   const grouped = questionSearchGroups(questions, phase);
-  const batches = await Promise.all(grouped.map(async ({ key, batch, questions: batchQuestions, questionSpecific }): Promise<BatchDiscoveryResult> => {
+  let providerHttpCalls = 0;
+  let providerCallBudgetExhausted = false;
+  const batches = await mapDiscoveryGroups(grouped, async ({ key, batch, questions: batchQuestions, questionSpecific }): Promise<BatchDiscoveryResult> => {
     const group = {
       key,
       batch,
@@ -973,20 +1180,60 @@ export async function discoverBasicFactLeadsDetailed(
 
     const prompt = discoveryPrompt(ctx, batchQuestions, phase);
     const maxSearchUses = phase === "repair" ? REPAIR_SEARCH_USES : PRIMARY_SEARCH_USES_PER_BATCH;
-    let attempts = 1;
-    let response = await callClaudeSearch(prompt, request, undefined, maxSearchUses);
-    if (!response) return { ...group, state: "failed", leads: [], attempts, detail: `${key}:request_failed` };
-    let webSearchRequests = response.usage?.server_tool_use?.web_search_requests ?? 0;
-    if (response.stop_reason === "pause_turn" && response.content?.length) {
-      attempts += 1;
-      response = await callClaudeSearch(prompt, request, response.content, maxSearchUses);
-      if (!response) return { ...group, state: "failed", leads: [], attempts, detail: `${key}:continuation_failed` };
-      webSearchRequests += response.usage?.server_tool_use?.web_search_requests ?? 0;
+    const executeSearch = async (): Promise<{
+      search: {
+        response: ClaudeResponse;
+        webSearchRequests: number;
+      } | null;
+      attempts: number;
+    }> => {
+      let attempts = 0;
+      const invoke = async (assistantContent?: ClaudeContentBlock[]): Promise<ClaudeResponse | null> => {
+        if (phase === "repair" && providerHttpCalls >= MAX_REPAIR_PROVIDER_CALLS) {
+          providerCallBudgetExhausted = true;
+          return null;
+        }
+        providerHttpCalls += 1;
+        attempts += 1;
+        return callClaudeSearch(prompt, request, assistantContent, maxSearchUses);
+      };
+      let response = await invoke();
+      if (!response) return { search: null, attempts };
+      let webSearchRequests = response.usage?.server_tool_use?.web_search_requests ?? 0;
+      if (response.stop_reason === "pause_turn" && response.content?.length) {
+        response = await invoke(response.content);
+        if (!response) return { search: null, attempts };
+        webSearchRequests += response.usage?.server_tool_use?.web_search_requests ?? 0;
+      }
+      return { search: { response, webSearchRequests }, attempts };
+    };
+
+    const execution = await executeSearch();
+    let search = execution.search;
+    let attempts = execution.attempts;
+    let text = search ? responseText(search.response) : "";
+    let parsed = text
+      ? parseBasicFactLeads(text, canonicalSubject, "claude-web-search", batchQuestions)
+      : null;
+    // Hosted search occasionally returns a transient failure or malformed
+    // JSON. Retry only that bounded batch once; fetched source verification
+    // remains the governing boundary after discovery succeeds.
+    if (!search || !text || !parsed) {
+      await new Promise((resolve) => setTimeout(resolve, DISCOVERY_RETRY_DELAY_MS));
+      const retry = await executeSearch();
+      attempts += retry.attempts;
+      if (retry.search) {
+        search = retry.search;
+        text = responseText(retry.search.response);
+        parsed = text
+          ? parseBasicFactLeads(text, canonicalSubject, "claude-web-search", batchQuestions)
+          : null;
+      }
     }
-    const text = responseText(response);
-    if (!text) return { ...group, state: "partial", leads: [], attempts, detail: `${key}:empty_output` };
-    const parsed = parseBasicFactLeads(text, canonicalSubject, "claude-web-search", batchQuestions);
-    if (!parsed) return { ...group, state: "partial", leads: [], attempts, detail: `${key}:invalid_json` };
+    if (!search) return { ...group, state: "failed", leads: [], attempts, detail: `${key}:request_failed_after_retry` };
+    if (!text) return { ...group, state: "partial", leads: [], attempts, detail: `${key}:empty_output_after_retry` };
+    if (!parsed) return { ...group, state: "partial", leads: [], attempts, detail: `${key}:invalid_json_after_retry` };
+    const webSearchRequests = search.webSearchRequests;
     void cacheWrite(cacheKey, text);
     const rawFactCount = rawBasicFactCount(text);
     const explicitEmpty = rawFactCount === 0;
@@ -1006,8 +1253,13 @@ export async function discoverBasicFactLeadsDetailed(
             ? `partial_${rawFactCount}_raw_facts_filtered`
             : "empty_without_attributable_search"}`,
     };
-  }));
-  return aggregateDiscovery("claude-web-search", batches);
+  });
+  const result = aggregateDiscovery("claude-web-search", batches);
+  if (providerCallBudgetExhausted) {
+    result.detail = [result.detail, `repair provider-call budget exhausted at ${MAX_REPAIR_PROVIDER_CALLS} calls`]
+      .filter(Boolean).join("; ");
+  }
+  return result;
 }
 
 /** Backward-compatible lead-only wrapper used by focused adapter tests. */
@@ -1020,17 +1272,29 @@ export async function discoverBasicFactLeads(
   return result.state === "failed" || result.state === "skipped" ? null : result.leads;
 }
 
-async function discoverGrokQuestions(
+export async function discoverGrokBasicFactLeadsDetailed(
   ctx: CollectContext,
   questions: readonly BasicFactsResearchQuestion[],
   phase: "primary" | "repair",
+  options: { bypassCache?: boolean } = {},
 ): Promise<BasicFactsDiscoveryResult> {
   if (!env("XAI_API_KEY")) {
     return { provider: "grok", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "Grok search is not configured" };
   }
   const audience = questions[0]?.audience ?? researchAudience(ctx);
   const grouped = questionSearchGroups(questions, phase);
-  const batches = await Promise.all(grouped.map(async ({ key, batch, questions: batchQuestions, questionSpecific }): Promise<BatchDiscoveryResult> => {
+  let providerHttpCalls = 0;
+  let providerCallBudgetExhausted = false;
+  const claimProviderCall = (): boolean => {
+    if (phase !== "repair") return true;
+    if (providerHttpCalls >= MAX_REPAIR_PROVIDER_CALLS) {
+      providerCallBudgetExhausted = true;
+      return false;
+    }
+    providerHttpCalls += 1;
+    return true;
+  };
+  const batches = await mapDiscoveryGroups(grouped, async ({ key, batch, questions: batchQuestions, questionSpecific }): Promise<BatchDiscoveryResult> => {
     const group = {
       key,
       batch,
@@ -1040,17 +1304,24 @@ async function discoverGrokQuestions(
     const fingerprint = createHash("sha256")
       .update(batchQuestions.map((question) => question.id).sort().join("|"))
       .digest("hex").slice(0, 12);
+    let attempts = 0;
     const text = await grokSearch(
       "You are ARGUS's basic-facts research scout. Use live web search. Return only the requested JSON. Every answer remains an unverified lead until ARGUS fetches and verifies the exact source passage.",
       discoveryPrompt(ctx, batchQuestions, phase),
       {
         maxToolCalls: phase === "repair" ? REPAIR_SEARCH_USES : PRIMARY_SEARCH_USES_PER_BATCH,
         cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grok:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${subjectName(ctx).toLowerCase()}`,
+        bypassCache: options.bypassCache,
+        claimProviderCall: () => {
+          const claimed = claimProviderCall();
+          if (claimed) attempts += 1;
+          return claimed;
+        },
       },
     );
-    if (!text) return { ...group, state: "failed", leads: [], attempts: 1, detail: `${key}:request_failed` };
+    if (!text) return { ...group, state: "failed", leads: [], attempts, detail: `${key}:request_failed` };
     const parsed = parseBasicFactLeads(text, subjectName(ctx), "grok", batchQuestions);
-    if (!parsed) return { ...group, state: "partial", leads: [], attempts: 1, detail: `${key}:invalid_json` };
+    if (!parsed) return { ...group, state: "partial", leads: [], attempts, detail: `${key}:invalid_json` };
     return {
       ...group,
       // grokSearch currently exposes text but not attributable tool-use
@@ -1058,108 +1329,57 @@ async function discoverGrokQuestions(
       // than becoming a checked-empty claim.
       state: parsed.length ? "succeeded" : questionSpecific ? "partial" : "completed_empty",
       leads: parsed,
-      attempts: 1,
+      attempts,
       detail: `${key}:${parsed.length
         ? `${parsed.length}_leads`
         : questionSpecific
           ? "empty_without_attributable_search"
           : "completed_empty"}`,
     };
-  }));
-  return aggregateDiscovery("grok", batches);
+  });
+  const result = aggregateDiscovery("grok", batches);
+  if (providerCallBudgetExhausted) {
+    result.detail = [result.detail, `repair provider-call budget exhausted at ${MAX_REPAIR_PROVIDER_CALLS} calls`]
+      .filter(Boolean).join("; ");
+  }
+  return result;
 }
 
 async function discoverPrimary(
   ctx: CollectContext,
   questions: readonly BasicFactsResearchQuestion[],
 ): Promise<BasicFactsDiscoveryResult> {
-  if (env("ANTHROPIC_API_KEY")) return discoverBasicFactLeadsDetailed(ctx, {}, questions, "primary");
-  return discoverGrokQuestions(ctx, questions, "primary");
-}
-
-function mergeDiscoveryResults(
-  defaultResult: BasicFactsDiscoveryResult,
-  questionSpecificResult: BasicFactsDiscoveryResult,
-): BasicFactsDiscoveryResult {
-  const leads = selectBasicFactLeads([...defaultResult.leads, ...questionSpecificResult.leads]);
-  const states = [defaultResult.state, questionSpecificResult.state];
-  const hasFailure = states.some((state) => state === "failed" || state === "partial");
-  const hasCompleted = states.some((state) => state === "succeeded" || state === "completed_empty");
-  const state: BasicFactsDiscoveryState = hasFailure
-    ? (leads.length || hasCompleted ? "partial" : "failed")
-    : leads.length
-      ? "succeeded"
-      : states.every((candidate) => candidate === "completed_empty")
-        ? "completed_empty"
-        : "partial";
-  const batchStates = Object.fromEntries(
-    (["identity", "track_record", "structure_risk", "repair"] as const).flatMap((batch) => {
-      const batchResults = [defaultResult.batchStates?.[batch], questionSpecificResult.batchStates?.[batch]]
-        .filter((candidate): candidate is BasicFactsDiscoveryState => Boolean(candidate));
-      return batchResults.length ? [[batch, aggregateGroupStates(batchResults)]] : [];
-    }),
-  );
+  if (!env("ANTHROPIC_API_KEY")) return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
+  const claude = await discoverBasicFactLeadsDetailed(ctx, {}, questions, "primary");
+  if (
+    !env("XAI_API_KEY")
+    || (claude.state !== "failed" && !(claude.state === "partial" && claude.leads.length === 0))
+  ) return claude;
+  const grok = await discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
   return {
-    provider: defaultResult.provider,
-    state,
-    leads,
-    attempts: defaultResult.attempts + questionSpecificResult.attempts,
-    completedBatches: defaultResult.completedBatches + questionSpecificResult.completedBatches,
-    failedBatches: defaultResult.failedBatches + questionSpecificResult.failedBatches,
-    ...(Object.keys(batchStates).length ? { batchStates } : {}),
-    questionStates: {
-      ...(defaultResult.questionStates ?? {}),
-      ...(questionSpecificResult.questionStates ?? {}),
-    },
-    questionProviders: {
-      ...(defaultResult.questionProviders ?? {}),
-      ...(questionSpecificResult.questionProviders ?? {}),
-    },
-    detail: [defaultResult.detail, questionSpecificResult.detail].filter(Boolean).join("; ") || undefined,
+    ...grok,
+    // Grok governs this result. Claude's failure stays visible in cost and
+    // incident history without mislabeling Grok-discovered leads as Claude.
+    attempts: claude.attempts + grok.attempts,
+    detail: [
+      `Claude primary ${claude.state}: ${claude.detail ?? "no detail"}`,
+      `Grok fallback ${grok.state}: ${grok.detail ?? "no detail"}`,
+    ].join("; "),
   };
 }
 
 async function discoverRepair(
   ctx: CollectContext,
   questions: readonly BasicFactsResearchQuestion[],
-  primaryProvider: BasicFactsDiscoveryResult["provider"],
 ): Promise<BasicFactsDiscoveryResult> {
   if (!questions.length) {
     return { provider: "none", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "no critical gaps" };
   }
-  // Prefer a genuinely independent second search provider, then make a
-  // targeted second pass with the configured provider if only one is present.
-  if (primaryProvider === "claude-web-search" && env("XAI_API_KEY")) {
-    const attributableAssetQuestions = questions.filter((question) =>
-      supportsExplicitEmptyBasicFact(question.predicate));
-    const independentQuestions = questions.filter((question) =>
-      !supportsExplicitEmptyBasicFact(question.predicate));
-    if (attributableAssetQuestions.length && env("ANTHROPIC_API_KEY")) {
-      const [independent, targetedAssets] = await Promise.all([
-        independentQuestions.length
-          ? discoverGrokQuestions(ctx, independentQuestions, "repair")
-          : Promise.resolve<BasicFactsDiscoveryResult>({
-            provider: "grok",
-            state: "skipped",
-            leads: [],
-            attempts: 0,
-            completedBatches: 0,
-            failedBatches: 0,
-            detail: "no non-asset repair questions",
-          }),
-        discoverBasicFactLeadsDetailed(ctx, {}, attributableAssetQuestions, "repair"),
-      ]);
-      return independentQuestions.length
-        ? mergeDiscoveryResults(independent, targetedAssets)
-        : targetedAssets;
-    }
-    return discoverGrokQuestions(ctx, questions, "repair");
-  }
-  if (primaryProvider === "grok" && env("ANTHROPIC_API_KEY")) {
-    return discoverBasicFactLeadsDetailed(ctx, {}, questions, "repair");
-  }
+  // Keep one governing provider for the entire bounded repair pass. Grok is
+  // preferred when configured so a depleted Claude account cannot trigger a
+  // second failing pass or multiply calls through per-question failover.
+  if (env("XAI_API_KEY")) return discoverGrokBasicFactLeadsDetailed(ctx, questions, "repair");
   if (env("ANTHROPIC_API_KEY")) return discoverBasicFactLeadsDetailed(ctx, {}, questions, "repair");
-  if (env("XAI_API_KEY")) return discoverGrokQuestions(ctx, questions, "repair");
   return { provider: "none", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "no repair search provider configured" };
 }
 
@@ -1295,7 +1515,7 @@ function documentText(document: PublicTextDocument): string {
 }
 
 const PREDICATE_PATTERNS: Record<BasicFactPredicate, RegExp> = {
-  official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company|person|entrepreneur|investor)\b/i,
+  official_identity: /\b(?:official|known as|operated by|developed by|is (?:a|an|the)|project|organization|protocol|foundation|company|person|entrepreneur|investor|(?:co[- ]?)?founder|chief executive officer|ceo)\b/i,
   current_role: /\b(?:currently|serves as|has served as|works as|is (?:the |an? )?(?:founder|co[- ]?founder|chief|ceo|cto|coo|cfo|president|partner|principal|director|head|lead|chair|member)|(?:co[- ]?founder|chief executive officer|chief technology officer|chief operating officer|chief financial officer|ceo|cto|coo|cfo|president|partner|principal|director|head|lead|chair(?:man|woman|person)?|board member)(?:\s*(?:,|&|and)\s*(?:co[- ]?founder|chief executive officer|chief technology officer|chief operating officer|chief financial officer|ceo|cto|coo|cfo|president|partner|principal|director|head|lead|chair(?:man|woman|person)?|board member))*|current role)\b/i,
   prior_role: /\b(?:formerly|previously|prior to|served as|was (?:the |an? )?(?:founder|co[- ]?founder|chief|ceo|cto|coo|cfo|president|partner|principal|director|head|lead|chair|member)|prior role)\b/i,
   education: /\b(?:graduated|degree|studied|attended|education|university|college|school|bachelor|master(?:'s)?|mba|phd|doctorate)\b/i,
@@ -1635,8 +1855,93 @@ function roleAttributionIsSupported(
   }));
 }
 
+/** Bind title-before-name captions such as "Aave Labs CEO Stani Kulechov"
+ * without letting another nearby person's title establish the identity. */
+function titleBindsOfficialIdentity(clause: string, lead: BasicFactLead): boolean {
+  if (looseTokens(lead.value).length < 2) return false;
+  const tokens = sourceTokens(clause);
+  const identityTokenKeys = new Set(looseTokens(lead.value));
+  const identitySpans = phraseTokenStarts(tokens, lead.value).map((start) => ({
+    start,
+    end: start + looseTokens(lead.value).length - 1,
+  }));
+  const directAfterLinkers = new Set([
+    "",
+    "a",
+    "an",
+    "as",
+    "is",
+    "is the",
+    "served as",
+    "serves as",
+    "the",
+    "was",
+    "was the",
+  ]);
+  const otherPeople = probablePersonSpans(tokens, identityTokenKeys);
+  return identitySpans.some((identity) => roleMatches(tokens).some((role) => {
+    // In a title-before-name caption the final title token must touch the name.
+    // `CEO and Stani Kulechov` names two people; the conjunction can never act
+    // as title glue. Multi-role titles still work because the nearest role in
+    // `Founder and CEO Stani Kulechov` is the adjacent CEO span.
+    if (role.end < identity.start) {
+      return role.end === identity.start - 1;
+    }
+    if (role.start > identity.end) {
+      const linker = tokens.slice(identity.end + 1, role.start).map((token) => token.key).join(" ");
+      if (!directAfterLinkers.has(linker)) return false;
+      // `Stani Kulechov and CEO Alice Example` must bind CEO to Alice, not
+      // Stani. Organization tails introduced by `of/at/for` are already
+      // excluded by probablePersonSpans and remain valid.
+      return !otherPeople.some((person) =>
+        person.start > role.end && person.start - role.end <= 3);
+    }
+    return false;
+  }));
+}
+
+function explicitPersonIdentityIsBound(clause: string, lead: BasicFactLead): boolean {
+  const value = loosePhrasePattern(lead.value);
+  if (!value) return false;
+  return [
+    new RegExp(`\\b(?:official(?:\\s+(?:name|identity))?|known\\s+as)\\b[^.!?;]{0,48}\\b${value}\\b`, "i"),
+    new RegExp(`\\b${value}\\b\\s*,?\\s*(?:(?:is|was)\\s+)?(?:an?\\s+|the\\s+)?(?:entrepreneur|investor|person)\\b`, "i"),
+  ].some((pattern) => pattern.test(clause));
+}
+
 function loosePhrasePattern(value: string): string {
   return looseTokens(value).map(escapedPattern).join("\\W+");
+}
+
+const FOUNDER_ENTITY_CONTINUATION_TOKENS = new Set([
+  "capital", "company", "corp", "corporation", "dao", "ecosystem", "exchange",
+  "foundation", "global", "group", "holdings", "inc", "labs", "limited", "llc",
+  "ltd", "network", "organization", "platform", "plc", "protocol", "technologies",
+  "technology", "ventures",
+]);
+
+/**
+ * A token-prefix match is not an entity match. `Aave Labs` cannot be recovered
+ * from `Aave Labs Ventures`, and `Aave` cannot be recovered from `Aave
+ * Protocol`. Lowercase prose may follow an entity naturally, while punctuation
+ * or conjunctions close the entity span explicitly.
+ */
+function founderValueHasExactEntityBoundary(clause: string, value: string): boolean {
+  const tokens = sourceTokens(clause);
+  const starts = phraseTokenStarts(tokens, value);
+  if (!starts.length) return false;
+  const valueLength = looseTokens(value).length;
+  return starts.every((start) => {
+    const end = start + valueLength - 1;
+    const current = tokens[end];
+    const next = tokens[end + 1];
+    if (!current || !next) return true;
+    const separator = clause.slice(current.end, next.start);
+    if (/[,.;:!?)]/.test(separator)) return true;
+    if (["and", "but", "while", "whereas"].includes(next.key)) return true;
+    if (FOUNDER_ENTITY_CONTINUATION_TOKENS.has(next.key)) return false;
+    return !/^\p{Lu}[\p{L}\p{M}'’-]+$/u.test(next.raw);
+  });
 }
 
 function founderAttributionIsSupported(
@@ -1658,6 +1963,7 @@ function founderAttributionIsSupported(
   const exactVentureBoundary = "(?=\\s*(?:[,.;:!?)]|$))";
   const generic = "(?:the|this|our)\\s+(?:business|company|exchange|organization|platform|product|project|protocol|service|venture)";
   return attributionClauses(passage).some((clause) => {
+    if (!founderValueHasExactEntityBoundary(clause, lead.value)) return false;
     const hasProjectContext = aliases.some((alias) => looseContainsPhrase(passage, alias));
     if (hasProjectContext && [
       new RegExp(`\\b${generic}\\b[^.!?;]{0,40}\\b${founded}\\s+by\\s+${value}\\b`, "i"),
@@ -1961,6 +2267,22 @@ function governingClaimClause(
       && looseContainsPhrase(clause, lead.attributedEntity!)
       && RELATION_LANGUAGE.test(clause));
     return relationshipBound ? legalClause : null;
+  }
+  if (lead.predicate === "official_identity") {
+    const direct = directClaimClause(clauses, lead, aliases, trustedContextTokens);
+    const personIdentityQuestion = /^(?:person|investor)\.official_identity$/.test(lead.questionId ?? "");
+    if (
+      direct
+      && (!personIdentityQuestion
+        || titleBindsOfficialIdentity(direct, lead)
+        || explicitPersonIdentityIsBound(direct, lead))
+    ) return direct;
+    return clauses.find((clause) =>
+      hasSubjectAlias(clause, aliases)
+      && looseContainsPhrase(clause, lead.value)
+      && predicateIsSupported(clause, lead.predicate)
+      && (titleBindsOfficialIdentity(clause, lead)
+        || (personIdentityQuestion && explicitPersonIdentityIsBound(clause, lead)))) ?? null;
   }
   if (DIRECT_RELATION_PREDICATES.has(lead.predicate)) {
     return directClaimClause(clauses, lead, aliases, trustedContextTokens);
@@ -2489,7 +2811,7 @@ export function verifyBasicFactLead(
     ...authoritativeAssetRelationships.map((relationship) => relationship.name),
   ];
   const counterpartyPredicate = new Set<BasicFactPredicate>([
-    "current_role", "prior_role", "founder", "executive", "founded", "product",
+    "official_identity", "current_role", "prior_role", "founder", "executive", "founded", "product",
     "exit", "track_record", "funding", "investor", "legal_entity", "governance",
     "public_security", "official_token",
   ]).has(lead.predicate);
@@ -2889,6 +3211,67 @@ function currentRoleRelationshipParts(value: string): { role: string; name: stri
   return role && name && CURRENT_CONTROL_ROLE.test(role) ? { role, name } : null;
 }
 
+/**
+ * Search models occasionally return the same official passage for identity
+ * but omit the separate founder row. When a verified current-role fact already
+ * names the organization, recover that founder relationship from the fetched
+ * passage itself. The synthesized row still goes through the normal source
+ * fetch and founder-attribution verifier before it can publish.
+ */
+function sourceBackedFounderRelationshipLeads(
+  ctx: CollectContext,
+  facts: readonly BasicFact[],
+): BasicFactLead[] {
+  const audience = researchAudience(ctx);
+  if (audience === "project") return [];
+  const identities = facts.filter((fact) =>
+    fact.predicate === "official_identity"
+    && fact.artifact_verified === true
+    && (fact.status === "verified" || fact.status === "corroborated")
+    && plausiblePersonIdentity(fact.value));
+  const relationships = facts.flatMap((fact): Array<{ name: string; discoveryProvider?: BasicFact["discoveryProvider"] }> => {
+    if (
+      fact.predicate !== "current_role"
+      || fact.artifact_verified !== true
+      || fact.status !== "verified"
+    ) return [];
+    const relationship = currentRoleRelationshipParts(fact.value);
+    const name = relationship ? atomicPersonVentureValue(relationship.name) : null;
+    return name ? [{ name, discoveryProvider: fact.discoveryProvider }] : [];
+  });
+  if (!identities.length || !relationships.length) return [];
+
+  const aliases = [...new Set([...subjectAliases(ctx), ...identities.map((identity) => identity.value)])];
+  const seen = new Set<string>();
+  return identities.flatMap((identity) => relationships.flatMap((relationship): BasicFactLead[] =>
+    facts.flatMap((fact): BasicFactLead[] => fact.sources.flatMap((source): BasicFactLead[] => {
+      if (
+        source.artifactVerified !== true
+        || (source.sourceClass !== "official_subject" && source.sourceClass !== "official_counterparty")
+        || !looseContainsPhrase(source.excerpt, identity.value)
+        || !looseContainsPhrase(source.excerpt, relationship.name)
+        || !predicateIsSupported(source.excerpt, "founder")
+      ) return [];
+      const lead: BasicFactLead = {
+        subject: identity.value,
+        predicate: "founder",
+        value: relationship.name,
+        questionId: `${audience}.founder`,
+        excerpt: source.excerpt,
+        sourceUrl: source.url,
+        ...(source.title ? { sourceTitle: source.title } : {}),
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        provider: identity.discoveryProvider ?? relationship.discoveryProvider ?? "claude-web-search",
+      };
+      if (!founderAttributionIsSupported(source.excerpt, lead, aliases)) return [];
+      const key = `${searchable(relationship.name)}::${source.url}`;
+      if (seen.has(key)) return [];
+      seen.add(key);
+      return [lead];
+    }))));
+}
+
 function scopeMatchesOrganizationIdentity(scope: string, name: string): boolean {
   let url: URL;
   try { url = new URL(scope); } catch { return false; }
@@ -2967,6 +3350,7 @@ function verifiedFactAssetRelationships(
       if (
         source.artifactVerified !== true
         || source.relation !== "supports"
+        || (source.sourceClass !== "official_subject" && source.sourceClass !== "official_counterparty")
         || !hasSubjectAlias(source.excerpt, aliases)
         || !CURRENT_CONTROL_ROLE.test(source.excerpt)
         || !PREDICATE_PATTERNS.current_role.test(source.excerpt)
@@ -3140,6 +3524,66 @@ function verifiedCounterpartyHosts(ctx: CollectContext): string[] {
   }))];
 }
 
+const NON_NAME_IDENTITY_TOKENS = new Set([
+  "ceo", "cfo", "coo", "cto", "chief", "company", "dao", "exchange",
+  "founder", "foundation", "labs", "network", "officer", "protocol",
+]);
+
+function plausiblePersonIdentity(value: string): boolean {
+  const tokens = looseTokens(value);
+  return tokens.length >= 2
+    && tokens.length <= 6
+    && tokens.every((token) => !NON_NAME_IDENTITY_TOKENS.has(token));
+}
+
+function profileIdentityIsSufficient(ctx: CollectContext, audience: BasicFactsResearchAudience): boolean {
+  const name = ctx.evidence.profile.resolved_name?.trim()
+    || ctx.evidence.profile.display_name.trim();
+  if (!name) return false;
+  if (audience === "project") return true;
+  const tokens = looseTokens(name);
+  if (tokens.length >= 2) return true;
+  if (tokens.length !== 1) return false;
+  const handle = looseTokens(ctx.handle.replace(/^@/, "")).join("");
+  const token = tokens[0];
+  // `Stani` plus @StaniKulechov is evidence that the collected display name is
+  // incomplete, not a completed real-name resolution. Do not apply this to a
+  // pseudonym whose handle does not begin with the displayed identity.
+  return !(handle.startsWith(token) && handle.slice(token.length).length >= 3);
+}
+
+function verifiedIdentityExtendsProfile(ctx: CollectContext, candidate: string): boolean {
+  if (!plausiblePersonIdentity(candidate)) return false;
+  const current = ctx.evidence.profile.resolved_name?.trim()
+    || ctx.evidence.profile.display_name.trim();
+  const currentTokens = looseTokens(current);
+  const candidateTokens = looseTokens(candidate);
+  if (currentTokens.length >= 2) return personKey(current) === personKey(candidate);
+  if (currentTokens.length !== 1 || !candidateTokens.includes(currentTokens[0])) return false;
+  const handle = looseTokens(ctx.handle.replace(/^@/, "")).join("");
+  return handle === candidateTokens.join("");
+}
+
+function applyVerifiedPersonIdentity(ctx: CollectContext, facts: readonly BasicFact[]): boolean {
+  if (researchAudience(ctx) === "project") return false;
+  const candidate = facts
+    .filter((fact) =>
+      fact.predicate === "official_identity"
+      && fact.artifact_verified === true
+      && (fact.status === "verified" || fact.status === "corroborated")
+      && verifiedIdentityExtendsProfile(ctx, fact.value))
+    .sort((left, right) => looseTokens(right.value).length - looseTokens(left.value).length)[0];
+  if (!candidate) return false;
+  const current = ctx.evidence.profile.resolved_name?.trim() ?? "";
+  if (personKey(current) === personKey(candidate.value)) return false;
+  ctx.evidence.profile.resolved_name = candidate.value;
+  if (ctx.evidence.profile.identity_confidence !== "Confirmed") {
+    ctx.evidence.profile.identity_confidence = "Probable";
+  }
+  ctx.evidence.profile.identity_note = `${candidate.value} was resolved from fetched, source-backed identity evidence.`;
+  return true;
+}
+
 function deterministicQuestionAnswerRefs(
   ctx: CollectContext,
   question: BasicFactsResearchQuestion,
@@ -3160,7 +3604,7 @@ function deterministicQuestionAnswerRefs(
   if (
     question.predicate === "official_identity"
     && ctx.evidence.profile.profile_collection_state === "resolved"
-    && (ctx.evidence.profile.resolved_name?.trim() || ctx.evidence.profile.display_name.trim())
+    && profileIdentityIsSufficient(ctx, question.audience)
   ) add(`profile:${ctx.evidence.profile.profile_provider ?? "provider"}:${ctx.handle.toLowerCase()}`);
   if (question.predicate === "official_token" && ctx.evidence.projectToken?.verified) {
     add(`project-token:${ctx.evidence.projectToken.coingeckoId}`);
@@ -3274,17 +3718,20 @@ export async function collectBasicFacts(
   });
 
   const primary = normalizeDiscoveryOutput(await discover(ctx, questions));
-  const primaryLeads = selectBasicFactLeads(primary.leads);
+  const primaryLeads = selectBasicFactLeads([
+    ...officialIdentityBootstrapLeads(ctx),
+    ...primary.leads,
+  ]);
   ctx.evidence.basicFactLeads = primaryLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = [];
 
-  const aliases = subjectAliases(ctx);
+  let aliases = subjectAliases(ctx);
   const officialHosts = [ctx.evidence.profile.website]
     .filter((value): value is string => Boolean(value))
     .flatMap((value) => {
       try { return [new URL(value).toString()]; } catch { return []; }
     });
-  const officialCounterpartyHosts = verifiedCounterpartyHosts(ctx);
+  let officialCounterpartyHosts = verifiedCounterpartyHosts(ctx);
   const ventureAssetRelationships = verifiedVentureAssetRelationships(ctx);
   const sourceByUrl = new Map<string, Promise<PublicTextResult>>();
   const fetchOnce = (url: string): Promise<PublicTextResult> => {
@@ -3354,10 +3801,46 @@ export async function collectBasicFacts(
       .filter((fact): fact is BasicFact => fact !== null);
   };
 
-  const primaryVerified = await verifyLeads(primaryLeads, MAX_SOURCES);
+  const expandVerificationContext = (facts: readonly BasicFact[]): boolean => {
+    let changed = false;
+    const relationshipScopes = verifiedFactAssetRelationships(ctx, facts)
+      .flatMap((relationship) => relationship.officialScopes);
+    const nextCounterpartyHosts = [...new Set([
+      ...officialCounterpartyHosts,
+      ...relationshipScopes,
+    ])];
+    if (nextCounterpartyHosts.length !== officialCounterpartyHosts.length) {
+      officialCounterpartyHosts = nextCounterpartyHosts;
+      changed = true;
+    }
+    if (applyVerifiedPersonIdentity(ctx, facts)) changed = true;
+    const nextAliases = [...new Set([...aliases, ...subjectAliases(ctx)])];
+    if (nextAliases.length !== aliases.length) {
+      aliases = nextAliases;
+      changed = true;
+    }
+    return changed;
+  };
+
+  const verifyWithExpandedContext = async (
+    leads: readonly BasicFactLead[],
+    sourceLimit: number,
+    assetRelationships: readonly VerifiedVentureAssetRelationship[] = ventureAssetRelationships,
+  ): Promise<BasicFact[]> => {
+    const candidates: BasicFact[] = [];
+    for (let pass = 0; pass < 3; pass += 1) {
+      candidates.push(...await verifyLeads(leads, sourceLimit, assetRelationships));
+      const published = resolveBasicFactCandidates(candidates);
+      if (!expandVerificationContext(published)) break;
+    }
+    return candidates;
+  };
+
+  const primaryVerified = await verifyWithExpandedContext(primaryLeads, MAX_SOURCES);
   const primaryFacts = resolveBasicFactCandidates(primaryVerified);
   const missingCritical = questions.filter((question) =>
     question.critical && deterministicQuestionAnswerRefs(ctx, question, primaryFacts).length === 0);
+  const repairQuestions = boundedRepairQuestions(missingCritical);
   let repair: BasicFactsDiscoveryResult = {
     provider: "none",
     state: "skipped",
@@ -3367,20 +3850,47 @@ export async function collectBasicFacts(
     failedBatches: 0,
     detail: missingCritical.length ? "repair provider not configured" : "no critical gaps",
   };
-  if (missingCritical.length && (dependencies.repair || !dependencies.discover)) {
+  if (repairQuestions.length && (dependencies.repair || !dependencies.discover)) {
     const output = dependencies.repair
-      ? await dependencies.repair(ctx, missingCritical)
-      : await discoverRepair(ctx, missingCritical, primary.provider);
+      ? await dependencies.repair(ctx, repairQuestions)
+      : await discoverRepair(ctx, repairQuestions);
     repair = normalizeDiscoveryOutput(output);
+    if (missingCritical.length > repairQuestions.length) {
+      repair.detail = [
+        repair.detail,
+        `${repairQuestions.length}/${missingCritical.length} critical gaps searched within the repair budget`,
+      ].filter(Boolean).join("; ");
+    }
   }
   const repairLeads = selectBasicFactLeads(repair.leads);
-  const repairVerified = await verifyLeads(repairLeads, Math.min(12, MAX_SOURCES));
-  const relationshipFacts = resolveBasicFactCandidates([...primaryVerified, ...repairVerified]);
+  const repairVerified = await verifyWithExpandedContext(repairLeads, Math.min(12, MAX_SOURCES));
+  const discoveredLeads = mergeLeads(primaryLeads, repairLeads);
+  // A repaired identity can add the full surname alias needed by an earlier
+  // source passage, while a repaired role can establish the organization scope
+  // needed by an earlier identity lead. Recheck the bounded combined set using
+  // the now-expanded deterministic context; fetchOnce reuses every artifact.
+  const contextualVerified = await verifyWithExpandedContext(discoveredLeads, MAX_SOURCES);
+  const relationshipFactsBeforeFounderRecovery = resolveBasicFactCandidates([
+    ...primaryVerified,
+    ...repairVerified,
+    ...contextualVerified,
+  ]);
+  const recoveredFounderLeads = sourceBackedFounderRelationshipLeads(ctx, relationshipFactsBeforeFounderRecovery);
+  const recoveredFounderVerified = await verifyWithExpandedContext(
+    recoveredFounderLeads,
+    Math.min(8, MAX_SOURCES),
+  );
+  const allLeads = mergeLeads(discoveredLeads, recoveredFounderLeads);
+  const relationshipFacts = resolveBasicFactCandidates([
+    ...primaryVerified,
+    ...repairVerified,
+    ...contextualVerified,
+    ...recoveredFounderVerified,
+  ]);
   const authoritativeAssetRelationships = mergeVentureAssetRelationships([
     ...ventureAssetRelationships,
     ...verifiedFactAssetRelationships(ctx, relationshipFacts),
   ]);
-  const allLeads = mergeLeads(primaryLeads, repairLeads);
   // Asset leads can arrive in the same repair response that first proves the
   // person's current control relationship. Re-run only those leads against
   // the newly established venture scopes; fetchOnce reuses earlier responses
@@ -3395,6 +3905,8 @@ export async function collectBasicFacts(
   const sourceVerifiedBeforeRegistry = resolveBasicFactCandidates([
     ...primaryVerified,
     ...repairVerified,
+    ...contextualVerified,
+    ...recoveredFounderVerified,
     ...relationshipBoundAssets,
   ]);
   let registryVerified: BasicFact[] = [];
@@ -3420,11 +3932,13 @@ export async function collectBasicFacts(
     ...primaryVerified,
     ...registryVerified,
     ...repairVerified,
+    ...contextualVerified,
+    ...recoveredFounderVerified,
     ...relationshipBoundAssets,
   ];
   ctx.evidence.basicFactLeads = allLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = resolveBasicFactCandidates(verified);
-  const repairQuestionIds = new Set(missingCritical.map((question) => question.id));
+  const repairQuestionIds = new Set(repairQuestions.map((question) => question.id));
   ctx.evidence.basicFactQuestionLedger = questionLedger(
     ctx,
     questions,

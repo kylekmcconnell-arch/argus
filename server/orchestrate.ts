@@ -50,7 +50,12 @@ import { coingeckoAdapter } from "./adapters/coingecko";
 import { redditAdapter } from "./adapters/reddit";
 import { onchainAdapter } from "./adapters/onchain";
 import { basicFactsAdapter } from "./adapters/basicFacts";
-import { hasResolvedRealName, offchainAdapter } from "./adapters/offchain";
+import {
+  hasResolvedRealName,
+  offchainAdapter,
+  refreshResolvedNameOffchain,
+  resolvedOffchainName,
+} from "./adapters/offchain";
 import { archivedAffiliation } from "./adapters/wayback";
 import { resolveForHandle } from "./adapters/wallet";
 import { collectTrustGraph } from "./adapters/trustgraph";
@@ -145,6 +150,12 @@ const attemptTotals = (providers?: readonly string[], operations?: readonly stri
     return totals;
   }, { total: 0, succeeded: 0, partial: 0, failed: 0, cached: 0 });
 };
+
+const ANALYST_ATTEMPT_PROVIDERS = ["claude", "grok"] as const;
+
+/** Provider-attributable attempts that can establish a fresh analyst run. */
+export const analystAttemptTotals = (operations: readonly string[]): AttemptTotals =>
+  attemptTotals(ANALYST_ATTEMPT_PROVIDERS, operations);
 
 const attemptDelta = (before: AttemptTotals, after: AttemptTotals): AttemptTotals => ({
   total: Math.max(0, after.total - before.total),
@@ -425,7 +436,7 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
   // the project's own team page (handle "VulcanForged" -> vulcanforged.com, whose
   // docs.* /team is the canonical roster). Failed guesses just fetch nothing.
   const teamDomain = domain || `${ctx.handle.replace(/^@/, "").toLowerCase()}.com`;
-  // Claude claim extraction is optional. Do not let a missing Anthropic key
+  // AI claim extraction is optional. Do not let a missing model key
   // suppress independent Grok/X discovery or the keyless first-party team
   // fetchers below; each provider must fail and attribute independently.
   const claimsPromise = canExtractClaims
@@ -458,7 +469,7 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
         claim: `Model-extracted self-claim suggests ${role}; provider corroboration is required before routing.`,
         source_url: "",
         source_date: "",
-        source_author: "claude-intake",
+        source_author: "ai-analyst-intake",
         verification_status: "Rumor",
         independent_source_count: 0,
         polarity: 0,
@@ -504,7 +515,7 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
       artifact_verified: false,
     }));
     const n = claims.ventures.length + claims.testimonials.length + claims.advised.length + claims.promotions.length;
-    ctx.emit({ phase: "P0 · Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"}. Role candidates remain non-governing until independently verified.`, source: "claude", tone: "neutral" });
+    ctx.emit({ phase: "P0 · Intake", label: "Claims extracted", detail: `${n} self-claims across ${candidateRoles.join(", ") || "no role candidates"}. Role candidates remain non-governing until independently verified.`, source: "AI analyst", tone: "neutral" });
   }
 
   // ── Affiliation discovery: every venture the subject is publicly tied to in
@@ -1069,10 +1080,10 @@ const FOUNDER_DECISION_QUESTION_GROUPS: readonly FounderDecisionQuestionGroup[] 
   },
   {
     id: "founder-track-record",
-    predicates: ["track_record", "exit", "prior_role"],
+    predicates: ["track_record", "exit", "prior_role", "founded", "product", "launched", "traction"],
     answerMode: "any",
-    answeredNote: "at least one prior role, venture outcome, or exit is tied to verified evidence",
-    emptyNote: "the source search completed without a publishable prior role, venture outcome, or exit",
+    answeredNote: "at least one prior role, founded venture, shipped product, traction result, venture outcome, or exit is tied to verified evidence",
+    emptyNote: "the source search completed without a publishable prior role, founded venture, shipped product, traction result, venture outcome, or exit",
   },
   {
     id: "founder-control-conflicts",
@@ -1971,6 +1982,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     // Refresh the trusted role set so the research model receives the correct
     // role-aware question set and critical-gap repair plan.
     if (a.id === "basic-facts") evidence.roles = providerBackedRoles(evidence);
+    const nameBeforeBasicFacts = a.id === "basic-facts" ? resolvedOffchainName(ctx) : null;
     const stageStartedAt = startRuntimeStage(`adapter:${a.id}`);
     try {
       const before = attemptTotals();
@@ -1991,6 +2003,36 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       emit({ phase: "Collect", label: `${a.label} error`, detail: String(e), tone: "warn" });
     }
     finishRuntimeStage(`adapter:${a.id}`, stageStartedAt);
+    if (a.id === "basic-facts") {
+      const resolvedName = resolvedOffchainName(ctx);
+      if (resolvedName && resolvedName.toLowerCase() !== nameBeforeBasicFacts?.toLowerCase()) {
+        const refreshStartedAt = startRuntimeStage("offchain-full-name-refresh");
+        try {
+          const refresh = await refreshResolvedNameOffchain(ctx);
+          const prior = adapterResults.get("offchain-diligence");
+          const states = [prior?.state, refresh.state].filter(
+            (state): state is AdapterRunResult["state"] => Boolean(state && state !== "skipped"),
+          );
+          const failed = states.filter((state) => state === "failed").length;
+          const partial = states.filter((state) => state === "partial").length;
+          const state: AdapterRunResult["state"] = states.length && failed === states.length
+            ? "failed"
+            : failed || partial
+              ? "partial"
+              : "executed";
+          const combined = {
+            state,
+            detail: [prior?.detail, refresh.detail].filter(Boolean).join("; "),
+          } satisfies AdapterRunResult;
+          adapterResults.set("offchain-diligence", combined);
+          checkTracker.provider("offchain-diligence", offchainAdapter.label, combined.state, combined.detail);
+        } catch (error) {
+          checkTracker.provider("offchain-diligence", offchainAdapter.label, "partial", `full-name refresh failed: ${String(error)}`);
+          emit({ phase: "Off-chain", label: "Full-name refresh error", detail: String(error), tone: "warn" });
+        }
+        finishRuntimeStage("offchain-full-name-refresh", refreshStartedAt);
+      }
+    }
   }
   if (fixture) {
     await projectTokenPass();
@@ -2220,7 +2262,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   };
 
   // ── Phase 4 contradiction scan + axis scoring, run CONCURRENTLY (both read the
-  //    same evidence) so the extra Claude call doesn't extend the critical path. ──
+  //    same evidence) so the extra analyst call doesn't extend the critical path. ──
   const analystStartedAt = startRuntimeStage("analyst");
   if (analystAvailable()) {
     // Decision models receive a structurally isolated packet. Related-entity and
@@ -2237,7 +2279,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       emit({ phase: "Contradictions", label: "Scan materials", detail: "Cross-referencing every claim against the collected evidence for internal contradictions…", tone: "neutral" });
     }
     if (scoringPreflight.state === "ready") {
-      emit({ phase: "Analyst", label: "Score axes", detail: "Claude analyst scoring every axis from the collected evidence…", tone: "neutral" });
+      emit({ phase: "Analyst", label: "Score axes", detail: "AI analyst scoring every axis from the collected evidence…", tone: "neutral" });
     }
     if (frozenAxisEvidence.length > 0) {
       evidence.axisCitationVersion = 1;
@@ -2249,8 +2291,8 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     // The validator accepts all requested axes or none, and the collector ledger
     // must independently confirm that a fresh analyst attempt occurred.
     evidence.axes = [];
-    const contradictionBefore = attemptTotals(["claude"], ["record_contradictions"]);
-    const scorerBefore = attemptTotals(["claude"], ["record_verdict"]);
+    const contradictionBefore = analystAttemptTotals(["record_contradictions"]);
+    const scorerBefore = analystAttemptTotals(["record_verdict"]);
     const analystDeadlineAt = options?.analystDeadlineAt
       ?? runtimeStartedAt
         + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
@@ -2267,11 +2309,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     ]);
     const contradictionAttempts = attemptDelta(
       contradictionBefore,
-      attemptTotals(["claude"], ["record_contradictions"]),
+      analystAttemptTotals(["record_contradictions"]),
     );
     const scorerAttempts = attemptDelta(
       scorerBefore,
-      attemptTotals(["claude"], ["record_verdict"]),
+      analystAttemptTotals(["record_verdict"]),
     );
     const contradictionObserved = contradictionAttempts.total > 0;
     const scorerObserved = scorerAttempts.total > 0;
@@ -2287,17 +2329,17 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     } else if (contradictionObserved && found && found.length) {
       evidence.contradictions = found;
       const worst = found.some((c) => c.severity === "high") ? "bad" : "warn";
-      emit({ phase: "Contradictions", label: `${found.length} contradiction${found.length === 1 ? "" : "s"}`, detail: found.slice(0, 3).map((c) => `${c.claim} vs ${c.conflict}`).join(" · "), source: "claude", tone: worst });
+      emit({ phase: "Contradictions", label: `${found.length} contradiction${found.length === 1 ? "" : "s"}`, detail: found.slice(0, 3).map((c) => `${c.claim} vs ${c.conflict}`).join(" · "), source: "AI analyst", tone: worst });
     } else if (contradictionObserved && found) {
-      emit({ phase: "Contradictions", label: "None found", detail: "No internal contradictions surfaced across the subject's claims and the evidence.", source: "claude", tone: "good" });
+      emit({ phase: "Contradictions", label: "None found", detail: "No internal contradictions surfaced across the subject's claims and the evidence.", source: "AI analyst", tone: "good" });
     } else {
-      emit({ phase: "Contradictions", label: "Incomplete", detail: "Contradiction analysis did not return a complete result.", source: "claude", tone: "warn" });
+      emit({ phase: "Contradictions", label: "Incomplete", detail: "Contradiction analysis did not return a complete result.", source: "AI analyst", tone: "warn" });
     }
     if (scorerObserved && verdict) {
       evidence.axes = verdict.axes;
       evidence.headline = verdict.headline || evidence.headline;
       if (verdict.identity_note) evidence.profile.identity_note = verdict.identity_note;
-      emit({ phase: "Analyst", label: "Scored", detail: `${verdict.axes.length} axes scored.`, source: "claude", tone: "good" });
+      emit({ phase: "Analyst", label: "Scored", detail: `${verdict.axes.length} axes scored.`, source: "AI analyst", tone: "good" });
     } else if (scoringPreflight.state === "packet_oversize") {
       evidence.headline = `Investigation incomplete: the analyst evidence packet could not preserve required coverage within ${ANALYST_EVIDENCE_MAX_CHARS.toLocaleString("en-US")} characters. No axis scores were inferred.`;
       emit({
@@ -2377,13 +2419,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
                 ? "evidence preflight passed; no scorer provider attempt was observed"
                 : `${scorerAttempts.total} observed scorer attempt${scorerAttempts.total === 1 ? "" : "s"}; ${verdict ? "complete axis set returned" : "axis result incomplete"}`;
     checkTracker.provider(
-      "claude-analyst",
-      "Claude analyst",
+      "ai-analyst",
+      "AI analyst",
       analystState,
       analystDetail,
     );
   } else {
-    checkTracker.provider("claude-analyst", "Claude analyst", "unavailable", "analyst provider is not configured");
+    checkTracker.provider("ai-analyst", "AI analyst", "unavailable", "analyst provider is not configured");
   }
   finishRuntimeStage("analyst", analystStartedAt);
 
@@ -2412,7 +2454,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   dossier.providerSnapshot = checkTracker.providers();
   // Attach what this run actually spent, so the report library can show it.
   dossier.cost = cost;
-  emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} searches ≈${cost.sources} sources · Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
+  emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} calls, ≈${cost.sources} search sources · Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
   finishRuntimeStage("pipeline", runtimeStartedAt);
   return dossier;
 }

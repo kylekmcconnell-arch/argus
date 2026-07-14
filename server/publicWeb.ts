@@ -271,6 +271,15 @@ const responseHeaders = (rawHeaders: readonly string[]): Headers => {
   return headers;
 };
 
+/** WHATWG Response accepts only 200-599, while Node can surface non-standard
+ * upstream codes through 999. Treat 6xx-9xx denial codes like a recoverable
+ * 403 and every other invalid final status like a bounded gateway failure. */
+export function fetchCompatibleResponseStatus(statusCode: number | undefined): number {
+  if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 200 && statusCode <= 599) return statusCode;
+  if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 600 && statusCode <= 999) return 403;
+  return 502;
+}
+
 const nativeRequest: RequestFn = (url, options) => new Promise<Response>((resolve, reject) => {
   const request = url.protocol === "https:" ? httpsRequest : httpRequest;
   const requestOptions: RequestOptions = {
@@ -283,16 +292,26 @@ const nativeRequest: RequestFn = (url, options) => new Promise<Response>((resolv
     agent: false,
   };
   const outgoing = request(url, requestOptions, (incoming) => {
-    const status = incoming.statusCode ?? 500;
-    const headers = responseHeaders(incoming.rawHeaders);
-    const noBody = status === 204 || status === 205 || status === 304 || (status >= 300 && status < 400);
-    if (noBody) {
-      incoming.resume();
-      resolve(new Response(null, { status, statusText: incoming.statusMessage, headers }));
-      return;
+    try {
+      const upstreamStatus = incoming.statusCode;
+      const status = fetchCompatibleResponseStatus(upstreamStatus);
+      const headers = responseHeaders(incoming.rawHeaders);
+      if (status !== upstreamStatus && upstreamStatus !== undefined) {
+        headers.set("x-argus-upstream-status", String(upstreamStatus));
+      }
+      const statusText = status === upstreamStatus ? incoming.statusMessage : "Upstream response rejected";
+      const noBody = status === 204 || status === 205 || status === 304 || (status >= 300 && status < 400);
+      if (noBody) {
+        incoming.resume();
+        resolve(new Response(null, { status, statusText, headers }));
+        return;
+      }
+      const body = Readable.toWeb(incoming) as ReadableStream<Uint8Array>;
+      resolve(new Response(body, { status, statusText, headers }));
+    } catch (error) {
+      incoming.destroy();
+      reject(error);
     }
-    const body = Readable.toWeb(incoming) as ReadableStream<Uint8Array>;
-    resolve(new Response(body, { status, statusText: incoming.statusMessage, headers }));
   });
   outgoing.once("error", reject);
   outgoing.end();

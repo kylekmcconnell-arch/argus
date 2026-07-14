@@ -47,6 +47,50 @@ describe("X provider attempt accounting", () => {
     }));
   });
 
+  it("bypasses both cache reads and writes for live Grok canaries", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("SUPABASE_URL", "https://cache.example");
+    vi.stubEnv("SUPABASE_SECRET_KEY", "service-test-key");
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      expect(String(input)).toBe("https://api.x.ai/v1/responses");
+      return json({
+        output_text: "fresh result",
+        output: [{ type: "web_search_call" }],
+        usage: { input_tokens: 100, output_tokens: 50 },
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    const captured = await withCostLedger(async () => {
+      const result = await grokSearch("system", "user", {
+        cacheKey: "live-canary",
+        bypassCache: true,
+      });
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBe("fresh result");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(captured.cost.grokCalls).toBe(1);
+    expect(captured.cost.calls.some((call) => call.provider === "cache")).toBe(false);
+  });
+
+  it("does not exceed a shared physical-call budget during compatibility fallback", async () => {
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    const fetchMock = vi.fn().mockResolvedValue(json({ error: "unsupported max_tool_calls" }, 400));
+    vi.stubGlobal("fetch", fetchMock);
+    let remainingCalls = 1;
+
+    const result = await grokSearch("system", "user", {
+      maxToolCalls: 2,
+      claimProviderCall: () => remainingCalls-- > 0,
+    });
+
+    expect(result).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("records a Grok response parse failure instead of dropping the attempt", async () => {
     vi.stubEnv("XAI_API_KEY", "xai-test-key");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("not-json", { status: 200 })));

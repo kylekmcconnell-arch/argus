@@ -185,6 +185,7 @@ function sourceProviderLabel(provider: string): string {
     twitterapi: "Official X profile",
     grok: "Web research",
     "claude-web-search": "Web research",
+    "argus-identity-bootstrap": "ARGUS identity check",
     "claude-vision": "Image review",
     github: "GitHub",
     opensanctions: "Sanctions screening",
