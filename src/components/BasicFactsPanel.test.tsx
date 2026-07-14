@@ -426,6 +426,45 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).not.toContain("Sources disagree");
   });
 
+  it("shows multiple founder-linked tokens plainly without descriptive lead qualifiers", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          audience="founder"
+          facts={[
+            {
+              predicate: "official_token",
+              value: "cbBTC",
+              qualifier: "ERC20 token backed 1:1 by Bitcoin held by Coinbase",
+              status: "verified",
+              sources: [{ url: "https://www.coinbase.com/cbbtc", relation: "supports" }],
+            },
+            {
+              predicate: "official_token",
+              value: "cbETH",
+              qualifier: "ERC-20 token representing staked ETH issued by Coinbase",
+              status: "verified",
+              sources: [{ url: "https://www.coinbase.com/cbeth", relation: "supports" }],
+            },
+          ]}
+          leads={[
+            {
+              predicate: "official_token",
+              value: "cbBTC",
+              qualifier: "ERC20 token backed 1:1 by Bitcoin held by Coinbase",
+              sourceUrl: "https://www.coinbase.com/cbbtc",
+            },
+          ]}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("cbBTC, cbETH");
+    expect(container.textContent).not.toContain("ERC20 token backed");
+    expect(container.textContent).not.toContain("ERC-20 token representing");
+    expect(container.textContent).not.toContain("Conflicted");
+  });
+
   it("maps every canonical collector predicate to a plain investor question", () => {
     const canonicalFacts = [
       ["official_identity", "Jupiter"],

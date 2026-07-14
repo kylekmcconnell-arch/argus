@@ -7497,6 +7497,7 @@ var MAX_REDIRECTS = 4;
 var JINA_READER_ORIGIN = "https://r.jina.ai/";
 var PUBLIC_WEB_USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
 var JINA_RECOVERABLE_FAILURES = /* @__PURE__ */ new Set([
+  "anti_bot_challenge",
   "http_403",
   "http_429",
   "transport_error",
@@ -7513,6 +7514,20 @@ var SAFE_CONTENT_TYPES = /* @__PURE__ */ new Set([
   "text/plain",
   "text/xml"
 ]);
+function antiBotChallengeHeaders(headers4) {
+  const mitigation = headers4.get("cf-mitigated") ?? "";
+  const captcha = headers4.get("x-datadome") ?? headers4.get("x-captcha") ?? "";
+  return /challenge|captcha/i.test(`${mitigation} ${captcha}`);
+}
+function antiBotChallengeBody(contentType, text2) {
+  if (!/html|xhtml/i.test(contentType)) return false;
+  const sample = text2.slice(0, 2e5);
+  const cloudflareTitle = /<title[^>]*>\s*just a moment(?:\.{3})?\s*<\/title>/i.test(sample);
+  const cloudflareRuntime = /(?:\/cdn-cgi\/challenge-platform\/|challenges\.cloudflare\.com|\bcf-chl-)/i.test(sample);
+  const otherChallengeRuntime = /(?:captcha-delivery|_pxcaptcha|perimeterx|datadome|incapsula|akamai bot manager)/i.test(sample);
+  const humanPrompt = /(?:verify (?:that )?you are human|checking (?:your )?browser(?: before accessing)?|enable javascript and cookies to continue)/i.test(sample);
+  return cloudflareTitle && cloudflareRuntime || otherChallengeRuntime && humanPrompt;
+}
 function normalizedJinaSource(text2) {
   const matches = [...text2.matchAll(/^URL Source:\s*(\S+)\s*$/gm)];
   if (matches.length !== 1) return null;
@@ -7686,6 +7701,9 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
       if (!target) return { status: "rejected", reason: "unsafe_redirect" };
       continue;
     }
+    if (antiBotChallengeHeaders(response.headers)) {
+      return { status: "failed", reason: "anti_bot_challenge" };
+    }
     if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
     if (contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
@@ -7700,6 +7718,9 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
     if (!bytes) return { status: "failed", reason: "response_too_large" };
     const text2 = bytes.toString("utf8");
     if (!text2.trim()) return { status: "failed", reason: "empty_response" };
+    if (antiBotChallengeBody(contentType, text2)) {
+      return { status: "failed", reason: "anti_bot_challenge" };
+    }
     return {
       status: "ok",
       url: target.url.toString(),
@@ -9511,15 +9532,16 @@ var TOKEN_PAGE_UNCERTAINTY = /\b(?:alleged|candidate|claimed|demo|draft|experime
 function officialVentureAssetPagePassage(document, page, lead, relationships) {
   if (!/^\$?[A-Za-z][A-Za-z0-9.-]{1,15}$/.test(lead.value)) return null;
   const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(page);
-  if (!metadata?.[1] || metadata.index !== 0) return null;
-  const title = normalize(metadata[1]);
-  const bodyStart = metadata[0].length;
-  const body = page.slice(bodyStart);
+  const htmlTitle = /html|xhtml/i.test(document.contentType) ? /<title\b[^>]*>([\s\S]{1,1000}?)<\/title>/i.exec(document.text)?.[1] : void 0;
+  if ((!metadata?.[1] || metadata.index !== 0) && !htmlTitle) return null;
+  const title = normalize(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
+  const body = metadata?.[1] && metadata.index === 0 ? page.slice(metadata[0].length) : page;
   let pathSymbol;
   try {
-    const path = decodeURIComponent(new URL(document.url).pathname).replace(/^\/+|\/+$/g, "");
-    if (!path || path.includes("/")) return null;
-    pathSymbol = searchable(path);
+    const segments = decodeURIComponent(new URL(document.url).pathname).split("/").filter(Boolean);
+    if (segments.length === 2 && !/^[a-z]{2}(?:-[a-z]{2})?$/i.test(segments[0])) return null;
+    if (segments.length !== 1 && segments.length !== 2) return null;
+    pathSymbol = searchable(segments.at(-1) ?? "");
   } catch {
     return null;
   }
@@ -9534,25 +9556,24 @@ function officialVentureAssetPagePassage(document, page, lead, relationships) {
       "i"
     ).exec(body);
     if (wrappedCustody) {
-      const end2 = bodyStart + (wrappedCustody.index ?? 0) + wrappedCustody[0].length;
-      const passage2 = normalize(page.slice(0, end2));
+      const passage2 = normalize(`${title}. ${wrappedCustody[0]}`);
       if (passage2.length <= MAX_SUPPORT_PASSAGE_CHARS && !TOKEN_PAGE_UNCERTAINTY.test(passage2)) return passage2;
     }
     const tokenClass = new RegExp(
       `\\b\\$?${value}\\b[^.!?]{0,140}\\b(?:(?:liquid\\s+staking|wrapped|staked|governance|native|utility|erc[- ]?\\d+)\\s+)?token\\b`,
       "i"
     ).exec(body);
+    const wrappedStakingProduct = new RegExp(
+      `(?:\\bwrap\\s+your\\s+staked\\s+[a-z0-9-]+\\s+to\\s+\\$?${value}\\b|\\b\\$?${value}\\b[^.!?]{0,120}\\btraded\\s+on\\s+${venture}\\b)`,
+      "i"
+    ).exec(body);
     const ventureWhitepaper = new RegExp(
       `(?:\\b${venture}['\u2019]s\\s+whitepaper\\b[^.!?]{0,260}\\b\\$?${value}\\b|\\b\\$?${value}\\b[^.!?]{0,260}\\b${venture}['\u2019]s\\s+whitepaper\\b)`,
       "i"
     ).exec(body);
-    if (!tokenClass || !ventureWhitepaper) continue;
-    const start = Math.min(tokenClass.index ?? 0, ventureWhitepaper.index ?? 0);
-    const end = Math.max(
-      (tokenClass.index ?? 0) + tokenClass[0].length,
-      (ventureWhitepaper.index ?? 0) + ventureWhitepaper[0].length
-    );
-    const passage = normalize(body.slice(start, end));
+    const productClass = tokenClass ?? wrappedStakingProduct;
+    if (!productClass || !ventureWhitepaper) continue;
+    const passage = normalize(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`);
     if (passage.length <= MAX_SUPPORT_PASSAGE_CHARS && looseContainsPhrase(passage, relationship.name) && looseContainsPhrase(passage, lead.value) && !TOKEN_PAGE_UNCERTAINTY.test(passage)) return passage;
   }
   return null;
@@ -9566,7 +9587,7 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
   const ventureAssetPredicate = lead.predicate === "public_security" || lead.predicate === "official_token";
   const authoritativeAssetRelationships = ventureAssetPredicate ? ventureAssetRelationships.filter((relationship) => {
     const ventureNamedByLead = looseContainsPhrase(
-      `${lead.value} ${lead.excerpt} ${lead.sourceTitle ?? ""}`,
+      `${lead.value} ${lead.qualifier ?? ""} ${lead.excerpt} ${lead.sourceTitle ?? ""}`,
       relationship.name
     );
     const ventureOfficial = relationship.officialScopes.some((scope) => sameOfficialScope(document, [scope]));

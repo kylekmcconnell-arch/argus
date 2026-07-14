@@ -204,6 +204,47 @@ describe("public web evidence fetcher", () => {
     }));
   });
 
+  it("recovers an explicit HTTP 200 Cloudflare interstitial through the bounded Jina reader", async () => {
+    const source = "https://example.com/evidence";
+    const challenge = `<!doctype html><html><head><title>Just a moment...</title></head>
+      <body>Enable JavaScript and cookies to continue<script src="/cdn-cgi/challenge-platform/run.js"></script></body></html>`;
+    const requestMock = vi.fn(async (url: URL) => url.hostname === "example.com"
+      ? new Response(challenge, { status: 200, headers: { "content-type": "text/html" } })
+      : new Response(`Title: Evidence\nURL Source: ${source}\nMarkdown Content:\nVerified source text.`, {
+        status: 200,
+        headers: { "content-type": "text/plain" },
+      }));
+
+    const result = await fetchPublicTextWithRecovery(source, {
+      request: requestMock,
+      lookup: publicLookup,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: "ok",
+      url: source,
+      retrievalMethod: "reader_recovery",
+      retrievalProvider: "jina-reader",
+    }));
+    expect(requestMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not send a query-bearing URL to the reader when HTTP 200 contains a challenge", async () => {
+    const source = "https://example.com/evidence?share=secret";
+    const requestMock = vi.fn(async () => new Response("<html><title>Just a moment...</title><script src='/cdn-cgi/challenge-platform/run.js'></script></html>", {
+      status: 200,
+      headers: { "content-type": "text/html" },
+    }));
+
+    const result = await fetchPublicTextWithRecovery(source, {
+      request: requestMock,
+      lookup: publicLookup,
+    });
+
+    expect(result).toEqual({ status: "failed", reason: "anti_bot_challenge" });
+    expect(requestMock).toHaveBeenCalledTimes(1);
+  });
+
   it.each([404, 410, 500, 503])("does not proxy a non-recoverable HTTP %s response", async (status) => {
     const requestMock = vi.fn(async () => new Response("origin failure", { status }));
 

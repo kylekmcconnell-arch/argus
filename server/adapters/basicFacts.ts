@@ -2289,10 +2289,11 @@ const TOKEN_PAGE_UNCERTAINTY = /\b(?:alleged|candidate|claimed|demo|draft|experi
  * Some first-party product pages split one proof across their page title and
  * product copy. Coinbase's cbBTC page, for example, names the product in the
  * title and separately says Coinbase wrapped assets are backed 1:1 and held by
- * Coinbase. This narrow reader-page verifier permits that same-page proof only
+ * Coinbase. This narrow product-page verifier permits that same-page proof only
  * when a verified current venture relationship already exists, the official
- * root product URL and title both name the symbol, and the body independently
- * binds the product class to that venture. Generic asset listings, partner
+ * product URL and title both name the symbol, and the body independently binds
+ * the product class to that venture. A standard locale prefix introduced by an
+ * official same-host redirect is allowed. Generic asset listings, partner
  * tokens, and externally issued assets remain rejected.
  */
 function officialVentureAssetPagePassage(
@@ -2303,15 +2304,22 @@ function officialVentureAssetPagePassage(
 ): string | null {
   if (!/^\$?[A-Za-z][A-Za-z0-9.-]{1,15}$/.test(lead.value)) return null;
   const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(page);
-  if (!metadata?.[1] || metadata.index !== 0) return null;
-  const title = normalize(metadata[1]);
-  const bodyStart = metadata[0].length;
-  const body = page.slice(bodyStart);
+  const htmlTitle = /html|xhtml/i.test(document.contentType)
+    ? /<title\b[^>]*>([\s\S]{1,1000}?)<\/title>/i.exec(document.text)?.[1]
+    : undefined;
+  if ((!metadata?.[1] || metadata.index !== 0) && !htmlTitle) return null;
+  const title = normalize(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
+  const body = metadata?.[1] && metadata.index === 0
+    ? page.slice(metadata[0].length)
+    : page;
   let pathSymbol: string;
   try {
-    const path = decodeURIComponent(new URL(document.url).pathname).replace(/^\/+|\/+$/g, "");
-    if (!path || path.includes("/")) return null;
-    pathSymbol = searchable(path);
+    const segments = decodeURIComponent(new URL(document.url).pathname)
+      .split("/")
+      .filter(Boolean);
+    if (segments.length === 2 && !/^[a-z]{2}(?:-[a-z]{2})?$/i.test(segments[0])) return null;
+    if (segments.length !== 1 && segments.length !== 2) return null;
+    pathSymbol = searchable(segments.at(-1) ?? "");
   } catch {
     return null;
   }
@@ -2328,8 +2336,7 @@ function officialVentureAssetPagePassage(
       "i",
     ).exec(body);
     if (wrappedCustody) {
-      const end = bodyStart + (wrappedCustody.index ?? 0) + wrappedCustody[0].length;
-      const passage = normalize(page.slice(0, end));
+      const passage = normalize(`${title}. ${wrappedCustody[0]}`);
       if (passage.length <= MAX_SUPPORT_PASSAGE_CHARS && !TOKEN_PAGE_UNCERTAINTY.test(passage)) return passage;
     }
 
@@ -2337,17 +2344,17 @@ function officialVentureAssetPagePassage(
       `\\b\\$?${value}\\b[^.!?]{0,140}\\b(?:(?:liquid\\s+staking|wrapped|staked|governance|native|utility|erc[- ]?\\d+)\\s+)?token\\b`,
       "i",
     ).exec(body);
+    const wrappedStakingProduct = new RegExp(
+      `(?:\\bwrap\\s+your\\s+staked\\s+[a-z0-9-]+\\s+to\\s+\\$?${value}\\b|\\b\\$?${value}\\b[^.!?]{0,120}\\btraded\\s+on\\s+${venture}\\b)`,
+      "i",
+    ).exec(body);
     const ventureWhitepaper = new RegExp(
       `(?:\\b${venture}['’]s\\s+whitepaper\\b[^.!?]{0,260}\\b\\$?${value}\\b|\\b\\$?${value}\\b[^.!?]{0,260}\\b${venture}['’]s\\s+whitepaper\\b)`,
       "i",
     ).exec(body);
-    if (!tokenClass || !ventureWhitepaper) continue;
-    const start = Math.min(tokenClass.index ?? 0, ventureWhitepaper.index ?? 0);
-    const end = Math.max(
-      (tokenClass.index ?? 0) + tokenClass[0].length,
-      (ventureWhitepaper.index ?? 0) + ventureWhitepaper[0].length,
-    );
-    const passage = normalize(body.slice(start, end));
+    const productClass = tokenClass ?? wrappedStakingProduct;
+    if (!productClass || !ventureWhitepaper) continue;
+    const passage = normalize(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`);
     if (
       passage.length <= MAX_SUPPORT_PASSAGE_CHARS
       && looseContainsPhrase(passage, relationship.name)
@@ -2379,7 +2386,7 @@ export function verifyBasicFactLead(
   const authoritativeAssetRelationships = ventureAssetPredicate
     ? ventureAssetRelationships.filter((relationship) => {
       const ventureNamedByLead = looseContainsPhrase(
-        `${lead.value} ${lead.excerpt} ${lead.sourceTitle ?? ""}`,
+        `${lead.value} ${lead.qualifier ?? ""} ${lead.excerpt} ${lead.sourceTitle ?? ""}`,
         relationship.name,
       );
       const ventureOfficial = relationship.officialScopes.some((scope) => sameOfficialScope(document, [scope]));

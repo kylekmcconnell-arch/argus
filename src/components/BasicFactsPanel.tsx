@@ -141,7 +141,9 @@ function answerFor(fact: BasicFactView): string {
   }
   if (fact.status === "unresolved") return "No verified answer was found in this snapshot.";
   const value = displayValue(fact.value) || displayValue(fact.normalizedValue);
-  const qualifier = fact.qualifier?.trim();
+  const qualifier = canonicalBasicFactPredicate(fact.predicate) === "official_token"
+    ? undefined
+    : fact.qualifier?.trim();
   const answer = value && qualifier && !value.toLowerCase().includes(qualifier.toLowerCase())
     ? `${value} · ${qualifier}`
     : value;
@@ -249,7 +251,8 @@ function factRows(
       answerFor(fact),
     ].filter((value) => value && !/^(?:No verified answer|Not applicable|Sources disagree|A source was verified)/.test(value))
       .map((value) => [canonicalBasicFactComparisonValue(predicate, value), value])).values()];
-    const conflictingValues = SINGLE_VALUE_PREDICATES.has(predicate) && values.length > 1;
+    const repeatableFounderAsset = predicate === "official_token" && audience !== "project";
+    const conflictingValues = SINGLE_VALUE_PREDICATES.has(predicate) && !repeatableFounderAsset && values.length > 1;
     const combinedStatus = existing.status === "conflicted" || fact.status === "conflicted" || conflictingValues
       ? "conflicted"
       : existing.status === "corroborated" || fact.status === "corroborated"
@@ -576,7 +579,9 @@ export function BasicFactsPanel({
             {discoveryLeads.map((lead, index) => {
               const urls = [...new Set([lead.sourceUrl, ...(lead.candidateUrls ?? [])].flatMap((url) => safeHttpUrl(url) ? [safeHttpUrl(url)!] : []))];
               const leadValue = displayValue(lead.value);
-              const leadQualifier = lead.qualifier?.trim();
+              const leadQualifier = canonicalBasicFactPredicate(lead.predicate) === "official_token"
+                ? undefined
+                : lead.qualifier?.trim();
               const leadAnswer = leadValue && leadQualifier && !leadValue.toLowerCase().includes(leadQualifier.toLowerCase())
                 ? `${leadValue} · ${leadQualifier}`
                 : leadValue;

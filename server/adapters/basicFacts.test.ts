@@ -2403,6 +2403,58 @@ Coinbase's whitepaper provides in-depth details about cbETH's unique design and 
       .toEqual(expect.objectContaining({ status: "answered" }));
   });
 
+  it("verifies Coinbase wrapped assets after a same-host locale redirect returns direct HTML", async () => {
+    const relationship = {
+      name: "Coinbase",
+      officialScopes: ["https://www.coinbase.com"],
+    };
+    const cases = [
+      {
+        symbol: "cbBTC",
+        url: "https://www.coinbase.com/es-mx/cbbtc",
+        excerpt: "Coinbase wrapped assets are backed 1:1 and held in custody by Coinbase.",
+        html: `<html><head><title>Coinbase cbBTC</title></head><body><h2>Benefits of Coinbase wrapped assets</h2><p>Coinbase wrapped assets are backed 1:1 and held in custody by Coinbase.</p></body></html>`,
+      },
+      {
+        symbol: "cbETH",
+        url: "https://www.coinbase.com/es-mx/cbeth",
+        excerpt: "cbETH: The trusted liquid staking token.",
+        html: `<html><head><title>Coinbase cbETH</title></head><body><h1>cbETH: el token de participación líquida confiable.</h1><p>Wrap your staked ETH to cbETH with just a few steps and zero fees. cbETH can be traded on Coinbase.</p><p>Coinbase's whitepaper provides in-depth details about cbETH's unique design and benefits.</p></body></html>`,
+      },
+    ] as const;
+
+    for (const candidate of cases) {
+      const fact = verifyBasicFactLead(
+        lead({
+          subject: "Brian Armstrong",
+          predicate: "official_token",
+          value: candidate.symbol,
+          questionId: "person.official_token",
+          excerpt: candidate.excerpt,
+          sourceUrl: candidate.url,
+          sourceTitle: `Coinbase ${candidate.symbol}`,
+        }),
+        document({
+          url: candidate.url,
+          host: "coinbase.com",
+          contentType: "text/html",
+          text: candidate.html,
+        }),
+        ["Brian Armstrong", "brian_armstrong"],
+        "@brian_armstrong",
+        [],
+        ["https://www.coinbase.com"],
+        [relationship],
+      );
+
+      expect(fact).toEqual(expect.objectContaining({
+        predicate: "official_token",
+        value: candidate.symbol,
+        status: "verified",
+      }));
+    }
+  });
+
   it("does not turn an official exchange listing page for someone else's token into a founder asset", async () => {
     const { ctx, evidence } = context("https://brianarmstrong.org");
     ctx.handle = "@brian_armstrong";

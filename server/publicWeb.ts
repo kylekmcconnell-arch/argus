@@ -10,6 +10,7 @@ const MAX_REDIRECTS = 4;
 const JINA_READER_ORIGIN = "https://r.jina.ai/";
 const PUBLIC_WEB_USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
 const JINA_RECOVERABLE_FAILURES = new Set([
+  "anti_bot_challenge",
   "http_403",
   "http_429",
   "transport_error",
@@ -26,6 +27,25 @@ const SAFE_CONTENT_TYPES = new Set([
   "text/plain",
   "text/xml",
 ]);
+
+function antiBotChallengeHeaders(headers: Headers): boolean {
+  const mitigation = headers.get("cf-mitigated") ?? "";
+  const captcha = headers.get("x-datadome") ?? headers.get("x-captcha") ?? "";
+  return /challenge|captcha/i.test(`${mitigation} ${captcha}`);
+}
+
+/** Match only explicit interstitial machinery, not an article that happens to
+ * discuss bot protection. These pages sometimes arrive with HTTP 200. */
+function antiBotChallengeBody(contentType: string, text: string): boolean {
+  if (!/html|xhtml/i.test(contentType)) return false;
+  const sample = text.slice(0, 200_000);
+  const cloudflareTitle = /<title[^>]*>\s*just a moment(?:\.{3})?\s*<\/title>/i.test(sample);
+  const cloudflareRuntime = /(?:\/cdn-cgi\/challenge-platform\/|challenges\.cloudflare\.com|\bcf-chl-)/i.test(sample);
+  const otherChallengeRuntime = /(?:captcha-delivery|_pxcaptcha|perimeterx|datadome|incapsula|akamai bot manager)/i.test(sample);
+  const humanPrompt = /(?:verify (?:that )?you are human|checking (?:your )?browser(?: before accessing)?|enable javascript and cookies to continue)/i.test(sample);
+  return (cloudflareTitle && cloudflareRuntime)
+    || (otherChallengeRuntime && humanPrompt);
+}
 
 export interface PublicTextDocument {
   status: "ok";
@@ -323,6 +343,12 @@ async function fetchValidatedPublicText(
       if (!target) return { status: "rejected", reason: "unsafe_redirect" };
       continue;
     }
+    // Anti-bot interstitials can be returned as HTTP 200 or 503. Treat an
+    // explicit mitigation header as retrieval failure so the caller may use
+    // the same bounded, source-checked recovery path as an ordinary 403.
+    if (antiBotChallengeHeaders(response.headers)) {
+      return { status: "failed", reason: "anti_bot_challenge" };
+    }
     if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
 
     const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
@@ -338,6 +364,9 @@ async function fetchValidatedPublicText(
     if (!bytes) return { status: "failed", reason: "response_too_large" };
     const text = bytes.toString("utf8");
     if (!text.trim()) return { status: "failed", reason: "empty_response" };
+    if (antiBotChallengeBody(contentType, text)) {
+      return { status: "failed", reason: "anti_bot_challenge" };
+    }
 
     return {
       status: "ok",
