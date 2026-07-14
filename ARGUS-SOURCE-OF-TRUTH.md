@@ -217,12 +217,19 @@ sanctions check. Crunchbase and Reddit were retired from the pipeline.
 Monid enrichment runs inside a hard 25-second wall-clock box so a slow
 provider degrades to a skipped enrichment, never a dead run.
 
-Live validation state. Aave (project) publishes a provisional PASS 72 with all
-six governing axes evidence-backed; Stani Kulechov (founder) publishes a
-provisional PASS 80 with clean sanctions and legal screens. Both await the
-founder related-asset binding (tying the verified project token to the
-founder's control on the person side) before full clearance; that binding is
-the active engineering workstream and is deliberately never waived.
+Live validation state. Both flagship subjects now publish full clearance.
+Stani Kulechov (founder) publishes a decision-ready PASS 82 with every never-
+waive safety screen recorded at 87 percent coverage (seven of eight applicable
+checks; the eighth is an enrichment gap that no longer withholds clearance).
+Aave (project) publishes a decision-ready PASS 72 with complete coverage
+(seven of seven checks, one hundred percent). The founder related-asset
+binding that had held both at provisional is landed: on the person side ARGUS
+resolves the venture's canonical token through the venture's own official X
+account (never a name match) and screens the US exchange registry for the
+venture's public-security status only after that identity verifies, so the
+never-waive related-asset check clears on evidence rather than assumption. Aave
+reaches full clearance in turn because the trust-graph connection to Stani now
+qualifies against his active, coverage-complete report.
 
 ## July 13, 2026 reconciliation
 
