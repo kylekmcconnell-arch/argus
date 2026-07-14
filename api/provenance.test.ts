@@ -1348,7 +1348,7 @@ describe("atomic immutable report bundle", () => {
 
 describe("report bundle migration contract (static SQL assertions only)", () => {
   const sql = readFileSync(
-    new URL("../supabase/migrations/20260713181834_persist_report_version_bundle.sql", import.meta.url),
+    new URL("../supabase/migrations/20260713184728_persist_report_version_bundle.sql", import.meta.url),
     "utf8",
   );
 
@@ -1384,12 +1384,12 @@ describe("report bundle migration contract (static SQL assertions only)", () => 
 
 describe("report bundle ambiguity repair migration", () => {
   const originalSql = readFileSync(
-    new URL("../supabase/migrations/20260713181834_persist_report_version_bundle.sql", import.meta.url),
+    new URL("../supabase/migrations/20260713184728_persist_report_version_bundle.sql", import.meta.url),
     "utf8",
   );
   const sql = readFileSync(
     new URL(
-      "../supabase/migrations/20260713185911_fix_persist_report_version_bundle_ambiguity.sql",
+      "../supabase/migrations/20260713190341_fix_persist_report_version_bundle_ambiguity.sql",
       import.meta.url,
     ),
     "utf8",
