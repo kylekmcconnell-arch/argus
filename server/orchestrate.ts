@@ -63,6 +63,8 @@ import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
 import { collectProjectTokenIdentity } from "./adapters/projectToken";
 import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
+import { collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
+import { collectCompanyEnrichment } from "./adapters/monid";
 
 const ADAPTERS: Adapter[] = [
   xAdapter,
@@ -1958,6 +1960,32 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     const stageStartedAt = startRuntimeStage("cold-intake");
     await resolveProfile(ctx);
     await projectTokenPass();
+    // Provider-backed backing/traction enrichment for a verified project token:
+    // DeFiLlama TVL + funding (free), with a Monid/Akta private-company fallback
+    // for funding + founder identity only when the free funding source is empty
+    // (cost control — Monid enrichment is metered). Additive and never-throws;
+    // feeds P4 (backing/partners) and P5 (traction) so an established project is
+    // no longer published INCOMPLETE for a missing backing axis.
+    if (evidence.projectToken?.verified) {
+      const projectName = evidence.projectToken.name;
+      const capturedAt = evidence.projectToken.capturedAt;
+      try {
+        const [tvlOutcome, fundingOutcome] = await Promise.all([
+          collectProtocolTvl(projectName),
+          collectProtocolFunding(projectName),
+        ]);
+        if (tvlOutcome.available) evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
+        if (fundingOutcome.available) evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
+        if (!fundingOutcome.available) {
+          const enrichment = await collectCompanyEnrichment(projectName, {
+            sections: ["funding_detail", "management_profile", "firmographic"],
+          });
+          if (enrichment.available) evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+        }
+      } catch (error) {
+        emit({ phase: "Token", label: "Backing enrichment error", detail: String(error), tone: "warn" });
+      }
+    }
     evidence.roles = providerBackedRoles(evidence);
     await coldIntake(ctx, true);
     finishRuntimeStage("cold-intake", stageStartedAt);

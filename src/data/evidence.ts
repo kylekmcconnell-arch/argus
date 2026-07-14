@@ -169,6 +169,82 @@ export interface ProjectTokenSnapshot {
   };
 }
 
+/**
+ * Frozen public funding record for a project (backing / partners). Mirrors the
+ * DeFiLlama `ProtocolFunding` value (see server/adapters/defiLlama.ts) plus the
+ * capture timestamp, so the wiring layer can store `{ ...value, capturedAt }`
+ * without importing a server-only type into the shared evidence bag.
+ */
+export interface ProtocolFundingSnapshot {
+  slug: string;
+  name: string;
+  rounds: Array<{
+    date: string | null;
+    round: string;
+    amountUsd: number | null;
+    leadInvestors: string[];
+    otherInvestors: string[];
+    valuationUsd: number | null;
+  }>;
+  totalRaisedUsd: number;
+  leadInvestors: string[];
+  sourceUrl: string;
+  capturedAt: string;
+}
+
+/**
+ * Frozen on-chain usage record for a project (total value locked). Mirrors the
+ * DeFiLlama `ProtocolTvl` value plus the capture timestamp.
+ */
+export interface ProtocolTvlSnapshot {
+  slug: string;
+  name: string;
+  symbol: string | null;
+  tvlUsd: number;
+  chains: string[];
+  chainBreakdown: Array<{ chain: string; tvlUsd: number }>;
+  geckoId: string | null;
+  sourceUrl: string;
+  capturedAt: string;
+}
+
+/**
+ * Frozen keyed private-market enrichment (Monid/Akta). Mirrors the adapter's
+ * `CompanyEnrichment` value (see server/adapters/monid.ts) plus the capture
+ * timestamp. Used to fill funding, leadership, and firmographic gaps that free
+ * public sources leave blank.
+ */
+export interface CompanyEnrichmentSnapshot {
+  name: string;
+  uuid: string;
+  funding?: {
+    totalRaisedUsd: number | null;
+    rounds: Array<{
+      date: string | null;
+      round: string;
+      amountUsd: number | null;
+      leadInvestors: string[];
+      otherInvestors: string[];
+    }>;
+    leadInvestors: string[];
+  };
+  management?: Array<{
+    name: string;
+    title: string;
+    priorCompanies: string[];
+    linkedin: string | null;
+    startYear: string | null;
+  }>;
+  firmographic?: {
+    legalName: string | null;
+    foundedYear: string | null;
+    headcountRange: string | null;
+    ownership: string | null;
+  };
+  sourceUrl: string;
+  capturedAt: string;
+}
+
 // A provider artifact frozen into the report that was available to the analyst
 // before scoring. These records are deliberately neutral about identity: a
 // court-caption or sanctions-name match is a lead tied to a source, not proof
@@ -495,6 +571,12 @@ export interface CollectedEvidence {
   trustGraphScreen?: TrustGraphScreen;
   /** Verified project-owned token identity and frozen market snapshot. */
   projectToken?: ProjectTokenSnapshot;
+  /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */
+  protocolFunding?: ProtocolFundingSnapshot;
+  /** Frozen total value locked + per-chain usage (DeFiLlama). Feeds P5. */
+  protocolTvl?: ProtocolTvlSnapshot;
+  /** Frozen keyed private-market enrichment (Monid/Akta): funding, leadership, firmographic. */
+  companyEnrichment?: CompanyEnrichmentSnapshot;
   /** Required foundational answers backed by independently fetched pages. */
   basicFacts?: BasicFact[];
   /** Search-model suggestions retained separately until source verification succeeds. */

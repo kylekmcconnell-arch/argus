@@ -15389,8 +15389,486 @@ function projectProviderBackedBasicFacts(evidence) {
       sourceClass: isOfficialUrl(url, officialHost(evidence)) ? "official_subject" : "other_public"
     })]));
   }
+  const isProject = evidence.roles.includes("PROJECT" /* PROJECT */);
+  const fundingFact = !isProject ? null : evidence.protocolFunding && evidence.protocolFunding.rounds.length ? {
+    rounds: evidence.protocolFunding.rounds.length,
+    totalRaisedUsd: evidence.protocolFunding.totalRaisedUsd,
+    leadInvestors: evidence.protocolFunding.leadInvestors,
+    sourceUrl: evidence.protocolFunding.sourceUrl,
+    capturedAt: evidence.protocolFunding.capturedAt,
+    provider: "defillama",
+    title: "DeFiLlama funding record"
+  } : evidence.companyEnrichment?.funding && evidence.companyEnrichment.funding.rounds.length ? {
+    rounds: evidence.companyEnrichment.funding.rounds.length,
+    totalRaisedUsd: evidence.companyEnrichment.funding.totalRaisedUsd ?? 0,
+    leadInvestors: evidence.companyEnrichment.funding.leadInvestors,
+    sourceUrl: evidence.companyEnrichment.sourceUrl,
+    capturedAt: evidence.companyEnrichment.capturedAt,
+    provider: "monid",
+    title: "Monid/Akta funding record"
+  } : null;
+  if (fundingFact) {
+    const leads = fundingFact.leadInvestors.slice(0, 4).join(", ");
+    const total = fundingFact.totalRaisedUsd > 0 ? ` \xB7 ${formatUsd(fundingFact.totalRaisedUsd)} raised` : "";
+    projected.push(makeFact(
+      evidence,
+      "funding",
+      `${fundingFact.rounds} public funding round${fundingFact.rounds === 1 ? "" : "s"}${total}${leads ? ` \xB7 led by ${leads}` : ""}`,
+      [source({
+        url: fundingFact.sourceUrl,
+        title: fundingFact.title,
+        excerpt: `${evidence.profile.display_name || "The project"} raised ${formatUsd(fundingFact.totalRaisedUsd)} across ${fundingFact.rounds} public funding round(s)${leads ? `, with lead investors including ${leads}` : ""}.`,
+        capturedAt: fundingFact.capturedAt,
+        provider: fundingFact.provider,
+        sourceClass: "other_public"
+      })]
+    ));
+  }
+  const tvlSnapshot = isProject ? evidence.protocolTvl : void 0;
+  if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
+    const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
+    projected.push(makeFact(
+      evidence,
+      "traction",
+      `${formatUsd(tvlSnapshot.tvlUsd)} total value locked${chainList ? ` (${chainList})` : ""}`,
+      [source({
+        url: tvlSnapshot.sourceUrl,
+        title: "DeFiLlama TVL record",
+        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""} (DeFiLlama on-chain snapshot).`,
+        capturedAt: tvlSnapshot.capturedAt,
+        provider: "defillama",
+        sourceClass: "regulatory_or_onchain"
+      })],
+      `captured ${tvlSnapshot.capturedAt.slice(0, 10)}`
+    ));
+  }
+  const founderProfile = isProject ? evidence.companyEnrichment?.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title)) : void 0;
+  if (founderProfile?.name.trim() && evidence.companyEnrichment) {
+    const prior = founderProfile.priorCompanies.filter(Boolean).slice(0, 3).join(", ");
+    projected.push(makeFact(
+      evidence,
+      "founder",
+      founderProfile.name.trim(),
+      [source({
+        url: founderProfile.linkedin || evidence.companyEnrichment.sourceUrl,
+        title: founderProfile.linkedin ? "LinkedIn (Monid/Akta management record)" : "Monid/Akta management record",
+        excerpt: `${founderProfile.name} is ${founderProfile.title} of ${evidence.companyEnrichment.name}${prior ? `; previously at ${prior}` : ""}${founderProfile.startYear ? ` (since ${founderProfile.startYear})` : ""}.`,
+        capturedAt: evidence.companyEnrichment.capturedAt,
+        provider: "monid",
+        sourceClass: "other_public"
+      })],
+      founderProfile.title
+    ));
+  }
   const materialized = projected.map((fact) => mergeProjectedFact(evidence, fact));
   reconcileQuestionLedger(evidence, materialized);
+}
+
+// server/adapters/defiLlama.ts
+var API_BASE = "https://api.llama.fi";
+function defiLlamaSlug(name) {
+  return name.trim().toLowerCase().replace(/[^a-z0-9\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
+}
+async function fetchProtocol(slug, fetcher) {
+  const url = `${API_BASE}/protocol/${encodeURIComponent(slug)}`;
+  let response;
+  try {
+    response = await fetcher(url, { signal: AbortSignal.timeout(2e4) });
+  } catch {
+    return { ok: false, notFound: false, note: "DeFiLlama was unavailable." };
+  }
+  if (!response.ok) {
+    const notFound = response.status === 400;
+    return {
+      ok: false,
+      notFound,
+      note: notFound ? `No DeFiLlama protocol matched "${slug}".` : "DeFiLlama request failed."
+    };
+  }
+  try {
+    const data = await response.json() ?? {};
+    return { ok: true, data };
+  } catch {
+    return { ok: false, notFound: false, note: "DeFiLlama response was unreadable." };
+  }
+}
+var strArray = (value) => Array.isArray(value) ? value.filter((entry) => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim()) : [];
+var NON_CHAIN_SEGMENT = /(?:^|[-])(?:borrowed|staking|pool2|vesting|treasury|offers|options)(?:$|[-])/i;
+async function collectProtocolTvl(projectName2, options = {}) {
+  const fetcher = options.fetcher ?? fetch;
+  const slug = options.slug ?? defiLlamaSlug(projectName2);
+  if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
+  const result = await fetchProtocol(slug, fetcher);
+  if (!result.ok) {
+    recordCall("defillama", "tvl", 0, `${slug} \xB7 ${result.notFound ? "not_found" : "error"}`, result.notFound ? "succeeded" : "failed");
+    return { available: false, note: result.note };
+  }
+  const data = result.data;
+  const series = Array.isArray(data.tvl) ? data.tvl : [];
+  const latest = series.length ? series[series.length - 1] : void 0;
+  const tvlUsd = typeof latest?.totalLiquidityUSD === "number" ? latest.totalLiquidityUSD : null;
+  if (tvlUsd === null || !(tvlUsd > 0)) {
+    recordCall("defillama", "tvl", 0, `${slug} \xB7 no_tvl`, "partial");
+    return { available: false, note: "DeFiLlama returned no positive TVL for this protocol." };
+  }
+  const rawChainTvls = data.currentChainTvls && typeof data.currentChainTvls === "object" ? data.currentChainTvls : {};
+  const chainBreakdown = Object.entries(rawChainTvls).filter(([chain, value]) => typeof value === "number" && value > 0 && !NON_CHAIN_SEGMENT.test(chain)).map(([chain, value]) => ({ chain, tvlUsd: value })).sort((a, b) => b.tvlUsd - a.tvlUsd);
+  recordCall("defillama", "tvl", 0, `${slug} \xB7 tvl_${Math.round(tvlUsd)}`, "succeeded");
+  return {
+    available: true,
+    value: {
+      slug,
+      name: typeof data.name === "string" ? data.name : projectName2,
+      symbol: typeof data.symbol === "string" ? data.symbol : null,
+      tvlUsd,
+      chains: chainBreakdown.map((entry) => entry.chain),
+      chainBreakdown,
+      geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
+      sourceUrl: `https://defillama.com/protocol/${slug}`
+    }
+  };
+}
+var millionsToUsd = (value) => typeof value === "number" && value > 0 ? Math.round(value * 1e6) : null;
+async function collectProtocolFunding(projectName2, options = {}) {
+  const fetcher = options.fetcher ?? fetch;
+  const slug = options.slug ?? defiLlamaSlug(projectName2);
+  if (!slug) return { available: false, reason: "no_data", note: "No resolvable DeFiLlama protocol slug." };
+  const result = await fetchProtocol(slug, fetcher);
+  if (!result.ok) {
+    recordCall("defillama", "funding", 0, `${slug} \xB7 ${result.notFound ? "not_found" : "error"}`, result.notFound ? "succeeded" : "failed");
+    return {
+      available: false,
+      reason: result.notFound ? "no_data" : "unavailable",
+      note: result.note
+    };
+  }
+  const raw = Array.isArray(result.data.raises) ? result.data.raises : [];
+  const rounds = raw.map((entry) => {
+    const dateSec = typeof entry.date === "number" ? entry.date : null;
+    const round = typeof entry.round === "string" && entry.round.trim() ? entry.round.trim() : "Undisclosed round";
+    return {
+      date: dateSec ? new Date(dateSec * 1e3).toISOString().slice(0, 10) : null,
+      round,
+      amountUsd: millionsToUsd(entry.amount),
+      leadInvestors: strArray(entry.leadInvestors),
+      otherInvestors: strArray(entry.otherInvestors),
+      valuationUsd: millionsToUsd(entry.valuation)
+    };
+  }).sort((a, b) => a.date && b.date ? a.date.localeCompare(b.date) : 0);
+  if (!rounds.length) {
+    recordCall("defillama", "funding", 0, `${slug} \xB7 no_raises`, "succeeded");
+    return { available: false, reason: "no_data", note: `No public funding rounds recorded for "${slug}" on DeFiLlama.` };
+  }
+  const leadInvestors = [...new Set(rounds.flatMap((round) => round.leadInvestors))];
+  const totalRaisedUsd = rounds.reduce((sum, round) => sum + (round.amountUsd ?? 0), 0);
+  recordCall("defillama", "funding", 0, `${slug} \xB7 ${rounds.length}_rounds`, "succeeded");
+  return {
+    available: true,
+    value: {
+      slug,
+      name: typeof result.data.name === "string" ? result.data.name : projectName2,
+      rounds,
+      totalRaisedUsd,
+      leadInvestors,
+      sourceUrl: `https://defillama.com/protocol/${slug}`
+    }
+  };
+}
+
+// server/adapters/monid.ts
+var API_BASE2 = "https://api.monid.ai/v1";
+var PROVIDER = "akta";
+var PER_SECTION_USD = 0.125;
+var POLL_INTERVAL_MS = 2e3;
+var POLL_TIMEOUT_MS = 3e4;
+var RUN_TIMEOUT_MS = 3e4;
+var ALLOWED_SECTIONS = [
+  "funding_detail",
+  "mna_and_investment",
+  "management_profile",
+  "firmographic",
+  "financial_estimate",
+  "company_assessment"
+];
+var DEFAULT_SECTIONS = [
+  "funding_detail",
+  "management_profile",
+  "firmographic"
+];
+var isNonEmptyString = (value) => typeof value === "string" && value.trim().length > 0;
+var numOrNull = (value) => typeof value === "number" && Number.isFinite(value) ? value : null;
+function toStringList(value) {
+  if (!Array.isArray(value)) return [];
+  const out = value.map(
+    (entry) => typeof entry === "string" ? entry : entry && typeof entry === "object" && isNonEmptyString(entry.name) ? entry.name : ""
+  ).map((entry) => entry.trim()).filter((entry) => entry.length > 0);
+  return [...new Set(out)];
+}
+function hostOf(value) {
+  if (!isNonEmptyString(value)) return null;
+  const host = value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+  return host || null;
+}
+function websiteUrl(value) {
+  const host = hostOf(value);
+  return host ? `https://${host}` : null;
+}
+function normalizeSections(input) {
+  if (!input || input.length === 0) return [...DEFAULT_SECTIONS];
+  const filtered = input.filter(
+    (section) => ALLOWED_SECTIONS.includes(section)
+  );
+  return filtered.length ? [...new Set(filtered)] : [...DEFAULT_SECTIONS];
+}
+var TERMINAL_OK = "COMPLETED";
+var TERMINAL_FAIL = /* @__PURE__ */ new Set(["FAILED", "BLOCKED", "TIMED_OUT", "STOPPED"]);
+var sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+function extractData(run) {
+  const output = run?.output;
+  if (output && typeof output === "object" && !Array.isArray(output) && "data" in output) {
+    return output.data;
+  }
+  return output;
+}
+function runId(run) {
+  if (isNonEmptyString(run?.runId)) return run.runId.trim();
+  if (isNonEmptyString(run?.id)) return run.id.trim();
+  return null;
+}
+async function startRun(key, endpoint, input, fetcher) {
+  let res;
+  try {
+    res = await fetcher(`${API_BASE2}/run`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({ provider: PROVIDER, endpoint, input }),
+      signal: AbortSignal.timeout(RUN_TIMEOUT_MS)
+    });
+  } catch {
+    return { ok: false, note: "Monid was unavailable." };
+  }
+  if (!res.ok) return { ok: false, note: `Monid request failed (http_${res.status}).` };
+  let run;
+  try {
+    run = await res.json();
+  } catch {
+    return { ok: false, note: "Monid response was unreadable." };
+  }
+  return resolveRun(run, key, fetcher);
+}
+async function resolveRun(initial, key, fetcher) {
+  let current = initial;
+  const deadline = Date.now() + POLL_TIMEOUT_MS;
+  for (let guard = 0; guard < 32; guard += 1) {
+    const status = isNonEmptyString(current?.status) ? current.status : "";
+    if (status === TERMINAL_OK) {
+      const data = extractData(current);
+      if (data === void 0 || data === null) {
+        return { ok: false, note: "Monid run completed without data." };
+      }
+      return { ok: true, data };
+    }
+    if (TERMINAL_FAIL.has(status)) {
+      return { ok: false, note: `Monid run ${status.toLowerCase()}.` };
+    }
+    const id = runId(current);
+    if (!id) return { ok: false, note: "Monid run had no id to poll." };
+    if (Date.now() >= deadline) return { ok: false, note: "Monid run timed out." };
+    await sleep(POLL_INTERVAL_MS);
+    const polled = await pollRun(id, key, fetcher);
+    if (!polled.ok) return { ok: false, note: polled.note };
+    current = polled.run;
+  }
+  return { ok: false, note: "Monid run did not settle." };
+}
+async function pollRun(id, key, fetcher) {
+  let res;
+  try {
+    res = await fetcher(`${API_BASE2}/runs/${encodeURIComponent(id)}`, {
+      method: "GET",
+      headers: { Authorization: `Bearer ${key}` },
+      signal: AbortSignal.timeout(RUN_TIMEOUT_MS)
+    });
+  } catch {
+    return { ok: false, note: "Monid was unavailable while polling." };
+  }
+  if (!res.ok) return { ok: false, note: `Monid poll failed (http_${res.status}).` };
+  try {
+    return { ok: true, run: await res.json() };
+  } catch {
+    return { ok: false, note: "Monid poll response was unreadable." };
+  }
+}
+function companyList(data) {
+  if (Array.isArray(data)) return data;
+  if (data && typeof data === "object" && Array.isArray(data.data)) {
+    return data.data;
+  }
+  return [];
+}
+function sectionRoot(data) {
+  if (!data || typeof data !== "object") return {};
+  const obj = data;
+  if (ALLOWED_SECTIONS.some((section) => section in obj)) return obj;
+  const nested = obj.data;
+  if (nested && typeof nested === "object" && ALLOWED_SECTIONS.some((section) => section in nested)) {
+    return nested;
+  }
+  return obj;
+}
+function pickBestMatch(companies, query) {
+  const valid = companies.filter((company) => isNonEmptyString(company?.uuid));
+  if (!valid.length) return null;
+  const queryHost = hostOf(query);
+  const queryName = query.trim().toLowerCase();
+  if (queryHost) {
+    const byWebsite = valid.find((company) => hostOf(company?.website) === queryHost);
+    if (byWebsite) return byWebsite;
+  }
+  const byName = valid.find(
+    (company) => isNonEmptyString(company?.name) && company.name.trim().toLowerCase() === queryName
+  );
+  if (byName) return byName;
+  return valid[0];
+}
+function formatAktaDate(value) {
+  if (!value || typeof value !== "object") return null;
+  const raw = value;
+  const year = numOrNull(raw.year);
+  if (year === null) return null;
+  const month = numOrNull(raw.month);
+  const day = numOrNull(raw.day);
+  const pad = (n) => String(n).padStart(2, "0");
+  if (month === null) return String(year);
+  if (day === null) return `${year}-${pad(month)}`;
+  return `${year}-${pad(month)}-${pad(day)}`;
+}
+function startYearFrom(value) {
+  if (typeof value === "string") {
+    const match = value.match(/\b(\d{4})\b/);
+    return match ? match[1] : null;
+  }
+  if (typeof value === "number" && Number.isFinite(value)) return String(Math.trunc(value));
+  if (value && typeof value === "object") {
+    const year = numOrNull(value.year);
+    return year === null ? null : String(year);
+  }
+  return null;
+}
+function parseFunding(section) {
+  if (!section || typeof section !== "object") return void 0;
+  const raw = section;
+  const overview = raw.funding_overview && typeof raw.funding_overview === "object" ? raw.funding_overview : {};
+  const totalRaisedUsd = numOrNull(overview.total_funding_usd);
+  const rawRounds = Array.isArray(raw.funding_rounds) ? raw.funding_rounds : [];
+  const rounds = rawRounds.map((entry) => {
+    const investors = Array.isArray(entry?.investors) ? entry.investors : [];
+    const namesWhere = (predicate) => [
+      ...new Set(
+        investors.filter(predicate).map((investor) => isNonEmptyString(investor?.name) ? investor.name.trim() : "").filter((name) => name.length > 0)
+      )
+    ];
+    return {
+      date: formatAktaDate(entry?.date),
+      round: isNonEmptyString(entry?.round?.label) ? entry.round.label.trim() : "Undisclosed round",
+      amountUsd: numOrNull(entry?.amount_usd),
+      // absolute USD — do NOT multiply
+      leadInvestors: namesWhere((investor) => investor?.lead_investor === true),
+      otherInvestors: namesWhere((investor) => investor?.lead_investor !== true)
+    };
+  });
+  if (totalRaisedUsd === null && rounds.length === 0) return void 0;
+  const leadInvestors = [...new Set(rounds.flatMap((round) => round.leadInvestors))];
+  return { totalRaisedUsd, rounds, leadInvestors };
+}
+function parseManagement(section) {
+  if (!section || typeof section !== "object") return void 0;
+  const profiles = Array.isArray(section.profiles) ? section.profiles : [];
+  const people = profiles.map((profile) => {
+    const name = isNonEmptyString(profile?.name) ? profile.name.trim() : "";
+    if (!name) return null;
+    return {
+      name,
+      title: isNonEmptyString(profile?.designation) ? profile.designation.trim() : "",
+      priorCompanies: toStringList(profile?.previous_companies),
+      linkedin: isNonEmptyString(profile?.social?.linkedin) ? profile.social.linkedin.trim() : null,
+      startYear: startYearFrom(profile?.start_date)
+    };
+  }).filter((person) => person !== null);
+  return people.length ? people : void 0;
+}
+function parseFirmographic(section) {
+  if (!section || typeof section !== "object") return void 0;
+  const raw = section;
+  const legalName = isNonEmptyString(raw.legal_name) ? raw.legal_name.trim() : null;
+  const foundedYearNum = numOrNull(raw.founded_year);
+  const foundedYear = foundedYearNum === null ? null : String(foundedYearNum);
+  const headcountRange = isNonEmptyString(raw.headcount_range) ? raw.headcount_range.trim() : null;
+  const ownership = isNonEmptyString(raw.ownership_category) ? raw.ownership_category.trim() : null;
+  if (!legalName && !foundedYear && !headcountRange && !ownership) return void 0;
+  return { legalName, foundedYear, headcountRange, ownership };
+}
+async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
+  const key = env("MONID_API_KEY");
+  if (!key) {
+    return { available: false, reason: "no_key", note: "MONID_API_KEY is not configured." };
+  }
+  const query = (nameOrWebsite ?? "").trim();
+  if (!query) {
+    return { available: false, reason: "no_match", note: "No company name or website supplied." };
+  }
+  const fetcher = options.fetcher ?? fetch;
+  const sections = normalizeSections(options.sections);
+  const search = await startRun(
+    key,
+    "/v1/company/search",
+    { queryParams: { query } },
+    fetcher
+  );
+  if (!search.ok) {
+    recordCall("monid", "company/search", 0, `search \xB7 ${search.note}`, "failed");
+    return { available: false, reason: "unavailable", note: search.note };
+  }
+  const companies = companyList(search.data);
+  const chosen = pickBestMatch(companies, query);
+  const uuid = isNonEmptyString(chosen?.uuid) ? chosen.uuid.trim() : "";
+  if (!chosen || !uuid) {
+    recordCall("monid", "company/search", 0, "search \xB7 no_match", "succeeded");
+    return {
+      available: false,
+      reason: "no_match",
+      note: `No Monid/Akta company matched "${query}".`
+    };
+  }
+  recordCall("monid", "company/search", 0, `search \xB7 matched ${uuid}`, "succeeded");
+  const enrichment = await startRun(
+    key,
+    "/v1/company/enrichment",
+    { queryParams: { company: uuid, sections } },
+    fetcher
+  );
+  const sectionMeta = `enrichment \xB7 ${sections.length} section(s) \xB7 ${uuid}`;
+  if (!enrichment.ok) {
+    recordCall("monid", "company/enrichment", 0, `${sectionMeta} \xB7 ${enrichment.note}`, "failed");
+    return { available: false, reason: "unavailable", note: enrichment.note };
+  }
+  recordCall("monid", "company/enrichment", sections.length * PER_SECTION_USD, sectionMeta, "succeeded");
+  const root = sectionRoot(enrichment.data);
+  const funding = sections.includes("funding_detail") ? parseFunding(root.funding_detail) : void 0;
+  const management = sections.includes("management_profile") ? parseManagement(root.management_profile) : void 0;
+  const firmographic = sections.includes("firmographic") ? parseFirmographic(root.firmographic) : void 0;
+  const name = isNonEmptyString(chosen.name) ? chosen.name.trim() : firmographic?.legalName ?? query;
+  return {
+    available: true,
+    value: {
+      name,
+      uuid,
+      ...funding ? { funding } : {},
+      ...management ? { management } : {},
+      ...firmographic ? { firmographic } : {},
+      sourceUrl: websiteUrl(chosen.website) ?? "https://monid.ai"
+    }
+  };
 }
 
 // server/orchestrate.ts
@@ -16853,6 +17331,26 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     const stageStartedAt = startRuntimeStage("cold-intake");
     await resolveProfile(ctx);
     await projectTokenPass();
+    if (evidence.projectToken?.verified) {
+      const projectName2 = evidence.projectToken.name;
+      const capturedAt = evidence.projectToken.capturedAt;
+      try {
+        const [tvlOutcome, fundingOutcome] = await Promise.all([
+          collectProtocolTvl(projectName2),
+          collectProtocolFunding(projectName2)
+        ]);
+        if (tvlOutcome.available) evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
+        if (fundingOutcome.available) evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
+        if (!fundingOutcome.available) {
+          const enrichment = await collectCompanyEnrichment(projectName2, {
+            sections: ["funding_detail", "management_profile", "firmographic"]
+          });
+          if (enrichment.available) evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+        }
+      } catch (error) {
+        emit({ phase: "Token", label: "Backing enrichment error", detail: String(error), tone: "warn" });
+      }
+    }
     evidence.roles = providerBackedRoles(evidence);
     await coldIntake(ctx, true);
     finishRuntimeStage("cold-intake", stageStartedAt);

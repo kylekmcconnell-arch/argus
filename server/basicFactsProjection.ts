@@ -528,6 +528,96 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     })]));
   }
 
+  const isProject = evidence.roles.includes(SubjectClass.PROJECT);
+
+  // Backing / funding → P4_backing_and_partners. Prefer DeFiLlama (free); fall
+  // back to Monid/Akta private-company funding. Additive: gives the analyst
+  // affirmative backing evidence so an established project is not published
+  // INCOMPLETE for a missing P4 axis.
+  const fundingFact = !isProject
+    ? null
+    : evidence.protocolFunding && evidence.protocolFunding.rounds.length
+      ? {
+          rounds: evidence.protocolFunding.rounds.length,
+          totalRaisedUsd: evidence.protocolFunding.totalRaisedUsd,
+          leadInvestors: evidence.protocolFunding.leadInvestors,
+          sourceUrl: evidence.protocolFunding.sourceUrl,
+          capturedAt: evidence.protocolFunding.capturedAt,
+          provider: "defillama",
+          title: "DeFiLlama funding record",
+        }
+      : evidence.companyEnrichment?.funding && evidence.companyEnrichment.funding.rounds.length
+        ? {
+            rounds: evidence.companyEnrichment.funding.rounds.length,
+            totalRaisedUsd: evidence.companyEnrichment.funding.totalRaisedUsd ?? 0,
+            leadInvestors: evidence.companyEnrichment.funding.leadInvestors,
+            sourceUrl: evidence.companyEnrichment.sourceUrl,
+            capturedAt: evidence.companyEnrichment.capturedAt,
+            provider: "monid",
+            title: "Monid/Akta funding record",
+          }
+        : null;
+  if (fundingFact) {
+    const leads = fundingFact.leadInvestors.slice(0, 4).join(", ");
+    const total = fundingFact.totalRaisedUsd > 0 ? ` · ${formatUsd(fundingFact.totalRaisedUsd)} raised` : "";
+    projected.push(makeFact(
+      evidence,
+      "funding",
+      `${fundingFact.rounds} public funding round${fundingFact.rounds === 1 ? "" : "s"}${total}${leads ? ` · led by ${leads}` : ""}`,
+      [source({
+        url: fundingFact.sourceUrl,
+        title: fundingFact.title,
+        excerpt: `${evidence.profile.display_name || "The project"} raised ${formatUsd(fundingFact.totalRaisedUsd)} across ${fundingFact.rounds} public funding round(s)${leads ? `, with lead investors including ${leads}` : ""}.`,
+        capturedAt: fundingFact.capturedAt,
+        provider: fundingFact.provider,
+        sourceClass: "other_public",
+      })],
+    ));
+  }
+
+  // On-chain TVL → traction (P5).
+  const tvlSnapshot = isProject ? evidence.protocolTvl : undefined;
+  if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
+    const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
+    projected.push(makeFact(
+      evidence,
+      "traction",
+      `${formatUsd(tvlSnapshot.tvlUsd)} total value locked${chainList ? ` (${chainList})` : ""}`,
+      [source({
+        url: tvlSnapshot.sourceUrl,
+        title: "DeFiLlama TVL record",
+        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""} (DeFiLlama on-chain snapshot).`,
+        capturedAt: tvlSnapshot.capturedAt,
+        provider: "defillama",
+        sourceClass: "regulatory_or_onchain",
+      })],
+      `captured ${tvlSnapshot.capturedAt.slice(0, 10)}`,
+    ));
+  }
+
+  // Monid/Akta management → founder identity (the "people behind it"). Conservative:
+  // only a clearly-labelled founder/CEO profile.
+  const founderProfile = isProject
+    ? evidence.companyEnrichment?.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title))
+    : undefined;
+  if (founderProfile?.name.trim() && evidence.companyEnrichment) {
+    const prior = founderProfile.priorCompanies.filter(Boolean).slice(0, 3).join(", ");
+    projected.push(makeFact(
+      evidence,
+      "founder",
+      founderProfile.name.trim(),
+      [source({
+        url: founderProfile.linkedin || evidence.companyEnrichment.sourceUrl,
+        title: founderProfile.linkedin ? "LinkedIn (Monid/Akta management record)" : "Monid/Akta management record",
+        excerpt: `${founderProfile.name} is ${founderProfile.title} of ${evidence.companyEnrichment.name}${prior ? `; previously at ${prior}` : ""}${founderProfile.startYear ? ` (since ${founderProfile.startYear})` : ""}.`,
+        capturedAt: evidence.companyEnrichment.capturedAt,
+        provider: "monid",
+        sourceClass: "other_public",
+      })],
+      founderProfile.title,
+    ));
+  }
+
   const materialized = projected.map((fact) => mergeProjectedFact(evidence, fact));
   reconcileQuestionLedger(evidence, materialized);
 }
