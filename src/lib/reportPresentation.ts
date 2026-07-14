@@ -1,4 +1,6 @@
-import { CLEARANCE_COVERAGE_FLOOR_PERCENT, NEVER_WAIVE_CHECK_IDS } from "./scanChecklist";
+// NOTE: this module is loaded as native ESM by the api/ functions — every
+// runtime import here MUST carry an explicit .js extension.
+import { CLEARANCE_COVERAGE_FLOOR_PERCENT, NEVER_WAIVE_CHECK_IDS } from "./scanChecklist.js";
 
 export type PublicCompleteness = "complete" | "partial" | "failed";
 
