@@ -490,7 +490,7 @@ const describesGroundedTeamAsUnresolved = (value: string): boolean => {
   const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
   return /\bnamed\s+(?:founders?|co\s+founders?|leaders?|leadership|team|executives?|ceo)(?:\s+\w+){0,12}\s+not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b/.test(normalized);
 };
-const ABSENT_NOTABLE_FOLLOWERS_CLAIM = /(?:\bno\s+(?:named\s+|verified\s+|documented\s+|structured\s+|observed\s+)?notable\s+followers?\b|\b(?:absence|lack|missing)\s+of\s+(?:named\s+|verified\s+|documented\s+|observed\s+)?notable\s+followers?\b|\bnotable\s+followers?\b(?:\s+[\w-]+){0,10}\s+(?:are|were|remain)?\s*not\s+(?:listed|documented|present|included|provided|available|observed|surfaced)\b)/i;
+const ABSENT_NOTABLE_FOLLOWERS_CLAIM = /(?:\b(?:no|zero)\s+(?:named\s+|verified\s+|documented\s+|structured\s+|observed\s+)?notable\s+followers?\b|\b(?:absence|lack|missing)\s+of\s+(?:named\s+|verified\s+|documented\s+|observed\s+)?notable\s+followers?\b|\bnotable\s+followers?\b(?:\s+[\w-]+){0,10}\s+(?:are|were|remain)?\s*not\s+(?:listed|documented|present|included|provided|available|observed|surfaced)\b|\b(?:notable\s+followers?|observed\s+network)(?:\s+(?:evidence|data|array|list|collection|section))?\s+(?:is|was|remains?)\s+(?:empty|absent|missing|unavailable|not\s+present)\b|\bnone\b(?:\s+[\w-]+){0,8}\s+notable\s+followers?\b|\bno\s+direct\s+observed\s+network\s+evidence\b)/i;
 const describesGroundedNotableFollowersAsAbsent = (value: string): boolean =>
   ABSENT_NOTABLE_FOLLOWERS_CLAIM.test(value);
 

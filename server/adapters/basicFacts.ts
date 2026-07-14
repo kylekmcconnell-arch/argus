@@ -2307,6 +2307,57 @@ function coinbaseWrappedAssetLocaleFallback(raw: string): string | null {
   }
 }
 
+function coinbaseWrappedAssetProductPassage(
+  title: string,
+  body: string,
+  symbol: string,
+): string | null {
+  if (
+    !looseContainsPhrase(title, "Coinbase")
+    || !looseContainsPhrase(title, symbol)
+    || /\b(?:404|not found|page unavailable)\b/i.test(title)
+  ) return null;
+
+  const normalizedBody = normalize(decodeHtmlEntities(body.replace(/<[^>]+>/g, " ")));
+  if (searchable(symbol) === "cbbtc") {
+    const wrappedCustody = /\bCoinbase\s+wrapped\s+assets?\b[^.!?]{0,220}\bbacked\s+1:1\b[^.!?]{0,160}\bheld\s+in\s+custody\s+by\s+Coinbase\b/i.exec(normalizedBody);
+    return wrappedCustody ? normalize(`${title}. ${wrappedCustody[0]}`) : null;
+  }
+  if (searchable(symbol) === "cbeth") {
+    const productClass = /(?:\bliquid\s+staking\s+token\b|\bwrap\s+your\s+staked\s+ETH\s+to\s+cbETH\b|\bcbETH\b[^.!?]{0,120}\btraded\s+on\s+Coinbase\b)/i.exec(normalizedBody);
+    const ventureWhitepaper = /(?:\bCoinbase['’]s\s+whitepaper\b[^.!?]{0,260}\bcbETH\b|\bcbETH\b[^.!?]{0,260}\bCoinbase['’]s\s+whitepaper\b)/i.exec(normalizedBody);
+    return productClass && ventureWhitepaper
+      ? normalize(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`)
+      : null;
+  }
+  return null;
+}
+
+function isExpectedCoinbaseWrappedAssetPage(
+  result: PublicTextResult,
+  fallbackUrl: string,
+): boolean {
+  if (result.status !== "ok") return false;
+  const symbol = new URL(fallbackUrl).pathname.split("/").filter(Boolean).at(-1) ?? "";
+  let pathSegments: string[];
+  try {
+    pathSegments = decodeURIComponent(new URL(result.url).pathname).split("/").filter(Boolean);
+  } catch {
+    return false;
+  }
+  const exactProductPath = pathSegments.length === 1
+    || (pathSegments.length === 2 && /^[a-z]{2}(?:-[a-z]{2})?$/i.test(pathSegments[0]));
+  if (!exactProductPath || searchable(pathSegments.at(-1) ?? "") !== searchable(symbol)) return false;
+
+  const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(result.text);
+  const htmlTitle = /<title\b[^>]*>([\s\S]{1,1000}?)<\/title>/i.exec(result.text)?.[1];
+  const title = normalize(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
+  const body = metadata?.[1] && metadata.index === 0
+    ? result.text.slice(metadata[0].length)
+    : result.text;
+  return Boolean(coinbaseWrappedAssetProductPassage(title, body, symbol));
+}
+
 /**
  * Some first-party product pages split one proof across their page title and
  * product copy. Coinbase's cbBTC page, for example, names the product in the
@@ -2352,6 +2403,15 @@ function officialVentureAssetPagePassage(
     const venture = loosePhrasePattern(relationship.name);
     const value = loosePhrasePattern(lead.value);
     if (!venture || !value) continue;
+
+    if (searchable(relationship.name) === "coinbase") {
+      const verifiedCoinbaseProduct = coinbaseWrappedAssetProductPassage(title, body, lead.value);
+      if (
+        verifiedCoinbaseProduct
+        && verifiedCoinbaseProduct.length <= MAX_SUPPORT_PASSAGE_CHARS
+        && !TOKEN_PAGE_UNCERTAINTY.test(verifiedCoinbaseProduct)
+      ) return verifiedCoinbaseProduct;
+    }
 
     const wrappedCustody = new RegExp(
       `\\b${venture}\\s+wrapped\\s+assets?\\b[^.!?]{0,220}\\bbacked\\s+1:1\\b[^.!?]{0,160}\\bheld\\s+in\\s+custody\\s+by\\s+${venture}\\b`,
@@ -3240,10 +3300,10 @@ export async function collectBasicFacts(
     };
     const pending = (async (): Promise<PublicTextResult> => {
       const primary = await fetchAndRecord(url);
-      if (primary.status === "ok") return primary;
       const localized = coinbaseWrappedAssetLocaleFallback(url);
-      if (!localized) return primary;
-      return fetchAndRecord(localized);
+      if (!localized || isExpectedCoinbaseWrappedAssetPage(primary, localized)) return primary;
+      const recovered = await fetchAndRecord(localized);
+      return recovered.status === "ok" ? recovered : primary;
     })();
     sourceByUrl.set(key, pending);
     return pending;

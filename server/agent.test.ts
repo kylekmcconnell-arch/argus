@@ -1009,7 +1009,14 @@ describe("analyst verdict integrity", () => {
     }, projectAxes, frozen)).not.toBeNull();
   });
 
-  it("rejects a no-notable-followers narrative when observed follower artifacts are frozen", () => {
+  it.each([
+    "Notable followers array is empty in the evidence packet.",
+    "Notable follower evidence is unavailable.",
+    "Observed network data remains absent.",
+    "Zero notable followers were found.",
+    "None of the accounts are notable followers.",
+    "No direct observed network evidence is available.",
+  ])("rejects the false observed-follower absence claim: %s", (falseAbsenceClaim) => {
     const networkAxes: AnalystAxis[] = [
       { axis: "F6_network_quality", weight: 12, role: "FOUNDER" },
     ];
@@ -1027,8 +1034,8 @@ describe("analyst verdict integrity", () => {
     expect(validateAnalystVerdict({
       axes: [{
         ...validAxis("F6_network_quality", 10, followerArtifact.artifactId),
-        rationale: "No notable followers are documented in the evidence packet.",
-        gaps: ["Notable followers were not listed in the collected evidence."],
+        rationale: falseAbsenceClaim,
+        gaps: ["Provider coverage of the wider network is partial."],
       }],
       headline: "The subject has an established public network.",
       identity_note: "Identity is resolved.",

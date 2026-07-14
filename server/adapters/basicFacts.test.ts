@@ -2373,25 +2373,27 @@ cbETH lets you safely and easily use and earn rewards on your staked ETH.
 Wrap your staked ETH to cbETH with just a few steps and zero fees. cbETH can be traded on Coinbase.
 Coinbase's whitepaper provides in-depth details about cbETH's unique design and benefits.`;
 
+    const fetchSource = fetchDocuments({
+      [cbBtcUrl]: document({
+        url: cbBtcUrl,
+        host: "coinbase.com",
+        contentType: "text/plain",
+        text: cbBtcReader,
+        contentHash: "8".repeat(64),
+      }),
+      [cbEthUrl]: document({
+        url: cbEthUrl,
+        host: "coinbase.com",
+        contentType: "text/plain",
+        text: cbEthReader,
+        contentHash: "9".repeat(64),
+      }),
+    });
+
     await collectBasicFacts(ctx, {
       discover: async () => leads,
       repair: async () => [],
-      fetchSource: fetchDocuments({
-        [cbBtcUrl]: document({
-          url: cbBtcUrl,
-          host: "coinbase.com",
-          contentType: "text/plain",
-          text: cbBtcReader,
-          contentHash: "8".repeat(64),
-        }),
-        [cbEthUrl]: document({
-          url: cbEthUrl,
-          host: "coinbase.com",
-          contentType: "text/plain",
-          text: cbEthReader,
-          contentHash: "9".repeat(64),
-        }),
-      }),
+      fetchSource,
     });
 
     expect(leads.map((candidate) => candidate.value)).toEqual(["cbBTC", "cbETH"]);
@@ -2399,6 +2401,8 @@ Coinbase's whitepaper provides in-depth details about cbETH's unique design and 
       expect.objectContaining({ value: "cbBTC", status: "verified" }),
       expect.objectContaining({ value: "cbETH", status: "verified" }),
     ]));
+    expect(fetchSource).not.toHaveBeenCalledWith("https://www.coinbase.com/en-mx/cbbtc");
+    expect(fetchSource).not.toHaveBeenCalledWith("https://www.coinbase.com/en-mx/cbeth");
     expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.official_token"))
       .toEqual(expect.objectContaining({ status: "answered" }));
   });
@@ -2478,6 +2482,16 @@ Coinbase's whitepaper provides in-depth details about cbETH's unique design and 
     const cbBtcLocalized = "https://www.coinbase.com/en-mx/cbbtc";
     const cbEthLocalized = "https://www.coinbase.com/en-mx/cbeth";
     const fetchSource = fetchDocuments({
+      [cbBtcUrl]: document({
+        url: "https://www.coinbase.com/en-us/cbbtc",
+        host: "coinbase.com",
+        text: "<html><head><title>Coinbase cbBTC</title></head><body>Coinbase offers many products.</body></html>",
+      }),
+      [cbEthUrl]: document({
+        url: "https://www.coinbase.com/en-us/cbeth",
+        host: "coinbase.com",
+        text: "<html><head><title>Coinbase cbETH</title></head><body>Coinbase offers many products.</body></html>",
+      }),
       [cbBtcLocalized]: document({
         url: cbBtcLocalized,
         host: "coinbase.com",
@@ -2527,6 +2541,10 @@ cbETH: The trusted liquid staking token. Wrap your staked ETH to cbETH. cbETH ca
     expect(fetchSource).toHaveBeenCalledWith(cbEthUrl);
     expect(fetchSource).toHaveBeenCalledWith(cbBtcLocalized);
     expect(fetchSource).toHaveBeenCalledWith(cbEthLocalized);
+    const wrappedAssetCalls = fetchSource.mock.calls
+      .map(([url]) => url)
+      .filter((url) => [cbBtcUrl, cbEthUrl, cbBtcLocalized, cbEthLocalized].includes(url));
+    expect(wrappedAssetCalls).toHaveLength(4);
     expect(evidence.basicFacts?.filter((fact) => fact.predicate === "official_token"))
       .toEqual(expect.arrayContaining([
         expect.objectContaining({ value: "cbBTC", status: "verified" }),

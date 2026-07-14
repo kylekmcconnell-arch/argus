@@ -2386,7 +2386,7 @@ var describesGroundedTeamAsUnresolved = (value) => {
   const normalized4 = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
   return /\bnamed\s+(?:founders?|co\s+founders?|leaders?|leadership|team|executives?|ceo)(?:\s+\w+){0,12}\s+not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b/.test(normalized4);
 };
-var ABSENT_NOTABLE_FOLLOWERS_CLAIM = /(?:\bno\s+(?:named\s+|verified\s+|documented\s+|structured\s+|observed\s+)?notable\s+followers?\b|\b(?:absence|lack|missing)\s+of\s+(?:named\s+|verified\s+|documented\s+|observed\s+)?notable\s+followers?\b|\bnotable\s+followers?\b(?:\s+[\w-]+){0,10}\s+(?:are|were|remain)?\s*not\s+(?:listed|documented|present|included|provided|available|observed|surfaced)\b)/i;
+var ABSENT_NOTABLE_FOLLOWERS_CLAIM = /(?:\b(?:no|zero)\s+(?:named\s+|verified\s+|documented\s+|structured\s+|observed\s+)?notable\s+followers?\b|\b(?:absence|lack|missing)\s+of\s+(?:named\s+|verified\s+|documented\s+|observed\s+)?notable\s+followers?\b|\bnotable\s+followers?\b(?:\s+[\w-]+){0,10}\s+(?:are|were|remain)?\s*not\s+(?:listed|documented|present|included|provided|available|observed|surfaced)\b|\b(?:notable\s+followers?|observed\s+network)(?:\s+(?:evidence|data|array|list|collection|section))?\s+(?:is|was|remains?)\s+(?:empty|absent|missing|unavailable|not\s+present)\b|\bnone\b(?:\s+[\w-]+){0,8}\s+notable\s+followers?\b|\bno\s+direct\s+observed\s+network\s+evidence\b)/i;
 var describesGroundedNotableFollowersAsAbsent = (value) => ABSENT_NOTABLE_FOLLOWERS_CLAIM.test(value);
 function normalizeAnalystSupportCounterOverlap(value, evidenceCatalog, projectScoreBands = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
@@ -9565,6 +9565,37 @@ function coinbaseWrappedAssetLocaleFallback(raw) {
     return null;
   }
 }
+function coinbaseWrappedAssetProductPassage(title, body, symbol) {
+  if (!looseContainsPhrase(title, "Coinbase") || !looseContainsPhrase(title, symbol) || /\b(?:404|not found|page unavailable)\b/i.test(title)) return null;
+  const normalizedBody = normalize(decodeHtmlEntities(body.replace(/<[^>]+>/g, " ")));
+  if (searchable(symbol) === "cbbtc") {
+    const wrappedCustody = /\bCoinbase\s+wrapped\s+assets?\b[^.!?]{0,220}\bbacked\s+1:1\b[^.!?]{0,160}\bheld\s+in\s+custody\s+by\s+Coinbase\b/i.exec(normalizedBody);
+    return wrappedCustody ? normalize(`${title}. ${wrappedCustody[0]}`) : null;
+  }
+  if (searchable(symbol) === "cbeth") {
+    const productClass = /(?:\bliquid\s+staking\s+token\b|\bwrap\s+your\s+staked\s+ETH\s+to\s+cbETH\b|\bcbETH\b[^.!?]{0,120}\btraded\s+on\s+Coinbase\b)/i.exec(normalizedBody);
+    const ventureWhitepaper = /(?:\bCoinbase['’]s\s+whitepaper\b[^.!?]{0,260}\bcbETH\b|\bcbETH\b[^.!?]{0,260}\bCoinbase['’]s\s+whitepaper\b)/i.exec(normalizedBody);
+    return productClass && ventureWhitepaper ? normalize(`${title}. ${productClass[0]}. ${ventureWhitepaper[0]}`) : null;
+  }
+  return null;
+}
+function isExpectedCoinbaseWrappedAssetPage(result, fallbackUrl) {
+  if (result.status !== "ok") return false;
+  const symbol = new URL(fallbackUrl).pathname.split("/").filter(Boolean).at(-1) ?? "";
+  let pathSegments;
+  try {
+    pathSegments = decodeURIComponent(new URL(result.url).pathname).split("/").filter(Boolean);
+  } catch {
+    return false;
+  }
+  const exactProductPath = pathSegments.length === 1 || pathSegments.length === 2 && /^[a-z]{2}(?:-[a-z]{2})?$/i.test(pathSegments[0]);
+  if (!exactProductPath || searchable(pathSegments.at(-1) ?? "") !== searchable(symbol)) return false;
+  const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(result.text);
+  const htmlTitle = /<title\b[^>]*>([\s\S]{1,1000}?)<\/title>/i.exec(result.text)?.[1];
+  const title = normalize(decodeHtmlEntities((metadata?.[1] ?? htmlTitle ?? "").replace(/<[^>]+>/g, " ")));
+  const body = metadata?.[1] && metadata.index === 0 ? result.text.slice(metadata[0].length) : result.text;
+  return Boolean(coinbaseWrappedAssetProductPassage(title, body, symbol));
+}
 function officialVentureAssetPagePassage(document, page, lead, relationships) {
   if (!/^\$?[A-Za-z][A-Za-z0-9.-]{1,15}$/.test(lead.value)) return null;
   const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(page);
@@ -9587,6 +9618,10 @@ function officialVentureAssetPagePassage(document, page, lead, relationships) {
     const venture = loosePhrasePattern(relationship.name);
     const value = loosePhrasePattern(lead.value);
     if (!venture || !value) continue;
+    if (searchable(relationship.name) === "coinbase") {
+      const verifiedCoinbaseProduct = coinbaseWrappedAssetProductPassage(title, body, lead.value);
+      if (verifiedCoinbaseProduct && verifiedCoinbaseProduct.length <= MAX_SUPPORT_PASSAGE_CHARS && !TOKEN_PAGE_UNCERTAINTY.test(verifiedCoinbaseProduct)) return verifiedCoinbaseProduct;
+    }
     const wrappedCustody = new RegExp(
       `\\b${venture}\\s+wrapped\\s+assets?\\b[^.!?]{0,220}\\bbacked\\s+1:1\\b[^.!?]{0,160}\\bheld\\s+in\\s+custody\\s+by\\s+${venture}\\b`,
       "i"
@@ -10257,10 +10292,10 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     };
     const pending = (async () => {
       const primary2 = await fetchAndRecord(url);
-      if (primary2.status === "ok") return primary2;
       const localized = coinbaseWrappedAssetLocaleFallback(url);
-      if (!localized) return primary2;
-      return fetchAndRecord(localized);
+      if (!localized || isExpectedCoinbaseWrappedAssetPage(primary2, localized)) return primary2;
+      const recovered = await fetchAndRecord(localized);
+      return recovered.status === "ok" ? recovered : primary2;
     })();
     sourceByUrl.set(key, pending);
     return pending;
