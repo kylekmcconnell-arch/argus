@@ -209,7 +209,12 @@ export class PersonCheckTracker {
     const heldRoles = new Set(roles);
     const projectOnly = heldRoles.size === 1 && heldRoles.has("PROJECT");
     return CHECKS.map((definition) => {
-      const decisionCritical = Boolean(
+      // Founder diligence already owns the stricter, attribution-verified
+      // legal/regulatory question. A secondary MEMBER classification must not
+      // re-arm the raw CourtListener name-screen diagnostic for the same person.
+      const founderLegalSupersedesNameScreen = definition.id === "us-legal-history"
+        && heldRoles.has("FOUNDER");
+      const decisionCritical = !founderLegalSupersedesNameScreen && Boolean(
         definition.criticalFor?.some((criticalRole) => heldRoles.has(criticalRole)),
       );
       if (definition.role && !heldRoles.has(definition.role)) {

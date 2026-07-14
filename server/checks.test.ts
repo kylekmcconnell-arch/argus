@@ -395,7 +395,7 @@ describe("PersonCheckTracker", () => {
     expect(readiness.successful).toBe(3);
   });
 
-  it("keeps a fully answered Brian-like founder PASS final when photo and CourtListener diagnostics fail", () => {
+  it("keeps a fully answered Brian-like founder/member PASS final when photo and CourtListener diagnostics fail", () => {
     const tracker = new PersonCheckTracker();
     for (const [id, status, note] of [
       ["founder-identity-authority", "confirmed", "Brian Armstrong and his current Coinbase CEO authority were verified"],
@@ -413,6 +413,20 @@ describe("PersonCheckTracker", () => {
         sourceCount: status === "checked-empty" ? 0 : 1,
       });
     }
+    tracker.record({
+      id: "identity-resolution",
+      status: "confirmed",
+      note: "licensed identity and linked public profile resolved to Brian Armstrong",
+      provider: "identity-resolution",
+      sourceCount: 1,
+    });
+    tracker.record({
+      id: "affiliations-associates",
+      status: "confirmed",
+      note: "provider-backed affiliations and associates were collected",
+      provider: "affiliations",
+      sourceCount: 1,
+    });
     tracker.record({
       id: "profile-photo-authenticity",
       status: "unavailable",
@@ -444,13 +458,14 @@ describe("PersonCheckTracker", () => {
       "CourtListener coverage was partial",
     );
 
-    const checks = tracker.snapshot(["FOUNDER"], { resolvedRealName: true });
+    const roles = ["FOUNDER", "MEMBER"];
+    const checks = tracker.snapshot(roles, { resolvedRealName: true });
     const readiness = deriveDecisionReadiness(checks, {
       roleCount: 1,
       decisionAxisTotal: 6,
       evidenceBackedAxes: 6,
     });
-    const completeness = tracker.completeness(["FOUNDER"], { resolvedRealName: true });
+    const completeness = tracker.completeness(roles, { resolvedRealName: true });
     const presentation = presentPublicReport({
       verdict: "PASS",
       score: 80,
@@ -488,8 +503,8 @@ describe("PersonCheckTracker", () => {
     }));
     expect(readiness).toMatchObject({
       status: "ready",
-      successful: 8,
-      applicable: 8,
+      successful: 10,
+      applicable: 10,
       coveragePercent: 100,
       unresolved: 0,
     });

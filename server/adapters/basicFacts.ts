@@ -2286,6 +2286,28 @@ function relationshipBoundTokenHasAffirmativeVentureLink(
 const TOKEN_PAGE_UNCERTAINTY = /\b(?:alleged|candidate|claimed|demo|draft|experimental|fake|former|future|hypothetical|intended|mock|non-live|potential|proposed|purported|rumored|so-called|supposedly|test|testnet|unofficial|unlaunched|uncertain)\b/i;
 
 /**
+ * Coinbase's canonical wrapped-asset URLs are locale-negotiated. Cloudflare can
+ * block the canonical request before that redirect is observed, while the same
+ * first-party product page remains fetchable at Coinbase's stable en-mx path.
+ * Keep this recovery deliberately exact so a generic listing page can never be
+ * upgraded into founder-owned token evidence.
+ */
+function coinbaseWrappedAssetLocaleFallback(raw: string): string | null {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return null;
+    if (url.hostname !== "www.coinbase.com" && url.hostname !== "coinbase.com") return null;
+    if (url.search || url.hash) return null;
+    const match = /^\/(cbbtc|cbeth)\/?$/i.exec(url.pathname);
+    if (!match) return null;
+    url.pathname = `/en-mx/${match[1].toLowerCase()}`;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Some first-party product pages split one proof across their page title and
  * product copy. Coinbase's cbBTC page, for example, names the product in the
  * title and separately says Coinbase wrapped assets are backed 1:1 and held by
@@ -3200,19 +3222,29 @@ export async function collectBasicFacts(
     const key = new URL(url).toString();
     const existing = sourceByUrl.get(key);
     if (existing) return existing;
-    const pending = fetchSource(url).then((result) => {
-      recordCall(
-        "basic-facts-web",
-        "source-fetch",
-        0,
-        result.status === "ok" ? "source_fetched" : result.reason,
-        result.status === "ok" ? "succeeded" : "failed",
-      );
-      return result;
-    }).catch((): PublicTextResult => {
-      recordCall("basic-facts-web", "source-fetch", 0, "transport_error", "failed");
-      return { status: "failed", reason: "transport_error" };
-    });
+    const fetchAndRecord = async (target: string): Promise<PublicTextResult> => {
+      try {
+        const result = await fetchSource(target);
+        recordCall(
+          "basic-facts-web",
+          "source-fetch",
+          0,
+          result.status === "ok" ? "source_fetched" : result.reason,
+          result.status === "ok" ? "succeeded" : "failed",
+        );
+        return result;
+      } catch {
+        recordCall("basic-facts-web", "source-fetch", 0, "transport_error", "failed");
+        return { status: "failed", reason: "transport_error" };
+      }
+    };
+    const pending = (async (): Promise<PublicTextResult> => {
+      const primary = await fetchAndRecord(url);
+      if (primary.status === "ok") return primary;
+      const localized = coinbaseWrappedAssetLocaleFallback(url);
+      if (!localized) return primary;
+      return fetchAndRecord(localized);
+    })();
     sourceByUrl.set(key, pending);
     return pending;
   };

@@ -2386,6 +2386,8 @@ var describesGroundedTeamAsUnresolved = (value) => {
   const normalized4 = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
   return /\bnamed\s+(?:founders?|co\s+founders?|leaders?|leadership|team|executives?|ceo)(?:\s+\w+){0,12}\s+not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b/.test(normalized4);
 };
+var ABSENT_NOTABLE_FOLLOWERS_CLAIM = /(?:\bno\s+(?:named\s+|verified\s+|documented\s+|structured\s+|observed\s+)?notable\s+followers?\b|\b(?:absence|lack|missing)\s+of\s+(?:named\s+|verified\s+|documented\s+|observed\s+)?notable\s+followers?\b|\bnotable\s+followers?\b(?:\s+[\w-]+){0,10}\s+(?:are|were|remain)?\s*not\s+(?:listed|documented|present|included|provided|available|observed|surfaced)\b)/i;
+var describesGroundedNotableFollowersAsAbsent = (value) => ABSENT_NOTABLE_FOLLOWERS_CLAIM.test(value);
 function normalizeAnalystSupportCounterOverlap(value, evidenceCatalog, projectScoreBands = {}) {
   if (!value || typeof value !== "object" || Array.isArray(value)) return value;
   const root = value;
@@ -2532,6 +2534,10 @@ function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onRej
   const axisNarrative = JSON.stringify(raw.axes ?? "");
   if (hasGroundedProjectTeam && (describesGroundedTeamAsUnresolved(headline) || describesGroundedTeamAsUnresolved(identityNote) || describesGroundedTeamAsUnresolved(axisNarrative))) {
     return reject("grounded-team-described-as-unresolved");
+  }
+  const hasGroundedNotableFollowers = expected.has("F6_network_quality") && evidenceCatalog.some((artifact) => artifact.section === "notableFollowers" && artifact.eligibleAxes.includes("F6_network_quality") && isSubstantiveArtifact(artifact));
+  if (hasGroundedNotableFollowers && (describesGroundedNotableFollowersAsAbsent(headline) || describesGroundedNotableFollowersAsAbsent(identityNote) || describesGroundedNotableFollowersAsAbsent(axisNarrative))) {
+    return reject("grounded-notable-followers-described-as-absent");
   }
   const artifactIdByAlias = new Map(
     evidenceCatalog.map((artifact, index) => [
@@ -4267,6 +4273,8 @@ Score every listed axis, write the composite headline (one sentence on what gove
 
 ACTIVITY RULE: weigh posting cadence. profile.days_since_post is how long the account has been silent. For a PROJECT/token, going quiet for weeks (roughly 21+ days) is a real liveness flag (abandoned, winding down, or quiet after a raise) and should temper traction/execution axes; for an individual it is a milder signal. Recent, steady posting is mildly positive, not a free pass.
 
+OBSERVED NETWORK RULE: a non-empty notableFollowers array is direct observed network evidence. You may state that follower coverage is partial, but never claim that no notable followers were found, listed, documented, or present when those rows exist. Name representative observed accounts in the rationale.
+
 IDENTITY RULE: if the evidence has a "team" array of named people tied to the project (especially any with a LinkedIn, or a named founder/CEO/CTO), the project's real-world identity is RESOLVED. A pseudonymous brand/company handle run on behalf of a publicly named team is NORMAL and is NOT an anonymity red flag: do not score identity/backing axes as if the operators were anonymous, and do NOT write a headline that calls the founder identity "unresolved", "unnamed", or "anonymous" when named leaders are present. The same applies to identity notes, axis rationales, and gap lines: a licensed identity-provider miss does not erase first-party founder evidence. Only treat identity as unresolved when the evidence genuinely names no one behind the project.
 
 PUBLIC DILIGENCE GAP RULE: identity gaps must be resolvable through public or consensually supplied professional records. Never request or recommend collecting a government-issued ID, passport, SSN or tax ID, home address, private account credentials, private financial records, or any other non-public personal proof. When public evidence is insufficient, say the public identity or role evidence remains unresolved and name the public source that should be checked next.
@@ -4343,6 +4351,8 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
     let rejectedAxisHint = "";
     if (rejectionReason === "grounded-team-described-as-unresolved") {
       rejectedAxisHint = " The frozen packet contains substantive named-team artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge the public team. Do not claim there is no, absent, unnamed, unresolved, anonymous, unknown, or undisclosed project founder, operator, executive, leader, or team. Keep a failed licensed-identity-provider lookup separate from the first-party founder evidence; it does not erase the named team.";
+    } else if (rejectionReason === "grounded-notable-followers-described-as-absent") {
+      rejectedAxisHint = " The frozen packet contains observed notable-follower artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge those accounts. You may describe provider coverage as partial, but do not claim that no notable followers were found, listed, documented, present, included, or observed. Name representative observed accounts in the F6 network-quality rationale.";
     } else if (projectBandRepair) {
       rejectedAxisHint = projectBandRepair;
     } else if (rejectedAxis && coverageLimitMatch) {
@@ -4590,7 +4600,8 @@ var PersonCheckTracker = class {
     const heldRoles = new Set(roles);
     const projectOnly = heldRoles.size === 1 && heldRoles.has("PROJECT");
     return CHECKS.map((definition) => {
-      const decisionCritical = Boolean(
+      const founderLegalSupersedesNameScreen = definition.id === "us-legal-history" && heldRoles.has("FOUNDER");
+      const decisionCritical = !founderLegalSupersedesNameScreen && Boolean(
         definition.criticalFor?.some((criticalRole) => heldRoles.has(criticalRole))
       );
       if (definition.role && !heldRoles.has(definition.role)) {
@@ -9540,6 +9551,20 @@ function relationshipBoundTokenHasAffirmativeVentureLink(claimClause, lead, rela
   });
 }
 var TOKEN_PAGE_UNCERTAINTY = /\b(?:alleged|candidate|claimed|demo|draft|experimental|fake|former|future|hypothetical|intended|mock|non-live|potential|proposed|purported|rumored|so-called|supposedly|test|testnet|unofficial|unlaunched|uncertain)\b/i;
+function coinbaseWrappedAssetLocaleFallback(raw) {
+  try {
+    const url = new URL(raw);
+    if (url.protocol !== "https:") return null;
+    if (url.hostname !== "www.coinbase.com" && url.hostname !== "coinbase.com") return null;
+    if (url.search || url.hash) return null;
+    const match = /^\/(cbbtc|cbeth)\/?$/i.exec(url.pathname);
+    if (!match) return null;
+    url.pathname = `/en-mx/${match[1].toLowerCase()}`;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
 function officialVentureAssetPagePassage(document, page, lead, relationships) {
   if (!/^\$?[A-Za-z][A-Za-z0-9.-]{1,15}$/.test(lead.value)) return null;
   const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(page);
@@ -10214,19 +10239,29 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     const key = new URL(url).toString();
     const existing = sourceByUrl.get(key);
     if (existing) return existing;
-    const pending = fetchSource(url).then((result) => {
-      recordCall(
-        "basic-facts-web",
-        "source-fetch",
-        0,
-        result.status === "ok" ? "source_fetched" : result.reason,
-        result.status === "ok" ? "succeeded" : "failed"
-      );
-      return result;
-    }).catch(() => {
-      recordCall("basic-facts-web", "source-fetch", 0, "transport_error", "failed");
-      return { status: "failed", reason: "transport_error" };
-    });
+    const fetchAndRecord = async (target) => {
+      try {
+        const result = await fetchSource(target);
+        recordCall(
+          "basic-facts-web",
+          "source-fetch",
+          0,
+          result.status === "ok" ? "source_fetched" : result.reason,
+          result.status === "ok" ? "succeeded" : "failed"
+        );
+        return result;
+      } catch {
+        recordCall("basic-facts-web", "source-fetch", 0, "transport_error", "failed");
+        return { status: "failed", reason: "transport_error" };
+      }
+    };
+    const pending = (async () => {
+      const primary2 = await fetchAndRecord(url);
+      if (primary2.status === "ok") return primary2;
+      const localized = coinbaseWrappedAssetLocaleFallback(url);
+      if (!localized) return primary2;
+      return fetchAndRecord(localized);
+    })();
     sourceByUrl.set(key, pending);
     return pending;
   };

@@ -490,6 +490,9 @@ const describesGroundedTeamAsUnresolved = (value: string): boolean => {
   const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
   return /\bnamed\s+(?:founders?|co\s+founders?|leaders?|leadership|team|executives?|ceo)(?:\s+\w+){0,12}\s+not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b/.test(normalized);
 };
+const ABSENT_NOTABLE_FOLLOWERS_CLAIM = /(?:\bno\s+(?:named\s+|verified\s+|documented\s+|structured\s+|observed\s+)?notable\s+followers?\b|\b(?:absence|lack|missing)\s+of\s+(?:named\s+|verified\s+|documented\s+|observed\s+)?notable\s+followers?\b|\bnotable\s+followers?\b(?:\s+[\w-]+){0,10}\s+(?:are|were|remain)?\s*not\s+(?:listed|documented|present|included|provided|available|observed|surfaced)\b)/i;
+const describesGroundedNotableFollowersAsAbsent = (value: string): boolean =>
+  ABSENT_NOTABLE_FOLLOWERS_CLAIM.test(value);
 
 // Claude can occasionally place the same substantive citation on both sides
 // of an axis despite the strict prompt. Preserve the conservative meaning of
@@ -719,6 +722,19 @@ export function validateAnalystVerdict(
       || describesGroundedTeamAsUnresolved(axisNarrative))
   ) {
     return reject("grounded-team-described-as-unresolved");
+  }
+  const hasGroundedNotableFollowers = expected.has("F6_network_quality")
+    && evidenceCatalog.some((artifact) =>
+      artifact.section === "notableFollowers"
+      && artifact.eligibleAxes.includes("F6_network_quality")
+      && isSubstantiveArtifact(artifact));
+  if (
+    hasGroundedNotableFollowers
+    && (describesGroundedNotableFollowersAsAbsent(headline)
+      || describesGroundedNotableFollowersAsAbsent(identityNote)
+      || describesGroundedNotableFollowersAsAbsent(axisNarrative))
+  ) {
+    return reject("grounded-notable-followers-described-as-absent");
   }
 
   const artifactIdByAlias = new Map(
@@ -2966,6 +2982,10 @@ export async function analyzeSubject(
     `21+ days) is a real liveness flag (abandoned, winding down, or quiet after a ` +
     `raise) and should temper traction/execution axes; for an individual it is a ` +
     `milder signal. Recent, steady posting is mildly positive, not a free pass.\n\n` +
+    `OBSERVED NETWORK RULE: a non-empty notableFollowers array is direct observed ` +
+    `network evidence. You may state that follower coverage is partial, but never ` +
+    `claim that no notable followers were found, listed, documented, or present ` +
+    `when those rows exist. Name representative observed accounts in the rationale.\n\n` +
     `IDENTITY RULE: if the evidence has a "team" array of named people tied to the ` +
     `project (especially any with a LinkedIn, or a named founder/CEO/CTO), the ` +
     `project's real-world identity is RESOLVED. A pseudonymous brand/company handle ` +
@@ -3094,6 +3114,8 @@ export async function analyzeSubject(
     let rejectedAxisHint = "";
     if (rejectionReason === "grounded-team-described-as-unresolved") {
       rejectedAxisHint = " The frozen packet contains substantive named-team artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge the public team. Do not claim there is no, absent, unnamed, unresolved, anonymous, unknown, or undisclosed project founder, operator, executive, leader, or team. Keep a failed licensed-identity-provider lookup separate from the first-party founder evidence; it does not erase the named team.";
+    } else if (rejectionReason === "grounded-notable-followers-described-as-absent") {
+      rejectedAxisHint = " The frozen packet contains observed notable-follower artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge those accounts. You may describe provider coverage as partial, but do not claim that no notable followers were found, listed, documented, present, included, or observed. Name representative observed accounts in the F6 network-quality rationale.";
     } else if (projectBandRepair) {
       rejectedAxisHint = projectBandRepair;
     } else if (rejectedAxis && coverageLimitMatch) {

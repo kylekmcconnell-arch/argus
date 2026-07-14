@@ -2455,6 +2455,87 @@ Coinbase's whitepaper provides in-depth details about cbETH's unique design and 
     }
   });
 
+  it("recovers canonical Coinbase wrapped-asset leads through the exact localized product pages", async () => {
+    const { ctx, evidence } = context("https://brianarmstrong.org");
+    ctx.handle = "@brian_armstrong";
+    evidence.profile.handle = "@brian_armstrong";
+    evidence.profile.display_name = "Brian Armstrong";
+    evidence.profile.resolved_name = "Brian Armstrong";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Coinbase",
+      domain: "coinbase.com",
+      role: "Co-founder and CEO",
+      period: "2012-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://investor.coinbase.com/governance/board-of-directors/default.aspx",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const cbBtcUrl = "https://www.coinbase.com/cbbtc";
+    const cbEthUrl = "https://www.coinbase.com/cbeth";
+    const cbBtcLocalized = "https://www.coinbase.com/en-mx/cbbtc";
+    const cbEthLocalized = "https://www.coinbase.com/en-mx/cbeth";
+    const fetchSource = fetchDocuments({
+      [cbBtcLocalized]: document({
+        url: cbBtcLocalized,
+        host: "coinbase.com",
+        contentType: "text/plain",
+        text: `Title: Coinbase cbBTC
+URL Source: ${cbBtcLocalized}
+Markdown Content:
+Coinbase wrapped assets are backed 1:1 and held in custody by Coinbase.`,
+      }),
+      [cbEthLocalized]: document({
+        url: cbEthLocalized,
+        host: "coinbase.com",
+        contentType: "text/plain",
+        text: `Title: Coinbase cbETH
+URL Source: ${cbEthLocalized}
+Markdown Content:
+cbETH: The trusted liquid staking token. Wrap your staked ETH to cbETH. cbETH can be traded on Coinbase. Coinbase's whitepaper provides in-depth details about cbETH's design.`,
+      }),
+    });
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [
+        lead({
+          subject: "Brian Armstrong",
+          predicate: "official_token",
+          value: "cbBTC",
+          questionId: "person.official_token",
+          excerpt: "Coinbase wrapped assets are backed 1:1 and held in custody by Coinbase.",
+          sourceUrl: cbBtcUrl,
+          sourceTitle: "Coinbase cbBTC",
+        }),
+        lead({
+          subject: "Brian Armstrong",
+          predicate: "official_token",
+          value: "cbETH",
+          questionId: "person.official_token",
+          excerpt: "cbETH: The trusted liquid staking token.",
+          sourceUrl: cbEthUrl,
+          sourceTitle: "Coinbase cbETH",
+        }),
+      ],
+      repair: async () => [],
+      fetchSource,
+    });
+
+    expect(fetchSource).toHaveBeenCalledWith(cbBtcUrl);
+    expect(fetchSource).toHaveBeenCalledWith(cbEthUrl);
+    expect(fetchSource).toHaveBeenCalledWith(cbBtcLocalized);
+    expect(fetchSource).toHaveBeenCalledWith(cbEthLocalized);
+    expect(evidence.basicFacts?.filter((fact) => fact.predicate === "official_token"))
+      .toEqual(expect.arrayContaining([
+        expect.objectContaining({ value: "cbBTC", status: "verified" }),
+        expect.objectContaining({ value: "cbETH", status: "verified" }),
+      ]));
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.official_token"))
+      .toEqual(expect.objectContaining({ status: "answered" }));
+  });
+
   it("does not turn an official exchange listing page for someone else's token into a founder asset", async () => {
     const { ctx, evidence } = context("https://brianarmstrong.org");
     ctx.handle = "@brian_armstrong";

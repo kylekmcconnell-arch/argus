@@ -1009,6 +1009,42 @@ describe("analyst verdict integrity", () => {
     }, projectAxes, frozen)).not.toBeNull();
   });
 
+  it("rejects a no-notable-followers narrative when observed follower artifacts are frozen", () => {
+    const networkAxes: AnalystAxis[] = [
+      { axis: "F6_network_quality", weight: 12, role: "FOUNDER" },
+    ];
+    const frozen = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      notableFollowers: [{
+        handle: "@a16zcrypto",
+        name: "a16z crypto",
+        category: "VC",
+        provider: "twitterapi",
+      }],
+    }, networkAxes));
+    const followerArtifact = frozen.find((artifact) => artifact.section === "notableFollowers")!;
+    const rejection = vi.fn();
+
+    expect(validateAnalystVerdict({
+      axes: [{
+        ...validAxis("F6_network_quality", 10, followerArtifact.artifactId),
+        rationale: "No notable followers are documented in the evidence packet.",
+        gaps: ["Notable followers were not listed in the collected evidence."],
+      }],
+      headline: "The subject has an established public network.",
+      identity_note: "Identity is resolved.",
+    }, networkAxes, frozen, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("grounded-notable-followers-described-as-absent");
+
+    expect(validateAnalystVerdict({
+      axes: [{
+        ...validAxis("F6_network_quality", 10, followerArtifact.artifactId),
+        rationale: "Observed followers include @a16zcrypto; provider coverage of the wider network is partial.",
+      }],
+      headline: "The subject has an established public network.",
+      identity_note: "Identity is resolved.",
+    }, networkAxes, frozen)).not.toBeNull();
+  });
+
   it.each([
     {
       label: "missing axis",
