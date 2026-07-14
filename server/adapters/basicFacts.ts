@@ -610,6 +610,8 @@ function canonicalOfficialTokenLeadValue(value: string): string {
   const symbol = "\\$?[A-Za-z][A-Za-z0-9.-]{1,15}";
   const leading = new RegExp(`^(${symbol})\\s*\\([^)]{2,100}\\)\\s*(?:[·:\\u2013\\u2014]|\\s-\\s|$)`).exec(normalized)?.[1];
   if (leading) return leading;
+  const delimited = new RegExp(`^(${symbol})\\s*(?:[·:\\u2013\\u2014]|\\s-\\s)\\s+\\S`).exec(normalized)?.[1];
+  if (delimited) return delimited;
   const named = new RegExp(`^[^();]{2,100}\\(\\s*(${symbol})\\s*\\)\\s*(?:[·:\\u2013\\u2014]|\\s-\\s|$)`).exec(normalized)?.[1];
   return named ?? normalized;
 }
