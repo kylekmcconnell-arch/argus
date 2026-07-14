@@ -10764,8 +10764,13 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     ...relationshipBoundAssets
   ]);
   let registryVerified = [];
+  let registryScreenEmpty = false;
   const publicSecurityQuestion = questions.find((question) => question.predicate === "public_security");
-  if (publicSecurityQuestion && authoritativeAssetRelationships.length && !sourceVerifiedBeforeRegistry.some((fact) => fact.predicate === "public_security" && (fact.status === "verified" || fact.status === "corroborated"))) {
+  const registryScreenNames = [.../* @__PURE__ */ new Set([
+    ...authoritativeAssetRelationships.map((relationship) => relationship.name),
+    ...ctx.evidence.ventures.filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead").map((venture) => venture.project_name.trim())
+  ])].filter((name) => name.length > 1);
+  if (publicSecurityQuestion && authoritativeAssetRelationships.length && registryScreenNames.length && !sourceVerifiedBeforeRegistry.some((fact) => fact.predicate === "public_security" && (fact.status === "verified" || fact.status === "corroborated"))) {
     const registry = await fetchOnce(SEC_EXCHANGE_REGISTRY_URL);
     if (registry.status === "ok") {
       registryVerified = secRegistryPublicSecurityFacts(
@@ -10774,6 +10779,9 @@ async function collectBasicFacts(ctx, dependencies = {}) {
         authoritativeAssetRelationships,
         publicSecurityQuestion.id
       );
+      const registryRows = secExchangeRegistryRows(registry);
+      const anyIssuerMatch = registryVerified.length > 0 || registryRows !== null && registryScreenNames.some((name) => registryRows.some((row) => registryIssuerMatchesRelationship(row.name, name)));
+      registryScreenEmpty = registryRows !== null && !anyIssuerMatch;
     }
   }
   const verified = [
@@ -10795,6 +10803,12 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     repair,
     repairQuestionIds
   );
+  if (registryScreenEmpty) {
+    const publicSecurityEntry = ctx.evidence.basicFactQuestionLedger.find((entry) => entry.predicate === "public_security");
+    if (publicSecurityEntry && publicSecurityEntry.status === "unanswered") {
+      publicSecurityEntry.providerRuns.push({ phase: "repair", provider: "sec-registry", state: "completed_empty" });
+    }
+  }
   const sourceVerifiedLeadCount = new Set(verified.map((fact) => `${fact.predicate}::${fact.normalizedValue}`)).size;
   const unansweredCritical = ctx.evidence.basicFactQuestionLedger.filter((entry) => entry.critical && entry.status === "unanswered").length;
   ctx.emit({
@@ -14914,6 +14928,56 @@ async function collectProjectTokenIdentity(ctx) {
     attempts: 1 + detailAttempts + 1 + historyResult.attempts
   };
 }
+async function collectVentureTokenIdentity(venture) {
+  const query = projectName(venture.name);
+  const ventureHandle = venture.xHandle?.trim() ? normalizeHandle2(venture.xHandle) : null;
+  const ventureScope = venture.domain?.trim() ? canonicalOfficialWebsite(venture.domain) : null;
+  if (query.length < 2 || !ventureHandle && !ventureScope) return null;
+  const search = await coinSearch(query);
+  if (!search) return null;
+  const candidates = rankedCandidates(query, search);
+  for (const candidate of candidates) {
+    const details = await coinDetails(candidate.id);
+    if (!details) continue;
+    const links = isRecord3(details.links) ? details.links : {};
+    const officialHandle = cleanText(links.twitter_screen_name);
+    const exactX = Boolean(ventureHandle && officialHandle && normalizeHandle2(officialHandle) === ventureHandle);
+    const homepages = officialHomepages(details);
+    const domainHomepage = ventureScope ? homepages.find((candidateHome) => {
+      const tokenScope = canonicalOfficialWebsite(candidateHome);
+      return tokenScope !== null && domainsMatch(ventureScope.domain, tokenScope.domain);
+    }) : void 0;
+    if (!exactX && !domainHomepage) continue;
+    const contract = canonicalContract(details);
+    if (!contract) continue;
+    const id = cleanText(details.id);
+    const name = cleanText(details.name);
+    const symbol = cleanText(details.symbol).toUpperCase();
+    if (!id || !name || !symbol) continue;
+    const market = isRecord3(details.market_data) ? details.market_data : {};
+    const currentPrice = isRecord3(market.current_price) ? finiteNumber(market.current_price.usd) : void 0;
+    const marketCap = isRecord3(market.market_cap) ? finiteNumber(market.market_cap.usd) : void 0;
+    return {
+      verified: true,
+      verification: exactX ? "official_x" : "official_domain",
+      ventureName: venture.name,
+      name,
+      symbol,
+      coingeckoId: id,
+      rank: Number.isFinite(details.market_cap_rank) ? Number(details.market_cap_rank) : null,
+      address: contract.address,
+      chain: contract.chain,
+      ...homepages[0] ? { homepage: homepages[0] } : {},
+      ...officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {},
+      sourceUrl: `https://www.coingecko.com/en/coins/${encodeURIComponent(id)}`,
+      capturedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      providers: ["coingecko"],
+      ...currentPrice !== void 0 ? { priceUsd: currentPrice } : {},
+      ...marketCap !== void 0 ? { marketCapUsd: marketCap } : {}
+    };
+  }
+  return null;
+}
 
 // server/basicFactsProjection.ts
 import { createHash as createHash10 } from "node:crypto";
@@ -15347,6 +15411,23 @@ function projectProviderBackedBasicFacts(evidence) {
         sourceClass: "regulatory_or_onchain"
       })],
       `captured ${tvlSnapshot.capturedAt.slice(0, 10)}`
+    ));
+  }
+  const ventureToken = isFounderSubject && !isProject ? evidence.ventureToken : void 0;
+  if (ventureToken?.verified) {
+    projected.push(makeFact(
+      evidence,
+      "official_token",
+      `$${ventureToken.symbol.toUpperCase()}`,
+      [source({
+        url: ventureToken.sourceUrl,
+        title: "CoinGecko token record",
+        excerpt: `${ventureToken.name} (${ventureToken.symbol}) is the canonical token of ${ventureToken.ventureName}, the subject's verified venture; its identity matched the venture's ${ventureToken.verification === "official_x" ? "official X account" : "official domain"}.`,
+        capturedAt: ventureToken.capturedAt,
+        provider: (ventureToken.providers ?? ["coingecko"]).join(" + "),
+        sourceClass: "regulatory_or_onchain"
+      })],
+      `canonical token of ${ventureToken.ventureName}`
     ));
   }
   const founderProfile = isProject ? evidence.companyEnrichment?.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title)) : void 0;
@@ -16617,7 +16698,7 @@ function collectFounderDecisionQuestionOutcomes(ctx) {
       const assetOutcomes = group.predicates.map((predicate) => {
         const entry = entries.find((candidate) => candidate.predicate === predicate);
         const fact = facts.find((candidate) => candidate.predicate === predicate);
-        const verifiedProjectToken = predicate === "official_token" && ctx.evidence.projectToken?.verified ? ctx.evidence.projectToken : null;
+        const verifiedProjectToken = predicate === "official_token" ? ctx.evidence.projectToken?.verified ? ctx.evidence.projectToken : ctx.evidence.ventureToken?.verified ? ctx.evidence.ventureToken : null : null;
         const claimObserved = Boolean(
           fact || verifiedProjectToken || (ctx.evidence.basicFactLeads ?? []).some((lead) => lead.predicate === predicate) || entry?.status === "answered"
         );
@@ -17351,6 +17432,27 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         }
       } catch (error) {
         emit({ phase: "Founder", label: "Venture financing enrichment error", detail: String(error), tone: "warn" });
+      }
+      if (!evidence.ventureToken && (primaryVenture.x_handle || primaryVenture.domain)) {
+        try {
+          const ventureToken = await collectVentureTokenIdentity({
+            name: primaryVenture.project_name.trim(),
+            ...primaryVenture.x_handle ? { xHandle: primaryVenture.x_handle } : {},
+            ...primaryVenture.domain ? { domain: primaryVenture.domain } : {}
+          });
+          if (ventureToken) {
+            evidence.ventureToken = ventureToken;
+            emit({
+              phase: "Founder",
+              label: `Venture token resolved \xB7 $${ventureToken.symbol}`,
+              detail: `${ventureToken.ventureName} matched by ${ventureToken.verification === "official_x" ? "official X account" : "official domain"}; frozen as the founder's related asset.`,
+              source: "coingecko",
+              tone: "good"
+            });
+          }
+        } catch (error) {
+          emit({ phase: "Founder", label: "Venture token resolution error", detail: String(error), tone: "warn" });
+        }
       }
     }
   }

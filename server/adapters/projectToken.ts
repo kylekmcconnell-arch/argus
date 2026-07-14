@@ -1,4 +1,4 @@
-import type { ProjectTokenSnapshot } from "../../src/data/evidence";
+import type { ProjectTokenSnapshot, VentureTokenSnapshot } from "../../src/data/evidence";
 import { canonicalOfficialWebsite } from "../../src/lib/fundScaleEvidence";
 import { env } from "../config";
 import { recordCall } from "../cost";
@@ -554,3 +554,68 @@ export const projectTokenAdapter: Adapter = {
   available: () => true,
   run: collectProjectTokenIdentity,
 };
+
+/**
+ * Resolve a verified venture's canonical token for a FOUNDER audit, using the
+ * same official-X / official-domain binding as a project audit but scoped to
+ * the venture's own bridge keys (its X handle / website), never the person's.
+ * Read-only: no ctx mutation, no project checks, no market-history fetches.
+ * Returns null when no candidate binds; a name match alone never verifies.
+ */
+export async function collectVentureTokenIdentity(venture: {
+  name: string;
+  xHandle?: string;
+  domain?: string;
+}): Promise<VentureTokenSnapshot | null> {
+  const query = projectName(venture.name);
+  const ventureHandle = venture.xHandle?.trim() ? normalizeHandle(venture.xHandle) : null;
+  const ventureScope = venture.domain?.trim() ? canonicalOfficialWebsite(venture.domain) : null;
+  if (query.length < 2 || (!ventureHandle && !ventureScope)) return null;
+
+  const search = await coinSearch(query);
+  if (!search) return null;
+  const candidates = rankedCandidates(query, search);
+  for (const candidate of candidates) {
+    const details = await coinDetails(candidate.id);
+    if (!details) continue;
+    const links = isRecord(details.links) ? details.links : {};
+    const officialHandle = cleanText(links.twitter_screen_name);
+    const exactX = Boolean(ventureHandle && officialHandle && normalizeHandle(officialHandle) === ventureHandle);
+    const homepages = officialHomepages(details);
+    const domainHomepage = ventureScope
+      ? homepages.find((candidateHome) => {
+          const tokenScope = canonicalOfficialWebsite(candidateHome);
+          return tokenScope !== null && domainsMatch(ventureScope.domain, tokenScope.domain);
+        })
+      : undefined;
+    if (!exactX && !domainHomepage) continue;
+    const contract = canonicalContract(details);
+    if (!contract) continue;
+    const id = cleanText(details.id);
+    const name = cleanText(details.name);
+    const symbol = cleanText(details.symbol).toUpperCase();
+    if (!id || !name || !symbol) continue;
+    const market = isRecord(details.market_data) ? details.market_data : {};
+    const currentPrice = isRecord(market.current_price) ? finiteNumber(market.current_price.usd) : undefined;
+    const marketCap = isRecord(market.market_cap) ? finiteNumber(market.market_cap.usd) : undefined;
+    return {
+      verified: true,
+      verification: exactX ? "official_x" : "official_domain",
+      ventureName: venture.name,
+      name,
+      symbol,
+      coingeckoId: id,
+      rank: Number.isFinite(details.market_cap_rank) ? Number(details.market_cap_rank) : null,
+      address: contract.address,
+      chain: contract.chain,
+      ...(homepages[0] ? { homepage: homepages[0] } : {}),
+      ...(officialHandle ? { officialX: `@${officialHandle.replace(/^@/, "")}` } : {}),
+      sourceUrl: `https://www.coingecko.com/en/coins/${encodeURIComponent(id)}`,
+      capturedAt: new Date().toISOString(),
+      providers: ["coingecko"],
+      ...(currentPrice !== undefined ? { priceUsd: currentPrice } : {}),
+      ...(marketCap !== undefined ? { marketCapUsd: marketCap } : {}),
+    };
+  }
+  return null;
+}

@@ -59,7 +59,7 @@ import { resolveForHandle } from "./adapters/wallet";
 import { collectTrustGraph } from "./adapters/trustgraph";
 import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
-import { collectProjectTokenIdentity } from "./adapters/projectToken";
+import { collectProjectTokenIdentity, collectVentureTokenIdentity } from "./adapters/projectToken";
 import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 import { collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
 import { collectCompanyEnrichment } from "./adapters/monid";
@@ -1154,8 +1154,15 @@ export function collectFounderDecisionQuestionOutcomes(ctx: CollectContext): voi
       const assetOutcomes = group.predicates.map((predicate) => {
         const entry = entries.find((candidate) => candidate.predicate === predicate);
         const fact = facts.find((candidate) => candidate.predicate === predicate);
-        const verifiedProjectToken = predicate === "official_token" && ctx.evidence.projectToken?.verified
-          ? ctx.evidence.projectToken
+        // A verified project token (project audits) or the founder's verified
+        // venture token (person audits, bound via the venture's own bridge
+        // keys) both resolve the token category deterministically.
+        const verifiedProjectToken = predicate === "official_token"
+          ? ctx.evidence.projectToken?.verified
+            ? ctx.evidence.projectToken
+            : ctx.evidence.ventureToken?.verified
+              ? ctx.evidence.ventureToken
+              : null
           : null;
         const claimObserved = Boolean(
           fact
@@ -2112,6 +2119,32 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         }
       } catch (error) {
         emit({ phase: "Founder", label: "Venture financing enrichment error", detail: String(error), tone: "warn" });
+      }
+      // Founder related-asset binding: resolve the verified venture's canonical
+      // token with the same official-X / official-domain binding a project
+      // audit uses, scoped to the venture's own bridge keys. This answers the
+      // founder official_token question deterministically (the never-waive
+      // asset-distinction screen) without granting the person a PROJECT role.
+      if (!evidence.ventureToken && (primaryVenture.x_handle || primaryVenture.domain)) {
+        try {
+          const ventureToken = await collectVentureTokenIdentity({
+            name: primaryVenture.project_name.trim(),
+            ...(primaryVenture.x_handle ? { xHandle: primaryVenture.x_handle } : {}),
+            ...(primaryVenture.domain ? { domain: primaryVenture.domain } : {}),
+          });
+          if (ventureToken) {
+            evidence.ventureToken = ventureToken;
+            emit({
+              phase: "Founder",
+              label: `Venture token resolved · $${ventureToken.symbol}`,
+              detail: `${ventureToken.ventureName} matched by ${ventureToken.verification === "official_x" ? "official X account" : "official domain"}; frozen as the founder's related asset.`,
+              source: "coingecko",
+              tone: "good",
+            });
+          }
+        } catch (error) {
+          emit({ phase: "Founder", label: "Venture token resolution error", detail: String(error), tone: "warn" });
+        }
       }
     }
   }

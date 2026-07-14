@@ -3910,10 +3910,23 @@ export async function collectBasicFacts(
     ...relationshipBoundAssets,
   ]);
   let registryVerified: BasicFact[] = [];
+  // Set when the SEC exchange-registry screen completed over the subject's
+  // asset-relationship and verified-venture names and found no listed issuer.
+  // That is a completed empty screen of the primary US registry, recorded on
+  // the public_security ledger entry so the founder asset-distinction check
+  // can close honestly instead of staying "unresolved" forever.
+  let registryScreenEmpty = false;
   const publicSecurityQuestion = questions.find((question) => question.predicate === "public_security");
+  const registryScreenNames = [...new Set([
+    ...authoritativeAssetRelationships.map((relationship) => relationship.name),
+    ...ctx.evidence.ventures
+      .filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead")
+      .map((venture) => venture.project_name.trim()),
+  ])].filter((name) => name.length > 1);
   if (
     publicSecurityQuestion
     && authoritativeAssetRelationships.length
+    && registryScreenNames.length
     && !sourceVerifiedBeforeRegistry.some((fact) =>
       fact.predicate === "public_security"
       && (fact.status === "verified" || fact.status === "corroborated"))
@@ -3926,6 +3939,11 @@ export async function collectBasicFacts(
         authoritativeAssetRelationships,
         publicSecurityQuestion.id,
       );
+      const registryRows = secExchangeRegistryRows(registry);
+      const anyIssuerMatch = registryVerified.length > 0
+        || (registryRows !== null && registryScreenNames.some((name) =>
+          registryRows.some((row) => registryIssuerMatchesRelationship(row.name, name))));
+      registryScreenEmpty = registryRows !== null && !anyIssuerMatch;
     }
   }
   const verified = [
@@ -3947,6 +3965,17 @@ export async function collectBasicFacts(
     repair,
     repairQuestionIds,
   );
+  if (registryScreenEmpty) {
+    // The completed registry screen found no listed issuer for any screened
+    // name. Record it as the final run on the public_security entry so the
+    // question resolves checked_empty (US exchange registry screened, none
+    // found) instead of hanging unresolved. Never overrides an answered entry.
+    const publicSecurityEntry = ctx.evidence.basicFactQuestionLedger
+      .find((entry) => entry.predicate === "public_security");
+    if (publicSecurityEntry && publicSecurityEntry.status === "unanswered") {
+      publicSecurityEntry.providerRuns.push({ phase: "repair", provider: "sec-registry", state: "completed_empty" });
+    }
+  }
 
   const sourceVerifiedLeadCount = new Set(verified.map((fact) =>
     `${fact.predicate}::${fact.normalizedValue}`)).size;

@@ -175,6 +175,12 @@ export interface ProjectTokenSnapshot {
  * capture timestamp, so the wiring layer can store `{ ...value, capturedAt }`
  * without importing a server-only type into the shared evidence bag.
  */
+/** A verified venture's canonical token, frozen for a FOUNDER subject. */
+export interface VentureTokenSnapshot extends ProjectTokenSnapshot {
+  /** The verified venture this token belongs to (never the person). */
+  ventureName: string;
+}
+
 export interface ProtocolFundingSnapshot {
   slug: string;
   name: string;
@@ -507,7 +513,7 @@ export interface BasicFactQuestionLedgerEntry {
   /** Providers/search passes asked this exact question, without implying success. */
   providerRuns: Array<{
     phase: "primary" | "repair";
-    provider: "claude-web-search" | "grok" | "test" | "none";
+    provider: "claude-web-search" | "grok" | "sec-registry" | "test" | "none";
     state: "succeeded" | "partial" | "completed_empty" | "failed" | "skipped";
   }>;
 }
@@ -573,6 +579,14 @@ export interface CollectedEvidence {
   projectToken?: ProjectTokenSnapshot;
   /** Frozen public funding rounds + lead investors (DeFiLlama). Feeds P4. */
   protocolFunding?: ProtocolFundingSnapshot;
+  /**
+   * A FOUNDER subject's verified-venture canonical token, resolved with the
+   * same official-X / official-domain binding a project audit uses but scoped
+   * to the venture's own bridge keys. Deliberately NOT projectToken: a person
+   * must never inherit the PROJECT role or project-market facts from a
+   * venture's token.
+   */
+  ventureToken?: VentureTokenSnapshot;
   /** Frozen total value locked + per-chain usage (DeFiLlama). Feeds P5. */
   protocolTvl?: ProtocolTvlSnapshot;
   /** Frozen keyed private-market enrichment (Monid/Akta): funding, leadership, firmographic. */

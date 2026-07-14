@@ -611,6 +611,28 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     ));
   }
 
+  // Founder related-asset binding: the verified venture's canonical token,
+  // bound through the venture's own official X account / domain (never a name
+  // match), answers the founder official_token question. The value stays
+  // venture-scoped so the token is never presented as the person's own issue.
+  const ventureToken = isFounderSubject && !isProject ? evidence.ventureToken : undefined;
+  if (ventureToken?.verified) {
+    projected.push(makeFact(
+      evidence,
+      "official_token",
+      `$${ventureToken.symbol.toUpperCase()}`,
+      [source({
+        url: ventureToken.sourceUrl,
+        title: "CoinGecko token record",
+        excerpt: `${ventureToken.name} (${ventureToken.symbol}) is the canonical token of ${ventureToken.ventureName}, the subject's verified venture; its identity matched the venture's ${ventureToken.verification === "official_x" ? "official X account" : "official domain"}.`,
+        capturedAt: ventureToken.capturedAt,
+        provider: (ventureToken.providers ?? ["coingecko"]).join(" + "),
+        sourceClass: "regulatory_or_onchain",
+      })],
+      `canonical token of ${ventureToken.ventureName}`,
+    ));
+  }
+
   // Monid/Akta management → founder identity (the "people behind it"). Conservative:
   // only a clearly-labelled founder/CEO profile.
   const founderProfile = isProject

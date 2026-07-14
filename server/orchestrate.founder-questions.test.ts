@@ -363,3 +363,73 @@ describe("founder decision question outcomes", () => {
     ]);
   });
 });
+
+describe("founder related-asset binding (ventureToken)", () => {
+  const ventureToken = () => ({
+    verified: true as const,
+    verification: "official_x" as const,
+    ventureName: "Aave",
+    name: "Aave",
+    symbol: "AAVE",
+    coingeckoId: "aave",
+    rank: 52,
+    address: "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9",
+    chain: "ethereum",
+    officialX: "@aave",
+    sourceUrl: "https://www.coingecko.com/en/coins/aave",
+    capturedAt: "2026-07-14T00:00:00.000Z",
+    providers: ["coingecko" as const],
+  });
+
+  it("resolves the token category from the verified venture token and confirms the check when the registry screen completed empty", () => {
+    const securityEntry = run("public_security", "unanswered", "failed");
+    // The completed SEC registry screen is recorded as the final run.
+    securityEntry.providerRuns.push({ phase: "repair", provider: "sec-registry", state: "completed_empty" });
+    const { ctx, observations } = context([
+      securityEntry,
+      run("official_token", "unanswered", "failed"),
+    ], [], [tokenLead("AAVE")]);
+    ctx.evidence.ventureToken = ventureToken();
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        id: "founder-asset-distinction",
+        status: "confirmed",
+        note: expect.stringMatching(/Official crypto token: \$AAVE verified/),
+      }),
+    ]);
+    expect(founderReadiness(observations[0])).toMatchObject({ status: "ready" });
+  });
+
+  it("confirms when both categories resolve: a verified security fact plus the venture token", () => {
+    const { ctx, observations } = context([
+      run("public_security", "unanswered", "failed"),
+      run("official_token", "unanswered", "failed"),
+    ], [fact("public_security", "NASDAQ: COIN")], [tokenLead("AAVE")]);
+    ctx.evidence.ventureToken = ventureToken();
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations[0]).toEqual(expect.objectContaining({
+      id: "founder-asset-distinction",
+      status: "confirmed",
+      note: expect.stringMatching(/Public security: NASDAQ: COIN verified; Official crypto token: \$AAVE verified/),
+    }));
+  });
+
+  it("stays unavailable when neither category resolves despite an observed token lead", () => {
+    const { ctx, observations } = context([
+      run("public_security", "unanswered", "failed"),
+      run("official_token", "unanswered", "failed"),
+    ], [], [tokenLead("AAVE")]);
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations[0]).toEqual(expect.objectContaining({
+      id: "founder-asset-distinction",
+      status: "unavailable",
+    }));
+  });
+});
