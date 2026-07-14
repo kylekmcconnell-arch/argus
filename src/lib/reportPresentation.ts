@@ -1,3 +1,5 @@
+import { CLEARANCE_COVERAGE_FLOOR_PERCENT, NEVER_WAIVE_CHECK_IDS } from "./scanChecklist";
+
 export type PublicCompleteness = "complete" | "partial" | "failed";
 
 export interface PublicReportPresentation {
@@ -107,12 +109,33 @@ export function coverageQualifiedCompleteness(input: {
       && metadata.notApplicable !== true;
   });
   if (!applicable.length) return "partial";
-  const everyCheckCompleted = applicable.every((value) => {
+  // Full-clearance coverage policy (mirrors clearanceCoverage in scanChecklist):
+  // every never-waive safety screen recorded, plus recorded coverage at the
+  // clearance floor. An enrichment gap no longer withholds completeness
+  // indefinitely; an unrecorded sanctions / identity / trust-graph screen
+  // always does. Frozen rows without stable check ids keep the strict
+  // everything-recorded rule.
+  const nowMs = Date.now();
+  const rows = applicable.map((value) => {
     const check = checkRecord(value);
-    return !checkIsStale(check, Date.now())
+    const id = typeof check.checkId === "string"
+      ? check.checkId
+      : typeof check.check_id === "string"
+        ? check.check_id
+        : "";
+    const recorded = !checkIsStale(check, nowMs)
       && SUCCESSFUL_CHECK_STATES.has(String(check.status ?? check.state ?? ""));
+    return { id, recorded };
   });
-  return completeness === "complete" && everyCheckCompleted ? "complete" : "partial";
+  const hasStableIds = rows.some((row) => row.id);
+  const recordedCount = rows.filter((row) => row.recorded).length;
+  const openNeverWaive = hasStableIds
+    && rows.some((row) => row.id && NEVER_WAIVE_CHECK_IDS.has(row.id) && !row.recorded);
+  const recordedPercent = Math.floor((recordedCount / rows.length) * 100);
+  const coverageSufficient = hasStableIds
+    ? !openNeverWaive && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT
+    : recordedCount === rows.length;
+  return completeness === "complete" && coverageSufficient ? "complete" : "partial";
 }
 
 export function publicScoreLabel(value: unknown): string {

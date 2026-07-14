@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { NormalizedSafety, TokenDossier } from "../token/audit";
 import {
+  clearanceCoverage,
   personChecks,
   summarizeChecks,
   tokenChecks,
@@ -212,5 +213,77 @@ describe("personChecks", () => {
     ]) {
       expect(byLabel(checks, label)).toMatchObject({ status: "unknown" });
     }
+  });
+});
+
+describe("clearanceCoverage (full-clearance coverage policy)", () => {
+  const row = (checkId: string, status: CheckStatus, decisionCritical = true): ScanCheck => ({
+    label: checkId,
+    status,
+    decisionCritical,
+    checkId,
+  });
+
+  it("grants clearance at the floor when every safety screen is recorded", () => {
+    const checks = [
+      row("identity-resolution", "confirmed"),
+      row("ofac-sanctions-name", "checked-empty"),
+      row("trust-graph-connections", "checked-empty"),
+      row("news-press", "confirmed"),
+      row("us-legal-history", "checked-empty"),
+      row("affiliations-associates", "confirmed"),
+      row("career-enrichment", "unavailable"),
+      row("basic-facts-research", "unknown"),
+    ];
+    const coverage = clearanceCoverage(checks);
+    expect(coverage.recorded).toBe(6);
+    expect(coverage.applicable).toBe(8);
+    expect(coverage.recordedPercent).toBe(75);
+    expect(coverage.openNeverWaive).toEqual([]);
+    expect(coverage.sufficient).toBe(true);
+  });
+
+  it("never waives an open sanctions screen regardless of coverage", () => {
+    const checks = [
+      row("identity-resolution", "confirmed"),
+      row("ofac-sanctions-name", "unavailable"),
+      ...Array.from({ length: 10 }, (_, index) => row(`enrichment-${index}`, "confirmed" as CheckStatus)),
+    ];
+    const coverage = clearanceCoverage(checks);
+    expect(coverage.recordedPercent).toBeGreaterThanOrEqual(90);
+    expect(coverage.openNeverWaive).toEqual(["ofac-sanctions-name"]);
+    expect(coverage.sufficient).toBe(false);
+  });
+
+  it("never waives an unresolved founder asset distinction", () => {
+    const checks = [
+      row("identity-resolution", "confirmed"),
+      row("ofac-sanctions-name", "checked-empty"),
+      row("trust-graph-connections", "checked-empty"),
+      row("founder-asset-distinction", "unavailable"),
+      ...Array.from({ length: 8 }, (_, index) => row(`enrichment-${index}`, "confirmed" as CheckStatus)),
+    ];
+    const coverage = clearanceCoverage(checks);
+    expect(coverage.openNeverWaive).toEqual(["founder-asset-distinction"]);
+    expect(coverage.sufficient).toBe(false);
+  });
+
+  it("withholds clearance below the coverage floor even with safety screens recorded", () => {
+    const checks = [
+      row("identity-resolution", "confirmed"),
+      row("ofac-sanctions-name", "checked-empty"),
+      row("trust-graph-connections", "checked-empty"),
+      row("gap-1", "unknown"),
+      row("gap-2", "unknown"),
+      row("gap-3", "unavailable"),
+    ];
+    // 3/6 = 50% < 75% floor: too many gaps.
+    expect(clearanceCoverage(checks).sufficient).toBe(false);
+  });
+
+  it("keeps the strict everything-recorded rule for legacy rows without check ids", () => {
+    const legacy = (status: CheckStatus): ScanCheck => ({ label: "legacy", status });
+    expect(clearanceCoverage([legacy("confirmed"), legacy("confirmed"), legacy("confirmed"), legacy("unknown")]).sufficient).toBe(false);
+    expect(clearanceCoverage([legacy("confirmed"), legacy("confirmed")]).sufficient).toBe(true);
   });
 });

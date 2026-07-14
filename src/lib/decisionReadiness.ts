@@ -1,8 +1,11 @@
-import { decisionCriticalChecks, summarizeChecks, type ScanCheck } from "./scanChecklist";
+import { clearanceCoverage, decisionCriticalChecks, summarizeChecks, type ScanCheck } from "./scanChecklist";
 
 /**
  * Coverage below this floor is too thin to describe an assessment as
- * provisional. Only 100% applicable coverage is ever `ready`.
+ * provisional. `ready` follows the full-clearance coverage policy in
+ * scanChecklist (clearanceCoverage): every never-waive safety screen recorded
+ * plus recorded coverage at the clearance floor; an enrichment gap does not
+ * withhold clearance indefinitely, an unrecorded safety screen always does.
  */
 export const PROVISIONAL_COVERAGE_FLOOR_PERCENT = 70;
 
@@ -98,10 +101,10 @@ export function deriveDecisionReadiness(
     ? 0
     : Math.min(checkCoveragePercent, axisCoveragePercent);
 
+  const clearance = clearanceCoverage(checks);
   const status: DecisionReadinessStatus = !decisionFrameworkUnavailable
     && decisionBlockers === 0
-    && applicable > 0
-    && successful === applicable
+    && clearance.sufficient
     ? "ready"
     : !decisionFrameworkUnavailable && coveragePercent >= PROVISIONAL_COVERAGE_FLOOR_PERCENT
       ? "provisional"
@@ -159,14 +162,26 @@ export function deriveDecisionReadiness(
   }
 
   if (status === "ready") {
+    if (successful === applicable) {
+      return {
+        ...base,
+        title: coverage.findings > 0
+          ? "Evidence coverage complete: findings require review"
+          : "Evidence coverage complete",
+        guidance: coverage.findings > 0
+          ? `All ${plural(applicable, "applicable check")} have recorded outcomes, including ${plural(coverage.findings, "finding")}. Coverage is complete, but this is not an investment recommendation.`
+          : `All ${plural(applicable, "applicable check")} have recorded outcomes. Review the underlying evidence before making an investment decision.`,
+      };
+    }
+    // Clearance granted under the coverage policy with enrichment gaps waived.
+    // The gaps stay disclosed; only their power to withhold clearance changed.
+    const readyGaps = gapDescription(base);
     return {
       ...base,
       title: coverage.findings > 0
-        ? "Evidence coverage complete: findings require review"
-        : "Evidence coverage complete",
-      guidance: coverage.findings > 0
-        ? `All ${plural(applicable, "applicable check")} have recorded outcomes, including ${plural(coverage.findings, "finding")}. Coverage is complete, but this is not an investment recommendation.`
-        : `All ${plural(applicable, "applicable check")} have recorded outcomes. Review the underlying evidence before making an investment decision.`,
+        ? "Evidence coverage sufficient: findings require review"
+        : "Evidence coverage sufficient",
+      guidance: `${successful} of ${applicable} applicable checks have recorded outcomes${readyGaps ? ` (${readyGaps})` : ""}. Every safety screen is recorded; the remaining paths are enrichment gaps that no longer withhold clearance. Review the underlying evidence before making an investment decision.`,
     };
   }
 

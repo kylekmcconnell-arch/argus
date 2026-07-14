@@ -1,4 +1,5 @@
 import {
+  clearanceCoverage,
   decisionCriticalChecks,
   summarizeChecks,
   type CheckStatus,
@@ -289,10 +290,12 @@ export class PersonCheckTracker {
   }
 
   completeness(roles: readonly string[], scope: PersonCheckScope = {}): "complete" | "partial" {
-    const summary = summarizeChecks(decisionCriticalChecks(this.snapshot(roles, scope)));
-    return summary.inScope > 0 && summary.successful === summary.inScope
-      ? "complete"
-      : "partial";
+    // Full-clearance coverage policy (clearanceCoverage): every never-waive
+    // safety screen recorded plus recorded coverage at the clearance floor.
+    // An enrichment path a provider cannot serve no longer withholds
+    // completeness indefinitely; an unrecorded sanctions / identity /
+    // trust-graph screen always does.
+    return clearanceCoverage(this.snapshot(roles, scope)).sufficient ? "complete" : "partial";
   }
 
   providers(): ProviderSnapshot {

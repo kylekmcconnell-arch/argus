@@ -83,6 +83,64 @@ export function summarizeChecks(checks: readonly ScanCheck[]): CoverageSummary {
   };
 }
 
+/**
+ * Full-clearance coverage policy.
+ *
+ * A recorded outcome for every applicable check is the ideal, but an
+ * enrichment path a provider cannot serve must not withhold clearance
+ * indefinitely. Clearance instead requires BOTH:
+ *   (a) every never-waive safety screen has a recorded outcome, and
+ *   (b) recorded coverage meets the clearance floor.
+ * Safety screens are never waivable: an unrecorded sanctions, identity, or
+ * trust-graph screen always withholds clearance. Legacy snapshots without
+ * stable check ids keep the strict everything-recorded rule, preserving
+ * historical semantics.
+ */
+export const NEVER_WAIVE_CHECK_IDS: ReadonlySet<string> = new Set([
+  "identity-resolution",
+  "ofac-sanctions-name",
+  "trust-graph-connections",
+  // An unresolved token/security candidacy is a capital-risk unknown (the core
+  // scam vector), never an enrichment gap.
+  "founder-asset-distinction",
+]);
+
+/** Minimum recorded share of applicable governing checks for full clearance. */
+export const CLEARANCE_COVERAGE_FLOOR_PERCENT = 75;
+
+export interface ClearanceCoverage {
+  applicable: number;
+  recorded: number;
+  /** applicable never-waive screens without a recorded outcome */
+  openNeverWaive: string[];
+  /** recorded/applicable as a floored percent (never rounds up to the floor) */
+  recordedPercent: number;
+  /** true when the coverage policy grants full clearance */
+  sufficient: boolean;
+}
+
+/** Apply the full-clearance coverage policy to a check snapshot. */
+export function clearanceCoverage(checks: readonly ScanCheck[]): ClearanceCoverage {
+  const governing = decisionCriticalChecks(checks);
+  const applicableRows = governing.filter((check) => check.status !== "not-applicable");
+  const recordedRows = applicableRows.filter((check) => SUCCESSFUL.has(check.status));
+  const hasStableIds = applicableRows.some((check) => typeof check.checkId === "string" && check.checkId);
+  const openNeverWaive = hasStableIds
+    ? applicableRows
+      .filter((check) => check.checkId
+        && NEVER_WAIVE_CHECK_IDS.has(check.checkId)
+        && !SUCCESSFUL.has(check.status))
+      .map((check) => check.checkId as string)
+    : [];
+  const applicable = applicableRows.length;
+  const recorded = recordedRows.length;
+  const recordedPercent = applicable > 0 ? Math.floor((recorded / applicable) * 100) : 0;
+  const sufficient = applicable > 0 && (hasStableIds
+    ? openNeverWaive.length === 0 && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT
+    : recorded === applicable);
+  return { applicable, recorded, openNeverWaive, recordedPercent, sufficient };
+}
+
 const shortAddr = (address: string) =>
   address.length > 12 ? `${address.slice(0, 5)}…${address.slice(-4)}` : address;
 

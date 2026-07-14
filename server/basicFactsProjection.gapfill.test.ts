@@ -76,6 +76,31 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     expect(funding?.value).toContain("$49M");
   });
 
+  it("mints a venture-scoped funding fact for a FOUNDER from the company record", () => {
+    const evidence = emptyEvidence("@stanitest");
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.profile = { ...evidence.profile, display_name: "Stani" };
+    evidence.companyEnrichment = {
+      name: "Aave",
+      uuid: "00005d7",
+      funding: {
+        totalRaisedUsd: 49_000_000,
+        rounds: [{ date: "2020-10-12", round: "Strategic", amountUsd: 25_000_000, leadInvestors: ["Blockchain Capital"], otherInvestors: [] }],
+        leadInvestors: ["Blockchain Capital"],
+      },
+      sourceUrl: "https://akta.pro/company/00005d7",
+      capturedAt: "2026-07-14T00:00:00.000Z",
+    };
+    projectProviderBackedBasicFacts(evidence);
+    const funding = evidence.basicFacts?.find((fact) => fact.predicate === "funding");
+    expect(funding).toBeTruthy();
+    // Venture-scoped: the value names the company so the person is never
+    // presented as having raised the money themselves.
+    expect(funding?.value.startsWith("Aave: ")).toBe(true);
+    expect(funding?.qualifier).toBe("venture financing");
+    expect(funding?.value).toContain("$49M raised");
+  });
+
   it("mints nothing for a non-project subject", () => {
     const evidence = emptyEvidence("@person");
     evidence.roles = [SubjectClass.FOUNDER];

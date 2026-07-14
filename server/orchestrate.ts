@@ -2064,6 +2064,32 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
   }
+  // Founder financing recall: a verified founder's primary venture usually has
+  // public funding rounds (the financing record the basic-facts pass otherwise
+  // reports as a critical gap). When the project-token path has not already
+  // enriched a company, resolve the venture through Monid/Akta so the
+  // projection can mint a source-backed venture-financing fact. Self-gated on
+  // MONID_API_KEY and never-throws; skipped for fixtures so canary runs stay
+  // deterministic.
+  if (!fixture && !evidence.companyEnrichment && evidence.roles.includes(SubjectClass.FOUNDER)) {
+    const primaryVenture = evidence.ventures.find((venture) =>
+      venture.artifact_verified === true
+      && venture.evidence_origin !== "model_lead"
+      && venture.project_name.trim()
+      && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
+    if (primaryVenture) {
+      try {
+        const enrichment = await collectCompanyEnrichment(primaryVenture.project_name.trim(), {
+          sections: ["funding_detail", "firmographic"],
+        });
+        if (enrichment.available) {
+          evidence.companyEnrichment = { ...enrichment.value, capturedAt: new Date().toISOString() };
+        }
+      } catch (error) {
+        emit({ phase: "Founder", label: "Venture financing enrichment error", detail: String(error), tone: "warn" });
+      }
+    }
+  }
   projectProviderBackedBasicFacts(evidence);
   projectVerifiedBasicFacts(ctx);
 

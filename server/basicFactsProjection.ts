@@ -534,44 +534,60 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // back to Monid/Akta private-company funding. Additive: gives the analyst
   // affirmative backing evidence so an established project is not published
   // INCOMPLETE for a missing P4 axis.
-  const fundingFact = !isProject
-    ? null
-    : evidence.protocolFunding && evidence.protocolFunding.rounds.length
+  // A project's own funding comes from DeFiLlama first, then the Monid/Akta
+  // company record. A founder's financing evidence is the venture's public
+  // raises: minted ONLY from the venture-resolved company record and always
+  // value-scoped to the venture name, so a person is never presented as having
+  // raised the money themselves.
+  const isFounderSubject = evidence.roles.includes(SubjectClass.FOUNDER);
+  const enrichmentRecord = evidence.companyEnrichment?.funding
+    && evidence.companyEnrichment.funding.rounds.length
+    ? evidence.companyEnrichment
+    : undefined;
+  const fundingFact = isProject && evidence.protocolFunding && evidence.protocolFunding.rounds.length
+    ? {
+        rounds: evidence.protocolFunding.rounds.length,
+        totalRaisedUsd: evidence.protocolFunding.totalRaisedUsd,
+        leadInvestors: evidence.protocolFunding.leadInvestors,
+        sourceUrl: evidence.protocolFunding.sourceUrl,
+        capturedAt: evidence.protocolFunding.capturedAt,
+        provider: "defillama",
+        title: "DeFiLlama funding record",
+        ventureName: "",
+        subjectLabel: evidence.profile.display_name || "The project",
+      }
+    : (isProject || isFounderSubject) && enrichmentRecord && enrichmentRecord.funding
       ? {
-          rounds: evidence.protocolFunding.rounds.length,
-          totalRaisedUsd: evidence.protocolFunding.totalRaisedUsd,
-          leadInvestors: evidence.protocolFunding.leadInvestors,
-          sourceUrl: evidence.protocolFunding.sourceUrl,
-          capturedAt: evidence.protocolFunding.capturedAt,
-          provider: "defillama",
-          title: "DeFiLlama funding record",
+          rounds: enrichmentRecord.funding.rounds.length,
+          totalRaisedUsd: enrichmentRecord.funding.totalRaisedUsd ?? 0,
+          leadInvestors: enrichmentRecord.funding.leadInvestors,
+          sourceUrl: enrichmentRecord.sourceUrl,
+          capturedAt: enrichmentRecord.capturedAt,
+          provider: "monid",
+          title: "Monid/Akta funding record",
+          ventureName: isProject ? "" : enrichmentRecord.name,
+          subjectLabel: isProject
+            ? evidence.profile.display_name || "The project"
+            : enrichmentRecord.name,
         }
-      : evidence.companyEnrichment?.funding && evidence.companyEnrichment.funding.rounds.length
-        ? {
-            rounds: evidence.companyEnrichment.funding.rounds.length,
-            totalRaisedUsd: evidence.companyEnrichment.funding.totalRaisedUsd ?? 0,
-            leadInvestors: evidence.companyEnrichment.funding.leadInvestors,
-            sourceUrl: evidence.companyEnrichment.sourceUrl,
-            capturedAt: evidence.companyEnrichment.capturedAt,
-            provider: "monid",
-            title: "Monid/Akta funding record",
-          }
-        : null;
+      : null;
   if (fundingFact) {
     const leads = fundingFact.leadInvestors.slice(0, 4).join(", ");
     const total = fundingFact.totalRaisedUsd > 0 ? ` · ${formatUsd(fundingFact.totalRaisedUsd)} raised` : "";
+    const prefix = fundingFact.ventureName ? `${fundingFact.ventureName}: ` : "";
     projected.push(makeFact(
       evidence,
       "funding",
-      `${fundingFact.rounds} public funding round${fundingFact.rounds === 1 ? "" : "s"}${total}${leads ? ` · led by ${leads}` : ""}`,
+      `${prefix}${fundingFact.rounds} public funding round${fundingFact.rounds === 1 ? "" : "s"}${total}${leads ? ` · led by ${leads}` : ""}`,
       [source({
         url: fundingFact.sourceUrl,
         title: fundingFact.title,
-        excerpt: `${evidence.profile.display_name || "The project"} raised ${formatUsd(fundingFact.totalRaisedUsd)} across ${fundingFact.rounds} public funding round(s)${leads ? `, with lead investors including ${leads}` : ""}.`,
+        excerpt: `${fundingFact.subjectLabel} raised ${formatUsd(fundingFact.totalRaisedUsd)} across ${fundingFact.rounds} public funding round(s)${leads ? `, with lead investors including ${leads}` : ""}.`,
         capturedAt: fundingFact.capturedAt,
         provider: fundingFact.provider,
         sourceClass: "other_public",
       })],
+      fundingFact.ventureName ? "venture financing" : undefined,
     ));
   }
 

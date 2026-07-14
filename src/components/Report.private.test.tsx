@@ -570,7 +570,7 @@ describe("decision-safe person report presentation", () => {
     expect(preliminarySignal?.classList.contains("chip-wrap")).toBe(true);
   });
 
-  it("shows a supported 71 PASS signal as provisional while three evidence checks remain open", () => {
+  it("keeps a supported 71 PASS signal provisional while a sanctions screen remains open (never-waive)", () => {
     const base = buildReport(SUBJECTS[1]);
     const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
     const catalog = Object.keys(governing.axes).map((axis, index) => {
@@ -592,9 +592,12 @@ describe("decision-safe person report presentation", () => {
       axis,
       { ...score, evidenceRefs: [catalog[index]!.artifactId] },
     ]));
+    // 10/13 recorded is above the clearance floor, but one open check is the
+    // OFAC sanctions screen: a never-waive safety screen always withholds
+    // final clearance regardless of coverage.
     const checks = Array.from({ length: 13 }, (_, index) => ({
-      checkId: `check-${index + 1}`,
-      label: `Evidence check ${index + 1}`,
+      checkId: index === 10 ? "ofac-sanctions-name" : `check-${index + 1}`,
+      label: index === 10 ? "OFAC sanctions (name)" : `Evidence check ${index + 1}`,
       status: index < 10 ? "confirmed" as const : "unknown" as const,
       provider: "frozen-provider",
       sourceCount: index < 10 ? 1 : 0,

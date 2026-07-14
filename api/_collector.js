@@ -4596,22 +4596,26 @@ function decisionCriticalChecks(checks) {
   return hasExplicitCriticality ? checks.filter((check) => check.decisionCritical === true) : checks;
 }
 var SUCCESSFUL = /* @__PURE__ */ new Set(["confirmed", "finding", "checked-empty"]);
-var UNKNOWN_OR_FAILED = /* @__PURE__ */ new Set(["unknown", "unavailable", "stale"]);
-function summarizeChecks(checks) {
-  const count = (status) => checks.filter((check) => check.status === status).length;
-  const notApplicable = count("not-applicable");
-  return {
-    total: checks.length,
-    inScope: checks.length - notApplicable,
-    successful: checks.filter((check) => SUCCESSFUL.has(check.status)).length,
-    unknownOrFailed: checks.filter((check) => UNKNOWN_OR_FAILED.has(check.status)).length,
-    findings: count("finding"),
-    checkedEmpty: count("checked-empty"),
-    notApplicable,
-    unavailable: count("unavailable"),
-    stale: count("stale"),
-    unknown: count("unknown")
-  };
+var NEVER_WAIVE_CHECK_IDS = /* @__PURE__ */ new Set([
+  "identity-resolution",
+  "ofac-sanctions-name",
+  "trust-graph-connections",
+  // An unresolved token/security candidacy is a capital-risk unknown (the core
+  // scam vector), never an enrichment gap.
+  "founder-asset-distinction"
+]);
+var CLEARANCE_COVERAGE_FLOOR_PERCENT = 75;
+function clearanceCoverage(checks) {
+  const governing = decisionCriticalChecks(checks);
+  const applicableRows = governing.filter((check) => check.status !== "not-applicable");
+  const recordedRows = applicableRows.filter((check) => SUCCESSFUL.has(check.status));
+  const hasStableIds = applicableRows.some((check) => typeof check.checkId === "string" && check.checkId);
+  const openNeverWaive = hasStableIds ? applicableRows.filter((check) => check.checkId && NEVER_WAIVE_CHECK_IDS.has(check.checkId) && !SUCCESSFUL.has(check.status)).map((check) => check.checkId) : [];
+  const applicable = applicableRows.length;
+  const recorded = recordedRows.length;
+  const recordedPercent = applicable > 0 ? Math.floor(recorded / applicable * 100) : 0;
+  const sufficient = applicable > 0 && (hasStableIds ? openNeverWaive.length === 0 && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT : recorded === applicable);
+  return { applicable, recorded, openNeverWaive, recordedPercent, sufficient };
 }
 var outcomeNotRecorded = "completion outcome not recorded";
 function personChecks(opts) {
@@ -4863,8 +4867,7 @@ var PersonCheckTracker = class {
     });
   }
   completeness(roles, scope = {}) {
-    const summary = summarizeChecks(decisionCriticalChecks(this.snapshot(roles, scope)));
-    return summary.inScope > 0 && summary.successful === summary.inScope ? "complete" : "partial";
+    return clearanceCoverage(this.snapshot(roles, scope)).sufficient ? "complete" : "partial";
   }
   providers() {
     return Object.freeze({
@@ -12215,11 +12218,19 @@ function coverageQualifiedCompleteness(input) {
     return check.status !== "not-applicable" && check.state !== "not-applicable" && check.notApplicable !== true && metadata.notApplicable !== true;
   });
   if (!applicable.length) return "partial";
-  const everyCheckCompleted = applicable.every((value) => {
+  const nowMs = Date.now();
+  const rows = applicable.map((value) => {
     const check = checkRecord(value);
-    return !checkIsStale(check, Date.now()) && SUCCESSFUL_CHECK_STATES.has(String(check.status ?? check.state ?? ""));
+    const id = typeof check.checkId === "string" ? check.checkId : typeof check.check_id === "string" ? check.check_id : "";
+    const recorded = !checkIsStale(check, nowMs) && SUCCESSFUL_CHECK_STATES.has(String(check.status ?? check.state ?? ""));
+    return { id, recorded };
   });
-  return completeness === "complete" && everyCheckCompleted ? "complete" : "partial";
+  const hasStableIds = rows.some((row) => row.id);
+  const recordedCount = rows.filter((row) => row.recorded).length;
+  const openNeverWaive = hasStableIds && rows.some((row) => row.id && NEVER_WAIVE_CHECK_IDS.has(row.id) && !row.recorded);
+  const recordedPercent = Math.floor(recordedCount / rows.length * 100);
+  const coverageSufficient = hasStableIds ? !openNeverWaive && recordedPercent >= CLEARANCE_COVERAGE_FLOOR_PERCENT : recordedCount === rows.length;
+  return completeness === "complete" && coverageSufficient ? "complete" : "partial";
 }
 
 // src/graph/network.ts
@@ -15278,38 +15289,46 @@ function projectProviderBackedBasicFacts(evidence) {
     })]));
   }
   const isProject = evidence.roles.includes("PROJECT" /* PROJECT */);
-  const fundingFact = !isProject ? null : evidence.protocolFunding && evidence.protocolFunding.rounds.length ? {
+  const isFounderSubject = evidence.roles.includes("FOUNDER" /* FOUNDER */);
+  const enrichmentRecord = evidence.companyEnrichment?.funding && evidence.companyEnrichment.funding.rounds.length ? evidence.companyEnrichment : void 0;
+  const fundingFact = isProject && evidence.protocolFunding && evidence.protocolFunding.rounds.length ? {
     rounds: evidence.protocolFunding.rounds.length,
     totalRaisedUsd: evidence.protocolFunding.totalRaisedUsd,
     leadInvestors: evidence.protocolFunding.leadInvestors,
     sourceUrl: evidence.protocolFunding.sourceUrl,
     capturedAt: evidence.protocolFunding.capturedAt,
     provider: "defillama",
-    title: "DeFiLlama funding record"
-  } : evidence.companyEnrichment?.funding && evidence.companyEnrichment.funding.rounds.length ? {
-    rounds: evidence.companyEnrichment.funding.rounds.length,
-    totalRaisedUsd: evidence.companyEnrichment.funding.totalRaisedUsd ?? 0,
-    leadInvestors: evidence.companyEnrichment.funding.leadInvestors,
-    sourceUrl: evidence.companyEnrichment.sourceUrl,
-    capturedAt: evidence.companyEnrichment.capturedAt,
+    title: "DeFiLlama funding record",
+    ventureName: "",
+    subjectLabel: evidence.profile.display_name || "The project"
+  } : (isProject || isFounderSubject) && enrichmentRecord && enrichmentRecord.funding ? {
+    rounds: enrichmentRecord.funding.rounds.length,
+    totalRaisedUsd: enrichmentRecord.funding.totalRaisedUsd ?? 0,
+    leadInvestors: enrichmentRecord.funding.leadInvestors,
+    sourceUrl: enrichmentRecord.sourceUrl,
+    capturedAt: enrichmentRecord.capturedAt,
     provider: "monid",
-    title: "Monid/Akta funding record"
+    title: "Monid/Akta funding record",
+    ventureName: isProject ? "" : enrichmentRecord.name,
+    subjectLabel: isProject ? evidence.profile.display_name || "The project" : enrichmentRecord.name
   } : null;
   if (fundingFact) {
     const leads = fundingFact.leadInvestors.slice(0, 4).join(", ");
     const total = fundingFact.totalRaisedUsd > 0 ? ` \xB7 ${formatUsd(fundingFact.totalRaisedUsd)} raised` : "";
+    const prefix = fundingFact.ventureName ? `${fundingFact.ventureName}: ` : "";
     projected.push(makeFact(
       evidence,
       "funding",
-      `${fundingFact.rounds} public funding round${fundingFact.rounds === 1 ? "" : "s"}${total}${leads ? ` \xB7 led by ${leads}` : ""}`,
+      `${prefix}${fundingFact.rounds} public funding round${fundingFact.rounds === 1 ? "" : "s"}${total}${leads ? ` \xB7 led by ${leads}` : ""}`,
       [source({
         url: fundingFact.sourceUrl,
         title: fundingFact.title,
-        excerpt: `${evidence.profile.display_name || "The project"} raised ${formatUsd(fundingFact.totalRaisedUsd)} across ${fundingFact.rounds} public funding round(s)${leads ? `, with lead investors including ${leads}` : ""}.`,
+        excerpt: `${fundingFact.subjectLabel} raised ${formatUsd(fundingFact.totalRaisedUsd)} across ${fundingFact.rounds} public funding round(s)${leads ? `, with lead investors including ${leads}` : ""}.`,
         capturedAt: fundingFact.capturedAt,
         provider: fundingFact.provider,
         sourceClass: "other_public"
-      })]
+      })],
+      fundingFact.ventureName ? "venture financing" : void 0
     ));
   }
   const tvlSnapshot = isProject ? evidence.protocolTvl : void 0;
@@ -17305,6 +17324,21 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   if (fixture) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
+  }
+  if (!fixture && !evidence.companyEnrichment && evidence.roles.includes("FOUNDER" /* FOUNDER */)) {
+    const primaryVenture = evidence.ventures.find((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead" && venture.project_name.trim() && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
+    if (primaryVenture) {
+      try {
+        const enrichment = await collectCompanyEnrichment(primaryVenture.project_name.trim(), {
+          sections: ["funding_detail", "firmographic"]
+        });
+        if (enrichment.available) {
+          evidence.companyEnrichment = { ...enrichment.value, capturedAt: (/* @__PURE__ */ new Date()).toISOString() };
+        }
+      } catch (error) {
+        emit({ phase: "Founder", label: "Venture financing enrichment error", detail: String(error), tone: "warn" });
+      }
+    }
   }
   projectProviderBackedBasicFacts(evidence);
   projectVerifiedBasicFacts(ctx);
