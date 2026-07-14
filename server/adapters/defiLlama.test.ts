@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { collectProtocolTvl, defiLlamaSlug, formatTvlUsd } from "./defiLlama";
+import {
+  collectProtocolFunding,
+  collectProtocolTvl,
+  defiLlamaSlug,
+  describeFunding,
+  formatTvlUsd,
+  formatUsd,
+} from "./defiLlama";
 
 const protocolBody = (over: Record<string, unknown> = {}) => ({
   name: "Aave",
@@ -14,6 +21,10 @@ const protocolBody = (over: Record<string, unknown> = {}) => ({
   tvl: [
     { date: 1, totalLiquidityUSD: 100 },
     { date: 2, totalLiquidityUSD: 13_700_000_000 },
+  ],
+  raises: [
+    { date: 1602460800, round: "Strategic", amount: 25, leadInvestors: ["Blockchain Capital", "Standard Crypto"], otherInvestors: [], valuation: null },
+    { date: 1512000000, round: "ICO", amount: 16.2, leadInvestors: [], otherInvestors: [] },
   ],
   ...over,
 });
@@ -86,11 +97,55 @@ describe("defiLlamaSlug", () => {
   });
 });
 
-describe("formatTvlUsd", () => {
-  it("formats compact USD", () => {
-    expect(formatTvlUsd(13_699_712_109)).toBe("$13.7B");
-    expect(formatTvlUsd(1_500_000)).toBe("$1.5M");
-    expect(formatTvlUsd(2_400)).toBe("$2.4K");
-    expect(formatTvlUsd(500)).toBe("$500");
+describe("collectProtocolFunding", () => {
+  it("returns funding rounds, lead investors, and total raised, oldest-first", async () => {
+    const out = await collectProtocolFunding("Aave", { fetcher: fetcherReturning(() => jsonResponse(protocolBody())) });
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.rounds.map((r) => r.round)).toEqual(["ICO", "Strategic"]); // sorted by date ascending
+    expect(out.value.rounds[1].amountUsd).toBe(25_000_000); // millions → USD
+    expect(out.value.rounds[1].date).toBe("2020-10-12");
+    expect(out.value.leadInvestors).toEqual(["Blockchain Capital", "Standard Crypto"]);
+    expect(out.value.totalRaisedUsd).toBe(41_200_000);
+    expect(describeFunding(out)).toMatchObject({ status: "confirmed" });
+    expect(describeFunding(out).note).toContain("Blockchain Capital");
+  });
+
+  it("reports no_data (not an outage) when the protocol has no raises", async () => {
+    const out = await collectProtocolFunding("Aave", {
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody({ raises: [] }))),
+    });
+    expect(out.available).toBe(false);
+    if (out.available) throw new Error("expected unavailable");
+    expect(out.reason).toBe("no_data");
+    expect(describeFunding(out).status).toBe("checked-empty");
+  });
+
+  it("reports no_data for a protocol that does not exist (400)", async () => {
+    const out = await collectProtocolFunding("Nope", {
+      fetcher: fetcherReturning(() => new Response("Protocol not found", { status: 400 })),
+    });
+    expect(out.available).toBe(false);
+    if (out.available) throw new Error("expected unavailable");
+    expect(out.reason).toBe("no_data");
+  });
+
+  it("reports unavailable (outage) on a transport error, never 'unfunded'", async () => {
+    const throwing = (() => Promise.reject(new Error("boom"))) as unknown as typeof fetch;
+    const out = await collectProtocolFunding("Aave", { fetcher: throwing });
+    expect(out.available).toBe(false);
+    if (out.available) throw new Error("expected unavailable");
+    expect(out.reason).toBe("unavailable");
+    expect(describeFunding(out).status).toBe("unavailable");
+  });
+});
+
+describe("formatUsd", () => {
+  it("formats compact USD (formatTvlUsd is a back-compat alias)", () => {
+    expect(formatUsd(13_699_712_109)).toBe("$13.7B");
+    expect(formatUsd(1_500_000)).toBe("$1.5M");
+    expect(formatUsd(2_400)).toBe("$2.4K");
+    expect(formatUsd(500)).toBe("$500");
+    expect(formatTvlUsd).toBe(formatUsd);
   });
 });
