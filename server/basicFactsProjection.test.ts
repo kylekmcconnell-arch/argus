@@ -556,3 +556,24 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(predicates.has("product")).toBe(false);
   });
 });
+
+describe("H2: recall (floorEligible:false) facts are coverage-only, never floors", () => {
+  it("excludes a floorEligible:false fact from project score floors while a strict fact floors", async () => {
+    const { deriveProjectStrengthBands } = await import("./agent");
+    const axes = [{ axis: "P1_team_and_identity", weight: 16, role: SubjectClass.PROJECT }];
+    const baseFact = {
+      factId: "founder:Acme", subjectKey: "@acme", predicate: "founder", value: "Acme",
+      normalizedValue: "acme", critical: true,
+      sources: [{ url: "https://coindesk.com/a", title: "t", excerpt: "Acme founder", capturedAt: "2026-07-13T00:00:00.000Z", provider: "public-web", sourceClass: "independent_press", relation: "supports", contentHash: "a".repeat(64), artifactVerified: true }],
+      evidence_origin: "deterministic", artifact_verified: true, provider: "public-web",
+    };
+    const packet = (fact: Record<string, unknown>) => JSON.stringify({ profile: { handle: "@acme", display_name: "Acme" }, basicFacts: [fact], team: [] });
+
+    const strict = deriveProjectStrengthBands(packet({ ...baseFact, status: "corroborated" }), axes);
+    const recall = deriveProjectStrengthBands(packet({ ...baseFact, status: "corroborated", floorEligible: false }), axes);
+    // The strict corroborated founder fact contributes a P1 leader floor; the
+    // recall (floorEligible:false) fact must not raise the floor above it.
+    expect(recall.P1_team_and_identity.minScore).toBeLessThanOrEqual(strict.P1_team_and_identity.minScore);
+    expect(recall.P1_team_and_identity.minScore).toBe(0);
+  });
+});

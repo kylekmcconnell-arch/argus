@@ -393,6 +393,16 @@ export interface BasicFact {
   artifact_verified: true;
   provider: "public-web";
   discoveryProvider?: "claude-web-search" | "grok";
+  /**
+   * Omitted/true: a strict single-passage fact, eligible to set enforced score
+   * FLOORS exactly as today. false: completed via the relaxed web-corroboration
+   * recall path (>=2 independent, non-wire, non-self fetched witnesses agreeing
+   * on the same anchored claim). A recall fact counts for COVERAGE and readiness
+   * but is excluded from score floors, so corroboration can never manufacture a
+   * minimum score (preserves the H2 no-floor-from-soft-evidence invariant), and
+   * it is surfaced as "web-corroborated", never a strict "confirmed" green.
+   */
+  floorEligible?: boolean;
 }
 
 /** Model-discovered answer and candidate source. It is never scoreable. */

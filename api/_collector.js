@@ -2901,7 +2901,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const records = (value) => Array.isArray(value) ? value.filter((row) => Boolean(row && typeof row === "object" && !Array.isArray(row))) : [];
   const artifactIds = (values) => [...new Set(values.map((row) => typeof row.artifactId === "string" ? row.artifactId : "").filter(Boolean))];
   const basicFacts = records(packet.basicFacts);
-  const verifiedFacts = (...predicates) => basicFacts.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated"));
+  const verifiedFacts = (...predicates) => basicFacts.filter((fact) => predicates.includes(String(fact.predicate ?? "").toLowerCase()) && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.floorEligible !== false);
   const factText = (facts) => facts.map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`).join(" ");
   const team = records(packet.team).filter((member) => member.artifact_verified === true && member.evidence_origin !== "model_lead");
   const leaders = team.filter((member) => PROJECT_LEADER_TEAM_ROLE.test(String(member.role ?? "")));
@@ -9509,6 +9509,121 @@ var MULTI_VALUE_PREDICATES = /* @__PURE__ */ new Set([
   "repository",
   "traction"
 ]);
+var NON_INDEPENDENT_HOSTS = /(?:^|\.)(?:prnewswire|globenewswire|businesswire|accesswire|einpresswire|prweb|newsfilecorp|prlog|openpr|issuewire|medium|substack|mirror\.xyz|wordpress|blogspot|tumblr|dev\.to|beehiiv|notion\.site)\.[a-z]/i;
+function registrableDomain(url) {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    const parts = host.split(".");
+    if (parts.length <= 2) return host;
+    const lastTwo = parts.slice(-2).join(".");
+    return /^(?:co|com|org|net|gov|ac|edu)\.[a-z]{2}$/.test(lastTwo) ? parts.slice(-3).join(".") : lastTwo;
+  } catch {
+    return null;
+  }
+}
+function pressWitnessDomains(sources) {
+  const domains = /* @__PURE__ */ new Set();
+  for (const source2 of sources) {
+    if (source2.sourceClass !== "independent_press") continue;
+    let host;
+    try {
+      host = new URL(source2.url).hostname;
+    } catch {
+      continue;
+    }
+    if (NON_INDEPENDENT_HOSTS.test(`.${host}.`)) continue;
+    const domain = registrableDomain(source2.url);
+    if (domain) domains.add(domain);
+  }
+  return domains;
+}
+var RECALL_PREDICATES = /* @__PURE__ */ new Set(["official_identity", "founder", "current_role", "executive", "product"]);
+var ANCHOR_STOPWORDS = /* @__PURE__ */ new Set([
+  "the",
+  "a",
+  "an",
+  "of",
+  "at",
+  "in",
+  "on",
+  "and",
+  "is",
+  "was",
+  "are",
+  "were",
+  "as",
+  "to",
+  "for",
+  "by",
+  "with",
+  "its",
+  "their",
+  "co",
+  "cofounder",
+  "co-founder",
+  "founder",
+  "founders",
+  "creator",
+  "creators",
+  "ceo",
+  "cto",
+  "coo",
+  "cfo",
+  "cmo",
+  "chief",
+  "executive",
+  "officer",
+  "chair",
+  "chairman",
+  "chairwoman",
+  "chairperson",
+  "president",
+  "owner",
+  "managing",
+  "general",
+  "partner",
+  "director",
+  "head",
+  "lead",
+  "vp",
+  "vice",
+  "advisor",
+  "adviser",
+  "investor",
+  "backer",
+  "contributor",
+  "inc",
+  "llc",
+  "ltd",
+  "labs",
+  "lab",
+  "foundation",
+  "company",
+  "companies",
+  "corp",
+  "corporation",
+  "protocol",
+  "dao",
+  "network",
+  "team"
+]);
+function anchorTokens(value) {
+  return [...new Set(searchable(value).split(" ").filter((word) => word.length > 1 && !ANCHOR_STOPWORDS.has(word)))].sort().join(" ");
+}
+function seniorityClass(value) {
+  const text2 = value.toLowerCase();
+  if (/\b(?:co[- ]?founder|founder|creator|ceo|chief\s+executive|chair(?:man|woman|person)?|president|owner|managing\s+partner|general\s+partner)\b/.test(text2)) return "principal";
+  if (/\b(?:cto|coo|cfo|cmo|chief|head|lead|director|vice\s+president|\bvp\b)\b/.test(text2)) return "exec";
+  if (/\b(?:advisor|adviser|investor|backer|contributor|ambassador)\b/.test(text2)) return "affiliate";
+  return "role";
+}
+function atomicAnchor(predicate, value) {
+  if (predicate === "current_role") return `${seniorityClass(value)}::${anchorTokens(value)}`;
+  return anchorTokens(value);
+}
+function dedupeSources(rows) {
+  return [...new Map(rows.flatMap((row) => row.sources).map((source2) => [source2.url, source2])).values()];
+}
 function resolveBasicFactCandidates(candidates) {
   const grouped = /* @__PURE__ */ new Map();
   for (const candidate of candidates) {
@@ -9518,18 +9633,41 @@ function resolveBasicFactCandidates(candidates) {
     rows.push(candidate);
     grouped.set(key, rows);
   }
-  const resolved = [...grouped.values()].flatMap((rows) => {
-    const sources = [...new Map(rows.flatMap((row) => row.sources).map((source2) => [source2.url, source2])).values()];
+  const resolved = [];
+  const strictFailures = [];
+  for (const rows of grouped.values()) {
+    const sources = dedupeSources(rows);
     const official = sources.some((source2) => source2.sourceClass === "official_subject" || source2.sourceClass === "official_counterparty" || source2.sourceClass === "regulatory_or_onchain");
     const independentHosts = new Set(sources.filter((source2) => source2.sourceClass === "independent_press").map((source2) => new URL(source2.url).hostname.replace(/^www\./, "")));
-    if (rows[0]?.predicate === "public_security" && !official) return [];
-    if (!official && independentHosts.size < 2) return [];
-    return [{
+    if (rows[0]?.predicate === "public_security" && !official) continue;
+    if (!official && independentHosts.size < 2) {
+      strictFailures.push(rows);
+      continue;
+    }
+    resolved.push({
       ...rows[0],
       status: official ? "verified" : "corroborated",
       sources
-    }];
-  });
+    });
+  }
+  const strictAnchors = new Set(resolved.map((fact) => `${fact.predicate}::${atomicAnchor(fact.predicate, fact.value)}`));
+  const recallGroups = /* @__PURE__ */ new Map();
+  for (const rows of strictFailures) {
+    const predicate = rows[0]?.predicate;
+    if (!predicate || !RECALL_PREDICATES.has(predicate)) continue;
+    const anchor = `${predicate}::${atomicAnchor(predicate, rows[0].value)}`;
+    if (strictAnchors.has(anchor)) continue;
+    recallGroups.set(anchor, [...recallGroups.get(anchor) ?? [], ...rows]);
+  }
+  for (const rows of recallGroups.values()) {
+    const sources = dedupeSources(rows);
+    if (pressWitnessDomains(sources).size < 2) continue;
+    const counts = /* @__PURE__ */ new Map();
+    for (const row of rows) counts.set(row.value, (counts.get(row.value) ?? 0) + 1);
+    const value = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)[0][0];
+    const representative = rows.find((row) => row.value === value) ?? rows[0];
+    resolved.push({ ...representative, value, status: "corroborated", floorEligible: false, sources });
+  }
   const singletonPredicates = new Set(resolved.map((fact) => fact.predicate).filter((predicate) => !MULTI_VALUE_PREDICATES.has(predicate)));
   for (const predicate of singletonPredicates) {
     const values = resolved.filter((fact) => fact.predicate === predicate);
@@ -14237,6 +14375,7 @@ function mergeProjectedFact(evidence, fact) {
   const known = new Set(same.sources.map((candidate) => candidate.url));
   same.sources.push(...fact.sources.filter((candidate) => !known.has(candidate.url)));
   if (same.status !== "conflicted") same.status = "verified";
+  if (fact.floorEligible !== false && same.floorEligible === false) delete same.floorEligible;
   return same;
 }
 function reconcileQuestionLedger(evidence, facts) {

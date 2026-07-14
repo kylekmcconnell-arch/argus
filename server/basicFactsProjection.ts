@@ -328,6 +328,9 @@ function mergeProjectedFact(evidence: CollectedEvidence, fact: BasicFact): Basic
   // A deterministic projection may add support, but it cannot erase a frozen
   // conflict that was established by competing values or sources.
   if (same.status !== "conflicted") same.status = "verified";
+  // Floor eligibility is monotonic upward: if a strict (floor-eligible) fact
+  // merges onto a recall-only fact, the merged fact regains floor eligibility.
+  if (fact.floorEligible !== false && same.floorEligible === false) delete same.floorEligible;
   return same;
 }
 
