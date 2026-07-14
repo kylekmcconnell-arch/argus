@@ -11450,6 +11450,98 @@ async function collectOfacName(rawName, options = {}) {
   };
 }
 
+// src/lib/internationalSanctions.ts
+var INTERNATIONAL_SANCTIONS_LISTS = [
+  { key: "eu", label: "EU Consolidated Financial Sanctions", slug: "eu_fsf", minNames: 1500 },
+  { key: "un", label: "UN Security Council Consolidated", slug: "un_sc_sanctions", minNames: 300 },
+  { key: "uk", label: "UK Sanctions List (FCDO)", slug: "gb_fcdo_sanctions", minNames: 1500 }
+];
+var openSanctionsDatasetUrl = (slug) => `https://data.opensanctions.org/datasets/latest/${slug}/targets.simple.csv`;
+var aggregateStatus3 = (attempts) => {
+  if (!attempts.length) return "succeeded";
+  if (attempts.every((attempt) => attempt.status === "succeeded")) return "succeeded";
+  if (attempts.every((attempt) => attempt.status === "failed")) return "failed";
+  return "partial";
+};
+async function loadListNames(list, fetcher) {
+  const operation = `${list.slug}-name-index`;
+  let response;
+  try {
+    response = await fetcher(openSanctionsDatasetUrl(list.slug), { signal: AbortSignal.timeout(2e4) });
+  } catch {
+    return { names: /* @__PURE__ */ new Set(), attempt: { provider: "opensanctions", operation, status: "failed", detail: "transport_error" } };
+  }
+  if (!response.ok) {
+    return { names: /* @__PURE__ */ new Set(), attempt: { provider: "opensanctions", operation, status: "failed", detail: `http_${response.status}` } };
+  }
+  let csv;
+  try {
+    csv = await response.text();
+  } catch {
+    return { names: /* @__PURE__ */ new Set(), attempt: { provider: "opensanctions", operation, status: "failed", detail: "response_text_error" } };
+  }
+  const names = parseOfacPersonNames(csv);
+  const valid = names.size >= list.minNames;
+  return {
+    names: valid ? names : /* @__PURE__ */ new Set(),
+    attempt: {
+      provider: "opensanctions",
+      operation,
+      status: valid ? "succeeded" : "partial",
+      detail: valid ? `${names.size}_names` : `undersized_index_${names.size}`
+    }
+  };
+}
+async function collectInternationalSanctions(rawName, options = {}) {
+  const name = normalizeResolvedName(rawName);
+  const query = normalizeSanctionsName(name);
+  if (query.split(" ").filter(Boolean).length < 2) {
+    return {
+      value: { available: false, note: "Sanctions screen needs a resolved real name." },
+      attempts: [],
+      status: "succeeded"
+    };
+  }
+  const fetcher = options.fetcher ?? fetch;
+  const tokens = query.split(" ");
+  const reversed = [tokens[tokens.length - 1], ...tokens.slice(0, -1)].join(" ");
+  const loaded = await Promise.all(
+    INTERNATIONAL_SANCTIONS_LISTS.map(
+      (list) => loadListNames(list, fetcher).then((result) => ({ list, ...result }))
+    )
+  );
+  const attempts = loaded.map((entry) => entry.attempt);
+  const results = loaded.map(({ list, names }) => ({
+    key: list.key,
+    label: list.label,
+    sourceUrl: openSanctionsDatasetUrl(list.slug),
+    available: names.size > 0,
+    listSize: names.size,
+    sanctioned: names.has(query) || names.has(reversed)
+  }));
+  const screened = results.filter((result) => result.available);
+  if (!screened.length) {
+    return {
+      value: { available: false, note: "EU, UN, and UK sanctions lists were all unavailable." },
+      attempts,
+      status: aggregateStatus3(attempts)
+    };
+  }
+  const matched = screened.filter((result) => result.sanctioned);
+  return {
+    value: {
+      available: true,
+      name,
+      results,
+      sanctioned: matched.length > 0,
+      matchedLists: matched.map((result) => result.label),
+      screenedLists: screened.map((result) => result.label)
+    },
+    attempts,
+    status: aggregateStatus3(attempts)
+  };
+}
+
 // server/adapters/profilePhoto.ts
 import { createHash as createHash5 } from "node:crypto";
 var ANTHROPIC_URL3 = "https://api.anthropic.com/v1/messages";
@@ -11976,6 +12068,34 @@ var freezeOfacOutcome = (ctx, ofac, name, capturedAt) => {
     });
   }
 };
+var freezeIntlSanctionsOutcome = (ctx, collection, name, capturedAt) => {
+  if (!collection.value.available) return;
+  const { screenedLists, matchedLists, sanctioned, results } = collection.value;
+  const matchedUrl = results.find((result) => result.sanctioned)?.sourceUrl ?? "https://data.opensanctions.org/";
+  addArtifact2(ctx, {
+    kind: "sanctions_screen",
+    provider: "opensanctions",
+    title: `EU/UN/UK consolidated sanctions exact-name screen (${screenedLists.length} lists)`,
+    sourceUrl: matchedUrl,
+    capturedAt,
+    excerpt: sanctioned ? `Exact name or alias match for ${name} on ${matchedLists.join(", ")}; identity requires verification.` : `No exact full-name or reversed-name match for ${name} across the ${screenedLists.join(", ")}.`,
+    match: sanctioned ? "exact_name" : "no_match"
+  });
+  if (sanctioned) {
+    addFinding(ctx, {
+      finding_type: "SanctionsNameLead",
+      claim: `${name} exactly matches a person name or alias on ${matchedLists.join(", ")} (EU/UN/UK consolidated sanctions); verify the identity before drawing a conclusion.`,
+      source_url: matchedUrl,
+      source_date: capturedAt.slice(0, 10),
+      source_author: "OpenSanctions (EU/UN/UK consolidated lists)",
+      verification_status: "Reported",
+      independent_source_count: matchedLists.length,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true
+    });
+  }
+};
 var ofacSearch = (name) => collectOfacName(name, {
   cache: {
     read: () => cacheGet("ofacname:v2", {
@@ -11998,17 +12118,20 @@ async function refreshResolvedNameOffchain(ctx) {
     detail: `Refreshing exact-name news, US court, and OFAC outcomes for ${name}.`,
     tone: "neutral"
   });
-  const [news, legal, ofac] = await Promise.all([
+  const [news, legal, ofac, intlSanctions] = await Promise.all([
     collectNews(name, ctx.handle),
     collectLegalCases(name),
-    ofacSearch(name)
+    ofacSearch(name),
+    collectInternationalSanctions(name)
   ]);
   recordAttempts(news.attempts);
   recordAttempts(legal.attempts);
   recordAttempts(ofac.attempts);
+  recordAttempts(intlSanctions.attempts);
   freezeNewsOutcome(ctx, news, capturedAt, false);
   freezeLegalOutcome(ctx, legal, name, capturedAt);
   freezeOfacOutcome(ctx, ofac, name, capturedAt);
+  freezeIntlSanctionsOutcome(ctx, intlSanctions, name, capturedAt);
   const statuses = [news.status, legal.status, ofac.status];
   const failed = statuses.filter((status) => status === "failed").length;
   const partial = statuses.filter((status) => status === "partial").length;
@@ -12035,18 +12158,22 @@ var offchainAdapter = {
     const profilePhotoPromise = collectProfilePhoto(ctx);
     const legalPromise = name ? collectLegalCases(name) : null;
     const ofacPromise = name ? ofacSearch(name) : null;
-    const [news, profilePhoto, legal, ofac] = await Promise.all([
+    const intlSanctionsPromise = name ? collectInternationalSanctions(name) : null;
+    const [news, profilePhoto, legal, ofac, intlSanctions] = await Promise.all([
       newsPromise,
       profilePhotoPromise,
       legalPromise ?? Promise.resolve(null),
-      ofacPromise ?? Promise.resolve(null)
+      ofacPromise ?? Promise.resolve(null),
+      intlSanctionsPromise ?? Promise.resolve(null)
     ]);
     recordAttempts(news.attempts);
     if (legal) recordAttempts(legal.attempts);
     if (ofac) recordAttempts(ofac.attempts);
+    if (intlSanctions) recordAttempts(intlSanctions.attempts);
     freezeNewsOutcome(ctx, news, capturedAt, incompleteSingleNameQuery(ctx, name));
     if (legal && name) freezeLegalOutcome(ctx, legal, name, capturedAt);
     if (ofac && name) freezeOfacOutcome(ctx, ofac, name, capturedAt);
+    if (intlSanctions && name) freezeIntlSanctionsOutcome(ctx, intlSanctions, name, capturedAt);
     const statuses = [news.status, profilePhoto.status, legal?.status, ofac?.status].filter(
       (status) => Boolean(status)
     );

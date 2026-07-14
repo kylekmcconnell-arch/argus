@@ -14,6 +14,7 @@ import {
   type OffchainAttempt,
   type OffchainAttemptStatus,
 } from "../../src/lib/offchainEvidence";
+import { collectInternationalSanctions } from "../../src/lib/internationalSanctions";
 import { cacheGet, cacheSet } from "../cache";
 import { recordCall } from "../cost";
 import type { Adapter, AdapterRunResult, CollectContext } from "./types";
@@ -272,6 +273,48 @@ const freezeOfacOutcome = (
   }
 };
 
+// Supplementary EU / UN / UK (FCDO) consolidated-sanctions screen, run alongside
+// the OFAC name screen. Surfaced as an evidence artifact plus a finding on a
+// match — deliberately NOT a persisted-checklist item, so it never alters the
+// frozen PERSON_CHECK_IDS report-qualification contract. OFAC remains the
+// gating sanctions check; this widens coverage without gating completion.
+const freezeIntlSanctionsOutcome = (
+  ctx: CollectContext,
+  collection: Awaited<ReturnType<typeof collectInternationalSanctions>>,
+  name: string,
+  capturedAt: string,
+): void => {
+  if (!collection.value.available) return;
+  const { screenedLists, matchedLists, sanctioned, results } = collection.value;
+  const matchedUrl = results.find((result) => result.sanctioned)?.sourceUrl
+    ?? "https://data.opensanctions.org/";
+  addArtifact(ctx, {
+    kind: "sanctions_screen",
+    provider: "opensanctions",
+    title: `EU/UN/UK consolidated sanctions exact-name screen (${screenedLists.length} lists)`,
+    sourceUrl: matchedUrl,
+    capturedAt,
+    excerpt: sanctioned
+      ? `Exact name or alias match for ${name} on ${matchedLists.join(", ")}; identity requires verification.`
+      : `No exact full-name or reversed-name match for ${name} across the ${screenedLists.join(", ")}.`,
+    match: sanctioned ? "exact_name" : "no_match",
+  });
+  if (sanctioned) {
+    addFinding(ctx, {
+      finding_type: "SanctionsNameLead",
+      claim: `${name} exactly matches a person name or alias on ${matchedLists.join(", ")} (EU/UN/UK consolidated sanctions); verify the identity before drawing a conclusion.`,
+      source_url: matchedUrl,
+      source_date: capturedAt.slice(0, 10),
+      source_author: "OpenSanctions (EU/UN/UK consolidated lists)",
+      verification_status: "Reported",
+      independent_source_count: matchedLists.length,
+      polarity: -1,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+  }
+};
+
 const ofacSearch = (name: string) => collectOfacName(name, {
   cache: {
     read: () => cacheGet("ofacname:v2", {
@@ -298,17 +341,20 @@ export async function refreshResolvedNameOffchain(ctx: CollectContext): Promise<
     detail: `Refreshing exact-name news, US court, and OFAC outcomes for ${name}.`,
     tone: "neutral",
   });
-  const [news, legal, ofac] = await Promise.all([
+  const [news, legal, ofac, intlSanctions] = await Promise.all([
     collectNews(name, ctx.handle),
     collectLegalCases(name),
     ofacSearch(name),
+    collectInternationalSanctions(name),
   ]);
   recordAttempts(news.attempts);
   recordAttempts(legal.attempts);
   recordAttempts(ofac.attempts);
+  recordAttempts(intlSanctions.attempts);
   freezeNewsOutcome(ctx, news, capturedAt, false);
   freezeLegalOutcome(ctx, legal, name, capturedAt);
   freezeOfacOutcome(ctx, ofac, name, capturedAt);
+  freezeIntlSanctionsOutcome(ctx, intlSanctions, name, capturedAt);
   const statuses = [news.status, legal.status, ofac.status];
   const failed = statuses.filter((status) => status === "failed").length;
   const partial = statuses.filter((status) => status === "partial").length;
@@ -343,22 +389,26 @@ export const offchainAdapter: Adapter = {
     const profilePhotoPromise = collectProfilePhoto(ctx);
     const legalPromise = name ? collectLegalCases(name) : null;
     const ofacPromise = name ? ofacSearch(name) : null;
+    const intlSanctionsPromise = name ? collectInternationalSanctions(name) : null;
 
-    const [news, profilePhoto, legal, ofac] = await Promise.all([
+    const [news, profilePhoto, legal, ofac, intlSanctions] = await Promise.all([
       newsPromise,
       profilePhotoPromise,
       legalPromise ?? Promise.resolve(null),
       ofacPromise ?? Promise.resolve(null),
+      intlSanctionsPromise ?? Promise.resolve(null),
     ]);
     recordAttempts(news.attempts);
     if (legal) recordAttempts(legal.attempts);
     if (ofac) recordAttempts(ofac.attempts);
+    if (intlSanctions) recordAttempts(intlSanctions.attempts);
 
     freezeNewsOutcome(ctx, news, capturedAt, incompleteSingleNameQuery(ctx, name));
 
     if (legal && name) freezeLegalOutcome(ctx, legal, name, capturedAt);
 
     if (ofac && name) freezeOfacOutcome(ctx, ofac, name, capturedAt);
+    if (intlSanctions && name) freezeIntlSanctionsOutcome(ctx, intlSanctions, name, capturedAt);
 
     const statuses = [news.status, profilePhoto.status, legal?.status, ofac?.status].filter(
       (status): status is OffchainAttemptStatus => Boolean(status),

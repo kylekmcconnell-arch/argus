@@ -52,7 +52,7 @@ describe("frozen off-chain diligence adapter", () => {
     vi.restoreAllMocks();
   });
 
-  it("freezes news, full-name legal, and no-match OFAC artifacts before scoring", async () => {
+  it("freezes news, full-name legal, no-match OFAC, and EU/UN/UK sanctions artifacts before scoring", async () => {
     const fetcher = vi.fn().mockImplementation((input: string | URL | Request) => {
       const url = String(input);
       if (url.startsWith("https://news.google.com/")) return Promise.resolve(new Response(rss, { status: 200 }));
@@ -81,9 +81,11 @@ describe("frozen off-chain diligence adapter", () => {
       expect.objectContaining({ id: "us-legal-history", status: "finding", sourceCount: 1 }),
       expect.objectContaining({ id: "ofac-sanctions-name", status: "checked-empty" }),
     ]));
-    expect(ctx.evidence.sourceArtifacts).toHaveLength(3);
+    expect(ctx.evidence.sourceArtifacts).toHaveLength(4);
     expect(ctx.evidence.sourceArtifacts.every((artifact) => /^[a-f0-9]{64}$/.test(artifact.contentHash))).toBe(true);
     expect(ctx.evidence.sourceArtifacts.filter((artifact) => artifact.kind === "legal_case")).toHaveLength(1);
+    // OFAC SDN + the supplementary EU/UN/UK consolidated screen.
+    expect(ctx.evidence.sourceArtifacts.filter((artifact) => artifact.kind === "sanctions_screen")).toHaveLength(2);
     expect(ctx.evidence.sourceArtifacts.find((artifact) => artifact.kind === "sanctions_screen")?.sourceContentHash).toMatch(/^[a-f0-9]{64}$/);
     expect(ctx.evidence.findings).toContainEqual(expect.objectContaining({
       finding_type: "LegalCaseNameLead",

@@ -5,7 +5,7 @@ import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 
 // Wiring the diligence gap-fillers into the projection: funding → P4_backing_and_partners,
 // TVL → P5 traction, Monid/Akta management → founder identity. Additive, PROJECT-only.
-describe("projectProviderBackedBasicFacts — diligence gap-fillers", () => {
+describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
   const projectEvidence = () => {
     const evidence = emptyEvidence("@aavetest");
     evidence.roles = [SubjectClass.PROJECT];
