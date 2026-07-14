@@ -169,7 +169,7 @@
       <span class="tagpill">Source-backed · versioned evidence</span>
       <span class="tagpill">EVM + Solana</span>
       <span class="tagpill">On-chain + off-chain + identity</span>
-      <span class="tagpill" style="border-color:var(--accent);color:var(--accent);">Living document · updated July 13, 2026</span>
+      <span class="tagpill" style="border-color:var(--accent);color:var(--accent);">Living document · updated July 14, 2026</span>
     </div>
   </div>
 </header>
@@ -371,6 +371,7 @@
           <div class="row"><span class="rk">Hard caps</span><p>Disqualifying findings - a honeypot, reclaimable ownership, a serial-scammer deployer, a non-transferable token - cap the score regardless of a clean market. A pretty chart never papers over an unsafe contract.</p></div>
           <div class="row"><span class="rk">Legitimacy weighting</span><p>A capability a rug can't fake - real CEX presence, deep market cap - relaxes the softer caps, so a genuine listed project isn't failed for a mint authority it will never abuse. Hard caps stay hard.</p></div>
           <div class="row"><span class="rk">Confidence &amp; negative space</span><p>A coverage-based confidence indicator says how much of the verdict rests on verified data, and a "what we couldn't verify" section states the gaps outright. An adversarial second opinion stress-tests the verdict in both directions before it's final.</p></div>
+          <div class="row"><span class="rk">Full-clearance coverage policy</span><p>Final clearance requires every never-waive safety screen recorded (identity resolution, OFAC name screen, trust-graph connections, and the founder related-asset distinction) plus at least 75% of applicable governing checks recorded. An enrichment path a provider cannot serve no longer withholds clearance indefinitely; waived gaps stay disclosed, and an unrecorded safety screen always withholds clearance.</p></div>
         </div>
       </section>
 
@@ -402,7 +403,10 @@
               <tr><td class="prov">People Data Labs</td><td class="powers">Professional identity and employment records when configured</td><td><span class="tier">keyed</span></td></tr>
               <tr><td class="prov">Official sites · filings · reputable reporting</td><td class="powers">Company, role, portfolio, funding, governance, and legal verification without a Crunchbase dependency</td><td><span class="tier keyless">public</span></td></tr>
               <tr><td class="prov">Public web fetch · Jina Reader</td><td class="powers">Exact supporting passages with bounded recovery for eligible public pages; original evidence URLs are preserved</td><td><span class="tier keyless">keyless</span></td></tr>
-              <tr><td class="prov">Google News · Reddit</td><td class="powers">Independent reporting and community leads that require source-level verification before scoring</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">Google News</td><td class="powers">Independent reporting and press leads that require source-level verification before scoring</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">DeFiLlama</td><td class="powers">Protocol TVL, chain breakdown, public funding rounds &amp; lead investors</td><td><span class="tier keyless">keyless</span></td></tr>
+              <tr><td class="prov">Monid · Akta</td><td class="powers">Private-company enrichment: funding rounds, lead investors, leadership, firmographics (metered fallback when free sources have no record)</td><td><span class="tier">keyed</span></td></tr>
+              <tr><td class="prov">EU FSF · UN SC · UK FCDO</td><td class="powers">Consolidated-sanctions name screens beside the OFAC screen (frozen artifact + finding; OFAC remains the gating check)</td><td><span class="tier keyless">keyless</span></td></tr>
               <tr><td class="prov">CryptoRank</td><td class="powers">Market intel: rank, drawdown, dilution, vesting / unlock flags</td><td><span class="tier">keyed</span></td></tr>
               <tr><td class="prov">Supabase</td><td class="powers">Shared trust graph + shared audit log (community feed)</td><td><span class="tier">infra</span></td></tr>
               <tr><td class="prov">DexScreener</td><td class="powers">Token market, liquidity &amp; pair data</td><td><span class="tier keyless">keyless</span></td></tr>

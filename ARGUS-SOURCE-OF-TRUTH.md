@@ -2,7 +2,7 @@
 
 Published field manual: [Claude artifact](https://claude.ai/code/artifact/4599c1f2-73cb-462c-9382-65282945a087)
 
-Last reconciled: July 13, 2026
+Last reconciled: July 14, 2026
 
 Product version: 3.0
 
@@ -188,6 +188,41 @@ change:
 5. Republish the Claude field manual to the same artifact URL and update its date.
 6. Record only observed production behavior as shipped. Keep unverified targets
    labeled as validation work.
+
+## July 14, 2026 reconciliation
+
+Full-clearance coverage policy. A recorded outcome for every applicable check
+remains the ideal, but an enrichment path a provider cannot serve no longer
+withholds final clearance indefinitely. One shared rule now governs the stored
+completeness claim, the trust-graph qualification cross-check, and the
+readiness status. Clearance requires both: every never-waive safety screen
+recorded (identity resolution, OFAC sanctions name screen, trust-graph
+connections, and founder related-asset distinction, because an unresolved
+token or security candidacy is a capital-risk unknown, never an enrichment
+gap), and recorded coverage of at least 75 percent of applicable governing
+checks. Waived gaps stay disclosed in the readiness guidance; only their power
+to withhold clearance changed. Legacy snapshots without stable check ids keep
+the strict everything-recorded rule.
+
+Evidence sources. Project audits now complete backing and traction from hard
+public data: DeFiLlama funding rounds and lead investors plus on-chain TVL
+(free, keyless), with Monid/Akta private-company enrichment (funding, lead
+investors, leadership, firmographics; keyed and metered) as the fallback when
+the free source has no record. A verified founder's primary venture is
+resolved the same way, minting a venture-scoped financing fact that never
+presents the person as having raised the money themselves. A supplementary
+EU, UN, and UK (FCDO) consolidated-sanctions screen now runs beside the OFAC
+screen as a frozen artifact and finding; OFAC remains the only gating
+sanctions check. Crunchbase and Reddit were retired from the pipeline.
+Monid enrichment runs inside a hard 25-second wall-clock box so a slow
+provider degrades to a skipped enrichment, never a dead run.
+
+Live validation state. Aave (project) publishes a provisional PASS 72 with all
+six governing axes evidence-backed; Stani Kulechov (founder) publishes a
+provisional PASS 80 with clean sanctions and legal screens. Both await the
+founder related-asset binding (tying the verified project token to the
+founder's control on the person side) before full clearance; that binding is
+the active engineering workstream and is deliberately never waived.
 
 ## July 13, 2026 reconciliation
 
