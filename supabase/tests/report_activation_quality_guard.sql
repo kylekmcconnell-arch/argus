@@ -13,8 +13,8 @@ select plan(1);
 insert into public.organizations (id, slug, name)
 values ('00000000-0000-4000-8000-000000000090', 'quality-guard-test', 'Quality Guard Test');
 
-insert into auth.users (id)
-values ('00000000-0000-4000-8000-000000000091');
+insert into auth.users (id, email)
+values ('00000000-0000-4000-8000-000000000091', 'quality-guard-owner@argus.test');
 
 insert into public.argus_members (user_id, organization_id, role, display_name)
 values (

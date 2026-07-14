@@ -7,6 +7,7 @@
     "dev": "vite",
     "server": "tsx watch server/index.ts",
     "dev:full": "concurrently -n web,api -c cyan,magenta \"vite\" \"tsx watch server/index.ts\"",
+    "prebuild": "node --import tsx scripts/auth-env-contract.ts",
     "build": "node scripts/build-collector.mjs && tsc -b && vite build",
     "typecheck": "tsc -b && tsc -p server/tsconfig.json --noEmit && tsc -p tsconfig.api.json --noEmit",
     "test": "vitest run",
@@ -18,7 +19,7 @@
     "quality": "npm run truth:check && npm run canary:offline && npm run calibrate && npm test && npm run typecheck",
     "seed:local-report": "tsx scripts/seed-local-report.ts",
     "check-env": "tsx scripts/check-env.ts",
-    "test:db": "supabase test db supabase/tests/report_activation_quality_guard.sql supabase/tests/database/persist_report_version_bundle.test.sql",
+    "test:db": "supabase test db supabase/tests/report_activation_quality_guard.sql supabase/tests/database/persist_report_version_bundle.test.sql supabase/tests/approved_signin_security.sql",
     "lint": "eslint .",
     "preview": "vite preview"
   },

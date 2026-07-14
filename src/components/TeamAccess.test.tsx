@@ -78,14 +78,14 @@ describe("TeamAccess invitation recovery", () => {
     expect(fetchMock.mock.calls.some(([, init]) => init?.method === "PUT")).toBe(true);
   });
 
-  it("hides resend after the member has verified their email", async () => {
+  it("shows a confirmed account as sign-in ready until its first real session", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       members: [{ ...pendingMember, emailVerified: true }],
       events: [],
     }), { status: 200 })));
 
     await act(async () => root.render(<TeamAccess />));
-    await vi.waitFor(() => expect(container.textContent).toContain("verified"));
+    await vi.waitFor(() => expect(container.textContent).toContain("sign-in ready"));
     expect(container.textContent).not.toContain("resend invite");
   });
 });

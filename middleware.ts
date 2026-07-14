@@ -5,6 +5,7 @@ const PUBLIC_API_PATHS = new Set([
   "/api/v1/openapi.json",
   "/api/card",
   "/api/og",
+  "/api/signin",
 ]);
 const VIEWER_GET_PATHS = new Set([
   "/api/session",

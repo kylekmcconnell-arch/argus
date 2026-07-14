@@ -1338,6 +1338,56 @@ describe("basic-facts source verification", () => {
   });
 
   it.each([
+    "Stani Kulechov is the founder and CEO of Aave.",
+    "Stani Kulechov is the founder & CEO of Aave.",
+    "Stani Kulechov, Founder of Aave, launched the protocol.",
+  ])("verifies a bounded person-to-venture founder title: %s", (passage) => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Stani Kulechov",
+        value: "Aave",
+        excerpt: passage,
+        sourceUrl: "https://press.example/stani-kulechov",
+      }),
+      document({
+        url: "https://press.example/stani-kulechov",
+        host: "press.example",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Stani Kulechov", "@StaniKulechov"],
+      "@StaniKulechov",
+    )).toEqual(expect.objectContaining({
+      predicate: "founder",
+      value: "Aave",
+      status: "lead",
+    }));
+  });
+
+  it.each([
+    "Stani Kulechov is the founder and CEO of Lens. Alice is the founder of Aave.",
+    "Stani Kulechov introduced Alice, Founder and CEO of Aave.",
+    "Stani Kulechov, Founder of Lens, spoke with Aave CEO Alice.",
+    "Stani Kulechov is the founder and CEO of Aave Capital.",
+    "Stani Kulechov, Founder of Aave's Lens protocol, spoke at the event.",
+  ])("does not transfer a bounded founder title from another person or venture: %s", (passage) => {
+    expect(verifyBasicFactLead(
+      lead({
+        subject: "Stani Kulechov",
+        value: "Aave",
+        excerpt: passage,
+        sourceUrl: "https://press.example/stani-kulechov",
+      }),
+      document({
+        url: "https://press.example/stani-kulechov",
+        host: "press.example",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Stani Kulechov", "@StaniKulechov"],
+      "@StaniKulechov",
+    )).toBeNull();
+  });
+
+  it.each([
     ["advisor", "Jupiter founders: Meow and advisor Siong."],
     ["investor", "Jupiter founders include Meow and investor Siong."],
     ["employee", "Jupiter founders are Meow and employee Siong."],

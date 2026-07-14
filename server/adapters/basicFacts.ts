@@ -1649,6 +1649,13 @@ function founderAttributionIsSupported(
   const aliasPatterns = aliases.map(loosePhrasePattern).filter(Boolean);
   const founded = "(?:co[-\\s]?founded|founded)";
   const founder = "(?:co[-\\s]?founder|founder)";
+  // Press profiles commonly compress a person's control relationship into
+  // "Founder and CEO of Venture" or the appositive "Name, Founder of
+  // Venture". Keep that bridge deliberately closed: only an optional CEO
+  // title may sit between founder and the exact venture value, so a nearby
+  // executive, company, or unrelated role can never satisfy the claim.
+  const founderExecutiveTitle = "(?:\\s*,?\\s*(?:and|&)\\s*(?:the\\s+)?(?:chief\\s+executive\\s+officer|ceo))?";
+  const exactVentureBoundary = "(?=\\s*(?:[,.;:!?)]|$))";
   const generic = "(?:the|this|our)\\s+(?:business|company|exchange|organization|platform|product|project|protocol|service|venture)";
   return attributionClauses(passage).some((clause) => {
     const hasProjectContext = aliases.some((alias) => looseContainsPhrase(passage, alias));
@@ -1672,6 +1679,8 @@ function founderAttributionIsSupported(
         new RegExp(`\\b${value}\\b\\s*,?\\s*(?:is\\s+)?(?:an?\\s+|the\\s+)?${founder}\\s+of\\s+(?:the\\s+)?${subject}\\b`, "i"),
         new RegExp(`\\b${subject}\\b[^.!?;]{0,60}\\b${founded}\\s+by\\s+${value}\\b`, "i"),
         new RegExp(`\\b${subject}\\b[^.!?;]{0,40}\\b${founded}\\s+(?:the\\s+)?${value}\\b`, "i"),
+        new RegExp(`\\b${subject}\\b\\s+(?:is|was)\\s+(?:an?\\s+|the\\s+)?${founder}${founderExecutiveTitle}\\s+(?:of|at)\\s+(?:the\\s+)?${value}\\b${exactVentureBoundary}`, "i"),
+        new RegExp(`\\b${subject}\\b\\s*,\\s*(?:an?\\s+|the\\s+)?${founder}${founderExecutiveTitle}\\s+(?:of|at)\\s+(?:the\\s+)?${value}\\b${exactVentureBoundary}`, "i"),
         new RegExp(`\\b${subject}\\b[^.!?;]{0,40}\\b(?:is|was)\\s+(?:an?\\s+|the\\s+)?${founder}\\s+(?:of|at)\\s+${value}\\b`, "i"),
         new RegExp(`\\b${value}\\b[^.!?;]{0,40}\\b${founded}\\s+(?:the\\s+)?${subject}\\b`, "i"),
         new RegExp(`\\b${value}\\b[^.!?;]{0,40}\\b(?:is|was)\\s+(?:an?\\s+|the\\s+)?${founder}\\s+(?:of|at)\\s+${subject}\\b`, "i"),

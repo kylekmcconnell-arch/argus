@@ -11,6 +11,7 @@ import {
   shouldRevalidateSession,
 } from "./lib/authenticatedFetch";
 import { setAnalyst } from "./lib/analyst";
+import { requestArgusSignInLink } from "./lib/signInRequest";
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.replace(/\/$/, "") || "";
 const publishableKey = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
@@ -168,24 +169,31 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
     setError("");
     setMessage("");
     try {
-      const { error: otpError } = await supabase.auth.signInWithOtp({
-        email: email.trim().toLowerCase(),
-        options: {
-          // Preserve an exact immutable-version deep link through email OTP.
-          // Hash fragments can contain auth material, so never echo them.
-          emailRedirectTo: `${window.location.origin}${window.location.pathname}${window.location.search}`,
-          shouldCreateUser: allowBootstrapSignup,
-        },
-      });
-      if (otpError) throw otpError;
-      setMessage("Check your email for the secure ARGUS sign-in link.");
+      if (allowBootstrapSignup) {
+        const { error: otpError } = await supabase.auth.signInWithOtp({
+          email: email.trim().toLowerCase(),
+          options: {
+            // Bootstrap is an explicit temporary setup mode. Normal ARGUS
+            // sign-in is always gated by active server-owned membership.
+            emailRedirectTo: `${window.location.origin}${window.location.pathname}${window.location.search}`,
+            shouldCreateUser: true,
+          },
+        });
+        if (otpError) throw otpError;
+        setMessage("Check your email for the secure ARGUS sign-in link.");
+      } else {
+        const nextMessage = await requestArgusSignInLink(
+          window.fetch.bind(window),
+          email,
+          `${window.location.pathname}${window.location.search}`,
+        );
+        setMessage(nextMessage);
+      }
     } catch (signInError) {
       const message = signInError instanceof Error
         ? signInError.message
         : "The sign-in link could not be sent.";
-      setError(/signups? not allowed/i.test(message)
-        ? "This account still needs an ARGUS invitation. Ask an owner to resend it from Audit & access."
-        : message);
+      setError(message);
     } finally {
       setSending(false);
     }

@@ -283,7 +283,11 @@ export function TeamAccess() {
                 </span>
                 <span className="mono mt-0.5 block text-[11px] text-ink-faint">{member.email}</span>
                 <span className="mt-0.5 block text-[11px] text-ink-faint">
-                  {member.emailVerified ? "verified" : "invitation pending"} · {relativeTime(member.lastSignInAt)}
+                  {member.lastSignInAt
+                    ? "signed in"
+                    : member.emailVerified
+                      ? "sign-in ready"
+                      : "invitation pending"} · {relativeTime(member.lastSignInAt)}
                 </span>
               </span>
               {!member.emailVerified && member.active && (

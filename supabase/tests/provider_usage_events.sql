@@ -94,9 +94,9 @@ insert into public.organizations (id, slug, name) values
   ('40000000-0000-4000-8000-000000000001', 'provider-usage-one', 'Provider Usage One'),
   ('40000000-0000-4000-8000-000000000002', 'provider-usage-two', 'Provider Usage Two');
 
-insert into auth.users (id) values
-  ('40000000-0000-4000-8000-000000000101'),
-  ('40000000-0000-4000-8000-000000000102');
+insert into auth.users (id, email) values
+  ('40000000-0000-4000-8000-000000000101', 'provider-owner-one@argus.test'),
+  ('40000000-0000-4000-8000-000000000102', 'provider-owner-two@argus.test');
 
 insert into public.argus_members (
   user_id, organization_id, role, display_name

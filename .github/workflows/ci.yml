@@ -19,7 +19,7 @@ jobs:
         run: supabase start
 
       - name: Executable Postgres persistence and activation gates
-        run: supabase test db supabase/tests/report_activation_quality_guard.sql supabase/tests/database/persist_report_version_bundle.test.sql
+        run: npm run test:db
 
   verify:
     runs-on: ubuntu-latest

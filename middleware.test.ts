@@ -27,6 +27,26 @@ describe("Case Brief middleware policy", () => {
     vi.unstubAllEnvs();
   });
 
+  it("allows the public sign-in request without a bearer token", async () => {
+    const response = await middleware(new Request("https://argus.example/api/signin", {
+      method: "POST",
+      headers: { origin: "https://argus.example", "content-type": "application/json" },
+      body: JSON.stringify({ email: "enigma@enigma-fund.com" }),
+    }));
+
+    expect(response.status).toBe(204);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("does not expose a nearby sign-in path", async () => {
+    const response = await middleware(new Request("https://argus.example/api/signin/admin", {
+      method: "POST",
+    }));
+
+    expect(response.status).toBe(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it("advertises PATCH for configured Case Brief CORS origins", async () => {
     vi.stubEnv("ARGUS_CORS_ORIGINS", "https://partner.example");
 

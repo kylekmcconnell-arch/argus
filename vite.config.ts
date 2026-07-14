@@ -17,7 +17,9 @@ export default defineConfig({
       // forward collector API to the Node server (npm run server, port 8787)
       "/api": {
         target: "http://localhost:8787",
-        changeOrigin: true,
+        // Preserve the browser Host so the public sign-in handler can enforce
+        // its same-origin Origin/Host check in local development too.
+        changeOrigin: false,
       },
     },
   },

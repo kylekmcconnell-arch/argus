@@ -34,9 +34,9 @@ $$;
 insert into public.organizations (id, slug, name)
 values ('00000000-0000-4000-8000-000000000002', 'tenant-two', 'Tenant Two');
 
-insert into auth.users (id) values
-  ('00000000-0000-4000-8000-000000000101'),
-  ('00000000-0000-4000-8000-000000000102');
+insert into auth.users (id, email) values
+  ('00000000-0000-4000-8000-000000000101', 'tenant-owner-one@argus.test'),
+  ('00000000-0000-4000-8000-000000000102', 'tenant-owner-two@argus.test');
 
 insert into public.argus_members (user_id, organization_id, role, display_name) values
   ('00000000-0000-4000-8000-000000000101', '00000000-0000-4000-8000-000000000001', 'owner', 'Tenant One Owner'),
