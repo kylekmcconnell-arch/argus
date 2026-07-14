@@ -525,3 +525,287 @@ export function describeCompanyEnrichment(outcome: CompanyEnrichmentOutcome): En
     note: parts.length ? `${name}: ${parts.join(" · ")}` : `${name}: Monid/Akta record verified`,
   };
 }
+
+// ===========================================================================
+// Additive collectors (company news + token/contract pre-trade risk).
+// These reuse the run/poll helpers above and follow the same env-gated,
+// never-throw conventions. They are standalone: nothing here is wired into
+// the collection pipeline by this module.
+// ===========================================================================
+
+/**
+ * POST a run for an arbitrary Monid provider (the existing startRun hardcodes
+ * PROVIDER = "akta"). Never throws; walks the run to its provider payload.
+ */
+async function startRunFor(
+  provider: string,
+  key: string,
+  endpoint: string,
+  input: Record<string, unknown>,
+  fetcher: typeof fetch,
+): Promise<RunOutcome> {
+  let res: Response;
+  try {
+    res = await fetcher(`${API_BASE}/run`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({ provider, endpoint, input }),
+      signal: AbortSignal.timeout(RUN_TIMEOUT_MS),
+    });
+  } catch {
+    return { ok: false, note: "Monid was unavailable." };
+  }
+  if (!res.ok) return { ok: false, note: `Monid request failed (http_${res.status}).` };
+  let run: any;
+  try {
+    run = await res.json();
+  } catch {
+    return { ok: false, note: "Monid response was unreadable." };
+  }
+  return resolveRun(run, key, fetcher);
+}
+
+/** First non-empty trimmed string from the candidates, else null. */
+function firstString(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (isNonEmptyString(value)) return value.trim();
+  }
+  return null;
+}
+
+/** Canonical UUID shape (8-4-4-4-12 hex). */
+function looksLikeUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+/** A website or bare host (has a scheme or a dotted TLD), not a plain name. */
+function looksLikeUrl(value: string): boolean {
+  return /^https?:\/\//i.test(value) || /\.[a-z]{2,}/i.test(value);
+}
+
+// ---------------------------------------------------------------------------
+// collectCompanyNews : Akta '/v1/news'
+// ---------------------------------------------------------------------------
+
+export type NewsSentiment = "positive" | "negative" | "neutral";
+
+export interface NewsArticle {
+  title: string | null;
+  summary: string | null;
+  sentiment: string | null;
+  publisher: string | null;
+  url: string | null;
+  date: string | null;
+}
+
+export interface CompanyNews {
+  /** the company identifier actually queried (uuid or host) */
+  company: string;
+  articles: NewsArticle[];
+  count: number;
+}
+
+export type CompanyNewsOutcome =
+  | { available: true; value: CompanyNews }
+  | { available: false; reason: "no_key" | "no_match" | "unavailable"; note: string };
+
+export interface CompanyNewsOptions {
+  fetcher?: typeof fetch;
+  limit?: number;
+  sentiment?: NewsSentiment;
+}
+
+const NEWS_LIMIT_DEFAULT = 8;
+const NEWS_LIMIT_CAP = 15;
+
+function clampNewsLimit(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) return NEWS_LIMIT_DEFAULT;
+  return Math.max(1, Math.min(NEWS_LIMIT_CAP, Math.trunc(value)));
+}
+
+/** News payload (array or { data:[...] }) → normalized articles. */
+function parseArticles(data: unknown): NewsArticle[] {
+  return companyList(data).map((entry: any): NewsArticle => ({
+    title: firstString(entry?.title),
+    summary: firstString(entry?.summary, entry?.ai_summary),
+    sentiment: firstString(entry?.sentiment),
+    publisher: firstString(entry?.publisher, entry?.publisher_domain),
+    url: firstString(entry?.url),
+    date: firstString(entry?.published_date, entry?.date),
+  }));
+}
+
+/**
+ * Recent news for a company via Akta's '/v1/news'. `company` may be a website,
+ * an Akta uuid, or a bare name (resolved via the free '/v1/company/search',
+ * mirroring collectCompanyEnrichment). Never throws. Distinguishes no-key,
+ * no-match, and provider-unavailable.
+ */
+export async function collectCompanyNews(
+  company: string,
+  options: CompanyNewsOptions = {},
+): Promise<CompanyNewsOutcome> {
+  const key = env("MONID_API_KEY");
+  if (!key) {
+    return { available: false, reason: "no_key", note: "MONID_API_KEY is not configured." };
+  }
+
+  const query = (company ?? "").trim();
+  if (!query) {
+    return { available: false, reason: "no_match", note: "No company name or website supplied." };
+  }
+
+  const fetcher = options.fetcher ?? fetch;
+  const limit = clampNewsLimit(options.limit);
+
+  // Resolve to a company identifier: url/uuid pass through, a bare name is
+  // resolved to a uuid through the free search (same path as enrichment).
+  let companyId = "";
+  if (looksLikeUuid(query)) {
+    companyId = query;
+  } else if (looksLikeUrl(query)) {
+    companyId = hostOf(query) ?? query;
+  } else {
+    const search = await startRun(key, "/v1/company/search", { queryParams: { query } }, fetcher);
+    if (!search.ok) {
+      recordCall("monid", "company/search", 0, `news search · ${search.note}`, "failed");
+      return { available: false, reason: "unavailable", note: search.note };
+    }
+    const chosen = pickBestMatch(companyList(search.data), query);
+    const uuid = isNonEmptyString(chosen?.uuid) ? chosen.uuid.trim() : "";
+    if (!chosen || !uuid) {
+      recordCall("monid", "company/search", 0, "news search · no_match", "succeeded");
+      return { available: false, reason: "no_match", note: `No Monid/Akta company matched "${query}".` };
+    }
+    recordCall("monid", "company/search", 0, `news search · matched ${uuid}`, "succeeded");
+    companyId = uuid;
+  }
+
+  const queryParams: Record<string, unknown> = { company: companyId, limit };
+  if (options.sentiment) queryParams.sentiment_list = [options.sentiment];
+
+  const news = await startRun(key, "/v1/news", { queryParams }, fetcher);
+  const meta = `news · ${companyId}`;
+  if (!news.ok) {
+    recordCall("monid", "akta/news", 0, `${meta} · ${news.note}`, "failed");
+    return { available: false, reason: "unavailable", note: news.note };
+  }
+
+  const articles = parseArticles(news.data);
+  recordCall(
+    "monid",
+    "akta/news",
+    articles.length * 0.0005 + 0.005,
+    `${meta} · ${articles.length} article(s)`,
+    "succeeded",
+  );
+
+  return { available: true, value: { company: companyId, articles, count: articles.length } };
+}
+
+// ---------------------------------------------------------------------------
+// collectTokenContractRisk : Strale '/x402/solutions/web3-pre-trade'
+// ---------------------------------------------------------------------------
+
+export interface TokenContractRisk {
+  tokenId: string;
+  contractSafety?: unknown;
+  deployerRisk?: unknown;
+  protocolHealth?: unknown;
+  sentiment?: unknown;
+  /** the full provider data object, so nothing is lost to normalization */
+  raw: unknown;
+}
+
+export type ContractRiskOutcome =
+  | { available: true; value: TokenContractRisk }
+  | { available: false; reason: "no_key" | "unavailable"; note: string };
+
+export interface TokenContractRiskOptions {
+  fetcher?: typeof fetch;
+  tokenId: string;
+  contractAddress?: string;
+  protocol?: string;
+  chainId?: string;
+}
+
+/** First defined value among the candidate keys of an object. */
+function firstDefined(obj: Record<string, unknown>, keys: string[]): unknown {
+  for (const k of keys) {
+    if (obj[k] !== undefined) return obj[k];
+  }
+  return undefined;
+}
+
+/** Pull whatever safety/risk signals exist out of the (varying) data object. */
+function extractRiskSignals(data: unknown): {
+  contractSafety?: unknown;
+  deployerRisk?: unknown;
+  protocolHealth?: unknown;
+  sentiment?: unknown;
+} {
+  const obj =
+    data && typeof data === "object" && !Array.isArray(data) ? (data as Record<string, unknown>) : {};
+  const contractSafety = firstDefined(obj, [
+    "contract_safety",
+    "token_contract_safety",
+    "contractSafety",
+    "safety",
+  ]);
+  const deployerRisk = firstDefined(obj, [
+    "deployer_risk",
+    "deployer_wallet_risk",
+    "deployerRisk",
+    "deployer",
+  ]);
+  const protocolHealth = firstDefined(obj, ["protocol_health", "protocolHealth", "protocol"]);
+  const sentiment = firstDefined(obj, ["sentiment", "sentiment_analysis"]);
+  return {
+    ...(contractSafety !== undefined ? { contractSafety } : {}),
+    ...(deployerRisk !== undefined ? { deployerRisk } : {}),
+    ...(protocolHealth !== undefined ? { protocolHealth } : {}),
+    ...(sentiment !== undefined ? { sentiment } : {}),
+  };
+}
+
+/**
+ * Pre-trade token/contract risk via Strale's '/x402/solutions/web3-pre-trade'
+ * (run through Monid, provider 'api.strale.io'). Defensively normalizes the
+ * varying response into contract-safety, deployer-risk, protocol-health, and
+ * sentiment signals while preserving the full data object as `raw`. Never
+ * throws; gated on MONID_API_KEY.
+ */
+export async function collectTokenContractRisk(
+  options: TokenContractRiskOptions,
+): Promise<ContractRiskOutcome> {
+  const key = env("MONID_API_KEY");
+  if (!key) {
+    return { available: false, reason: "no_key", note: "MONID_API_KEY is not configured." };
+  }
+
+  const tokenId = (options?.tokenId ?? "").trim();
+  if (!tokenId) {
+    return { available: false, reason: "unavailable", note: "No token id supplied." };
+  }
+
+  const fetcher = options.fetcher ?? fetch;
+  const body: Record<string, unknown> = {
+    token_id: tokenId,
+    chain_id: isNonEmptyString(options.chainId) ? options.chainId.trim() : "1",
+  };
+  if (isNonEmptyString(options.contractAddress)) body.contract_address = options.contractAddress.trim();
+  if (isNonEmptyString(options.protocol)) body.protocol = options.protocol.trim();
+
+  const run = await startRunFor("api.strale.io", key, "/x402/solutions/web3-pre-trade", { body }, fetcher);
+  const meta = `web3-pre-trade · ${tokenId}`;
+  if (!run.ok) {
+    recordCall("monid", "strale/web3-pre-trade", 0, `${meta} · ${run.note}`, "failed");
+    return { available: false, reason: "unavailable", note: run.note };
+  }
+  recordCall("monid", "strale/web3-pre-trade", 0.14256, meta, "succeeded");
+
+  return {
+    available: true,
+    value: { tokenId, ...extractRiskSignals(run.data), raw: run.data },
+  };
+}

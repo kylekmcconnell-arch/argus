@@ -44,10 +44,8 @@ import {
 } from "../src/lib/investigationRuntime";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
-import { crunchbaseAdapter } from "./adapters/crunchbase";
 import { dexscreenerAdapter } from "./adapters/dexscreener";
 import { coingeckoAdapter } from "./adapters/coingecko";
-import { redditAdapter } from "./adapters/reddit";
 import { onchainAdapter } from "./adapters/onchain";
 import { basicFactsAdapter } from "./adapters/basicFacts";
 import {
@@ -71,10 +69,10 @@ const ADAPTERS: Adapter[] = [
   githubAdapter,
   peopledatalabsAdapter,
   offchainAdapter,
-  crunchbaseAdapter,
+  // crunchbaseAdapter retired: DeFiLlama + Monid/Akta cover funding/backing.
   dexscreenerAdapter,
   coingeckoAdapter,
-  redditAdapter,
+  // redditAdapter retired: Reddit API access was not approved.
   onchainAdapter,
   basicFactsAdapter,
 ];

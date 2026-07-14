@@ -7254,100 +7254,6 @@ var githubAdapter = {
   }
 };
 
-// server/adapters/crunchbase.ts
-var BASE3 = "https://api.crunchbase.com/api/v4";
-async function lookupOrganization(name) {
-  const key = env("CRUNCHBASE_API_KEY");
-  if (!key) return null;
-  const meta = "plan-billed";
-  let res;
-  try {
-    res = await fetch(`${BASE3}/searches/organizations`, {
-      method: "POST",
-      headers: { "X-cb-user-key": key, "content-type": "application/json" },
-      body: JSON.stringify({
-        field_ids: ["identifier", "funding_total", "num_funding_rounds", "investor_identifiers", "acquirer_identifier"],
-        query: [{ type: "predicate", field_id: "identifier", operator_id: "contains", values: [name] }],
-        limit: 1
-      }),
-      signal: AbortSignal.timeout(12e3)
-    });
-  } catch {
-    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 transport_error`, "failed");
-    return null;
-  }
-  if (!res.ok) {
-    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 http_${res.status}`, "failed");
-    return null;
-  }
-  let d;
-  try {
-    d = await res.json();
-  } catch {
-    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 response_json_error`, "failed");
-    return null;
-  }
-  if (!d || typeof d !== "object" || !Array.isArray(d.entities)) {
-    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 result_shape_error`, "partial");
-    return null;
-  }
-  if (!d.entities.length) {
-    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 no_match`, "succeeded");
-    return null;
-  }
-  const e = d.entities[0]?.properties;
-  const resolvedName = e?.identifier?.value;
-  if (!e || typeof e !== "object" || typeof resolvedName !== "string" || !resolvedName.trim()) {
-    recordCall("crunchbase", "org-search", 0, `${meta} \xB7 result_shape_error`, "partial");
-    return null;
-  }
-  const rawInvestors = e.investor_identifiers;
-  const investorShapeOkay = rawInvestors == null || Array.isArray(rawInvestors);
-  const investors = (Array.isArray(rawInvestors) ? rawInvestors : []).map((investor) => investor?.value).filter((value) => typeof value === "string" && !!value.trim());
-  recordCall(
-    "crunchbase",
-    "org-search",
-    0,
-    investorShapeOkay ? meta : `${meta} \xB7 incomplete_investor_shape`,
-    investorShapeOkay ? "succeeded" : "partial"
-  );
-  return {
-    name: resolvedName,
-    fundingTotal: e.funding_total?.value_usd,
-    rounds: e.num_funding_rounds,
-    investors,
-    acquirer: e.acquirer_identifier?.value
-  };
-}
-var crunchbaseAdapter = {
-  id: "crunchbase",
-  label: "Crunchbase",
-  available: () => !!env("CRUNCHBASE_API_KEY"),
-  async run(ctx) {
-    if (!ctx.evidence.ventures.length) return;
-    ctx.emit({ phase: "Founder", label: "Verify funding", detail: `Cross-referencing ${ctx.evidence.ventures.length} venture(s) against Crunchbase\u2026`, tone: "neutral" });
-    let matched = 0;
-    for (const v of ctx.evidence.ventures) {
-      const org = await lookupOrganization(v.project_name);
-      if (!org) {
-        ctx.emit({ phase: "Founder", label: v.project_name, detail: "no Crunchbase record found for claimed venture", source: "crunchbase", tone: "warn" });
-        continue;
-      }
-      matched += 1;
-      if (org.investors?.length) v.investors = Array.from(/* @__PURE__ */ new Set([...v.investors ?? [], ...org.investors]));
-      if (org.acquirer && !v.acquirer) v.acquirer = org.acquirer;
-      ctx.emit({ phase: "Founder", label: v.project_name, detail: `verified \xB7 ${org.rounds ?? 0} rounds, backers: ${(org.investors ?? []).slice(0, 3).join(", ") || "n/a"}`, source: "crunchbase", tone: "good" });
-    }
-    ctx.emit({
-      phase: "Founder",
-      label: "Crunchbase enrichment complete",
-      detail: `${matched}/${ctx.evidence.ventures.length} named organization${ctx.evidence.ventures.length === 1 ? "" : "s"} matched; company records were treated as enrichment, not relationship proof.`,
-      source: "crunchbase",
-      tone: "neutral"
-    });
-  }
-};
-
 // server/adapters/coingecko.ts
 var PRO = "https://pro-api.coingecko.com/api/v3";
 var PUBLIC = "https://api.coingecko.com/api/v3";
@@ -7444,151 +7350,6 @@ var coingeckoAdapter = {
         tone: downBad ? "warn" : "neutral"
       });
     }
-  }
-};
-
-// server/adapters/reddit.ts
-var cachedToken = null;
-var asRecord4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
-function recordRedditAttempt(op, status, meta) {
-  recordCall("reddit", op, 0, meta, status);
-}
-async function getToken() {
-  const id = env("REDDIT_CLIENT_ID");
-  const secret = env("REDDIT_CLIENT_SECRET");
-  if (!id || !secret) return null;
-  if (cachedToken && cachedToken.exp > Date.now()) return cachedToken.token;
-  let res;
-  try {
-    res = await fetch("https://www.reddit.com/api/v1/access_token", {
-      method: "POST",
-      headers: {
-        authorization: "Basic " + Buffer.from(`${id}:${secret}`).toString("base64"),
-        "content-type": "application/x-www-form-urlencoded",
-        "user-agent": "argus-dd/1.0"
-      },
-      body: "grant_type=client_credentials",
-      signal: AbortSignal.timeout(8e3)
-    });
-  } catch {
-    recordRedditAttempt("oauth-token", "failed", "transport_error");
-    return null;
-  }
-  if (!res.ok) {
-    recordRedditAttempt("oauth-token", "failed", `http_${res.status}`);
-    return null;
-  }
-  let raw;
-  try {
-    raw = await res.json();
-  } catch {
-    recordRedditAttempt("oauth-token", "failed", "response_json_error");
-    return null;
-  }
-  const d = asRecord4(raw);
-  const token = typeof d?.access_token === "string" && d.access_token ? d.access_token : null;
-  if (!token) {
-    recordRedditAttempt("oauth-token", "partial", "missing_access_token");
-    return null;
-  }
-  const expiresIn = typeof d?.expires_in === "number" && Number.isFinite(d.expires_in) ? d.expires_in : null;
-  if (expiresIn == null) {
-    recordRedditAttempt("oauth-token", "partial", "missing_expiry");
-    return token;
-  }
-  cachedToken = { token, exp: Date.now() + (expiresIn - 60) * 1e3 };
-  recordRedditAttempt("oauth-token", "succeeded");
-  return token;
-}
-async function searchMentions(query) {
-  const token = await getToken();
-  if (!token) return [];
-  let res;
-  try {
-    res = await fetch(`https://oauth.reddit.com/search?q=${encodeURIComponent(query)}&sort=relevance&limit=15&t=year`, {
-      headers: { authorization: `Bearer ${token}`, "user-agent": "argus-dd/1.0" },
-      signal: AbortSignal.timeout(1e4)
-    });
-  } catch {
-    recordRedditAttempt("search", "failed", "transport_error");
-    return [];
-  }
-  if (!res.ok) {
-    recordRedditAttempt("search", "failed", `http_${res.status}`);
-    return [];
-  }
-  let raw;
-  try {
-    raw = await res.json();
-  } catch {
-    recordRedditAttempt("search", "failed", "response_json_error");
-    return [];
-  }
-  const d = asRecord4(raw);
-  const data = asRecord4(d?.data);
-  if (!Array.isArray(data?.children)) {
-    recordRedditAttempt("search", "partial", "missing_children");
-    return [];
-  }
-  let invalidChildren = 0;
-  const hits = data.children.flatMap((child) => {
-    const item = asRecord4(asRecord4(child)?.data);
-    const title = typeof item?.title === "string" ? item.title : null;
-    const sub = typeof item?.subreddit_name_prefixed === "string" ? item.subreddit_name_prefixed : null;
-    const permalink = typeof item?.permalink === "string" ? item.permalink : null;
-    if (!title || !sub || !permalink) {
-      invalidChildren += 1;
-      return [];
-    }
-    return [{
-      title,
-      sub,
-      score: typeof item?.score === "number" && Number.isFinite(item.score) ? item.score : 0,
-      url: "https://reddit.com" + permalink
-    }];
-  });
-  recordRedditAttempt(
-    "search",
-    invalidChildren ? "partial" : "succeeded",
-    invalidChildren ? `dropped_${invalidChildren}_invalid_results` : `${hits.length}_results`
-  );
-  return hits;
-}
-var redditAdapter = {
-  id: "reddit",
-  label: "Reddit",
-  available: () => !!env("REDDIT_CLIENT_ID") && !!env("REDDIT_CLIENT_SECRET"),
-  async run(ctx) {
-    const handle = ctx.handle.replace(/^@/, "");
-    ctx.emit({ phase: "Reputation", label: "FUD scan", detail: `Searching Reddit for "${handle}" mentions\u2026`, tone: "neutral" });
-    const hits = await searchMentions(`${handle} (scam OR rug OR warning OR review)`);
-    if (!hits.length) {
-      ctx.emit({ phase: "Reputation", label: "No FUD surfaced", detail: "No notable Reddit complaints in the last year.", source: "reddit", tone: "neutral" });
-      return;
-    }
-    for (const h of hits.slice(0, 5)) {
-      ctx.evidence.findings.push({
-        finding_type: "CommunityFUD",
-        claim: h.title,
-        source_url: h.url,
-        source_date: (/* @__PURE__ */ new Date()).toISOString().slice(0, 10),
-        source_author: "reddit",
-        verification_status: "Reported",
-        independent_source_count: 1,
-        polarity: -1,
-        provider: "reddit",
-        evidence_origin: "deterministic",
-        artifact_verified: true,
-        finding_scope: {
-          scope: "direct_subject",
-          target_entity_key: ctx.evidence.profile.handle,
-          target_entity_type: "person",
-          relationship_to_subject: "self",
-          relationship_label: "Reddit search result naming the audited handle"
-        }
-      });
-    }
-    ctx.emit({ phase: "Reputation", label: `${hits.length} threads`, detail: `Top: "${hits[0].title.slice(0, 70)}" (${hits[0].sub})`, source: "reddit", tone: hits.length > 3 ? "warn" : "neutral" });
   }
 };
 
@@ -11070,7 +10831,7 @@ var basicFactsAdapter = {
 import { createHash as createHash6 } from "node:crypto";
 
 // src/lib/offchainEvidence.ts
-var asRecord5 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
+var asRecord4 = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
 var aggregateStatus2 = (attempts) => {
   if (!attempts.length) return "succeeded";
   if (attempts.every((attempt) => attempt.status === "succeeded")) return "succeeded";
@@ -11250,7 +11011,7 @@ async function collectLegalCases(rawName, fetcher = fetch) {
   }
   let parsed;
   try {
-    parsed = asRecord5(await response.json()) ?? {};
+    parsed = asRecord4(await response.json()) ?? {};
   } catch (error) {
     return {
       value: { available: false, error: String(error), note: "Legal screen failed." },
@@ -11262,7 +11023,7 @@ async function collectLegalCases(rawName, fetcher = fetch) {
   const rows = resultShapeValid ? parsed.results : [];
   let malformedRows = 0;
   const cases = rows.slice(0, 20).flatMap((candidate) => {
-    const row = asRecord5(candidate);
+    const row = asRecord4(candidate);
     if (!row) {
       malformedRows += 1;
       return [];
@@ -16004,10 +15765,10 @@ var ADAPTERS = [
   githubAdapter,
   peopledatalabsAdapter,
   offchainAdapter,
-  crunchbaseAdapter,
+  // crunchbaseAdapter retired: DeFiLlama + Monid/Akta cover funding/backing.
   dexscreenerAdapter,
   coingeckoAdapter,
-  redditAdapter,
+  // redditAdapter retired: Reddit API access was not approved.
   onchainAdapter,
   basicFactsAdapter
 ];
