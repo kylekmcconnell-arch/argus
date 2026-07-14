@@ -10140,6 +10140,33 @@ function mergeLeads(primary, repair) {
   return selectBasicFactLeads(merged);
 }
 var SEC_EXCHANGE_REGISTRY_URL = "https://www.sec.gov/files/company_tickers_exchange.json";
+async function fetchSecExchangeRegistry() {
+  let response;
+  try {
+    response = await fetch(SEC_EXCHANGE_REGISTRY_URL, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(15e3)
+    });
+  } catch {
+    return { status: "failed", reason: "transport_error" };
+  }
+  if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
+  let text2;
+  try {
+    text2 = await response.text();
+  } catch {
+    return { status: "failed", reason: "response_text_error" };
+  }
+  return {
+    status: "ok",
+    url: SEC_EXCHANGE_REGISTRY_URL,
+    host: "www.sec.gov",
+    contentType: response.headers.get("content-type") ?? "application/json",
+    text: text2,
+    contentHash: createHash4("sha256").update(text2).digest("hex"),
+    capturedAt: (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
 var CURRENT_CONTROL_ROLE = /\b(?:co[- ]?founder|founder|chief executive officer|ceo|chair(?:man|woman|person)?|owner|controlling)\b/i;
 var CURRENT_PERIOD = /\b(?:current|currently|now|ongoing|present|today)\b/i;
 var VENTURE_IDENTITY_STOP_WORDS = /* @__PURE__ */ new Set([
@@ -10768,10 +10795,34 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   const publicSecurityQuestion = questions.find((question) => question.predicate === "public_security");
   const registryScreenNames = [.../* @__PURE__ */ new Set([
     ...authoritativeAssetRelationships.map((relationship) => relationship.name),
-    ...ctx.evidence.ventures.filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead").map((venture) => venture.project_name.trim())
+    ...ctx.evidence.ventures.filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead").map((venture) => venture.project_name.trim()),
+    // A founder whose venture verified through fetched-passage facts (rather
+    // than a structured venture row) still names a screenable company, but
+    // ONLY when an official first-party source lives on the venture's own
+    // domain (aave.com vouching "CEO at Aave"). A press host, a hostile
+    // subdomain, or the person's own site never drives a registry
+    // consultation (the org-named press-host and attacker-subdomain negative
+    // controls).
+    ...sourceVerifiedBeforeRegistry.flatMap((fact) => {
+      if (fact.predicate !== "founder" && fact.predicate !== "current_role" || fact.artifact_verified !== true) return [];
+      const ventureName = fact.predicate === "current_role" ? fact.value.split(/\bat\b/i).pop()?.trim() ?? "" : fact.value.trim();
+      const nameKey = ventureName.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      if (ventureName.length < 2 || !nameKey) return [];
+      const ventureDomainAnchored = fact.sources.some((candidate) => {
+        if (candidate.sourceClass !== "official_subject" || candidate.relation !== "supports") return false;
+        try {
+          const label = new URL(candidate.url).hostname.toLowerCase().replace(/^www\./, "").split(".")[0] ?? "";
+          const labelKey = label.replace(/[^a-z0-9]+/g, "");
+          return Boolean(labelKey) && (nameKey.startsWith(labelKey) || labelKey.startsWith(nameKey));
+        } catch {
+          return false;
+        }
+      });
+      return ventureDomainAnchored ? [ventureName] : [];
+    })
   ])].filter((name) => name.length > 1);
-  if (publicSecurityQuestion && authoritativeAssetRelationships.length && registryScreenNames.length && !sourceVerifiedBeforeRegistry.some((fact) => fact.predicate === "public_security" && (fact.status === "verified" || fact.status === "corroborated"))) {
-    const registry = await fetchOnce(SEC_EXCHANGE_REGISTRY_URL);
+  if (publicSecurityQuestion && registryScreenNames.length && !sourceVerifiedBeforeRegistry.some((fact) => fact.predicate === "public_security" && (fact.status === "verified" || fact.status === "corroborated"))) {
+    const registry = dependencies.fetchSource ? await fetchOnce(SEC_EXCHANGE_REGISTRY_URL) : await fetchSecExchangeRegistry();
     if (registry.status === "ok") {
       registryVerified = secRegistryPublicSecurityFacts(
         ctx,
@@ -17418,7 +17469,36 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     evidence.roles = providerBackedRoles(evidence);
   }
   if (!fixture && !evidence.companyEnrichment && evidence.roles.includes("FOUNDER" /* FOUNDER */)) {
-    const primaryVenture = evidence.ventures.find((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead" && venture.project_name.trim() && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
+    const verifiedVentureRow = evidence.ventures.find((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead" && venture.project_name.trim() && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
+    let primaryVenture = verifiedVentureRow ? {
+      project_name: verifiedVentureRow.project_name,
+      ...verifiedVentureRow.x_handle ? { x_handle: verifiedVentureRow.x_handle } : {},
+      ...verifiedVentureRow.domain ? { domain: verifiedVentureRow.domain } : {}
+    } : void 0;
+    if (!primaryVenture) {
+      const ventureFact = (evidence.basicFacts ?? []).find((fact) => (fact.predicate === "founder" || fact.predicate === "current_role") && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.value.trim());
+      if (ventureFact) {
+        const ventureName = ventureFact.predicate === "current_role" ? ventureFact.value.split(/\bat\b/i).pop()?.trim() ?? "" : ventureFact.value.trim();
+        const nameKey = ventureName.toLowerCase().replace(/[^a-z0-9]+/g, "");
+        const bioHandle = evidence.profile.bio.match(/@([A-Za-z0-9_]{2,15})/)?.[1];
+        const handleKey = bioHandle?.toLowerCase() ?? "";
+        const handleAgrees = Boolean(nameKey && handleKey && (nameKey.startsWith(handleKey) || handleKey.startsWith(nameKey)));
+        const officialHost2 = ventureFact.sources.filter((candidate) => candidate.sourceClass === "official_subject" && candidate.relation === "supports").map((candidate) => {
+          try {
+            return new URL(candidate.url).hostname;
+          } catch {
+            return "";
+          }
+        }).find((host) => host && !/(^|\.)x\.com$|(^|\.)twitter\.com$/i.test(host));
+        if (ventureName.length > 1 && (handleAgrees || officialHost2)) {
+          primaryVenture = {
+            project_name: ventureName,
+            ...handleAgrees && bioHandle ? { x_handle: `@${bioHandle}` } : {},
+            ...officialHost2 ? { domain: officialHost2 } : {}
+          };
+        }
+      }
+    }
     if (primaryVenture) {
       try {
         const enrichment = await withWallClockBox(

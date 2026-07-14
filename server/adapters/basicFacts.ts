@@ -3115,6 +3115,41 @@ interface SecExchangeRegistryRow {
 
 const SEC_EXCHANGE_REGISTRY_URL = "https://www.sec.gov/files/company_tickers_exchange.json";
 
+/**
+ * The SEC exchange registry is a machine-readable JSON file, so fetch it
+ * directly with a hard time bound. The article-recovery ladder
+ * (fetchPublicTextWithRecovery: reader fallback plus delayed retry) exists for
+ * flaky editorial pages and can stall for tens of seconds when the network is
+ * down; a registry screen must degrade to "screen skipped" instead.
+ */
+async function fetchSecExchangeRegistry(): Promise<PublicTextResult> {
+  let response: Response;
+  try {
+    response = await fetch(SEC_EXCHANGE_REGISTRY_URL, {
+      headers: { accept: "application/json" },
+      signal: AbortSignal.timeout(15_000),
+    });
+  } catch {
+    return { status: "failed", reason: "transport_error" };
+  }
+  if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
+  let text: string;
+  try {
+    text = await response.text();
+  } catch {
+    return { status: "failed", reason: "response_text_error" };
+  }
+  return {
+    status: "ok",
+    url: SEC_EXCHANGE_REGISTRY_URL,
+    host: "www.sec.gov",
+    contentType: response.headers.get("content-type") ?? "application/json",
+    text,
+    contentHash: createHash("sha256").update(text).digest("hex"),
+    capturedAt: new Date().toISOString(),
+  };
+}
+
 const CURRENT_CONTROL_ROLE = /\b(?:co[- ]?founder|founder|chief executive officer|ceo|chair(?:man|woman|person)?|owner|controlling)\b/i;
 const CURRENT_PERIOD = /\b(?:current|currently|now|ongoing|present|today)\b/i;
 const VENTURE_IDENTITY_STOP_WORDS = new Set([
@@ -3922,16 +3957,49 @@ export async function collectBasicFacts(
     ...ctx.evidence.ventures
       .filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead")
       .map((venture) => venture.project_name.trim()),
+    // A founder whose venture verified through fetched-passage facts (rather
+    // than a structured venture row) still names a screenable company, but
+    // ONLY when an official first-party source lives on the venture's own
+    // domain (aave.com vouching "CEO at Aave"). A press host, a hostile
+    // subdomain, or the person's own site never drives a registry
+    // consultation (the org-named press-host and attacker-subdomain negative
+    // controls).
+    ...sourceVerifiedBeforeRegistry.flatMap((fact) => {
+      if (
+        (fact.predicate !== "founder" && fact.predicate !== "current_role")
+        || fact.artifact_verified !== true
+      ) return [];
+      const ventureName = fact.predicate === "current_role"
+        ? fact.value.split(/\bat\b/i).pop()?.trim() ?? ""
+        : fact.value.trim();
+      const nameKey = ventureName.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      if (ventureName.length < 2 || !nameKey) return [];
+      const ventureDomainAnchored = fact.sources.some((candidate) => {
+        if (candidate.sourceClass !== "official_subject" || candidate.relation !== "supports") return false;
+        try {
+          const label = new URL(candidate.url).hostname.toLowerCase().replace(/^www\./, "").split(".")[0] ?? "";
+          const labelKey = label.replace(/[^a-z0-9]+/g, "");
+          return Boolean(labelKey) && (nameKey.startsWith(labelKey) || labelKey.startsWith(nameKey));
+        } catch {
+          return false;
+        }
+      });
+      return ventureDomainAnchored ? [ventureName] : [];
+    }),
   ])].filter((name) => name.length > 1);
   if (
     publicSecurityQuestion
-    && authoritativeAssetRelationships.length
     && registryScreenNames.length
     && !sourceVerifiedBeforeRegistry.some((fact) =>
       fact.predicate === "public_security"
       && (fact.status === "verified" || fact.status === "corroborated"))
   ) {
-    const registry = await fetchOnce(SEC_EXCHANGE_REGISTRY_URL);
+    // Injected fetchers (tests / fixtures) stay on the deterministic fetchOnce
+    // path; live runs use the bounded direct fetch so a registry outage can
+    // never drag the audit through the article-recovery retry ladder.
+    const registry = dependencies.fetchSource
+      ? await fetchOnce(SEC_EXCHANGE_REGISTRY_URL)
+      : await fetchSecExchangeRegistry();
     if (registry.status === "ok") {
       registryVerified = secRegistryPublicSecurityFacts(
         ctx,

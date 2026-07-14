@@ -2101,11 +2101,51 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // MONID_API_KEY and never-throws; skipped for fixtures so canary runs stay
   // deterministic.
   if (!fixture && !evidence.companyEnrichment && evidence.roles.includes(SubjectClass.FOUNDER)) {
-    const primaryVenture = evidence.ventures.find((venture) =>
+    const verifiedVentureRow = evidence.ventures.find((venture) =>
       venture.artifact_verified === true
       && venture.evidence_origin !== "model_lead"
       && venture.project_name.trim()
       && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
+    let primaryVenture: { project_name: string; x_handle?: string; domain?: string } | undefined =
+      verifiedVentureRow
+        ? {
+            project_name: verifiedVentureRow.project_name,
+            ...(verifiedVentureRow.x_handle ? { x_handle: verifiedVentureRow.x_handle } : {}),
+            ...(verifiedVentureRow.domain ? { domain: verifiedVentureRow.domain } : {}),
+          }
+        : undefined;
+    // Fallback: a founder whose venture verified through fetched-passage facts
+    // (founder / current_role) rather than a structured venture row. The bio's
+    // own @handle and the official-subject source host are the bridge keys; a
+    // handle is only accepted when it agrees with the verified venture name.
+    if (!primaryVenture) {
+      const ventureFact = (evidence.basicFacts ?? []).find((fact) =>
+        (fact.predicate === "founder" || fact.predicate === "current_role")
+        && fact.artifact_verified === true
+        && (fact.status === "verified" || fact.status === "corroborated")
+        && fact.value.trim());
+      if (ventureFact) {
+        const ventureName = ventureFact.predicate === "current_role"
+          ? ventureFact.value.split(/\bat\b/i).pop()?.trim() ?? ""
+          : ventureFact.value.trim();
+        const nameKey = ventureName.toLowerCase().replace(/[^a-z0-9]+/g, "");
+        const bioHandle = evidence.profile.bio.match(/@([A-Za-z0-9_]{2,15})/)?.[1];
+        const handleKey = bioHandle?.toLowerCase() ?? "";
+        const handleAgrees = Boolean(nameKey && handleKey
+          && (nameKey.startsWith(handleKey) || handleKey.startsWith(nameKey)));
+        const officialHost = ventureFact.sources
+          .filter((candidate) => candidate.sourceClass === "official_subject" && candidate.relation === "supports")
+          .map((candidate) => { try { return new URL(candidate.url).hostname; } catch { return ""; } })
+          .find((host) => host && !/(^|\.)x\.com$|(^|\.)twitter\.com$/i.test(host));
+        if (ventureName.length > 1 && (handleAgrees || officialHost)) {
+          primaryVenture = {
+            project_name: ventureName,
+            ...(handleAgrees && bioHandle ? { x_handle: `@${bioHandle}` } : {}),
+            ...(officialHost ? { domain: officialHost } : {}),
+          };
+        }
+      }
+    }
     if (primaryVenture) {
       try {
         const enrichment = await withWallClockBox(
