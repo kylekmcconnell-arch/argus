@@ -16,6 +16,12 @@ const JINA_RECOVERABLE_FAILURES = new Set([
   "transport_error",
   "response_stream_error",
 ]);
+const JINA_TRANSIENT_FAILURES = new Set([
+  "http_422",
+  "http_429",
+  "transport_error",
+  "response_stream_error",
+]);
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 const CAPABILITY_PATH_LABEL = /^(?:auth|invite|magic|private|secret|share|signed|token)$/i;
 const SAFE_CONTENT_TYPES = new Set([
@@ -114,6 +120,7 @@ export interface PublicWebDependencies {
   request?: RequestFn;
   lookup?: LookupFn;
   now?: () => Date;
+  wait?: (delayMs: number) => Promise<void>;
 }
 
 export function isPublicIpAddress(address: string): boolean {
@@ -328,6 +335,7 @@ async function fetchValidatedPublicText(
         signal: AbortSignal.timeout(8_000),
         headers: {
           accept,
+          "accept-language": "en-US,en;q=0.8",
           "user-agent": PUBLIC_WEB_USER_AGENT,
         },
         lookup: pinnedLookupFor(target),
@@ -392,8 +400,9 @@ export async function fetchPublicText(
 }
 
 /**
- * Fetch source text directly, then make one bounded keyless Jina Reader attempt
- * only when the validated origin returned an ordinary retrieval failure.
+ * Fetch source text directly, then make one bounded keyless Jina Reader recovery
+ * only when the validated origin returned an ordinary retrieval failure. A
+ * transient reader failure receives at most one delayed retry.
  * Unsafe origins and unsafe redirects remain rejected and never reach a proxy.
  */
 export async function fetchPublicTextWithRecovery(
@@ -432,7 +441,14 @@ export async function fetchPublicTextWithRecovery(
     lookup,
   );
   if (!readerTarget) return { status: "failed", reason: "reader_target_validation_failed" };
-  const recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
+  let recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
+  // Reader 422/429 and transport failures are frequently transient while the
+  // upstream page is rendered. One delayed retry is enough to reuse a warmed
+  // reader result without turning source verification into an open-ended job.
+  if (recovered.status === "failed" && JINA_TRANSIENT_FAILURES.has(recovered.reason)) {
+    await (dependencies.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs))))(750);
+    recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
+  }
   if (recovered.status !== "ok") {
     return { status: "failed", reason: `reader_recovery_failed_${recovered.reason}` };
   }

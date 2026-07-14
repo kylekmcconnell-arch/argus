@@ -229,6 +229,57 @@ describe("public web evidence fetcher", () => {
     expect(requestMock).toHaveBeenCalledTimes(2);
   });
 
+  it("retries one transient reader 422 before accepting exact-source evidence", async () => {
+    const source = "https://example.com/evidence";
+    let readerAttempts = 0;
+    const requestMock = vi.fn(async (url: URL) => {
+      if (url.hostname === "example.com") return new Response("Cloudflare", { status: 403 });
+      readerAttempts += 1;
+      return readerAttempts === 1
+        ? new Response("reader warming", { status: 422 })
+        : new Response(`Title: Evidence\nURL Source: ${source}\nMarkdown Content:\nVerified source text.`, {
+          status: 200,
+          headers: { "content-type": "text/plain" },
+        });
+    });
+    const wait = vi.fn(async () => undefined);
+
+    const result = await fetchPublicTextWithRecovery(source, {
+      request: requestMock,
+      lookup: publicLookup,
+      wait,
+    });
+
+    expect(result).toEqual(expect.objectContaining({
+      status: "ok",
+      url: source,
+      retrievalMethod: "reader_recovery",
+    }));
+    expect(wait).toHaveBeenCalledWith(750);
+    expect(requestMock).toHaveBeenCalledTimes(3);
+  });
+
+  it("stops after one retry when the reader remains transiently unavailable", async () => {
+    const source = "https://example.com/evidence";
+    const requestMock = vi.fn(async (url: URL) => (
+      url.hostname === "example.com"
+        ? new Response("Cloudflare", { status: 403 })
+        : new Response("reader warming", { status: 422 })
+    ));
+    const wait = vi.fn(async () => undefined);
+
+    const result = await fetchPublicTextWithRecovery(source, {
+      request: requestMock,
+      lookup: publicLookup,
+      wait,
+    });
+
+    expect(result).toEqual({ status: "failed", reason: "reader_recovery_failed_http_422" });
+    expect(wait).toHaveBeenCalledTimes(1);
+    expect(wait).toHaveBeenCalledWith(750);
+    expect(requestMock).toHaveBeenCalledTimes(3);
+  });
+
   it("does not send a query-bearing URL to the reader when HTTP 200 contains a challenge", async () => {
     const source = "https://example.com/evidence?share=secret";
     const requestMock = vi.fn(async () => new Response("<html><title>Just a moment...</title><script src='/cdn-cgi/challenge-platform/run.js'></script></html>", {

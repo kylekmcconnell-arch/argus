@@ -7503,6 +7503,12 @@ var JINA_RECOVERABLE_FAILURES = /* @__PURE__ */ new Set([
   "transport_error",
   "response_stream_error"
 ]);
+var JINA_TRANSIENT_FAILURES = /* @__PURE__ */ new Set([
+  "http_422",
+  "http_429",
+  "transport_error",
+  "response_stream_error"
+]);
 var SENSITIVE_URL_PARAM2 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 var CAPABILITY_PATH_LABEL = /^(?:auth|invite|magic|private|secret|share|signed|token)$/i;
 var SAFE_CONTENT_TYPES = /* @__PURE__ */ new Set([
@@ -7687,6 +7693,7 @@ async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept
         signal: AbortSignal.timeout(8e3),
         headers: {
           accept,
+          "accept-language": "en-US,en;q=0.8",
           "user-agent": PUBLIC_WEB_USER_AGENT
         },
         lookup: pinnedLookupFor(target)
@@ -7762,7 +7769,11 @@ async function fetchPublicTextWithRecovery(raw, dependencies = {}) {
     lookup
   );
   if (!readerTarget) return { status: "failed", reason: "reader_target_validation_failed" };
-  const recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
+  let recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
+  if (recovered.status === "failed" && JINA_TRANSIENT_FAILURES.has(recovered.reason)) {
+    await (dependencies.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs))))(750);
+    recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
+  }
   if (recovered.status !== "ok") {
     return { status: "failed", reason: `reader_recovery_failed_${recovered.reason}` };
   }
