@@ -2269,6 +2269,14 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
                   source: "sec-registry",
                   tone: "warn",
                 });
+              } else {
+                emit({
+                  phase: "Founder",
+                  label: "Public-security registry unavailable",
+                  detail: "The US exchange registry could not be screened this run; the security category is unchanged.",
+                  source: "sec-registry",
+                  tone: "warn",
+                });
               }
             }
           }

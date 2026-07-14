@@ -10144,7 +10144,12 @@ async function fetchSecExchangeRegistry() {
   let response;
   try {
     response = await fetch(SEC_EXCHANGE_REGISTRY_URL, {
-      headers: { accept: "application/json" },
+      headers: {
+        accept: "application/json",
+        // SEC.gov's fair-access policy rejects requests without a
+        // self-identifying User-Agent (403). Same identity publicWeb uses.
+        "user-agent": "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)"
+      },
       signal: AbortSignal.timeout(15e3)
     });
   } catch {
@@ -17568,6 +17573,14 @@ async function runAuditWithLedger(rawHandle, emit, options) {
                   phase: "Founder",
                   label: "Public-security registry match",
                   detail: `${ventureToken.ventureName} matched a listed issuer name; the security category stays open for review.`,
+                  source: "sec-registry",
+                  tone: "warn"
+                });
+              } else {
+                emit({
+                  phase: "Founder",
+                  label: "Public-security registry unavailable",
+                  detail: "The US exchange registry could not be screened this run; the security category is unchanged.",
                   source: "sec-registry",
                   tone: "warn"
                 });

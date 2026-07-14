@@ -3126,7 +3126,12 @@ async function fetchSecExchangeRegistry(): Promise<PublicTextResult> {
   let response: Response;
   try {
     response = await fetch(SEC_EXCHANGE_REGISTRY_URL, {
-      headers: { accept: "application/json" },
+      headers: {
+        accept: "application/json",
+        // SEC.gov's fair-access policy rejects requests without a
+        // self-identifying User-Agent (403). Same identity publicWeb uses.
+        "user-agent": "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)",
+      },
       signal: AbortSignal.timeout(15_000),
     });
   } catch {
