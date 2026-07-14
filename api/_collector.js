@@ -10819,6 +10819,29 @@ async function collectBasicFacts(ctx, dependencies = {}) {
         }
       });
       return ventureDomainAnchored ? [ventureName] : [];
+    }),
+    // Rung 3 of the founder venture ladder: a verified identity-class fact
+    // anchored on an official-subject host whose label agrees with a
+    // founder/CEO claim naming an @handle in the subject's own bio
+    // (aave.com + "Founder & CEO @Aave" screens "Aave").
+    ...sourceVerifiedBeforeRegistry.flatMap((fact) => {
+      if (fact.predicate !== "official_identity" && fact.predicate !== "founder" && fact.predicate !== "current_role" || fact.artifact_verified !== true) return [];
+      const bio = ctx.evidence.profile.bio;
+      if (!/\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(bio)) return [];
+      const bioHandle = bio.match(/@([A-Za-z0-9_]{2,15})/)?.[1];
+      const handleKey = bioHandle?.toLowerCase().replace(/[^a-z0-9]+/g, "") ?? "";
+      if (!bioHandle || !handleKey) return [];
+      const anchored = fact.sources.some((candidate) => {
+        if (candidate.sourceClass !== "official_subject" || candidate.relation !== "supports") return false;
+        try {
+          const label = new URL(candidate.url).hostname.toLowerCase().replace(/^www\./, "").split(".")[0] ?? "";
+          const labelKey = label.replace(/[^a-z0-9]+/g, "");
+          return Boolean(labelKey) && (labelKey.startsWith(handleKey) || handleKey.startsWith(labelKey));
+        } catch {
+          return false;
+        }
+      });
+      return anchored ? [bioHandle] : [];
     })
   ])].filter((name) => name.length > 1);
   if (publicSecurityQuestion && registryScreenNames.length && !sourceVerifiedBeforeRegistry.some((fact) => fact.predicate === "public_security" && (fact.status === "verified" || fact.status === "corroborated"))) {
@@ -15911,6 +15934,60 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
 }
 
 // server/orchestrate.ts
+var VENTURE_ROLE_TOKENS = /\b(?:co[- ]?founders?|founders?|creators?|ceo|cto|coo|cfo|chief\s+\w+(?:\s+officer)?|presidents?|chair(?:man|woman|person)?|executives?)\b/gi;
+var BIO_FOUNDER_CLAIM = /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i;
+function cleanVentureName(value) {
+  const afterAt = value.split(/\bat\b/i).pop() ?? value;
+  return afterAt.replace(VENTURE_ROLE_TOKENS, " ").replace(/[&,@]/g, " ").replace(/\s+/g, " ").trim();
+}
+function deriveFounderVentureCandidate(evidence) {
+  const row = evidence.ventures.find((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead" && venture.project_name.trim() && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
+  if (row) {
+    return {
+      project_name: row.project_name.trim(),
+      ...row.x_handle ? { x_handle: row.x_handle } : {},
+      ...row.domain ? { domain: row.domain } : {}
+    };
+  }
+  const verifiedFacts = (evidence.basicFacts ?? []).filter((fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated"));
+  const officialHostOf = (fact) => fact.sources.filter((candidate) => candidate.sourceClass === "official_subject" && candidate.relation === "supports").map((candidate) => {
+    try {
+      return new URL(candidate.url).hostname.toLowerCase().replace(/^www\./, "");
+    } catch {
+      return "";
+    }
+  }).find((host) => host && !/(^|\.)x\.com$|(^|\.)twitter\.com$/i.test(host));
+  const bioHandle = BIO_FOUNDER_CLAIM.test(evidence.profile.bio) ? evidence.profile.bio.match(/@([A-Za-z0-9_]{2,15})/)?.[1] : void 0;
+  const handleKey = bioHandle?.toLowerCase() ?? "";
+  const roleFact = verifiedFacts.find((fact) => (fact.predicate === "founder" || fact.predicate === "current_role") && cleanVentureName(fact.value).length > 1);
+  if (roleFact) {
+    const ventureName = cleanVentureName(roleFact.value);
+    const nameKey = ventureName.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const handleAgrees = Boolean(nameKey && handleKey && (nameKey.startsWith(handleKey) || handleKey.startsWith(nameKey)));
+    const officialHost2 = officialHostOf(roleFact);
+    const hostLabelKey = (officialHost2?.split(".")[0] ?? "").replace(/[^a-z0-9]+/g, "");
+    const hostAgrees = Boolean(nameKey && hostLabelKey && (nameKey.startsWith(hostLabelKey) || hostLabelKey.startsWith(nameKey)));
+    if (handleAgrees || hostAgrees) {
+      return {
+        project_name: ventureName,
+        ...handleAgrees && bioHandle ? { x_handle: `@${bioHandle}` } : {},
+        ...hostAgrees && officialHost2 ? { domain: officialHost2 } : {}
+      };
+    }
+  }
+  if (bioHandle && handleKey) {
+    for (const fact of verifiedFacts) {
+      if (fact.predicate !== "official_identity" && fact.predicate !== "founder" && fact.predicate !== "current_role") continue;
+      const officialHost2 = officialHostOf(fact);
+      if (!officialHost2) continue;
+      const label = (officialHost2.split(".")[0] ?? "").replace(/[^a-z0-9]+/g, "");
+      if (label && (label.startsWith(handleKey) || handleKey.startsWith(label))) {
+        return { project_name: bioHandle, x_handle: `@${bioHandle}`, domain: officialHost2 };
+      }
+    }
+  }
+  return null;
+}
 var MONID_ENRICHMENT_BUDGET_MS = 25e3;
 var withWallClockBox = (work, budgetMs) => Promise.race([
   work,
@@ -17469,36 +17546,14 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     evidence.roles = providerBackedRoles(evidence);
   }
   if (!fixture && !evidence.companyEnrichment && evidence.roles.includes("FOUNDER" /* FOUNDER */)) {
-    const verifiedVentureRow = evidence.ventures.find((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead" && venture.project_name.trim() && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
-    let primaryVenture = verifiedVentureRow ? {
-      project_name: verifiedVentureRow.project_name,
-      ...verifiedVentureRow.x_handle ? { x_handle: verifiedVentureRow.x_handle } : {},
-      ...verifiedVentureRow.domain ? { domain: verifiedVentureRow.domain } : {}
-    } : void 0;
-    if (!primaryVenture) {
-      const ventureFact = (evidence.basicFacts ?? []).find((fact) => (fact.predicate === "founder" || fact.predicate === "current_role") && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.value.trim());
-      if (ventureFact) {
-        const ventureName = ventureFact.predicate === "current_role" ? ventureFact.value.split(/\bat\b/i).pop()?.trim() ?? "" : ventureFact.value.trim();
-        const nameKey = ventureName.toLowerCase().replace(/[^a-z0-9]+/g, "");
-        const bioHandle = evidence.profile.bio.match(/@([A-Za-z0-9_]{2,15})/)?.[1];
-        const handleKey = bioHandle?.toLowerCase() ?? "";
-        const handleAgrees = Boolean(nameKey && handleKey && (nameKey.startsWith(handleKey) || handleKey.startsWith(nameKey)));
-        const officialHost2 = ventureFact.sources.filter((candidate) => candidate.sourceClass === "official_subject" && candidate.relation === "supports").map((candidate) => {
-          try {
-            return new URL(candidate.url).hostname;
-          } catch {
-            return "";
-          }
-        }).find((host) => host && !/(^|\.)x\.com$|(^|\.)twitter\.com$/i.test(host));
-        if (ventureName.length > 1 && (handleAgrees || officialHost2)) {
-          primaryVenture = {
-            project_name: ventureName,
-            ...handleAgrees && bioHandle ? { x_handle: `@${bioHandle}` } : {},
-            ...officialHost2 ? { domain: officialHost2 } : {}
-          };
-        }
-      }
-    }
+    const primaryVenture = deriveFounderVentureCandidate(evidence);
+    emit({
+      phase: "Founder",
+      label: primaryVenture ? `Primary venture derived \xB7 ${primaryVenture.project_name}` : "No primary venture derived",
+      detail: primaryVenture ? `Bridge keys: ${[primaryVenture.x_handle, primaryVenture.domain].filter(Boolean).join(" \xB7 ") || "none"}; used for financing enrichment and the related-asset token binding.` : "No verified venture row, venture-naming fact, or official-domain identity anchor agreed with a bio founder claim; the related-asset binding is skipped.",
+      source: "argus-founder-assets",
+      tone: primaryVenture ? "neutral" : "warn"
+    });
     if (primaryVenture) {
       try {
         const enrichment = await withWallClockBox(

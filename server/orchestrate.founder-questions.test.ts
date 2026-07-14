@@ -433,3 +433,62 @@ describe("founder related-asset binding (ventureToken)", () => {
     }));
   });
 });
+
+describe("deriveFounderVentureCandidate (venture ladder)", () => {
+  const officialSource = (url: string) => ({
+    url,
+    sourceClass: "official_subject" as const,
+    relation: "supports" as const,
+    excerpt: "Stani Kulechov is CEO of Aave Labs.",
+    contentHash: "c".repeat(64),
+    capturedAt: "2026-07-14T00:00:00.000Z",
+    provider: "public-web",
+    artifactVerified: true as const,
+  });
+  const baseEvidence = () => {
+    const evidence = emptyEvidence("@founder");
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.profile = { ...evidence.profile, bio: "Founder & CEO @Aave" };
+    return evidence;
+  };
+
+  it("rung 2: cleans role words from a current_role value with no 'at'", async () => {
+    const { deriveFounderVentureCandidate } = await import("./orchestrate");
+    const evidence = baseEvidence();
+    evidence.basicFacts = [{
+      ...fact("current_role", "Aave Labs CEO"),
+      sources: [officialSource("https://aave.com/about")],
+    }];
+    const candidate = deriveFounderVentureCandidate(evidence);
+    expect(candidate).toMatchObject({ project_name: "Aave Labs", x_handle: "@Aave", domain: "aave.com" });
+  });
+
+  it("rung 3: binds from an official-domain identity anchor plus the bio founder claim", async () => {
+    const { deriveFounderVentureCandidate } = await import("./orchestrate");
+    const evidence = baseEvidence();
+    evidence.basicFacts = [{
+      ...fact("official_identity", "Stani Kulechov"),
+      sources: [officialSource("https://aave.com/about")],
+    }];
+    const candidate = deriveFounderVentureCandidate(evidence);
+    expect(candidate).toMatchObject({ project_name: "Aave", x_handle: "@Aave", domain: "aave.com" });
+  });
+
+  it("derives nothing when the official anchor host disagrees with the bio handle", async () => {
+    const { deriveFounderVentureCandidate } = await import("./orchestrate");
+    const evidence = baseEvidence();
+    evidence.basicFacts = [{
+      ...fact("official_identity", "Stani Kulechov"),
+      sources: [officialSource("https://stani.example/role")],
+    }];
+    expect(deriveFounderVentureCandidate(evidence)).toBeNull();
+  });
+
+  it("derives nothing from a press-only role fact with no bio agreement", async () => {
+    const { deriveFounderVentureCandidate } = await import("./orchestrate");
+    const evidence = baseEvidence();
+    evidence.profile = { ...evidence.profile, bio: "building things" };
+    evidence.basicFacts = [fact("current_role", "CEO at Aave Labs")];
+    expect(deriveFounderVentureCandidate(evidence)).toBeNull();
+  });
+});

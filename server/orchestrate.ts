@@ -64,6 +64,95 @@ import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 import { collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
 import { collectCompanyEnrichment } from "./adapters/monid";
 
+// Role words stripped when a venture name is derived from a fact value like
+// "Aave Labs CEO" or "CEO at Aave Labs": only the company survives.
+const VENTURE_ROLE_TOKENS = /\b(?:co[- ]?founders?|founders?|creators?|ceo|cto|coo|cfo|chief\s+\w+(?:\s+officer)?|presidents?|chair(?:man|woman|person)?|executives?)\b/gi;
+const BIO_FOUNDER_CLAIM = /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i;
+
+function cleanVentureName(value: string): string {
+  const afterAt = value.split(/\bat\b/i).pop() ?? value;
+  return afterAt.replace(VENTURE_ROLE_TOKENS, " ").replace(/[&,@]/g, " ").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Derive a FOUNDER subject's primary venture for the related-asset binding.
+ * Ladder, strongest first:
+ *  1. a verified structured venture row (bridge keys included);
+ *  2. a verified founder/current_role fact (role words cleaned from the value),
+ *     with the bio's @handle accepted only when it agrees with the name and
+ *     the official-subject source host as the domain key;
+ *  3. a verified identity-class fact anchored on an official-subject host
+ *     whose label agrees with a founder/CEO claim naming an @handle in the
+ *     subject's own bio (aave.com + "Founder & CEO @Aave" -> Aave).
+ * Exported for tests.
+ */
+export function deriveFounderVentureCandidate(
+  evidence: CollectedEvidence,
+): { project_name: string; x_handle?: string; domain?: string } | null {
+  const row = evidence.ventures.find((venture) =>
+    venture.artifact_verified === true
+    && venture.evidence_origin !== "model_lead"
+    && venture.project_name.trim()
+    && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
+  if (row) {
+    return {
+      project_name: row.project_name.trim(),
+      ...(row.x_handle ? { x_handle: row.x_handle } : {}),
+      ...(row.domain ? { domain: row.domain } : {}),
+    };
+  }
+  const verifiedFacts = (evidence.basicFacts ?? []).filter((fact) =>
+    fact.artifact_verified === true
+    && (fact.status === "verified" || fact.status === "corroborated"));
+  const officialHostOf = (fact: (typeof verifiedFacts)[number]): string | undefined => fact.sources
+    .filter((candidate) => candidate.sourceClass === "official_subject" && candidate.relation === "supports")
+    .map((candidate) => { try { return new URL(candidate.url).hostname.toLowerCase().replace(/^www\./, ""); } catch { return ""; } })
+    .find((host) => host && !/(^|\.)x\.com$|(^|\.)twitter\.com$/i.test(host));
+  const bioHandle = BIO_FOUNDER_CLAIM.test(evidence.profile.bio)
+    ? evidence.profile.bio.match(/@([A-Za-z0-9_]{2,15})/)?.[1]
+    : undefined;
+  const handleKey = bioHandle?.toLowerCase() ?? "";
+
+  // Rung 2: a venture-naming fact.
+  const roleFact = verifiedFacts.find((fact) =>
+    (fact.predicate === "founder" || fact.predicate === "current_role")
+    && cleanVentureName(fact.value).length > 1);
+  if (roleFact) {
+    const ventureName = cleanVentureName(roleFact.value);
+    const nameKey = ventureName.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const handleAgrees = Boolean(nameKey && handleKey
+      && (nameKey.startsWith(handleKey) || handleKey.startsWith(nameKey)));
+    const officialHost = officialHostOf(roleFact);
+    // The official host is a bridge key only when its label identifies the
+    // venture itself (aave.com for "Aave Labs"); a person's own site or an
+    // unrelated official page never vouches for the venture identity.
+    const hostLabelKey = (officialHost?.split(".")[0] ?? "").replace(/[^a-z0-9]+/g, "");
+    const hostAgrees = Boolean(nameKey && hostLabelKey
+      && (nameKey.startsWith(hostLabelKey) || hostLabelKey.startsWith(nameKey)));
+    if (handleAgrees || hostAgrees) {
+      return {
+        project_name: ventureName,
+        ...(handleAgrees && bioHandle ? { x_handle: `@${bioHandle}` } : {}),
+        ...(hostAgrees && officialHost ? { domain: officialHost } : {}),
+      };
+    }
+  }
+
+  // Rung 3: identity anchored on the venture's own domain plus a bio claim.
+  if (bioHandle && handleKey) {
+    for (const fact of verifiedFacts) {
+      if (fact.predicate !== "official_identity" && fact.predicate !== "founder" && fact.predicate !== "current_role") continue;
+      const officialHost = officialHostOf(fact);
+      if (!officialHost) continue;
+      const label = (officialHost.split(".")[0] ?? "").replace(/[^a-z0-9]+/g, "");
+      if (label && (label.startsWith(handleKey) || handleKey.startsWith(label))) {
+        return { project_name: bioHandle, x_handle: `@${bioHandle}`, domain: officialHost };
+      }
+    }
+  }
+  return null;
+}
+
 // Monid enrichment polls asynchronous runs (1-120s). An audit already runs
 // minutes against a bounded platform function budget, so enrichment gets a
 // hard wall-clock box: over budget degrades to a skipped enrichment, never a
@@ -2101,51 +2190,16 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // MONID_API_KEY and never-throws; skipped for fixtures so canary runs stay
   // deterministic.
   if (!fixture && !evidence.companyEnrichment && evidence.roles.includes(SubjectClass.FOUNDER)) {
-    const verifiedVentureRow = evidence.ventures.find((venture) =>
-      venture.artifact_verified === true
-      && venture.evidence_origin !== "model_lead"
-      && venture.project_name.trim()
-      && /\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(venture.role));
-    let primaryVenture: { project_name: string; x_handle?: string; domain?: string } | undefined =
-      verifiedVentureRow
-        ? {
-            project_name: verifiedVentureRow.project_name,
-            ...(verifiedVentureRow.x_handle ? { x_handle: verifiedVentureRow.x_handle } : {}),
-            ...(verifiedVentureRow.domain ? { domain: verifiedVentureRow.domain } : {}),
-          }
-        : undefined;
-    // Fallback: a founder whose venture verified through fetched-passage facts
-    // (founder / current_role) rather than a structured venture row. The bio's
-    // own @handle and the official-subject source host are the bridge keys; a
-    // handle is only accepted when it agrees with the verified venture name.
-    if (!primaryVenture) {
-      const ventureFact = (evidence.basicFacts ?? []).find((fact) =>
-        (fact.predicate === "founder" || fact.predicate === "current_role")
-        && fact.artifact_verified === true
-        && (fact.status === "verified" || fact.status === "corroborated")
-        && fact.value.trim());
-      if (ventureFact) {
-        const ventureName = ventureFact.predicate === "current_role"
-          ? ventureFact.value.split(/\bat\b/i).pop()?.trim() ?? ""
-          : ventureFact.value.trim();
-        const nameKey = ventureName.toLowerCase().replace(/[^a-z0-9]+/g, "");
-        const bioHandle = evidence.profile.bio.match(/@([A-Za-z0-9_]{2,15})/)?.[1];
-        const handleKey = bioHandle?.toLowerCase() ?? "";
-        const handleAgrees = Boolean(nameKey && handleKey
-          && (nameKey.startsWith(handleKey) || handleKey.startsWith(nameKey)));
-        const officialHost = ventureFact.sources
-          .filter((candidate) => candidate.sourceClass === "official_subject" && candidate.relation === "supports")
-          .map((candidate) => { try { return new URL(candidate.url).hostname; } catch { return ""; } })
-          .find((host) => host && !/(^|\.)x\.com$|(^|\.)twitter\.com$/i.test(host));
-        if (ventureName.length > 1 && (handleAgrees || officialHost)) {
-          primaryVenture = {
-            project_name: ventureName,
-            ...(handleAgrees && bioHandle ? { x_handle: `@${bioHandle}` } : {}),
-            ...(officialHost ? { domain: officialHost } : {}),
-          };
-        }
-      }
-    }
+    const primaryVenture = deriveFounderVentureCandidate(evidence);
+    emit({
+      phase: "Founder",
+      label: primaryVenture ? `Primary venture derived · ${primaryVenture.project_name}` : "No primary venture derived",
+      detail: primaryVenture
+        ? `Bridge keys: ${[primaryVenture.x_handle, primaryVenture.domain].filter(Boolean).join(" · ") || "none"}; used for financing enrichment and the related-asset token binding.`
+        : "No verified venture row, venture-naming fact, or official-domain identity anchor agreed with a bio founder claim; the related-asset binding is skipped.",
+      source: "argus-founder-assets",
+      tone: primaryVenture ? "neutral" : "warn",
+    });
     if (primaryVenture) {
       try {
         const enrichment = await withWallClockBox(

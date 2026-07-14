@@ -3986,6 +3986,32 @@ export async function collectBasicFacts(
       });
       return ventureDomainAnchored ? [ventureName] : [];
     }),
+    // Rung 3 of the founder venture ladder: a verified identity-class fact
+    // anchored on an official-subject host whose label agrees with a
+    // founder/CEO claim naming an @handle in the subject's own bio
+    // (aave.com + "Founder & CEO @Aave" screens "Aave").
+    ...sourceVerifiedBeforeRegistry.flatMap((fact) => {
+      if (
+        (fact.predicate !== "official_identity" && fact.predicate !== "founder" && fact.predicate !== "current_role")
+        || fact.artifact_verified !== true
+      ) return [];
+      const bio = ctx.evidence.profile.bio;
+      if (!/\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(bio)) return [];
+      const bioHandle = bio.match(/@([A-Za-z0-9_]{2,15})/)?.[1];
+      const handleKey = bioHandle?.toLowerCase().replace(/[^a-z0-9]+/g, "") ?? "";
+      if (!bioHandle || !handleKey) return [];
+      const anchored = fact.sources.some((candidate) => {
+        if (candidate.sourceClass !== "official_subject" || candidate.relation !== "supports") return false;
+        try {
+          const label = new URL(candidate.url).hostname.toLowerCase().replace(/^www\./, "").split(".")[0] ?? "";
+          const labelKey = label.replace(/[^a-z0-9]+/g, "");
+          return Boolean(labelKey) && (labelKey.startsWith(handleKey) || handleKey.startsWith(labelKey));
+        } catch {
+          return false;
+        }
+      });
+      return anchored ? [bioHandle] : [];
+    }),
   ])].filter((name) => name.length > 1);
   if (
     publicSecurityQuestion
