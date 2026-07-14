@@ -10167,6 +10167,15 @@ async function fetchSecExchangeRegistry() {
     capturedAt: (/* @__PURE__ */ new Date()).toISOString()
   };
 }
+async function screenSecRegistryForNames(names) {
+  const screenable = [...new Set(names.map((name) => name.trim()).filter((name) => name.length > 1))];
+  if (!screenable.length) return null;
+  const registry = await fetchSecExchangeRegistry();
+  if (registry.status !== "ok") return null;
+  const rows = secExchangeRegistryRows(registry);
+  if (rows === null) return null;
+  return screenable.some((name) => rows.some((row) => registryIssuerMatchesRelationship(row.name, name))) ? "matched" : "empty";
+}
 var CURRENT_CONTROL_ROLE = /\b(?:co[- ]?founder|founder|chief executive officer|ceo|chair(?:man|woman|person)?|owner|controlling)\b/i;
 var CURRENT_PERIOD = /\b(?:current|currently|now|ongoing|present|today)\b/i;
 var VENTURE_IDENTITY_STOP_WORDS = /* @__PURE__ */ new Set([
@@ -10795,54 +10804,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   const publicSecurityQuestion = questions.find((question) => question.predicate === "public_security");
   const registryScreenNames = [.../* @__PURE__ */ new Set([
     ...authoritativeAssetRelationships.map((relationship) => relationship.name),
-    ...ctx.evidence.ventures.filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead").map((venture) => venture.project_name.trim()),
-    // A founder whose venture verified through fetched-passage facts (rather
-    // than a structured venture row) still names a screenable company, but
-    // ONLY when an official first-party source lives on the venture's own
-    // domain (aave.com vouching "CEO at Aave"). A press host, a hostile
-    // subdomain, or the person's own site never drives a registry
-    // consultation (the org-named press-host and attacker-subdomain negative
-    // controls).
-    ...sourceVerifiedBeforeRegistry.flatMap((fact) => {
-      if (fact.predicate !== "founder" && fact.predicate !== "current_role" || fact.artifact_verified !== true) return [];
-      const ventureName = fact.predicate === "current_role" ? fact.value.split(/\bat\b/i).pop()?.trim() ?? "" : fact.value.trim();
-      const nameKey = ventureName.toLowerCase().replace(/[^a-z0-9]+/g, "");
-      if (ventureName.length < 2 || !nameKey) return [];
-      const ventureDomainAnchored = fact.sources.some((candidate) => {
-        if (candidate.sourceClass !== "official_subject" || candidate.relation !== "supports") return false;
-        try {
-          const label = new URL(candidate.url).hostname.toLowerCase().replace(/^www\./, "").split(".")[0] ?? "";
-          const labelKey = label.replace(/[^a-z0-9]+/g, "");
-          return Boolean(labelKey) && (nameKey.startsWith(labelKey) || labelKey.startsWith(nameKey));
-        } catch {
-          return false;
-        }
-      });
-      return ventureDomainAnchored ? [ventureName] : [];
-    }),
-    // Rung 3 of the founder venture ladder: a verified identity-class fact
-    // anchored on an official-subject host whose label agrees with a
-    // founder/CEO claim naming an @handle in the subject's own bio
-    // (aave.com + "Founder & CEO @Aave" screens "Aave").
-    ...sourceVerifiedBeforeRegistry.flatMap((fact) => {
-      if (fact.predicate !== "official_identity" && fact.predicate !== "founder" && fact.predicate !== "current_role" || fact.artifact_verified !== true) return [];
-      const bio = ctx.evidence.profile.bio;
-      if (!/\b(?:co[- ]?founder|founder|creator|ceo|chief executive)\b/i.test(bio)) return [];
-      const bioHandle = bio.match(/@([A-Za-z0-9_]{2,15})/)?.[1];
-      const handleKey = bioHandle?.toLowerCase().replace(/[^a-z0-9]+/g, "") ?? "";
-      if (!bioHandle || !handleKey) return [];
-      const anchored = fact.sources.some((candidate) => {
-        if (candidate.sourceClass !== "official_subject" || candidate.relation !== "supports") return false;
-        try {
-          const label = new URL(candidate.url).hostname.toLowerCase().replace(/^www\./, "").split(".")[0] ?? "";
-          const labelKey = label.replace(/[^a-z0-9]+/g, "");
-          return Boolean(labelKey) && (labelKey.startsWith(handleKey) || handleKey.startsWith(labelKey));
-        } catch {
-          return false;
-        }
-      });
-      return anchored ? [bioHandle] : [];
-    })
+    ...ctx.evidence.ventures.filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead").map((venture) => venture.project_name.trim())
   ])].filter((name) => name.length > 1);
   if (publicSecurityQuestion && registryScreenNames.length && !sourceVerifiedBeforeRegistry.some((fact) => fact.predicate === "public_security" && (fact.status === "verified" || fact.status === "corroborated"))) {
     const registry = dependencies.fetchSource ? await fetchOnce(SEC_EXCHANGE_REGISTRY_URL) : await fetchSecExchangeRegistry();
@@ -17584,6 +17546,33 @@ async function runAuditWithLedger(rawHandle, emit, options) {
               source: "coingecko",
               tone: "good"
             });
+            const verifiedSecurity = (evidence.basicFacts ?? []).some((fact) => fact.predicate === "public_security" && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated"));
+            const securityEntry = (evidence.basicFactQuestionLedger ?? []).find((entry) => entry.predicate === "public_security");
+            if (!verifiedSecurity && securityEntry && securityEntry.status === "unanswered") {
+              const screen = await screenSecRegistryForNames([
+                ventureToken.ventureName,
+                ventureToken.name,
+                primaryVenture.project_name
+              ]);
+              if (screen === "empty") {
+                securityEntry.providerRuns.push({ phase: "repair", provider: "sec-registry", state: "completed_empty" });
+                emit({
+                  phase: "Founder",
+                  label: "Public-security registry screened",
+                  detail: `No listed issuer for ${ventureToken.ventureName} in the US exchange registry; the security category closes as checked-empty.`,
+                  source: "sec-registry",
+                  tone: "neutral"
+                });
+              } else if (screen === "matched") {
+                emit({
+                  phase: "Founder",
+                  label: "Public-security registry match",
+                  detail: `${ventureToken.ventureName} matched a listed issuer name; the security category stays open for review.`,
+                  source: "sec-registry",
+                  tone: "warn"
+                });
+              }
+            }
           }
         } catch (error) {
           emit({ phase: "Founder", label: "Venture token resolution error", detail: String(error), tone: "warn" });

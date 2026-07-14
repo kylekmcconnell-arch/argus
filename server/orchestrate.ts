@@ -47,7 +47,7 @@ import { githubAdapter } from "./adapters/github";
 import { dexscreenerAdapter } from "./adapters/dexscreener";
 import { coingeckoAdapter } from "./adapters/coingecko";
 import { onchainAdapter } from "./adapters/onchain";
-import { basicFactsAdapter } from "./adapters/basicFacts";
+import { basicFactsAdapter, screenSecRegistryForNames } from "./adapters/basicFacts";
 import {
   hasResolvedRealName,
   offchainAdapter,
@@ -2235,6 +2235,42 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
               source: "coingecko",
               tone: "good",
             });
+            // Public-security half of the asset distinction: the venture
+            // identity is now verified through its official X account, so the
+            // US exchange registry can be screened for it. A completed empty
+            // screen closes the category honestly; a name match stays open
+            // for review instead of becoming a silent fact.
+            const verifiedSecurity = (evidence.basicFacts ?? []).some((fact) =>
+              fact.predicate === "public_security"
+              && fact.artifact_verified === true
+              && (fact.status === "verified" || fact.status === "corroborated"));
+            const securityEntry = (evidence.basicFactQuestionLedger ?? [])
+              .find((entry) => entry.predicate === "public_security");
+            if (!verifiedSecurity && securityEntry && securityEntry.status === "unanswered") {
+              const screen = await screenSecRegistryForNames([
+                ventureToken.ventureName,
+                ventureToken.name,
+                primaryVenture.project_name,
+              ]);
+              if (screen === "empty") {
+                securityEntry.providerRuns.push({ phase: "repair", provider: "sec-registry", state: "completed_empty" });
+                emit({
+                  phase: "Founder",
+                  label: "Public-security registry screened",
+                  detail: `No listed issuer for ${ventureToken.ventureName} in the US exchange registry; the security category closes as checked-empty.`,
+                  source: "sec-registry",
+                  tone: "neutral",
+                });
+              } else if (screen === "matched") {
+                emit({
+                  phase: "Founder",
+                  label: "Public-security registry match",
+                  detail: `${ventureToken.ventureName} matched a listed issuer name; the security category stays open for review.`,
+                  source: "sec-registry",
+                  tone: "warn",
+                });
+              }
+            }
           }
         } catch (error) {
           emit({ phase: "Founder", label: "Venture token resolution error", detail: String(error), tone: "warn" });
