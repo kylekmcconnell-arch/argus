@@ -185,6 +185,45 @@ describe("basic-facts lead parsing", () => {
     ]);
   });
 
+  it("reduces descriptive official-token answers to their atomic symbol", () => {
+    const parsed = parseBasicFactLeads(JSON.stringify({
+      facts: [
+        {
+          question_id: "person.official_token",
+          subject: "Brian Armstrong",
+          predicate: "official_token",
+          value: "cbBTC (Coinbase Wrapped BTC) · ERC20 token backed 1:1 by Bitcoin held by Coinbase",
+          exact_excerpt: "Coinbase wrapped assets are backed 1:1 and held in custody by Coinbase.",
+          source_url: "https://www.coinbase.com/cbbtc",
+        },
+        {
+          question_id: "person.official_token",
+          subject: "Brian Armstrong",
+          predicate: "official_token",
+          value: "cbETH (Coinbase Wrapped ETH) · ERC-20 token representing staked ETH issued by Coinbase",
+          exact_excerpt: "cbETH: The trusted liquid staking token.",
+          source_url: "https://www.coinbase.com/cbeth",
+        },
+      ],
+    }));
+
+    expect(parsed?.map((candidate) => candidate.value)).toEqual(["cbBTC", "cbETH"]);
+  });
+
+  it("does not truncate an ordinary multi-word token name into its first word", () => {
+    const parsed = parseBasicFactLeads(JSON.stringify({
+      facts: [{
+        subject: "Acme",
+        predicate: "official_token",
+        value: "Acme Wrapped Bitcoin",
+        exact_excerpt: "Acme Wrapped Bitcoin is Acme's official token.",
+        source_url: "https://acme.example/token",
+      }],
+    }));
+
+    expect(parsed?.[0]?.value).toBe("Acme Wrapped Bitcoin");
+  });
+
   it("rejects legal-event leads without exact entity and status fields", () => {
     expect(parseBasicFactLeads(JSON.stringify({
       facts: [{
@@ -2274,6 +2313,140 @@ describe("basic-facts source verification", () => {
       .toEqual(expect.objectContaining({ status: "answered", answerRefs: expect.arrayContaining([
         expect.stringMatching(/^basic_v1_/),
       ]) }));
+  });
+
+  it("verifies the production-shaped Coinbase wrapped-asset pages without trusting the model description", async () => {
+    const { ctx, evidence } = context("https://brianarmstrong.org");
+    ctx.handle = "@brian_armstrong";
+    evidence.profile.handle = "@brian_armstrong";
+    evidence.profile.display_name = "Brian Armstrong";
+    evidence.profile.resolved_name = "Brian Armstrong";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Coinbase",
+      domain: "coinbase.com",
+      role: "Co-founder and CEO",
+      period: "2012-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://investor.coinbase.com/governance/board-of-directors/default.aspx",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const cbBtcUrl = "https://www.coinbase.com/cbbtc";
+    const cbEthUrl = "https://www.coinbase.com/cbeth";
+    const questions = basicFactsResearchQuestions(ctx).filter((question) => question.id === "person.official_token");
+    const leads = parseBasicFactLeads(JSON.stringify({
+      facts: [
+        {
+          question_id: "person.official_token",
+          subject: "Brian Armstrong",
+          predicate: "official_token",
+          value: "cbBTC (Coinbase Wrapped BTC) · ERC20 token backed 1:1 by Bitcoin held by Coinbase",
+          exact_excerpt: "Coinbase wrapped assets are backed 1:1 and held in custody by Coinbase.",
+          source_title: "Coinbase cbBTC",
+          source_url: cbBtcUrl,
+        },
+        {
+          question_id: "person.official_token",
+          subject: "Brian Armstrong",
+          predicate: "official_token",
+          value: "cbETH (Coinbase Wrapped ETH) · ERC-20 token representing staked ETH issued by Coinbase",
+          exact_excerpt: "cbETH: The trusted liquid staking token.",
+          source_title: "Coinbase cbETH",
+          source_url: cbEthUrl,
+        },
+      ],
+    }), "Brian Armstrong", "claude-web-search", questions) ?? [];
+
+    const cbBtcReader = `Title: Coinbase cbBTC
+URL Source: http://www.coinbase.com/cbbtc
+Markdown Content:
+## Benefits of Coinbase wrapped assets
+Coinbase is pioneering a new era for DeFi with wrapped assets – a trusted and reputable wrapped version of your eligible assets that can be used onchain.
+Coinbase wrapped assets are backed 1:1 and held in custody by Coinbase – which has a 10+ year record of securely custodying crypto for institutions and customers.`;
+    const cbEthReader = `Title: Coinbase cbETH
+URL Source: http://www.coinbase.com/cbeth
+Markdown Content:
+## cbETH: The trusted liquid staking token.
+cbETH lets you safely and easily use and earn rewards on your staked ETH.
+Wrap your staked ETH to cbETH with just a few steps and zero fees. cbETH can be traded on Coinbase.
+Coinbase's whitepaper provides in-depth details about cbETH's unique design and benefits.`;
+
+    await collectBasicFacts(ctx, {
+      discover: async () => leads,
+      repair: async () => [],
+      fetchSource: fetchDocuments({
+        [cbBtcUrl]: document({
+          url: cbBtcUrl,
+          host: "coinbase.com",
+          contentType: "text/plain",
+          text: cbBtcReader,
+          contentHash: "8".repeat(64),
+        }),
+        [cbEthUrl]: document({
+          url: cbEthUrl,
+          host: "coinbase.com",
+          contentType: "text/plain",
+          text: cbEthReader,
+          contentHash: "9".repeat(64),
+        }),
+      }),
+    });
+
+    expect(leads.map((candidate) => candidate.value)).toEqual(["cbBTC", "cbETH"]);
+    expect(evidence.basicFacts?.filter((fact) => fact.predicate === "official_token")).toEqual(expect.arrayContaining([
+      expect.objectContaining({ value: "cbBTC", status: "verified" }),
+      expect.objectContaining({ value: "cbETH", status: "verified" }),
+    ]));
+    expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "person.official_token"))
+      .toEqual(expect.objectContaining({ status: "answered" }));
+  });
+
+  it("does not turn an official exchange listing page for someone else's token into a founder asset", async () => {
+    const { ctx, evidence } = context("https://brianarmstrong.org");
+    ctx.handle = "@brian_armstrong";
+    evidence.profile.display_name = "Brian Armstrong";
+    evidence.profile.resolved_name = "Brian Armstrong";
+    evidence.roles = [SubjectClass.FOUNDER];
+    evidence.ventures.push({
+      project_name: "Coinbase",
+      domain: "coinbase.com",
+      role: "Co-founder and CEO",
+      period: "2012-present",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: "https://investor.coinbase.com/governance/board-of-directors/default.aspx",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "public-web",
+    });
+    const sourceUrl = "https://www.coinbase.com/wbtc";
+    const passage = `Title: Coinbase WBTC
+URL Source: https://www.coinbase.com/wbtc
+Markdown Content:
+WBTC is an ERC-20 wrapped token issued by BitGo. Coinbase customers can trade WBTC.`;
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [lead({
+        subject: "Brian Armstrong",
+        predicate: "official_token",
+        value: "WBTC",
+        questionId: "person.official_token",
+        excerpt: "WBTC is an ERC-20 wrapped token issued by BitGo.",
+        sourceUrl,
+      })],
+      repair: async () => [],
+      fetchSource: fetchDocuments({
+        [sourceUrl]: document({
+          url: sourceUrl,
+          host: "coinbase.com",
+          contentType: "text/plain",
+          text: passage,
+        }),
+      }),
+    });
+
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "official_token")).toBe(false);
   });
 
   it("keeps a project's canonical official-token answer singular", async () => {

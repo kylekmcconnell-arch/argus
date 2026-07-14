@@ -8233,6 +8233,14 @@ function isAtomicValue(predicate, value) {
   if (["founder", "executive", "investor"].includes(predicate) && value.includes(",")) return false;
   return true;
 }
+function canonicalOfficialTokenLeadValue(value) {
+  const normalized4 = normalize(value);
+  const symbol = "\\$?[A-Za-z][A-Za-z0-9.-]{1,15}";
+  const leading = new RegExp(`^(${symbol})\\s*\\([^)]{2,100}\\)\\s*(?:[\xB7:\\u2013\\u2014]|\\s-\\s|$)`).exec(normalized4)?.[1];
+  if (leading) return leading;
+  const named = new RegExp(`^[^();]{2,100}\\(\\s*(${symbol})\\s*\\)\\s*(?:[\xB7:\\u2013\\u2014]|\\s-\\s|$)`).exec(normalized4)?.[1];
+  return named ?? normalized4;
+}
 function isEmptyAssetPlaceholder(predicate, value) {
   if (!supportsExplicitEmptyBasicFact(predicate)) return false;
   const normalized4 = normalize(value).toLowerCase().replace(/[.!]+$/, "").trim();
@@ -8256,10 +8264,11 @@ function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-sear
     const row = raw;
     const predicate = clean(row.predicate, 40);
     const subject = clean(expectedSubject ?? row.subject, 160);
-    const value = clean(row.value, 240);
+    const rawValue = clean(row.value, 240);
     const excerpt = clean(row.exact_excerpt ?? row.excerpt, 1200);
     const sourceUrl = safeCandidateUrl(row.source_url ?? row.sourceUrl);
-    if (!predicate || !PREDICATES.has(predicate) || !subject || !value || !excerpt || !sourceUrl) continue;
+    if (!predicate || !PREDICATES.has(predicate) || !subject || !rawValue || !excerpt || !sourceUrl) continue;
+    const value = predicate === "official_token" ? canonicalOfficialTokenLeadValue(rawValue) : rawValue;
     if (isEmptyAssetPlaceholder(predicate, value)) continue;
     if (!isAtomicValue(predicate, value)) continue;
     const suppliedQuestionId = clean(row.question_id ?? row.questionId, 100);
@@ -9496,6 +9505,56 @@ function relationshipBoundTokenHasAffirmativeVentureLink(claimClause, lead, rela
     return brandedContinuationIsValid(valueFirstBrand);
   });
 }
+var TOKEN_PAGE_UNCERTAINTY = /\b(?:alleged|candidate|claimed|demo|draft|experimental|fake|former|future|hypothetical|intended|mock|non-live|potential|proposed|purported|rumored|so-called|supposedly|test|testnet|unofficial|unlaunched|uncertain)\b/i;
+function officialVentureAssetPagePassage(document, page, lead, relationships) {
+  if (!/^\$?[A-Za-z][A-Za-z0-9.-]{1,15}$/.test(lead.value)) return null;
+  const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(page);
+  if (!metadata?.[1] || metadata.index !== 0) return null;
+  const title = normalize(metadata[1]);
+  const bodyStart = metadata[0].length;
+  const body = page.slice(bodyStart);
+  let pathSymbol;
+  try {
+    const path = decodeURIComponent(new URL(document.url).pathname).replace(/^\/+|\/+$/g, "");
+    if (!path || path.includes("/")) return null;
+    pathSymbol = searchable(path);
+  } catch {
+    return null;
+  }
+  if (pathSymbol !== searchable(lead.value)) return null;
+  for (const relationship of relationships) {
+    if (!looseContainsPhrase(title, relationship.name) || !looseContainsPhrase(title, lead.value)) continue;
+    const venture = loosePhrasePattern(relationship.name);
+    const value = loosePhrasePattern(lead.value);
+    if (!venture || !value) continue;
+    const wrappedCustody = new RegExp(
+      `\\b${venture}\\s+wrapped\\s+assets?\\b[^.!?]{0,220}\\bbacked\\s+1:1\\b[^.!?]{0,160}\\bheld\\s+in\\s+custody\\s+by\\s+${venture}\\b`,
+      "i"
+    ).exec(body);
+    if (wrappedCustody) {
+      const end2 = bodyStart + (wrappedCustody.index ?? 0) + wrappedCustody[0].length;
+      const passage2 = normalize(page.slice(0, end2));
+      if (passage2.length <= MAX_SUPPORT_PASSAGE_CHARS && !TOKEN_PAGE_UNCERTAINTY.test(passage2)) return passage2;
+    }
+    const tokenClass = new RegExp(
+      `\\b\\$?${value}\\b[^.!?]{0,140}\\b(?:(?:liquid\\s+staking|wrapped|staked|governance|native|utility|erc[- ]?\\d+)\\s+)?token\\b`,
+      "i"
+    ).exec(body);
+    const ventureWhitepaper = new RegExp(
+      `(?:\\b${venture}['\u2019]s\\s+whitepaper\\b[^.!?]{0,260}\\b\\$?${value}\\b|\\b\\$?${value}\\b[^.!?]{0,260}\\b${venture}['\u2019]s\\s+whitepaper\\b)`,
+      "i"
+    ).exec(body);
+    if (!tokenClass || !ventureWhitepaper) continue;
+    const start = Math.min(tokenClass.index ?? 0, ventureWhitepaper.index ?? 0);
+    const end = Math.max(
+      (tokenClass.index ?? 0) + tokenClass[0].length,
+      (ventureWhitepaper.index ?? 0) + ventureWhitepaper[0].length
+    );
+    const passage = normalize(body.slice(start, end));
+    if (passage.length <= MAX_SUPPORT_PASSAGE_CHARS && looseContainsPhrase(passage, relationship.name) && looseContainsPhrase(passage, lead.value) && !TOKEN_PAGE_UNCERTAINTY.test(passage)) return passage;
+  }
+  return null;
+}
 function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject, officialHosts = [], officialCounterpartyHosts = [], ventureAssetRelationships = []) {
   const page = documentText(document);
   if (!isAtomicValue(lead.predicate, lead.value)) return null;
@@ -9504,7 +9563,10 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
   const publicSecurityRegulator = lead.predicate === "public_security" && regulatorySourceSupports(document.host, lead.predicate);
   const ventureAssetPredicate = lead.predicate === "public_security" || lead.predicate === "official_token";
   const authoritativeAssetRelationships = ventureAssetPredicate ? ventureAssetRelationships.filter((relationship) => {
-    const ventureNamedByLead = looseContainsPhrase(`${lead.value} ${lead.excerpt}`, relationship.name);
+    const ventureNamedByLead = looseContainsPhrase(
+      `${lead.value} ${lead.excerpt} ${lead.sourceTitle ?? ""}`,
+      relationship.name
+    );
     const ventureOfficial = relationship.officialScopes.some((scope) => sameOfficialScope(document, [scope]));
     return ventureNamedByLead && (ventureOfficial || publicSecurityRegulator);
   }) : [];
@@ -9531,18 +9593,19 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
   const applicableCounterpartyHosts = ventureAssetPredicate ? authoritativeAssetRelationships.flatMap((relationship) => relationship.officialScopes) : officialCounterpartyHosts;
   const officialCounterparty = !official && counterpartyPredicate && sameOfficialScope(document, applicableCounterpartyHosts);
   const contextTokens = official || officialCounterparty ? trustedHostContextTokens(document.host) : /* @__PURE__ */ new Set();
-  const excerpt = supportingSourcePassage(page, lead, verificationAliases, contextTokens);
+  const personOrInvestorAsset = /^(?:person|investor)\./.test(lead.questionId ?? "");
+  const officialAssetPageEvidence = lead.predicate === "official_token" && personOrInvestorAsset && officialCounterparty && authoritativeAssetRelationships.length ? officialVentureAssetPagePassage(document, page, lead, authoritativeAssetRelationships) : null;
+  const excerpt = officialAssetPageEvidence ?? supportingSourcePassage(page, lead, verificationAliases, contextTokens);
   if (!excerpt) return null;
-  const claimClause = governingClaimClause(excerpt, lead, verificationAliases, contextTokens);
+  const claimClause = officialAssetPageEvidence ?? governingClaimClause(excerpt, lead, verificationAliases, contextTokens);
   if (!claimClause) return null;
   if (lead.predicate === "official_token" && authoritativeAssetRelationships.length) {
-    const personOrInvestorAsset = /^(?:person|investor)\./.test(lead.questionId ?? "");
-    const explicitTokenLanguage = EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) || EXPLICIT_WRAPPED_OR_ERC_TOKEN.test(claimClause);
+    const explicitTokenLanguage = Boolean(officialAssetPageEvidence) || EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) || EXPLICIT_WRAPPED_OR_ERC_TOKEN.test(claimClause);
     const affirmativeVentureLink = relationshipBoundTokenHasAffirmativeVentureLink(
       claimClause,
       lead,
       authoritativeAssetRelationships
-    );
+    ) || Boolean(officialAssetPageEvidence);
     if (personOrInvestorAsset && (!explicitTokenLanguage || !affirmativeVentureLink)) return null;
     if (!personOrInvestorAsset && !EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) && !affirmativeVentureLink) return null;
   }

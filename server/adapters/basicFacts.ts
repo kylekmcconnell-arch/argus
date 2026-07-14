@@ -598,6 +598,23 @@ function isAtomicValue(predicate: BasicFactPredicate, value: string): boolean {
 }
 
 /**
+ * Web-search models sometimes answer an asset question with a symbol followed
+ * by a prose description, for example `cbBTC (Coinbase Wrapped BTC) · ERC20
+ * token ...`. The description is useful as a discovery hint, but treating the
+ * entire string as the asset identity makes exact source verification
+ * impossible. Reduce only unmistakably delimited symbol shapes; ordinary
+ * multi-word token names remain untouched and still have to verify normally.
+ */
+function canonicalOfficialTokenLeadValue(value: string): string {
+  const normalized = normalize(value);
+  const symbol = "\\$?[A-Za-z][A-Za-z0-9.-]{1,15}";
+  const leading = new RegExp(`^(${symbol})\\s*\\([^)]{2,100}\\)\\s*(?:[·:\\u2013\\u2014]|\\s-\\s|$)`).exec(normalized)?.[1];
+  if (leading) return leading;
+  const named = new RegExp(`^[^();]{2,100}\\(\\s*(${symbol})\\s*\\)\\s*(?:[·:\\u2013\\u2014]|\\s-\\s|$)`).exec(normalized)?.[1];
+  return named ?? normalized;
+}
+
+/**
  * A scout may serialize a negative search answer as a fact row (for example,
  * `official_token: "none"`). That row is not affirmative evidence and must
  * never become a token or security lead. In a question-specific search it is
@@ -635,10 +652,13 @@ export function parseBasicFactLeads(
     const row = raw as Record<string, unknown>;
     const predicate = clean(row.predicate, 40) as BasicFactPredicate | undefined;
     const subject = clean(expectedSubject ?? row.subject, 160);
-    const value = clean(row.value, 240);
+    const rawValue = clean(row.value, 240);
     const excerpt = clean(row.exact_excerpt ?? row.excerpt, 1_200);
     const sourceUrl = safeCandidateUrl(row.source_url ?? row.sourceUrl);
-    if (!predicate || !PREDICATES.has(predicate) || !subject || !value || !excerpt || !sourceUrl) continue;
+    if (!predicate || !PREDICATES.has(predicate) || !subject || !rawValue || !excerpt || !sourceUrl) continue;
+    const value = predicate === "official_token"
+      ? canonicalOfficialTokenLeadValue(rawValue)
+      : rawValue;
     if (isEmptyAssetPlaceholder(predicate, value)) continue;
     if (!isAtomicValue(predicate, value)) continue;
     const suppliedQuestionId = clean(row.question_id ?? row.questionId, 100);
@@ -2261,6 +2281,81 @@ function relationshipBoundTokenHasAffirmativeVentureLink(
   });
 }
 
+const TOKEN_PAGE_UNCERTAINTY = /\b(?:alleged|candidate|claimed|demo|draft|experimental|fake|former|future|hypothetical|intended|mock|non-live|potential|proposed|purported|rumored|so-called|supposedly|test|testnet|unofficial|unlaunched|uncertain)\b/i;
+
+/**
+ * Some first-party product pages split one proof across their page title and
+ * product copy. Coinbase's cbBTC page, for example, names the product in the
+ * title and separately says Coinbase wrapped assets are backed 1:1 and held by
+ * Coinbase. This narrow reader-page verifier permits that same-page proof only
+ * when a verified current venture relationship already exists, the official
+ * root product URL and title both name the symbol, and the body independently
+ * binds the product class to that venture. Generic asset listings, partner
+ * tokens, and externally issued assets remain rejected.
+ */
+function officialVentureAssetPagePassage(
+  document: PublicTextDocument,
+  page: string,
+  lead: BasicFactLead,
+  relationships: readonly VerifiedVentureAssetRelationship[],
+): string | null {
+  if (!/^\$?[A-Za-z][A-Za-z0-9.-]{1,15}$/.test(lead.value)) return null;
+  const metadata = /^Title:\s*(.+?)\s+URL Source:\s*(.+?)\s+Markdown Content:\s*/i.exec(page);
+  if (!metadata?.[1] || metadata.index !== 0) return null;
+  const title = normalize(metadata[1]);
+  const bodyStart = metadata[0].length;
+  const body = page.slice(bodyStart);
+  let pathSymbol: string;
+  try {
+    const path = decodeURIComponent(new URL(document.url).pathname).replace(/^\/+|\/+$/g, "");
+    if (!path || path.includes("/")) return null;
+    pathSymbol = searchable(path);
+  } catch {
+    return null;
+  }
+  if (pathSymbol !== searchable(lead.value)) return null;
+
+  for (const relationship of relationships) {
+    if (!looseContainsPhrase(title, relationship.name) || !looseContainsPhrase(title, lead.value)) continue;
+    const venture = loosePhrasePattern(relationship.name);
+    const value = loosePhrasePattern(lead.value);
+    if (!venture || !value) continue;
+
+    const wrappedCustody = new RegExp(
+      `\\b${venture}\\s+wrapped\\s+assets?\\b[^.!?]{0,220}\\bbacked\\s+1:1\\b[^.!?]{0,160}\\bheld\\s+in\\s+custody\\s+by\\s+${venture}\\b`,
+      "i",
+    ).exec(body);
+    if (wrappedCustody) {
+      const end = bodyStart + (wrappedCustody.index ?? 0) + wrappedCustody[0].length;
+      const passage = normalize(page.slice(0, end));
+      if (passage.length <= MAX_SUPPORT_PASSAGE_CHARS && !TOKEN_PAGE_UNCERTAINTY.test(passage)) return passage;
+    }
+
+    const tokenClass = new RegExp(
+      `\\b\\$?${value}\\b[^.!?]{0,140}\\b(?:(?:liquid\\s+staking|wrapped|staked|governance|native|utility|erc[- ]?\\d+)\\s+)?token\\b`,
+      "i",
+    ).exec(body);
+    const ventureWhitepaper = new RegExp(
+      `(?:\\b${venture}['’]s\\s+whitepaper\\b[^.!?]{0,260}\\b\\$?${value}\\b|\\b\\$?${value}\\b[^.!?]{0,260}\\b${venture}['’]s\\s+whitepaper\\b)`,
+      "i",
+    ).exec(body);
+    if (!tokenClass || !ventureWhitepaper) continue;
+    const start = Math.min(tokenClass.index ?? 0, ventureWhitepaper.index ?? 0);
+    const end = Math.max(
+      (tokenClass.index ?? 0) + tokenClass[0].length,
+      (ventureWhitepaper.index ?? 0) + ventureWhitepaper[0].length,
+    );
+    const passage = normalize(body.slice(start, end));
+    if (
+      passage.length <= MAX_SUPPORT_PASSAGE_CHARS
+      && looseContainsPhrase(passage, relationship.name)
+      && looseContainsPhrase(passage, lead.value)
+      && !TOKEN_PAGE_UNCERTAINTY.test(passage)
+    ) return passage;
+  }
+  return null;
+}
+
 /** Promote one lead only when a short passage in the safely fetched artifact
  * independently contains the subject, atomic value, and predicate language. */
 export function verifyBasicFactLead(
@@ -2281,7 +2376,10 @@ export function verifyBasicFactLead(
   const ventureAssetPredicate = lead.predicate === "public_security" || lead.predicate === "official_token";
   const authoritativeAssetRelationships = ventureAssetPredicate
     ? ventureAssetRelationships.filter((relationship) => {
-      const ventureNamedByLead = looseContainsPhrase(`${lead.value} ${lead.excerpt}`, relationship.name);
+      const ventureNamedByLead = looseContainsPhrase(
+        `${lead.value} ${lead.excerpt} ${lead.sourceTitle ?? ""}`,
+        relationship.name,
+      );
       const ventureOfficial = relationship.officialScopes.some((scope) => sameOfficialScope(document, [scope]));
       return ventureNamedByLead && (ventureOfficial || publicSecurityRegulator);
     })
@@ -2308,22 +2406,31 @@ export function verifyBasicFactLead(
   const contextTokens = official || officialCounterparty
     ? trustedHostContextTokens(document.host)
     : new Set<string>();
-  const excerpt = supportingSourcePassage(page, lead, verificationAliases, contextTokens);
+  const personOrInvestorAsset = /^(?:person|investor)\./.test(lead.questionId ?? "");
+  const officialAssetPageEvidence = lead.predicate === "official_token"
+    && personOrInvestorAsset
+    && officialCounterparty
+    && authoritativeAssetRelationships.length
+    ? officialVentureAssetPagePassage(document, page, lead, authoritativeAssetRelationships)
+    : null;
+  const excerpt = officialAssetPageEvidence
+    ?? supportingSourcePassage(page, lead, verificationAliases, contextTokens);
   if (!excerpt) return null;
-  const claimClause = governingClaimClause(excerpt, lead, verificationAliases, contextTokens);
+  const claimClause = officialAssetPageEvidence
+    ?? governingClaimClause(excerpt, lead, verificationAliases, contextTokens);
   if (!claimClause) return null;
   // A related venture's first-party page may stand in for the person's name,
   // but only explicit crypto-token language may do so. A stock ticker or
   // security symbol on that same site must remain public_security evidence.
   if (lead.predicate === "official_token" && authoritativeAssetRelationships.length) {
-    const personOrInvestorAsset = /^(?:person|investor)\./.test(lead.questionId ?? "");
-    const explicitTokenLanguage = EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause)
+    const explicitTokenLanguage = Boolean(officialAssetPageEvidence)
+      || EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause)
       || EXPLICIT_WRAPPED_OR_ERC_TOKEN.test(claimClause);
     const affirmativeVentureLink = relationshipBoundTokenHasAffirmativeVentureLink(
       claimClause,
       lead,
       authoritativeAssetRelationships,
-    );
+    ) || Boolean(officialAssetPageEvidence);
     // Project canonical-token verification remains on its existing path. The
     // stricter ownership gate applies only when a venture relationship stands
     // in for an audited person or investor.
