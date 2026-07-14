@@ -14356,13 +14356,41 @@ function projectProviderBackedBasicFacts(evidence) {
     });
     projected.push(makeFact(evidence, "official_token", `$${token.symbol.toUpperCase()}`, [tokenSource], token.name));
     projected.push(makeFact(evidence, "network", token.chain, [tokenSource]));
-    if (typeof token.volume24hUsd === "number" && token.volume24hUsd > 0) {
+    const rank = typeof token.rank === "number" && token.rank > 0 ? token.rank : null;
+    const marketCap = typeof token.marketCapUsd === "number" && token.marketCapUsd > 0 ? token.marketCapUsd : null;
+    const liquidity = typeof token.liquidityUsd === "number" && token.liquidityUsd > 0 ? token.liquidityUsd : null;
+    const volume = typeof token.volume24hUsd === "number" && token.volume24hUsd > 0 ? token.volume24hUsd : null;
+    const marketDescriptor = [
+      rank !== null ? `CoinGecko rank #${rank}` : null,
+      marketCap !== null ? `${formatUsd(marketCap)} market cap` : null,
+      liquidity !== null ? `${formatUsd(liquidity)} on-chain liquidity` : null,
+      volume !== null ? `${formatUsd(volume)} 24h volume` : null
+    ].filter((part) => Boolean(part)).join(" \xB7 ");
+    const hasLiveMarket = rank !== null || marketCap !== null || liquidity !== null || volume !== null;
+    if (hasLiveMarket) {
       projected.push(makeFact(
         evidence,
         "traction",
-        `${formatUsd(token.volume24hUsd)} 24h trading volume`,
+        marketDescriptor,
         [tokenSource],
         `captured ${token.capturedAt.slice(0, 10)}`
+      ));
+    }
+    const establishedProtocol = rank !== null && rank <= 3e3 || marketCap !== null && marketCap >= 1e7;
+    if (establishedProtocol) {
+      const providerLabel = (token.providers ?? ["coingecko"]).join(" + ");
+      projected.push(makeFact(
+        evidence,
+        "product",
+        `${token.name} operates a live on-chain protocol; its canonical token ${token.symbol.toUpperCase()} is established and actively traded (${marketDescriptor})`,
+        [source({
+          url: token.sourceUrl,
+          title: "On-chain market liveness",
+          excerpt: `${token.name} (${token.symbol}) is a verified canonical token corroborated across ${providerLabel} with ${marketDescriptor}. An established, liquid, market-listed protocol token is direct evidence of a live operating product.`,
+          capturedAt: token.capturedAt,
+          provider: providerLabel,
+          sourceClass: "regulatory_or_onchain"
+        })]
       ));
     }
   }

@@ -128,7 +128,8 @@ describe("projectProviderBackedBasicFacts", () => {
       ["founder", "Meow"],
       ["official_token", "$JUP"],
       ["network", "Solana"],
-      ["traction", "$18M 24h trading volume"],
+      ["traction", "CoinGecko rank #90 · $18M 24h volume"],
+      ["product", "Jupiter operates a live on-chain protocol; its canonical token JUP is established and actively traded (CoinGecko rank #90 · $18M 24h volume)"],
       ["repository", "github.com/jup-ag"],
     ]);
     expect(evidence.basicFacts?.every((fact) =>
@@ -488,10 +489,70 @@ describe("projectProviderBackedBasicFacts", () => {
 
     projectProviderBackedBasicFacts(evidence);
 
-    expect(evidence.basicFacts).toHaveLength(2);
+    // official_token (merged) + network + market-backed traction + product: an
+    // established top-ranked canonical token contributes liveness facts too.
+    expect(evidence.basicFacts).toHaveLength(4);
     const tokenFacts = evidence.basicFacts?.filter((fact) => fact.predicate === "official_token") ?? [];
     expect(tokenFacts).toHaveLength(1);
     expect(tokenFacts[0]).toMatchObject({ value: "JUP", normalizedValue: "jup", status: "verified" });
     expect(tokenFacts[0].sources).toHaveLength(2);
+  });
+
+  it("completes product and traction from an established token even when no volume is present (Cloudflare-blocked site)", () => {
+    const evidence = emptyEvidence("@aave");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_domain",
+      name: "Aave",
+      symbol: "AAVE",
+      coingeckoId: "aave",
+      rank: 52,
+      address: "0x7Fc66500c84A76Ad7e9c93437bFc5Ac33E2DDaE9",
+      chain: "Ethereum",
+      sourceUrl: "https://www.coingecko.com/en/coins/aave",
+      capturedAt: "2026-07-13T20:00:00.000Z",
+      providers: ["coingecko", "dexscreener", "geckoterminal"],
+      marketCapUsd: 1_452_871_023,
+      liquidityUsd: 13_159_336,
+      // no volume24hUsd, mirroring a partial market snapshot
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const byPredicate = new Map((evidence.basicFacts ?? []).map((fact) => [fact.predicate, fact]));
+    // Market/on-chain evidence completes traction-liveness and product-substance
+    // without any homepage fetch — the fix for "AAVE can never complete".
+    expect(byPredicate.get("traction")?.value).toBe("CoinGecko rank #52 · $1.5B market cap · $13M on-chain liquidity");
+    expect(byPredicate.get("product")?.value).toContain("Aave operates a live on-chain protocol");
+    expect(byPredicate.get("product")?.artifact_verified).toBe(true);
+    expect(byPredicate.get("product")?.sources[0].sourceClass).toBe("regulatory_or_onchain");
+  });
+
+  it("does not grant product substance to a thin, unranked, low-cap token", () => {
+    const evidence = emptyEvidence("@thinproject");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Thin Project",
+      symbol: "THIN",
+      coingeckoId: "thin-project",
+      rank: null,
+      address: "0xthin",
+      chain: "Ethereum",
+      sourceUrl: "https://www.coingecko.com/en/coins/thin-project",
+      capturedAt: "2026-07-13T20:00:00.000Z",
+      providers: ["dexscreener"],
+      liquidityUsd: 8_000,
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const predicates = new Set((evidence.basicFacts ?? []).map((fact) => fact.predicate));
+    // Thin liquidity still shows traction (it does trade), but an unranked,
+    // sub-$10M token must NOT inherit product substance for free.
+    expect(predicates.has("traction")).toBe(true);
+    expect(predicates.has("product")).toBe(false);
   });
 });
