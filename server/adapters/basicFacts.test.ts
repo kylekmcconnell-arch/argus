@@ -11,6 +11,7 @@ import {
   discoverGrokBasicFactLeadsDetailed,
   parseBasicFactLeads,
   verifyBasicFactLead,
+  overlappingNetworkAnswers,
 } from "./basicFacts";
 
 const NOW = "2026-07-12T12:00:00.000Z";
@@ -3421,6 +3422,22 @@ WBTC is an ERC-20 wrapped token issued by BitGo. Coinbase customers can trade WB
     expect(tokens.every((fact) => fact.status === "conflicted")).toBe(true);
     expect(evidence.basicFactQuestionLedger?.find((entry) => entry.questionId === "project.official_token"))
       .toEqual(expect.objectContaining({ status: "unanswered", answerRefs: [] }));
+  });
+
+  it("treats overlapping network lists as corroboration, not conflict", () => {
+    expect(overlappingNetworkAnswers([
+      "Ethereum, Polygon, Avalanche, BNB Chain, Fantom",
+      "22 chains incl. Ethereum, Plasma, Base, Arbitrum",
+    ])).toBe(true);
+    expect(overlappingNetworkAnswers([
+      "Solana, Ethereum",
+      "5 chains incl. Solana, Base, Arbitrum",
+    ])).toBe(true);
+  });
+
+  it("keeps genuinely disjoint network answers conflicted", () => {
+    expect(overlappingNetworkAnswers(["Solana", "Ethereum"])).toBe(false);
+    expect(overlappingNetworkAnswers(["", "Ethereum"])).toBe(false);
   });
 
   it.each([
