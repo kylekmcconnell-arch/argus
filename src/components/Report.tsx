@@ -1262,6 +1262,25 @@ function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
   });
 }
 
+// What this run actually cost, from the provider ledger frozen with the
+// report. Keyless or pre-ledger scans have no ledger and render nothing.
+// Paid providers only: the ledger also records every free call ($0 lines
+// for caches and keyless sources), which would inflate "across N providers"
+// into a claim the money trail cannot support.
+function RunCostLine({ cost }: { cost: Dossier["cost"] }) {
+  if (!cost || !(cost.usd > 0)) return null;
+  const providers = new Set((cost.calls ?? []).filter((c) => c.usd > 0).map((c) => c.provider)).size;
+  const scope = providers > 1 ? ` across ${providers} providers` : "";
+  const claudeShare = cost.claudeUsd > 0 && cost.claudeUsd < cost.usd
+    ? ` Claude research and analysis was $${cost.claudeUsd.toFixed(2)} of it.`
+    : "";
+  return (
+    <p className="mt-3 border-t border-line pt-3 text-[12px] text-ink-faint">
+      This investigation cost about ${cost.usd.toFixed(2)}{scope}.{claudeShare}
+    </p>
+  );
+}
+
 export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onOpenBrief }: { dossier: Dossier; onReset: () => void; onAudit?: (q: string) => void; onRescan?: () => void; onOpenProject?: (name: string, domain?: string, panelCostToken?: string) => void; onOpenBrief?: () => void }) {
   const { role } = useArgusAuth();
   const f = dossier;
@@ -3306,6 +3325,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             Identity is rewarded, not gated: pseudonymity is neutral, disclosure earns a bonus, and only
             impersonation blocks a verdict. API-only acquisition, evidence-disciplined, reproducible.
           </p>
+          <RunCostLine cost={dossier.cost} />
         </div>
       </div>
     </div>

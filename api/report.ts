@@ -651,6 +651,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         res.status(200).json({ available: true, ...exact });
         return;
       }
+      if (req.query.spend != null) {
+        // Spend truth lives in the append-only usage event stream: it carries
+        // the run ledger recorded at persist time AND follow-up panel spend,
+        // each stamped when the money was actually spent. report_versions
+        // supplies the per-day run count, and every persisted version counts,
+        // including superseded ones — the current-report list hides those,
+        // which understates what a day cost. Paid lines only (usd > 0): the
+        // ledger also records free calls, which are noise for spend totals.
+        const since = new Date(Date.now() - 30 * 86_400_000).toISOString();
+        const sinceFilter = `created_at=gte.${encodeURIComponent(since)}`;
+        const [eventsResponse, runsResponse] = await Promise.all([
+          fetch(
+            `${credentials.url}/rest/v1/provider_usage_events?select=created_at,provider,usd&${orgFilter}&usd=gt.0&${sinceFilter}&order=created_at.desc&limit=1000`,
+            { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+          ),
+          fetch(
+            `${credentials.url}/rest/v1/report_versions?select=created_at&${orgFilter}&${sinceFilter}&order=created_at.desc&limit=1000`,
+            { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+          ),
+        ]);
+        if (!eventsResponse.ok) throw new Error(`provider usage read failed (${eventsResponse.status})`);
+        if (!runsResponse.ok) throw new Error(`report spend read failed (${runsResponse.status})`);
+        const rawEvents = await eventsResponse.json() as unknown;
+        const rawRuns = await runsResponse.json() as unknown;
+        const spent = (value: unknown): number => {
+          const n = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+          return Number.isFinite(n) && n > 0 ? n : 0;
+        };
+        const events = (Array.isArray(rawEvents) ? rawEvents.map(asRecord) : [])
+          .filter((row) => typeof row.created_at === "string" && row.created_at)
+          .map((row) => {
+            const usd = spent(row.usd);
+            return {
+              createdAt: row.created_at as string,
+              usd,
+              claudeUsd: row.provider === "claude" ? usd : 0,
+            };
+          });
+        const runs = (Array.isArray(rawRuns) ? rawRuns.map(asRecord) : [])
+          .map((row) => (typeof row.created_at === "string" ? row.created_at : ""))
+          .filter(Boolean);
+        res.status(200).json({
+          available: true,
+          since,
+          truncated: events.length >= 1000 || runs.length >= 1000,
+          events,
+          runs,
+        });
+        return;
+      }
       if (req.query.resolve != null) {
         const input = typeof req.query.resolve === "string" ? req.query.resolve.trim() : "";
         if (!input || input.length > 500) {

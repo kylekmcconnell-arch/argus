@@ -351,6 +351,56 @@ describe("report case lifecycle API", () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain("select=id,case_id,version,");
   });
 
+  it("aggregates spend from the usage event stream plus run counts, org-scoped to the last 30 days", async () => {
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/rest/v1/provider_usage_events")) {
+        return jsonResponse([
+          { created_at: "2026-07-15T07:08:57.926Z", provider: "claude", usd: 0.65 },
+          { created_at: "2026-07-15T07:10:00.000Z", provider: "grok", usd: 0.01 },
+          { created_at: "2026-07-14T20:00:00.000Z", provider: "claude", usd: "0.25" },
+          { created_at: null, provider: "claude", usd: 5 },
+        ]);
+      }
+      if (url.includes("/rest/v1/report_versions")) {
+        return jsonResponse([
+          { created_at: "2026-07-15T07:08:57.926Z" },
+          { created_at: "2026-07-14T20:00:00.000Z" },
+          { created_at: 17 },
+        ]);
+      }
+      throw new Error(`unexpected fetch ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("GET", { query: { spend: "1" } }), res);
+
+    expect(captured.statusCode).toBe(200);
+    expect(captured.body).toMatchObject({
+      available: true,
+      truncated: false,
+      events: [
+        { createdAt: "2026-07-15T07:08:57.926Z", usd: 0.65, claudeUsd: 0.65 },
+        { createdAt: "2026-07-15T07:10:00.000Z", usd: 0.01, claudeUsd: 0 },
+        { createdAt: "2026-07-14T20:00:00.000Z", usd: 0.25, claudeUsd: 0.25 },
+      ],
+      runs: ["2026-07-15T07:08:57.926Z", "2026-07-14T20:00:00.000Z"],
+    });
+    const urls = fetchMock.mock.calls.map((call) => String(call[0]));
+    const eventsUrl = urls.find((u) => u.includes("provider_usage_events")) ?? "";
+    expect(eventsUrl).toContain("select=created_at,provider,usd");
+    expect(eventsUrl).toContain("organization_id=eq.00000000-0000-4000-8000-000000000001");
+    expect(eventsUrl).toContain("usd=gt.0");
+    expect(eventsUrl).toContain("created_at=gte.");
+    expect(eventsUrl).toContain("limit=1000");
+    const runsUrl = urls.find((u) => u.includes("report_versions")) ?? "";
+    expect(runsUrl).toContain("select=created_at&");
+    expect(runsUrl).toContain("organization_id=eq.00000000-0000-4000-8000-000000000001");
+    expect(runsUrl).toContain("created_at=gte.");
+    expect(runsUrl).toContain("limit=1000");
+  });
+
   it("opens an exact immutable report version for evidence review", async () => {
     const caseId = "00000000-0000-4000-8000-000000000101";
     const versionId = "00000000-0000-4000-8000-000000000201";

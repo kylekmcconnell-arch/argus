@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { auditReadinessLabel, getLog, clearLog, hasCoverageGap, logStats, mergedLog, presentedAuditVerdict, applyRoles, type LogEntry } from "../lib/auditlog";
 import { verdictMeta } from "../lib/verdict";
 import { PendingEdits } from "./PendingEdits";
@@ -61,11 +61,73 @@ function verdictColor(e: LogEntry): string {
   return verdictMeta(presentedAuditVerdict(e) ?? "INCOMPLETE").color;
 }
 
+interface SpendEvent { createdAt: string; usd: number; claudeUsd: number }
+interface SpendData { truncated: boolean; runs: string[]; events: SpendEvent[] }
+interface SpendDay { day: string; label: string; runs: number; usd: number; claudeUsd: number }
+
+// Bucket recorded usage by the analyst's local calendar day, newest first.
+// Dollars come from the usage event stream (scans plus follow-up panels,
+// stamped when the money was spent); run counts come from persisted report
+// versions, superseded ones included. When either feed hit the server row
+// cap the oldest returned day may be missing rows, so it is dropped rather
+// than shown as a partial total.
+export function buildSpendDays(data: SpendData): SpendDay[] {
+  const days = new Map<string, SpendDay>();
+  const bucketFor = (at: Date): SpendDay => {
+    const day = `${at.getFullYear()}-${String(at.getMonth() + 1).padStart(2, "0")}-${String(at.getDate()).padStart(2, "0")}`;
+    const existing = days.get(day);
+    if (existing) return existing;
+    const fresh: SpendDay = {
+      day,
+      label: at.toLocaleDateString(undefined, { month: "short", day: "numeric" }),
+      runs: 0,
+      usd: 0,
+      claudeUsd: 0,
+    };
+    days.set(day, fresh);
+    return fresh;
+  };
+  for (const run of data.runs) {
+    const at = new Date(run);
+    if (Number.isNaN(at.getTime())) continue;
+    bucketFor(at).runs += 1;
+  }
+  for (const event of data.events) {
+    const at = new Date(event.createdAt);
+    if (Number.isNaN(at.getTime())) continue;
+    const bucket = bucketFor(at);
+    bucket.usd += event.usd;
+    bucket.claudeUsd += event.claudeUsd;
+  }
+  const ordered = [...days.values()].sort((a, b) => (a.day < b.day ? 1 : -1));
+  if (data.truncated && ordered.length > 1) ordered.pop();
+  return ordered;
+}
+
 export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
   const [log, setLog] = useState<LogEntry[]>(() => getLog());
   const [filter, setFilter] = useState<"all" | "site" | "token" | "person" | "gaps">("all");
   const [recat, setRecat] = useState<"idle" | "running" | string>("idle");
+  const [spend, setSpend] = useState<SpendData | null>(null);
   const stats = logStats(log);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const r = await fetch("/api/report?spend", { signal: AbortSignal.timeout(9000) });
+        if (!r.ok) return;
+        const d = await r.json() as { available?: boolean; truncated?: boolean; runs?: string[]; events?: SpendEvent[] };
+        if (!cancelled && d?.available !== false && Array.isArray(d?.runs) && Array.isArray(d?.events)) {
+          setSpend({ truncated: d.truncated === true, runs: d.runs, events: d.events });
+        }
+      } catch {
+        /* spend panel is optional; the page works without it */
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+  const spendDays = spend ? buildSpendDays(spend).slice(0, 14) : [];
 
   const onRecategorize = async () => {
     setRecat("running");
@@ -122,6 +184,43 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
         <Stat label="People / sites" value={stats.byKind.person + stats.byKind.site} />
         <Stat label="Coverage gaps" value={stats.gaps} tone="var(--color-unverifiable)" />
       </div>
+
+      {/* provider spend — what each day of scanning actually cost */}
+      {spendDays.length > 0 && (
+        <div className="panel mt-5 p-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <div className="text-[12.5px] text-ink-dim">Provider spend by day</div>
+            <div className="mono text-[11px] text-ink-faint">
+              ${spendDays.reduce((a, d) => a + d.usd, 0).toFixed(2)} over the last {spendDays.length === 1 ? "active day" : `${spendDays.length} active days`}
+            </div>
+          </div>
+          <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
+            Recorded provider usage from the past 30 days: every saved scan counts, including versions later
+            replaced by a rescan, plus follow-up intel panels opened on reports. Runs that failed before saving
+            anything are not recorded here.
+          </p>
+          <table className="mt-3 w-full text-[12px]">
+            <thead>
+              <tr className="text-left text-[11px] text-ink-faint">
+                <th className="py-1 pr-3 font-normal">Day</th>
+                <th className="py-1 pr-3 text-right font-normal">Runs</th>
+                <th className="py-1 pr-3 text-right font-normal">Claude</th>
+                <th className="py-1 text-right font-normal">Total</th>
+              </tr>
+            </thead>
+            <tbody className="tabular-nums">
+              {spendDays.map((d) => (
+                <tr key={d.day} className="border-t border-line text-ink-dim">
+                  <td className="py-1.5 pr-3">{d.label}</td>
+                  <td className="py-1.5 pr-3 text-right">{d.runs}</td>
+                  <td className="py-1.5 pr-3 text-right">${d.claudeUsd.toFixed(2)}</td>
+                  <td className="py-1.5 text-right text-ink">${d.usd.toFixed(2)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       {/* filters */}
       <div className="mt-5 flex flex-wrap gap-1.5">
