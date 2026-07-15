@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SubjectClass } from "../src/engine";
+import { SubjectClass, VentureOutcome } from "../src/engine";
 import { emptyEvidence } from "../src/data/evidence";
 import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 
@@ -158,5 +158,71 @@ describe("projectProviderBackedBasicFacts: independent audits (corroboration hop
     const lead = evidence.basicFactLeads?.find((candidate) => candidate.predicate === "audit");
     expect(lead?.value).toContain("Trail of Bits");
     expect(lead?.evidence_origin).toBe("deterministic_bootstrap");
+  });
+});
+
+describe("corroborateVenturesAgainstFirstPartySources", () => {
+  const ventureRow = (name: string) => ({
+    project_name: name,
+    role: "product",
+    period: "2022-present",
+    outcome: VentureOutcome.ACTIVE,
+    evidence_origin: "model_lead" as const,
+    artifact_verified: false,
+  });
+
+  it("verifies a claim-extracted venture when a first-party source names it", () => {
+    const evidence = emptyEvidence("@aavetest");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.profile = { ...evidence.profile, display_name: "Aave" };
+    evidence.ventures = [ventureRow("GHO"), ventureRow("Aave Horizon"), ventureRow("Nonexistent Thing")];
+    evidence.basicFacts = [{
+      predicate: "product",
+      value: "Aave App, Aave Kit, Aave Protocol",
+      status: "verified",
+      artifact_verified: true,
+      sources: [{
+        url: "https://aave.com/",
+        sourceClass: "official_subject",
+        relation: "supports",
+        excerpt: "Aave offers the GHO stablecoin and Aave Horizon for institutions.",
+        contentHash: "a".repeat(64),
+        capturedAt: "2026-07-15T00:00:00.000Z",
+        provider: "public-web",
+        artifactVerified: true,
+      }],
+    } as never];
+    projectProviderBackedBasicFacts(evidence);
+    const byName = Object.fromEntries(evidence.ventures.map((venture) => [venture.project_name, venture]));
+    expect(byName.GHO.artifact_verified).toBe(true);
+    expect(byName.GHO.evidence_url).toContain("aave.com");
+    expect(byName["Aave Horizon"].artifact_verified).toBe(true);
+    expect(byName["Nonexistent Thing"].artifact_verified).toBe(false);
+    // Discovery provenance is preserved: verification never rewrites origin.
+    expect(byName.GHO.evidence_origin).toBe("model_lead");
+  });
+
+  it("press or other-public mentions never corroborate a venture claim", () => {
+    const evidence = emptyEvidence("@aavetest");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.ventures = [ventureRow("GHO")];
+    evidence.basicFacts = [{
+      predicate: "product",
+      value: "GHO coverage",
+      status: "verified",
+      artifact_verified: true,
+      sources: [{
+        url: "https://news.example/gho",
+        sourceClass: "independent_press",
+        relation: "supports",
+        excerpt: "The GHO stablecoin grew this quarter.",
+        contentHash: "b".repeat(64),
+        capturedAt: "2026-07-15T00:00:00.000Z",
+        provider: "google-news",
+        artifactVerified: true,
+      }],
+    } as never];
+    projectProviderBackedBasicFacts(evidence);
+    expect(evidence.ventures[0].artifact_verified).toBe(false);
   });
 });

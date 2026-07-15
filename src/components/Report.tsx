@@ -3045,7 +3045,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <Clamp itemCount={evidence.ventures.length} label="ventures">
                 <Card className="divide-y divide-line/60">
                   {evidence.ventures.map((v, i) => {
-                    const sourceBacked = v.evidence_origin !== "model_lead" && v.artifact_verified === true;
+                    // Discovered-by-model, verified-by-fetch is the standard leads pattern:
+                    // a first-party source naming the venture makes it source-backed.
+                    const sourceBacked = v.artifact_verified === true;
                     const isLead = v.evidence_origin === "model_lead" || v.artifact_verified === false;
                     const evidenceState = sourceBacked ? "source-backed" : isLead ? "unverified lead" : "legacy curated";
                     return (

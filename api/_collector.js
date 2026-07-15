@@ -15312,6 +15312,28 @@ function reconcileQuestionLedger(evidence, facts) {
     entry.status = "answered";
   }
 }
+var escapeVentureNeedle = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function corroborateVenturesAgainstFirstPartySources(evidence) {
+  const unverified = (evidence.ventures ?? []).filter((venture) => venture.artifact_verified !== true && venture.project_name.trim().length >= 3);
+  if (!unverified.length) return;
+  const firstPartyCorpus = [];
+  for (const fact of evidence.basicFacts ?? []) {
+    if (fact.status !== "verified" && fact.status !== "corroborated") continue;
+    for (const source2 of fact.sources ?? []) {
+      if (source2.sourceClass !== "official_subject" || source2.relation !== "supports") continue;
+      firstPartyCorpus.push({ text: `${fact.value} ${source2.excerpt ?? ""}`, url: source2.url });
+    }
+  }
+  if (!firstPartyCorpus.length) return;
+  for (const venture of unverified) {
+    const needle = new RegExp(`\\b${escapeVentureNeedle(venture.project_name.trim())}\\b`, "i");
+    const match = firstPartyCorpus.find((entry) => needle.test(entry.text));
+    if (match) {
+      venture.artifact_verified = true;
+      if (!venture.evidence_url) venture.evidence_url = match.url;
+    }
+  }
+}
 function formatUsd(value) {
   const absolute = Math.abs(value);
   const unit = absolute >= 1e12 ? [1e12, "T"] : absolute >= 1e9 ? [1e9, "B"] : absolute >= 1e6 ? [1e6, "M"] : absolute >= 1e3 ? [1e3, "K"] : null;
@@ -15636,6 +15658,7 @@ function projectProviderBackedBasicFacts(evidence) {
   }
   const materialized = projected.map((fact) => mergeProjectedFact(evidence, fact));
   reconcileQuestionLedger(evidence, materialized);
+  corroborateVenturesAgainstFirstPartySources(evidence);
 }
 
 // server/adapters/defiLlama.ts

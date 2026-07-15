@@ -355,6 +355,41 @@ function reconcileQuestionLedger(evidence: CollectedEvidence, facts: readonly Ba
   }
 }
 
+const escapeVentureNeedle = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/**
+ * Leads-until-fetched, finished for ventures: a claim-extracted venture row
+ * ("GHO", "Aave Labs") verifies when a FIRST-PARTY fetched source from the
+ * same run names it, exactly the bar every basic fact meets. The row's
+ * evidence_origin stays model_lead, so founder scoring rungs that require a
+ * structured verified venture row are unaffected; this upgrades the record
+ * and its display, not any score input. Press mentions deliberately do not
+ * qualify: the subject's own site vouching for its own product is the
+ * unfakeable claim here.
+ */
+export function corroborateVenturesAgainstFirstPartySources(evidence: CollectedEvidence): void {
+  const unverified = (evidence.ventures ?? []).filter((venture) =>
+    venture.artifact_verified !== true && venture.project_name.trim().length >= 3);
+  if (!unverified.length) return;
+  const firstPartyCorpus: Array<{ text: string; url: string }> = [];
+  for (const fact of evidence.basicFacts ?? []) {
+    if (fact.status !== "verified" && fact.status !== "corroborated") continue;
+    for (const source of fact.sources ?? []) {
+      if (source.sourceClass !== "official_subject" || source.relation !== "supports") continue;
+      firstPartyCorpus.push({ text: `${fact.value} ${source.excerpt ?? ""}`, url: source.url });
+    }
+  }
+  if (!firstPartyCorpus.length) return;
+  for (const venture of unverified) {
+    const needle = new RegExp(`\\b${escapeVentureNeedle(venture.project_name.trim())}\\b`, "i");
+    const match = firstPartyCorpus.find((entry) => needle.test(entry.text));
+    if (match) {
+      venture.artifact_verified = true;
+      if (!venture.evidence_url) venture.evidence_url = match.url;
+    }
+  }
+}
+
 // Same 3-significant-digit contract as the report canvas (src/lib/format.ts)
 // so newly frozen fact text matches the UI. Forward-only: already-frozen
 // values are never rewritten client-side.
@@ -799,4 +834,5 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
 
   const materialized = projected.map((fact) => mergeProjectedFact(evidence, fact));
   reconcileQuestionLedger(evidence, materialized);
+  corroborateVenturesAgainstFirstPartySources(evidence);
 }
