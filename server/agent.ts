@@ -3349,10 +3349,7 @@ export async function analyzeSubject(
     `repeat an alias or place it on both sides. gaps contains zero to six short ` +
     `descriptions of material unresolved evidence. Write each gap as a plain question ` +
     `an investor would ask, one sentence, without internal vocabulary: never write ` +
-    `packet, provider, coverage, collected, artifact, telemetry, or frozen. ` +
-    `Within a solid or exceptional band, an item already recorded as a gap must not ` +
-    `also push the score toward the band minimum: the band floor prices the gap once. ` +
-    `Score conservatively when evidence is thin. providerRuns operational ` +
+    `packet, provider, coverage, collected, artifact, telemetry, or frozen. providerRuns operational ` +
     `telemetry is excluded from the scoring packet and must never be inferred or cited.\n\n` +
     `TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection ` +
     `findings bound to an exact complete server-collected report may influence scoring. ` +
