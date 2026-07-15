@@ -112,3 +112,51 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     expect(evidence.basicFacts?.some((fact) => fact.predicate === "funding")).toBeFalsy();
   });
 });
+
+describe("projectProviderBackedBasicFacts: independent audits (corroboration hop)", () => {
+  const projectEvidence = () => {
+    const evidence = emptyEvidence("@aavetest");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.profile = { ...evidence.profile, display_name: "Aave" };
+    return evidence;
+  };
+
+  it("mints verified audit facts only for auditor-domain corroborated entries", () => {
+    const evidence = projectEvidence();
+    evidence.securityAudits = {
+      securityPageUrl: "https://aave.com/security",
+      selfAttested: ["Trail of Bits", "OpenZeppelin", "CertiK"],
+      corroborated: [
+        { auditor: "Trail of Bits", auditorUrl: "https://www.trailofbits.com/publications/aave-v3", excerpt: "Our security review of the Aave protocol v3." },
+      ],
+      capturedAt: "2026-07-14T00:00:00.000Z",
+    };
+    projectProviderBackedBasicFacts(evidence);
+    const auditFacts = evidence.basicFacts?.filter((fact) => fact.predicate === "audit") ?? [];
+    expect(auditFacts).toHaveLength(1);
+    expect(auditFacts[0].value).toContain("Trail of Bits");
+    expect(auditFacts[0].status).toBe("verified");
+    expect(auditFacts[0].sources[0]).toMatchObject({ sourceClass: "official_counterparty" });
+    expect(auditFacts[0].sources[0].url).toContain("trailofbits.com");
+    const lead = evidence.basicFactLeads?.find((candidate) => candidate.predicate === "audit");
+    expect(lead).toBeTruthy();
+    expect(lead?.value).toContain("OpenZeppelin");
+    expect(lead?.value).not.toContain("Trail of Bits");
+    expect(lead?.artifact_verified).toBe(false);
+  });
+
+  it("a purely self-attested security page mints NO audit fact, only a lead", () => {
+    const evidence = projectEvidence();
+    evidence.securityAudits = {
+      securityPageUrl: "https://rugcoin.example/security",
+      selfAttested: ["Trail of Bits"],
+      corroborated: [],
+      capturedAt: "2026-07-14T00:00:00.000Z",
+    };
+    projectProviderBackedBasicFacts(evidence);
+    expect(evidence.basicFacts?.some((fact) => fact.predicate === "audit")).toBe(false);
+    const lead = evidence.basicFactLeads?.find((candidate) => candidate.predicate === "audit");
+    expect(lead?.value).toContain("Trail of Bits");
+    expect(lead?.evidence_origin).toBe("deterministic_bootstrap");
+  });
+});

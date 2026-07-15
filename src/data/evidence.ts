@@ -240,6 +240,20 @@ export interface ProtocolFeesSnapshot {
 }
 
 /**
+ * Frozen independent-audit evidence. `corroborated` entries were confirmed on
+ * the auditor's OWN domain (a page there names the subject) and may mint
+ * verified audit facts; `selfAttested` names come only from the subject's own
+ * security page and stay research leads, never scoring evidence, because any
+ * scam can publish an auditor list on its own site.
+ */
+export interface SecurityAuditsSnapshot {
+  securityPageUrl: string | null;
+  selfAttested: string[];
+  corroborated: Array<{ auditor: string; auditorUrl: string; excerpt: string }>;
+  capturedAt: string;
+}
+
+/**
  * Frozen keyed private-market enrichment (Monid/Akta). Mirrors the adapter's
  * `CompanyEnrichment` value (see server/adapters/monid.ts) plus the capture
  * timestamp. Used to fill funding, leadership, and firmographic gaps that free
@@ -499,7 +513,7 @@ export interface BasicFact {
   evidence_origin: "deterministic";
   artifact_verified: true;
   provider: "public-web";
-  discoveryProvider?: "claude-web-search" | "grok" | "argus-identity-bootstrap";
+  discoveryProvider?: "claude-web-search" | "grok" | "argus-identity-bootstrap" | "security-audits";
 }
 
 /** Unverified answer and candidate source. It is never scoreable. */
@@ -521,7 +535,7 @@ export interface BasicFactLead {
   /** Whether a model proposed the row or ARGUS derived a bounded candidate. */
   evidence_origin: "model_lead" | "deterministic_bootstrap";
   artifact_verified: false;
-  provider: "claude-web-search" | "grok" | "argus-identity-bootstrap";
+  provider: "claude-web-search" | "grok" | "argus-identity-bootstrap" | "security-audits";
 }
 
 export interface BasicFactQuestionLedgerEntry {
@@ -616,6 +630,8 @@ export interface CollectedEvidence {
   protocolTvl?: ProtocolTvlSnapshot;
   /** Frozen protocol fee totals (DeFiLlama). A second dated usage metric for P5. */
   protocolFees?: ProtocolFeesSnapshot;
+  /** Frozen independent-audit evidence (auditor-domain corroborated vs self-attested). */
+  securityAudits?: SecurityAuditsSnapshot;
   /** Frozen keyed private-market enrichment (Monid/Akta): funding, leadership, firmographic. */
   companyEnrichment?: CompanyEnrichmentSnapshot;
   /** Required foundational answers backed by independently fetched pages. */

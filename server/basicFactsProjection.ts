@@ -672,6 +672,58 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     }
   }
 
+  // Independent audits → P2/P3/P6. ONLY auditor-domain-corroborated entries
+  // mint verified facts (the auditor's own site names the subject; a scam
+  // cannot fake that). Self-attested names from the subject's own security
+  // page stay research leads: visible for transparency, excluded from every
+  // scoring gate and question completion.
+  const auditsSnapshot = isProject ? evidence.securityAudits : undefined;
+  if (auditsSnapshot) {
+    for (const entry of auditsSnapshot.corroborated.slice(0, 4)) {
+      projected.push(makeFact(
+        evidence,
+        "audit",
+        `Security engagement with ${entry.auditor}`,
+        [
+          source({
+            url: entry.auditorUrl,
+            title: `${entry.auditor} publication naming the subject`,
+            excerpt: entry.excerpt,
+            capturedAt: auditsSnapshot.capturedAt,
+            provider: "security-audits",
+            sourceClass: "official_counterparty",
+          }),
+          ...(auditsSnapshot.securityPageUrl ? [source({
+            url: auditsSnapshot.securityPageUrl,
+            title: "Project security page naming the auditor",
+            excerpt: `The project's security page names ${entry.auditor}.`,
+            capturedAt: auditsSnapshot.capturedAt,
+            provider: "security-audits",
+            sourceClass: "official_subject",
+          })] : []),
+        ],
+        "confirmed on the auditor's own site",
+      ));
+    }
+    const corroboratedNames = new Set(auditsSnapshot.corroborated.map((entry) => entry.auditor));
+    const unconfirmed = auditsSnapshot.selfAttested.filter((name) => !corroboratedNames.has(name));
+    if (unconfirmed.length && auditsSnapshot.securityPageUrl) {
+      const leads = evidence.basicFactLeads ?? (evidence.basicFactLeads = []);
+      leads.push({
+        subject: evidence.profile.display_name || evidence.profile.handle,
+        predicate: "audit",
+        value: `Security page names ${unconfirmed.slice(0, 6).join(", ")}${unconfirmed.length > 6 ? ` and ${unconfirmed.length - 6} more` : ""}`,
+        questionId: "project.audit",
+        excerpt: "Named on the project's own security page; not yet confirmed on the auditor's own site.",
+        sourceUrl: auditsSnapshot.securityPageUrl,
+        sourceTitle: "Project security page (self-attested)",
+        evidence_origin: "deterministic_bootstrap",
+        artifact_verified: false,
+        provider: "security-audits",
+      });
+    }
+  }
+
   // Protocol fees → a second dated usage metric (P5). Fees are on-chain
   // derived and self-limiting to fake: generating fee volume costs the fees.
   const feesSnapshot = isProject ? evidence.protocolFees : undefined;

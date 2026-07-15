@@ -31,6 +31,9 @@ type ProtocolDocument = {
   raises?: unknown;
   governanceID?: unknown;
   hacks?: unknown;
+  audits?: unknown;
+  audit_links?: unknown;
+  otherProtocols?: unknown;
 };
 
 type FetchResult =
@@ -181,6 +184,69 @@ export async function collectProtocolTvl(
       sourceUrl: `https://defillama.com/protocol/${slug}`,
     },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Audit links (candidate URLs for the security-audit collector)
+// ---------------------------------------------------------------------------
+
+export interface ProtocolAuditLinks {
+  slug: string;
+  /** DeFiLlama's listed audit count, when present. Project-submitted listing metadata: a corroborating lead, never verification. */
+  auditCount: number | null;
+  /** Listed audit/security page URLs. Candidates for the first-party fetch, not evidence by themselves. */
+  auditLinks: string[];
+}
+
+export type AuditLinksOutcome =
+  | { available: true; value: ProtocolAuditLinks }
+  | { available: false; note: string };
+
+const parseAuditFields = (data: ProtocolDocument): { count: number | null; links: string[] } => ({
+  count: typeof data.audits === "string" && /^\d+$/.test(data.audits.trim())
+    ? Number(data.audits.trim())
+    : typeof data.audits === "number" && data.audits >= 0 ? data.audits : null,
+  links: strArray(data.audit_links).filter((link) => /^https?:\/\//i.test(link)),
+});
+
+/**
+ * Resolve DeFiLlama-listed audit links for a protocol. Parent documents often
+ * carry audits:null while version children (aave-v3) hold the links, so when
+ * the parent is empty the first few otherProtocols children are checked (one
+ * free GET each, capped). Never throws.
+ */
+export async function collectProtocolAuditLinks(
+  projectName: string,
+  options: { fetcher?: typeof fetch; slug?: string; maxChildren?: number } = {},
+): Promise<AuditLinksOutcome> {
+  const fetcher = options.fetcher ?? fetch;
+  const slug = options.slug ?? defiLlamaSlug(projectName);
+  if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
+  const parent = await fetchProtocol(slug, fetcher);
+  if (!parent.ok) {
+    recordCall("defillama", "audit-links", 0, `${slug} · ${parent.notFound ? "not_found" : "error"}`, parent.notFound ? "succeeded" : "failed");
+    return { available: false, note: parent.note };
+  }
+  const fromParent = parseAuditFields(parent.data);
+  if (fromParent.links.length) {
+    recordCall("defillama", "audit-links", 0, `${slug} · ${fromParent.links.length}_links`, "succeeded");
+    return { available: true, value: { slug, auditCount: fromParent.count, auditLinks: fromParent.links } };
+  }
+  const children = strArray(parent.data.otherProtocols)
+    .map((name) => defiLlamaSlug(name))
+    .filter((child) => child && child !== slug)
+    .slice(0, options.maxChildren ?? 3);
+  for (const child of children) {
+    const doc = await fetchProtocol(child, fetcher);
+    if (!doc.ok) continue;
+    const fields = parseAuditFields(doc.data);
+    if (fields.links.length) {
+      recordCall("defillama", "audit-links", 0, `${slug}->${child} · ${fields.links.length}_links`, "succeeded");
+      return { available: true, value: { slug: child, auditCount: fields.count, auditLinks: fields.links } };
+    }
+  }
+  recordCall("defillama", "audit-links", 0, `${slug} · none`, "succeeded");
+  return { available: false, note: "No audit links listed on DeFiLlama for this protocol." };
 }
 
 // ---------------------------------------------------------------------------

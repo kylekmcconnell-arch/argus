@@ -61,7 +61,8 @@ import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
 import { collectProjectTokenIdentity, collectVentureTokenIdentity } from "./adapters/projectToken";
 import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
-import { collectProtocolFees, collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
+import { collectProtocolAuditLinks, collectProtocolFees, collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
+import { collectSecurityAudits } from "./adapters/securityAudits";
 import { collectCompanyEnrichment } from "./adapters/monid";
 
 // Role words stripped when a venture name is derived from a fact value like
@@ -158,6 +159,8 @@ export function deriveFounderVentureCandidate(
 // hard wall-clock box: over budget degrades to a skipped enrichment, never a
 // dead run. The adapter's own polling keeps its result cheap to discard.
 const MONID_ENRICHMENT_BUDGET_MS = 25_000;
+// Up to ~6 bounded page fetches (security page candidates + auditor hops).
+const SECURITY_AUDITS_BUDGET_MS = 45_000;
 const withWallClockBox = <T>(work: Promise<T>, budgetMs: number): Promise<T | null> =>
   Promise.race([
     work,
@@ -2099,6 +2102,40 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           }
         }
         if (fundingOutcome.available) evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
+        // Independent audits: first-party security page plus the
+        // auditor-domain corroboration hop. Wall-clock boxed: up to ~6
+        // bounded fetches must degrade to a skipped enrichment, never a
+        // stalled audit.
+        {
+          const auditLinks = await collectProtocolAuditLinks(projectName);
+          const auditsResult = await withWallClockBox(
+            collectSecurityAudits(
+              projectName,
+              evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
+              auditLinks.available ? auditLinks.value.auditLinks : [],
+            ),
+            SECURITY_AUDITS_BUDGET_MS,
+          );
+          if (auditsResult?.available) {
+            evidence.securityAudits = {
+              securityPageUrl: auditsResult.securityPageUrl,
+              selfAttested: auditsResult.selfAttested,
+              corroborated: auditsResult.corroborated,
+              capturedAt: auditsResult.capturedAt,
+            };
+            emit({
+              phase: "Token",
+              label: auditsResult.corroborated.length
+                ? `Independent audits confirmed · ${auditsResult.corroborated.map((entry) => entry.auditor).slice(0, 3).join(", ")}`
+                : "Security page found · auditor confirmation pending",
+              detail: auditsResult.corroborated.length
+                ? `${auditsResult.corroborated.length} auditor${auditsResult.corroborated.length === 1 ? "" : "s"} name ${projectName} on their own sites; ${auditsResult.selfAttested.length} named on the project's security page.`
+                : `${auditsResult.selfAttested.length} auditors are named on the project's own security page; none could be confirmed on an auditor's own site this run, so the claims stay research leads.`,
+              source: "security-audits",
+              tone: auditsResult.corroborated.length ? "good" : "neutral",
+            });
+          }
+        }
         if (!fundingOutcome.available) {
           // Hard wall-clock box: Monid runs poll asynchronously (1-120s) and an
           // audit already runs minutes; an over-budget enrichment must degrade

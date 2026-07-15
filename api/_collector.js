@@ -10390,9 +10390,9 @@ function verifiedOrganizationScope(scope, name) {
   const lastLabel = hostLabels.at(-1) ?? "";
   const penultimateLabel = hostLabels.at(-2) ?? "";
   const suffixWidth = hostLabels.length >= 3 && lastLabel.length === 2 && COMMON_COUNTRY_PUBLIC_SUFFIX_LABELS.has(penultimateLabel) ? 2 : 1;
-  const registrableHost = hostLabels.slice(-(suffixWidth + 1)).join(".");
-  if (!registrableHost.includes(".")) return null;
-  return `${url.protocol}//${registrableHost}/`;
+  const registrableHost2 = hostLabels.slice(-(suffixWidth + 1)).join(".");
+  if (!registrableHost2.includes(".")) return null;
+  return `${url.protocol}//${registrableHost2}/`;
 }
 function verifiedFactAssetRelationships(ctx, facts) {
   const aliases = subjectAliases(ctx);
@@ -15528,6 +15528,52 @@ function projectProviderBackedBasicFacts(evidence) {
       }
     }
   }
+  const auditsSnapshot = isProject ? evidence.securityAudits : void 0;
+  if (auditsSnapshot) {
+    for (const entry of auditsSnapshot.corroborated.slice(0, 4)) {
+      projected.push(makeFact(
+        evidence,
+        "audit",
+        `Security engagement with ${entry.auditor}`,
+        [
+          source({
+            url: entry.auditorUrl,
+            title: `${entry.auditor} publication naming the subject`,
+            excerpt: entry.excerpt,
+            capturedAt: auditsSnapshot.capturedAt,
+            provider: "security-audits",
+            sourceClass: "official_counterparty"
+          }),
+          ...auditsSnapshot.securityPageUrl ? [source({
+            url: auditsSnapshot.securityPageUrl,
+            title: "Project security page naming the auditor",
+            excerpt: `The project's security page names ${entry.auditor}.`,
+            capturedAt: auditsSnapshot.capturedAt,
+            provider: "security-audits",
+            sourceClass: "official_subject"
+          })] : []
+        ],
+        "confirmed on the auditor's own site"
+      ));
+    }
+    const corroboratedNames = new Set(auditsSnapshot.corroborated.map((entry) => entry.auditor));
+    const unconfirmed = auditsSnapshot.selfAttested.filter((name) => !corroboratedNames.has(name));
+    if (unconfirmed.length && auditsSnapshot.securityPageUrl) {
+      const leads = evidence.basicFactLeads ?? (evidence.basicFactLeads = []);
+      leads.push({
+        subject: evidence.profile.display_name || evidence.profile.handle,
+        predicate: "audit",
+        value: `Security page names ${unconfirmed.slice(0, 6).join(", ")}${unconfirmed.length > 6 ? ` and ${unconfirmed.length - 6} more` : ""}`,
+        questionId: "project.audit",
+        excerpt: "Named on the project's own security page; not yet confirmed on the auditor's own site.",
+        sourceUrl: auditsSnapshot.securityPageUrl,
+        sourceTitle: "Project security page (self-attested)",
+        evidence_origin: "deterministic_bootstrap",
+        artifact_verified: false,
+        provider: "security-audits"
+      });
+    }
+  }
   const feesSnapshot = isProject ? evidence.protocolFees : void 0;
   if (feesSnapshot && typeof feesSnapshot.total30dUsd === "number" && feesSnapshot.total30dUsd > 0) {
     projected.push(makeFact(
@@ -15659,6 +15705,37 @@ async function collectProtocolTvl(projectName2, options = {}) {
     }
   };
 }
+var parseAuditFields = (data) => ({
+  count: typeof data.audits === "string" && /^\d+$/.test(data.audits.trim()) ? Number(data.audits.trim()) : typeof data.audits === "number" && data.audits >= 0 ? data.audits : null,
+  links: strArray(data.audit_links).filter((link) => /^https?:\/\//i.test(link))
+});
+async function collectProtocolAuditLinks(projectName2, options = {}) {
+  const fetcher = options.fetcher ?? fetch;
+  const slug = options.slug ?? defiLlamaSlug(projectName2);
+  if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
+  const parent = await fetchProtocol(slug, fetcher);
+  if (!parent.ok) {
+    recordCall("defillama", "audit-links", 0, `${slug} \xB7 ${parent.notFound ? "not_found" : "error"}`, parent.notFound ? "succeeded" : "failed");
+    return { available: false, note: parent.note };
+  }
+  const fromParent = parseAuditFields(parent.data);
+  if (fromParent.links.length) {
+    recordCall("defillama", "audit-links", 0, `${slug} \xB7 ${fromParent.links.length}_links`, "succeeded");
+    return { available: true, value: { slug, auditCount: fromParent.count, auditLinks: fromParent.links } };
+  }
+  const children = strArray(parent.data.otherProtocols).map((name) => defiLlamaSlug(name)).filter((child) => child && child !== slug).slice(0, options.maxChildren ?? 3);
+  for (const child of children) {
+    const doc = await fetchProtocol(child, fetcher);
+    if (!doc.ok) continue;
+    const fields = parseAuditFields(doc.data);
+    if (fields.links.length) {
+      recordCall("defillama", "audit-links", 0, `${slug}->${child} \xB7 ${fields.links.length}_links`, "succeeded");
+      return { available: true, value: { slug: child, auditCount: fields.count, auditLinks: fields.links } };
+    }
+  }
+  recordCall("defillama", "audit-links", 0, `${slug} \xB7 none`, "succeeded");
+  return { available: false, note: "No audit links listed on DeFiLlama for this protocol." };
+}
 async function collectProtocolFees(projectName2, options = {}) {
   const fetcher = options.fetcher ?? fetch;
   const slug = options.slug ?? defiLlamaSlug(projectName2);
@@ -15742,6 +15819,151 @@ async function collectProtocolFunding(projectName2, options = {}) {
       leadInvestors,
       sourceUrl: `https://defillama.com/protocol/${slug}`
     }
+  };
+}
+
+// server/adapters/securityAudits.ts
+var AUDITOR_REGISTRY = [
+  { name: "Trail of Bits", pattern: /trail\s*of\s*bits/i, domains: ["trailofbits.com"] },
+  { name: "OpenZeppelin", pattern: /open\s*zeppelin/i, domains: ["openzeppelin.com"] },
+  { name: "Certora", pattern: /certora/i, domains: ["certora.com"] },
+  { name: "ChainSecurity", pattern: /chain\s*security/i, domains: ["chainsecurity.com"] },
+  { name: "Sigma Prime", pattern: /sigma\s*prime/i, domains: ["sigmaprime.io"] },
+  { name: "PeckShield", pattern: /peck\s*shield/i, domains: ["peckshield.com"] },
+  { name: "ABDK", pattern: /\babdk\b/i, domains: ["abdk.consulting"] },
+  { name: "Spearbit", pattern: /spearbit/i, domains: ["spearbit.com", "cantina.xyz"] },
+  { name: "Cantina", pattern: /cantina/i, domains: ["cantina.xyz"] },
+  { name: "MixBytes", pattern: /mixbytes/i, domains: ["mixbytes.io"] },
+  { name: "Consensys Diligence", pattern: /consensys\s*diligence/i, domains: ["consensys.io", "diligence.consensys.net"] },
+  { name: "Sherlock", pattern: /sherlock/i, domains: ["sherlock.xyz"] },
+  { name: "Halborn", pattern: /halborn/i, domains: ["halborn.com"] },
+  { name: "Quantstamp", pattern: /quantstamp/i, domains: ["quantstamp.com"] },
+  { name: "Zellic", pattern: /zellic/i, domains: ["zellic.io"] },
+  { name: "OtterSec", pattern: /otter\s*sec/i, domains: ["osec.io"] },
+  { name: "CertiK", pattern: /certik/i, domains: ["certik.com"] }
+];
+var FETCH_TIMEOUT_MS = 15e3;
+var MAX_AUDITOR_FETCHES = 4;
+var USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
+async function fetchPageText(url, fetcher) {
+  let response;
+  try {
+    response = await fetcher(url, {
+      headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT },
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      redirect: "follow"
+    });
+  } catch {
+    return null;
+  }
+  if (!response.ok) return null;
+  try {
+    const text2 = await response.text();
+    return text2.length > 2e6 ? text2.slice(0, 2e6) : text2;
+  } catch {
+    return null;
+  }
+}
+var registrableHost = (url) => {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+};
+var hostMatchesDomain = (host, domain) => host === domain || host.endsWith(`.${domain}`);
+function outboundLinksTo(html, domains) {
+  const links = [];
+  for (const match of html.matchAll(/href=["']?(https?:\/\/[^"'\s>]+)/gi)) {
+    const host = registrableHost(match[1]);
+    if (host && domains.some((domain) => hostMatchesDomain(host, domain))) links.push(match[1]);
+  }
+  return [...new Set(links)];
+}
+function htmlToText2(html) {
+  return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&[a-z#0-9]+;/gi, " ").replace(/\s+/g, " ");
+}
+var ENGAGEMENT_CONTEXT = /\b(?:audit(?:s|ed|ing)?|review(?:s|ed)?|assessment|formal verification|verification|engagement|client|bounty|bounties|competition|contest)\b/i;
+var ADVERSE_CONTEXT = /\b(?:exploit(?:s|ed)?|hack(?:s|ed)?|incident|post-?mortem|stolen|drained|rug(?:ged)?|scam)\b/i;
+function engagementExcerpt(text2, needle) {
+  const global = new RegExp(needle.source, "gi");
+  for (const match of text2.matchAll(global)) {
+    if (match.index === void 0) continue;
+    const start = Math.max(0, match.index - 240);
+    const window = text2.slice(start, match.index + match[0].length + 280);
+    if (ENGAGEMENT_CONTEXT.test(window) && !ADVERSE_CONTEXT.test(window)) return window.trim();
+  }
+  return null;
+}
+var escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+async function collectSecurityAudits(subjectName3, officialSite, candidateUrls2, deps = {}) {
+  const fetcher = deps.fetcher ?? fetch;
+  const capturedAt = (/* @__PURE__ */ new Date()).toISOString();
+  const name = subjectName3.trim();
+  const empty = (note) => ({
+    available: false,
+    note,
+    securityPageUrl: null,
+    selfAttested: [],
+    corroborated: [],
+    capturedAt
+  });
+  if (name.length < 2) return empty("No subject name to corroborate against.");
+  const conventionCandidates = [];
+  if (officialSite) {
+    try {
+      const base = new URL(officialSite);
+      conventionCandidates.push(new URL("/security", base).toString());
+    } catch {
+    }
+  }
+  const candidates = [.../* @__PURE__ */ new Set([...candidateUrls2, ...conventionCandidates])].slice(0, 4);
+  if (!candidates.length) return empty("No candidate security pages.");
+  let securityPageUrl = null;
+  let securityHtml = null;
+  for (const candidate of candidates) {
+    const html = await fetchPageText(candidate, fetcher);
+    if (html && AUDITOR_REGISTRY.some((auditor) => auditor.pattern.test(html))) {
+      securityPageUrl = candidate;
+      securityHtml = html;
+      break;
+    }
+  }
+  if (!securityPageUrl || !securityHtml) return empty("No fetchable security page named a known auditor.");
+  const named = AUDITOR_REGISTRY.filter((auditor) => auditor.pattern.test(securityHtml));
+  const selfAttested = named.map((auditor) => auditor.name);
+  const subjectNeedle = new RegExp(`\\b${escapeRegExp(name)}\\b`, "i");
+  const corroborated = [];
+  const usedAuditorUrls = /* @__PURE__ */ new Set();
+  const fetchedPages = /* @__PURE__ */ new Map();
+  let fetches = 0;
+  for (const auditor of named) {
+    const outbound = outboundLinksTo(securityHtml, auditor.domains).slice(0, 2);
+    for (const link of outbound) {
+      if (usedAuditorUrls.has(link)) break;
+      let html = fetchedPages.get(link);
+      if (html === void 0) {
+        if (fetches >= MAX_AUDITOR_FETCHES) break;
+        fetches += 1;
+        html = await fetchPageText(link, fetcher);
+        fetchedPages.set(link, html);
+      }
+      if (!html) continue;
+      const excerpt = engagementExcerpt(htmlToText2(html), subjectNeedle);
+      if (excerpt) {
+        usedAuditorUrls.add(link);
+        corroborated.push({ auditor: auditor.name, auditorUrl: link, excerpt: excerpt.slice(0, 320) });
+        break;
+      }
+    }
+  }
+  return {
+    available: true,
+    note: corroborated.length ? `${corroborated.length} auditor${corroborated.length === 1 ? "" : "s"} confirmed on their own domains.` : "Security page names auditors; no auditor-domain confirmation succeeded.",
+    securityPageUrl,
+    selfAttested,
+    corroborated,
+    capturedAt
   };
 }
 
@@ -16097,6 +16319,7 @@ function deriveFounderVentureCandidate(evidence) {
   return null;
 }
 var MONID_ENRICHMENT_BUDGET_MS = 25e3;
+var SECURITY_AUDITS_BUDGET_MS = 45e3;
 var withWallClockBox = (work, budgetMs) => Promise.race([
   work,
   new Promise((resolve) => {
@@ -17580,6 +17803,32 @@ async function runAuditWithLedger(rawHandle, emit, options) {
           }
         }
         if (fundingOutcome.available) evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
+        {
+          const auditLinks = await collectProtocolAuditLinks(projectName2);
+          const auditsResult = await withWallClockBox(
+            collectSecurityAudits(
+              projectName2,
+              evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl,
+              auditLinks.available ? auditLinks.value.auditLinks : []
+            ),
+            SECURITY_AUDITS_BUDGET_MS
+          );
+          if (auditsResult?.available) {
+            evidence.securityAudits = {
+              securityPageUrl: auditsResult.securityPageUrl,
+              selfAttested: auditsResult.selfAttested,
+              corroborated: auditsResult.corroborated,
+              capturedAt: auditsResult.capturedAt
+            };
+            emit({
+              phase: "Token",
+              label: auditsResult.corroborated.length ? `Independent audits confirmed \xB7 ${auditsResult.corroborated.map((entry) => entry.auditor).slice(0, 3).join(", ")}` : "Security page found \xB7 auditor confirmation pending",
+              detail: auditsResult.corroborated.length ? `${auditsResult.corroborated.length} auditor${auditsResult.corroborated.length === 1 ? "" : "s"} name ${projectName2} on their own sites; ${auditsResult.selfAttested.length} named on the project's security page.` : `${auditsResult.selfAttested.length} auditors are named on the project's own security page; none could be confirmed on an auditor's own site this run, so the claims stay research leads.`,
+              source: "security-audits",
+              tone: auditsResult.corroborated.length ? "good" : "neutral"
+            });
+          }
+        }
         if (!fundingOutcome.available) {
           const enrichment = await withWallClockBox(
             collectCompanyEnrichment(projectName2, {
