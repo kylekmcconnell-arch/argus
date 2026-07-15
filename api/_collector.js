@@ -3176,7 +3176,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     const widenedByUnverified = floorTier !== void 0 && floorTier !== effectiveTier && effectiveTier !== "adverse";
     bands[axis] = {
       tier: effectiveTier,
-      ...widenedByUnverified ? { minScore: projectBandRange(spec.weight, floorTier).minScore, maxScore: range.maxScore } : range,
+      ...widenedByUnverified ? { minScore: projectBandRange(spec.weight, floorTier).minScore, maxScore: range.maxScore, floorTier } : range,
       reasons: [
         ...effectiveTier !== tier ? ["verified score-limiting evidence"] : [],
         ...widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : [],

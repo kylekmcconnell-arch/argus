@@ -35,7 +35,10 @@ const CATALOG_ARTIFACT_KEYS = new Set([
   "artifactId", "kind", "provider", "operation", "section", "title", "excerpt",
   "sourceUrl", "capturedAt", "contentHash", "eligibleAxes", "verification", "counterEligibleAxes", "scope",
 ]);
-const PROJECT_BAND_KEYS = new Set(["tier", "minScore", "maxScore", "reasons", "anchorArtifactIds"]);
+const PROJECT_BAND_KEYS = new Set(["tier", "minScore", "maxScore", "floorTier", "reasons", "anchorArtifactIds"]);
+// Positive tier ladder for split-band sanity: a press-widened band's verified
+// floor must sit strictly below its ceiling tier.
+const POSITIVE_TIER_ORDER = ["none", "emerging", "solid", "exceptional"] as const;
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
 // Keep the serverless provenance boundary self-contained. Importing the
@@ -321,6 +324,7 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
     tier: string;
     minScore: number;
     maxScore: number;
+    floorTier?: string;
     reasons: string[];
     anchorArtifactIds: string[];
   }>();
@@ -336,6 +340,17 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
       || !Number.isInteger(band.maxScore)
     ) {
       throw new Error("invalid axis evidence lineage: project strength band");
+    }
+    // A floorTier marks a press-widened band: the verified floor must be a
+    // positive tier strictly below the ceiling tier (never adverse/none, and
+    // never widening downward).
+    const floorTier = band.floorTier === undefined ? undefined : String(band.floorTier);
+    if (floorTier !== undefined) {
+      const floorRank = POSITIVE_TIER_ORDER.indexOf(floorTier as (typeof POSITIVE_TIER_ORDER)[number]);
+      const tierRank = POSITIVE_TIER_ORDER.indexOf(tier as (typeof POSITIVE_TIER_ORDER)[number]);
+      if (floorRank < 0 || tierRank < 0 || floorRank >= tierRank) {
+        throw new Error("invalid axis evidence lineage: project strength band floor");
+      }
     }
     const reasons = strictStringArray(band.reasons, `${axisId}.band.reasons`, {
       min: tier === "none" ? 0 : 1,
@@ -358,6 +373,7 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
       tier,
       minScore: band.minScore as number,
       maxScore: band.maxScore as number,
+      ...(floorTier !== undefined ? { floorTier } : {}),
       reasons,
       anchorArtifactIds,
     });
@@ -480,13 +496,20 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
         if (!band || band.tier === "none") {
           throw new Error(`invalid axis evidence lineage: ${axisId} missing project strength band`);
         }
-        const expectedRange = band.tier === "adverse"
+        const tierRange = (tier: string): { min: number; max: number } => tier === "adverse"
           ? { min: 0, max: Math.floor(expectedWeight * 0.39) }
-          : band.tier === "emerging"
+          : tier === "emerging"
             ? { min: Math.ceil(expectedWeight * 0.4), max: Math.floor(expectedWeight * 0.69) }
-            : band.tier === "solid"
+            : tier === "solid"
               ? { min: Math.ceil(expectedWeight * 0.7), max: Math.floor(expectedWeight * 0.84) }
               : { min: Math.ceil(expectedWeight * 0.85), max: expectedWeight };
+        // A press-widened band spans from the verified floor tier's minimum to
+        // the ceiling tier's maximum; floorTier validity (positive, strictly
+        // below tier) was enforced at parse time.
+        const expectedRange = {
+          min: tierRange(band.floorTier ?? band.tier).min,
+          max: tierRange(band.tier).max,
+        };
         const verifiedCounters = counter.filter((artifactId) =>
           counterEligibleByArtifact.get(artifactId)?.has(axisId));
         const hasSevereCounter = verifiedCounters.some((artifactId) =>

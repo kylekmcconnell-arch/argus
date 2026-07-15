@@ -1605,7 +1605,7 @@ export function deriveProjectStrengthBands(
     bands[axis] = {
       tier: effectiveTier,
       ...(widenedByUnverified
-        ? { minScore: projectBandRange(spec.weight, floorTier).minScore, maxScore: range.maxScore }
+        ? { minScore: projectBandRange(spec.weight, floorTier).minScore, maxScore: range.maxScore, floorTier }
         : range),
       reasons: [
         ...(effectiveTier !== tier ? ["verified score-limiting evidence"] : []),

@@ -289,6 +289,13 @@ describe("frozen source artifact provenance", () => {
       maxScore: Math.floor(weight * 0.69),
       reasons: [`Source-backed emerging evidence for ${axis}`],
       anchorArtifactIds: [artifacts[index].artifactId],
+    } as {
+      tier: string;
+      minScore: number;
+      maxScore: number;
+      floorTier?: string;
+      reasons: string[];
+      anchorArtifactIds: string[];
     }]));
     const payload = {
       axisCitationVersion: 1,
@@ -405,6 +412,37 @@ describe("frozen source artifact provenance", () => {
     };
     forgedAdverse.report.role_reports[0].axes.P1_team_and_identity.score = 3;
     await expect(persistProvenance(credentials, context, forgedAdverse, [])).rejects.toThrow(
+      "violates project strength band",
+    );
+
+    // Press-widened split band: verified floor (emerging) with a press ceiling
+    // (solid). minScore comes from the floor tier, maxScore from the ceiling
+    // tier; this is the exact shape setBand freezes when unverified press
+    // widens an axis, and persistence must accept it.
+    const p4Weight = weights.P4_backing_and_partners;
+    const widened = structuredClone(payload);
+    widened.projectStrengthBands.P4_backing_and_partners = {
+      tier: "solid",
+      floorTier: "emerging",
+      minScore: Math.ceil(p4Weight * 0.4),
+      maxScore: Math.floor(p4Weight * 0.84),
+      reasons: ["unverified press widens the ceiling only, never the floor", "1 material relationship source"],
+      anchorArtifactIds: [widened.projectStrengthBands.P4_backing_and_partners.anchorArtifactIds[0]],
+    };
+    widened.report.role_reports[0].axes.P4_backing_and_partners.score = Math.ceil(p4Weight * 0.4);
+    await expect(persistProvenance(credentials, context, widened, [])).resolves.toBeUndefined();
+
+    // A floor at or above the ceiling tier is a forged widening.
+    const forgedFloor = structuredClone(widened);
+    forgedFloor.projectStrengthBands.P4_backing_and_partners.floorTier = "exceptional";
+    await expect(persistProvenance(credentials, context, forgedFloor, [])).rejects.toThrow(
+      "project strength band floor",
+    );
+
+    // A split band whose minScore does not match its declared floor is forged.
+    const forgedSplitRange = structuredClone(widened);
+    forgedSplitRange.projectStrengthBands.P4_backing_and_partners.minScore = Math.ceil(p4Weight * 0.7);
+    await expect(persistProvenance(credentials, context, forgedSplitRange, [])).rejects.toThrow(
       "violates project strength band",
     );
   });

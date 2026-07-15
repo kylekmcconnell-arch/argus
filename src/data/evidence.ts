@@ -94,6 +94,14 @@ export interface ProjectStrengthBandRecord {
   tier: ProjectStrengthTier;
   minScore: number;
   maxScore: number;
+  /**
+   * Present only when unverified press widened the ceiling: the strongest
+   * tier the axis reaches on verified records alone. minScore comes from this
+   * tier while maxScore comes from `tier`, so persistence can re-derive the
+   * split range exactly. Absent on fully verified bands and on older frozen
+   * reports.
+   */
+  floorTier?: ProjectStrengthTier;
   reasons: string[];
   anchorArtifactIds: string[];
 }
