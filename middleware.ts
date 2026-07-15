@@ -194,7 +194,11 @@ export default async function middleware(request: Request): Promise<Response> {
         p_metadata: { method: request.method },
         p_units: ROUTE_UNITS[pathname] || 1,
       }),
-      signal: AbortSignal.timeout(15_000),
+      // 8s (not longer): this is Edge middleware, so the whole auth + member +
+      // quota chain must stay under Vercel's ~25s wall-clock ceiling (8+8+8).
+      // Because the check now fails open, a modest timeout is safe — a slow RPC
+      // proceeds rather than blocking; it does not need to "ride out" latency.
+      signal: AbortSignal.timeout(8_000),
     }).catch(() => null);
     // Fail open when the usage RPC is unreachable: the daily API budget is a
     // soft guardrail, and a transient Supabase blip must not turn every metered

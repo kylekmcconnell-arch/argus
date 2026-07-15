@@ -257,7 +257,10 @@ export async function consumeInvestigationQuota(
         p_daily_limit: dailyLimit,
         p_metadata: metadata,
       }),
-      signal: AbortSignal.timeout(15_000),
+      // Fail-open handles a slow RPC, so a modest timeout suffices; kept in step
+      // with the Edge middleware's api.budget check (both ~8s over the ~5s cold
+      // RPC), and short enough not to stall a scan waiting on a wedged call.
+      signal: AbortSignal.timeout(8_000),
     });
     if (!response.ok) {
       console.error("[quota] RPC failed; allowing (fail-open)", response.status, (await response.text()).slice(0, 300));

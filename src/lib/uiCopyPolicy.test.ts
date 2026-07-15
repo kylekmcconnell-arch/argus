@@ -49,5 +49,8 @@ describe("ARGUS UI copy policy", () => {
     }
 
     expect(violations, `Replace em dashes in authored runtime copy:\n${violations.join("\n")}`).toEqual([]);
-  });
+    // Parses every tracked src/api/server TS file with the TypeScript compiler,
+    // so the default 5s cap is too tight (and tightens as the repo grows). The
+    // generous timeout keeps the assertion meaningful rather than load-flaky.
+  }, 30_000);
 });
