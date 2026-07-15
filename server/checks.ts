@@ -196,12 +196,14 @@ export class PersonCheckTracker {
     this.observations.set(normalized.id, uniqueObservations([...current, normalized]));
   }
 
-  provider(id: string, label: string, state: ProviderRunState, detail?: string): void {
+  provider(id: string, label: string, state: ProviderRunState, detail?: string, observedAt?: string): void {
     this.providerRuns.set(id, {
       id,
       label,
       state,
-      observedAt: new Date().toISOString(),
+      // Buffered rows (concurrent adapter lanes flush in canonical order)
+      // keep their completion-time timestamps.
+      observedAt: observedAt ?? new Date().toISOString(),
       ...(detail?.trim() ? { detail: detail.trim().slice(0, 500) } : {}),
     });
   }

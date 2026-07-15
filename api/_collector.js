@@ -4816,12 +4816,14 @@ var PersonCheckTracker = class {
     const current = this.observations.get(normalized4.id) ?? [];
     this.observations.set(normalized4.id, uniqueObservations([...current, normalized4]));
   }
-  provider(id, label, state, detail) {
+  provider(id, label, state, detail, observedAt) {
     this.providerRuns.set(id, {
       id,
       label,
       state,
-      observedAt: (/* @__PURE__ */ new Date()).toISOString(),
+      // Buffered rows (concurrent adapter lanes flush in canonical order)
+      // keep their completion-time timestamps.
+      observedAt: observedAt ?? (/* @__PURE__ */ new Date()).toISOString(),
       ...detail?.trim() ? { detail: detail.trim().slice(0, 500) } : {}
     });
   }
@@ -16375,6 +16377,18 @@ var ADAPTERS = [
   onchainAdapter,
   basicFactsAdapter
 ];
+var IDENTITY_LANE = [xAdapter, githubAdapter, peopledatalabsAdapter, offchainAdapter];
+var TOKEN_LANE = [dexscreenerAdapter, coingeckoAdapter];
+var WALLET_LANE = [onchainAdapter];
+var ADAPTER_PROVIDERS = {
+  "x": ["twitterapi", "grok", "cache"],
+  "github": ["github"],
+  "peopledatalabs": ["peopledatalabs"],
+  "offchain-diligence": ["google-news", "courtlistener", "opensanctions", "x-avatar", "claude", "cache"],
+  "dexscreener": ["dexscreener"],
+  "coingecko": ["coingecko"],
+  "onchain": ["helius"]
+};
 var teamEvidenceRank = (member) => member.artifact_verified === true && member.evidence_origin !== "model_lead" ? 2 : member.evidence_origin !== "model_lead" ? 1 : 0;
 function coalesceTeamMembersByHandle(members) {
   const output = [];
@@ -17882,9 +17896,18 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     await coldIntake(ctx, true);
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
-  for (const a of ADAPTERS) {
+  const laneProviderRows = [];
+  const flushLaneProviderRows = () => {
+    const byId = new Map(laneProviderRows.map((row) => [row.id, row]));
+    for (const a of ADAPTERS) {
+      const row = byId.get(a.id);
+      if (row) checkTracker.provider(row.id, row.label, row.state, row.detail, row.observedAt);
+    }
+    laneProviderRows.length = 0;
+  };
+  const runAdapter = async (a) => {
     if (!a.available()) {
-      checkTracker.provider(a.id, a.label, "unavailable", "provider is not configured");
+      laneProviderRows.push({ id: a.id, label: a.label, state: "unavailable", detail: "provider is not configured", observedAt: (/* @__PURE__ */ new Date()).toISOString() });
       if (a.id === "github") {
         checkTracker.record({
           id: "code-footprint-github",
@@ -17893,21 +17916,22 @@ async function runAuditWithLedger(rawHandle, emit, options) {
           provider: "github"
         });
       }
-      continue;
+      return;
     }
     if (a.id === "basic-facts") evidence.roles = providerBackedRoles(evidence);
     const nameBeforeBasicFacts = a.id === "basic-facts" ? resolvedOffchainName(ctx) : null;
+    const providers = ADAPTER_PROVIDERS[a.id];
     const stageStartedAt = startRuntimeStage(`adapter:${a.id}`);
     try {
-      const before = attemptTotals();
+      const before = attemptTotals(providers);
       const result = await a.run(ctx);
       if (result) adapterResults.set(a.id, result);
-      const attempts = attemptDelta(before, attemptTotals());
+      const attempts = attemptDelta(before, attemptTotals(providers));
       const state = adapterRunState(result, attempts);
       const detail = result?.detail ?? (state === "skipped" ? "no applicable provider call was observed" : `${attempts.total} provider attempt${attempts.total === 1 ? "" : "s"} observed`);
-      checkTracker.provider(a.id, a.label, state, detail);
+      laneProviderRows.push({ id: a.id, label: a.label, state, detail, observedAt: (/* @__PURE__ */ new Date()).toISOString() });
     } catch (e) {
-      checkTracker.provider(a.id, a.label, "failed", String(e));
+      laneProviderRows.push({ id: a.id, label: a.label, state: "failed", detail: String(e), observedAt: (/* @__PURE__ */ new Date()).toISOString() });
       if (a.id === "github") {
         checkTracker.record({ id: "code-footprint-github", status: "unavailable", note: `GitHub adapter failed: ${String(e)}`, provider: "github" });
       }
@@ -17940,7 +17964,19 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         finishRuntimeStage("offchain-full-name-refresh", refreshStartedAt);
       }
     }
-  }
+  };
+  const runLane = async (lane) => {
+    for (const a of lane) await runAdapter(a);
+  };
+  const lanes = env("ARGUS_SERIAL_ADAPTERS") ? [[...IDENTITY_LANE, ...TOKEN_LANE, ...WALLET_LANE]] : [IDENTITY_LANE, TOKEN_LANE, WALLET_LANE];
+  const lanesStartedAt = startRuntimeStage("adapter-lanes");
+  const settledLanes = await Promise.allSettled(lanes.map(runLane));
+  finishRuntimeStage("adapter-lanes", lanesStartedAt);
+  flushLaneProviderRows();
+  const laneFailure = settledLanes.find((entry) => entry.status === "rejected");
+  if (laneFailure) throw laneFailure.reason;
+  await runAdapter(basicFactsAdapter);
+  flushLaneProviderRows();
   if (fixture) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);

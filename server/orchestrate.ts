@@ -184,6 +184,35 @@ const ADAPTERS: Adapter[] = [
   basicFactsAdapter,
 ];
 
+// Concurrent adapter lanes. Serial within a lane (read-after-write
+// dependencies from the adapter field audit); lanes are pairwise disjoint in
+// evidence fields, check ids, external hosts, and cost-ledger providers.
+// basic-facts runs alone after all lanes settle (it reads everything).
+/** Test-only view of the registry so the lane partition guard cannot drift. */
+export const ADAPTERS_FOR_TEST: readonly Adapter[] = ADAPTERS;
+export const IDENTITY_LANE = [xAdapter, githubAdapter, peopledatalabsAdapter, offchainAdapter] as const;
+export const TOKEN_LANE = [dexscreenerAdapter, coingeckoAdapter] as const;
+export const WALLET_LANE = [onchainAdapter] as const;
+
+/**
+ * Every cost-ledger provider an adapter's run() can record. Concurrent
+ * attempt accounting filters the shared ledger by these so a stage-mate's
+ * calls are never cross-attributed; the lane schedule guarantees no two
+ * concurrently-running adapters share a provider. memory.lol is
+ * coldIntake-only and intentionally absent. basic-facts is omitted on
+ * purpose: it runs alone post-barrier, keeping its historical unfiltered
+ * delta byte-identical.
+ */
+export const ADAPTER_PROVIDERS: Record<string, readonly string[]> = {
+  "x": ["twitterapi", "grok", "cache"],
+  "github": ["github"],
+  "peopledatalabs": ["peopledatalabs"],
+  "offchain-diligence": ["google-news", "courtlistener", "opensanctions", "x-avatar", "claude", "cache"],
+  "dexscreener": ["dexscreener"],
+  "coingecko": ["coingecko"],
+  "onchain": ["helius"],
+};
+
 const teamEvidenceRank = (member: WebTeamMember): number =>
   member.artifact_verified === true && member.evidence_origin !== "model_lead"
     ? 2
@@ -2158,10 +2187,29 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     finishRuntimeStage("cold-intake", stageStartedAt);
   }
 
-  // run each available adapter
-  for (const a of ADAPTERS) {
+  // ── Dependency-staged adapter schedule ────────────────────────────────
+  // Serial within a lane (arrows are read-after-write dependencies from the
+  // adapter field maps); lanes run concurrently because they touch disjoint
+  // evidence fields, disjoint check ids, disjoint external hosts, and
+  // disjoint cost-ledger providers. Field ownership contract:
+  //   Lane A owns profile/ventures/associates/findings/sourceArtifacts,
+  //   Lane B owns promotions[].perf_current,
+  //   Lane C owns wallets[].activity_summary.
+  // basic-facts is the evidence sink: it runs alone after the barrier with
+  // its role refresh and offchain full-name post-hook attached.
+  const laneProviderRows: Array<{ id: string; label: string; state: Parameters<typeof checkTracker.provider>[2]; detail: string; observedAt: string }> = [];
+  const flushLaneProviderRows = () => {
+    const byId = new Map(laneProviderRows.map((row) => [row.id, row] as const));
+    for (const a of ADAPTERS) {
+      const row = byId.get(a.id);
+      if (row) checkTracker.provider(row.id, row.label, row.state, row.detail, row.observedAt);
+    }
+    laneProviderRows.length = 0;
+  };
+
+  const runAdapter = async (a: Adapter): Promise<void> => {
     if (!a.available()) {
-      checkTracker.provider(a.id, a.label, "unavailable", "provider is not configured");
+      laneProviderRows.push({ id: a.id, label: a.label, state: "unavailable", detail: "provider is not configured", observedAt: new Date().toISOString() });
       if (a.id === "github") {
         checkTracker.record({
           id: "code-footprint-github",
@@ -2170,7 +2218,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           provider: "github",
         });
       }
-      continue;
+      return;
     }
     // Identity and career adapters run before Basic Facts and may establish a
     // founder or investor role that was not explicit in the original X bio.
@@ -2178,20 +2226,23 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     // role-aware question set and critical-gap repair plan.
     if (a.id === "basic-facts") evidence.roles = providerBackedRoles(evidence);
     const nameBeforeBasicFacts = a.id === "basic-facts" ? resolvedOffchainName(ctx) : null;
+    // basic-facts runs alone post-barrier, so its historical unfiltered
+    // ledger delta stays byte-identical; concurrent lanes filter by provider.
+    const providers = ADAPTER_PROVIDERS[a.id];
     const stageStartedAt = startRuntimeStage(`adapter:${a.id}`);
     try {
-      const before = attemptTotals();
+      const before = attemptTotals(providers);
       const result = await a.run(ctx);
       if (result) adapterResults.set(a.id, result);
-      const attempts = attemptDelta(before, attemptTotals());
+      const attempts = attemptDelta(before, attemptTotals(providers));
       const state = adapterRunState(result, attempts);
       const detail = result?.detail
         ?? (state === "skipped"
           ? "no applicable provider call was observed"
           : `${attempts.total} provider attempt${attempts.total === 1 ? "" : "s"} observed`);
-      checkTracker.provider(a.id, a.label, state, detail);
+      laneProviderRows.push({ id: a.id, label: a.label, state, detail, observedAt: new Date().toISOString() });
     } catch (e) {
-      checkTracker.provider(a.id, a.label, "failed", String(e));
+      laneProviderRows.push({ id: a.id, label: a.label, state: "failed", detail: String(e), observedAt: new Date().toISOString() });
       if (a.id === "github") {
         checkTracker.record({ id: "code-footprint-github", status: "unavailable", note: `GitHub adapter failed: ${String(e)}`, provider: "github" });
       }
@@ -2228,7 +2279,31 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         finishRuntimeStage("offchain-full-name-refresh", refreshStartedAt);
       }
     }
-  }
+  };
+
+  const runLane = async (lane: readonly Adapter[]) => {
+    // Serial chain within the lane; a run() throw is caught per-adapter
+    // inside runAdapter, so the lane continues exactly like the old loop.
+    for (const a of lane) await runAdapter(a);
+  };
+
+  // Instant no-deploy rollback lever and the switch for the serial/parallel
+  // equivalence test.
+  const lanes: ReadonlyArray<readonly Adapter[]> = env("ARGUS_SERIAL_ADAPTERS")
+    ? [[...IDENTITY_LANE, ...TOKEN_LANE, ...WALLET_LANE]]
+    : [IDENTITY_LANE, TOKEN_LANE, WALLET_LANE];
+  const lanesStartedAt = startRuntimeStage("adapter-lanes");
+  const settledLanes = await Promise.allSettled(lanes.map(runLane));
+  finishRuntimeStage("adapter-lanes", lanesStartedAt);
+  flushLaneProviderRows();
+  // A throw from bookkeeping itself (not run(), which is caught per-adapter)
+  // still fails the audit, as it did in the serial loop; it just no longer
+  // strands sibling lanes mid-flight.
+  const laneFailure = settledLanes.find((entry): entry is PromiseRejectedResult => entry.status === "rejected");
+  if (laneFailure) throw laneFailure.reason;
+
+  await runAdapter(basicFactsAdapter);
+  flushLaneProviderRows();
   if (fixture) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
