@@ -8,6 +8,7 @@ const { cacheGetJson, cacheSetJson } = vi.hoisted(() => ({
 vi.mock("./_cache.js", () => ({ cacheGetJson, cacheSetJson }));
 
 import handler from "./sanctions";
+import { screenSanctionedAddresses } from "./_sanctions-core";
 
 // A real OFAC SOL SDN entry: case-sensitive base58, carries uppercase.
 const SANCTIONED_SOL = "iBSNRxRQNZ1kbeeHXfk5nJXhkxfz3dR7BvWXvsuY71C";
@@ -65,5 +66,34 @@ describe("OFAC address screen", () => {
     await handler(request({ addresses: SANCTIONED_EVM, chain: "ethereum" }), res as never);
 
     expect(captured.body).toMatchObject({ available: true, sanctioned: [SANCTIONED_EVM] });
+  });
+});
+
+describe("screenSanctionedAddresses (server-side direct screener)", () => {
+  beforeEach(() => {
+    cacheGetJson.mockReset().mockResolvedValue(null);
+    cacheSetJson.mockReset().mockResolvedValue(undefined);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("returns undefined when there is nothing screenable (records 'not run')", async () => {
+    expect(await screenSanctionedAddresses("ethereum", [null, undefined, "short"])).toBeUndefined();
+  });
+
+  it("returns a stamped outcome with the SDN hit, from the raw deployer + holder list", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => listResponse(`${SANCTIONED_EVM.toLowerCase()}\n`)));
+
+    const out = await screenSanctionedAddresses("base", [null, SANCTIONED_EVM, "0x1111111111111111111111111111111111111111"]);
+
+    expect(out).toMatchObject({ available: true, checked: 2, sanctioned: [SANCTIONED_EVM] });
+    expect(typeof out?.completedAt).toBe("string");
+  });
+
+  it("records available:false (never a false clean) when the list is unreachable", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => ({ ok: false, status: 503, text: async () => "" } as Response)));
+
+    const out = await screenSanctionedAddresses("ethereum", [SANCTIONED_EVM]);
+
+    expect(out).toMatchObject({ available: false, sanctioned: [] });
   });
 });

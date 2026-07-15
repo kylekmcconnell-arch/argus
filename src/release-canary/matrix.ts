@@ -343,6 +343,22 @@ export async function runOfflineReleaseCanary(): Promise<ReleaseCanarySummary> {
         auditToken({ kind: "token", ref: CLEAN_TOKEN_ADDRESS, via: "evm" }, undefined, { force: true }),
         auditToken({ kind: "token", ref: HONEYPOT_TOKEN_ADDRESS, via: "evm" }, undefined, { force: true }),
       ]);
+      // Same clean-token fixtures, but an injected screener reports a sanctioned
+      // address: an OFAC SDN hit must override the market score to AVOID.
+      const sanctioned = await auditToken(
+        { kind: "token", ref: CLEAN_TOKEN_ADDRESS, via: "evm" },
+        undefined,
+        {
+          force: true,
+          screenSanctions: async () => ({
+            available: true,
+            checked: 2,
+            listSize: 700,
+            sanctioned: ["0x0000000000000000000000000000000000000bad"],
+            completedAt: "2026-07-15T00:00:00.000Z",
+          }),
+        },
+      );
       results.push(
         tokenResult({
           id: "token-established-control",
@@ -357,6 +373,13 @@ export async function runOfflineReleaseCanary(): Promise<ReleaseCanarySummary> {
           dossier: honeypot,
           verdict: "AVOID",
           cap: "honeypot_confirmed",
+        }),
+        tokenResult({
+          id: "token-ofac-sanctioned",
+          scenario: "A sanctioned deployer or holder must hard-stop an otherwise-clean token.",
+          dossier: sanctioned,
+          verdict: "AVOID",
+          cap: "ofac_sanctioned_address",
         }),
       );
     } catch (error) {

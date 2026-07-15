@@ -318,7 +318,8 @@ async function goplus(chainId, address) {
 async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
   const unique = [...new Set(addresses.filter((a) => typeof a === "string" && a.length > 8))].slice(0, 40);
   if (!unique.length) return void 0;
-  if (typeof window === "undefined" || !window.location?.origin) return void 0;
+  const origin = globalThis.location?.origin;
+  if (!origin) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
   try {
     const r = await fetchImpl(
@@ -762,7 +763,8 @@ async function runTokenAudit(input, emit, opts) {
     isContract: h.is_contract === 1 || h.is_contract === "1"
   })).filter((h) => h.address);
   step({ phase: "Screen", label: "OFAC sanctions", detail: "Screening deployer + top holders against the US Treasury SDN address list\u2026", tone: "neutral" });
-  const sanctionsScreen = await screenAddressSanctions(chain, [deployer, ...topHolders.map((h) => h.address)]);
+  const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
+  const sanctionsScreen = await screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]);
   if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
     findings.push({
       claim: sanctionsScreen.sanctioned.length === 1 ? `OFAC SDN hit: screened address ${sanctionsScreen.sanctioned[0].slice(0, 10)}\u2026 is on the US Treasury sanctions list. Touching this token is a legal-exposure risk.` : `OFAC SDN hit: ${sanctionsScreen.sanctioned.length} screened addresses are on the US Treasury sanctions list. Touching this token is a legal-exposure risk.`,

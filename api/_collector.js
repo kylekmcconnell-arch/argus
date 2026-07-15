@@ -5947,10 +5947,10 @@ function scanPostsForRoles(posts, projectName2) {
   };
   const project = projectName2?.trim() ? regexEscape2(projectName2.trim()) : "";
   const roleIsProjectOwned = (post, index, length, role) => {
-    const window2 = post.slice(Math.max(0, index - 56), Math.min(post.length, index + length + 56));
+    const window = post.slice(Math.max(0, index - 56), Math.min(post.length, index + length + 56));
     const r = regexEscape2(role).replace(/\\ /g, "\\s+");
     const owner = project ? `(?:our|${project})` : "our";
-    return new RegExp(`\\b${owner}\\s+(?:own\\s+|core\\s+)?${r}\\b|\\b${r}\\s+(?:at|for)\\s+${owner}\\b`, "i").test(window2);
+    return new RegExp(`\\b${owner}\\s+(?:own\\s+|core\\s+)?${r}\\b|\\b${r}\\s+(?:at|for)\\s+${owner}\\b`, "i").test(window);
   };
   for (const raw of posts.slice(0, 80)) {
     const p = String(raw ?? "");
@@ -6281,8 +6281,8 @@ function teamMemberIsDirectlySupported(text2, name, handle, role, projectName2) 
   for (const identity of identities) {
     let offset = lower.indexOf(identity);
     while (offset >= 0) {
-      const window2 = corpus.slice(Math.max(0, offset - 220), Math.min(corpus.length, offset + identity.length + 220));
-      if (rolePattern.test(window2) && (!projectName2 || window2.toLowerCase().includes(projectName2.toLowerCase()))) return true;
+      const window = corpus.slice(Math.max(0, offset - 220), Math.min(corpus.length, offset + identity.length + 220));
+      if (rolePattern.test(window) && (!projectName2 || window.toLowerCase().includes(projectName2.toLowerCase()))) return true;
       offset = lower.indexOf(identity, offset + identity.length);
     }
   }
@@ -15931,8 +15931,8 @@ function engagementExcerpt(text2, needle) {
   for (const match of text2.matchAll(global)) {
     if (match.index === void 0) continue;
     const start = Math.max(0, match.index - 240);
-    const window2 = text2.slice(start, match.index + match[0].length + 280);
-    if (ENGAGEMENT_CONTEXT.test(window2) && !ADVERSE_CONTEXT.test(window2)) return window2.trim();
+    const window = text2.slice(start, match.index + match[0].length + 280);
+    if (ENGAGEMENT_CONTEXT.test(window) && !ADVERSE_CONTEXT.test(window)) return window.trim();
   }
   return null;
 }
@@ -18535,7 +18535,8 @@ async function goplus(chainId, address) {
 async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
   const unique = [...new Set(addresses.filter((a) => typeof a === "string" && a.length > 8))].slice(0, 40);
   if (!unique.length) return void 0;
-  if (typeof window === "undefined" || !window.location?.origin) return void 0;
+  const origin = globalThis.location?.origin;
+  if (!origin) return void 0;
   const completedAt = (/* @__PURE__ */ new Date()).toISOString();
   try {
     const r = await fetchImpl(
@@ -18979,7 +18980,8 @@ async function runTokenAudit(input, emit, opts) {
     isContract: h.is_contract === 1 || h.is_contract === "1"
   })).filter((h) => h.address);
   step({ phase: "Screen", label: "OFAC sanctions", detail: "Screening deployer + top holders against the US Treasury SDN address list\u2026", tone: "neutral" });
-  const sanctionsScreen = await screenAddressSanctions(chain, [deployer, ...topHolders.map((h) => h.address)]);
+  const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
+  const sanctionsScreen = await screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]);
   if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
     findings.push({
       claim: sanctionsScreen.sanctioned.length === 1 ? `OFAC SDN hit: screened address ${sanctionsScreen.sanctioned[0].slice(0, 10)}\u2026 is on the US Treasury sanctions list. Touching this token is a legal-exposure risk.` : `OFAC SDN hit: ${sanctionsScreen.sanctioned.length} screened addresses are on the US Treasury sanctions list. Touching this token is a legal-exposure risk.`,

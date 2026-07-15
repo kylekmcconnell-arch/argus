@@ -7,7 +7,10 @@ describe("deterministic offline release canary", () => {
 
     expect(summary.mode).toBe("offline-fixtures");
     expect(summary.unexpectedUrls).toEqual([]);
-    expect(summary.interceptedFixtureRequests).toBe(8);
+    // 4 provider fixtures each for the clean, honeypot, and OFAC-sanctioned
+    // token scans (the sanctioned scan reuses the clean-token fixtures with an
+    // injected screener, so it adds no /api/sanctions request).
+    expect(summary.interceptedFixtureRequests).toBe(12);
     expect(summary.results.map((result) => result.id)).toEqual([
       "person-founder-known-good",
       "person-investor-known-good",
@@ -15,6 +18,7 @@ describe("deterministic offline release canary", () => {
       "person-sparse-unknown",
       "token-established-control",
       "token-honeypot-negative",
+      "token-ofac-sanctioned",
     ]);
     expect(summary.results.filter((result) => !result.pass)).toEqual([]);
     expect(summary.passed).toBe(summary.total);

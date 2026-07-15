@@ -97,6 +97,15 @@ export interface SanctionsScreenOutcome {
   completedAt: string;
 }
 
+// A screener the audit calls to record its OFAC outcome. The browser default
+// (screenAddressSanctions) posts to /api/sanctions; server audit paths inject a
+// direct screener (api/_sanctions-core) so the screen and its AVOID cap run
+// without a handler self-calling its own authenticated HTTP route.
+export type ScreenSanctionsFn = (
+  chain: string,
+  addresses: readonly (string | null | undefined)[],
+) => Promise<SanctionsScreenOutcome | undefined>;
+
 // OFAC SDN address screen, recorded as a real check outcome for the checklist.
 // Never throws: an unreachable screen records available:false so the checklist
 // shows "unavailable" instead of silently claiming a clean pass.
@@ -114,7 +123,11 @@ export async function screenAddressSanctions(
 ): Promise<SanctionsScreenOutcome | undefined> {
   const unique = [...new Set(addresses.filter((a): a is string => typeof a === "string" && a.length > 8))].slice(0, 40);
   if (!unique.length) return undefined;
-  if (typeof window === "undefined" || !window.location?.origin) return undefined;
+  // Same-origin relative fetch only resolves in a browser. `globalThis` is
+  // typed in both the DOM and Node libs (a bare `window` is not), so this is
+  // the env-agnostic way to detect the browser without a DOM-lib dependency.
+  const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
+  if (!origin) return undefined;
   const completedAt = new Date().toISOString();
   try {
     const r = await fetchImpl(
@@ -270,7 +283,7 @@ const CACHE_TTL = 60_000;
 export async function auditToken(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { skipSim?: boolean; force?: boolean },
+  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
@@ -285,7 +298,7 @@ export async function auditToken(
 async function runTokenAudit(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { skipSim?: boolean; force?: boolean },
+  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const trace: TraceStep[] = [];
@@ -609,7 +622,8 @@ async function runTokenAudit(
 
   // ---- OFAC screen: deployer + top holders, recorded as a check outcome ----
   step({ phase: "Screen", label: "OFAC sanctions", detail: "Screening deployer + top holders against the US Treasury SDN address list…", tone: "neutral" });
-  const sanctionsScreen = await screenAddressSanctions(chain, [deployer, ...topHolders.map((h) => h.address)]);
+  const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
+  const sanctionsScreen = await screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]);
   if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
     findings.push({
       claim: sanctionsScreen.sanctioned.length === 1

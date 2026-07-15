@@ -3,6 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 import type { ResolvedInput, RunnableTokenInput } from "../../src/lib/resolveInput.js";
 import { auditToken, resolveInput } from "../_collector.js";
 import { consumeInvestigationQuota, requireArgusAuth } from "../_auth.js";
+import { screenSanctionedAddresses } from "../_sanctions-core.js";
 
 export const config = { maxDuration: 30 };
 
@@ -40,7 +41,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (quota.error) { res.status(503).json({ error: quota.error }); return; }
   if (!quota.allowed) { res.status(429).json({ error: "daily_investigation_limit_reached", remaining: 0 }); return; }
   try {
-    const d = await auditToken(input);
+    // Inject the direct OFAC screener so this server path records a real
+    // sanctions outcome (and applies the AVOID cap) rather than skipping the
+    // browser-only same-origin fetch.
+    const d = await auditToken(input, undefined, { screenSanctions: screenSanctionedAddresses });
     if (!d) {
       res.status(404).json({ error: "no DEX pair found for this contract" });
       return;
@@ -58,6 +62,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       headline: d.headline,
       market: { priceUsd: d.priceUsd, marketCap: d.mcap, liquidityUsd: d.liquidityUsd, volume24h: d.vol24, ageDays: d.ageDays, priceChange: d.priceChange },
       safety: d.safety,
+      sanctions: d.sanctionsScreen
+        ? { screened: d.sanctionsScreen.checked, listSize: d.sanctionsScreen.listSize, sanctioned: d.sanctionsScreen.sanctioned, available: d.sanctionsScreen.available }
+        : null,
       holders: { top: d.topHolders, insiderPct: d.insiderPct, bundleCount: d.bundleCount, bundleRisk: d.bundleRisk },
       corroboration: d.cg,
       provenance: { projectX: d.projectX, deployer: d.deployer },
