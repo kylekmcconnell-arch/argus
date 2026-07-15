@@ -128,7 +128,7 @@ describe("projectProviderBackedBasicFacts", () => {
       ["founder", "Meow"],
       ["official_token", "$JUP"],
       ["network", "Solana"],
-      ["traction", "$18M 24h trading volume"],
+      ["traction", "$17.9M 24h trading volume"],
       ["repository", "github.com/jup-ag"],
     ]);
     expect(evidence.basicFacts?.every((fact) =>

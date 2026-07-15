@@ -2,6 +2,7 @@ import {
   ArrowSquareOut,
   CheckCircle,
   MagnifyingGlass,
+  ShieldCheck,
   Warning,
 } from "@phosphor-icons/react";
 import { canonicalBasicFactComparisonValue } from "../data/evidence";
@@ -151,6 +152,32 @@ function answerFor(fact: BasicFactView): string {
     ? "Sources disagree and no governing answer was selected."
     : "A source was verified, but the answer could not be summarized.";
   return answer;
+}
+
+// The four answers an investor scans first. Everything else compresses.
+const KEY_PREDICATES = new Set(["official_identity", "official_token", "traction", "funding"]);
+
+/**
+ * A shield line renders only when the strongest source is one the subject
+ * cannot self-publish: the auditor's own domain always qualifies; a
+ * registry/on-chain class qualifies only for the token binding, where the
+ * hard part is the official-account match. Scarcity is the point: on a
+ * healthy report two or three shields land, and the eye lands with them.
+ */
+function hardVerificationLine(
+  sources: BasicFactSourceView[],
+  predicate: string,
+): { line: string; excerpt?: string } | null {
+  const counterparty = sources.find((source) => source.sourceClass === "official_counterparty" && safeHttpUrl(source.url));
+  if (counterparty) {
+    const hostname = new URL(safeHttpUrl(counterparty.url)!).hostname.replace(/^www\./, "");
+    return { line: `Confirmed on ${hostname}, not just claimed`, excerpt: counterparty.excerpt };
+  }
+  if (predicate === "official_token") {
+    const onchain = sources.find((source) => source.sourceClass === "regulatory_or_onchain" && safeHttpUrl(source.url));
+    if (onchain) return { line: "Bound via the official account, never a name match", excerpt: onchain.excerpt };
+  }
+  return null;
 }
 
 function compactMetadataValue(value?: string): string {
@@ -322,6 +349,71 @@ function leadRows(facts: readonly BasicFactView[], leads: readonly BasicFactLead
   });
 }
 
+function AnsweredFactCard({ fact, audience, prominent }: {
+  fact: BasicFactView; audience: BasicFactsAudience; prominent: boolean;
+}) {
+  const meta = STATUS_META[fact.status as "verified" | "corroborated"];
+  // Contradicting sources are ordered first so the visible slice can never
+  // hide a contradiction behind supporting links.
+  const sources = dedupeSources(fact.sources ?? []).sort((a, b) =>
+    Number(b.relation === "contradicts") - Number(a.relation === "contradicts"));
+  const hard = hardVerificationLine(sources, fact.predicate);
+  // When the shield line carries the provenance, the qualifier stops reading
+  // as prose inside the answer (audit facts qualify their value with the
+  // same sentence).
+  const displayFact = hard && fact.predicate === "audit" ? { ...fact, qualifier: undefined } : fact;
+  return (
+    <li className={`panel-inset min-w-0 ${prominent ? "border-l-2 border-pass/40 px-3.5 py-3" : "px-3 py-2.5"}`}>
+      <div className="flex items-start justify-between gap-2.5">
+        <div className="min-w-0">
+          <p className={`font-semibold leading-snug tracking-tight text-ink tabular-nums ${prominent ? "text-[16.5px]" : "text-[13.5px]"}`}>
+            {answerFor(displayFact)}
+          </p>
+          <p className="mt-1 text-[10px] uppercase tracking-[0.09em] text-ink-faint">
+            {basicFactQuestionFor(fact.predicate, audience)}
+          </p>
+        </div>
+        {fact.status === "corroborated" ? (
+          <span className={`chip shrink-0 normal-case tracking-normal ${meta.className}`}>{meta.label}</span>
+        ) : (
+          <>
+            <CheckCircle aria-hidden="true" size={14} weight="fill" className="mt-0.5 shrink-0 text-pass" />
+            <span className="sr-only">Verified</span>
+          </>
+        )}
+      </div>
+      {hard && (
+        <p className="mono mt-1.5 flex items-center gap-1.5 text-[10.5px] text-pass" title={hard.excerpt}>
+          <ShieldCheck aria-hidden="true" size={12} weight="fill" className="shrink-0" />
+          {hard.line}
+        </p>
+      )}
+      <LegalEventMetadata fact={fact} audience={audience} />
+      {sources.length > 0 && (
+        <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${basicFactQuestionFor(fact.predicate, audience)}`}>
+          {sources.slice(0, prominent ? 4 : 2).map((source, sourceIndex) => {
+            const url = safeHttpUrl(source.url)!;
+            const contradicts = source.relation === "contradicts";
+            return (
+              <a
+                key={`${url}:${sourceIndex}`}
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+                title={source.excerpt || sourceLabel(source, url)}
+                className={`btn-chip min-h-8 max-w-full normal-case tracking-normal ${contradicts ? "tint-avoid" : "tint-signal"}`}
+              >
+                <ArrowSquareOut aria-hidden="true" size={12} weight="bold" className="shrink-0" />
+                <span className="max-w-52 truncate">{contradicts ? "Contradicts: " : ""}{sourceLabel(source, url)}</span>
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </li>
+  );
+}
+
 export function BasicFactsPanel({
   id = "basic-facts",
   facts = [],
@@ -352,6 +444,8 @@ export function BasicFactsPanel({
   const answeredRows = rows.filter((fact) =>
     (fact.status === "verified" || fact.status === "corroborated")
     && fact.attributionScope !== "identity_unresolved");
+  const keyRows = answeredRows.filter((fact) => KEY_PREDICATES.has(fact.predicate));
+  const supportingRows = answeredRows.filter((fact) => !KEY_PREDICATES.has(fact.predicate));
   const checkedEmptyRows = rows.filter((fact) => fact.status === "checked_empty");
   const conflictedRows = rows.filter((fact) => fact.status === "conflicted");
   const unresolvedRows = rows.filter((fact) => fact.status === "unresolved");
@@ -370,7 +464,7 @@ export function BasicFactsPanel({
           <div className="panel-inset flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-[11px]" aria-label="Basic facts coverage">
             <span className="inline-flex items-center gap-1.5 font-medium text-pass">
               <CheckCircle aria-hidden="true" size={14} weight="fill" />
-              {answered} confirmed
+              {answered} verified
             </span>
             {checkedEmpty > 0 && <span className="text-ink-dim">{checkedEmpty} checked, none found</span>}
             {conflicted > 0 && <span className="text-avoid">{conflicted} conflicted</span>}
@@ -383,48 +477,22 @@ export function BasicFactsPanel({
       </header>
 
       {answeredRows.length > 0 ? (
-        <ul className="grid gap-2 p-4 sm:grid-cols-2 sm:p-5" aria-label="Confirmed basic facts">
-          {answeredRows.map((fact, index) => {
-            const meta = STATUS_META[fact.status as "verified" | "corroborated"];
-            const sources = dedupeSources(fact.sources ?? []);
-            return (
-              <li key={fact.factId || `${fact.predicate}:${index}`} className="panel-inset min-w-0 px-3.5 py-3.5">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <p className="text-[10.5px] leading-relaxed text-ink-faint">{basicFactQuestionFor(fact.predicate, audience)}</p>
-                    <p className="mt-1 text-[15px] font-medium leading-snug text-ink">{answerFor(fact)}</p>
-                  </div>
-                  <span className={`chip shrink-0 normal-case tracking-normal ${meta.className}`}>
-                    <CheckCircle aria-hidden="true" size={12} weight="fill" />
-                    {meta.label}
-                  </span>
-                </div>
-                  <LegalEventMetadata fact={fact} audience={audience} />
-                  {sources.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1.5" aria-label={`Sources for ${basicFactQuestionFor(fact.predicate, audience)}`}>
-                      {sources.slice(0, 4).map((source, sourceIndex) => {
-                        const url = safeHttpUrl(source.url)!;
-                        const contradicts = source.relation === "contradicts";
-                        return (
-                          <a
-                            key={`${url}:${sourceIndex}`}
-                            href={url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            title={source.excerpt || sourceLabel(source, url)}
-                            className={`btn-chip min-h-8 max-w-full normal-case tracking-normal ${contradicts ? "tint-avoid" : "tint-signal"}`}
-                          >
-                            <ArrowSquareOut aria-hidden="true" size={12} weight="bold" className="shrink-0" />
-                            <span className="max-w-52 truncate">{contradicts ? "Contradicts: " : ""}{sourceLabel(source, url)}</span>
-                          </a>
-                        );
-                      })}
-                    </div>
-                  )}
-              </li>
-            );
-          })}
-        </ul>
+        <>
+          {keyRows.length > 0 && (
+            <ul className="grid gap-2 p-4 pb-0 sm:grid-cols-2 sm:p-5 sm:pb-0" aria-label="Key verified answers">
+              {keyRows.map((fact, index) => (
+                <AnsweredFactCard key={fact.factId || `${fact.predicate}:${index}`} fact={fact} audience={audience} prominent />
+              ))}
+            </ul>
+          )}
+          {supportingRows.length > 0 && (
+            <ul className="grid gap-1.5 p-4 sm:grid-cols-2 xl:grid-cols-3 sm:p-5 sm:pt-3" aria-label="Confirmed basic facts">
+              {supportingRows.map((fact, index) => (
+                <AnsweredFactCard key={fact.factId || `${fact.predicate}:${index}`} fact={fact} audience={audience} prominent={false} />
+              ))}
+            </ul>
+          )}
+        </>
       ) : checkedEmptyRows.length === 0 && identityReviewRows.length === 0 ? (
         <div className="px-4 py-5 sm:px-5">
           <div className="panel-inset flex items-start gap-3 px-3.5 py-3.5">

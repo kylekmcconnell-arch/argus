@@ -3,6 +3,8 @@ import {
   ArrowLeft,
   ArrowsClockwise,
   Briefcase,
+  WarningCircle,
+  XCircle,
   Buildings,
   CheckCircle,
   Cube,
@@ -20,6 +22,7 @@ import {
   UserCircle,
   UserFocus,
 } from "@phosphor-icons/react";
+import { usdCompact } from "../lib/format";
 import { ArgusMark } from "./ArgusMark";
 import { TrustGraph } from "./TrustGraph";
 import type { Dossier } from "../data/dossier";
@@ -109,15 +112,32 @@ function VerdictPill({ verdict, size = "sm" }: { verdict: string; size?: "sm" | 
   );
 }
 
-function ScoreRing({ score, verdict, size = 86 }: { score: number | null; verdict: string; size?: number }) {
+function ScoreRing({ score, verdict, size = 86, bands = false }: {
+  score: number | null; verdict: string; size?: number; bands?: boolean;
+}) {
   const m = verdictMeta(verdict);
   const r = size / 2 - 6;
   const c = 2 * Math.PI * r;
   const pct = score == null ? 0 : Math.max(0, Math.min(100, score)) / 100;
+  // Published rubric zones on the ring track (FAIL 0-39, CAUTION 40-69,
+  // PASS 70-100); 3px gaps articulate the 40 and 70 thresholds so the score
+  // arc tip visibly lands inside its zone.
+  const zone = (from: number, to: number) => ({
+    strokeDasharray: `${Math.max(0, ((to - from) / 100) * c - 3)} ${c}`,
+    strokeDashoffset: -((from / 100) * c) - 1.5,
+  });
   return (
     <div className="relative" style={{ width: size, height: size }}>
       <svg width={size} height={size} className="-rotate-90">
-        <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-line)" strokeWidth="4" />
+        {bands ? (
+          <>
+            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-fail)" strokeOpacity="0.22" strokeWidth="4" style={zone(0, 40)} />
+            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-caution)" strokeOpacity="0.22" strokeWidth="4" style={zone(40, 70)} />
+            <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-pass)" strokeOpacity="0.25" strokeWidth="4" style={zone(70, 100)} />
+          </>
+        ) : (
+          <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="var(--color-line)" strokeWidth="4" />
+        )}
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -137,6 +157,41 @@ function ScoreRing({ score, verdict, size = 86 }: { score: number | null; verdic
         </span>
         <span className="mono text-[10px] text-ink-faint">/ 100</span>
       </div>
+    </div>
+  );
+}
+
+/** Where a score sits inside its published rubric band, in investor words. */
+function scoreBandPosition(score: number, capApplied?: string | null): string {
+  if (capApplied) return "capped by a disqualifying finding";
+  const band = score >= 70 ? { lo: 70, hi: 100, name: "pass band" }
+    : score >= 40 ? { lo: 40, hi: 69, name: "caution band" }
+      : { lo: 0, hi: 39, name: "fail band" };
+  const t = (score - band.lo) / (band.hi - band.lo);
+  return `${t >= 0.67 ? "top" : t >= 0.34 ? "middle" : "low end"} of the ${band.name}`;
+}
+
+type HeroProofTone = "pass" | "caution" | "avoid" | "neutral";
+interface HeroProofChip { key: string; label: string; value?: string; tone: HeroProofTone; href: `#${string}`; title: string }
+
+const PROOF_TONE_CLASS: Record<HeroProofTone, string> = {
+  pass: "tint-pass", caution: "tint-caution", avoid: "tint-avoid font-medium", neutral: "",
+};
+
+function ProofChipStrip({ chips }: { chips: HeroProofChip[] }) {
+  if (chips.length === 0) return null;
+  return (
+    <div className="mt-3 flex flex-wrap gap-1.5" role="list" aria-label="Verification proof points">
+      {chips.map((chip) => (
+        <a key={chip.key} role="listitem" href={chip.href} title={chip.title}
+          className={`chip min-h-8 px-2 transition hover:brightness-125 ${PROOF_TONE_CLASS[chip.tone]}`}>
+          {chip.tone === "avoid" ? <XCircle aria-hidden="true" size={12} weight="fill" />
+            : chip.tone === "caution" ? <WarningCircle aria-hidden="true" size={12} weight="bold" />
+              : chip.tone === "pass" ? <CheckCircle aria-hidden="true" size={12} weight="fill" /> : null}
+          {chip.label}
+          {chip.value && <span className="tabular font-semibold normal-case">{chip.value}</span>}
+        </a>
+      ))}
     </div>
   );
 }
@@ -790,12 +845,7 @@ function fundScaleTemporalLabel(source: SourceArtifact): string {
 }
 
 function formatFundScaleUsd(value?: number): string {
-  if (!Number.isFinite(value)) return "amount unavailable";
-  const amount = value as number;
-  if (amount >= 1_000_000_000_000) return `$${(amount / 1_000_000_000_000).toFixed(amount % 1_000_000_000_000 ? 1 : 0)}T`;
-  if (amount >= 1_000_000_000) return `$${(amount / 1_000_000_000).toFixed(amount % 1_000_000_000 ? 1 : 0)}B`;
-  if (amount >= 1_000_000) return `$${(amount / 1_000_000).toFixed(amount % 1_000_000 ? 1 : 0)}M`;
-  return `$${amount.toLocaleString()}`;
+  return Number.isFinite(value) ? usdCompact(value) : "amount unavailable";
 }
 
 const SOURCE_KIND_LABEL: Record<FrozenSourceArtifact["kind"], string> = {
@@ -1631,7 +1681,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         id: `support-${axis.axis}`,
         title: diligenceAreaLabel(axis.axis),
         detail: summary,
-        provenance: `${strength} · ${axis.support.length} ${axis.support.length === 1 ? "source" : "sources"} reviewed`,
+        meta: `${strength.replace(" evidence", "")} · ${axis.support.length} src`,
         href: axisHref(axis.axis),
       };
     });
@@ -1800,7 +1850,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       title: `$${f.projectToken.symbol} is the verified project token.`,
       detail: [
         f.projectToken.rank != null ? `CoinGecko rank #${f.projectToken.rank}` : null,
-        f.projectToken.marketCapUsd != null ? `market cap $${Math.round(f.projectToken.marketCapUsd).toLocaleString()}` : null,
+        f.projectToken.marketCapUsd != null ? `market cap ${usdCompact(f.projectToken.marketCapUsd)}` : null,
         f.projectToken.chain,
       ].filter(Boolean).join(" · "),
       provenance: `Canonical token · verified via ${f.projectToken.verification === "official_x" ? "official X" : "official domain"}`,
@@ -1868,6 +1918,110 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     { label: "Relationship records", value: relationshipRecordCount, detail: "people and graph links" },
     { label: "Open questions", value: decisionQuestionCount, detail: "worth verifying" },
   ] as const;
+
+  // Hero proof chips: every chip is a projection of recorded check outcomes,
+  // verified facts, or frozen snapshots, deep-linking to its evidence.
+  // Adverse findings always outrank proof in the sort; a missing screen shows
+  // as caution, never silence.
+  const findCheck = (id: string) => diligenceChecks.find((check) => check.checkId === id);
+  const heroLedgerEntry = (predicate: string) => (f.basicFactQuestionLedger ?? []).find((entry) =>
+    canonicalBasicFactPredicate(entry.predicate) === predicate);
+  const heroProofChips: HeroProofChip[] = [];
+  {
+    const ic = report.identity_confidence;
+    heroProofChips.push(
+      ic === "SuspectedImpersonation"
+        ? { key: "identity", label: "Impersonation suspected", tone: "avoid", href: "#identity-evidence", title: "Identity screen flagged suspected impersonation. Review before anything else." }
+        : ic === "Confirmed"
+          ? { key: "identity", label: "Identity verified", tone: "pass", href: "#identity-evidence", title: findCheck("identity-resolution")?.note ?? "Official identity resolved and confirmed." }
+          : ic === "Probable"
+            ? { key: "identity", label: "Identity probable", tone: "caution", href: "#identity-evidence", title: "Identity resolution is probable, not confirmed." }
+            : { key: "identity", label: "Identity unresolved", tone: "caution", href: "#identity-evidence", title: "No confirmed identity resolution is recorded." },
+    );
+  }
+  if (!legacyCoverageNotCaptured) {
+    const sanctionsCheck = findCheck("ofac-sanctions-name");
+    const sanctionsNames = sanctionsCheck?.note?.match(/against ([\d,]+) OFAC SDN names/)?.[1];
+    heroProofChips.push(
+      sanctionsCheck?.status === "checked-empty"
+        ? { key: "sanctions", label: "Sanctions clear", value: sanctionsNames ? `${sanctionsNames} names` : undefined, tone: "pass", href: "#identity-evidence", title: sanctionsCheck.note ?? "Exact-name sanctions screen completed with no match." }
+        : sanctionsCheck?.status === "finding"
+          ? { key: "sanctions", label: "Sanctions match", tone: "avoid", href: "#identity-evidence", title: sanctionsCheck.note ?? "An exact-name sanctions match requires identity review." }
+          : sanctionsCheck?.status === "not-applicable"
+            ? { key: "sanctions", label: "Sanctions n/a", tone: "neutral", href: "#identity-evidence", title: sanctionsCheck.note ?? "The sanctions screen needs a resolved real name." }
+            : { key: "sanctions", label: "Sanctions not screened", tone: "caution", href: "#scan-methodology", title: sanctionsCheck?.note ?? "No sanctions-screen outcome is recorded in this snapshot." },
+    );
+  }
+  {
+    const auditFacts = basicFacts.filter((fact) =>
+      canonicalBasicFactPredicate(fact.predicate) === "audit"
+      && (fact.status === "verified" || fact.status === "corroborated"));
+    const conflictedAudit = basicFacts.some((fact) =>
+      canonicalBasicFactPredicate(fact.predicate) === "audit" && fact.status === "conflicted");
+    const auditorConfirmed = auditFacts.filter((fact) =>
+      (fact.sources ?? []).some((candidate) => candidate.sourceClass === "official_counterparty")).length;
+    const auditQuestion = heroLedgerEntry("audit");
+    if (conflictedAudit) {
+      heroProofChips.push({ key: "audits", label: "Audit claim conflicted", tone: "avoid", href: "#basic-facts", title: "An audit claim is contradicted by a source. Read both before relying on either." });
+    } else if (auditorConfirmed > 0) {
+      heroProofChips.push({ key: "audits", label: "Audits confirmed", value: `x${auditorConfirmed}`, tone: "pass", href: "#basic-facts", title: `${auditorConfirmed} audit ${auditorConfirmed === 1 ? "claim" : "claims"} confirmed on the auditor's own site, not just the project's.` });
+    } else if (auditFacts.length > 0) {
+      heroProofChips.push({ key: "audits", label: "Audits cited", value: `x${auditFacts.length}`, tone: "neutral", href: "#basic-facts", title: "Audit claims verified on project materials; auditor-site confirmation not recorded." });
+    } else if (auditQuestion && basicFactQuestionOutcome(auditQuestion) !== "checked_empty") {
+      heroProofChips.push({ key: "audits", label: "Audits not verified", tone: "caution", href: "#verification-next", title: "Independent audits are not verified in this snapshot." });
+    } else if (auditQuestion) {
+      heroProofChips.push({ key: "audits", label: "No audits found", tone: "caution", href: "#basic-facts", title: "A completed search found no independent audit." });
+    }
+  }
+  {
+    const tokenQuestion = heroLedgerEntry("official_token");
+    if (f.projectToken) {
+      heroProofChips.push({ key: "token", label: "Token verified", value: `$${f.projectToken.symbol}`, tone: "pass", href: "#project-token", title: `Canonical token bound via ${f.projectToken.verification === "official_x" ? "the official X account" : "the official domain"}, never a name match.` });
+    } else if (tokenQuestion && basicFactQuestionOutcome(tokenQuestion) === "checked_empty") {
+      heroProofChips.push({ key: "token", label: "No official token", tone: "neutral", href: "#basic-facts", title: "A completed search found no verified official token." });
+    } else if (tokenQuestion) {
+      heroProofChips.push({ key: "token", label: "Token identity unresolved", tone: "caution", href: "#verification-next", title: "Official-token candidacy is not resolved. This is the core scam vector; verify before capital moves." });
+    }
+  }
+  {
+    // Scale reads pass tone only from sources a subject cannot self-publish;
+    // an official-subject-only usage claim stays labeled as self-reported.
+    const HARD_SCALE_CLASSES = new Set(["regulatory_or_onchain", "independent_press", "official_counterparty"]);
+    const tractionFacts = basicFacts.filter((fact) =>
+      canonicalBasicFactPredicate(fact.predicate) === "traction"
+      && (fact.status === "verified" || fact.status === "corroborated"));
+    const tvlFact = tractionFacts.find((fact) => /total value locked|TVL/i.test(String(fact.value ?? "")));
+    const scaleFact = tvlFact ?? tractionFacts[0];
+    if (scaleFact) {
+      const hardScale = (scaleFact.sources ?? []).some((candidate) => HARD_SCALE_CLASSES.has(candidate.sourceClass ?? ""));
+      const raw = String(scaleFact.value ?? "");
+      const tvlMatch = raw.match(/\$\s?([\d.,]+)\s*(billion|bn|b|million|mn|m)\b/i);
+      const compact = tvlMatch && tvlFact === scaleFact
+        ? `$${tvlMatch[1].replace(/,/g, "")}${/^b/i.test(tvlMatch[2]) ? "B" : "M"} TVL`
+        : undefined;
+      heroProofChips.push(hardScale
+        ? { key: "scale", label: compact ? "Verified" : "Usage verified", value: compact, tone: "pass", href: "#basic-facts", title: raw.slice(0, 160) }
+        : { key: "scale", label: "Self-reported usage", value: compact, tone: "neutral", href: "#basic-facts", title: `${raw.slice(0, 140)} (source: the project's own materials)` });
+    }
+  }
+  {
+    const foundedFact = basicFacts.find((fact) =>
+      canonicalBasicFactPredicate(fact.predicate) === "founded"
+      && (fact.status === "verified" || fact.status === "corroborated"));
+    const foundedYear = foundedFact ? String(foundedFact.value ?? "").match(/(?:19|20)\d{2}/)?.[0] : undefined;
+    if (foundedYear) {
+      heroProofChips.push({ key: "age", label: "since", value: foundedYear, tone: "neutral", href: "#basic-facts", title: `Founded ${foundedYear}, verified against fetched sources.` });
+    }
+  }
+  if (!legacyCoverageNotCaptured) {
+    heroProofChips.push(
+      readiness.status === "ready"
+        ? { key: "coverage", label: "Checks", value: `${readiness.successful}/${readiness.applicable}`, tone: "pass", href: "#scan-methodology", title: `${readiness.coveragePercent}% of applicable decision-critical checks have recorded outcomes.` }
+        : { key: "coverage", label: `Coverage ${readiness.coveragePercent}%`, value: `${readiness.successful}/${readiness.applicable}`, tone: "caution", href: "#scan-methodology", title: readinessGuidance },
+    );
+  }
+  const PROOF_TONE_RANK: Record<HeroProofTone, number> = { avoid: 0, caution: 1, pass: 2, neutral: 3 };
+  heroProofChips.sort((a, b) => PROOF_TONE_RANK[a.tone] - PROOF_TONE_RANK[b.tone]);
 
   return (
     <div className="relative min-h-full pb-24">
@@ -2077,9 +2231,19 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             aria-label="Decision readiness result"
           >
             <div className="shrink-0 text-center max-sm:flex max-sm:items-center max-sm:gap-3 max-sm:text-left">
-              <ScoreRing score={presentation.primaryScore ? report.governing_score : null} verdict={presentedVerdict} size={92} />
-              <div className="mono mt-1 text-[11px] uppercase tracking-wider text-ink-faint">
+              <ScoreRing
+                score={presentation.primaryScore ? report.governing_score : null}
+                verdict={presentedVerdict}
+                size={92}
+                bands={Boolean(presentation.primaryScore)}
+              />
+              <div className="mono mt-1 max-w-[9.5rem] text-[11px] uppercase tracking-wider text-ink-faint">
                 {presentation.scoreLabel?.toLowerCase() ?? "score withheld"}
+                {presentation.primaryScore && report.governing_score != null && (
+                  <span className="block normal-case tracking-normal text-ink-dim">
+                    {scoreBandPosition(report.governing_score, report.cap_applied)}
+                  </span>
+                )}
               </div>
             </div>
             <div className="min-w-0 flex-1">
@@ -2103,6 +2267,25 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <p className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
                 {presentation.final ? f.headline : legacyCoverageNotCaptured ? readinessGuidance : presentation.note}
               </p>
+              {presentation.final && !legacyCoverageNotCaptured && (
+                <p className="mono mt-2 text-[11px] text-ink-faint" aria-label="Verdict support summary">
+                  <span className="tabular">{verifiedDecisionFactCount}</span> facts verified
+                  <span aria-hidden="true"> · </span>
+                  <span className="tabular">{cleanScreens.length}</span> screens clean
+                  <span aria-hidden="true"> · </span>
+                  {(() => {
+                    const adverseSignals = diligenceChecks.filter((check) => check.status === "finding").length
+                      + visibleContradictions.length;
+                    if (adverseSignals > 0) {
+                      return <span className="text-avoid">{adverseSignals} adverse {adverseSignals === 1 ? "signal" : "signals"}</span>;
+                    }
+                    // Never assert a zero under an adverse verdict; route to the basis instead.
+                    return favorableVerdict
+                      ? <span>0 adverse findings</span>
+                      : <a href="#decision-basis" className="text-avoid underline-offset-2 hover:underline">see decision basis</a>;
+                  })()}
+                </p>
+              )}
               {!presentation.final && f.headline && (
                 <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
                   <span className="text-ink-dim">Stored scored-evidence summary, not clearance:</span> {f.headline}
@@ -2123,8 +2306,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 {legacyCoverageNotCaptured ? "this snapshot contains no frozen check-level outcomes" : "observable outcomes stored in this report"}
               </span>
               {!legacyCoverageNotCaptured && diligenceChecks.length > 0 && (
-                <a href="#scan-methodology" className="ml-auto inline-flex min-h-8 items-center text-[11px] text-signal-lift underline-offset-2 hover:underline">
-                  Review coverage gaps
+                <a
+                  href={decisionQuestionCount > 0 ? "#verification-next" : "#scan-methodology"}
+                  className="ml-auto inline-flex min-h-8 items-center text-[11px] text-signal-lift underline-offset-2 hover:underline"
+                >
+                  {decisionQuestionCount > 0
+                    ? `${decisionQuestionCount} open ${decisionQuestionCount === 1 ? "question" : "questions"}`
+                    : "Review methodology"}
                 </a>
               )}
             </div>
@@ -2150,30 +2338,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 )}
               </div>
             ) : (
-              <>
-                <dl className="mt-3 grid gap-2 sm:grid-cols-4">
-                  <div className="stat-tile">
-                    <dt className="stat-label">
-                      {versionContext?.attestationState === "legacy_unattested" ? "Evidence coverage" : "Review coverage"}
-                    </dt>
-                    <dd className="stat-value mt-0.5 font-semibold">{readiness.coveragePercent}%</dd>
-                  </div>
-                  <div className="stat-tile">
-                    <dt className="stat-label">Checks completed</dt>
-                    <dd className="stat-value mt-0.5 font-semibold">{readiness.successful} / {readiness.applicable}</dd>
-                  </div>
-                  <div className="stat-tile">
-                    <dt className="stat-label">Areas with evidence</dt>
-                    <dd className="stat-value mt-0.5 font-semibold">{evidenceBackedAxisCount} / {governingAxes.length}</dd>
-                  </div>
-                  <div className="stat-tile">
-                    <dt className="stat-label">Questions remaining</dt>
-                    <dd className={`stat-value mt-0.5 font-semibold ${decisionQuestionCount ? "text-caution" : "text-ink"}`}>{decisionQuestionCount}</dd>
-                  </div>
-                </dl>
-                <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
-              </>
+              <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
             )}
+            <ProofChipStrip chips={heroProofChips} />
           </div>
         </section>
 
@@ -2498,7 +2665,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             {argusEdgeMetrics.map((metric) => (
               <div key={metric.label} className="panel-inset px-3 py-3">
                 <dt className="text-[10.5px] text-ink-faint">{metric.label}</dt>
-                <dd className="mono mt-1 text-[20px] font-semibold text-ink">{metric.value}</dd>
+                <dd className="stat-value mt-1 text-[20px] font-semibold">{metric.value}</dd>
                 <dd className="mt-1 text-[10.5px] leading-snug text-ink-faint">{metric.detail}</dd>
               </div>
             ))}

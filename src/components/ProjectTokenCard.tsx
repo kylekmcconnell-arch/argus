@@ -1,14 +1,7 @@
 import { ArrowSquareOut, ChartLineUp, ShieldCheck } from "@phosphor-icons/react";
 import type { ProjectTokenSnapshot } from "../data/evidence";
+import { usdCompact } from "../lib/format";
 import { TokenSparkline } from "./TokenSparkline";
-
-const money = (value?: number) => {
-  if (value == null || !Number.isFinite(value)) return "N/A";
-  if (value >= 1e9) return `$${(value / 1e9).toFixed(2)}B`;
-  if (value >= 1e6) return `$${(value / 1e6).toFixed(1)}M`;
-  if (value >= 1e3) return `$${Math.round(value / 1e3)}K`;
-  return `$${Math.round(value).toLocaleString()}`;
-};
 
 const price = (value?: number) => {
   if (value == null || !Number.isFinite(value)) return "N/A";
@@ -39,6 +32,13 @@ export function ProjectTokenCard({
       .filter(Boolean)
       .filter((chain, index, all) => all.findIndex((candidate) => candidate.toLowerCase() === chain.toLowerCase()) === index)
     : null;
+  const supplyDenominator = typeof token.maxSupply === "number" && token.maxSupply > 0
+    ? token.maxSupply
+    : typeof token.totalSupply === "number" && token.totalSupply > 0 ? token.totalSupply : null;
+  const circulatingPct = supplyDenominator !== null
+    && typeof token.circulatingSupply === "number" && token.circulatingSupply > 0
+    ? Math.min(100, Math.round((token.circulatingSupply / supplyDenominator) * 100))
+    : null;
   const chainDisplay = chainList
     ? chainList.length > 3
       ? `${chainList.slice(0, 3).join(", ")} +${chainList.length - 3} more`
@@ -60,7 +60,7 @@ export function ProjectTokenCard({
             {token.rank != null && <span className="chip">CoinGecko #{token.rank}</span>}
           </div>
           <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
-            <span className="mono font-medium text-ink">${token.symbol}</span> is the canonical token linked to {token.name}. The identity binding is frozen into this report even when the overall verdict is withheld.
+            <span className="mono font-medium text-ink">${token.symbol}</span> is the canonical token linked to {token.name}. Matched through the project's {verifiedBy} and canonical {token.chain} contract, never a name or ticker match. The identity binding is frozen into this report even when the overall verdict is withheld.
           </p>
         </div>
         <div className="flex shrink-0 flex-wrap gap-2">
@@ -76,17 +76,18 @@ export function ProjectTokenCard({
       </div>
 
       <dl className="grid grid-cols-2 gap-px bg-line sm:grid-cols-3 lg:grid-cols-6">
-        {[
-          ["Price", price(token.priceUsd)],
-          ["Market cap", money(token.marketCapUsd)],
-          ["Fully diluted", money(token.fdvUsd)],
-          ["24h volume", money(token.volume24hUsd)],
-          ["DEX liquidity", money(token.liquidityUsd)],
-          [chainList ? `Chains (${chainList.length})` : "Chain", chainDisplay],
-        ].map(([label, value]) => (
+        {([
+          ["Price", price(token.priceUsd), "", null],
+          ["Market cap", usdCompact(token.marketCapUsd), "", null],
+          ["Fully diluted", usdCompact(token.fdvUsd), "", circulatingPct !== null ? `${circulatingPct}% of supply circulating` : null],
+          ["24h volume", usdCompact(token.volume24hUsd), "", null],
+          ["DEX liquidity", usdCompact(token.liquidityUsd), "", null],
+          [chainList ? `Chains (${chainList.length})` : "Chain", chainDisplay, "capitalize", chainList ? "matched by CoinGecko id, not by name" : null],
+        ] as const).map(([label, value, extra, sub]) => (
           <div key={label} className="bg-panel px-4 py-3">
             <dt className="stat-label">{label}</dt>
-            <dd className="stat-value mt-1 font-semibold capitalize" title={chainList && label.startsWith("Chains") ? `${chainList.join(", ")} · protocol footprint per DeFiLlama TVL` : undefined}>{value}</dd>
+            <dd className={`stat-value mt-1 font-semibold ${extra}`} title={chainList && label.startsWith("Chains") ? `${chainList.join(", ")} · protocol footprint per DeFiLlama TVL` : undefined}>{value}</dd>
+            {sub && <dd className="mt-0.5 text-[10px] leading-snug text-ink-faint tabular-nums">{sub}</dd>}
           </div>
         ))}
       </dl>

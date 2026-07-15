@@ -129,8 +129,10 @@ const PREDICATE_ALIASES: Record<string, string> = {
   leadership: "executive",
   core_team: "executive",
   token: "official_token",
-  tokeneconomics: "official_token",
-  tokenomics: "official_token",
+  // A supply or allocation disclosure answers its own question. It must never
+  // reconcile against the token symbol, where the singleton rule would present
+  // it as a fake conflict with the verified official token.
+  tokeneconomics: "tokenomics",
   launch_date: "launched",
   launch: "launched",
   founding_date: "founded",
@@ -155,10 +157,17 @@ function humanizeBasicFactPredicate(value: string): string {
   return canonicalBasicFactPredicate(value).replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase());
 }
 
+const SUPPLEMENTAL_QUESTIONS: ReadonlyMap<string, string> = new Map([
+  ["tokenomics", "What token allocation or supply disclosures are published?"],
+  ["vesting", "What vesting, lockup, or unlock schedule is published?"],
+  ["treasury", "What treasury assets, reports, wallets, or controls are disclosed?"],
+]);
+
 export function basicFactQuestionFor(predicate: string, audience: BasicFactsAudience): string {
   const canonical = canonicalBasicFactPredicate(predicate);
   return QUESTION_MAPS[audience].get(canonical)
     ?? QUESTION_MAPS.project.get(canonical)
+    ?? SUPPLEMENTAL_QUESTIONS.get(canonical)
     ?? humanizeBasicFactPredicate(canonical);
 }
 

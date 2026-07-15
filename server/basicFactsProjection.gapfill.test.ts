@@ -73,7 +73,7 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     const founder = evidence.basicFacts?.find((fact) => fact.predicate === "founder" && fact.value === "Stani Kulechov");
     expect(founder).toBeTruthy();
     const funding = evidence.basicFacts?.find((fact) => fact.predicate === "funding");
-    expect(funding?.value).toContain("$49M");
+    expect(funding?.value).toContain("$49.0M");
   });
 
   it("mints a venture-scoped funding fact for a FOUNDER from the company record", () => {
@@ -98,7 +98,7 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     // presented as having raised the money themselves.
     expect(funding?.value.startsWith("Aave: ")).toBe(true);
     expect(funding?.qualifier).toBe("venture financing");
-    expect(funding?.value).toContain("$49M raised");
+    expect(funding?.value).toContain("$49.0M raised");
   });
 
   it("mints nothing for a non-project subject", () => {

@@ -6897,8 +6897,10 @@ var PREDICATE_ALIASES = {
   leadership: "executive",
   core_team: "executive",
   token: "official_token",
-  tokeneconomics: "official_token",
-  tokenomics: "official_token",
+  // A supply or allocation disclosure answers its own question. It must never
+  // reconcile against the token symbol, where the singleton rule would present
+  // it as a fake conflict with the verified official token.
+  tokeneconomics: "tokenomics",
   launch_date: "launched",
   launch: "launched",
   founding_date: "founded",
@@ -15307,10 +15309,11 @@ function reconcileQuestionLedger(evidence, facts) {
 }
 function formatUsd(value) {
   const absolute = Math.abs(value);
-  if (absolute >= 1e9) return `$${(value / 1e9).toFixed(absolute >= 1e10 ? 0 : 1)}B`;
-  if (absolute >= 1e6) return `$${(value / 1e6).toFixed(absolute >= 1e7 ? 0 : 1)}M`;
-  if (absolute >= 1e3) return `$${(value / 1e3).toFixed(absolute >= 1e4 ? 0 : 1)}K`;
-  return `$${value.toFixed(2)}`;
+  const unit = absolute >= 1e12 ? [1e12, "T"] : absolute >= 1e9 ? [1e9, "B"] : absolute >= 1e6 ? [1e6, "M"] : absolute >= 1e3 ? [1e3, "K"] : null;
+  if (!unit) return `$${value.toFixed(2)}`;
+  const scaled = value / unit[0];
+  const digits = Math.abs(scaled) >= 100 ? 0 : Math.abs(scaled) >= 10 ? 1 : 2;
+  return `$${scaled.toFixed(digits)}${unit[1]}`;
 }
 function projectProviderBackedBasicFacts(evidence) {
   const projected = [];

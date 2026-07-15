@@ -355,12 +355,20 @@ function reconcileQuestionLedger(evidence: CollectedEvidence, facts: readonly Ba
   }
 }
 
+// Same 3-significant-digit contract as the report canvas (src/lib/format.ts)
+// so newly frozen fact text matches the UI. Forward-only: already-frozen
+// values are never rewritten client-side.
 function formatUsd(value: number): string {
   const absolute = Math.abs(value);
-  if (absolute >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(absolute >= 10_000_000_000 ? 0 : 1)}B`;
-  if (absolute >= 1_000_000) return `$${(value / 1_000_000).toFixed(absolute >= 10_000_000 ? 0 : 1)}M`;
-  if (absolute >= 1_000) return `$${(value / 1_000).toFixed(absolute >= 10_000 ? 0 : 1)}K`;
-  return `$${value.toFixed(2)}`;
+  const unit = absolute >= 1_000_000_000_000 ? [1_000_000_000_000, "T"] as const
+    : absolute >= 1_000_000_000 ? [1_000_000_000, "B"] as const
+      : absolute >= 1_000_000 ? [1_000_000, "M"] as const
+        : absolute >= 1_000 ? [1_000, "K"] as const
+          : null;
+  if (!unit) return `$${value.toFixed(2)}`;
+  const scaled = value / unit[0];
+  const digits = Math.abs(scaled) >= 100 ? 0 : Math.abs(scaled) >= 10 ? 1 : 2;
+  return `$${scaled.toFixed(digits)}${unit[1]}`;
 }
 
 /**

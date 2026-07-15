@@ -69,7 +69,7 @@ describe("ProjectTokenCard", () => {
     expect(container.textContent).toContain("Token and market");
     expect(container.textContent).toContain("$JUP");
     expect(container.textContent).toContain("CoinGecko #89");
-    expect(container.textContent).toContain("$620.0M");
+    expect(container.textContent).toContain("$620M");
     expect(container.textContent).toContain("Frozen with this investigation");
     expect(container.textContent).toContain("Official site");
     expect(harness.sparkline).toHaveBeenCalledWith(expect.objectContaining({

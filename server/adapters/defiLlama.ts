@@ -440,10 +440,16 @@ export function describeFunding(outcome: FundingOutcome): FundingSummary {
 
 /** Compact USD, e.g. 13699712109 → "$13.7B". For evidence/traction strings. */
 export function formatUsd(usd: number): string {
-  if (usd >= 1_000_000_000) return `$${(usd / 1_000_000_000).toFixed(1)}B`;
-  if (usd >= 1_000_000) return `$${(usd / 1_000_000).toFixed(1)}M`;
-  if (usd >= 1_000) return `$${(usd / 1_000).toFixed(1)}K`;
-  return `$${Math.round(usd)}`;
+  const abs = Math.abs(usd);
+  const unit = abs >= 1_000_000_000_000 ? [1_000_000_000_000, "T"] as const
+    : abs >= 1_000_000_000 ? [1_000_000_000, "B"] as const
+      : abs >= 1_000_000 ? [1_000_000, "M"] as const
+        : abs >= 1_000 ? [1_000, "K"] as const
+          : null;
+  if (!unit) return `$${Math.round(usd)}`;
+  const scaled = usd / unit[0];
+  const digits = Math.abs(scaled) >= 100 ? 0 : Math.abs(scaled) >= 10 ? 1 : 2;
+  return `$${scaled.toFixed(digits)}${unit[1]}`;
 }
 
 /** @deprecated alias for {@link formatUsd}; kept for existing callers. */

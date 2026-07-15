@@ -313,7 +313,7 @@ describe("decision-safe person report presentation", () => {
     expect(tokenSection).not.toBeNull();
     expect(decisionSummary).not.toBeNull();
     expect(tokenSection?.textContent).toContain("$JUP");
-    expect(tokenSection?.textContent).toContain("$620.0M");
+    expect(tokenSection?.textContent).toContain("$620M");
     expect(tokenSection?.querySelector("svg polygon")).not.toBeNull();
     expect(tokenSection!.compareDocumentPosition(decisionSummary!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
@@ -392,7 +392,7 @@ describe("decision-safe person report presentation", () => {
 
     expect(container.textContent).toContain("Project routing unresolved");
     expect(container.textContent).toContain("ARGUS collected intelligence, but did not select a scoring methodology");
-    expect(container.textContent).toContain("Review coverage0%");
+    expect(container.textContent).toContain("Coverage 0%");
     expect(container.textContent).toContain("Resolve whether this account represents a project, organization, token, or person");
     expect(container.textContent).toContain("Data coverage notes");
     expect(container.textContent).toContain("Identity resolution");
@@ -442,7 +442,7 @@ describe("decision-safe person report presentation", () => {
 
     expect(container.textContent).toContain("Scoring output incomplete");
     expect(container.textContent).toContain("ARGUS resolved this subject to Project, but the scoring pass did not complete");
-    expect(container.textContent).toContain("Review coverage0%");
+    expect(container.textContent).toContain("Coverage 0%");
     expect(container.textContent).toContain("What ARGUS found before the decision failed");
     expect(container.textContent).toContain("Complete the Project scoring pass");
     expect(container.textContent).not.toContain("Project routing unresolved");
@@ -639,10 +639,12 @@ describe("decision-safe person report presentation", () => {
     expect([...container.querySelectorAll(".display")].some((node) => node.textContent?.trim() === "PROVISIONAL")).toBe(true);
     expect(container.textContent).toContain("provisional score");
     expect(container.textContent).toContain("PASS SIGNAL");
-    expect(container.textContent).toContain("Review coverage76%");
-    expect(container.textContent).toContain("Checks completed10 / 13");
-    expect(container.textContent).toContain("Areas with evidence6 / 6");
-    expect(container.textContent).toContain("Questions remaining3");
+    expect(container.textContent).toContain("Coverage 76%");
+    expect(container.textContent).toContain("Coverage 76%");
+    expect(container.textContent).toContain("10/13");
+    expect(container.textContent).toContain("6 of 6 diligence areas have cited support");
+    expect(container.textContent).toContain("3 open questions");
+    expect(container.textContent).toContain("3 decision questions remain unanswered.");
     expect(container.textContent).toContain("Final clearance remains withheld");
     expect(container.textContent).toContain("Evidence-backed scored-axis breakdown");
     expect(container.textContent).toContain("= provisional 71");
@@ -1550,7 +1552,7 @@ describe("legacy person report coverage truth", () => {
     });
 
     expect(container.textContent).not.toContain("Coverage not captured");
-    expect(container.textContent).toContain("Evidence coverage100%");
+    expect(container.textContent).toContain("Checks1/1");
     expect(container.querySelector('a[href="#scan-methodology"]')).not.toBeNull();
     expect(container.querySelector("#scan-methodology")).not.toBeNull();
   });

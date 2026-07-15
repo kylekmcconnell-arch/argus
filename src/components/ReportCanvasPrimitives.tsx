@@ -83,6 +83,8 @@ export interface ReportCanvasNarrativeItem {
   title: string;
   detail?: string;
   provenance?: string;
+  /** Compact top-right annotation (e.g. "Moderate · 4 src"). Use `provenance` when the caveat is content that must read inline. */
+  meta?: string;
   href?: `#${string}`;
 }
 
@@ -116,28 +118,35 @@ export function ReportCanvasNarrativeSection({
       </div>
 
       {items.length ? (
-        <ul className="mt-3 grid gap-2 pl-11 md:grid-cols-2" aria-label={title}>
-          {items.map((item) => (
-            <li key={item.id} className="panel-inset px-3 py-2.5">
-              <div className="flex items-start gap-2.5">
-                <CaretRight aria-hidden="true" size={13} weight="bold" className={`mt-0.5 shrink-0 ${TONE_TEXT_CLASS[tone]}`} />
-                <div className="min-w-0 flex-1">
-                  <p className="text-[12.5px] leading-relaxed text-ink">{item.title}</p>
-                  {item.detail && <p className="mt-0.5 text-[11px] leading-relaxed text-ink-dim">{item.detail}</p>}
-                  {(item.provenance || item.href) && (
-                    <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11px] text-ink-faint">
-                      {item.provenance && <span>{item.provenance}</span>}
-                      {item.href && (
-                        <a href={item.href} className="inline-flex min-h-8 items-center gap-1 text-signal-lift underline-offset-2 hover:underline">
-                          Inspect evidence <ArrowRight aria-hidden="true" size={12} weight="bold" />
-                        </a>
-                      )}
-                    </div>
+        <ul className="mt-3 grid gap-1.5 pl-0 sm:pl-11 md:grid-cols-2" aria-label={title}>
+          {items.map((item) => {
+            const body = (
+              <>
+                <div className="flex items-start justify-between gap-2">
+                  <p className="min-w-0 text-[12.5px] font-medium leading-snug text-ink">{item.title}</p>
+                  {item.meta && (
+                    <span className={`mono shrink-0 text-[10px] uppercase tracking-[0.08em] tabular-nums ${item.meta.startsWith("Limited") ? "text-caution" : "text-ink-faint"}`}>
+                      {item.meta}
+                    </span>
                   )}
                 </div>
-              </div>
-            </li>
-          ))}
+                {item.detail && <p className="mt-1 text-[11.5px] leading-snug text-ink-dim">{item.detail}</p>}
+                {item.provenance && <p className="mt-1 text-[10.5px] text-ink-faint">{item.provenance}</p>}
+              </>
+            );
+            return (
+              <li key={item.id} className="panel-inset">
+                {item.href ? (
+                  <a href={item.href} className="group flex items-start gap-2 px-3 py-2 transition hover:bg-panel-2/50">
+                    <div className="min-w-0 flex-1">{body}</div>
+                    <CaretRight aria-hidden="true" size={13} weight="bold" className={`mt-1 shrink-0 transition group-hover:text-signal-lift ${TONE_TEXT_CLASS[tone]}`} />
+                  </a>
+                ) : (
+                  <div className="px-3 py-2">{body}</div>
+                )}
+              </li>
+            );
+          })}
         </ul>
       ) : (
         <p className="ml-11 mt-3 panel-inset px-3 py-2.5 text-[12.5px] leading-relaxed text-ink-faint">{emptyCopy}</p>

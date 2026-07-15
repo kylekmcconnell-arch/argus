@@ -70,9 +70,9 @@ describe("BasicFactsPanel", () => {
     });
 
     expect(container.querySelector("#basic-facts")).not.toBeNull();
-    expect(container.querySelectorAll('ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(2);
+    expect(container.querySelectorAll('ul[aria-label="Key verified answers"] > li, ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(2);
     expect(container.querySelectorAll('ul[aria-label="Unresolved basic facts"] > li')).toHaveLength(12);
-    expect(container.textContent).toContain("2 confirmed");
+    expect(container.textContent).toContain("2 verified");
     expect(container.textContent).toContain("12 questions");
     expect(container.textContent).toContain("What does the project actually do?");
     expect(container.textContent).toContain("Still to confirm");
@@ -118,7 +118,7 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).toContain("excluded from the verdict");
     expect(container.textContent).toContain("Candidate founder from model search");
     expect(container.textContent).toContain("$25 million");
-    expect(container.textContent).toContain("0 confirmed");
+    expect(container.textContent).toContain("0 verified");
     expect(container.textContent).toContain("Foundational answers are still being verified");
     expect(container.textContent).toContain("ARGUS found 2 possible answers");
     expect(container.querySelector('a[href^="javascript:"]')).toBeNull();
@@ -144,7 +144,7 @@ describe("BasicFactsPanel", () => {
       );
     });
 
-    expect(container.querySelectorAll('ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(1);
+    expect(container.querySelectorAll('ul[aria-label="Key verified answers"] > li, ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(1);
     expect(container.textContent).toContain("Legal name");
     expect(container.textContent).not.toContain("Who founded it?");
   });
@@ -176,7 +176,7 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).toContain("Who is this person?");
     expect(container.textContent).toContain("What do they lead or control today?");
     expect(container.textContent).toContain("What legal or regulatory events actually name them?");
-    expect(container.textContent).toContain("2 confirmed");
+    expect(container.textContent).toContain("2 verified");
     expect(container.textContent).toContain("10 questions");
     expect(container.textContent).not.toContain("Which networks does it run on?");
     expect(container.textContent).not.toContain("When did the product launch?");
@@ -261,10 +261,11 @@ describe("BasicFactsPanel", () => {
     expect(metadata?.textContent).toContain("Exact name only, identity not confirmed");
     expect(metadata?.textContent).not.toContain("Directly attributed");
     expect(container.querySelector('[aria-label="Confirmed basic facts"]')).toBeNull();
+    expect(container.querySelector('[aria-label="Key verified answers"]')).toBeNull();
     expect(container.querySelector('[aria-label="Identity review required"]')?.textContent)
       .toContain("Same name, identity not confirmed");
     expect(container.querySelector('[aria-label="Basic facts coverage"]')?.textContent)
-      .toContain("0 confirmed");
+      .toContain("0 verified");
   });
 
   it("keeps conflicting legal statuses in separate visible cards", () => {
@@ -420,7 +421,7 @@ describe("BasicFactsPanel", () => {
       );
     });
 
-    expect(container.querySelectorAll('ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(1);
+    expect(container.querySelectorAll('ul[aria-label="Key verified answers"] > li, ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(1);
     expect(container.textContent).toContain("JUP");
     expect(container.textContent).not.toContain("Conflicted");
     expect(container.textContent).not.toContain("Sources disagree");
@@ -499,8 +500,8 @@ describe("BasicFactsPanel", () => {
       );
     });
 
-    expect(container.querySelectorAll('ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(15);
-    expect(container.textContent).toContain("15 confirmed");
+    expect(container.querySelectorAll('ul[aria-label="Key verified answers"] > li, ul[aria-label="Confirmed basic facts"] > li')).toHaveLength(15);
+    expect(container.textContent).toContain("15 verified");
     expect(container.textContent).toContain("Who founded it?");
     expect(container.textContent).toContain("Who operates it today?");
     expect(container.textContent).toContain("When was it founded?");
@@ -535,5 +536,59 @@ describe("BasicFactsPanel", () => {
 
     const links = [...container.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')];
     expect(links.map((link) => link.href)).toEqual(["https://example.com/public-source"]);
+  });
+
+  it("renders a supply disclosure as its own answer, never a conflict with the token symbol", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[
+            {
+              predicate: "official_token",
+              value: "$AAVE",
+              status: "verified",
+              sources: [{ url: "https://coingecko.com/en/coins/aave", relation: "supports" }],
+            },
+            {
+              predicate: "tokenomics",
+              value: "15.2M of 16.0M supply circulating (95%)",
+              status: "verified",
+              sources: [{ url: "https://coingecko.com/en/coins/aave", relation: "supports" }],
+            },
+          ]}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("$AAVE");
+    expect(container.textContent).toContain("15.2M of 16.0M supply circulating (95%)");
+    expect(container.textContent).toContain("What token allocation or supply disclosures are published?");
+    expect(container.textContent).not.toContain("Sources disagree");
+    expect(container.textContent).not.toContain("Conflicted");
+  });
+
+  it("a supply disclosure alone never answers the official-token question", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[
+            {
+              predicate: "tokenomics",
+              value: "50% community allocation",
+              status: "verified",
+              sources: [{ url: "https://example.com/tokenomics", relation: "supports" }],
+            },
+          ]}
+          fillRequired
+          audience="project"
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("50% community allocation");
+    // The token-identity question stays open instead of being silently
+    // "answered" by an allocation string.
+    expect(container.textContent).toContain("Does it have an official token?");
+    expect(container.textContent).not.toContain("Sources disagree");
   });
 });

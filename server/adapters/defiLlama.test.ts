@@ -143,8 +143,8 @@ describe("collectProtocolFunding", () => {
 describe("formatUsd", () => {
   it("formats compact USD (formatTvlUsd is a back-compat alias)", () => {
     expect(formatUsd(13_699_712_109)).toBe("$13.7B");
-    expect(formatUsd(1_500_000)).toBe("$1.5M");
-    expect(formatUsd(2_400)).toBe("$2.4K");
+    expect(formatUsd(1_500_000)).toBe("$1.50M");
+    expect(formatUsd(2_400)).toBe("$2.40K");
     expect(formatUsd(500)).toBe("$500");
     expect(formatTvlUsd).toBe(formatUsd);
   });

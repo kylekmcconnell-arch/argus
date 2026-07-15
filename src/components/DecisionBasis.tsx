@@ -284,9 +284,6 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                       {row.counter.length ? ` · ${row.counter.length} need${row.counter.length === 1 ? "s" : ""} reconciliation` : ""}
                       {questions.length ? ` · ${questions.length} question${questions.length === 1 ? "" : "s"} to verify` : ""}
                     </span>
-                    <span className="mt-0.5 block truncate text-[11px] text-ink-dim">
-                      {evidenceTitle(row.support[0]?.title ?? row.counter[0]?.title ?? questions[0] ?? "No qualifying frozen citation recorded")}
-                    </span>
                   </button>
                 </div>
               );
