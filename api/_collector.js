@@ -10061,7 +10061,10 @@ var MULTI_VALUE_PREDICATES = /* @__PURE__ */ new Set([
   "treasury",
   "audit",
   "repository",
-  "traction"
+  "traction",
+  // A protocol deploys to many networks: several individually verified
+  // single-chain answers ENUMERATE the footprint, they never conflict.
+  "network"
 ]);
 function resolveBasicFactCandidates(candidates) {
   const grouped = /* @__PURE__ */ new Map();
@@ -10088,9 +10091,6 @@ function resolveBasicFactCandidates(candidates) {
   for (const predicate of singletonPredicates) {
     const values = resolved.filter((fact) => fact.predicate === predicate && !(fact.predicate === "official_token" && /^(?:person|investor)\./.test(fact.questionId ?? "")));
     if (values.length > 1) {
-      if (predicate === "network" && overlappingNetworkAnswers(values.map((fact) => String(fact.value ?? "")))) {
-        continue;
-      }
       values.forEach((fact) => {
         fact.status = "conflicted";
       });
@@ -10216,15 +10216,6 @@ async function screenSecRegistryForNames(names) {
   const rows = secExchangeRegistryRows(registry);
   if (rows === null) return null;
   return screenable.some((name) => rows.some((row) => registryIssuerMatchesRelationship(row.name, name))) ? "matched" : "empty";
-}
-var networkChainTokens = (value) => new Set(
-  (value.match(/[A-Z][A-Za-z0-9]+(?: [A-Z][A-Za-z0-9]+)?/g) ?? []).map((name) => name.toLowerCase()).filter((name) => !/^\d|^incl/.test(name))
-);
-function overlappingNetworkAnswers(values) {
-  if (values.length < 2) return true;
-  const anchor = networkChainTokens(values[0]);
-  if (!anchor.size) return false;
-  return values.every((value, index) => index === 0 || [...networkChainTokens(value)].some((name) => anchor.has(name)));
 }
 var CURRENT_CONTROL_ROLE = /\b(?:co[- ]?founder|founder|chief executive officer|ceo|chair(?:man|woman|person)?|owner|controlling)\b/i;
 var CURRENT_PERIOD = /\b(?:current|currently|now|ongoing|present|today)\b/i;

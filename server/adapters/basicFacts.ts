@@ -2941,6 +2941,9 @@ const MULTI_VALUE_PREDICATES = new Set<BasicFactPredicate>([
   "public_security", "legal_entity", "legal_regulatory_event", "control", "conflict_of_interest",
   "tokenomics", "vesting", "treasury",
   "audit", "repository", "traction",
+  // A protocol deploys to many networks: several individually verified
+  // single-chain answers ENUMERATE the footprint, they never conflict.
+  "network",
 ]);
 
 function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[] {
@@ -2988,9 +2991,6 @@ function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[] {
       fact.predicate === predicate
       && !(fact.predicate === "official_token" && /^(?:person|investor)\./.test(fact.questionId ?? "")));
     if (values.length > 1) {
-      if (predicate === "network" && overlappingNetworkAnswers(values.map((fact) => String(fact.value ?? "")))) {
-        continue;
-      }
       values.forEach((fact) => { fact.status = "conflicted"; });
     }
   }

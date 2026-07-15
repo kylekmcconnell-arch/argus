@@ -592,6 +592,33 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).not.toContain("Sources disagree");
   });
 
+  it("collapses enumerated single-chain answers into the footprint answer", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[
+            ...["Ethereum", "Polygon", "Avalanche", "BNB Chain", "Fantom"].map((chain) => ({
+              predicate: "network",
+              value: chain,
+              status: "verified" as const,
+              sources: [{ url: `https://aave.com/docs/${chain.toLowerCase().replace(/\s+/g, "-")}`, relation: "supports" as const }],
+            })),
+            {
+              predicate: "network",
+              value: "22 chains incl. Ethereum, Plasma, Base, Arbitrum",
+              status: "verified",
+              sources: [{ url: "https://defillama.com/protocol/aave", relation: "supports" }],
+            },
+          ]}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("22 chains incl. Ethereum, Plasma, Base, Arbitrum");
+    expect(container.textContent).not.toContain("Sources disagree");
+    expect(container.textContent).not.toContain("Conflicted");
+  });
+
   it("treats overlapping network lists as corroboration, showing the richer footprint", () => {
     act(() => {
       root.render(
