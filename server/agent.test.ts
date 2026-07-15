@@ -4955,7 +4955,7 @@ describe("analyst verdict integrity", () => {
     );
   });
 
-  it("fails closed after exactly one invalid semantic repair", async () => {
+  it("fails closed after exhausting every invalid semantic repair attempt", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
@@ -5012,7 +5012,7 @@ describe("analyst verdict integrity", () => {
     vi.spyOn(console, "info").mockImplementation(() => undefined);
 
     await expect(analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson)).resolves.toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
   });
 
   it("does not semantic-repair a max-token completion failure", async () => {

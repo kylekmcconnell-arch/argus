@@ -3394,6 +3394,12 @@ export async function analyzeSubject(
   );
   if (raw && !validated) {
     console.warn(`[agent] rejected incomplete or invalid analyst axis set (${rejectionReason})`);
+  }
+  // A weak packet often needs more than one round: the first repair can fix
+  // the rejected language while introducing a different citation slip. Each
+  // round rebuilds the reason-specific hint for the CURRENT rejection.
+  const MAX_ANALYST_REPAIRS = 3;
+  for (let repairAttempt = 1; raw && !validated && repairAttempt <= MAX_ANALYST_REPAIRS; repairAttempt++) {
     if (
       typeof options.analystDeadlineAt === "number"
       && Date.now() + ANALYST_REPAIR_TIMEOUT_MS > options.analystDeadlineAt
@@ -3487,7 +3493,7 @@ export async function analyzeSubject(
       { projectScoreBands },
     );
     if (raw && !validated) {
-      console.warn(`[agent] rejected analyst repair axis set (${rejectionReason})`);
+      console.warn(`[agent] rejected analyst repair axis set (${rejectionReason}) attempt=${repairAttempt}/${MAX_ANALYST_REPAIRS}`);
     }
   }
   return validated;

@@ -214,6 +214,37 @@ function Card({ children, className = "" }: { children: React.ReactNode; classNa
   );
 }
 
+/**
+ * Collapses long evidence lists behind a "View all" toggle. Nothing is
+ * removed from the record: the full list stays in the DOM (print and
+ * find-in-page still see it) and one click reveals it.
+ */
+function Clamp({ itemCount, threshold = 5, label, children }: {
+  itemCount: number; threshold?: number; label: string; children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(false);
+  useEffect(() => {
+    const expand = () => setOpen(true);
+    window.addEventListener("beforeprint", expand);
+    return () => window.removeEventListener("beforeprint", expand);
+  }, []);
+  if (itemCount <= threshold) return <>{children}</>;
+  return (
+    <div>
+      <div className={open ? undefined : "max-h-80 overflow-hidden [mask-image:linear-gradient(to_bottom,black_78%,transparent)]"}>
+        {children}
+      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="mt-1 flex min-h-10 w-full items-center justify-center gap-1 text-[11.5px] text-signal-lift underline-offset-2 hover:underline"
+      >
+        {open ? "Show fewer" : `View all ${itemCount} ${label}`}
+      </button>
+    </div>
+  );
+}
+
 const PROJECT_DILIGENCE_LABELS: Record<string, string> = {
   P1_team_and_identity: "Team and leadership",
   P2_product_substance: "Product and execution",
@@ -2815,10 +2846,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
 
         {/* signature modules */}
-        <div className="grid gap-3 lg:grid-cols-2">
+        <div className="lg:columns-2 lg:gap-3">
           {evidence.wallets.length > 0 && (
-            <div className="min-w-0">
+            <div className="mb-3 min-w-0 break-inside-avoid">
               <Section title="Wallets & on-chain links" kicker="addresses tied to them · ranked by attribution strength">
+                <Clamp itemCount={evidence.wallets.length} label="wallets">
                 <Card className="divide-y divide-line/60">
                   {[...evidence.wallets]
                     .sort((a, b) => walletTier(a).rank - walletTier(b).rank)
@@ -2862,6 +2894,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                       );
                     })}
                 </Card>
+                </Clamp>
               </Section>
             </div>
           )}
@@ -3007,8 +3040,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           )}
 
           {evidence.ventures.length > 0 && (
-            <div className="min-w-0">
+            <div className="mb-3 min-w-0 break-inside-avoid">
               <Section title="Ventures & affiliations" kicker="founding, employment and operating ties · separate from investments">
+                <Clamp itemCount={evidence.ventures.length} label="ventures">
                 <Card className="divide-y divide-line/60">
                   {evidence.ventures.map((v, i) => {
                     const sourceBacked = v.evidence_origin !== "model_lead" && v.artifact_verified === true;
@@ -3037,20 +3071,23 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     );
                   })}
                 </Card>
+                </Clamp>
               </Section>
             </div>
           )}
 
           {corroborationRows.length > 0 && (
-            <div className="min-w-0">
+            <div className="mb-3 min-w-0 break-inside-avoid">
               <Section title="Testimonial corroboration" kicker="claimed vs. acknowledged">
+                <Clamp itemCount={corroborationRows.length} label="endorsements">
                 <CorroborationTable rows={corroborationRows} />
+                </Clamp>
               </Section>
             </div>
           )}
 
           {founderSummary && (
-            <div className="min-w-0">
+            <div className="mb-3 min-w-0 break-inside-avoid">
               <Section title="Founder pattern" kicker="outcomes + repeat backing">
                 <Card className="p-4">
                   <div className="flex items-center gap-4">
@@ -3087,7 +3124,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           )}
 
           {advisedRows.length > 0 && (
-            <div className="min-w-0">
+            <div className="mb-3 min-w-0 break-inside-avoid">
               <Section title="Advisory graveyard" kicker="projects lent their name to">
                 <Card className="divide-y divide-line/60">
                   {advisedRows.map((p, i) => (

@@ -4541,6 +4541,9 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
   );
   if (raw && !validated) {
     console.warn(`[agent] rejected incomplete or invalid analyst axis set (${rejectionReason})`);
+  }
+  const MAX_ANALYST_REPAIRS = 3;
+  for (let repairAttempt = 1; raw && !validated && repairAttempt <= MAX_ANALYST_REPAIRS; repairAttempt++) {
     if (typeof options.analystDeadlineAt === "number" && Date.now() + ANALYST_REPAIR_TIMEOUT_MS > options.analystDeadlineAt) {
       console.warn("[agent-runtime]", JSON.stringify({
         tool: "record_verdict",
@@ -4610,7 +4613,7 @@ REPAIR REQUIRED: the prior record_verdict tool payload was rejected by determini
       { projectScoreBands }
     );
     if (raw && !validated) {
-      console.warn(`[agent] rejected analyst repair axis set (${rejectionReason})`);
+      console.warn(`[agent] rejected analyst repair axis set (${rejectionReason}) attempt=${repairAttempt}/${MAX_ANALYST_REPAIRS}`);
     }
   }
   return validated;

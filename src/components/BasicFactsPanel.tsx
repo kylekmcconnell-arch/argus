@@ -279,7 +279,26 @@ function factRows(
     ].filter((value) => value && !/^(?:No verified answer|Not applicable|Sources disagree|A source was verified)/.test(value))
       .map((value) => [canonicalBasicFactComparisonValue(predicate, value), value])).values()];
     const repeatableFounderAsset = predicate === "official_token" && audience !== "project";
-    const conflictingValues = SINGLE_VALUE_PREDICATES.has(predicate) && !repeatableFounderAsset && values.length > 1;
+    // Two chain lists that OVERLAP answer "which networks" compatibly: one
+    // source lists the flagship deployments, another the full footprint.
+    // Overlap means corroboration; the richer list wins the display. Disjoint
+    // lists remain a real conflict.
+    const chainNames = (value: string) => new Set(
+      (value.match(/[A-Z][A-Za-z0-9]+(?: [A-Z][A-Za-z0-9]+)?/g) ?? [])
+        .map((name) => name.toLowerCase())
+        .filter((name) => !/^\d|^incl/.test(name)),
+    );
+    const networkOverlap = predicate === "network" && values.length > 1
+      ? values.every((value, index) => index === 0
+        || [...chainNames(String(value))].some((name) => chainNames(String(values[0])).has(name)))
+      : false;
+    if (networkOverlap) {
+      const richest = [...values].sort((a, b) => chainNames(String(b)).size - chainNames(String(a)).size
+        + (/\d+\s+chains/i.test(String(b)) ? 100 : 0) - (/\d+\s+chains/i.test(String(a)) ? 100 : 0))[0];
+      values.length = 0;
+      values.push(richest);
+    }
+    const conflictingValues = SINGLE_VALUE_PREDICATES.has(predicate) && !repeatableFounderAsset && !networkOverlap && values.length > 1;
     const combinedStatus = existing.status === "conflicted" || fact.status === "conflicted" || conflictingValues
       ? "conflicted"
       : existing.status === "corroborated" || fact.status === "corroborated"
