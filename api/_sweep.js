@@ -315,6 +315,30 @@ async function goplus(chainId, address) {
 }
 
 // src/token/audit.ts
+async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
+  const unique = [...new Set(addresses.filter((a) => typeof a === "string" && a.length > 8))].slice(0, 40);
+  if (!unique.length) return void 0;
+  if (typeof window === "undefined" || !window.location?.origin) return void 0;
+  const completedAt = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    const r = await fetchImpl(
+      `/api/sanctions?addresses=${encodeURIComponent(unique.join(","))}&chain=${encodeURIComponent(chain)}`,
+      { signal: AbortSignal.timeout(9e3) }
+    );
+    if (!r.ok) return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    const d = await r.json();
+    if (d?.available !== true) return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    return {
+      available: true,
+      checked: typeof d.checked === "number" ? d.checked : unique.length,
+      listSize: typeof d.listSize === "number" ? d.listSize : void 0,
+      sanctioned: Array.isArray(d.sanctioned) ? d.sanctioned.filter((a) => typeof a === "string") : [],
+      completedAt
+    };
+  } catch {
+    return { available: false, checked: unique.length, sanctioned: [], completedAt };
+  }
+}
 var clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 var num = (s) => s == null || s === "" ? null : Number(s);
 var t1 = (s) => s === "1";
@@ -737,6 +761,19 @@ async function runTokenAudit(input, emit, opts) {
     tag: h.tag || void 0,
     isContract: h.is_contract === 1 || h.is_contract === "1"
   })).filter((h) => h.address);
+  step({ phase: "Screen", label: "OFAC sanctions", detail: "Screening deployer + top holders against the US Treasury SDN address list\u2026", tone: "neutral" });
+  const sanctionsScreen = await screenAddressSanctions(chain, [deployer, ...topHolders.map((h) => h.address)]);
+  if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
+    findings.push({
+      claim: sanctionsScreen.sanctioned.length === 1 ? `OFAC SDN hit: screened address ${sanctionsScreen.sanctioned[0].slice(0, 10)}\u2026 is on the US Treasury sanctions list. Touching this token is a legal-exposure risk.` : `OFAC SDN hit: ${sanctionsScreen.sanctioned.length} screened addresses are on the US Treasury sanctions list. Touching this token is a legal-exposure risk.`,
+      tone: "bad",
+      source: "ofac"
+    });
+    score = Math.min(score, 5);
+    capApplied = "ofac_sanctioned_address";
+    verdict = "AVOID";
+    step({ phase: "Finalize", label: "OFAC sanctions", detail: `${sanctionsScreen.sanctioned.length} sanctioned address(es): verdict forced to AVOID.`, tone: "bad" });
+  }
   const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} \xB7 ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
@@ -772,7 +809,8 @@ async function runTokenAudit(input, emit, opts) {
     findings,
     trace,
     live: true,
-    safetyChecked: s.available
+    safetyChecked: s.available,
+    sanctionsScreen
   };
 }
 function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders, socials) {
@@ -812,6 +850,7 @@ function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders
   return { nodes, edges };
 }
 function buildHeadline(verdict, cap, s, liq, projectX) {
+  if (cap === "ofac_sanctioned_address") return "A screened address is on the US Treasury OFAC sanctions list. Touching this token is a legal-exposure risk. Do not touch.";
   if (s.honeypot) return s.nonTransferable ? "Non-transferable: holders are locked in. Do not touch." : "Honeypot: buyers cannot sell. Do not touch.";
   if (cap === "mint_authority_active") return "Mint authority is live, the team can dilute holders to zero.";
   if (cap === "freeze_authority_active") return "Freeze authority is live, the team can freeze your tokens at any time.";
@@ -835,6 +874,8 @@ function normalizeSubjectRef(value) {
 }
 
 // src/lib/scanChecklist.ts
+var SUCCESSFUL = /* @__PURE__ */ new Set(["confirmed", "finding", "checked-empty"]);
+var UNKNOWN_OR_FAILED = /* @__PURE__ */ new Set(["unknown", "unavailable", "stale"]);
 var shortAddr = (address) => address.length > 12 ? `${address.slice(0, 5)}\u2026${address.slice(-4)}` : address;
 function contractSafetyConcerns(dossier) {
   const safety = dossier.safety;
@@ -870,10 +911,14 @@ function tokenChecks(dossier) {
   const checks = [];
   checks.push(
     safety.available ? {
+      checkId: "contract-safety",
+      decisionCritical: true,
       label: "Contract safety",
       status: contractSafetyConcerns(dossier).length ? "finding" : "confirmed",
       note: contractSafetyNote(dossier)
     } : {
+      checkId: "contract-safety",
+      decisionCritical: true,
       label: "Contract safety",
       status: "unavailable",
       note: `no contract-safety provider response recorded for ${dossier.chain}`
@@ -881,49 +926,100 @@ function tokenChecks(dossier) {
   );
   checks.push(
     safety.simChecked ? {
+      checkId: "buy-sell-simulation",
+      decisionCritical: true,
       label: "Buy/sell simulation",
       status: safety.honeypot || safety.cannotSellAll ? "finding" : "confirmed",
       note: `buy ${safety.buyTax}% \xB7 sell ${safety.sellTax}%`
-    } : evm ? { label: "Buy/sell simulation", status: "unknown", note: outcomeNotRecorded } : { label: "Buy/sell simulation", status: "not-applicable", note: "Solana: static flags only" }
+    } : evm ? { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "unknown", note: outcomeNotRecorded } : { checkId: "buy-sell-simulation", decisionCritical: true, label: "Buy/sell simulation", status: "not-applicable", note: "Solana: static flags only" }
   );
   const holderCount = safety.holderCount || dossier.topHolders.length;
   const topHolderPct = safety.topHolderPct ?? dossier.topHolders[0]?.percent ?? null;
   checks.push(
     holderCount > 0 ? {
+      checkId: "holder-distribution",
+      decisionCritical: true,
       label: "Holder distribution",
       status: (topHolderPct ?? 0) > 50 ? "finding" : "confirmed",
       note: `${holderCount.toLocaleString()} holder${holderCount === 1 ? "" : "s"} \xB7 top ${topHolderPct == null ? "unknown" : `${Math.round(topHolderPct)}%`}`
-    } : safety.available ? { label: "Holder distribution", status: "unknown", note: "safety data returned, but no holder-query outcome was recorded" } : { label: "Holder distribution", status: "unavailable", note: "holder provider response unavailable" }
+    } : safety.available ? { checkId: "holder-distribution", decisionCritical: true, label: "Holder distribution", status: "unknown", note: "safety data returned, but no holder-query outcome was recorded" } : { checkId: "holder-distribution", decisionCritical: true, label: "Holder distribution", status: "unavailable", note: "holder provider response unavailable" }
   );
   const hasHolderRows = dossier.topHolders.length > 0;
   const hasClusteringOutcome = hasHolderRows && (dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" || dossier.bundleCount > 0 || dossier.insiderPct > 0);
   checks.push(
     hasClusteringOutcome ? {
+      checkId: "wallet-clustering",
+      decisionCritical: true,
       label: "Wallet clustering",
       status: dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" ? "finding" : "confirmed",
       note: dossier.bundleRisk === "elevated" || dossier.bundleRisk === "high" ? `${dossier.bundleCount} concentrated wallets \xB7 ~${Math.round(dossier.insiderPct)}% (${dossier.bundleRisk} risk)` : "holder rows analyzed; no elevated concentration surfaced"
-    } : hasHolderRows ? { label: "Wallet clustering", status: "unknown", note: "holder rows exist, but clustering completion/reliability is not recorded" } : safety.available ? { label: "Wallet clustering", status: "unknown", note: "no holder rows available to establish a clustering result" } : { label: "Wallet clustering", status: "unavailable", note: "requires holder-provider data" }
+    } : hasHolderRows ? { checkId: "wallet-clustering", decisionCritical: true, label: "Wallet clustering", status: "unknown", note: "holder rows exist, but clustering completion/reliability is not recorded" } : safety.available ? { checkId: "wallet-clustering", decisionCritical: true, label: "Wallet clustering", status: "unknown", note: "no holder rows available to establish a clustering result" } : { checkId: "wallet-clustering", decisionCritical: true, label: "Wallet clustering", status: "unavailable", note: "requires holder-provider data" }
   );
   checks.push({
+    checkId: "operator-funding-trace",
+    decisionCritical: true,
     label: "Operator / funding trace",
     status: "unknown",
     note: dossier.deployer ? `deployer ${shortAddr(dossier.deployer)} resolved; trace ${outcomeNotRecorded}` : `deployer unresolved; trace ${outcomeNotRecorded}`
   });
-  checks.push(evm ? { label: "Deployer trail (EVM)", status: "unknown", note: outcomeNotRecorded } : { label: "Deployer trail (EVM)", status: "not-applicable", note: "Solana" });
-  checks.push(evm ? { label: "Bytecode fingerprint (EVM)", status: "unknown", note: `redeployed-rug clone check; ${outcomeNotRecorded}` } : { label: "Bytecode fingerprint", status: "not-applicable", note: "Solana" });
+  checks.push(evm ? { checkId: "deployer-trail-evm", decisionCritical: true, label: "Deployer trail (EVM)", status: "unknown", note: outcomeNotRecorded } : { checkId: "deployer-trail-evm", decisionCritical: true, label: "Deployer trail (EVM)", status: "not-applicable", note: "Solana" });
+  checks.push(evm ? { checkId: "bytecode-fingerprint-evm", decisionCritical: true, label: "Bytecode fingerprint (EVM)", status: "unknown", note: `redeployed-rug clone check; ${outcomeNotRecorded}` } : { checkId: "bytecode-fingerprint-evm", decisionCritical: true, label: "Bytecode fingerprint", status: "not-applicable", note: "Solana" });
   checks.push(
     dossier.cg?.listed ? {
+      checkId: "market-intelligence",
+      decisionCritical: true,
       label: "Market intelligence",
       status: dossier.cg.cexCount > 0 ? "confirmed" : "finding",
       note: `CoinGecko listing \xB7 ${dossier.cg.cexCount} CEX listing${dossier.cg.cexCount === 1 ? "" : "s"}${dossier.cg.rank ? ` \xB7 rank #${dossier.cg.rank}` : ""}`
-    } : dossier.cg ? { label: "Market intelligence", status: "checked-empty", note: "CoinGecko returned no matching asset" } : { label: "Market intelligence", status: "unknown", note: outcomeNotRecorded }
+    } : dossier.cg ? { checkId: "market-intelligence", decisionCritical: true, label: "Market intelligence", status: "checked-empty", note: "CoinGecko returned no matching asset" } : { checkId: "market-intelligence", decisionCritical: true, label: "Market intelligence", status: "unknown", note: outcomeNotRecorded }
   );
-  checks.push({ label: "OFAC sanctions screen", status: "unknown", note: `deployer + top holders; ${outcomeNotRecorded}` });
-  checks.push({ label: "Documents & audits", status: "unknown", note: `whitepaper, security audits, docs; ${outcomeNotRecorded}` });
-  checks.push({ label: "News & press", status: "unknown", note: outcomeNotRecorded });
-  checks.push({ label: "GitHub forensics", status: "unknown", note: `when a repo/org is linked; ${outcomeNotRecorded}` });
-  checks.push({ label: "Trust-graph reconciliation", status: "unknown", note: `shared deployers/funders with flagged subjects; ${outcomeNotRecorded}` });
+  const sanctionsScreen = dossier.sanctionsScreen;
+  checks.push(
+    sanctionsScreen?.available ? {
+      checkId: "ofac-sanctions-address",
+      decisionCritical: true,
+      label: "OFAC sanctions screen",
+      status: sanctionsScreen.sanctioned.length ? "finding" : "confirmed",
+      note: sanctionsScreen.sanctioned.length ? `${sanctionsScreen.sanctioned.length} of ${sanctionsScreen.checked} screened addresses are on the US Treasury SDN list` : `${sanctionsScreen.checked} address${sanctionsScreen.checked === 1 ? "" : "es"} (deployer + top holders) screened against the${sanctionsScreen.listSize ? ` ${sanctionsScreen.listSize.toLocaleString()}-entry` : ""} OFAC SDN list; no matches`,
+      provider: "ofac-sdn",
+      completedAt: sanctionsScreen.completedAt
+    } : sanctionsScreen ? { checkId: "ofac-sanctions-address", decisionCritical: true, label: "OFAC sanctions screen", status: "unavailable", note: "OFAC SDN list was unreachable during the scan; screen not completed" } : { checkId: "ofac-sanctions-address", decisionCritical: true, label: "OFAC sanctions screen", status: "unknown", note: `deployer + top holders; ${outcomeNotRecorded}` }
+  );
+  checks.push({ checkId: "documents-audits", decisionCritical: true, label: "Documents & audits", status: "unknown", note: `whitepaper, security audits, docs; ${outcomeNotRecorded}` });
+  checks.push({ checkId: "news-press", decisionCritical: true, label: "News & press", status: "unknown", note: outcomeNotRecorded });
+  checks.push({ checkId: "github-forensics", decisionCritical: true, label: "GitHub forensics", status: "unknown", note: `when a repo/org is linked; ${outcomeNotRecorded}` });
+  checks.push({ checkId: "trust-graph-connections", decisionCritical: true, label: "Trust-graph reconciliation", status: "unknown", note: `shared deployers/funders with flagged subjects; ${outcomeNotRecorded}` });
   return checks;
+}
+var INVESTIGATION_CHECK_BRIDGE = [
+  { tokenCheckId: "news-press", tokenLabel: "News & press", projectCheckId: "news-press", projectLabel: "News & press" },
+  { tokenCheckId: "github-forensics", tokenLabel: "GitHub forensics", projectCheckId: "code-footprint-github", projectLabel: "Code footprint (GitHub)" },
+  { tokenCheckId: "documents-audits", tokenLabel: "Documents & audits", projectCheckId: "project-transparency", projectLabel: "Transparency and disclosures" },
+  { tokenCheckId: "trust-graph-connections", tokenLabel: "Trust-graph reconciliation", projectCheckId: "trust-graph-connections", projectLabel: "Trust-graph connections" }
+];
+function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount) {
+  const rows = tokenRows.map((row) => ({ ...row }));
+  const projectRows = projectAccount?.checkRuns;
+  if (!projectRows || !projectRows.length) return rows;
+  const binding = projectRows.find((row) => row.checkId === "project-token-identity" || row.label === "Canonical project token");
+  if (!binding || binding.status !== "confirmed") return rows;
+  const boundAddress = (projectAccount?.projectToken?.address ?? "").trim().toLowerCase();
+  const subjectAddress = (tokenAddress ?? "").trim().toLowerCase();
+  if (boundAddress && boundAddress !== subjectAddress) return rows;
+  const handle = (projectAccount?.handle ?? "").trim();
+  const provenance = handle ? `the bound project account scan (${handle})` : "the bound project account scan";
+  for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
+    const target = rows.find((row) => row.checkId === bridge.tokenCheckId || row.label === bridge.tokenLabel);
+    if (!target || !UNKNOWN_OR_FAILED.has(target.status)) continue;
+    const source = projectRows.find((row) => row.checkId === bridge.projectCheckId || row.label === bridge.projectLabel);
+    if (!source || !SUCCESSFUL.has(source.status)) continue;
+    target.status = source.status;
+    target.note = `recorded on ${provenance}: ${source.note ?? "completed"}`;
+    if (source.provider) target.provider = source.provider;
+    if (source.completedAt) target.completedAt = source.completedAt;
+    if (typeof source.sourceCount === "number") target.sourceCount = source.sourceCount;
+  }
+  return rows;
 }
 function personChecks(opts) {
   const { identityConfidence, realName, roles, hasAssociates } = opts;
@@ -962,7 +1058,8 @@ function reportChecks(kind, payload) {
   }
   if (kind === "investigation") {
     const investigation = payload;
-    return investigation.versionContext ? investigation.versionContext.checks.map((check) => ({ ...check })) : tokenChecks(investigation.token);
+    const base = investigation.versionContext ? investigation.versionContext.checks.map((check) => ({ ...check })) : tokenChecks(investigation.token);
+    return reconcileInvestigationChecks(base, investigation.token.address, investigation.projectAccount);
   }
   if (kind === "person") {
     const dossier = payload;

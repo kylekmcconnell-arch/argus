@@ -29,7 +29,7 @@ import { isRunnableTokenInput, resolveInput, type RunnableTokenInput } from "./l
 import type { TokenDossier } from "./token/audit";
 import { resolveTokenSubject, type TokenCandidate } from "./token/resolveSubject";
 import type { NavTarget } from "./components/Sidebar";
-import { personChecks, tokenChecks } from "./lib/scanChecklist";
+import { personChecks, reconcileInvestigationChecks, tokenChecks } from "./lib/scanChecklist";
 import { deriveDecisionReadiness } from "./lib/decisionReadiness";
 import { normalizeSubjectRef } from "./lib/subjectRef";
 import { useArgusAuth } from "./auth-context";
@@ -511,7 +511,7 @@ export default function App() {
     logAudit({
       kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
       summary: inv.founderNote,
-      coverage: deriveDecisionReadiness(tokenChecks(inv.token)).status,
+      coverage: deriveDecisionReadiness(reconcileInvestigationChecks(tokenChecks(inv.token), inv.token.address, inv.projectAccount)).status,
       flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
     });
     const c = investigationContribution(inv);

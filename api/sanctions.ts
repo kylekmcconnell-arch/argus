@@ -22,7 +22,12 @@ const LISTS: Record<string, string[]> = {
 };
 
 async function sanctionedSet(family: "evm" | "solana"): Promise<Set<string>> {
-  const ck = `ofac:${family}:v1`;
+  // EVM addresses are case-insensitive, so the set is lowercased and the query
+  // is lowercased to match. Solana base58 addresses ARE case-sensitive (and
+  // real ones almost always carry uppercase), so the Solana set must be stored
+  // case-preserved or every hit is missed. The cache key is versioned so a
+  // previously-lowercased Solana list does not survive this fix.
+  const ck = `ofac:${family}:v2`;
   const cached = await cacheGetJson<string[]>(ck);
   if (cached && cached.length) return new Set(cached);
   const set = new Set<string>();
@@ -32,7 +37,11 @@ async function sanctionedSet(family: "evm" | "solana"): Promise<Set<string>> {
         const r = await fetch(`${RAW}${asset}.txt`, { signal: AbortSignal.timeout(9000) });
         if (!r.ok) return;
         const t = await r.text();
-        for (const line of t.split("\n")) { const a = line.trim().toLowerCase(); if (a && !a.startsWith("#")) set.add(a); }
+        for (const line of t.split("\n")) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) continue;
+          set.add(family === "solana" ? trimmed : trimmed.toLowerCase());
+        }
       } catch { /* one list failing shouldn't sink the screen */ }
     }),
   );

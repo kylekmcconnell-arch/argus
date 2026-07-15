@@ -4628,6 +4628,9 @@ var SUCCESSFUL = /* @__PURE__ */ new Set(["confirmed", "finding", "checked-empty
 var NEVER_WAIVE_CHECK_IDS = /* @__PURE__ */ new Set([
   "identity-resolution",
   "ofac-sanctions-name",
+  // A sanctioned deployer or holder wallet is a legal-exposure flag no market
+  // signal can offset; the address screen is never waivable on token subjects.
+  "ofac-sanctions-address",
   "trust-graph-connections",
   // An unresolved token/security candidacy is a capital-risk unknown (the core
   // scam vector), never an enrichment gap.
@@ -5944,10 +5947,10 @@ function scanPostsForRoles(posts, projectName2) {
   };
   const project = projectName2?.trim() ? regexEscape2(projectName2.trim()) : "";
   const roleIsProjectOwned = (post, index, length, role) => {
-    const window = post.slice(Math.max(0, index - 56), Math.min(post.length, index + length + 56));
+    const window2 = post.slice(Math.max(0, index - 56), Math.min(post.length, index + length + 56));
     const r = regexEscape2(role).replace(/\\ /g, "\\s+");
     const owner = project ? `(?:our|${project})` : "our";
-    return new RegExp(`\\b${owner}\\s+(?:own\\s+|core\\s+)?${r}\\b|\\b${r}\\s+(?:at|for)\\s+${owner}\\b`, "i").test(window);
+    return new RegExp(`\\b${owner}\\s+(?:own\\s+|core\\s+)?${r}\\b|\\b${r}\\s+(?:at|for)\\s+${owner}\\b`, "i").test(window2);
   };
   for (const raw of posts.slice(0, 80)) {
     const p = String(raw ?? "");
@@ -6278,8 +6281,8 @@ function teamMemberIsDirectlySupported(text2, name, handle, role, projectName2) 
   for (const identity of identities) {
     let offset = lower.indexOf(identity);
     while (offset >= 0) {
-      const window = corpus.slice(Math.max(0, offset - 220), Math.min(corpus.length, offset + identity.length + 220));
-      if (rolePattern.test(window) && (!projectName2 || window.toLowerCase().includes(projectName2.toLowerCase()))) return true;
+      const window2 = corpus.slice(Math.max(0, offset - 220), Math.min(corpus.length, offset + identity.length + 220));
+      if (rolePattern.test(window2) && (!projectName2 || window2.toLowerCase().includes(projectName2.toLowerCase()))) return true;
       offset = lower.indexOf(identity, offset + identity.length);
     }
   }
@@ -15928,8 +15931,8 @@ function engagementExcerpt(text2, needle) {
   for (const match of text2.matchAll(global)) {
     if (match.index === void 0) continue;
     const start = Math.max(0, match.index - 240);
-    const window = text2.slice(start, match.index + match[0].length + 280);
-    if (ENGAGEMENT_CONTEXT.test(window) && !ADVERSE_CONTEXT.test(window)) return window.trim();
+    const window2 = text2.slice(start, match.index + match[0].length + 280);
+    if (ENGAGEMENT_CONTEXT.test(window2) && !ADVERSE_CONTEXT.test(window2)) return window2.trim();
   }
   return null;
 }
@@ -18529,6 +18532,30 @@ async function goplus(chainId, address) {
 }
 
 // src/token/audit.ts
+async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
+  const unique = [...new Set(addresses.filter((a) => typeof a === "string" && a.length > 8))].slice(0, 40);
+  if (!unique.length) return void 0;
+  if (typeof window === "undefined" || !window.location?.origin) return void 0;
+  const completedAt = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    const r = await fetchImpl(
+      `/api/sanctions?addresses=${encodeURIComponent(unique.join(","))}&chain=${encodeURIComponent(chain)}`,
+      { signal: AbortSignal.timeout(9e3) }
+    );
+    if (!r.ok) return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    const d = await r.json();
+    if (d?.available !== true) return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    return {
+      available: true,
+      checked: typeof d.checked === "number" ? d.checked : unique.length,
+      listSize: typeof d.listSize === "number" ? d.listSize : void 0,
+      sanctioned: Array.isArray(d.sanctioned) ? d.sanctioned.filter((a) => typeof a === "string") : [],
+      completedAt
+    };
+  } catch {
+    return { available: false, checked: unique.length, sanctioned: [], completedAt };
+  }
+}
 var clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
 var num2 = (s) => s == null || s === "" ? null : Number(s);
 var t1 = (s) => s === "1";
@@ -18951,6 +18978,19 @@ async function runTokenAudit(input, emit, opts) {
     tag: h.tag || void 0,
     isContract: h.is_contract === 1 || h.is_contract === "1"
   })).filter((h) => h.address);
+  step({ phase: "Screen", label: "OFAC sanctions", detail: "Screening deployer + top holders against the US Treasury SDN address list\u2026", tone: "neutral" });
+  const sanctionsScreen = await screenAddressSanctions(chain, [deployer, ...topHolders.map((h) => h.address)]);
+  if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
+    findings.push({
+      claim: sanctionsScreen.sanctioned.length === 1 ? `OFAC SDN hit: screened address ${sanctionsScreen.sanctioned[0].slice(0, 10)}\u2026 is on the US Treasury sanctions list. Touching this token is a legal-exposure risk.` : `OFAC SDN hit: ${sanctionsScreen.sanctioned.length} screened addresses are on the US Treasury sanctions list. Touching this token is a legal-exposure risk.`,
+      tone: "bad",
+      source: "ofac"
+    });
+    score = Math.min(score, 5);
+    capApplied = "ofac_sanctioned_address";
+    verdict = "AVOID";
+    step({ phase: "Finalize", label: "OFAC sanctions", detail: `${sanctionsScreen.sanctioned.length} sanctioned address(es): verdict forced to AVOID.`, tone: "bad" });
+  }
   const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
   step({ phase: "Finalize", label: "Verdict", detail: `${verdict} \xB7 ${score}/100${capApplied ? ` (cap: ${capApplied})` : ""}`, tone: verdict === "PASS" ? "good" : verdict === "CAUTION" ? "warn" : "bad" });
@@ -18986,7 +19026,8 @@ async function runTokenAudit(input, emit, opts) {
     findings,
     trace,
     live: true,
-    safetyChecked: s.available
+    safetyChecked: s.available,
+    sanctionsScreen
   };
 }
 function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders, socials) {
@@ -19026,6 +19067,7 @@ function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders
   return { nodes, edges };
 }
 function buildHeadline(verdict, cap, s, liq, projectX) {
+  if (cap === "ofac_sanctioned_address") return "A screened address is on the US Treasury OFAC sanctions list. Touching this token is a legal-exposure risk. Do not touch.";
   if (s.honeypot) return s.nonTransferable ? "Non-transferable: holders are locked in. Do not touch." : "Honeypot: buyers cannot sell. Do not touch.";
   if (cap === "mint_authority_active") return "Mint authority is live, the team can dilute holders to zero.";
   if (cap === "freeze_authority_active") return "Freeze authority is live, the team can freeze your tokens at any time.";

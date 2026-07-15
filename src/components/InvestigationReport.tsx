@@ -7,7 +7,7 @@ import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
-import { personChecks, tokenChecks } from "../lib/scanChecklist";
+import { personChecks, reconcileInvestigationChecks, tokenChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { ArkhamName } from "./ArkhamName";
 import { useArkhamLabels } from "../lib/useArkhamLabels";
@@ -139,9 +139,13 @@ export function InvestigationReport({
     || projectBasicFacts.length > 0
     || projectBasicFactLeads.length > 0;
   const tokenSubjectGraphKey = String(token.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
-  const diligenceChecks = inv.versionContext
-    ? inv.versionContext.checks
-    : tokenChecks(token);
+  // Credit org-side outcomes the bound project scan recorded in this same
+  // payload; without a confirmed canonical binding this is a no-op.
+  const diligenceChecks = reconcileInvestigationChecks(
+    inv.versionContext ? inv.versionContext.checks : tokenChecks(token),
+    token.address,
+    projectAccount,
+  );
   const readiness = deriveDecisionReadiness(diligenceChecks);
   const positiveVerdictNeedsQualification = token.verdict === "PASS" && readiness.status !== "ready";
   const presentedTokenVerdict = positiveVerdictNeedsQualification ? "INCOMPLETE" : token.verdict;

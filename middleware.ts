@@ -19,6 +19,11 @@ const VIEWER_GET_PATHS = new Set([
   "/api/provider-usage",
   "/api/alerts",
   "/api/augment",
+  // Keyless read-only lookup of a public OFAC SDN address list. Runs inline on
+  // every token scan, so it must be viewer-reachable and unmetered: gating it
+  // to analyst or charging API budget would silently degrade the sanctions
+  // screen (and per-report readiness) once a batch sweep exhausts the budget.
+  "/api/sanctions",
 ]);
 const OWNER_PATHS = new Set(["/api/reclassify", "/api/members"]);
 const UNMETERED_COLLABORATION_PATHS = new Set(["/api/case-brief"]);

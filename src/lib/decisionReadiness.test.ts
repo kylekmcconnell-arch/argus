@@ -234,3 +234,61 @@ describe("deriveDecisionReadiness", () => {
     expect(result.guidance).toContain("1 governing axis has no qualifying frozen support");
   });
 });
+
+describe("investigation token readiness end to end", () => {
+  // The $VVV shape: a keyless token audit (5 recorded outcomes) whose
+  // investigation also ran the OFAC address screen and bound the token to a
+  // fully scanned project account. Reconciliation must lift readiness out of
+  // "incomplete" without waiving the genuinely un-run deployer-side checks.
+  it("reaches ready once the never-waive screens record and org-side outcomes reconcile", async () => {
+    const { tokenChecks, reconcileInvestigationChecks } = await import("./scanChecklist");
+    const dossier = {
+      chain: "base",
+      deployer: "0xc9c88391e50eeadb43647fac514fa26f8dfd7e7f",
+      topHolders: [{ address: "0xholder1", percent: 20 }],
+      insiderPct: 20,
+      bundleCount: 1,
+      bundleRisk: "low",
+      safety: {
+        available: true, simChecked: true, honeypot: false, cannotSellAll: false,
+        buyTax: 0, sellTax: 0, holderCount: 140755, topHolderPct: 12,
+        ownerRenounced: true, mintable: false, freezable: false, nonTransferable: false,
+        takeBack: false, hiddenOwner: false, selfdestruct: false, pausable: false,
+        openSource: true, metadataMutable: false, lpLocked: true, lpBurnedPct: 0,
+        lpLockedPct: 100, lpTopUnlockedEoaPct: 0, balanceMutable: false,
+        transferHook: false, transferFee: false, proxy: false, slippageModifiable: false,
+        blacklist: false, tradingCooldown: false, externalCall: false,
+        ownerChangeBalance: false, serialScammerCreator: false, honeypotOnchain: false,
+        creatorPercent: 0,
+      },
+      cg: { listed: true, rank: 120, mcapUsd: 520_000_000, marketCount: 60, cexCount: 42, cexNames: [], homepage: null, twitter: null, image: null, description: null },
+      sanctionsScreen: { available: true, checked: 11, listSize: 700, sanctioned: [], completedAt: "2026-07-15T16:00:00.000Z" },
+    };
+    const projectAccount = {
+      handle: "@askvenice",
+      projectToken: { address: "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf" },
+      checkRuns: [
+        { checkId: "project-token-identity", label: "Canonical project token", status: "confirmed" as const },
+        { checkId: "news-press", label: "News & press", status: "confirmed" as const, note: "2 press results frozen" },
+        { checkId: "code-footprint-github", label: "Code footprint (GitHub)", status: "confirmed" as const, note: "github.com/veniceai resolved" },
+        { checkId: "project-transparency", label: "Transparency and disclosures", status: "confirmed" as const, note: "2 disclosures frozen" },
+        { checkId: "trust-graph-connections", label: "Trust-graph connections", status: "checked-empty" as const, note: "no prior-report connection" },
+      ],
+    };
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows = reconcileInvestigationChecks(tokenChecks(dossier as any), "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf", projectAccount);
+    const readiness = deriveDecisionReadiness(rows);
+
+    expect(readiness.applicable).toBe(13);
+    expect(readiness.successful).toBe(10);
+    expect(readiness.status).toBe("ready");
+
+    // Without the reconciliation the same scan is stuck below the provisional
+    // floor: the historical "5 of 13" defect.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const unreconciled = deriveDecisionReadiness(tokenChecks({ ...dossier, sanctionsScreen: undefined } as any));
+    expect(unreconciled.successful).toBe(5);
+    expect(unreconciled.status).toBe("incomplete");
+  });
+});

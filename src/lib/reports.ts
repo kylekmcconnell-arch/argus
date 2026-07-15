@@ -6,7 +6,7 @@ import type { Dossier } from "../data/dossier";
 import type { Recon } from "../collect/recon";
 import type { Investigation } from "./investigation";
 import type { TokenDossier } from "../token/audit";
-import { personChecks, tokenChecks, type ScanCheck } from "./scanChecklist";
+import { personChecks, reconcileInvestigationChecks, tokenChecks, type ScanCheck } from "./scanChecklist";
 import { normalizeSubjectRef } from "./subjectRef";
 import type {
   ReportAttestationState,
@@ -50,9 +50,12 @@ export function reportChecks(
   }
   if (kind === "investigation") {
     const investigation = payload as Investigation;
-    return investigation.versionContext
+    const base = investigation.versionContext
       ? investigation.versionContext.checks.map((check) => ({ ...check }))
       : tokenChecks(investigation.token);
+    // Credit org-side outcomes the bound project scan recorded in this same
+    // payload; without a confirmed canonical binding this is a no-op.
+    return reconcileInvestigationChecks(base, investigation.token.address, investigation.projectAccount);
   }
   if (kind === "person") {
     const dossier = payload as Dossier;

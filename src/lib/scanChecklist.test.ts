@@ -3,6 +3,7 @@ import type { NormalizedSafety, TokenDossier } from "../token/audit";
 import {
   clearanceCoverage,
   personChecks,
+  reconcileInvestigationChecks,
   summarizeChecks,
   tokenChecks,
   type CheckStatus,
@@ -285,5 +286,112 @@ describe("clearanceCoverage (full-clearance coverage policy)", () => {
     const legacy = (status: CheckStatus): ScanCheck => ({ label: "legacy", status });
     expect(clearanceCoverage([legacy("confirmed"), legacy("confirmed"), legacy("confirmed"), legacy("unknown")]).sufficient).toBe(false);
     expect(clearanceCoverage([legacy("confirmed"), legacy("confirmed")]).sufficient).toBe(true);
+  });
+});
+
+describe("token OFAC address screen recording", () => {
+  it("records a clean scan-time screen as confirmed with the screened counts", () => {
+    const checks = tokenChecks(dossier({
+      sanctionsScreen: { available: true, checked: 11, listSize: 700, sanctioned: [], completedAt: "2026-07-15T16:00:00.000Z" },
+    }));
+    const row = byLabel(checks, "OFAC sanctions screen");
+
+    expect(row.status).toBe("confirmed");
+    expect(row.checkId).toBe("ofac-sanctions-address");
+    expect(row.note).toContain("11 addresses");
+    expect(row.note).toContain("700-entry");
+    expect(row.note).toContain("no matches");
+    expect(row.completedAt).toBe("2026-07-15T16:00:00.000Z");
+  });
+
+  it("records an SDN hit as a finding, never a pass", () => {
+    const checks = tokenChecks(dossier({
+      sanctionsScreen: { available: true, checked: 11, sanctioned: ["0xdeadbeef00000000"], completedAt: "2026-07-15T16:00:00.000Z" },
+    }));
+
+    expect(byLabel(checks, "OFAC sanctions screen")).toMatchObject({ status: "finding" });
+    expect(byLabel(checks, "OFAC sanctions screen").note).toContain("1 of 11");
+  });
+
+  it("records an unreachable list as unavailable instead of silently clean, and legacy dossiers stay unknown", () => {
+    const unreachable = tokenChecks(dossier({
+      sanctionsScreen: { available: false, checked: 11, sanctioned: [], completedAt: "2026-07-15T16:00:00.000Z" },
+    }));
+    const legacy = tokenChecks(dossier());
+
+    expect(byLabel(unreachable, "OFAC sanctions screen")).toMatchObject({ status: "unavailable" });
+    expect(byLabel(legacy, "OFAC sanctions screen")).toMatchObject({ status: "unknown" });
+  });
+});
+
+describe("reconcileInvestigationChecks", () => {
+  const TOKEN_ADDRESS = "0xacfe6019ed1a7dc6f7b508c02d1b04ec88cc21bf";
+  const projectRows = (): ScanCheck[] => [
+    { checkId: "project-token-identity", label: "Canonical project token", status: "confirmed", note: "$VVV matched this project through its official X account" },
+    { checkId: "news-press", label: "News & press", status: "confirmed", note: "2 exact-name crypto press results frozen", provider: "google-news", sourceCount: 2 },
+    { checkId: "code-footprint-github", label: "Code footprint (GitHub)", status: "confirmed", note: "github.com/veniceai resolved through its X handle field" },
+    { checkId: "project-transparency", label: "Transparency and disclosures", status: "confirmed", note: "2 disclosures frozen" },
+    { checkId: "trust-graph-connections", label: "Trust-graph connections", status: "checked-empty", note: "No connection to a prior authoritative ARGUS report was found" },
+  ];
+  const boundAccount = (overrides: Partial<{ checkRuns: ScanCheck[]; handle: string; address: string }> = {}) => ({
+    checkRuns: overrides.checkRuns ?? projectRows(),
+    handle: overrides.handle ?? "@askvenice",
+    projectToken: { address: overrides.address ?? "0xACFE6019ed1A7Dc6f7B508C02d1b04ec88cC21bf" },
+  });
+
+  it("credits org-side outcomes through a confirmed canonical binding with provenance notes", () => {
+    const rows = reconcileInvestigationChecks(tokenChecks(dossier()), TOKEN_ADDRESS, boundAccount());
+
+    expect(byLabel(rows, "News & press").status).toBe("confirmed");
+    expect(byLabel(rows, "News & press").note).toContain("recorded on the bound project account scan (@askvenice)");
+    expect(byLabel(rows, "News & press").sourceCount).toBe(2);
+    expect(byLabel(rows, "GitHub forensics").status).toBe("confirmed");
+    expect(byLabel(rows, "Documents & audits").status).toBe("confirmed");
+    expect(byLabel(rows, "Trust-graph reconciliation").status).toBe("checked-empty");
+    // never credited: no recorded source exists for these
+    expect(byLabel(rows, "Operator / funding trace").status).toBe("unknown");
+    expect(byLabel(rows, "Deployer trail (EVM)").status).toBe("unknown");
+  });
+
+  it("credits nothing without a confirmed canonical binding", () => {
+    const unbound = projectRows().map((row) =>
+      row.checkId === "project-token-identity" ? { ...row, status: "unknown" as CheckStatus } : row);
+    const rows = reconcileInvestigationChecks(tokenChecks(dossier()), TOKEN_ADDRESS, boundAccount({ checkRuns: unbound }));
+
+    expect(byLabel(rows, "News & press").status).toBe("unknown");
+    expect(byLabel(rows, "GitHub forensics").status).toBe("unknown");
+  });
+
+  it("credits nothing when the bound token address is a different asset", () => {
+    const rows = reconcileInvestigationChecks(
+      tokenChecks(dossier()),
+      TOKEN_ADDRESS,
+      boundAccount({ address: "0x1111111111111111111111111111111111111111" }),
+    );
+
+    expect(byLabel(rows, "News & press").status).toBe("unknown");
+    expect(byLabel(rows, "Documents & audits").status).toBe("unknown");
+  });
+
+  it("never overwrites a recorded token outcome and never credits from an unrecorded source", () => {
+    const sources = projectRows().map((row) =>
+      row.checkId === "news-press" ? { ...row, status: "unknown" as CheckStatus } : row);
+    const tokenRows = tokenChecks(dossier()).map((row) =>
+      row.checkId === "documents-audits"
+        ? { ...row, status: "finding" as CheckStatus, note: "token-side docs finding already recorded" }
+        : row);
+    const rows = reconcileInvestigationChecks(tokenRows, TOKEN_ADDRESS, boundAccount({ checkRuns: sources }));
+
+    expect(byLabel(rows, "News & press").status).toBe("unknown");
+    expect(byLabel(rows, "Documents & audits")).toMatchObject({
+      status: "finding",
+      note: "token-side docs finding already recorded",
+    });
+  });
+
+  it("is a no-op without a project account", () => {
+    const base = tokenChecks(dossier());
+    expect(reconcileInvestigationChecks(base, TOKEN_ADDRESS, null)).toEqual(base);
+    expect(reconcileInvestigationChecks(base, TOKEN_ADDRESS, undefined)).toEqual(base);
   });
 });

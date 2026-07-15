@@ -77,6 +77,8 @@ export interface TokenDossier {
   trace: TraceStep[];
   live: boolean;
   safetyChecked: boolean;
+  /** OFAC address-screen outcome recorded at scan time (deployer + top holders). */
+  sanctionsScreen?: SanctionsScreenOutcome;
   /** Frozen server-side evidence/check context for a persisted report version. */
   versionContext?: ReportVersionContext;
   /** Snapshot framing inherited from a parent investigation facet. */
@@ -85,6 +87,53 @@ export interface TokenDossier {
   viewPersistence?: ReportPersistenceContext;
   /** Transient persistence/cost capability for a scan completed in this tab. */
   persistence?: ReportPersistenceContext;
+}
+
+export interface SanctionsScreenOutcome {
+  available: boolean;
+  checked: number;
+  listSize?: number;
+  sanctioned: string[];
+  completedAt: string;
+}
+
+// OFAC SDN address screen, recorded as a real check outcome for the checklist.
+// Never throws: an unreachable screen records available:false so the checklist
+// shows "unavailable" instead of silently claiming a clean pass.
+//
+// The screen calls a same-origin API route (/api/sanctions), which only
+// resolves under the browser's authenticated fetch wrapper. In a raw server or
+// Node audit (public API, drift sweep, benchmark) there is no origin, so the
+// screen is skipped and returns undefined — recorded as "not run" rather than a
+// failed attempt or, worse, a false clean. Server-side direct screening is a
+// separate follow-up.
+export async function screenAddressSanctions(
+  chain: string,
+  addresses: readonly (string | null | undefined)[],
+  fetchImpl: typeof fetch = fetch,
+): Promise<SanctionsScreenOutcome | undefined> {
+  const unique = [...new Set(addresses.filter((a): a is string => typeof a === "string" && a.length > 8))].slice(0, 40);
+  if (!unique.length) return undefined;
+  if (typeof window === "undefined" || !window.location?.origin) return undefined;
+  const completedAt = new Date().toISOString();
+  try {
+    const r = await fetchImpl(
+      `/api/sanctions?addresses=${encodeURIComponent(unique.join(","))}&chain=${encodeURIComponent(chain)}`,
+      { signal: AbortSignal.timeout(9000) },
+    );
+    if (!r.ok) return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    const d = await r.json() as { available?: boolean; checked?: number; listSize?: number; sanctioned?: string[] };
+    if (d?.available !== true) return { available: false, checked: unique.length, sanctioned: [], completedAt };
+    return {
+      available: true,
+      checked: typeof d.checked === "number" ? d.checked : unique.length,
+      listSize: typeof d.listSize === "number" ? d.listSize : undefined,
+      sanctioned: Array.isArray(d.sanctioned) ? d.sanctioned.filter((a): a is string => typeof a === "string") : [],
+      completedAt,
+    };
+  } catch {
+    return { available: false, checked: unique.length, sanctioned: [], completedAt };
+  }
 }
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
@@ -558,6 +607,26 @@ async function runTokenAudit(
     isContract: h.is_contract === 1 || h.is_contract === "1",
   })).filter((h) => h.address);
 
+  // ---- OFAC screen: deployer + top holders, recorded as a check outcome ----
+  step({ phase: "Screen", label: "OFAC sanctions", detail: "Screening deployer + top holders against the US Treasury SDN address list…", tone: "neutral" });
+  const sanctionsScreen = await screenAddressSanctions(chain, [deployer, ...topHolders.map((h) => h.address)]);
+  if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
+    findings.push({
+      claim: sanctionsScreen.sanctioned.length === 1
+        ? `OFAC SDN hit: screened address ${sanctionsScreen.sanctioned[0].slice(0, 10)}… is on the US Treasury sanctions list. Touching this token is a legal-exposure risk.`
+        : `OFAC SDN hit: ${sanctionsScreen.sanctioned.length} screened addresses are on the US Treasury sanctions list. Touching this token is a legal-exposure risk.`,
+      tone: "bad",
+      source: "ofac",
+    });
+    // A sanctioned deployer or holder is the hardest AVOID signal there is; it
+    // overrides any market score. Recompute the verdict so the headline can
+    // never render PASS over a confirmed sanctions hit.
+    score = Math.min(score, 5);
+    capApplied = "ofac_sanctioned_address";
+    verdict = "AVOID";
+    step({ phase: "Finalize", label: "OFAC sanctions", detail: `${sanctionsScreen.sanctioned.length} sanctioned address(es): verdict forced to AVOID.`, tone: "bad" });
+  }
+
   const graph = buildGraph(chain, address, pair.baseToken.symbol, verdict, projectX, deployer, topHolders, socials);
 
   const headline = buildHeadline(verdict, capApplied, s, liquidityUsd, projectX);
@@ -569,6 +638,7 @@ async function runTokenAudit(
     mcap: fdv, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
     verdict, score, capApplied, headline, axes, safety: s, socials,
     projectX, deployer, topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
+    sanctionsScreen,
   };
 }
 
@@ -616,6 +686,7 @@ function buildGraph(chain: string, address: string, symbol: string, verdict: str
 }
 
 function buildHeadline(verdict: string, cap: string | null, s: NormalizedSafety, liq: number, projectX: string | null): string {
+  if (cap === "ofac_sanctioned_address") return "A screened address is on the US Treasury OFAC sanctions list. Touching this token is a legal-exposure risk. Do not touch.";
   if (s.honeypot) return s.nonTransferable ? "Non-transferable: holders are locked in. Do not touch." : "Honeypot: buyers cannot sell. Do not touch.";
   if (cap === "mint_authority_active") return "Mint authority is live, the team can dilute holders to zero.";
   if (cap === "freeze_authority_active") return "Freeze authority is live, the team can freeze your tokens at any time.";
