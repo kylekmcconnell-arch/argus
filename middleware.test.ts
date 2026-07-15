@@ -282,6 +282,55 @@ describe("Case Brief middleware policy", () => {
     });
   });
 
+  it("fails open (allows) when the usage quota RPC is unreachable", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        id: "00000000-0000-4000-8000-000000000010",
+        email_confirmed_at: "2026-07-11T00:00:00.000Z",
+      }))
+      .mockResolvedValueOnce(jsonResponse([{
+        organization_id: "00000000-0000-4000-8000-000000000001",
+        role: "owner",
+        active: true,
+      }]))
+      .mockResolvedValueOnce(jsonResponse({ error: "statement timeout" }, 503));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(new Request("https://argus.example/api/augment", {
+      method: "PATCH",
+      headers: { authorization: "Bearer owner-token", "content-type": "application/json" },
+      body: JSON.stringify({ action: "approve", id: "00000000-0000-4000-8000-000000000101" }),
+    }));
+
+    // A transient quota-RPC outage must not hard-block a metered request.
+    expect(response.status).toBe(204);
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it("still enforces a genuine over-budget response with 429", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({
+        id: "00000000-0000-4000-8000-000000000010",
+        email_confirmed_at: "2026-07-11T00:00:00.000Z",
+      }))
+      .mockResolvedValueOnce(jsonResponse([{
+        organization_id: "00000000-0000-4000-8000-000000000001",
+        role: "owner",
+        active: true,
+      }]))
+      .mockResolvedValueOnce(jsonResponse([{ allowed: false, remaining: 0 }]));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await middleware(new Request("https://argus.example/api/augment", {
+      method: "PATCH",
+      headers: { authorization: "Bearer owner-token", "content-type": "application/json" },
+      body: JSON.stringify({ action: "approve", id: "00000000-0000-4000-8000-000000000101" }),
+    }));
+
+    expect(response.status).toBe(429);
+    expect(next).not.toHaveBeenCalled();
+  });
+
   it("does not allow a viewer to mutate Case Brief", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({

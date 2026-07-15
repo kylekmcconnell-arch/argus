@@ -194,20 +194,25 @@ export default async function middleware(request: Request): Promise<Response> {
         p_metadata: { method: request.method },
         p_units: ROUTE_UNITS[pathname] || 1,
       }),
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(15_000),
     }).catch(() => null);
+    // Fail open when the usage RPC is unreachable: the daily API budget is a
+    // soft guardrail, and a transient Supabase blip must not turn every metered
+    // request (including a scan's persist) into a 503 outage. A genuine
+    // over-budget response (RPC succeeds, allowed=false) is still enforced.
     if (!quotaResponse?.ok) {
-      return Response.json({ error: "quota_unavailable" }, { status: 503 });
+      console.warn("[middleware] usage quota RPC unavailable; allowing (fail-open)", pathname);
+    } else {
+      const quotaRows = (await quotaResponse.json().catch(() => [])) as Array<{
+        allowed?: unknown;
+        remaining?: unknown;
+      }>;
+      const quota = Array.isArray(quotaRows) ? quotaRows[0] : null;
+      if (quota?.allowed !== true) {
+        return Response.json({ error: "daily_api_budget_reached", remaining: 0 }, { status: 429 });
+      }
+      apiBudgetRemaining = typeof quota.remaining === "number" ? quota.remaining : null;
     }
-    const quotaRows = (await quotaResponse.json().catch(() => [])) as Array<{
-      allowed?: unknown;
-      remaining?: unknown;
-    }>;
-    const quota = Array.isArray(quotaRows) ? quotaRows[0] : null;
-    if (quota?.allowed !== true) {
-      return Response.json({ error: "daily_api_budget_reached", remaining: 0 }, { status: 429 });
-    }
-    apiBudgetRemaining = typeof quota.remaining === "number" ? quota.remaining : null;
   }
 
   const requestHeaders = new Headers(request.headers);

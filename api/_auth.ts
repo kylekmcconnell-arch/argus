@@ -239,6 +239,12 @@ export async function consumeInvestigationQuota(
       ? positiveInt(process.env.ARGUS_OWNER_DAILY_INVESTIGATION_LIMIT, 100)
       : positiveInt(process.env.ARGUS_DAILY_INVESTIGATION_LIMIT, 25);
 
+  // The daily investigation limit is a soft guardrail. If the usage RPC is
+  // transiently unreachable (Supabase latency blip, cold connection), fail OPEN
+  // so a bookkeeping hiccup never kills a multi-minute scan the user is waiting
+  // on. Enforcement resumes automatically the moment the RPC recovers, and a
+  // genuine over-limit response (RPC succeeds, allowed=false) is still enforced.
+  const failOpen = (): QuotaResult => ({ allowed: true, used: 0, remaining: dailyLimit });
   try {
     const response = await fetch(`${credentials.url}/rest/v1/rpc/consume_usage_quota`, {
       method: "POST",
@@ -251,24 +257,27 @@ export async function consumeInvestigationQuota(
         p_daily_limit: dailyLimit,
         p_metadata: metadata,
       }),
-      signal: AbortSignal.timeout(8_000),
+      signal: AbortSignal.timeout(15_000),
     });
     if (!response.ok) {
-      console.error("[quota] RPC failed", response.status, (await response.text()).slice(0, 300));
-      return { allowed: false, used: 0, remaining: 0, error: "quota_unavailable" };
+      console.error("[quota] RPC failed; allowing (fail-open)", response.status, (await response.text()).slice(0, 300));
+      return failOpen();
     }
     const rows = (await response.json()) as unknown;
     const row = Array.isArray(rows) && rows[0] && typeof rows[0] === "object"
       ? (rows[0] as Record<string, unknown>)
       : null;
-    if (!row) return { allowed: false, used: 0, remaining: 0, error: "quota_unavailable" };
+    if (!row) {
+      console.error("[quota] RPC returned no row; allowing (fail-open)");
+      return failOpen();
+    }
     return {
       allowed: row.allowed === true,
       used: typeof row.used === "number" ? row.used : 0,
       remaining: typeof row.remaining === "number" ? row.remaining : 0,
     };
   } catch (error) {
-    console.error("[quota] check failed", error);
-    return { allowed: false, used: 0, remaining: 0, error: "quota_unavailable" };
+    console.error("[quota] check failed; allowing (fail-open)", error);
+    return failOpen();
   }
 }
