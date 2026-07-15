@@ -29,6 +29,8 @@ type ProtocolDocument = {
   currentChainTvls?: unknown;
   tvl?: unknown;
   raises?: unknown;
+  governanceID?: unknown;
+  hacks?: unknown;
 };
 
 type FetchResult =
@@ -73,6 +75,15 @@ const strArray = (value: unknown): string[] =>
 // TVL
 // ---------------------------------------------------------------------------
 
+export interface ProtocolHackRecord {
+  /** ISO date (YYYY-MM-DD) or null when the record has no date */
+  date: string | null;
+  amountUsd: number | null;
+  /** whether the record states the funds were returned */
+  returnedFunds: boolean;
+  classification: string | null;
+}
+
 export interface ProtocolTvl {
   slug: string;
   name: string;
@@ -81,6 +92,20 @@ export interface ProtocolTvl {
   chains: string[];
   chainBreakdown: { chain: string; tvlUsd: number }[];
   geckoId: string | null;
+  /**
+   * First date in DeFiLlama's TVL series. Phrase user-facing claims as "TVL
+   * history since YYYY": the series start can be backfilled when an old
+   * protocol is listed late, so it bounds, not proves, protocol age.
+   */
+  firstRecordedAt: string | null;
+  /** Governance identifiers as listed by DeFiLlama (curated listing metadata, e.g. "snapshot:aave.eth", "eip155:1:0x..."). */
+  governanceIds: string[];
+  /**
+   * Security incidents in the same DeFiLlama document. Frozen alongside the
+   * positives from this payload: consuming a document for score-lifting
+   * evidence while dropping its hack records would be selective evidence use.
+   */
+  hacks: ProtocolHackRecord[];
   /** human-facing DeFiLlama page */
   sourceUrl: string;
 }
@@ -126,6 +151,19 @@ export async function collectProtocolTvl(
     .map(([chain, value]) => ({ chain, tvlUsd: value as number }))
     .sort((a, b) => b.tvlUsd - a.tvlUsd);
 
+  const firstPoint = series.length ? (series[0] as { date?: unknown }) : undefined;
+  const firstRecordedAt = typeof firstPoint?.date === "number"
+    ? new Date(firstPoint.date * 1000).toISOString().slice(0, 10)
+    : null;
+  const hacks: ProtocolHackRecord[] = (Array.isArray(data.hacks) ? data.hacks : [])
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+    .map((entry) => ({
+      date: typeof entry.date === "number" ? new Date(entry.date * 1000).toISOString().slice(0, 10) : null,
+      amountUsd: typeof entry.amount === "number" && entry.amount > 0 ? Math.round(entry.amount) : null,
+      returnedFunds: entry.returnedFunds === true,
+      classification: typeof entry.classification === "string" ? entry.classification : null,
+    }));
+
   recordCall("defillama", "tvl", 0, `${slug} · tvl_${Math.round(tvlUsd)}`, "succeeded");
   return {
     available: true,
@@ -137,6 +175,75 @@ export async function collectProtocolTvl(
       chains: chainBreakdown.map((entry) => entry.chain),
       chainBreakdown,
       geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
+      firstRecordedAt,
+      governanceIds: strArray(data.governanceID),
+      hacks,
+      sourceUrl: `https://defillama.com/protocol/${slug}`,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Protocol fees (real usage: what users actually paid)
+// ---------------------------------------------------------------------------
+
+export interface ProtocolFees {
+  slug: string;
+  /** fees paid by users over the trailing 24 hours, USD */
+  total24hUsd: number | null;
+  /** fees paid by users over the trailing 30 days, USD */
+  total30dUsd: number | null;
+  sourceUrl: string;
+}
+
+export type FeesOutcome =
+  | { available: true; value: ProtocolFees }
+  | { available: false; note: string };
+
+/**
+ * Fetch protocol fee totals from the free /summary/fees/{slug} endpoint.
+ * Fees are on-chain-derived and self-limiting to fake (generating fee volume
+ * costs the same amount in fees), which is what makes them an honest traction
+ * signal. Never throws.
+ */
+export async function collectProtocolFees(
+  projectName: string,
+  options: { fetcher?: typeof fetch; slug?: string } = {},
+): Promise<FeesOutcome> {
+  const fetcher = options.fetcher ?? fetch;
+  const slug = options.slug ?? defiLlamaSlug(projectName);
+  if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
+  const url = `${API_BASE}/summary/fees/${encodeURIComponent(slug)}`;
+  let response: Response;
+  try {
+    response = await fetcher(url, { signal: AbortSignal.timeout(20000) });
+  } catch {
+    recordCall("defillama", "fees", 0, `${slug} · error`, "failed");
+    return { available: false, note: "DeFiLlama fees endpoint was unavailable." };
+  }
+  if (!response.ok) {
+    recordCall("defillama", "fees", 0, `${slug} · http_${response.status}`, response.status === 400 ? "succeeded" : "failed");
+    return { available: false, note: `No DeFiLlama fee record for "${slug}".` };
+  }
+  let payload: { total24h?: unknown; total30d?: unknown };
+  try {
+    payload = ((await response.json()) ?? {}) as { total24h?: unknown; total30d?: unknown };
+  } catch {
+    return { available: false, note: "DeFiLlama fees response was unreadable." };
+  }
+  const total24hUsd = typeof payload.total24h === "number" && payload.total24h >= 0 ? Math.round(payload.total24h) : null;
+  const total30dUsd = typeof payload.total30d === "number" && payload.total30d >= 0 ? Math.round(payload.total30d) : null;
+  if (total24hUsd === null && total30dUsd === null) {
+    recordCall("defillama", "fees", 0, `${slug} · no_totals`, "succeeded");
+    return { available: false, note: "DeFiLlama reported no fee totals for this protocol." };
+  }
+  recordCall("defillama", "fees", 0, `${slug} · fees30d_${total30dUsd ?? 0}`, "succeeded");
+  return {
+    available: true,
+    value: {
+      slug,
+      total24hUsd,
+      total30dUsd,
       sourceUrl: `https://defillama.com/protocol/${slug}`,
     },
   };

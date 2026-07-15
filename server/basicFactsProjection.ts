@@ -501,12 +501,40 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       sourceClass: "regulatory_or_onchain",
     });
     projected.push(makeFact(evidence, "official_token", `$${token.symbol.toUpperCase()}`, [tokenSource], token.name));
-    projected.push(makeFact(evidence, "network", token.chain, [tokenSource]));
+    // network is a singleton predicate: extend the ONE fact's value with the
+    // id-joined DeFiLlama chain footprint instead of minting a second fact,
+    // which the singleton reconciliation would mark conflicted.
+    const chainFootprint = token.deployedChains?.length
+      ? `${token.deployedChains.length} chains incl. ${token.deployedChains.slice(0, 4).join(", ")}`
+      : token.chain;
+    projected.push(makeFact(evidence, "network", chainFootprint, [tokenSource],
+      token.deployedChains?.length ? "protocol footprint per DeFiLlama TVL" : undefined));
     if (typeof token.volume24hUsd === "number" && token.volume24hUsd > 0) {
       projected.push(makeFact(
         evidence,
         "traction",
         `${formatUsd(token.volume24hUsd)} 24h trading volume`,
+        [tokenSource],
+        `captured ${token.capturedAt.slice(0, 10)}`,
+      ));
+    }
+    // Supply ratio -> tokenomics disclosure. The checkable ratio only, never a
+    // vesting claim: CoinGecko supply is partly project-self-reported, and a
+    // schedule is a different artifact this fact deliberately does not imply.
+    if (
+      typeof token.circulatingSupply === "number" && token.circulatingSupply > 0
+      && ((typeof token.maxSupply === "number" && token.maxSupply > 0)
+        || (typeof token.totalSupply === "number" && token.totalSupply > 0))
+    ) {
+      const denominator = typeof token.maxSupply === "number" && token.maxSupply > 0
+        ? token.maxSupply
+        : token.totalSupply as number;
+      const pct = Math.min(100, Math.round((token.circulatingSupply / denominator) * 100));
+      const compact = (value: number) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` : Math.round(value).toLocaleString();
+      projected.push(makeFact(
+        evidence,
+        "tokenomics",
+        `${compact(token.circulatingSupply)} of ${compact(denominator)} supply circulating (${pct}%)`,
         [tokenSource],
         `captured ${token.capturedAt.slice(0, 10)}`,
       ));
@@ -591,10 +619,17 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     ));
   }
 
-  // On-chain TVL → traction (P5).
+  // On-chain TVL → traction (P5). Hack records from the same DeFiLlama
+  // document ride in the same excerpt: consuming a document for score-lifting
+  // positives while dropping its incident records would be selective
+  // evidence use.
   const tvlSnapshot = isProject ? evidence.protocolTvl : undefined;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
     const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
+    const historySince = tvlSnapshot.firstRecordedAt ? ` TVL history since ${tvlSnapshot.firstRecordedAt.slice(0, 4)}.` : "";
+    const hackNote = tvlSnapshot.hacks?.length
+      ? ` DeFiLlama also records ${tvlSnapshot.hacks.length} security incident${tvlSnapshot.hacks.length === 1 ? "" : "s"}${tvlSnapshot.hacks[0].amountUsd ? `, including ${formatUsd(tvlSnapshot.hacks[0].amountUsd)}${tvlSnapshot.hacks[0].date ? ` in ${tvlSnapshot.hacks[0].date.slice(0, 4)}` : ""}${tvlSnapshot.hacks[0].returnedFunds ? " (funds returned)" : ""}` : ""}.`
+      : "";
     projected.push(makeFact(
       evidence,
       "traction",
@@ -602,12 +637,58 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       [source({
         url: tvlSnapshot.sourceUrl,
         title: "DeFiLlama TVL record",
-        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""} (DeFiLlama on-chain snapshot).`,
+        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""} (DeFiLlama on-chain snapshot).${historySince}${hackNote}`,
         capturedAt: tvlSnapshot.capturedAt,
         provider: "defillama",
         sourceClass: "regulatory_or_onchain",
       })],
       `captured ${tvlSnapshot.capturedAt.slice(0, 10)}`,
+    ));
+    // Governance identifiers -> P6 disclosure. Snapshot spaces are off-chain
+    // voting and anyone can create one; only the eip155 governor entry is an
+    // on-chain contract. Curated listing metadata, hence other_public.
+    if (tvlSnapshot.governanceIds?.length) {
+      const snapshotSpace = tvlSnapshot.governanceIds.find((id) => id.startsWith("snapshot:"))?.slice("snapshot:".length);
+      const onchainGovernor = tvlSnapshot.governanceIds.find((id) => id.startsWith("eip155:"));
+      const parts = [
+        ...(snapshotSpace ? [`Snapshot space ${snapshotSpace} (off-chain voting)`] : []),
+        ...(onchainGovernor ? [`on-chain governor ${onchainGovernor.split(":").pop()?.slice(0, 10)}…`] : []),
+      ];
+      if (parts.length) {
+        projected.push(makeFact(
+          evidence,
+          "governance",
+          parts.join("; "),
+          [source({
+            url: tvlSnapshot.sourceUrl,
+            title: "DeFiLlama governance listing",
+            excerpt: `DeFiLlama lists governance identifiers for ${tvlSnapshot.name}: ${tvlSnapshot.governanceIds.join(", ")}.`,
+            capturedAt: tvlSnapshot.capturedAt,
+            provider: "defillama",
+            sourceClass: "other_public",
+          })],
+        ));
+      }
+    }
+  }
+
+  // Protocol fees → a second dated usage metric (P5). Fees are on-chain
+  // derived and self-limiting to fake: generating fee volume costs the fees.
+  const feesSnapshot = isProject ? evidence.protocolFees : undefined;
+  if (feesSnapshot && typeof feesSnapshot.total30dUsd === "number" && feesSnapshot.total30dUsd > 0) {
+    projected.push(makeFact(
+      evidence,
+      "traction",
+      `${formatUsd(feesSnapshot.total30dUsd)} protocol fees in 30 days`,
+      [source({
+        url: feesSnapshot.sourceUrl,
+        title: "DeFiLlama protocol fees record",
+        excerpt: `Users paid ${formatUsd(feesSnapshot.total30dUsd)} in protocol fees over the trailing 30 days${typeof feesSnapshot.total24hUsd === "number" ? ` (${formatUsd(feesSnapshot.total24hUsd)} in the last 24 hours)` : ""}.`,
+        capturedAt: feesSnapshot.capturedAt,
+        provider: "defillama",
+        sourceClass: "regulatory_or_onchain",
+      })],
+      `captured ${feesSnapshot.capturedAt.slice(0, 10)}`,
     ));
   }
 

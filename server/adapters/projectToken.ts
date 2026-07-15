@@ -480,6 +480,9 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
   const marketCap = isRecord(market.market_cap) ? finiteNumber(market.market_cap.usd) : undefined;
   const fdv = isRecord(market.fully_diluted_valuation) ? finiteNumber(market.fully_diluted_valuation.usd) : undefined;
   const volume = isRecord(market.total_volume) ? finiteNumber(market.total_volume.usd) : undefined;
+  const circulatingSupply = finiteNumber(market.circulating_supply);
+  const totalSupply = finiteNumber(market.total_supply);
+  const maxSupply = finiteNumber(market.max_supply);
   const id = cleanText(details.id);
   const name = cleanText(details.name);
   const symbol = cleanText(details.symbol).toUpperCase();
@@ -511,6 +514,9 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
     ...marketCap !== undefined ? { marketCapUsd: marketCap } : {},
     ...fdv !== undefined ? { fdvUsd: fdv } : {},
     ...volume !== undefined ? { volume24hUsd: volume } : {},
+    ...circulatingSupply !== undefined ? { circulatingSupply } : {},
+    ...totalSupply !== undefined ? { totalSupply } : {},
+    ...maxSupply !== undefined ? { maxSupply } : {},
     ...pair ? { liquidityUsd: pair.liquidityUsd, pairAddress: pair.pairAddress } : {},
     ...history ? { history } : {},
   };

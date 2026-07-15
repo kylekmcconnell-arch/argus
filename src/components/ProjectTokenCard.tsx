@@ -18,15 +18,32 @@ const price = (value?: number) => {
 
 export function ProjectTokenCard({
   token,
+  chains,
   showCurrentIntelligence,
   onAudit,
 }: {
   token: ProjectTokenSnapshot;
+  /**
+   * Protocol chain footprint from DeFiLlama TVL data. The caller must only
+   * pass this when the DeFiLlama protocol record joins the verified token by
+   * CoinGecko id, so a name-alike protocol can never lend its footprint.
+   */
+  chains?: string[];
   showCurrentIntelligence: boolean;
   onAudit?: (query: string) => void;
 }) {
   const verifiedBy = token.verification === "official_x" ? "official X account" : "official project domain";
   const captured = new Date(token.capturedAt);
+  const chainList = chains?.length
+    ? [token.chain, ...chains]
+      .filter(Boolean)
+      .filter((chain, index, all) => all.findIndex((candidate) => candidate.toLowerCase() === chain.toLowerCase()) === index)
+    : null;
+  const chainDisplay = chainList
+    ? chainList.length > 3
+      ? `${chainList.slice(0, 3).join(", ")} +${chainList.length - 3} more`
+      : chainList.join(", ")
+    : token.chain;
 
   return (
     <section id="project-token" className="panel scroll-mt-28 overflow-hidden" aria-label="Verified token and market fundamentals">
@@ -65,11 +82,11 @@ export function ProjectTokenCard({
           ["Fully diluted", money(token.fdvUsd)],
           ["24h volume", money(token.volume24hUsd)],
           ["DEX liquidity", money(token.liquidityUsd)],
-          ["Chain", token.chain],
+          [chainList ? `Chains (${chainList.length})` : "Chain", chainDisplay],
         ].map(([label, value]) => (
           <div key={label} className="bg-panel px-4 py-3">
             <dt className="stat-label">{label}</dt>
-            <dd className="stat-value mt-1 font-semibold capitalize">{value}</dd>
+            <dd className="stat-value mt-1 font-semibold capitalize" title={chainList && label.startsWith("Chains") ? `${chainList.join(", ")} · protocol footprint per DeFiLlama TVL` : undefined}>{value}</dd>
           </div>
         ))}
       </dl>

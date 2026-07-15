@@ -159,7 +159,7 @@ describe("private person report evidence boundary", () => {
     });
 
     const snapshotLink = container.querySelector<HTMLAnchorElement>(`a[href="/?version=${reportVersionId}"]`);
-    expect(snapshotLink?.textContent?.trim()).toBe("CORE SNAPSHOT SAVED");
+    expect(snapshotLink?.textContent?.trim()).toBe("SAVED REPORT");
     expect(snapshotLink?.title).toContain("exact immutable snapshot");
     expect(snapshotLink?.target).toBe("_blank");
     expect(container.textContent).toContain("core snapshot saved");
@@ -526,22 +526,27 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    const diligenceRail = container.querySelector('section[aria-label="Diligence areas"]')?.textContent ?? "";
-    const openQuestionsRail = container.querySelector('section[aria-label="Open questions"]')?.textContent ?? "";
-    expect(diligenceRail).toMatch(/Strong evidence|Moderate evidence|Limited evidence/);
-    expect(diligenceRail).toContain("question to verify");
-    expect(diligenceRail).toContain("reviewed");
-    expect(diligenceRail).not.toContain(originalAxisName);
-    expect(diligenceRail).not.toMatch(/[A-Z]\d+_/);
-    expect(diligenceRail).not.toContain("_");
-    expect(diligenceRail).not.toContain("counter");
-    expect(diligenceRail).not.toContain("gaps");
-    expect(openQuestionsRail).toContain("Transparency and disclosures");
-    expect(openQuestionsRail).not.toContain("Optional social enrichment");
-    expect(openQuestionsRail).not.toContain("Crunchbase");
-    expect(openQuestionsRail).not.toContain("Reddit");
-    expect(container.textContent).toContain("See all evidence");
-    expect(container.textContent).toContain("See what still needs checking");
+    // The rail duplicates are gone; the same translation contract now applies
+    // to the decision-basis panel and the single verification list: axis keys
+    // and investigator vocabulary never reach the investor.
+    const decisionBasis = container.querySelector("#decision-basis")?.textContent ?? "";
+    const verificationSection = container.querySelector("#verification-next")?.textContent ?? "";
+    expect(decisionBasis).not.toContain(originalAxisName);
+    expect(decisionBasis).not.toMatch(/[A-Z]\d+_/);
+    expect(verificationSection).not.toMatch(/[A-Z]\d+_/);
+    expect(container.textContent).toMatch(/Strong evidence|Moderate evidence|Limited evidence/);
+    // Provider diagnostics stay in the methodology ledger; they never leak
+    // into the decision summary or the verification list.
+    const summarySurfaces = `${container.querySelector("#decision-summary")?.textContent ?? ""}${verificationSection}`;
+    expect(summarySurfaces).not.toContain("Optional social enrichment");
+    expect(summarySurfaces).not.toContain("Crunchbase");
+    expect(summarySurfaces).not.toContain("Reddit");
+    // The gap renders exactly once outside its axis detail panel: in the
+    // verification list, never as a thesis risk.
+    const gapMatches = (container.textContent ?? "").split("Confirm the current operating team.").length - 1;
+    expect(gapMatches).toBeGreaterThanOrEqual(1);
+    const thesisSection = container.querySelector("#confidence-limits")?.textContent ?? "";
+    expect(thesisSection).not.toContain("Confirm the current operating team.");
   });
 
   it("withholds incomplete PASS clearance while preserving it as a preliminary signal", () => {
@@ -721,7 +726,7 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    expect(container.textContent).toContain("Frozen source ledger");
+    expect(container.textContent).toContain("Sources we saved");
     expect(container.textContent).toContain("Mara Voss raises a new fund");
     expect(container.textContent).toContain(`SHA-256 ${hash.slice(0, 12)}…`);
     expect(container.textContent).toContain("SHA-256 unavailable");
@@ -1160,15 +1165,15 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    expect(container.textContent).toContain("Profile-photo integrity");
-    expect(container.textContent).toContain("visual triage, not identity proof");
+    expect(container.textContent).toContain("Profile-photo check");
+    expect(container.textContent).toContain("a quick photo check, not identity proof");
     expect(container.textContent).toContain("AI-generated image lead");
     expect(container.textContent).toContain("cannot prove image ownership, identity, or web-wide reuse");
     expect(container.textContent).toContain(`Source image SHA-256 ${imageHash.slice(0, 12)}…`);
     expect(container.querySelector('img[src="data:image/jpeg;base64,YWJj"]')).not.toBeNull();
     expect(container.textContent).toContain("exact image bytes retained with this report");
 
-    expect(container.textContent).toContain("Frozen trust-graph screen");
+    expect(container.textContent).toContain("Known connections");
     expect(container.textContent).toContain("A shared person, wallet, funder, or project is an investigative lead");
     expect(container.textContent).toContain("9 / 12");
     expect(container.textContent).toContain("Shared founder");
@@ -1221,7 +1226,7 @@ describe("decision-safe person report presentation", () => {
         },
         {
           checkId: "profile-photo-authenticity",
-          label: "Profile-photo integrity",
+          label: "Profile-photo check",
           status: "checked-empty" as const,
           note: "real candid observed; visual-only screen cannot prove image ownership or identity",
           provider: "claude-vision",
@@ -1324,7 +1329,7 @@ describe("decision-safe person report presentation", () => {
         provider: "google-news",
       }, {
         checkId: "profile-photo-authenticity",
-        label: "Profile-photo integrity",
+        label: "Profile-photo check",
         status: "checked-empty" as const,
         note: "real candid observed; visual-only screen cannot prove image ownership or identity",
         provider: "claude-vision",
@@ -1392,9 +1397,9 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    expect(container.textContent).toContain("Investigative leads");
-    expect(container.textContent).toContain("Associate lead");
-    expect(container.textContent).toContain("unverified lead · outside subject score");
+    expect(container.textContent).toContain("Worth a second look");
+    expect(container.textContent).toContain("About an associate");
+    expect(container.textContent).toContain("unconfirmed · not scored");
     expect(container.textContent).toContain(`not verified evidence of conduct by ${base.report.handle}`);
     expect(container.textContent).not.toContain("Publishable findings");
   });
@@ -1433,8 +1438,8 @@ describe("decision-safe person report presentation", () => {
     });
 
     expect(container.textContent).not.toContain("Publishable findings");
-    expect(container.textContent).toContain("Investigative leads");
-    expect(container.textContent).toContain("Related-entity lead");
+    expect(container.textContent).toContain("Worth a second look");
+    expect(container.textContent).toContain("About a related company");
     expect(container.textContent).toContain("@legacy_associate");
     expect(decisionBasisText()).not.toContain("legacy_associate");
     expect(decisionBasisText()).toContain("Lineage unavailable");
@@ -1474,7 +1479,7 @@ describe("decision-safe person report presentation", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    expect(container.textContent).toContain("verified about target · outside subject score");
+    expect(container.textContent).toContain("confirmed about the named entity · not scored");
     expect(container.textContent).toContain(`verified about @related_venture, but it is not evidence of conduct by ${base.report.handle}`);
     expect(container.textContent).toContain("Verified target source");
   });
@@ -1510,7 +1515,7 @@ describe("legacy person report coverage truth", () => {
 
     expect(container.textContent).toContain("Coverage not captured");
     expect(container.textContent).toContain("Frozen coverage unavailable");
-    expect(container.textContent).toContain("legacy snapshot predates frozen check-level coverage");
+    expect(container.textContent).toContain("report was saved before per-check results were recorded");
     expect(container.textContent).not.toContain("Evidence coverage0%");
     expect(container.textContent).not.toContain("0 / 0");
     expect(container.textContent).not.toContain("0 unresolved");

@@ -2824,6 +2824,18 @@ function validateAnalystVerdict(value, axisCatalog2, evidenceCatalog = [], onRej
     if (allSelectedEvidenceRefs.length > 12 || !counterEvidenceRefs || !gaps) {
       return reject(`axis-arrays-invalid:${row.axis}`);
     }
+    if (spec.role === "PROJECT" && row.axis === "P4_backing_and_partners") {
+      const frozenRelationshipPress = [...artifacts.values()].some((artifact) => {
+        if (!artifact.eligibleAxes.includes("P4_backing_and_partners")) return false;
+        if (artifact.verification === "unavailable") return false;
+        const text2 = `${artifact.title} ${artifact.excerpt ?? ""}`;
+        return MATERIAL_RELATIONSHIP_PRESS.test(text2) && !MATERIAL_RELATIONSHIP_DENIAL.test(text2);
+      });
+      const collectionStatusGap = gaps.some((gap) => /\b(?:partner|integrat|counterpart)/i.test(gap) && /\bnot\s+collected\b/i.test(gap));
+      if (frozenRelationshipPress && collectionStatusGap) {
+        return reject(`relationship-press-described-as-uncollected:${row.axis}`);
+      }
+    }
     if (counterEvidenceRefs.some((ref) => allSelectedEvidenceRefs.includes(ref))) {
       return reject(`support-counter-overlap:${row.axis}`);
     }
@@ -3008,7 +3020,7 @@ var compactSourceArtifact = (value) => {
     return compacted === void 0 ? [] : [[key, compacted]];
   }));
 };
-var MATERIAL_RELATIONSHIP_PRESS = /\b(?:partner(?:s|ed|ing|ship)?|integrat(?:e[ds]?|ion)|collaborat(?:e[ds]?|ion)|alliance|joint(?:ly)?|teams? up|backed by|invest(?:s|ed|ing|ment)|funding|launch(?:e[ds])?\s+(?:with|alongside))\b/i;
+var MATERIAL_RELATIONSHIP_PRESS = /\b(?:partner(?:s|ed|ing|ship)?|integrat(?:e[ds]?|ion)|collaborat(?:e[ds]?|ion)|alliance|joint(?:ly)?|teams? up|backed by|invest(?:s|ed|ing|ment)|funding|launch(?:e[ds])?\s+(?:with|alongside)|adopt(?:s|ed|ion)?|taps|selects|(?:expand|extend)(?:s|ed|ing)?\s+(?!to\b|into\b|its\b|the\b)\S)\b/i;
 var MULTI_PARTY_LAUNCH_PRESS = /^(?:[^,\n]{1,100},){2}[^,\n]{1,140}\blaunch(?:e[ds])?\b/i;
 var MATERIAL_RELATIONSHIP_DENIAL = /\b(?:den(?:y|ies|ied)|rumou?r(?:ed|s)?|alleg(?:e[ds]?|ation)|reportedly|false|fake|no partnership|not (?:a |an )?(?:partner|investor|backer)|end(?:s|ed)? (?:its |the )?(?:partnership|integration|collaboration)|terminat(?:e[ds]?|ion))\b/i;
 var PROJECT_PRODUCT_PRESS = /\b(?:product|protocol|platform|exchange|app(?:lication)?|mainnet|testnet|launch(?:e[ds])?|releas(?:e[ds])?|ship(?:s|ped)?|deploy(?:s|ed|ment)|upgrade|integration|developer|repository|open[ -]?source)\b/i;
@@ -3221,6 +3233,15 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   let p5Tier = currentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
   if (currentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5Tier = "solid";
   if (currentActivity && currentProtocolTractionFacts.length > 0 && scaleSignals >= 2 && tokenProviders >= 2) p5Tier = "exceptional";
+  const tvlLongevity = protocolTractionFacts.some((fact) => {
+    const text2 = factText([fact]);
+    const sinceYear = text2.match(/TVL history since (\d{4})/)?.[1];
+    if (!sinceYear) return false;
+    const scaleMatch = text2.match(/\$(\d+(?:\.\d+)?)B[^.]*total value locked/i);
+    return Number(sinceYear) <= (/* @__PURE__ */ new Date()).getFullYear() - 3 && scaleMatch !== null && Number(scaleMatch[1]) >= 1;
+  });
+  if (tvlLongevity && currentActivity && p5Tier === "solid") p5Tier = "exceptional";
+  if (tvlLongevity && verifiedCurrentActivity && p5FloorTier === "solid") p5FloorTier = "exceptional";
   const severeProjectTokenDrawdown = catalog.some((artifact) => artifact.operation === "findings:ProjectTokenDrawdown" && artifact.counterEligibleAxes?.includes("P5_traction_and_liveness"));
   if (severeProjectTokenDrawdown && p5Tier === "exceptional") p5Tier = "solid";
   if (severeProjectTokenDrawdown && p5FloorTier === "exceptional") p5FloorTier = "solid";
@@ -3228,6 +3249,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...currentActivity ? ["current operating activity"] : [],
     ...protocolTractionFacts.length ? ["verified protocol usage metric"] : [],
     ...currentProtocolTractionFacts.length ? ["dated current protocol metric"] : [],
+    ...tvlLongevity ? ["multi-year billion-scale TVL history"] : [],
     ...moderateMarket ? ["measured token-market corroboration"] : [],
     ...severeProjectTokenDrawdown ? ["severe canonical-token drawdown caps exceptional traction"] : []
   ], artifactIds([
@@ -4475,7 +4497,7 @@ INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this scoring
 
 FINDING ATTRIBUTION RULE: when comparing or interpreting finding collections, only direct-subject findings may be attributed to the audited subject. A relationship alone is not evidence of participation or responsibility. This restriction applies to finding collections, not to legitimate non-finding evidence: profile, team, wallet, check-outcome, source, and provider evidence may affect scoring when relevant and reliable.
 
-CITATION RULE: return exactly one array row for every requested axis. The axis field must exactly match an ID in the requested axis list and score must be an integer from zero through that axis's listed maximum. primaryEvidenceRef must be one substantive alias eligible for that axis. additionalEvidenceRefs contains zero to seven other substantive aliases, without duplicates. Always return coverageRefs, using an empty array when none apply; it may contain zero to four checked-empty or unavailable aliases eligible for that axis. Gaps must include a material missing-coverage description for every unavailable coverage reference. A checked-empty reference records a completed clear or negative screen; it is not an evidence gap and must not create a gap line by itself. counterEvidenceRefs contains zero to eight substantive aliases that credibly pull against the score. Never repeat an alias or place it on both sides. gaps contains zero to six short descriptions of material unresolved evidence. providerRuns operational telemetry is excluded from the scoring packet and must never be inferred or cited.
+CITATION RULE: return exactly one array row for every requested axis. The axis field must exactly match an ID in the requested axis list and score must be an integer from zero through that axis's listed maximum. primaryEvidenceRef must be one substantive alias eligible for that axis. additionalEvidenceRefs contains zero to seven other substantive aliases, without duplicates. Always return coverageRefs, using an empty array when none apply; it may contain zero to four checked-empty or unavailable aliases eligible for that axis. Gaps must include a material missing-coverage description for every unavailable coverage reference. A checked-empty reference records a completed clear or negative screen; it is not an evidence gap and must not create a gap line by itself. counterEvidenceRefs contains zero to eight substantive aliases that credibly pull against the score. Never repeat an alias or place it on both sides. gaps contains zero to six short descriptions of material unresolved evidence. Write each gap as a plain question an investor would ask, one sentence, without internal vocabulary: never write packet, provider, coverage, collected, artifact, telemetry, or frozen. Within a solid or exceptional band, an item already recorded as a gap must not also push the score toward the band minimum: the band floor prices the gap once. Score conservatively when evidence is thin. providerRuns operational telemetry is excluded from the scoring packet and must never be inferred or cited.
 
 TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection findings bound to an exact complete server-collected report may influence scoring. Weak or unqualified ties are context only. ARGUS applies any graph cap deterministically after your axis scoring; do not invent or strengthen one.`;
   const tool = {
@@ -4547,6 +4569,8 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
       rejectedAxisHint = " The frozen packet contains verified founder, product, role, or outcome evidence for F2. Rewrite F2 and the report summary from those source-backed artifacts. Followers, profile biography, posting cadence, and follow relationships may inform F6 only. You may say that additional measurable outcomes remain incomplete, but do not say the track record is inferred from social reach or a claimed role.";
     } else if (rejectionReason === "founder-track-record-described-as-social-only") {
       rejectedAxisHint = " Followers, profile biography, posting cadence, and follow relationships may inform F6 network quality only. They cannot establish F2 track record. If the frozen packet has no source-backed founder, role, product, or outcome artifacts, state that the track record remains unscored and publish the investigation as incomplete rather than inferring it from social reach.";
+    } else if (rejectionReason.startsWith("relationship-press-described-as-uncollected")) {
+      rejectedAxisHint = " The frozen packet contains press artifacts naming a counterparty relationship that are eligible for P4. Do not write a gap claiming partnership or integration evidence was not collected. You may state that the named integrations are press-reported and not yet first-party confirmed, which is the accurate remaining gap.";
     } else if (rejectionReason === "grounded-notable-followers-described-as-absent") {
       rejectedAxisHint = " The frozen packet contains observed notable-follower artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge those accounts. You may describe provider coverage as partial, but do not claim that no notable followers were found, listed, documented, present, included, or observed. Name representative observed accounts in the F6 network-quality rationale.";
     } else if (projectBandRepair) {
@@ -14905,6 +14929,9 @@ async function collectProjectTokenIdentity(ctx) {
   const marketCap = isRecord3(market.market_cap) ? finiteNumber(market.market_cap.usd) : void 0;
   const fdv = isRecord3(market.fully_diluted_valuation) ? finiteNumber(market.fully_diluted_valuation.usd) : void 0;
   const volume = isRecord3(market.total_volume) ? finiteNumber(market.total_volume.usd) : void 0;
+  const circulatingSupply = finiteNumber(market.circulating_supply);
+  const totalSupply = finiteNumber(market.total_supply);
+  const maxSupply = finiteNumber(market.max_supply);
   const id = cleanText(details.id);
   const name = cleanText(details.name);
   const symbol = cleanText(details.symbol).toUpperCase();
@@ -14933,6 +14960,9 @@ async function collectProjectTokenIdentity(ctx) {
     ...marketCap !== void 0 ? { marketCapUsd: marketCap } : {},
     ...fdv !== void 0 ? { fdvUsd: fdv } : {},
     ...volume !== void 0 ? { volume24hUsd: volume } : {},
+    ...circulatingSupply !== void 0 ? { circulatingSupply } : {},
+    ...totalSupply !== void 0 ? { totalSupply } : {},
+    ...maxSupply !== void 0 ? { maxSupply } : {},
     ...pair ? { liquidityUsd: pair.liquidityUsd, pairAddress: pair.pairAddress } : {},
     ...history ? { history } : {}
   };
@@ -15370,12 +15400,31 @@ function projectProviderBackedBasicFacts(evidence) {
       sourceClass: "regulatory_or_onchain"
     });
     projected.push(makeFact(evidence, "official_token", `$${token.symbol.toUpperCase()}`, [tokenSource], token.name));
-    projected.push(makeFact(evidence, "network", token.chain, [tokenSource]));
+    const chainFootprint = token.deployedChains?.length ? `${token.deployedChains.length} chains incl. ${token.deployedChains.slice(0, 4).join(", ")}` : token.chain;
+    projected.push(makeFact(
+      evidence,
+      "network",
+      chainFootprint,
+      [tokenSource],
+      token.deployedChains?.length ? "protocol footprint per DeFiLlama TVL" : void 0
+    ));
     if (typeof token.volume24hUsd === "number" && token.volume24hUsd > 0) {
       projected.push(makeFact(
         evidence,
         "traction",
         `${formatUsd(token.volume24hUsd)} 24h trading volume`,
+        [tokenSource],
+        `captured ${token.capturedAt.slice(0, 10)}`
+      ));
+    }
+    if (typeof token.circulatingSupply === "number" && token.circulatingSupply > 0 && (typeof token.maxSupply === "number" && token.maxSupply > 0 || typeof token.totalSupply === "number" && token.totalSupply > 0)) {
+      const denominator = typeof token.maxSupply === "number" && token.maxSupply > 0 ? token.maxSupply : token.totalSupply;
+      const pct = Math.min(100, Math.round(token.circulatingSupply / denominator * 100));
+      const compact3 = (value) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` : Math.round(value).toLocaleString();
+      projected.push(makeFact(
+        evidence,
+        "tokenomics",
+        `${compact3(token.circulatingSupply)} of ${compact3(denominator)} supply circulating (${pct}%)`,
         [tokenSource],
         `captured ${token.capturedAt.slice(0, 10)}`
       ));
@@ -15439,6 +15488,8 @@ function projectProviderBackedBasicFacts(evidence) {
   const tvlSnapshot = isProject ? evidence.protocolTvl : void 0;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
     const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
+    const historySince = tvlSnapshot.firstRecordedAt ? ` TVL history since ${tvlSnapshot.firstRecordedAt.slice(0, 4)}.` : "";
+    const hackNote = tvlSnapshot.hacks?.length ? ` DeFiLlama also records ${tvlSnapshot.hacks.length} security incident${tvlSnapshot.hacks.length === 1 ? "" : "s"}${tvlSnapshot.hacks[0].amountUsd ? `, including ${formatUsd(tvlSnapshot.hacks[0].amountUsd)}${tvlSnapshot.hacks[0].date ? ` in ${tvlSnapshot.hacks[0].date.slice(0, 4)}` : ""}${tvlSnapshot.hacks[0].returnedFunds ? " (funds returned)" : ""}` : ""}.` : "";
     projected.push(makeFact(
       evidence,
       "traction",
@@ -15446,12 +15497,52 @@ function projectProviderBackedBasicFacts(evidence) {
       [source({
         url: tvlSnapshot.sourceUrl,
         title: "DeFiLlama TVL record",
-        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""} (DeFiLlama on-chain snapshot).`,
+        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""} (DeFiLlama on-chain snapshot).${historySince}${hackNote}`,
         capturedAt: tvlSnapshot.capturedAt,
         provider: "defillama",
         sourceClass: "regulatory_or_onchain"
       })],
       `captured ${tvlSnapshot.capturedAt.slice(0, 10)}`
+    ));
+    if (tvlSnapshot.governanceIds?.length) {
+      const snapshotSpace = tvlSnapshot.governanceIds.find((id) => id.startsWith("snapshot:"))?.slice("snapshot:".length);
+      const onchainGovernor = tvlSnapshot.governanceIds.find((id) => id.startsWith("eip155:"));
+      const parts = [
+        ...snapshotSpace ? [`Snapshot space ${snapshotSpace} (off-chain voting)`] : [],
+        ...onchainGovernor ? [`on-chain governor ${onchainGovernor.split(":").pop()?.slice(0, 10)}\u2026`] : []
+      ];
+      if (parts.length) {
+        projected.push(makeFact(
+          evidence,
+          "governance",
+          parts.join("; "),
+          [source({
+            url: tvlSnapshot.sourceUrl,
+            title: "DeFiLlama governance listing",
+            excerpt: `DeFiLlama lists governance identifiers for ${tvlSnapshot.name}: ${tvlSnapshot.governanceIds.join(", ")}.`,
+            capturedAt: tvlSnapshot.capturedAt,
+            provider: "defillama",
+            sourceClass: "other_public"
+          })]
+        ));
+      }
+    }
+  }
+  const feesSnapshot = isProject ? evidence.protocolFees : void 0;
+  if (feesSnapshot && typeof feesSnapshot.total30dUsd === "number" && feesSnapshot.total30dUsd > 0) {
+    projected.push(makeFact(
+      evidence,
+      "traction",
+      `${formatUsd(feesSnapshot.total30dUsd)} protocol fees in 30 days`,
+      [source({
+        url: feesSnapshot.sourceUrl,
+        title: "DeFiLlama protocol fees record",
+        excerpt: `Users paid ${formatUsd(feesSnapshot.total30dUsd)} in protocol fees over the trailing 30 days${typeof feesSnapshot.total24hUsd === "number" ? ` (${formatUsd(feesSnapshot.total24hUsd)} in the last 24 hours)` : ""}.`,
+        capturedAt: feesSnapshot.capturedAt,
+        provider: "defillama",
+        sourceClass: "regulatory_or_onchain"
+      })],
+      `captured ${feesSnapshot.capturedAt.slice(0, 10)}`
     ));
   }
   const ventureToken = isFounderSubject && !isProject ? evidence.ventureToken : void 0;
@@ -15542,6 +15633,14 @@ async function collectProtocolTvl(projectName2, options = {}) {
   }
   const rawChainTvls = data.currentChainTvls && typeof data.currentChainTvls === "object" ? data.currentChainTvls : {};
   const chainBreakdown = Object.entries(rawChainTvls).filter(([chain, value]) => typeof value === "number" && value > 0 && !NON_CHAIN_SEGMENT.test(chain)).map(([chain, value]) => ({ chain, tvlUsd: value })).sort((a, b) => b.tvlUsd - a.tvlUsd);
+  const firstPoint = series.length ? series[0] : void 0;
+  const firstRecordedAt = typeof firstPoint?.date === "number" ? new Date(firstPoint.date * 1e3).toISOString().slice(0, 10) : null;
+  const hacks = (Array.isArray(data.hacks) ? data.hacks : []).filter((entry) => Boolean(entry) && typeof entry === "object").map((entry) => ({
+    date: typeof entry.date === "number" ? new Date(entry.date * 1e3).toISOString().slice(0, 10) : null,
+    amountUsd: typeof entry.amount === "number" && entry.amount > 0 ? Math.round(entry.amount) : null,
+    returnedFunds: entry.returnedFunds === true,
+    classification: typeof entry.classification === "string" ? entry.classification : null
+  }));
   recordCall("defillama", "tvl", 0, `${slug} \xB7 tvl_${Math.round(tvlUsd)}`, "succeeded");
   return {
     available: true,
@@ -15553,6 +15652,48 @@ async function collectProtocolTvl(projectName2, options = {}) {
       chains: chainBreakdown.map((entry) => entry.chain),
       chainBreakdown,
       geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
+      firstRecordedAt,
+      governanceIds: strArray(data.governanceID),
+      hacks,
+      sourceUrl: `https://defillama.com/protocol/${slug}`
+    }
+  };
+}
+async function collectProtocolFees(projectName2, options = {}) {
+  const fetcher = options.fetcher ?? fetch;
+  const slug = options.slug ?? defiLlamaSlug(projectName2);
+  if (!slug) return { available: false, note: "No resolvable DeFiLlama protocol slug." };
+  const url = `${API_BASE}/summary/fees/${encodeURIComponent(slug)}`;
+  let response;
+  try {
+    response = await fetcher(url, { signal: AbortSignal.timeout(2e4) });
+  } catch {
+    recordCall("defillama", "fees", 0, `${slug} \xB7 error`, "failed");
+    return { available: false, note: "DeFiLlama fees endpoint was unavailable." };
+  }
+  if (!response.ok) {
+    recordCall("defillama", "fees", 0, `${slug} \xB7 http_${response.status}`, response.status === 400 ? "succeeded" : "failed");
+    return { available: false, note: `No DeFiLlama fee record for "${slug}".` };
+  }
+  let payload;
+  try {
+    payload = await response.json() ?? {};
+  } catch {
+    return { available: false, note: "DeFiLlama fees response was unreadable." };
+  }
+  const total24hUsd = typeof payload.total24h === "number" && payload.total24h >= 0 ? Math.round(payload.total24h) : null;
+  const total30dUsd = typeof payload.total30d === "number" && payload.total30d >= 0 ? Math.round(payload.total30d) : null;
+  if (total24hUsd === null && total30dUsd === null) {
+    recordCall("defillama", "fees", 0, `${slug} \xB7 no_totals`, "succeeded");
+    return { available: false, note: "DeFiLlama reported no fee totals for this protocol." };
+  }
+  recordCall("defillama", "fees", 0, `${slug} \xB7 fees30d_${total30dUsd ?? 0}`, "succeeded");
+  return {
+    available: true,
+    value: {
+      slug,
+      total24hUsd,
+      total30dUsd,
       sourceUrl: `https://defillama.com/protocol/${slug}`
     }
   };
@@ -17426,11 +17567,18 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       const projectName2 = evidence.projectToken.name;
       const capturedAt = evidence.projectToken.capturedAt;
       try {
-        const [tvlOutcome, fundingOutcome] = await Promise.all([
+        const [tvlOutcome, fundingOutcome, feesOutcome] = await Promise.all([
           collectProtocolTvl(projectName2),
-          collectProtocolFunding(projectName2)
+          collectProtocolFunding(projectName2),
+          collectProtocolFees(projectName2)
         ]);
-        if (tvlOutcome.available) evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
+        if (feesOutcome.available) evidence.protocolFees = { ...feesOutcome.value, capturedAt };
+        if (tvlOutcome.available) {
+          evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
+          if (tvlOutcome.value.chains.length && tvlOutcome.value.geckoId && tvlOutcome.value.geckoId === evidence.projectToken.coingeckoId) {
+            evidence.projectToken = { ...evidence.projectToken, deployedChains: tvlOutcome.value.chains };
+          }
+        }
         if (fundingOutcome.available) evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
         if (!fundingOutcome.available) {
           const enrichment = await withWallClockBox(

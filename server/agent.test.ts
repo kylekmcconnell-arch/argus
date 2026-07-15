@@ -5387,3 +5387,134 @@ describe("AI analyst attempt accounting", () => {
     }));
   });
 });
+
+describe("blue-chip evidence recall (report UX overhaul)", () => {
+  const p4Axes: AnalystAxis[] = [{ axis: "P4_backing_and_partners", weight: 14, role: SubjectClass.PROJECT }];
+  const pressArtifact = (title: string, hash: string) => ({
+    kind: "press",
+    provider: "google-news",
+    title,
+    excerpt: title,
+    sourceUrl: `https://news.example/${hash}`,
+    capturedAt: "2026-07-12T12:00:00.000Z",
+    publishedAt: "2026-07-10T12:00:00.000Z",
+    contentHash: hash.repeat(64).slice(0, 64),
+    match: "exact_handle" as const,
+  });
+
+  it("counts transitive counterparty verbs (adopts, expands + object) as relationship press", () => {
+    // Both headlines cover ONE Aave-Chainlink story, so the syndication dedupe
+    // correctly yields a single relationship key: solid, not exceptional.
+    // Before the verb fix these headlines counted as zero relationship press.
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [
+        pressArtifact("Aave Expands Chainlink CCIP for Cross-Chain Actions", "a"),
+        pressArtifact("Aave adopts Chainlink CCIP for crosschain transfers", "b"),
+      ],
+    }, p4Axes);
+    expect(deriveProjectStrengthBands(packet, p4Axes).P4_backing_and_partners.tier).toBe("solid");
+    const noPress = buildScoringEvidencePacket({ sourceArtifacts: [] }, p4Axes);
+    const noPressTier = deriveProjectStrengthBands(noPress, p4Axes).P4_backing_and_partners.tier;
+    expect(noPressTier === "none" || noPressTier === "emerging").toBe(true);
+  });
+
+  it("never counts self-referential deployment phrasing as a counterparty relationship", () => {
+    const packet = buildScoringEvidencePacket({
+      sourceArtifacts: [
+        pressArtifact("RugX goes live on BSC", "c"),
+        pressArtifact("RugX expands to Base", "d"),
+        pressArtifact("RugX extends its lead on Solana", "e"),
+      ],
+    }, p4Axes);
+    const band = deriveProjectStrengthBands(packet, p4Axes).P4_backing_and_partners;
+    expect(band.tier === "none" || band.tier === "emerging").toBe(true);
+  });
+
+  it("rejects a P4 gap claiming partnership evidence was not collected while relationship press is frozen", () => {
+    const p4Support = `art_v1_${"e".repeat(64)}`;
+    const pressRef = `art_v1_${"f".repeat(64)}`;
+    const evidence = [
+      axisArtifact(p4Support, ["P4_backing_and_partners"]),
+      {
+        ...axisArtifact(pressRef, ["P4_backing_and_partners"]),
+        title: "Aave adopts Chainlink CCIP for crosschain transfers",
+        excerpt: "Aave adopts Chainlink CCIP.",
+      },
+    ];
+    const payload = (gap: string) => ({
+      axes: [{
+        ...validAxis("P4_backing_and_partners", 10, p4Support),
+        gaps: [gap],
+      }],
+      headline: "Evidence-backed project result",
+      identity_note: "Named team is verified",
+    });
+    const rejection = vi.fn();
+    expect(validateAnalystVerdict(
+      payload("Direct counterparty confirmation of ecosystem integration partnerships was not collected."),
+      p4Axes, evidence, rejection,
+    )).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith(
+      "relationship-press-described-as-uncollected:P4_backing_and_partners",
+    );
+    // Named-partner verification failures survive: they are honest gaps.
+    expect(validateAnalystVerdict(
+      payload("A claimed Binance partnership could not be verified from available sources."),
+      p4Axes, evidence, undefined,
+    )).not.toBeNull();
+  });
+
+  it("lifts P5 to exceptional on multi-year billion-scale TVL history and still demotes on a severe drawdown", () => {
+    const p5Axes: AnalystAxis[] = [{ axis: "P5_traction_and_liveness", weight: 14, role: SubjectClass.PROJECT }];
+    const base = {
+      profile: {
+        handle: "@aave",
+        display_name: "Aave",
+        days_since_post: 0,
+        profile_collection_state: "resolved" as const,
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-12T20:00:00.000Z",
+      },
+      basicFacts: [{
+        predicate: "traction",
+        value: "$14.0B total value locked (Ethereum, Plasma, Arbitrum)",
+        qualifier: "captured 2026-07-12",
+        status: "verified" as const,
+        artifact_verified: true,
+        excerpt: "Aave holds $14.0B in total value locked. TVL history since 2020.",
+      }],
+      projectToken: {
+        verified: true as const,
+        verification: "official_x" as const,
+        name: "Aave",
+        symbol: "AAVE",
+        coingeckoId: "aave",
+        rank: 52,
+        address: "0x7fc66500c84a76ad7e9c93437bfc5ac33e2ddae9",
+        chain: "ethereum",
+        sourceUrl: "https://www.coingecko.com/en/coins/aave",
+        capturedAt: "2026-07-12T20:00:00.000Z",
+        providers: ["coingecko", "dexscreener"] as Array<"coingecko" | "dexscreener" | "geckoterminal">,
+        marketCapUsd: 1_500_000_000,
+        volume24hUsd: 218_000_000,
+        liquidityUsd: 13_600_000,
+      },
+    };
+    const longevityPacket = buildScoringEvidencePacket(base, p5Axes);
+    expect(deriveProjectStrengthBands(longevityPacket, p5Axes).P5_traction_and_liveness.tier).toBe("exceptional");
+
+    const drawdownPacket = buildScoringEvidencePacket({
+      ...base,
+      findings: [{
+        finding_type: "ProjectTokenDrawdown",
+        claim: "The canonical token fell more than 70 percent from its recorded peak.",
+        source_url: "https://geckoterminal.example/ohlcv",
+        verification_status: "Verified",
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }],
+    }, p5Axes);
+    expect(deriveProjectStrengthBands(drawdownPacket, p5Axes).P5_traction_and_liveness.tier).toBe("solid");
+  });
+});

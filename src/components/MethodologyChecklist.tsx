@@ -6,10 +6,10 @@ import { summarizeChecks, type ScanCheck, type CheckStatus } from "../lib/scanCh
 const META: Record<CheckStatus, { color: string; glyph: string; label: string }> = {
   confirmed: { color: "var(--color-pass)", glyph: "✓", label: "confirmed" },
   finding: { color: "var(--color-caution)", glyph: "▲", label: "finding" },
-  "checked-empty": { color: "var(--color-ink-faint)", glyph: "○", label: "checked: empty" },
+  "checked-empty": { color: "var(--color-ink-faint)", glyph: "○", label: "checked, nothing found" },
   "not-applicable": { color: "var(--color-ink-faint)", glyph: "⊘", label: "not applicable" },
-  unknown: { color: "var(--color-ink-faint)", glyph: "?", label: "not run / unknown" },
-  unavailable: { color: "var(--color-caution)", glyph: "⚠", label: "provider unavailable" },
+  unknown: { color: "var(--color-ink-faint)", glyph: "?", label: "not yet checked" },
+  unavailable: { color: "var(--color-caution)", glyph: "⚠", label: "data source was down" },
   stale: { color: "var(--color-caution)", glyph: "◷", label: "stale" },
 };
 
@@ -33,7 +33,7 @@ export function MethodologyChecklist({ checks, id }: { checks: ScanCheck[]; id?:
         className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
       >
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-faint)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
-        <span className="eyebrow">Scan methodology</span>
+        <span className="eyebrow">What we checked</span>
         <span className="text-[12.5px] text-ink-dim">
           {coverage.successful}/{coverage.inScope} outcomes recorded
           {coverage.unknownOrFailed ? ` · ${coverage.unknownOrFailed} unresolved` : ""}

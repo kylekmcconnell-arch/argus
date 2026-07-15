@@ -19,7 +19,7 @@ const STATUS_META: Record<DecisionBasisStatus, { label: string; color: string }>
   grounded: { label: "Strong evidence", color: "var(--color-pass)" },
   partial: { label: "Moderate evidence", color: "var(--color-caution)" },
   contested: { label: "Contested evidence", color: "var(--color-avoid)" },
-  gap: { label: "No qualifying support", color: "var(--color-caution)" },
+  gap: { label: "No evidence found yet", color: "var(--color-caution)" },
 };
 
 const RELATION_LABEL = {
@@ -311,7 +311,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
                   ) : <p className="mt-1.5 text-[11px] text-ink-faint">No verified supporting source was captured.</p>}
                 </div>
                 <div>
-                  <h5 className="eyebrow">What needs reconciliation</h5>
+                  <h5 className="eyebrow">Where sources disagree</h5>
                   {selected.counter.length ? (
                     <ul className="mt-1.5 space-y-2" aria-label={`Counter-evidence for ${axisLabel(selected.axis)}`}>
                       {selected.counter.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="counter" />)}

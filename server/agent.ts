@@ -1116,6 +1116,29 @@ export function validateAnalystVerdict(
     if (allSelectedEvidenceRefs.length > 12 || !counterEvidenceRefs || !gaps) {
       return reject(`axis-arrays-invalid:${row.axis}`);
     }
+    // A gap may claim a collection path was never run only while the frozen
+    // catalog actually lacks that evidence. Relationship press frozen in the
+    // catalog and eligible for the backing axis falsifies "partnership ...
+    // not collected" wording, so the row is rejected and the repair pass must
+    // rewrite the gap against the collected evidence. Asymmetry, stated
+    // openly: every other reject here keys on verified artifacts; this one
+    // keys on unfetched press headlines and is defensible only because the
+    // policed claim ("not collected") is a collection-status statement the
+    // headlines' existence directly falsifies. Verification-failure phrasing
+    // ("could not be verified/found") is deliberately untouched.
+    if (spec.role === "PROJECT" && row.axis === "P4_backing_and_partners") {
+      const frozenRelationshipPress = [...artifacts.values()].some((artifact) => {
+        if (!artifact.eligibleAxes.includes("P4_backing_and_partners")) return false;
+        if (artifact.verification === "unavailable") return false;
+        const text = `${artifact.title} ${artifact.excerpt ?? ""}`;
+        return MATERIAL_RELATIONSHIP_PRESS.test(text) && !MATERIAL_RELATIONSHIP_DENIAL.test(text);
+      });
+      const collectionStatusGap = gaps.some((gap) =>
+        /\b(?:partner|integrat|counterpart)/i.test(gap) && /\bnot\s+collected\b/i.test(gap));
+      if (frozenRelationshipPress && collectionStatusGap) {
+        return reject(`relationship-press-described-as-uncollected:${row.axis}`);
+      }
+    }
     if (counterEvidenceRefs.some((ref) => allSelectedEvidenceRefs.includes(ref))) {
       return reject(`support-counter-overlap:${row.axis}`);
     }
@@ -1321,7 +1344,13 @@ const compactSourceArtifact = (value: unknown): Record<string, unknown> | undefi
   }));
 };
 
-const MATERIAL_RELATIONSHIP_PRESS = /\b(?:partner(?:s|ed|ing|ship)?|integrat(?:e[ds]?|ion)|collaborat(?:e[ds]?|ion)|alliance|joint(?:ly)?|teams? up|backed by|invest(?:s|ed|ing|ment)|funding|launch(?:e[ds])?\s+(?:with|alongside))\b/i;
+// Transitive counterparty verbs only: "Aave adopts Chainlink CCIP" names a
+// relationship between two parties; "RugX goes live on Base" or "built on
+// Solana" is self-referential platform usage and must never count as
+// partnership evidence (deploy/launch phrasing already feeds the product
+// axis via PROJECT_PRODUCT_PRESS). "expands/extends to|into|its|the" is
+// excluded for the same reason: expansion INTO a chain is not a counterparty.
+const MATERIAL_RELATIONSHIP_PRESS = /\b(?:partner(?:s|ed|ing|ship)?|integrat(?:e[ds]?|ion)|collaborat(?:e[ds]?|ion)|alliance|joint(?:ly)?|teams? up|backed by|invest(?:s|ed|ing|ment)|funding|launch(?:e[ds])?\s+(?:with|alongside)|adopt(?:s|ed|ion)?|taps|selects|(?:expand|extend)(?:s|ed|ing)?\s+(?!to\b|into\b|its\b|the\b)\S)\b/i;
 const MULTI_PARTY_LAUNCH_PRESS = /^(?:[^,\n]{1,100},){2}[^,\n]{1,140}\blaunch(?:e[ds])?\b/i;
 const MATERIAL_RELATIONSHIP_DENIAL = /\b(?:den(?:y|ies|ied)|rumou?r(?:ed|s)?|alleg(?:e[ds]?|ation)|reportedly|false|fake|no partnership|not (?:a |an )?(?:partner|investor|backer)|end(?:s|ed)? (?:its |the )?(?:partnership|integration|collaboration)|terminat(?:e[ds]?|ion))\b/i;
 const PROJECT_PRODUCT_PRESS = /\b(?:product|protocol|platform|exchange|app(?:lication)?|mainnet|testnet|launch(?:e[ds])?|releas(?:e[ds])?|ship(?:s|ped)?|deploy(?:s|ed|ment)|upgrade|integration|developer|repository|open[ -]?source)\b/i;
@@ -1652,6 +1681,22 @@ export function deriveProjectStrengthBands(
   let p5Tier: ProjectStrengthTier = currentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
   if (currentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5Tier = "solid";
   if (currentActivity && currentProtocolTractionFacts.length > 0 && scaleSignals >= 2 && tokenProviders >= 2) p5Tier = "exceptional";
+  // Multi-year third-party TVL history at billion-dollar scale is a traction
+  // signal a fresh deployment cannot fabricate. "History since" bounds rather
+  // than proves age (the series can be backfilled at listing time), so it
+  // lifts traction only alongside verified current activity and $1B+ scale,
+  // and it is applied BEFORE the drawdown demotion so a severe verified
+  // drawdown still caps it.
+  const tvlLongevity = protocolTractionFacts.some((fact) => {
+    const text = factText([fact]);
+    const sinceYear = text.match(/TVL history since (\d{4})/)?.[1];
+    if (!sinceYear) return false;
+    const scaleMatch = text.match(/\$(\d+(?:\.\d+)?)B[^.]*total value locked/i);
+    return Number(sinceYear) <= new Date().getFullYear() - 3
+      && scaleMatch !== null && Number(scaleMatch[1]) >= 1;
+  });
+  if (tvlLongevity && currentActivity && p5Tier === "solid") p5Tier = "exceptional";
+  if (tvlLongevity && verifiedCurrentActivity && p5FloorTier === "solid") p5FloorTier = "exceptional";
   const severeProjectTokenDrawdown = catalog.some((artifact) =>
     artifact.operation === "findings:ProjectTokenDrawdown"
     && artifact.counterEligibleAxes?.includes("P5_traction_and_liveness"));
@@ -1661,6 +1706,7 @@ export function deriveProjectStrengthBands(
     ...(currentActivity ? ["current operating activity"] : []),
     ...(protocolTractionFacts.length ? ["verified protocol usage metric"] : []),
     ...(currentProtocolTractionFacts.length ? ["dated current protocol metric"] : []),
+    ...(tvlLongevity ? ["multi-year billion-scale TVL history"] : []),
     ...(moderateMarket ? ["measured token-market corroboration"] : []),
     ...(severeProjectTokenDrawdown ? ["severe canonical-token drawdown caps exceptional traction"] : []),
   ], artifactIds([
@@ -3301,7 +3347,12 @@ export async function analyzeSubject(
     `it is not an evidence gap and must not create a gap line by itself. counterEvidenceRefs contains zero ` +
     `to eight substantive aliases that credibly pull against the score. Never ` +
     `repeat an alias or place it on both sides. gaps contains zero to six short ` +
-    `descriptions of material unresolved evidence. providerRuns operational ` +
+    `descriptions of material unresolved evidence. Write each gap as a plain question ` +
+    `an investor would ask, one sentence, without internal vocabulary: never write ` +
+    `packet, provider, coverage, collected, artifact, telemetry, or frozen. ` +
+    `Within a solid or exceptional band, an item already recorded as a gap must not ` +
+    `also push the score toward the band minimum: the band floor prices the gap once. ` +
+    `Score conservatively when evidence is thin. providerRuns operational ` +
     `telemetry is excluded from the scoring packet and must never be inferred or cited.\n\n` +
     `TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection ` +
     `findings bound to an exact complete server-collected report may influence scoring. ` +
@@ -3388,6 +3439,8 @@ export async function analyzeSubject(
       rejectedAxisHint = " The frozen packet contains verified founder, product, role, or outcome evidence for F2. Rewrite F2 and the report summary from those source-backed artifacts. Followers, profile biography, posting cadence, and follow relationships may inform F6 only. You may say that additional measurable outcomes remain incomplete, but do not say the track record is inferred from social reach or a claimed role.";
     } else if (rejectionReason === "founder-track-record-described-as-social-only") {
       rejectedAxisHint = " Followers, profile biography, posting cadence, and follow relationships may inform F6 network quality only. They cannot establish F2 track record. If the frozen packet has no source-backed founder, role, product, or outcome artifacts, state that the track record remains unscored and publish the investigation as incomplete rather than inferring it from social reach.";
+    } else if (rejectionReason.startsWith("relationship-press-described-as-uncollected")) {
+      rejectedAxisHint = " The frozen packet contains press artifacts naming a counterparty relationship that are eligible for P4. Do not write a gap claiming partnership or integration evidence was not collected. You may state that the named integrations are press-reported and not yet first-party confirmed, which is the accurate remaining gap.";
     } else if (rejectionReason === "grounded-notable-followers-described-as-absent") {
       rejectedAxisHint = " The frozen packet contains observed notable-follower artifacts. Rewrite the headline, identity note, every axis rationale, and every evidence-gap line to acknowledge those accounts. You may describe provider coverage as partial, but do not claim that no notable followers were found, listed, documented, present, included, or observed. Name representative observed accounts in the F6 network-quality rationale.";
     } else if (projectBandRepair) {

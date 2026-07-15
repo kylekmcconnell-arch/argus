@@ -61,7 +61,7 @@ import { collectPortfolioRelationships } from "./adapters/portfolio";
 import { collectFundScale } from "./adapters/fundScale";
 import { collectProjectTokenIdentity, collectVentureTokenIdentity } from "./adapters/projectToken";
 import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
-import { collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
+import { collectProtocolFees, collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
 import { collectCompanyEnrichment } from "./adapters/monid";
 
 // Role words stripped when a venture name is derived from a fact value like
@@ -2079,11 +2079,25 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       const projectName = evidence.projectToken.name;
       const capturedAt = evidence.projectToken.capturedAt;
       try {
-        const [tvlOutcome, fundingOutcome] = await Promise.all([
+        const [tvlOutcome, fundingOutcome, feesOutcome] = await Promise.all([
           collectProtocolTvl(projectName),
           collectProtocolFunding(projectName),
+          collectProtocolFees(projectName),
         ]);
-        if (tvlOutcome.available) evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
+        if (feesOutcome.available) evidence.protocolFees = { ...feesOutcome.value, capturedAt };
+        if (tvlOutcome.available) {
+          evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
+          // Attach the protocol chain footprint to the verified token ONLY on
+          // a CoinGecko-id join: a name-alike DeFiLlama entry can never lend
+          // its chains to an impostor token.
+          if (
+            tvlOutcome.value.chains.length
+            && tvlOutcome.value.geckoId
+            && tvlOutcome.value.geckoId === evidence.projectToken.coingeckoId
+          ) {
+            evidence.projectToken = { ...evidence.projectToken, deployedChains: tvlOutcome.value.chains };
+          }
+        }
         if (fundingOutcome.available) evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
         if (!fundingOutcome.available) {
           // Hard wall-clock box: Monid runs poll asynchronously (1-120s) and an

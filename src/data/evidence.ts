@@ -144,6 +144,12 @@ export interface ProjectTokenSnapshot {
   rank: number | null;
   address: string;
   chain: string;
+  /**
+   * Protocol chain footprint from DeFiLlama TVL data, attached only when the
+   * DeFiLlama record joins this token by CoinGecko id (never by name), so a
+   * name-alike protocol can never lend its footprint to a token.
+   */
+  deployedChains?: string[];
   homepage?: string;
   officialX?: string;
   sourceUrl: string;
@@ -153,6 +159,10 @@ export interface ProjectTokenSnapshot {
   marketCapUsd?: number;
   fdvUsd?: number;
   volume24hUsd?: number;
+  /** CoinGecko-reported supply figures (partly project-self-reported; present the checkable ratio, never a vesting claim). */
+  circulatingSupply?: number;
+  totalSupply?: number;
+  maxSupply?: number;
   liquidityUsd?: number;
   pairAddress?: string;
   history?: {
@@ -210,6 +220,21 @@ export interface ProtocolTvlSnapshot {
   chains: string[];
   chainBreakdown: Array<{ chain: string; tvlUsd: number }>;
   geckoId: string | null;
+  /** First date in the TVL series ("TVL history since YYYY"; the series can be backfilled, so this bounds, not proves, age). */
+  firstRecordedAt?: string | null;
+  /** Governance identifiers as listed by DeFiLlama (curated listing metadata). */
+  governanceIds?: string[];
+  /** Security incidents recorded in the same DeFiLlama document; frozen with the positives so evidence use is never selective. */
+  hacks?: Array<{ date: string | null; amountUsd: number | null; returnedFunds: boolean; classification: string | null }>;
+  sourceUrl: string;
+  capturedAt: string;
+}
+
+/** Frozen protocol fee totals (DeFiLlama /summary/fees). On-chain-derived usage: users actually paid these fees. */
+export interface ProtocolFeesSnapshot {
+  slug: string;
+  total24hUsd: number | null;
+  total30dUsd: number | null;
   sourceUrl: string;
   capturedAt: string;
 }
@@ -589,6 +614,8 @@ export interface CollectedEvidence {
   ventureToken?: VentureTokenSnapshot;
   /** Frozen total value locked + per-chain usage (DeFiLlama). Feeds P5. */
   protocolTvl?: ProtocolTvlSnapshot;
+  /** Frozen protocol fee totals (DeFiLlama). A second dated usage metric for P5. */
+  protocolFees?: ProtocolFeesSnapshot;
   /** Frozen keyed private-market enrichment (Monid/Akta): funding, leadership, firmographic. */
   companyEnrichment?: CompanyEnrichmentSnapshot;
   /** Required foundational answers backed by independently fetched pages. */
