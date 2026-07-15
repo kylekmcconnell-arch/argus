@@ -644,7 +644,7 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("10/13");
     expect(container.textContent).toContain("6 of 6 diligence areas have cited support");
     expect(container.textContent).toContain("3 open questions");
-    expect(container.textContent).toContain("3 decision questions remain unanswered.");
+    expect(container.textContent).toContain("Also open: 3 decision questions");
     expect(container.textContent).toContain("Final clearance remains withheld");
     expect(container.textContent).toContain("Evidence-backed scored-axis breakdown");
     expect(container.textContent).toContain("= provisional 71");

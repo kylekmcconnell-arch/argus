@@ -1828,16 +1828,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const remainingVerificationQuestions = allVerificationQuestions.slice(3);
   const decisionQuestionCount = allVerificationQuestions.length;
 
-  const confidenceLimits: ReportCanvasNarrativeItem[] = [
-    ...confidenceLimitsBase,
-    ...(decisionQuestionCount > 0 ? [{
-      id: "open-question-pressure",
-      title: `${decisionQuestionCount} decision ${decisionQuestionCount === 1 ? "question remains" : "questions remain"} unanswered.`,
-      detail: "The score reflects the evidence collected. Read the open questions before relying on it.",
-      provenance: "Open questions",
-      href: "#verification-next" as `#${string}`,
-    }] : []),
-  ].slice(0, 6);
+  // Real countervailing signals only. Open-question pressure renders as a
+  // dedicated line attached to the section (never the lead item), so the
+  // section leads with what was FOUND while a favorable report still can
+  // never show an all-clear body without naming its open questions beside it.
+  const confidenceLimits: ReportCanvasNarrativeItem[] = confidenceLimitsBase.slice(0, 6);
   const adverseVerdictNarrative = [...confidenceLimits, ...lowAxisDrivers]
     .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
     .slice(0, 6);
@@ -2020,8 +2015,46 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         : { key: "coverage", label: `Coverage ${readiness.coveragePercent}%`, value: `${readiness.successful}/${readiness.applicable}`, tone: "caution", href: "#scan-methodology", title: readinessGuidance },
     );
   }
-  const PROOF_TONE_RANK: Record<HeroProofTone, number> = { avoid: 0, caution: 1, pass: 2, neutral: 3 };
+  // Findings lead, then what we FOUND. Absence-class caution chips stay
+  // visible but trail the proof: a report never leads with what it did not
+  // find, while an actual adverse finding still outranks everything.
+  const PROOF_TONE_RANK: Record<HeroProofTone, number> = { avoid: 0, pass: 1, neutral: 2, caution: 3 };
   heroProofChips.sort((a, b) => PROOF_TONE_RANK[a.tone] - PROOF_TONE_RANK[b.tone]);
+
+  // Fundamentals we verified, as headline numbers. Every tile derives from a
+  // frozen snapshot and is omitted when absent; nothing renders a dash.
+  const fundamentalTiles: Array<{ key: string; label: string; value: string; sub: string }> = [
+    ...(f.protocolTvl && f.protocolTvl.tvlUsd > 0 ? [{
+      key: "tvl",
+      label: "Value locked",
+      value: usdCompact(f.protocolTvl.tvlUsd),
+      sub: `DeFiLlama · ${f.protocolTvl.capturedAt.slice(0, 10)}`,
+    }] : []),
+    ...(f.projectToken?.rank != null ? [{
+      key: "rank",
+      label: "Market rank",
+      value: `#${f.projectToken.rank}`,
+      sub: "CoinGecko, all crypto assets",
+    }] : []),
+    ...(f.protocolTvl?.firstRecordedAt ? [{
+      key: "history",
+      label: "TVL history",
+      value: `since ${f.protocolTvl.firstRecordedAt.slice(0, 4)}`,
+      sub: "series start, bounds age",
+    }] : []),
+    ...(f.protocolFunding && f.protocolFunding.totalRaisedUsd > 0 ? [{
+      key: "raised",
+      label: "Raised",
+      value: usdCompact(f.protocolFunding.totalRaisedUsd),
+      sub: `${f.protocolFunding.rounds.length} public round${f.protocolFunding.rounds.length === 1 ? "" : "s"}`,
+    }] : []),
+    ...(f.projectToken?.deployedChains?.length ? [{
+      key: "chains",
+      label: "Chains",
+      value: String(f.projectToken.deployedChains.length),
+      sub: "CoinGecko-id joined",
+    }] : []),
+  ];
 
   return (
     <div className="relative min-h-full pb-24">
@@ -2299,7 +2332,19 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           </div>
 
-          <div className={`finding relative order-3 px-5 py-4 ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`} aria-label="Due-diligence readiness">
+          {fundamentalTiles.length > 0 && (
+            <dl className="order-3 grid grid-cols-2 gap-px border-t border-line/60 bg-line sm:grid-cols-3 lg:grid-cols-5" aria-label="Verified fundamentals">
+              {fundamentalTiles.map((tile) => (
+                <div key={tile.key} className="bg-panel px-5 py-3.5">
+                  <dt className="stat-label">{tile.label}</dt>
+                  <dd className="stat-value mt-1 text-[19px] font-semibold tabular-nums">{tile.value}</dd>
+                  <dd className="mono mt-0.5 text-[10px] leading-snug text-ink-faint">{tile.sub}</dd>
+                </div>
+              ))}
+            </dl>
+          )}
+
+          <div className={`finding relative order-4 px-5 py-4 ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`} aria-label="Due-diligence readiness">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">{readinessTitle}</span>
               <span className="text-[11px] text-ink-faint">
@@ -2470,6 +2515,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     : "No adverse findings in the collected evidence."
                   : "No evidence-backed positive counterweight is recorded in this report."}
             />
+            {!decisionFrameworkUnavailable && decisionQuestionCount > 0 && (
+              <p className="border-t border-line/60 py-3 text-[11.5px] text-ink-faint">
+                Also open: <a href="#verification-next" className="text-caution underline-offset-2 hover:underline">{decisionQuestionCount} decision {decisionQuestionCount === 1 ? "question" : "questions"}</a>. The score reflects the evidence collected; read them before relying on it.
+              </p>
+            )}
           </div>
         </div>
 

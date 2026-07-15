@@ -97,6 +97,9 @@ export interface Dossier {
   trustGraphScreen?: TrustGraphScreen;
   /** Verified project-owned token plus frozen market/chart context. */
   projectToken?: ProjectTokenSnapshot;
+  /** Frozen protocol fundamentals (DeFiLlama), for the hero strip. */
+  protocolTvl?: CollectedEvidence["protocolTvl"];
+  protocolFunding?: CollectedEvidence["protocolFunding"];
   /** Plain-language answers to the project's core diligence questions. */
   basicFacts?: DossierBasicFact[];
   /** Model-discovered candidates that remain unverified and unscored. */
@@ -315,6 +318,8 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     sourceArtifacts: ev.sourceArtifacts,
     profileAuthenticity: ev.profileAuthenticity,
     trustGraphScreen: ev.trustGraphScreen,
+    ...(ev.protocolTvl ? { protocolTvl: { ...ev.protocolTvl, chains: [...ev.protocolTvl.chains], chainBreakdown: ev.protocolTvl.chainBreakdown.map((entry) => ({ ...entry })) } } : {}),
+    ...(ev.protocolFunding ? { protocolFunding: { ...ev.protocolFunding, rounds: ev.protocolFunding.rounds.map((round) => ({ ...round })), leadInvestors: [...ev.protocolFunding.leadInvestors] } } : {}),
     projectToken: ev.projectToken ? {
       ...ev.projectToken,
       ...(ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {}),
