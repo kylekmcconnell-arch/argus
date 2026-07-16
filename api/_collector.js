@@ -18532,6 +18532,22 @@ async function goplus(chainId, address) {
 }
 
 // src/token/audit.ts
+var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
+async function screenDeployerRisk(address, fetchImpl = fetch) {
+  if (!address || address.length < 8) return void 0;
+  const origin = globalThis.location?.origin;
+  if (!origin) return void 0;
+  const completedAt = (/* @__PURE__ */ new Date()).toISOString();
+  try {
+    const r = await fetchImpl(`/api/deployer-risk?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(18e3) });
+    if (!r.ok) return { available: false, paths: [], completedAt };
+    const d = await r.json();
+    if (d?.available !== true) return { available: false, paths: [], completedAt };
+    return { available: true, paths: Array.isArray(d.paths) ? d.paths : [], completedAt };
+  } catch {
+    return { available: false, paths: [], completedAt };
+  }
+}
 async function screenAddressSanctions(chain, addresses, fetchImpl = fetch) {
   const unique = [...new Set(addresses.filter((a) => typeof a === "string" && a.length > 8))].slice(0, 40);
   if (!unique.length) return void 0;
@@ -18979,9 +18995,30 @@ async function runTokenAudit(input, emit, opts) {
     tag: h.tag || void 0,
     isContract: h.is_contract === 1 || h.is_contract === "1"
   })).filter((h) => h.address);
-  step({ phase: "Screen", label: "OFAC sanctions", detail: "Screening deployer + top holders against the US Treasury SDN address list\u2026", tone: "neutral" });
+  step({ phase: "Screen", label: "Deployer forensics", detail: "Screening deployer + top holders against OFAC, and tracing the deployer's funding provenance on Arkham\u2026", tone: "neutral" });
   const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
-  const sanctionsScreen = await screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]);
+  const deployerRiskFn = opts?.screenDeployerRisk ?? screenDeployerRisk;
+  const [sanctionsScreen, deployerRisk] = await Promise.all([
+    screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
+    // Best-effort enrichment: a deployer-risk failure must never break a scan
+    // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
+    deployer ? deployerRiskFn(deployer).catch(() => void 0) : Promise.resolve(void 0)
+  ]);
+  if (deployerRisk?.available && deployerRisk.paths.length) {
+    for (const p of deployerRisk.paths.slice(0, 3)) {
+      const severe = SEVERE_RISK_CATEGORY.test(p.category ?? "");
+      const who = p.seedName || p.category || "a flagged entity";
+      const hopStr = p.hops ? `, ${p.hops} hop${p.hops === 1 ? "" : "s"} away` : "";
+      const amt = p.usd >= 1 ? `~$${Math.round(p.usd).toLocaleString()} ` : "";
+      findings.push({
+        claim: p.direction === "backward" ? `Deployer wallet received ${amt}traceable to ${who}${hopStr}. ${severe ? "This is a serious funding-provenance risk." : "Worth scrutiny on where the launch capital came from."}` : `Deployer wallet sent ${amt}to ${who}${hopStr}. ${severe ? "This is a serious counterparty risk." : "Worth scrutiny on where the funds moved."}`,
+        tone: severe ? "bad" : "warn",
+        source: "arkham"
+      });
+    }
+    const lead = deployerRisk.paths[0];
+    step({ phase: "Finalize", label: "Funding trace", detail: `Deployer ${lead.direction === "backward" ? "funded via" : "exposed to"} ${lead.seedName || lead.category || "a flagged entity"}${lead.hops ? ` (${lead.hops} hop${lead.hops === 1 ? "" : "s"})` : ""}.`, tone: SEVERE_RISK_CATEGORY.test(lead.category ?? "") ? "bad" : "warn" });
+  }
   if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
     findings.push({
       claim: sanctionsScreen.sanctioned.length === 1 ? `OFAC SDN hit: screened address ${sanctionsScreen.sanctioned[0].slice(0, 10)}\u2026 is on the US Treasury sanctions list. Touching this token is a legal-exposure risk.` : `OFAC SDN hit: ${sanctionsScreen.sanctioned.length} screened addresses are on the US Treasury sanctions list. Touching this token is a legal-exposure risk.`,
@@ -19029,7 +19066,8 @@ async function runTokenAudit(input, emit, opts) {
     trace,
     live: true,
     safetyChecked: s.available,
-    sanctionsScreen
+    sanctionsScreen,
+    deployerRisk
   };
 }
 function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders, socials) {

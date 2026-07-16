@@ -2,32 +2,17 @@
 //
 // The risk score says "flagged"; this says why: the seed→target trace showing which
 // hacker / mixer / sanctioned entity the wallet is exposed to, in which direction,
-// how many hops away, and how much USD flowed. Turns "⚠ risk" into "$72M, 1 hop from
+// how many hops away, and how much USD flowed. Turns "risk" into "$72M, 1 hop from
 // Tornado.Cash". Seeds are labeled with their Arkham entity so they read as names,
-// not hashes. Top paths by USD contribution, deduped per seed, cached 24h.
+// not hashes. The trace itself lives in ./_arkham-core (shared with the scan-time
+// deployer trace); this route adds auth, panel-cost accounting, and caching.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { attachPanelCost, cacheGetJson, cacheSetJson, resolvePanelCostVersion } from "./_cache.js";
 import { requireArgusAuth } from "./_auth.js";
 import { providerAddressKey } from "../src/lib/providerAddress.js";
+import { fetchAddressRiskPaths } from "./_arkham-core.js";
 
 export const config = { maxDuration: 20 };
-
-const RISK = "https://api.arkm.com/risk/address/";
-const INTEL = "https://api.arkm.com/intelligence/address/";
-
-type PathOut = { seed: string; seedName?: string; seedType?: string; category?: string; direction: string; score: number; usd: number; hops: number };
-interface CallCounter { calls: number; succeeded: number }
-
-async function seedName(addr: string, key: string, usage: CallCounter): Promise<{ name?: string; type?: string }> {
-  usage.calls += 1;
-  try {
-    const r = await fetch(`${INTEL}${encodeURIComponent(addr)}`, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(7000) });
-    if (!r.ok) return {};
-    const d = (await r.json()) as { arkhamEntity?: { name?: string; type?: string }; arkhamLabel?: { name?: string } };
-    usage.succeeded += 1;
-    return { name: d.arkhamEntity?.name || d.arkhamLabel?.name, type: d.arkhamEntity?.type };
-  } catch { return {}; }
-}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const auth = await requireArgusAuth(req, res, "analyst");
@@ -46,53 +31,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!addr || addr.length < 8) { res.status(400).json({ error: "address required" }); return; }
 
   const ck = `arkham-paths:${providerAddressKey(addr)}:v1`;
-  const cached = await cacheGetJson<any>(ck);
+  const cached = await cacheGetJson<{ available: boolean; paths: unknown[] }>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
-  const usage: CallCounter = { calls: 0, succeeded: 0 };
+  const result = await fetchAddressRiskPaths(addr, key);
   try {
-    usage.calls += 1;
-    const r = await fetch(`${RISK}${encodeURIComponent(addr)}/paths`, { headers: { "API-Key": key }, redirect: "follow", signal: AbortSignal.timeout(12000) });
-    if (!r.ok) { res.status(200).json({ available: false, note: `Arkham ${r.status}` }); return; }
-    const d = (await r.json()) as { paths?: any[] };
-    usage.succeeded += 1;
-    const raw = Array.isArray(d?.paths) ? d.paths : [];
-    // Best path per seed (highest USD contribution), then the top few overall.
-    const bySeed = new Map<string, any>();
-    for (const p of raw) {
-      const s = String(p?.seed_address ?? "");
-      if (!s) continue;
-      const ex = bySeed.get(s);
-      if (!ex || Number(p?.contribution_usd ?? 0) > Number(ex?.contribution_usd ?? 0)) bySeed.set(s, p);
+    if (!result.available) {
+      res.status(200).json({ available: false, note: "Risk paths lookup failed." });
+      return;
     }
-    const top = [...bySeed.values()].sort((a, b) => Number(b?.contribution_usd ?? 0) - Number(a?.contribution_usd ?? 0)).slice(0, 6);
-    // Label the seeds (parallel, bounded).
-    const labels = await Promise.all(top.map((p) => seedName(String(p.seed_address), key, usage)));
-    const paths: PathOut[] = top.map((p, i) => ({
-      seed: String(p.seed_address),
-      seedName: labels[i].name,
-      seedType: labels[i].type,
-      category: p?.risk_category,
-      direction: p?.direction === "backward" ? "backward" : "forward",
-      score: Number(p?.score ?? 0),
-      usd: Number(p?.contribution_usd ?? 0),
-      hops: Number(p?.hop_distance ?? 0),
-    }));
-    const out = { available: true, paths };
+    const out = { available: true, paths: result.paths };
     await cacheSetJson(ck, out);
     res.status(200).json(out);
-  } catch (e) {
-    res.status(200).json({ available: false, error: String(e), note: "Risk paths lookup failed." });
   } finally {
-    if (usage.calls > 0) {
+    if (result.calls > 0) {
       await attachPanelCost(auth.organizationId, panelCostVersionId, {
         provider: "arkham",
         op: "panel:arkham-risk-paths",
-        calls: usage.calls,
+        calls: result.calls,
         usd: 0,
         meta: "subscription/keyed",
         initiatedBy: auth.userId,
-        status: usage.succeeded === usage.calls ? "succeeded" : usage.succeeded > 0 ? "partial" : "failed",
+        status: result.succeeded === result.calls ? "succeeded" : result.succeeded > 0 ? "partial" : "failed",
       });
     }
   }

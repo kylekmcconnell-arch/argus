@@ -395,3 +395,50 @@ describe("reconcileInvestigationChecks", () => {
     expect(reconcileInvestigationChecks(base, TOKEN_ADDRESS, undefined)).toEqual(base);
   });
 });
+
+describe("token operator/funding trace (Arkham deployer risk)", () => {
+  const at = "2026-07-16T00:00:00.000Z";
+
+  it("records a clean trace as confirmed (no funding source surfaced)", () => {
+    const checks = tokenChecks(dossier({ deployerRisk: { available: true, paths: [], completedAt: at } }));
+    const row = byLabel(checks, "Operator / funding trace");
+    expect(row.status).toBe("confirmed");
+    expect(row.checkId).toBe("operator-funding-trace");
+    expect(row.note).toContain("no flagged-entity funding source");
+    expect(row.completedAt).toBe(at);
+  });
+
+  it("records inbound (backward) exposure to a flagged entity as a finding with entity + hops", () => {
+    const checks = tokenChecks(dossier({
+      deployerRisk: {
+        available: true,
+        paths: [{ seed: "0xbad", seedName: "Tornado.Cash", category: "mixer", direction: "backward", score: 9, usd: 72_000_000, hops: 1 }],
+        completedAt: at,
+      },
+    }));
+    const row = byLabel(checks, "Operator / funding trace");
+    expect(row.status).toBe("finding");
+    expect(row.note).toContain("Tornado.Cash");
+    expect(row.note).toContain("1 hop");
+  });
+
+  it("treats outbound-only (forward) exposure as a clean funding source (the check is inbound-scoped)", () => {
+    // Outbound exposure still surfaces as a report finding; the funding-source
+    // check specifically covers inbound provenance, so it stays confirmed.
+    const checks = tokenChecks(dossier({
+      deployerRisk: {
+        available: true,
+        paths: [{ seed: "0xmix", seedName: "Some Mixer", category: "mixer", direction: "forward", score: 5, usd: 1000, hops: 2 }],
+        completedAt: at,
+      },
+    }));
+    expect(byLabel(checks, "Operator / funding trace").status).toBe("confirmed");
+  });
+
+  it("stays unknown (not recorded) when the trace was unavailable or a legacy dossier never ran it", () => {
+    const unavailable = tokenChecks(dossier({ deployerRisk: { available: false, paths: [], completedAt: at } }));
+    const legacy = tokenChecks(dossier());
+    expect(byLabel(unavailable, "Operator / funding trace").status).toBe("unknown");
+    expect(byLabel(legacy, "Operator / funding trace").status).toBe("unknown");
+  });
+});

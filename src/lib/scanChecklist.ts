@@ -257,16 +257,48 @@ export function tokenChecks(dossier: TokenDossier): ScanCheck[] {
         : { checkId: "wallet-clustering", decisionCritical: true, label: "Wallet clustering", status: "unavailable", note: "requires holder-provider data" },
   );
 
-  // Resolving an address is not evidence that its funding trail was chased.
-  checks.push({
-    checkId: "operator-funding-trace",
-    decisionCritical: true,
-    label: "Operator / funding trace",
-    status: "unknown",
-    note: dossier.deployer
-      ? `deployer ${shortAddr(dossier.deployer)} resolved; trace ${outcomeNotRecorded}`
-      : `deployer unresolved; trace ${outcomeNotRecorded}`,
-  });
+  // The deployer's funding provenance, traced on Arkham at scan time: backward
+  // exposure to a mixer / hacker / sanctioned entity is a finding; a clean trace
+  // is a recorded outcome; resolving an address without a trace stays unknown.
+  const deployerRisk = dossier.deployerRisk;
+  const backwardRisk = deployerRisk?.available
+    ? deployerRisk.paths.filter((path) => path.direction === "backward")
+    : [];
+  checks.push(
+    deployerRisk?.available
+      ? backwardRisk.length
+        ? {
+            checkId: "operator-funding-trace",
+            decisionCritical: true,
+            label: "Operator / funding trace",
+            status: "finding",
+            note: `Deployer funding traced on Arkham: exposure to ${backwardRisk[0].seedName || backwardRisk[0].category || "a flagged entity"}${backwardRisk[0].hops ? ` (${backwardRisk[0].hops} hop${backwardRisk[0].hops === 1 ? "" : "s"})` : ""}`,
+            provider: "arkham",
+            completedAt: deployerRisk.completedAt,
+          }
+        : {
+            checkId: "operator-funding-trace",
+            decisionCritical: true,
+            label: "Operator / funding trace",
+            status: "confirmed",
+            // "funding source" is inbound only (backward); any outbound exposure
+            // still surfaces as a finding, so this note does not overclaim.
+            note: dossier.deployer
+              ? `Deployer ${shortAddr(dossier.deployer)} funding traced on Arkham; no flagged-entity funding source surfaced`
+              : "Deployer funding traced on Arkham; no flagged-entity funding source surfaced",
+            provider: "arkham",
+            completedAt: deployerRisk.completedAt,
+          }
+      : {
+          checkId: "operator-funding-trace",
+          decisionCritical: true,
+          label: "Operator / funding trace",
+          status: "unknown",
+          note: dossier.deployer
+            ? `deployer ${shortAddr(dossier.deployer)} resolved; trace ${outcomeNotRecorded}`
+            : `deployer unresolved; trace ${outcomeNotRecorded}`,
+        },
+  );
 
   // These checks execute in report-page panels today. Their outcomes are not
   // represented in TokenDossier, so mounting the panel must not become "ran".

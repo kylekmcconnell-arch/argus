@@ -79,6 +79,8 @@ export interface TokenDossier {
   safetyChecked: boolean;
   /** OFAC address-screen outcome recorded at scan time (deployer + top holders). */
   sanctionsScreen?: SanctionsScreenOutcome;
+  /** Arkham funding/risk trace on the deployer wallet, recorded at scan time. */
+  deployerRisk?: DeployerRiskOutcome;
   /** Frozen server-side evidence/check context for a persisted report version. */
   versionContext?: ReportVersionContext;
   /** Snapshot framing inherited from a parent investigation facet. */
@@ -105,6 +107,54 @@ export type ScreenSanctionsFn = (
   chain: string,
   addresses: readonly (string | null | undefined)[],
 ) => Promise<SanctionsScreenOutcome | undefined>;
+
+// Arkham risk-path exposure recorded for the deployer wallet at scan time: who
+// funded it and whether that money traces to a mixer / hacker / sanctioned
+// entity. Arkham is a flat subscription, so this trace is $0 marginal per scan.
+export interface DeployerRiskPath {
+  seed: string;
+  seedName?: string;
+  seedType?: string;
+  category?: string;
+  direction: "backward" | "forward" | string;
+  score: number;
+  usd: number;
+  hops: number;
+}
+export interface DeployerRiskOutcome {
+  available: boolean;
+  paths: DeployerRiskPath[];
+  completedAt: string;
+}
+export type ScreenDeployerRiskFn = (address: string) => Promise<DeployerRiskOutcome | undefined>;
+
+// Concerning-funding categories. Arkham's risk/paths endpoint only returns paths
+// that contribute to a risk score, so any returned path is already an exposure;
+// these split the tone (hard vs soft) for the surfaced finding.
+const SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
+
+// Browser default: GET the deployer's Arkham trace from the scan-time route.
+// Only runs in a browser (relative fetch); the opts.screenDeployerRisk hook is
+// reserved for a future server-side direct screener (mirrors screenSanctions),
+// so server audits currently record the trace as "not run" rather than a throw.
+export async function screenDeployerRisk(
+  address: string | null | undefined,
+  fetchImpl: typeof fetch = fetch,
+): Promise<DeployerRiskOutcome | undefined> {
+  if (!address || address.length < 8) return undefined;
+  const origin = (globalThis as { location?: { origin?: string } }).location?.origin;
+  if (!origin) return undefined;
+  const completedAt = new Date().toISOString();
+  try {
+    const r = await fetchImpl(`/api/deployer-risk?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(18000) });
+    if (!r.ok) return { available: false, paths: [], completedAt };
+    const d = await r.json() as { available?: boolean; paths?: DeployerRiskPath[] };
+    if (d?.available !== true) return { available: false, paths: [], completedAt };
+    return { available: true, paths: Array.isArray(d.paths) ? d.paths : [], completedAt };
+  } catch {
+    return { available: false, paths: [], completedAt };
+  }
+}
 
 // OFAC SDN address screen, recorded as a real check outcome for the checklist.
 // Never throws: an unreachable screen records available:false so the checklist
@@ -283,7 +333,7 @@ const CACHE_TTL = 60_000;
 export async function auditToken(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn },
+  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const cacheRef = input.via === "evm" ? input.ref.toLowerCase() : input.ref;
@@ -298,7 +348,7 @@ export async function auditToken(
 async function runTokenAudit(
   input: RunnableTokenInput,
   emit?: (s: TraceStep) => void,
-  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn },
+  opts?: { skipSim?: boolean; force?: boolean; screenSanctions?: ScreenSanctionsFn; screenDeployerRisk?: ScreenDeployerRiskFn },
 ): Promise<TokenDossier | null> {
   if (input.kind !== "token") return null;
   const trace: TraceStep[] = [];
@@ -620,10 +670,37 @@ async function runTokenAudit(
     isContract: h.is_contract === 1 || h.is_contract === "1",
   })).filter((h) => h.address);
 
-  // ---- OFAC screen: deployer + top holders, recorded as a check outcome ----
-  step({ phase: "Screen", label: "OFAC sanctions", detail: "Screening deployer + top holders against the US Treasury SDN address list…", tone: "neutral" });
+  // ---- Deployer forensics: OFAC screen + Arkham funding/risk trace, in parallel
+  // (both key off the deployer, so running them together adds no serial latency).
+  step({ phase: "Screen", label: "Deployer forensics", detail: "Screening deployer + top holders against OFAC, and tracing the deployer's funding provenance on Arkham…", tone: "neutral" });
   const screenFn = opts?.screenSanctions ?? screenAddressSanctions;
-  const sanctionsScreen = await screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]);
+  const deployerRiskFn = opts?.screenDeployerRisk ?? screenDeployerRisk;
+  const [sanctionsScreen, deployerRisk] = await Promise.all([
+    screenFn(chain, [deployer, ...topHolders.map((h) => h.address)]),
+    // Best-effort enrichment: a deployer-risk failure must never break a scan
+    // (unlike OFAC, it carries no verdict cap), so it always degrades to undefined.
+    deployer ? deployerRiskFn(deployer).catch(() => undefined) : Promise.resolve(undefined),
+  ]);
+  if (deployerRisk?.available && deployerRisk.paths.length) {
+    // Every path Arkham returns is already a risk exposure. Surface both
+    // directions: backward = the deployer was FUNDED BY a flagged entity;
+    // forward = the deployer SENT funds TO one. Both belong in the report.
+    for (const p of deployerRisk.paths.slice(0, 3)) {
+      const severe = SEVERE_RISK_CATEGORY.test(p.category ?? "");
+      const who = p.seedName || p.category || "a flagged entity";
+      const hopStr = p.hops ? `, ${p.hops} hop${p.hops === 1 ? "" : "s"} away` : "";
+      const amt = p.usd >= 1 ? `~$${Math.round(p.usd).toLocaleString()} ` : "";
+      findings.push({
+        claim: p.direction === "backward"
+          ? `Deployer wallet received ${amt}traceable to ${who}${hopStr}. ${severe ? "This is a serious funding-provenance risk." : "Worth scrutiny on where the launch capital came from."}`
+          : `Deployer wallet sent ${amt}to ${who}${hopStr}. ${severe ? "This is a serious counterparty risk." : "Worth scrutiny on where the funds moved."}`,
+        tone: severe ? "bad" : "warn",
+        source: "arkham",
+      });
+    }
+    const lead = deployerRisk.paths[0];
+    step({ phase: "Finalize", label: "Funding trace", detail: `Deployer ${lead.direction === "backward" ? "funded via" : "exposed to"} ${lead.seedName || lead.category || "a flagged entity"}${lead.hops ? ` (${lead.hops} hop${lead.hops === 1 ? "" : "s"})` : ""}.`, tone: SEVERE_RISK_CATEGORY.test(lead.category ?? "") ? "bad" : "warn" });
+  }
   if (sanctionsScreen?.available && sanctionsScreen.sanctioned.length) {
     findings.push({
       claim: sanctionsScreen.sanctioned.length === 1
@@ -653,6 +730,7 @@ async function runTokenAudit(
     verdict, score, capApplied, headline, axes, safety: s, socials,
     projectX, deployer, topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
     sanctionsScreen,
+    deployerRisk,
   };
 }
 
