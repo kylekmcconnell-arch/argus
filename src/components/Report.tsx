@@ -2335,8 +2335,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 <span className={`display text-[44px] uppercase leading-none max-sm:text-[32px] ${verdictTextClass}`}>
                   {m.label}
                 </span>
-                {presentation.secondarySignal && <span className="chip chip-wrap tint-caution">{presentation.secondarySignal}</span>}
-                {presentation.displayVerdict !== "PROVISIONAL" && (
+                {presentation.secondarySignal && <span className="chip chip-wrap text-ink-faint">{presentation.secondarySignal}</span>}
+                {presentation.displayVerdict !== "PROVISIONAL"
+                  // Suppress the readiness chip when it merely repeats the verdict
+                  // word (e.g. an INCOMPLETE verdict already reads "INCOMPLETE").
+                  // "decision-ready" always adds information next to PASS/CAUTION/etc.
+                  && !(readiness.status !== "ready" && m.label.toUpperCase() === readiness.status.toUpperCase()) && (
                   <span className={`chip ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`}>
                     {readiness.status === "ready" ? "decision-ready" : readiness.status}
                   </span>

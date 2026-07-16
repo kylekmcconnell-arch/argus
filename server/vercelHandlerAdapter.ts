@@ -52,6 +52,14 @@ export async function serveVercelHandler(
     },
   } as unknown as VercelResponse;
 
-  const request = Object.assign(req, { body: body || undefined }) as VercelRequest;
+  // Vercel populates req.query from the URL; the raw Node request does not, so
+  // parse it here or handlers reading req.query.<param> throw on undefined.
+  const parsedUrl = new URL(req.url ?? "/", "http://localhost");
+  const query: Record<string, string | string[]> = {};
+  for (const key of parsedUrl.searchParams.keys()) {
+    const all = parsedUrl.searchParams.getAll(key);
+    query[key] = all.length > 1 ? all : all[0];
+  }
+  const request = Object.assign(req, { body: body || undefined, query }) as VercelRequest;
   await handler(request, response);
 }

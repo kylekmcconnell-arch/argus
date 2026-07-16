@@ -12,6 +12,10 @@ import { providerStatus } from "./config";
 import { runAudit } from "./orchestrate";
 import type { TraceStep } from "./adapters/types";
 import signInHandler from "../api/signin";
+import sessionHandler from "../api/session";
+import reportHandler from "../api/report";
+import membersHandler from "../api/members";
+import auditLogHandler from "../api/auditlog";
 import { serveVercelHandler } from "./vercelHandlerAdapter";
 
 const PORT = Number(process.env.ARGUS_PORT || 8787);
@@ -31,6 +35,25 @@ const server = createServer(async (req, res) => {
 
   if (url.pathname === "/api/signin") {
     await serveVercelHandler(req, res, signInHandler);
+    return;
+  }
+
+  // Dev-only: mount the authed Vercel handlers the collector server normally omits,
+  // so a seeded report can be viewed end-to-end locally.
+  if (url.pathname === "/api/session") {
+    await serveVercelHandler(req, res, sessionHandler);
+    return;
+  }
+  if (url.pathname === "/api/report") {
+    await serveVercelHandler(req, res, reportHandler);
+    return;
+  }
+  if (url.pathname === "/api/members") {
+    await serveVercelHandler(req, res, membersHandler);
+    return;
+  }
+  if (url.pathname === "/api/auditlog") {
+    await serveVercelHandler(req, res, auditLogHandler);
     return;
   }
 
