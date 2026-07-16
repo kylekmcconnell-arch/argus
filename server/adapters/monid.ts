@@ -565,6 +565,56 @@ async function startRunFor(
   return resolveRun(run, key, fetcher);
 }
 
+/** Discriminated so the caller can record provider health honestly: a monid
+ *  outage/timeout ("error") must not be logged as a clean "no_match". */
+export type MonidPersonOutcome =
+  | { outcome: "match"; record: Record<string, unknown> }
+  | { outcome: "no_match" }
+  | { outcome: "error"; note: string };
+
+// A single person enrich must not consume the scan's whole latency budget if
+// Monid leaves the run in a slow polling state. The identity lane issues up to
+// five attempts, so bound each to well under the module's 30s poll deadline.
+const PERSON_ENRICH_TIMEOUT_MS = 12_000;
+
+/**
+ * Full-data PDL person enrichment routed through Monid. ARGUS's own PDL key is
+ * on the free tier, which omits the contact fields (emails/phone) needed to
+ * confirm an identity; Monid's PDL plan returns the complete record. Same PDL
+ * response schema, so the caller's existing parser is unchanged. Never throws;
+ * gated on MONID_API_KEY.
+ */
+export async function enrichPersonViaMonid(
+  params: { profile?: string; name?: string; company?: string; minLikelihood?: number },
+  fetcher: typeof fetch = fetch,
+): Promise<MonidPersonOutcome> {
+  const key = env("MONID_API_KEY");
+  if (!key) return { outcome: "error", note: "no_key" };
+  const body: Record<string, unknown> = {
+    // A disambiguator (known company or social profile) makes a lower-likelihood
+    // match safe; a bare common name demands high confidence.
+    min_likelihood: params.minLikelihood ?? (params.company || params.profile ? 4 : 8),
+  };
+  if (params.profile) body.profile = params.profile;
+  if (params.name) body.name = params.name;
+  if (params.company) body.company = params.company;
+  const timeout = new Promise<RunOutcome>((resolve) =>
+    setTimeout(() => resolve({ ok: false, note: "person_enrich_timeout" }), PERSON_ENRICH_TIMEOUT_MS));
+  const outcome = await Promise.race([
+    startRunFor("pdl", key, "/v5/person/enrich", { body }, fetcher),
+    timeout,
+  ]);
+  if (!outcome.ok) return { outcome: "error", note: outcome.note };
+  // For a match, startRunFor unwrapped run.output.data (the person record). A
+  // no-match unwraps to the bare {status:404,...} envelope, which has no
+  // full_name — the guard below classifies it as no_match, never a person.
+  const data = outcome.data;
+  if (!data || typeof data !== "object" || Array.isArray(data)) return { outcome: "no_match" };
+  const record = data as Record<string, unknown>;
+  if (!isNonEmptyString(record.full_name) && !isNonEmptyString(record.id)) return { outcome: "no_match" };
+  return { outcome: "match", record };
+}
+
 /** First non-empty trimmed string from the candidates, else null. */
 function firstString(...values: unknown[]): string | null {
   for (const value of values) {

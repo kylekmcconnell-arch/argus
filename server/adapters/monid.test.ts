@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { collectCompanyEnrichment, describeCompanyEnrichment } from "./monid";
+import { collectCompanyEnrichment, describeCompanyEnrichment, enrichPersonViaMonid } from "./monid";
 
 const KEY = "MONID_API_KEY";
 let savedKey: string | undefined;
@@ -162,5 +162,50 @@ describe("collectCompanyEnrichment", () => {
     if (out.available) throw new Error("expected unavailable");
     expect(out.reason).toBe("unavailable");
     expect(describeCompanyEnrichment(out).status).toBe("unavailable");
+  });
+});
+
+describe("enrichPersonViaMonid (PDL person enrichment through Monid)", () => {
+  const pdlFetcher = (response: unknown, status = 200): typeof fetch =>
+    (((_input: string | URL | Request, init?: RequestInit) => {
+      const endpoint = (() => { try { return (JSON.parse(String(init?.body ?? "{}")) as { endpoint?: string }).endpoint ?? ""; } catch { return ""; } })();
+      if (endpoint === "/v5/person/enrich") return Promise.resolve(jsonResponse(response, status));
+      return Promise.resolve(jsonResponse({}, 404));
+    }) as unknown as typeof fetch);
+
+  it("reports outcome 'error' (never a false no-match) when MONID_API_KEY is unset", async () => {
+    delete process.env[KEY];
+    expect(await enrichPersonViaMonid({ name: "Hayden Adams" }, pdlFetcher({}))).toEqual({ outcome: "error", note: "no_key" });
+  });
+
+  it("returns the full PDL person record (with contact fields) on a match", async () => {
+    const fetcher = pdlFetcher({
+      status: "COMPLETED",
+      output: { status: 200, likelihood: 8, data: {
+        full_name: "hayden adams",
+        personal_emails: ["haydenzadams@gmail.com"],
+        github_username: "haydenadams",
+        linkedin_url: "linkedin.com/in/haydenadams",
+      } },
+    });
+    const result = await enrichPersonViaMonid({ name: "Hayden Adams", company: "Uniswap" }, fetcher);
+    expect(result.outcome).toBe("match");
+    if (result.outcome !== "match") throw new Error("expected match");
+    expect(result.record.full_name).toBe("hayden adams");
+    expect(result.record.personal_emails).toContain("haydenzadams@gmail.com");
+    expect(result.record.github_username).toBe("haydenadams");
+  });
+
+  it("reports outcome 'no_match' on a 404 envelope (no person record)", async () => {
+    const result = await enrichPersonViaMonid({ name: "Nobody Real" }, pdlFetcher({
+      status: "COMPLETED",
+      output: { status: 404 },
+    }));
+    expect(result).toEqual({ outcome: "no_match" });
+  });
+
+  it("reports outcome 'error' (not no_match) when the run fails, never throwing", async () => {
+    const result = await enrichPersonViaMonid({ name: "X" }, pdlFetcher({ status: "FAILED" }));
+    expect(result.outcome).toBe("error");
   });
 });

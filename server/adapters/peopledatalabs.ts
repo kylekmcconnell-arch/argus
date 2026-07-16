@@ -3,8 +3,9 @@
 // F2 career history. Gated on PDL_API_KEY.
 
 import type { Adapter, CollectContext } from "./types";
-import { recordPdlMatch } from "../cost";
+import { recordCall, recordPdlMatch } from "../cost";
 import { env } from "../config";
+import { enrichPersonViaMonid } from "./monid";
 import { VentureOutcome } from "../../src/engine";
 
 const BASE = "https://api.peopledatalabs.com/v5";
@@ -16,6 +17,28 @@ const optionalString = (value: unknown): string | undefined =>
   typeof value === "string" && value.trim() ? value : undefined;
 
 export async function enrichPerson(params: { profile?: string; name?: string; company?: string }) {
+  // Prefer Monid's full-data PDL: our own direct key is on the free tier, which
+  // omits the contact fields (emails/phone) that confirm an identity. Same PDL
+  // response schema, so parsePdlPerson is shared. Fall back to the direct key
+  // when Monid is not configured.
+  if (env("MONID_API_KEY")) {
+    const result = await enrichPersonViaMonid(params);
+    // Record under the "peopledatalabs" provider (the identity resolution is
+    // PDL's; Monid is just the transport) so provider-truth accounting sees the
+    // adapter's work, and distinguish a real no-match from a Monid outage so an
+    // outage never reads as a healthy "no person exists".
+    if (result.outcome === "error") {
+      recordCall("peopledatalabs", "person-enrich:monid", 0, `monid_${result.note}`, "failed");
+      return null;
+    }
+    if (result.outcome === "no_match") {
+      recordCall("peopledatalabs", "person-enrich:monid", 0, "no_match", "succeeded");
+      return null;
+    }
+    const { person, issues } = parsePdlPerson(result.record);
+    recordCall("peopledatalabs", "person-enrich:monid", 0.3, issues.length ? `incomplete:${[...new Set(issues)].join(",")}` : undefined, issues.length ? "partial" : "succeeded");
+    return person;
+  }
   const key = env("PDL_API_KEY");
   if (!key) return null;
   const qs = new URLSearchParams();
@@ -64,6 +87,18 @@ export async function enrichPerson(params: { profile?: string; name?: string; co
     return null;
   }
 
+  const { person, issues } = parsePdlPerson(p);
+  recordPdlMatch(
+    true,
+    issues.length ? "partial" : "succeeded",
+    issues.length ? `incomplete_result:${[...new Set(issues)].join(",")}` : undefined,
+  );
+  return person;
+}
+
+// Parse a raw PDL person record into ARGUS's identity shape. No cost recording:
+// each caller records for its own provider path (direct PDL key vs Monid's PDL).
+function parsePdlPerson(p: JsonRecord) {
   const issues: string[] = [];
   const fullName = optionalString(p.full_name);
   if (!fullName) issues.push("missing_full_name");
@@ -106,12 +141,7 @@ export async function enrichPerson(params: { profile?: string; name?: string; co
     github: optionalString(p.github_username) ?? null,
     location: optionalString(p.location_name) ?? null,
   };
-  recordPdlMatch(
-    true,
-    issues.length ? "partial" : "succeeded",
-    issues.length ? `incomplete_result:${[...new Set(issues)].join(",")}` : undefined,
-  );
-  return person;
+  return { person, issues };
 }
 
 const httpify = (u?: string | null) => (u ? (/^https?:\/\//.test(u) ? u : "https://" + u) : null);
@@ -119,7 +149,7 @@ const httpify = (u?: string | null) => (u ? (/^https?:\/\//.test(u) ? u : "https
 export const peopledatalabsAdapter: Adapter = {
   id: "peopledatalabs",
   label: "People Data Labs",
-  available: () => !!env("PDL_API_KEY"),
+  available: () => !!env("MONID_API_KEY") || !!env("PDL_API_KEY"),
   async run(ctx: CollectContext) {
     const handle = ctx.handle.replace(/^@/, "");
     const name = ctx.evidence.profile.display_name;
