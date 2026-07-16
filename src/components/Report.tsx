@@ -39,7 +39,7 @@ import { IdentitySweep } from "./IdentitySweep";
 import { PfpCheck } from "./PfpCheck";
 import { PersonGithub } from "./PersonGithub";
 import { MethodologyChecklist } from "./MethodologyChecklist";
-import { decisionCriticalChecks, personChecks } from "../lib/scanChecklist";
+import { decisionCriticalChecks, isAdverseFinding, personChecks } from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { coverageQualifiedCompleteness, exactReportPath, presentPublicReport } from "../lib/reportPresentation";
 import { AddInfo } from "./AddInfo";
@@ -2357,7 +2357,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   <span className="tabular">{cleanScreens.length}</span> screens clean
                   <span aria-hidden="true"> · </span>
                   {(() => {
-                    const adverseSignals = diligenceChecks.filter((check) => check.status === "finding").length
+                    // A neutral assessment null (e.g. "no repeat backing on record")
+                    // is recorded as a substantive "finding" so it can cover + score
+                    // its axis, but an absent positive signal is never counter-evidence.
+                    // isAdverseFinding excludes those neutral nulls from the tally.
+                    const adverseSignals = diligenceChecks.filter(isAdverseFinding).length
                       + visibleContradictions.length;
                     if (adverseSignals > 0) {
                       return <span className="text-avoid">{adverseSignals} adverse {adverseSignals === 1 ? "signal" : "signals"}</span>;

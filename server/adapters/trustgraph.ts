@@ -16,6 +16,7 @@ import {
 import { env } from "../config";
 import { recordCall } from "../cost";
 import {
+  FOUNDER_DILIGENCE_PERSON_CHECK_IDS,
   LEGACY_PERSON_CHECK_IDS,
   PERSON_CHECK_IDS,
   PROJECT_DILIGENCE_PERSON_CHECK_IDS,
@@ -37,6 +38,7 @@ const EXPECTED_PERSON_CHECK_IDS = new Set<string>(PERSON_CHECK_IDS);
 const ACCEPTED_CHECK_CONTRACTS = [
   new Set<string>(LEGACY_PERSON_CHECK_IDS),
   new Set<string>(PROJECT_DILIGENCE_PERSON_CHECK_IDS),
+  new Set<string>(FOUNDER_DILIGENCE_PERSON_CHECK_IDS),
   EXPECTED_PERSON_CHECK_IDS,
 ] as const;
 

@@ -2390,7 +2390,7 @@ var FOUNDER_SCORING_POLICY = [
   "Keep score and confidence separate. Score source-backed identity, operating history, products, outcomes, conduct, and network quality. Record unavailable, stale, checked-empty, or uncollected information in coverageRefs and gaps. Missing coverage is not counter-evidence and never erases a verified fact.",
   "F1 identity verifiability: a fetched first-party organization page, regulator or institutional counterparty record, or two independent fetched sources can establish identity and current authority. A People Data Labs miss, an empty exact-name news query, or a missing personal GitHub profile is only a coverage gap.",
   "F2 track record: use verified founder and executive relationships, prior roles, products, launches, exits, and concrete operating outcomes. Follower count, posting cadence, profile biography, fame, and X follow relationships never establish a founder role or track record.",
-  "F3 repeat backing: require actual source-backed financing, investor, or repeat-counterparty records across distinct events. Social follows, mutual follows, and generic affiliations are network context, not repeat backing.",
+  "F3 repeat backing: require actual source-backed financing, investor, or repeat-counterparty records across distinct events. Social follows, mutual follows, and generic affiliations are network context, not repeat backing. A completed repeat-backing assessment (the founder-repeat-backing check) that establishes no source-backed repeat financing across the known ventures scores F3 at the low end for lack of a demonstrated positive signal; it is a null result on this axis only, never counter-evidence against identity, track record, build substance, or any other axis.",
   "F4 build substance: verified live products, protocols, documentation, audits, usage, releases, or organization repositories establish build substance. A personal GitHub account is optional and its absence cannot negate a verified live product.",
   "F5 reputation and integrity: use direct-subject, source-verified conduct, legal, regulatory, sanctions, governance, or conflict evidence. A completed clear screen is coverage context, not affirmative character evidence, and an unavailable screen is not adverse evidence.",
   "F6 network quality: use observed professional relationships and notable network evidence only for network quality. Never transfer that evidence into identity, track record, repeat backing, or build substance.",
@@ -3556,6 +3556,7 @@ var CHECK_AXIS_ELIGIBILITY = {
   "founder-control-conflicts": ["F5_reputation_integrity"],
   "founder-legal-regulatory": ["F5_reputation_integrity"],
   "founder-asset-distinction": ["F4_build_substance", "F5_reputation_integrity"],
+  "founder-repeat-backing": ["F3_repeat_backing"],
   "vc-portfolio-track-record": ["I2_portfolio_quality"],
   "news-press": ["F5_reputation_integrity", "P2_product_substance", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
@@ -4709,6 +4710,18 @@ var CHECKS = [
   { id: "founder-control-conflicts", label: "Control and conflicts", defaultNote: "governance control, ownership, and material conflicts were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
   { id: "founder-legal-regulatory", label: "Legal and regulatory history", defaultNote: "material legal or regulatory events and their attribution were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
   { id: "founder-asset-distinction", label: "Related assets and security/token distinction", defaultNote: "related public securities, native tokens, and other assets were not clearly distinguished", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  // Repeat backing is the only FOUNDER axis (F3) with no fallback producer once
+  // the `ventures` section is empty (its `testimonials` feeder is dead), so a
+  // richly-evidenced founder with no resolved venture row was withheld entirely.
+  // This check runs a deterministic assessment over the founder's known
+  // ventures/companies and records an observable outcome (a positive repeat
+  // backer/re-backed exit, or an affirmative "none in the collected record"),
+  // which is the substantive artifact F3 needs. It never runs when there is no
+  // venture or company to assess, so a genuinely unassessable subject still abstains.
+  // Not a decision gate: a founder without demonstrated repeat backing is still
+  // decision-ready (repeat backing is a positive signal, not a safety must-have).
+  // This row is a scoring input for F3 only; it never gates report completeness.
+  { id: "founder-repeat-backing", label: "Repeat backing and re-investment", defaultNote: "repeat financing, re-backing, or re-investment across ventures was not assessed", role: "FOUNDER" },
   { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR", criticalFor: ["INVESTOR"] },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
   // Sanctions, legal history, and flagged-subject graph reconciliation are
@@ -4772,6 +4785,31 @@ var PROJECT_DILIGENCE_PERSON_CHECK_IDS = Object.freeze([
   "project-backing-partners",
   "project-traction-liveness",
   "project-transparency",
+  "vc-portfolio-track-record",
+  "news-press",
+  "us-legal-history",
+  "ofac-sanctions-name",
+  "trust-graph-connections"
+]);
+var FOUNDER_DILIGENCE_PERSON_CHECK_IDS = Object.freeze([
+  "identity-resolution",
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "affiliations-associates",
+  "promoted-token-performance",
+  "project-token-identity",
+  "project-product-substance",
+  "project-team-identity",
+  "project-backing-partners",
+  "project-traction-liveness",
+  "project-transparency",
+  "founder-identity-authority",
+  "founder-company-relationships",
+  "founder-track-record",
+  "founder-control-conflicts",
+  "founder-legal-regulatory",
+  "founder-asset-distinction",
   "vc-portfolio-track-record",
   "news-press",
   "us-legal-history",
@@ -13062,6 +13100,7 @@ var EXPECTED_PERSON_CHECK_IDS = new Set(PERSON_CHECK_IDS);
 var ACCEPTED_CHECK_CONTRACTS = [
   new Set(LEGACY_PERSON_CHECK_IDS),
   new Set(PROJECT_DILIGENCE_PERSON_CHECK_IDS),
+  new Set(FOUNDER_DILIGENCE_PERSON_CHECK_IDS),
   EXPECTED_PERSON_CHECK_IDS
 ];
 var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -16527,6 +16566,39 @@ function parseOutcome(s) {
   const match = Object.values(VentureOutcome).find((v) => v.toLowerCase() === s.toLowerCase());
   return match ?? "Unknown" /* UNKNOWN */;
 }
+function assessFounderRepeatBacking(evidence) {
+  if (!evidence.roles.includes("FOUNDER" /* FOUNDER */)) return null;
+  const ventures = evidence.ventures.filter(
+    (v) => v.evidence_origin !== "model_lead" && v.artifact_verified === true
+  );
+  const companyFacts = (evidence.basicFacts ?? []).filter(
+    (f) => f.artifact_verified === true && (f.status === "verified" || f.status === "corroborated") && (f.predicate === "founder" || f.predicate === "founded" || f.predicate === "executive" || f.predicate === "prior_role")
+  );
+  const knownCompanies = new Set(
+    [
+      ...ventures.map((v) => v.project_name.trim().toLowerCase()),
+      ...companyFacts.map((f) => f.value.trim().toLowerCase())
+    ].filter(Boolean)
+  );
+  if (knownCompanies.size === 0) return null;
+  const signal = repeatBackingSignal(ventures);
+  const ventureLabel = `${knownCompanies.size} known venture${knownCompanies.size === 1 ? "" : "s"}`;
+  if (signal.strength !== "none" && signal.repeat_backers.length) {
+    return {
+      id: "founder-repeat-backing",
+      status: "confirmed",
+      note: `Repeat backing established across ${ventureLabel}: ${signal.repeat_backers.slice(0, 3).join(", ")} re-backed the founder${signal.from_successful_exit ? " through a successful exit" : ""}.`,
+      provider: "argus-analysis",
+      sourceCount: signal.repeat_backers.length
+    };
+  }
+  return {
+    id: "founder-repeat-backing",
+    status: "finding",
+    note: `Assessed repeat backing across ${ventureLabel}; no source-backed repeat financing, re-backing, or re-backed exit appears in the collected record.`,
+    provider: "argus-analysis"
+  };
+}
 function asRoles(roles) {
   const valid = new Set(Object.values(SubjectClass));
   let out = roles.filter((r) => valid.has(r)).map((r) => r);
@@ -18259,6 +18331,17 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
   } finally {
     finishRuntimeStage("trust-graph", trustGraphStartedAt);
+  }
+  const repeatBacking = assessFounderRepeatBacking(evidence);
+  if (repeatBacking) {
+    checkTracker.record(repeatBacking);
+    emit({
+      phase: "Founder",
+      label: repeatBacking.status === "confirmed" ? "Repeat backing confirmed" : "Repeat backing assessed",
+      detail: repeatBacking.note,
+      source: "argus-analysis",
+      tone: repeatBacking.status === "confirmed" ? "good" : "neutral"
+    });
   }
   const profileForLlm = { ...evidence.profile };
   delete profileForLlm.identity_confidence;

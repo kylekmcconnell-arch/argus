@@ -66,6 +66,18 @@ const CHECKS: readonly CheckDefinition[] = [
   { id: "founder-control-conflicts", label: "Control and conflicts", defaultNote: "governance control, ownership, and material conflicts were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
   { id: "founder-legal-regulatory", label: "Legal and regulatory history", defaultNote: "material legal or regulatory events and their attribution were not verified", role: "FOUNDER", criticalFor: ["FOUNDER"] },
   { id: "founder-asset-distinction", label: "Related assets and security/token distinction", defaultNote: "related public securities, native tokens, and other assets were not clearly distinguished", role: "FOUNDER", criticalFor: ["FOUNDER"] },
+  // Repeat backing is the only FOUNDER axis (F3) with no fallback producer once
+  // the `ventures` section is empty (its `testimonials` feeder is dead), so a
+  // richly-evidenced founder with no resolved venture row was withheld entirely.
+  // This check runs a deterministic assessment over the founder's known
+  // ventures/companies and records an observable outcome (a positive repeat
+  // backer/re-backed exit, or an affirmative "none in the collected record"),
+  // which is the substantive artifact F3 needs. It never runs when there is no
+  // venture or company to assess, so a genuinely unassessable subject still abstains.
+  // Not a decision gate: a founder without demonstrated repeat backing is still
+  // decision-ready (repeat backing is a positive signal, not a safety must-have).
+  // This row is a scoring input for F3 only; it never gates report completeness.
+  { id: "founder-repeat-backing", label: "Repeat backing and re-investment", defaultNote: "repeat financing, re-backing, or re-investment across ventures was not assessed", role: "FOUNDER" },
   { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR", criticalFor: ["INVESTOR"] },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
   // Sanctions, legal history, and flagged-subject graph reconciliation are
@@ -139,6 +151,37 @@ export const PROJECT_DILIGENCE_PERSON_CHECK_IDS: readonly PersonCheckId[] = Obje
   "project-backing-partners",
   "project-traction-liveness",
   "project-transparency",
+  "vc-portfolio-track-record",
+  "news-press",
+  "us-legal-history",
+  "ofac-sanctions-name",
+  "trust-graph-connections",
+]);
+
+/**
+ * Exact checklist frozen after founder diligence shipped and before the
+ * founder repeat-backing (F3) assessment was added. Reports persisted under this
+ * shape must still qualify for the trust-graph KB after the new check lands.
+ */
+export const FOUNDER_DILIGENCE_PERSON_CHECK_IDS: readonly PersonCheckId[] = Object.freeze([
+  "identity-resolution",
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "affiliations-associates",
+  "promoted-token-performance",
+  "project-token-identity",
+  "project-product-substance",
+  "project-team-identity",
+  "project-backing-partners",
+  "project-traction-liveness",
+  "project-transparency",
+  "founder-identity-authority",
+  "founder-company-relationships",
+  "founder-track-record",
+  "founder-control-conflicts",
+  "founder-legal-regulatory",
+  "founder-asset-distinction",
   "vc-portfolio-track-record",
   "news-press",
   "us-legal-history",

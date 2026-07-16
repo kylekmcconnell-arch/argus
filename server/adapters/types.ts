@@ -34,6 +34,7 @@ export type PersonCheckId =
   | "founder-control-conflicts"
   | "founder-legal-regulatory"
   | "founder-asset-distinction"
+  | "founder-repeat-backing"
   | "vc-portfolio-track-record"
   | "news-press"
   | "us-legal-history"

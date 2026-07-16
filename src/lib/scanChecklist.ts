@@ -65,6 +65,20 @@ const SUCCESSFUL = new Set<CheckStatus>(["confirmed", "finding", "checked-empty"
 const UNKNOWN_OR_FAILED = new Set<CheckStatus>(["unknown", "unavailable", "stale"]);
 
 /** Summarize execution coverage separately from what the checks found. */
+// Some checks record their honest null as a substantive "finding" (so the axis
+// they feed is covered and scores low) even though an absent POSITIVE signal is
+// never counter-evidence. The founder repeat-backing assessment is one: "no
+// repeat backing on record" must read as a neutral completed outcome, never as an
+// adverse finding. Its positive result uses "confirmed", so only its "finding"
+// branch is a neutral null.
+export const NEUTRAL_NULL_FINDING_CHECK_IDS: ReadonlySet<string> = new Set<string>([
+  "founder-repeat-backing",
+]);
+
+/** A "finding" that genuinely signals an adverse discovery (not a neutral null). */
+export const isAdverseFinding = (check: Pick<ScanCheck, "status" | "checkId">): boolean =>
+  check.status === "finding" && !(check.checkId !== undefined && NEUTRAL_NULL_FINDING_CHECK_IDS.has(check.checkId));
+
 export function summarizeChecks(checks: readonly ScanCheck[]): CoverageSummary {
   const count = (status: CheckStatus) => checks.filter((check) => check.status === status).length;
   const notApplicable = count("not-applicable");
@@ -74,7 +88,7 @@ export function summarizeChecks(checks: readonly ScanCheck[]): CoverageSummary {
     inScope: checks.length - notApplicable,
     successful: checks.filter((check) => SUCCESSFUL.has(check.status)).length,
     unknownOrFailed: checks.filter((check) => UNKNOWN_OR_FAILED.has(check.status)).length,
-    findings: count("finding"),
+    findings: checks.filter(isAdverseFinding).length,
     checkedEmpty: count("checked-empty"),
     notApplicable,
     unavailable: count("unavailable"),

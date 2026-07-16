@@ -10,12 +10,12 @@
 //    return the fixture dossier unchanged, so the demo always works.
 // The engine always owns caps, banding and the composite verdict.
 
-import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEntityKey, type Finding } from "../src/engine";
+import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEntityKey, repeatBackingSignal, type Finding } from "../src/engine";
 import { env } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence, type BasicFact, type WebTeamMember } from "../src/data/evidence";
-import type { AdapterRunResult, CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
+import type { AdapterRunResult, CheckObservation, CollectedEvidence, Emit, CollectContext, Adapter } from "./adapters/types";
 import {
   ANALYST_EVIDENCE_MAX_CHARS,
   analystAvailable,
@@ -325,6 +325,56 @@ function parseOutcome(s?: string): VentureOutcome {
   if (!s) return VentureOutcome.UNKNOWN;
   const match = Object.values(VentureOutcome).find((v) => v.toLowerCase() === s.toLowerCase());
   return (match as VentureOutcome) ?? VentureOutcome.UNKNOWN;
+}
+
+// F3_repeat_backing is the only FOUNDER axis with no producer once the `ventures`
+// section is empty (its `testimonials` feeder was never wired), so a founder we
+// have richly evidenced on identity, track record, product, reputation, and
+// network was withheld a score entirely — the whole subject abstained because
+// this single axis had no substantive artifact. This runs a deterministic
+// assessment over the collected venture record (reusing the engine's canonical
+// repeatBackingSignal) and records an observable outcome so F3 gets a substantive
+// artifact: a positive repeat backer/re-backed exit, or an affirmative null that
+// the analyst scores at the low end for lack of a demonstrated positive signal.
+// It only runs when there is at least one known venture or company to assess; a
+// genuinely unassessable subject records nothing and still abstains, honestly.
+export function assessFounderRepeatBacking(evidence: CollectedEvidence): CheckObservation | null {
+  if (!evidence.roles.includes(SubjectClass.FOUNDER)) return null;
+  const ventures = evidence.ventures.filter(
+    (v) => v.evidence_origin !== "model_lead" && v.artifact_verified === true,
+  );
+  const companyFacts = (evidence.basicFacts ?? []).filter(
+    (f) => f.artifact_verified === true
+      && (f.status === "verified" || f.status === "corroborated")
+      && (f.predicate === "founder" || f.predicate === "founded" || f.predicate === "executive" || f.predicate === "prior_role"),
+  );
+  const knownCompanies = new Set<string>(
+    [
+      ...ventures.map((v) => v.project_name.trim().toLowerCase()),
+      ...companyFacts.map((f) => f.value.trim().toLowerCase()),
+    ].filter(Boolean),
+  );
+  // Nothing to assess: leave F3 a coverage gap so preflight correctly abstains
+  // rather than manufacturing an "assessed" result over an empty record.
+  if (knownCompanies.size === 0) return null;
+
+  const signal = repeatBackingSignal(ventures);
+  const ventureLabel = `${knownCompanies.size} known venture${knownCompanies.size === 1 ? "" : "s"}`;
+  if (signal.strength !== "none" && signal.repeat_backers.length) {
+    return {
+      id: "founder-repeat-backing",
+      status: "confirmed",
+      note: `Repeat backing established across ${ventureLabel}: ${signal.repeat_backers.slice(0, 3).join(", ")} re-backed the founder${signal.from_successful_exit ? " through a successful exit" : ""}.`,
+      provider: "argus-analysis",
+      sourceCount: signal.repeat_backers.length,
+    };
+  }
+  return {
+    id: "founder-repeat-backing",
+    status: "finding",
+    note: `Assessed repeat backing across ${ventureLabel}; no source-backed repeat financing, re-backing, or re-backed exit appears in the collected record.`,
+    provider: "argus-analysis",
+  };
 }
 
 function asRoles(roles: string[]): SubjectClass[] {
@@ -2590,6 +2640,22 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
   } finally {
     finishRuntimeStage("trust-graph", trustGraphStartedAt);
+  }
+
+  // Deterministic F3 (repeat backing) assessment. Founder-only; records an
+  // observable outcome so a richly-evidenced founder with no resolved venture row
+  // is no longer withheld a score by this single unassessed axis. Records nothing
+  // when there is no venture or company to assess, preserving honest abstention.
+  const repeatBacking = assessFounderRepeatBacking(evidence);
+  if (repeatBacking) {
+    checkTracker.record(repeatBacking);
+    emit({
+      phase: "Founder",
+      label: repeatBacking.status === "confirmed" ? "Repeat backing confirmed" : "Repeat backing assessed",
+      detail: repeatBacking.note,
+      source: "argus-analysis",
+      tone: repeatBacking.status === "confirmed" ? "good" : "neutral",
+    });
   }
 
   // Strip ARGUS's OWN analysis fields (identity_confidence/identity_note) from

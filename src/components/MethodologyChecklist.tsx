@@ -1,5 +1,5 @@
 import { useId, useState } from "react";
-import { summarizeChecks, type ScanCheck, type CheckStatus } from "../lib/scanChecklist";
+import { isAdverseFinding, summarizeChecks, type ScanCheck, type CheckStatus } from "../lib/scanChecklist";
 
 // Transparent scan methodology: successful execution coverage and evidence
 // outcomes are separate. Collapsed by default so this reads as a trust footer.
@@ -46,7 +46,12 @@ export function MethodologyChecklist({ checks, id }: { checks: ScanCheck[]; id?:
         <div id={panelId} role="region" aria-labelledby={buttonId} className="border-t border-line/60 px-2 py-1.5">
           <ul className="m-0 list-none p-0" aria-label="Investigation check outcomes">
             {checks.map((check, index) => {
-              const meta = META[check.status];
+              // A neutral assessment null is recorded as a substantive "finding" so
+              // it can cover its axis, but it must not read as an adverse discovery.
+              // Render it as a completed-null outcome, not an amber caution.
+              const meta = check.status === "finding" && !isAdverseFinding(check)
+                ? META["checked-empty"]
+                : META[check.status];
               return (
                 <li key={`${check.label}-${index}`} className="flex items-start gap-2.5 rounded-lg px-2 py-1.5">
                   <span aria-hidden="true" className="mono mt-0.5 w-3.5 shrink-0 text-center text-[12.5px]" style={{ color: meta.color }}>{meta.glyph}</span>
