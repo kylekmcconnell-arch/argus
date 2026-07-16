@@ -11,7 +11,7 @@ import { SubjectClass, VentureOutcome, getProfile } from "../src/engine";
 import type { CollectedEvidence } from "./adapters/types";
 
 // A founder resolved richly on every axis except repeat backing, with NO verified
-// venture row — the empirically-confirmed abstention case. Mirrors the real packet
+// venture row (the empirically-confirmed abstention case). Mirrors the real packet
 // sections a person scan produces.
 function richFounderNoVentures(): Record<string, unknown> {
   return {
@@ -42,7 +42,7 @@ function preflightState(sections: Record<string, unknown>) {
   return { pf, catalog };
 }
 
-describe("founder abstention fix — F3 repeat-backing assessment", () => {
+describe("founder abstention fix: F3 repeat-backing assessment", () => {
   it("REGRESSION: a rich founder with no ventures abstains solely on F3 when no repeat-backing check is present", () => {
     const { pf } = preflightState(richFounderNoVentures());
     expect(pf.state).toBe("insufficient_evidence");
