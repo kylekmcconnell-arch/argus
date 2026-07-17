@@ -40,6 +40,7 @@ import { personChecks } from "../src/lib/scanChecklist";
 import { basicFactQuestionOutcome } from "../src/lib/basicFactQuestions";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
+  COLLECTION_ANALYST_RESERVE_MS,
   DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
 } from "../src/lib/investigationRuntime";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
@@ -2053,6 +2054,16 @@ interface RunAuditOptions {
 
 async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
   const runtimeStartedAt = Date.now();
+  // Single source of truth for the analyst start-by deadline (the route passes
+  // it; fall back to the same formula for direct/test callers). Collection must
+  // stop launching new provider work COLLECTION_ANALYST_RESERVE_MS before it, so
+  // the analyst + finalization + persistence always fit inside the function
+  // ceiling. collectionOverBudget() is checked before each adapter/pass rather
+  // than mid-run, so no in-flight adapter is abandoned while it mutates evidence.
+  const analystDeadlineAt = options?.analystDeadlineAt
+    ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000 - ANALYST_FINALIZATION_RESERVE_MS;
+  const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
+  const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
   const startRuntimeStage = (stage: string) => {
     const stageStartedAt = Date.now();
     console.info("[audit-runtime]", JSON.stringify({
@@ -2258,6 +2269,14 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   };
 
   const runAdapter = async (a: Adapter): Promise<void> => {
+    // Stop launching new provider work once the collection budget is spent, so a
+    // large multi-venture/high-connectivity subject leaves time to score and
+    // persist instead of running to the function ceiling. Already-running
+    // adapters finish; only not-yet-started ones are skipped (no evidence race).
+    if (collectionOverBudget()) {
+      laneProviderRows.push({ id: a.id, label: a.label, state: "skipped", detail: "collection time budget reached; skipped to preserve scoring and persistence time", observedAt: new Date().toISOString() });
+      return;
+    }
     if (!a.available()) {
       laneProviderRows.push({ id: a.id, label: a.label, state: "unavailable", detail: "provider is not configured", observedAt: new Date().toISOString() });
       if (a.id === "github") {
@@ -2494,26 +2513,39 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     });
   };
   const signalPassesStartedAt = startRuntimeStage("signal-passes");
-  const signalPasses: Promise<void>[] = [
-    trackedPass("token-lifecycle", "Promoted-token lifecycle", ["dexscreener"], () => tokenLifecycle(ctx), (e) => {
-      emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
-    }),
-  ];
-  if (env("TWITTERAPI_KEY")) {
-    signalPasses.push(trackedPass("post-cadence", "Posting cadence", ["twitterapi"], () => postCadence(ctx), (e) => {
-      emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" });
-    }));
+  if (collectionOverBudget()) {
+    // Over the collection budget already: skip these enrichment passes (the
+    // slowest is the Grok adverse sweep) and preserve time to score + persist.
+    for (const [id, label] of [
+      ["token-lifecycle", "Promoted-token lifecycle"],
+      ["post-cadence", "Posting cadence"],
+      ["adverse-sweep", "Adverse-signal sweep"],
+    ] as const) {
+      checkTracker.provider(id, label, "unavailable", "collection time budget reached before this pass");
+    }
+    emit({ phase: "Collect", label: "Signal passes skipped", detail: "Collection time budget reached; skipping enrichment passes to leave time to score and persist a partial report.", tone: "warn" });
   } else {
-    checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
+    const signalPasses: Promise<void>[] = [
+      trackedPass("token-lifecycle", "Promoted-token lifecycle", ["dexscreener"], () => tokenLifecycle(ctx), (e) => {
+        emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
+      }),
+    ];
+    if (env("TWITTERAPI_KEY")) {
+      signalPasses.push(trackedPass("post-cadence", "Posting cadence", ["twitterapi"], () => postCadence(ctx), (e) => {
+        emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" });
+      }));
+    } else {
+      checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
+    }
+    if (analystAvailable() || env("XAI_API_KEY")) {
+      signalPasses.push(trackedPass("adverse-sweep", "Adverse-signal sweep", ["grok", "cache"], () => adverseSignalsAndTooling(ctx), (e) => {
+        emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
+      }));
+    } else {
+      checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
+    }
+    await Promise.all(signalPasses);
   }
-  if (analystAvailable() || env("XAI_API_KEY")) {
-    signalPasses.push(trackedPass("adverse-sweep", "Adverse-signal sweep", ["grok", "cache"], () => adverseSignalsAndTooling(ctx), (e) => {
-      emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
-    }));
-  } else {
-    checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
-  }
-  await Promise.all(signalPasses);
   finishRuntimeStage("signal-passes", signalPassesStartedAt);
 
   // Route only from provider-backed profile/career evidence. Model-extracted
@@ -2614,33 +2646,46 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // The provisional dossier is used only to materialize today's graph; its
   // score/verdict is deliberately omitted from the contribution.
   const trustGraphStartedAt = startRuntimeStage("trust-graph");
-  try {
-    const provisional = assembleDossier(evidence, true);
-    const graphResult = await collectTrustGraph(ctx, {
-      handle: provisional.handle,
-      nodes: provisional.graph.nodes,
-      edges: provisional.graph.edges,
-      aliases: [provisional.handle],
-    });
-    checkTracker.provider(
-      "trust-graph",
-      "Frozen trust-graph reconciliation",
-      graphResult.state,
-      graphResult.detail,
-    );
-  } catch (error) {
-    const detail = `Trust-graph materialization failed: ${String(error)}`;
-    checkTracker.provider("trust-graph", "Frozen trust-graph reconciliation", "failed", detail);
+  if (collectionOverBudget()) {
+    // Never-waive gate, but graph reconciliation (which scales with connectivity)
+    // must not push the run past the ceiling. Record it unavailable so the report
+    // persists as partial/not-decision-ready rather than not finishing at all.
+    checkTracker.provider("trust-graph", "Frozen trust-graph reconciliation", "unavailable", "collection time budget reached before graph reconciliation");
     checkTracker.record({
       id: "trust-graph-connections",
       status: "unavailable",
-      note: detail,
+      note: "collection time budget reached before flagged-subject graph reconciliation",
       provider: "argus-graph",
     });
-    emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
-  } finally {
-    finishRuntimeStage("trust-graph", trustGraphStartedAt);
+    emit({ phase: "Network", label: "Trust graph skipped", detail: "Collection time budget reached; skipped graph reconciliation to leave time to score and persist a partial report.", source: "argus-graph", tone: "warn" });
+  } else {
+    try {
+      const provisional = assembleDossier(evidence, true);
+      const graphResult = await collectTrustGraph(ctx, {
+        handle: provisional.handle,
+        nodes: provisional.graph.nodes,
+        edges: provisional.graph.edges,
+        aliases: [provisional.handle],
+      });
+      checkTracker.provider(
+        "trust-graph",
+        "Frozen trust-graph reconciliation",
+        graphResult.state,
+        graphResult.detail,
+      );
+    } catch (error) {
+      const detail = `Trust-graph materialization failed: ${String(error)}`;
+      checkTracker.provider("trust-graph", "Frozen trust-graph reconciliation", "failed", detail);
+      checkTracker.record({
+        id: "trust-graph-connections",
+        status: "unavailable",
+        note: detail,
+        provider: "argus-graph",
+      });
+      emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
+    }
   }
+  finishRuntimeStage("trust-graph", trustGraphStartedAt);
 
   // Deterministic F3 (repeat backing) assessment. Founder-only; records an
   // observable outcome so a richly-evidenced founder with no resolved venture row
@@ -2733,10 +2778,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     evidence.axes = [];
     const contradictionBefore = analystAttemptTotals(["record_contradictions"]);
     const scorerBefore = analystAttemptTotals(["record_verdict"]);
-    const analystDeadlineAt = options?.analystDeadlineAt
-      ?? runtimeStartedAt
-        + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
-        - ANALYST_FINALIZATION_RESERVE_MS;
+    // analystDeadlineAt is computed once at the top of the run (see above).
     const [found, verdict] = await Promise.all([
       decisionPacketUsable
         ? scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt })

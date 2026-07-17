@@ -2037,6 +2037,7 @@ var DEEP_INVESTIGATION_MAX_DURATION_SECONDS = 600;
 var ANALYST_SCORING_TIMEOUT_MS = 18e4;
 var ANALYST_REPAIR_TIMEOUT_MS = 9e4;
 var ANALYST_FINALIZATION_RESERVE_MS = 9e4;
+var COLLECTION_ANALYST_RESERVE_MS = 12e4;
 
 // server/agent.ts
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -17890,6 +17891,9 @@ function downgradeFixtureEvidenceForLive(seed) {
 }
 async function runAuditWithLedger(rawHandle, emit, options) {
   const runtimeStartedAt = Date.now();
+  const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
+  const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
+  const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
   const startRuntimeStage = (stage) => {
     const stageStartedAt = Date.now();
     console.info("[audit-runtime]", JSON.stringify({
@@ -18044,6 +18048,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     laneProviderRows.length = 0;
   };
   const runAdapter = async (a) => {
+    if (collectionOverBudget()) {
+      laneProviderRows.push({ id: a.id, label: a.label, state: "skipped", detail: "collection time budget reached; skipped to preserve scoring and persistence time", observedAt: (/* @__PURE__ */ new Date()).toISOString() });
+      return;
+    }
     if (!a.available()) {
       laneProviderRows.push({ id: a.id, label: a.label, state: "unavailable", detail: "provider is not configured", observedAt: (/* @__PURE__ */ new Date()).toISOString() });
       if (a.id === "github") {
@@ -18219,26 +18227,37 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     });
   };
   const signalPassesStartedAt = startRuntimeStage("signal-passes");
-  const signalPasses = [
-    trackedPass("token-lifecycle", "Promoted-token lifecycle", ["dexscreener"], () => tokenLifecycle(ctx), (e) => {
-      emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
-    })
-  ];
-  if (env("TWITTERAPI_KEY")) {
-    signalPasses.push(trackedPass("post-cadence", "Posting cadence", ["twitterapi"], () => postCadence(ctx), (e) => {
-      emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" });
-    }));
+  if (collectionOverBudget()) {
+    for (const [id, label] of [
+      ["token-lifecycle", "Promoted-token lifecycle"],
+      ["post-cadence", "Posting cadence"],
+      ["adverse-sweep", "Adverse-signal sweep"]
+    ]) {
+      checkTracker.provider(id, label, "unavailable", "collection time budget reached before this pass");
+    }
+    emit({ phase: "Collect", label: "Signal passes skipped", detail: "Collection time budget reached; skipping enrichment passes to leave time to score and persist a partial report.", tone: "warn" });
   } else {
-    checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
+    const signalPasses = [
+      trackedPass("token-lifecycle", "Promoted-token lifecycle", ["dexscreener"], () => tokenLifecycle(ctx), (e) => {
+        emit({ phase: "Token", label: "Lifecycle error", detail: String(e), tone: "warn" });
+      })
+    ];
+    if (env("TWITTERAPI_KEY")) {
+      signalPasses.push(trackedPass("post-cadence", "Posting cadence", ["twitterapi"], () => postCadence(ctx), (e) => {
+        emit({ phase: "Cadence", label: "Cadence error", detail: String(e), tone: "warn" });
+      }));
+    } else {
+      checkTracker.provider("post-cadence", "Posting cadence", "unavailable", "twitterapi.io provider is not configured");
+    }
+    if (analystAvailable() || env("XAI_API_KEY")) {
+      signalPasses.push(trackedPass("adverse-sweep", "Adverse-signal sweep", ["grok", "cache"], () => adverseSignalsAndTooling(ctx), (e) => {
+        emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
+      }));
+    } else {
+      checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
+    }
+    await Promise.all(signalPasses);
   }
-  if (analystAvailable() || env("XAI_API_KEY")) {
-    signalPasses.push(trackedPass("adverse-sweep", "Adverse-signal sweep", ["grok", "cache"], () => adverseSignalsAndTooling(ctx), (e) => {
-      emit({ phase: "Adverse", label: "Sweep error", detail: String(e), tone: "warn" });
-    }));
-  } else {
-    checkTracker.provider("adverse-sweep", "Adverse-signal sweep", "unavailable", "model search provider is not configured");
-  }
-  await Promise.all(signalPasses);
   finishRuntimeStage("signal-passes", signalPassesStartedAt);
   evidence.roles = providerBackedRoles(evidence);
   if (evidence.roles.length) {
@@ -18305,33 +18324,43 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "skipped", "not a provider-backed investor/fund role");
   }
   const trustGraphStartedAt = startRuntimeStage("trust-graph");
-  try {
-    const provisional = assembleDossier(evidence, true);
-    const graphResult = await collectTrustGraph(ctx, {
-      handle: provisional.handle,
-      nodes: provisional.graph.nodes,
-      edges: provisional.graph.edges,
-      aliases: [provisional.handle]
-    });
-    checkTracker.provider(
-      "trust-graph",
-      "Frozen trust-graph reconciliation",
-      graphResult.state,
-      graphResult.detail
-    );
-  } catch (error) {
-    const detail = `Trust-graph materialization failed: ${String(error)}`;
-    checkTracker.provider("trust-graph", "Frozen trust-graph reconciliation", "failed", detail);
+  if (collectionOverBudget()) {
+    checkTracker.provider("trust-graph", "Frozen trust-graph reconciliation", "unavailable", "collection time budget reached before graph reconciliation");
     checkTracker.record({
       id: "trust-graph-connections",
       status: "unavailable",
-      note: detail,
+      note: "collection time budget reached before flagged-subject graph reconciliation",
       provider: "argus-graph"
     });
-    emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
-  } finally {
-    finishRuntimeStage("trust-graph", trustGraphStartedAt);
+    emit({ phase: "Network", label: "Trust graph skipped", detail: "Collection time budget reached; skipped graph reconciliation to leave time to score and persist a partial report.", source: "argus-graph", tone: "warn" });
+  } else {
+    try {
+      const provisional = assembleDossier(evidence, true);
+      const graphResult = await collectTrustGraph(ctx, {
+        handle: provisional.handle,
+        nodes: provisional.graph.nodes,
+        edges: provisional.graph.edges,
+        aliases: [provisional.handle]
+      });
+      checkTracker.provider(
+        "trust-graph",
+        "Frozen trust-graph reconciliation",
+        graphResult.state,
+        graphResult.detail
+      );
+    } catch (error) {
+      const detail = `Trust-graph materialization failed: ${String(error)}`;
+      checkTracker.provider("trust-graph", "Frozen trust-graph reconciliation", "failed", detail);
+      checkTracker.record({
+        id: "trust-graph-connections",
+        status: "unavailable",
+        note: detail,
+        provider: "argus-graph"
+      });
+      emit({ phase: "Network", label: "Trust graph incomplete", detail, source: "argus-graph", tone: "warn" });
+    }
   }
+  finishRuntimeStage("trust-graph", trustGraphStartedAt);
   const repeatBacking = assessFounderRepeatBacking(evidence);
   if (repeatBacking) {
     checkTracker.record(repeatBacking);
@@ -18406,7 +18435,6 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     evidence.axes = [];
     const contradictionBefore = analystAttemptTotals(["record_contradictions"]);
     const scorerBefore = analystAttemptTotals(["record_verdict"]);
-    const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
     const [found, verdict] = await Promise.all([
       decisionPacketUsable ? scanContradictions(evidence.profile.handle, evidenceJson, { deadlineAt: analystDeadlineAt }) : Promise.resolve(null),
       scoringPreflight.state === "ready" ? analyzeSubject(evidence.profile.handle, evidence.roles, requestedAxes, evidenceJson, {

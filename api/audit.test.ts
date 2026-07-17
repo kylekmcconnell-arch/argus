@@ -48,7 +48,9 @@ import { activateReportVersion } from "./_provenance.js";
 import { resolveInput, runAudit } from "./_collector.js";
 import handler, { config } from "./audit";
 import {
+  ANALYST_FINALIZATION_RESERVE_MS,
   AUDIT_SSE_HEARTBEAT_MS,
+  COLLECTION_ANALYST_RESERVE_MS,
   DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
 } from "../src/lib/investigationRuntime";
 
@@ -505,5 +507,20 @@ describe("person audit input guard", () => {
 describe("person audit runtime budget", () => {
   it("keeps the deep-investigation route inside the Pro Fluid Compute ceiling", () => {
     expect(config).toEqual({ maxDuration: DEEP_INVESTIGATION_MAX_DURATION_SECONDS });
+  });
+
+  it("reserves collection + analyst + finalization time so a slow subject still finishes inside the ceiling", () => {
+    const ceilingMs = DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000;
+    // Collection stops COLLECTION_ANALYST_RESERVE_MS before the analyst deadline,
+    // which is itself ANALYST_FINALIZATION_RESERVE_MS before the ceiling. Both
+    // reserves must fit inside the ceiling AND leave the collection phase a
+    // positive, meaningful budget, so an over-budget subject degrades to a scored
+    // partial report rather than being killed at the ceiling with nothing.
+    const analystReserveMs = COLLECTION_ANALYST_RESERVE_MS + ANALYST_FINALIZATION_RESERVE_MS;
+    expect(COLLECTION_ANALYST_RESERVE_MS).toBeGreaterThan(0);
+    expect(analystReserveMs).toBeLessThan(ceilingMs);
+    // Collection still gets the majority of the budget (this is a safety cut-off,
+    // not an aggressive cap that would starve normal scans).
+    expect(ceilingMs - analystReserveMs).toBeGreaterThan(ceilingMs / 2);
   });
 });

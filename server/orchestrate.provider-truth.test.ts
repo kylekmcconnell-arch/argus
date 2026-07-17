@@ -56,6 +56,7 @@ describe("orchestrator provider execution truth", () => {
     });
   });
 
+
   it("keeps a fixture curated when Bitquery is the only configured credential", async () => {
     vi.stubEnv("BITQUERY_API_KEY", "configured-but-unused");
     const fetchMock = vi.fn();

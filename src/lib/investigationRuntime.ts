@@ -17,6 +17,16 @@ export const ANALYST_SCORING_TIMEOUT_MS = 180_000;
 export const ANALYST_REPAIR_TIMEOUT_MS = 90_000;
 export const ANALYST_FINALIZATION_RESERVE_MS = 90_000;
 
+// Evidence collection (every provider pass) must STOP LAUNCHING new work with
+// this much of the analyst-deadline budget still in hand, so the analyst call
+// plus finalization/persistence always fit inside the function ceiling. Without
+// it, a large multi-venture/high-connectivity subject can let collection run to
+// the ceiling and the function is killed with nothing persisted ("didn't
+// finish"). Normal subjects finish collection long before this bites, so it is a
+// no-op for them; a pathological subject instead degrades to a persisted partial
+// report scored on whatever evidence was gathered by the cut-off.
+export const COLLECTION_ANALYST_RESERVE_MS = 120_000;
+
 // This is an inactivity deadline, not a cap on the whole investigation. The
 // route emits heartbeats every 15 seconds even while the longer scorer is
 // working, so 90 seconds with no streamed bytes means the connection itself is
