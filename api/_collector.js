@@ -6271,7 +6271,7 @@ async function discoverTeamDocumentUrls(domain) {
 function htmlToText(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/\s+/g, " ").trim();
 }
-async function fetchPage(url) {
+async function fetchPage(url, expectedApex) {
   let response;
   try {
     response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,text/markdown,text/plain" }, redirect: "follow", signal: AbortSignal.timeout(8e3) });
@@ -6281,6 +6281,17 @@ async function fetchPage(url) {
   }
   if (!response.ok) {
     recordCall("site-fetch", "team-page", 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  const finalUrl = response.url || url;
+  try {
+    const finalHost = new URL(finalUrl).hostname.toLowerCase();
+    if (finalHost !== expectedApex && !finalHost.endsWith(`.${expectedApex}`)) {
+      recordCall("site-fetch", "team-page", 0, "redirected_offsite", "partial");
+      return null;
+    }
+  } catch {
+    recordCall("site-fetch", "team-page", 0, "redirected_offsite", "partial");
     return null;
   }
   const ct = response.headers.get("content-type") ?? "";
@@ -6301,7 +6312,7 @@ async function fetchPage(url) {
     return null;
   }
   recordCall("site-fetch", "team-page", 0, void 0, "succeeded");
-  return { url, text: text2 };
+  return { url: finalUrl, text: text2 };
 }
 var roleEvidencePattern = (role) => {
   if (/founder/i.test(role)) return /\b(?:co-?founders?|founders?|started|founded)\b/i;
@@ -6434,16 +6445,18 @@ async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
   return [...new Set(results.flat())].slice(0, 8);
 }
 async function fetchTeamPage(domain, projectName2) {
+  const apex = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  if (!apex) return [];
   const urls = [.../* @__PURE__ */ new Set([
     ...await discoverTeamDocumentUrls(domain),
     ...candidateUrls(domain)
   ])];
   if (!urls.length) return [];
-  const pages = (await Promise.all(urls.map(fetchPage))).filter(Boolean);
+  const pages = (await Promise.all(urls.map((u) => fetchPage(u, apex)))).filter(Boolean);
   if (!pages.length) return [];
   const directTeam = await extractTeamFromPages(pages, projectName2);
   const forumUrls = await discoverFounderAuthoredForumUrls(domain, directTeam);
-  const forumPages = (await Promise.all(forumUrls.map(fetchPage))).filter(Boolean);
+  const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex)))).filter(Boolean);
   const forumTeam = await extractTeamFromPages(forumPages, projectName2, true);
   const seen = /* @__PURE__ */ new Set();
   return [...directTeam, ...forumTeam].filter((person) => {
@@ -6454,12 +6467,336 @@ async function fetchTeamPage(domain, projectName2) {
   });
 }
 
+// server/publicWeb.ts
+import { createHash as createHash3 } from "node:crypto";
+import { lookup as dnsLookup } from "node:dns/promises";
+import { request as httpRequest } from "node:http";
+import { request as httpsRequest } from "node:https";
+import { isIP } from "node:net";
+import { Readable } from "node:stream";
+var MAX_TEXT_BYTES = 15e5;
+var MAX_REDIRECTS = 4;
+var JINA_READER_ORIGIN = "https://r.jina.ai/";
+var PUBLIC_WEB_USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
+var JINA_RECOVERABLE_FAILURES = /* @__PURE__ */ new Set([
+  "anti_bot_challenge",
+  "http_403",
+  "http_429",
+  "transport_error",
+  "response_stream_error"
+]);
+var JINA_TRANSIENT_FAILURES = /* @__PURE__ */ new Set([
+  "http_422",
+  "http_429",
+  "transport_error",
+  "response_stream_error"
+]);
+var SENSITIVE_URL_PARAM2 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
+var CAPABILITY_PATH_LABEL = /^(?:auth|invite|magic|private|secret|share|signed|token)$/i;
+var SAFE_CONTENT_TYPES = /* @__PURE__ */ new Set([
+  "application/json",
+  "application/ld+json",
+  "application/xhtml+xml",
+  "text/html",
+  "text/markdown",
+  "text/plain",
+  "text/xml"
+]);
+function antiBotChallengeHeaders(headers4) {
+  const mitigation = headers4.get("cf-mitigated") ?? "";
+  const captcha = headers4.get("x-datadome") ?? headers4.get("x-captcha") ?? "";
+  return /challenge|captcha/i.test(`${mitigation} ${captcha}`);
+}
+function antiBotChallengeBody(contentType, text2) {
+  if (!/html|xhtml/i.test(contentType)) return false;
+  const sample = text2.slice(0, 2e5);
+  const cloudflareTitle = /<title[^>]*>\s*just a moment(?:\.{3})?\s*<\/title>/i.test(sample);
+  const cloudflareRuntime = /(?:\/cdn-cgi\/challenge-platform\/|challenges\.cloudflare\.com|\bcf-chl-)/i.test(sample);
+  const otherChallengeRuntime = /(?:captcha-delivery|_pxcaptcha|perimeterx|datadome|incapsula|akamai bot manager)/i.test(sample);
+  const humanPrompt = /(?:verify (?:that )?you are human|checking (?:your )?browser(?: before accessing)?|enable javascript and cookies to continue)/i.test(sample);
+  return cloudflareTitle && cloudflareRuntime || otherChallengeRuntime && humanPrompt;
+}
+function normalizedJinaSource(text2) {
+  const matches = [...text2.matchAll(/^URL Source:\s*(\S+)\s*$/gm)];
+  if (matches.length !== 1) return null;
+  try {
+    const source2 = new URL(matches[0][1]);
+    if (source2.protocol !== "https:" && source2.protocol !== "http:" || source2.username || source2.password) return null;
+    source2.hash = "";
+    return source2.toString();
+  } catch {
+    return null;
+  }
+}
+function pathnameMayContainCapability(url) {
+  const segments = url.pathname.split("/").filter(Boolean).map((segment) => {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  });
+  return segments.some((segment, index) => {
+    if (CAPABILITY_PATH_LABEL.test(segment) && Boolean(segments[index + 1])) return true;
+    return /^(?:share|invite|token|secret)[-_][A-Za-z0-9_-]{12,}$/i.test(segment);
+  });
+}
+function isPublicIpAddress(address) {
+  const version = isIP(address);
+  if (version === 4) {
+    const [a, b, c] = address.split(".").map(Number);
+    return !(a === 0 || a === 10 || a === 127 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 0 && c === 0 || a === 192 && b === 0 && c === 2 || a === 192 && b === 88 && c === 99 || a === 192 && b === 168 || a === 198 && (b === 18 || b === 19) || a === 198 && b === 51 && c === 100 || a === 203 && b === 0 && c === 113 || a >= 224);
+  }
+  if (version === 6) {
+    const value = address.toLowerCase();
+    const parts = value.split(":");
+    const first = Number.parseInt(parts[0] || "0", 16);
+    const second = Number.parseInt(parts[1] || "0", 16);
+    if (!Number.isFinite(first) || first < 8192 || first > 16383) return false;
+    if (first === 8194 || first === 16382) return false;
+    if (first === 8193 && (second === 0 || second === 2 || second >= 16 && second <= 47 || second === 3512)) return false;
+    return true;
+  }
+  return false;
+}
+var defaultLookup = async (hostname2) => dnsLookup(hostname2, { all: true, verbatim: true });
+var normalizedHostname = (value) => value.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
+async function validatedPublicTarget(raw, base, lookup = defaultLookup) {
+  let url;
+  try {
+    url = base ? new URL(raw, base) : new URL(raw);
+  } catch {
+    return null;
+  }
+  if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password) return null;
+  if (url.port && !(url.protocol === "https:" && url.port === "443" || url.protocol === "http:" && url.port === "80")) return null;
+  if ([...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM2.test(key))) return null;
+  const hostname2 = normalizedHostname(url.hostname);
+  if (!hostname2 || isIP(hostname2) || hostname2 === "localhost" || hostname2.endsWith(".localhost") || hostname2.endsWith(".local") || hostname2.endsWith(".internal")) return null;
+  try {
+    const resolved = await lookup(hostname2);
+    if (!resolved.length) return null;
+    const addresses = resolved.map((entry) => ({
+      address: entry.address,
+      // Trust the parsed address rather than provider-supplied family metadata.
+      family: isIP(entry.address)
+    }));
+    if (addresses.some((entry) => !entry.family || !isPublicIpAddress(entry.address))) return null;
+    url.hash = "";
+    return {
+      url,
+      hostname: hostname2,
+      addresses: Object.freeze(addresses.map((entry) => Object.freeze({ ...entry })))
+    };
+  } catch {
+    return null;
+  }
+}
+var pinnedLookupFor = (target) => (hostname2, options, callback) => {
+  const requestedHost = normalizedHostname(hostname2);
+  if (requestedHost !== target.hostname) {
+    const error = new Error("socket lookup hostname differed from validated target");
+    error.code = "EACCES";
+    callback(error, "", 0);
+    return;
+  }
+  const publicAddresses = target.addresses.filter((entry) => entry.family === isIP(entry.address) && isPublicIpAddress(entry.address));
+  const requestedFamily = options.family === "IPv4" ? 4 : options.family === "IPv6" ? 6 : options.family;
+  const eligible = requestedFamily === 4 || requestedFamily === 6 ? publicAddresses.filter((entry) => entry.family === requestedFamily) : publicAddresses;
+  if (!eligible.length) {
+    const error = new Error("validated target has no public address for requested family");
+    error.code = "EACCES";
+    callback(error, "", 0);
+    return;
+  }
+  if (options.all) callback(null, eligible.map((entry) => ({ ...entry })));
+  else callback(null, eligible[0].address, eligible[0].family);
+};
+var responseHeaders = (rawHeaders) => {
+  const headers4 = new Headers();
+  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
+    headers4.append(rawHeaders[index], rawHeaders[index + 1]);
+  }
+  return headers4;
+};
+function fetchCompatibleResponseStatus(statusCode) {
+  if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 200 && statusCode <= 599) return statusCode;
+  if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 600 && statusCode <= 999) return 403;
+  return 502;
+}
+var nativeRequest = (url, options) => new Promise((resolve, reject) => {
+  const request = url.protocol === "https:" ? httpsRequest : httpRequest;
+  const requestOptions = {
+    method: "GET",
+    headers: options.headers,
+    signal: options.signal,
+    lookup: options.lookup,
+    // Never reuse a socket whose connection was established under another DNS
+    // decision. Every hop must exercise this request's pinned lookup.
+    agent: false
+  };
+  const outgoing = request(url, requestOptions, (incoming) => {
+    try {
+      const upstreamStatus = incoming.statusCode;
+      const status = fetchCompatibleResponseStatus(upstreamStatus);
+      const headers4 = responseHeaders(incoming.rawHeaders);
+      if (status !== upstreamStatus && upstreamStatus !== void 0) {
+        headers4.set("x-argus-upstream-status", String(upstreamStatus));
+      }
+      const statusText = status === upstreamStatus ? incoming.statusMessage : "Upstream response rejected";
+      const noBody = status === 204 || status === 205 || status === 304 || status >= 300 && status < 400;
+      if (noBody) {
+        incoming.resume();
+        resolve(new Response(null, { status, statusText, headers: headers4 }));
+        return;
+      }
+      const body = Readable.toWeb(incoming);
+      resolve(new Response(body, { status, statusText, headers: headers4 }));
+    } catch (error) {
+      incoming.destroy();
+      reject(error);
+    }
+  });
+  outgoing.once("error", reject);
+  outgoing.end();
+});
+async function readBoundedText(response) {
+  const declared = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declared) && declared > MAX_TEXT_BYTES) return null;
+  if (!response.body) return Buffer.alloc(0);
+  const chunks = [];
+  const reader = response.body.getReader();
+  let total = 0;
+  for (; ; ) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > MAX_TEXT_BYTES) {
+      await reader.cancel();
+      return null;
+    }
+    chunks.push(Buffer.from(value));
+  }
+  return Buffer.concat(chunks, total);
+}
+async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8") {
+  const request = dependencies.request ?? nativeRequest;
+  const lookup = dependencies.lookup ?? defaultLookup;
+  let target = initialTarget;
+  for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
+    let response;
+    try {
+      response = await request(target.url, {
+        signal: AbortSignal.timeout(8e3),
+        headers: {
+          accept,
+          "accept-language": "en-US,en;q=0.8",
+          "user-agent": PUBLIC_WEB_USER_AGENT
+        },
+        lookup: pinnedLookupFor(target)
+      });
+    } catch {
+      return { status: "failed", reason: "transport_error" };
+    }
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get("location");
+      if (!location || redirect === MAX_REDIRECTS) return { status: "failed", reason: "invalid_or_excessive_redirect" };
+      target = await validatedPublicTarget(location, target.url, lookup);
+      if (!target) return { status: "rejected", reason: "unsafe_redirect" };
+      continue;
+    }
+    if (antiBotChallengeHeaders(response.headers)) {
+      return { status: "failed", reason: "anti_bot_challenge" };
+    }
+    if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
+    const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+    if (contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
+      return { status: "failed", reason: "unsupported_content_type" };
+    }
+    let bytes;
+    try {
+      bytes = await readBoundedText(response);
+    } catch {
+      return { status: "failed", reason: "response_stream_error" };
+    }
+    if (!bytes) return { status: "failed", reason: "response_too_large" };
+    const text2 = bytes.toString("utf8");
+    if (!text2.trim()) return { status: "failed", reason: "empty_response" };
+    if (antiBotChallengeBody(contentType, text2)) {
+      return { status: "failed", reason: "anti_bot_challenge" };
+    }
+    return {
+      status: "ok",
+      url: target.url.toString(),
+      host: target.url.hostname.replace(/^www\./i, "").toLowerCase(),
+      contentType: contentType || "text/plain",
+      text: text2,
+      contentHash: createHash3("sha256").update(bytes).digest("hex"),
+      capturedAt: (dependencies.now?.() ?? /* @__PURE__ */ new Date()).toISOString()
+    };
+  }
+  return { status: "failed", reason: "redirect_loop" };
+}
+async function fetchPublicText(raw, dependencies = {}) {
+  const lookup = dependencies.lookup ?? defaultLookup;
+  const target = await validatedPublicTarget(raw, void 0, lookup);
+  if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
+  return fetchValidatedPublicText(target, dependencies);
+}
+async function fetchPublicTextWithRecovery(raw, dependencies = {}) {
+  const lookup = dependencies.lookup ?? defaultLookup;
+  const originalTarget = await validatedPublicTarget(raw, void 0, lookup);
+  if (!originalTarget) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
+  const direct = await fetchValidatedPublicText(originalTarget, dependencies);
+  if (direct.status === "ok") {
+    return {
+      ...direct,
+      retrievalMethod: "direct",
+      retrievalProvider: "origin",
+      retrievalUrl: direct.url
+    };
+  }
+  if (direct.status === "rejected") return direct;
+  if (!JINA_RECOVERABLE_FAILURES.has(direct.reason)) return direct;
+  if (originalTarget.url.search) return direct;
+  if (pathnameMayContainCapability(originalTarget.url)) return direct;
+  const readerTarget = await validatedPublicTarget(
+    `${JINA_READER_ORIGIN}${originalTarget.url.toString()}`,
+    void 0,
+    lookup
+  );
+  if (!readerTarget) return { status: "failed", reason: "reader_target_validation_failed" };
+  let recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
+  if (recovered.status === "failed" && JINA_TRANSIENT_FAILURES.has(recovered.reason)) {
+    await (dependencies.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs))))(750);
+    recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
+  }
+  if (recovered.status !== "ok") {
+    return { status: "failed", reason: `reader_recovery_failed_${recovered.reason}` };
+  }
+  if (recovered.url !== readerTarget.url.toString()) {
+    return { status: "failed", reason: "reader_redirect_mismatch" };
+  }
+  if (normalizedJinaSource(recovered.text) !== originalTarget.url.toString()) {
+    return { status: "failed", reason: "reader_source_mismatch" };
+  }
+  return {
+    ...recovered,
+    // Evidence classification and citations must stay bound to the source the
+    // model named, never to the rendering intermediary.
+    url: originalTarget.url.toString(),
+    host: originalTarget.hostname.replace(/^www\./i, "").toLowerCase(),
+    retrievalMethod: "reader_recovery",
+    retrievalProvider: "jina-reader",
+    retrievalUrl: recovered.url
+  };
+}
+
 // server/adapters/sitecheck.ts
 var COMING = /coming[\s_-]*soon|under[\s_-]*construction|launching[\s_-]*soon|join[\s_-]*(the[\s_-]*)?waitlist|\bwaitlist\b|early[\s_-]*access|get[\s_-]*notified|notify[\s_-]*me|be[\s_-]*the[\s_-]*first|request[\s_-]*access|sign[\s_-]*up[\s_-]*for[\s_-]*(early[\s_-]*)?access/i;
 var HARD_COMING = /coming[\s_-]*soon|under[\s_-]*construction|launching[\s_-]*soon/i;
 var PARKED = /this[\s_-]*domain[\s_-]*is[\s_-]*for[\s_-]*sale|buy[\s_-]*this[\s_-]*domain|hugedomains|sedoparking|parkingcrew|domain[\s_-]*(is[\s_-]*)?parked/i;
 var PRODUCT = /\b(docs|whitepaper|dashboard|pricing|features|roadmap|marketplace|explorer|portfolio|order\s*book|connect\s*wallet|launch\s*app|sign\s*in|log\s*in|deposit|withdraw|governance|staking)\b/i;
-var ANTI_BOT = /cf-chl-|challenge-platform|just a moment(?:\.{3})?|checking (?:your )?browser(?: before accessing)?|verify (?:that )?you are human|captcha-delivery|_pxcaptcha|perimeterx|datadome|incapsula|akamai bot manager|bot verification/i;
 var DNS_CODES = /* @__PURE__ */ new Set(["ENOTFOUND", "EAI_AGAIN", "EAI_FAIL", "ENODATA", "ENONAME"]);
 function stripText(html) {
   return html.replace(/<script[\s\S]*?<\/script>/gi, " ").replace(/<style[\s\S]*?<\/style>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim();
@@ -6483,7 +6820,7 @@ function hostname(url) {
 function isAntiBotResponse(response, body) {
   const mitigation = response.headers.get("cf-mitigated") ?? "";
   const challenge = response.headers.get("x-datadome") ?? response.headers.get("x-captcha") ?? "";
-  return /challenge|captcha/i.test(`${mitigation} ${challenge}`) || ANTI_BOT.test(body);
+  return /challenge|captcha/i.test(`${mitigation} ${challenge}`) || antiBotChallengeBody(response.headers.get("content-type") ?? "text/html", body);
 }
 async function get(url, opts) {
   let response;
@@ -6639,7 +6976,7 @@ async function checkSiteSubstance(domain) {
       detail: "the served homepage is a registrar parking or domain-for-sale page"
     };
   }
-  const hardComingMarker = HARD_COMING.test(`${title} ${meta}`);
+  const hardComingMarker = HARD_COMING.test(`${title} ${meta}`) && !hasSubstantialProductSurface;
   const comingOnlySurface = COMING.test(`${title} ${meta} ${body}`) && !hasSubstantialProductSurface;
   if (hardComingMarker || comingOnlySurface) {
     const excerpt = [title, meta].find((value) => COMING.test(value)) || body.match(COMING)?.[0] || "coming-soon marker";
@@ -7752,7 +8089,15 @@ async function ghJson(path, key) {
   recordCall("github", op, 0, tier, "succeeded");
   return value;
 }
-async function resolveGithub(handle, name, key) {
+var apexOf = (value) => {
+  if (!value?.trim()) return "";
+  try {
+    return new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+};
+async function resolveGithub(handle, name, key, subject) {
   const h = handle.replace(/^@/, "").toLowerCase();
   const candidates = /* @__PURE__ */ new Set([h]);
   for (const q of [name, handle.replace(/^@/, "")]) {
@@ -7760,18 +8105,26 @@ async function resolveGithub(handle, name, key) {
     const found = await ghJson(`/search/users?q=${encodeURIComponent(q)}&per_page=5`, key);
     for (const it of found?.items ?? []) candidates.add(it.login);
   }
+  const bioText = (subject?.bioText ?? "").toLowerCase();
+  const siteApex = apexOf(subject?.siteDomain);
+  let claimed = null;
   let weak = null;
   for (const login of [...candidates].slice(0, 8)) {
     const u = await ghJson(`/users/${encodeURIComponent(login)}`, key);
     if (!u) continue;
     if ((u.twitter_username ?? "").toLowerCase() === h) {
-      return { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "gold" };
+      const subjectLinksBack = !!bioText && bioText.includes(`github.com/${u.login.toLowerCase()}`);
+      const blogIsSubjectSite = !!siteApex && apexOf(u.blog) === siteApex;
+      if (subjectLinksBack || blogIsSubjectSite) {
+        return { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "gold" };
+      }
+      if (!claimed) claimed = { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "claimed" };
     }
     if (!weak && u.login.toLowerCase() === h) {
       weak = { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "weak" };
     }
   }
-  return weak;
+  return claimed ?? weak;
 }
 async function githubAffiliations(login, key) {
   const out = /* @__PURE__ */ new Map();
@@ -7797,7 +8150,10 @@ var githubAdapter = {
     if (!key) return;
     const name = ctx.evidence.profile.display_name;
     ctx.emit({ phase: "P1 \xB7 Identity", label: "GitHub resolution", detail: `Matching ${ctx.handle} to a GitHub account by linked X handle\u2026`, source: "github", tone: "neutral" });
-    const match = await resolveGithub(ctx.handle, name, key);
+    const match = await resolveGithub(ctx.handle, name, key, {
+      bioText: [ctx.evidence.profile.bio, ctx.evidence.profile.website].filter(Boolean).join(" "),
+      siteDomain: ctx.evidence.profile.website
+    });
     if (!match) {
       ctx.recordCheck?.({
         id: "code-footprint-github",
@@ -7806,6 +8162,16 @@ var githubAdapter = {
         provider: "github"
       });
       ctx.emit({ phase: "P1 \xB7 Identity", label: "No GitHub match", detail: "No GitHub account links back to this X handle.", source: "github", tone: "neutral" });
+      return;
+    }
+    if (match.confidence === "claimed") {
+      ctx.recordCheck?.({
+        id: "code-footprint-github",
+        status: "unknown",
+        note: `github.com/${match.login} names this X handle, but nothing on the subject's side links back to it`,
+        provider: "github"
+      });
+      ctx.emit({ phase: "P1 \xB7 Identity", label: "Possible GitHub", detail: `github.com/${match.login} names ${ctx.handle} in its profile, but the subject's bio and site never reference it. Unconfirmed, not attributed.`, source: "github", tone: "warn" });
       return;
     }
     if (match.confidence === "weak") {
@@ -8084,333 +8450,6 @@ var onchainAdapter = {
 // server/adapters/basicFacts.ts
 import { createHash as createHash4 } from "node:crypto";
 import { isIP as isIP2 } from "node:net";
-
-// server/publicWeb.ts
-import { createHash as createHash3 } from "node:crypto";
-import { lookup as dnsLookup } from "node:dns/promises";
-import { request as httpRequest } from "node:http";
-import { request as httpsRequest } from "node:https";
-import { isIP } from "node:net";
-import { Readable } from "node:stream";
-var MAX_TEXT_BYTES = 15e5;
-var MAX_REDIRECTS = 4;
-var JINA_READER_ORIGIN = "https://r.jina.ai/";
-var PUBLIC_WEB_USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
-var JINA_RECOVERABLE_FAILURES = /* @__PURE__ */ new Set([
-  "anti_bot_challenge",
-  "http_403",
-  "http_429",
-  "transport_error",
-  "response_stream_error"
-]);
-var JINA_TRANSIENT_FAILURES = /* @__PURE__ */ new Set([
-  "http_422",
-  "http_429",
-  "transport_error",
-  "response_stream_error"
-]);
-var SENSITIVE_URL_PARAM2 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
-var CAPABILITY_PATH_LABEL = /^(?:auth|invite|magic|private|secret|share|signed|token)$/i;
-var SAFE_CONTENT_TYPES = /* @__PURE__ */ new Set([
-  "application/json",
-  "application/ld+json",
-  "application/xhtml+xml",
-  "text/html",
-  "text/markdown",
-  "text/plain",
-  "text/xml"
-]);
-function antiBotChallengeHeaders(headers4) {
-  const mitigation = headers4.get("cf-mitigated") ?? "";
-  const captcha = headers4.get("x-datadome") ?? headers4.get("x-captcha") ?? "";
-  return /challenge|captcha/i.test(`${mitigation} ${captcha}`);
-}
-function antiBotChallengeBody(contentType, text2) {
-  if (!/html|xhtml/i.test(contentType)) return false;
-  const sample = text2.slice(0, 2e5);
-  const cloudflareTitle = /<title[^>]*>\s*just a moment(?:\.{3})?\s*<\/title>/i.test(sample);
-  const cloudflareRuntime = /(?:\/cdn-cgi\/challenge-platform\/|challenges\.cloudflare\.com|\bcf-chl-)/i.test(sample);
-  const otherChallengeRuntime = /(?:captcha-delivery|_pxcaptcha|perimeterx|datadome|incapsula|akamai bot manager)/i.test(sample);
-  const humanPrompt = /(?:verify (?:that )?you are human|checking (?:your )?browser(?: before accessing)?|enable javascript and cookies to continue)/i.test(sample);
-  return cloudflareTitle && cloudflareRuntime || otherChallengeRuntime && humanPrompt;
-}
-function normalizedJinaSource(text2) {
-  const matches = [...text2.matchAll(/^URL Source:\s*(\S+)\s*$/gm)];
-  if (matches.length !== 1) return null;
-  try {
-    const source2 = new URL(matches[0][1]);
-    if (source2.protocol !== "https:" && source2.protocol !== "http:" || source2.username || source2.password) return null;
-    source2.hash = "";
-    return source2.toString();
-  } catch {
-    return null;
-  }
-}
-function pathnameMayContainCapability(url) {
-  const segments = url.pathname.split("/").filter(Boolean).map((segment) => {
-    try {
-      return decodeURIComponent(segment);
-    } catch {
-      return segment;
-    }
-  });
-  return segments.some((segment, index) => {
-    if (CAPABILITY_PATH_LABEL.test(segment) && Boolean(segments[index + 1])) return true;
-    return /^(?:share|invite|token|secret)[-_][A-Za-z0-9_-]{12,}$/i.test(segment);
-  });
-}
-function isPublicIpAddress(address) {
-  const version = isIP(address);
-  if (version === 4) {
-    const [a, b, c] = address.split(".").map(Number);
-    return !(a === 0 || a === 10 || a === 127 || a === 100 && b >= 64 && b <= 127 || a === 169 && b === 254 || a === 172 && b >= 16 && b <= 31 || a === 192 && b === 0 && c === 0 || a === 192 && b === 0 && c === 2 || a === 192 && b === 88 && c === 99 || a === 192 && b === 168 || a === 198 && (b === 18 || b === 19) || a === 198 && b === 51 && c === 100 || a === 203 && b === 0 && c === 113 || a >= 224);
-  }
-  if (version === 6) {
-    const value = address.toLowerCase();
-    const parts = value.split(":");
-    const first = Number.parseInt(parts[0] || "0", 16);
-    const second = Number.parseInt(parts[1] || "0", 16);
-    if (!Number.isFinite(first) || first < 8192 || first > 16383) return false;
-    if (first === 8194 || first === 16382) return false;
-    if (first === 8193 && (second === 0 || second === 2 || second >= 16 && second <= 47 || second === 3512)) return false;
-    return true;
-  }
-  return false;
-}
-var defaultLookup = async (hostname2) => dnsLookup(hostname2, { all: true, verbatim: true });
-var normalizedHostname = (value) => value.replace(/^\[|\]$/g, "").replace(/\.$/, "").toLowerCase();
-async function validatedPublicTarget(raw, base, lookup = defaultLookup) {
-  let url;
-  try {
-    url = base ? new URL(raw, base) : new URL(raw);
-  } catch {
-    return null;
-  }
-  if (url.protocol !== "https:" && url.protocol !== "http:" || url.username || url.password) return null;
-  if (url.port && !(url.protocol === "https:" && url.port === "443" || url.protocol === "http:" && url.port === "80")) return null;
-  if ([...url.searchParams.keys()].some((key) => SENSITIVE_URL_PARAM2.test(key))) return null;
-  const hostname2 = normalizedHostname(url.hostname);
-  if (!hostname2 || isIP(hostname2) || hostname2 === "localhost" || hostname2.endsWith(".localhost") || hostname2.endsWith(".local") || hostname2.endsWith(".internal")) return null;
-  try {
-    const resolved = await lookup(hostname2);
-    if (!resolved.length) return null;
-    const addresses = resolved.map((entry) => ({
-      address: entry.address,
-      // Trust the parsed address rather than provider-supplied family metadata.
-      family: isIP(entry.address)
-    }));
-    if (addresses.some((entry) => !entry.family || !isPublicIpAddress(entry.address))) return null;
-    url.hash = "";
-    return {
-      url,
-      hostname: hostname2,
-      addresses: Object.freeze(addresses.map((entry) => Object.freeze({ ...entry })))
-    };
-  } catch {
-    return null;
-  }
-}
-var pinnedLookupFor = (target) => (hostname2, options, callback) => {
-  const requestedHost = normalizedHostname(hostname2);
-  if (requestedHost !== target.hostname) {
-    const error = new Error("socket lookup hostname differed from validated target");
-    error.code = "EACCES";
-    callback(error, "", 0);
-    return;
-  }
-  const publicAddresses = target.addresses.filter((entry) => entry.family === isIP(entry.address) && isPublicIpAddress(entry.address));
-  const requestedFamily = options.family === "IPv4" ? 4 : options.family === "IPv6" ? 6 : options.family;
-  const eligible = requestedFamily === 4 || requestedFamily === 6 ? publicAddresses.filter((entry) => entry.family === requestedFamily) : publicAddresses;
-  if (!eligible.length) {
-    const error = new Error("validated target has no public address for requested family");
-    error.code = "EACCES";
-    callback(error, "", 0);
-    return;
-  }
-  if (options.all) callback(null, eligible.map((entry) => ({ ...entry })));
-  else callback(null, eligible[0].address, eligible[0].family);
-};
-var responseHeaders = (rawHeaders) => {
-  const headers4 = new Headers();
-  for (let index = 0; index + 1 < rawHeaders.length; index += 2) {
-    headers4.append(rawHeaders[index], rawHeaders[index + 1]);
-  }
-  return headers4;
-};
-function fetchCompatibleResponseStatus(statusCode) {
-  if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 200 && statusCode <= 599) return statusCode;
-  if (typeof statusCode === "number" && Number.isInteger(statusCode) && statusCode >= 600 && statusCode <= 999) return 403;
-  return 502;
-}
-var nativeRequest = (url, options) => new Promise((resolve, reject) => {
-  const request = url.protocol === "https:" ? httpsRequest : httpRequest;
-  const requestOptions = {
-    method: "GET",
-    headers: options.headers,
-    signal: options.signal,
-    lookup: options.lookup,
-    // Never reuse a socket whose connection was established under another DNS
-    // decision. Every hop must exercise this request's pinned lookup.
-    agent: false
-  };
-  const outgoing = request(url, requestOptions, (incoming) => {
-    try {
-      const upstreamStatus = incoming.statusCode;
-      const status = fetchCompatibleResponseStatus(upstreamStatus);
-      const headers4 = responseHeaders(incoming.rawHeaders);
-      if (status !== upstreamStatus && upstreamStatus !== void 0) {
-        headers4.set("x-argus-upstream-status", String(upstreamStatus));
-      }
-      const statusText = status === upstreamStatus ? incoming.statusMessage : "Upstream response rejected";
-      const noBody = status === 204 || status === 205 || status === 304 || status >= 300 && status < 400;
-      if (noBody) {
-        incoming.resume();
-        resolve(new Response(null, { status, statusText, headers: headers4 }));
-        return;
-      }
-      const body = Readable.toWeb(incoming);
-      resolve(new Response(body, { status, statusText, headers: headers4 }));
-    } catch (error) {
-      incoming.destroy();
-      reject(error);
-    }
-  });
-  outgoing.once("error", reject);
-  outgoing.end();
-});
-async function readBoundedText(response) {
-  const declared = Number(response.headers.get("content-length"));
-  if (Number.isFinite(declared) && declared > MAX_TEXT_BYTES) return null;
-  if (!response.body) return Buffer.alloc(0);
-  const chunks = [];
-  const reader = response.body.getReader();
-  let total = 0;
-  for (; ; ) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    total += value.byteLength;
-    if (total > MAX_TEXT_BYTES) {
-      await reader.cancel();
-      return null;
-    }
-    chunks.push(Buffer.from(value));
-  }
-  return Buffer.concat(chunks, total);
-}
-async function fetchValidatedPublicText(initialTarget, dependencies = {}, accept = "text/html,application/xhtml+xml,application/json,text/plain;q=0.8") {
-  const request = dependencies.request ?? nativeRequest;
-  const lookup = dependencies.lookup ?? defaultLookup;
-  let target = initialTarget;
-  for (let redirect = 0; redirect <= MAX_REDIRECTS; redirect += 1) {
-    let response;
-    try {
-      response = await request(target.url, {
-        signal: AbortSignal.timeout(8e3),
-        headers: {
-          accept,
-          "accept-language": "en-US,en;q=0.8",
-          "user-agent": PUBLIC_WEB_USER_AGENT
-        },
-        lookup: pinnedLookupFor(target)
-      });
-    } catch {
-      return { status: "failed", reason: "transport_error" };
-    }
-    if (response.status >= 300 && response.status < 400) {
-      const location = response.headers.get("location");
-      if (!location || redirect === MAX_REDIRECTS) return { status: "failed", reason: "invalid_or_excessive_redirect" };
-      target = await validatedPublicTarget(location, target.url, lookup);
-      if (!target) return { status: "rejected", reason: "unsafe_redirect" };
-      continue;
-    }
-    if (antiBotChallengeHeaders(response.headers)) {
-      return { status: "failed", reason: "anti_bot_challenge" };
-    }
-    if (!response.ok) return { status: "failed", reason: `http_${response.status}` };
-    const contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
-    if (contentType && !SAFE_CONTENT_TYPES.has(contentType)) {
-      return { status: "failed", reason: "unsupported_content_type" };
-    }
-    let bytes;
-    try {
-      bytes = await readBoundedText(response);
-    } catch {
-      return { status: "failed", reason: "response_stream_error" };
-    }
-    if (!bytes) return { status: "failed", reason: "response_too_large" };
-    const text2 = bytes.toString("utf8");
-    if (!text2.trim()) return { status: "failed", reason: "empty_response" };
-    if (antiBotChallengeBody(contentType, text2)) {
-      return { status: "failed", reason: "anti_bot_challenge" };
-    }
-    return {
-      status: "ok",
-      url: target.url.toString(),
-      host: target.url.hostname.replace(/^www\./i, "").toLowerCase(),
-      contentType: contentType || "text/plain",
-      text: text2,
-      contentHash: createHash3("sha256").update(bytes).digest("hex"),
-      capturedAt: (dependencies.now?.() ?? /* @__PURE__ */ new Date()).toISOString()
-    };
-  }
-  return { status: "failed", reason: "redirect_loop" };
-}
-async function fetchPublicText(raw, dependencies = {}) {
-  const lookup = dependencies.lookup ?? defaultLookup;
-  const target = await validatedPublicTarget(raw, void 0, lookup);
-  if (!target) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
-  return fetchValidatedPublicText(target, dependencies);
-}
-async function fetchPublicTextWithRecovery(raw, dependencies = {}) {
-  const lookup = dependencies.lookup ?? defaultLookup;
-  const originalTarget = await validatedPublicTarget(raw, void 0, lookup);
-  if (!originalTarget) return { status: "rejected", reason: "unsafe_or_unresolvable_url" };
-  const direct = await fetchValidatedPublicText(originalTarget, dependencies);
-  if (direct.status === "ok") {
-    return {
-      ...direct,
-      retrievalMethod: "direct",
-      retrievalProvider: "origin",
-      retrievalUrl: direct.url
-    };
-  }
-  if (direct.status === "rejected") return direct;
-  if (!JINA_RECOVERABLE_FAILURES.has(direct.reason)) return direct;
-  if (originalTarget.url.search) return direct;
-  if (pathnameMayContainCapability(originalTarget.url)) return direct;
-  const readerTarget = await validatedPublicTarget(
-    `${JINA_READER_ORIGIN}${originalTarget.url.toString()}`,
-    void 0,
-    lookup
-  );
-  if (!readerTarget) return { status: "failed", reason: "reader_target_validation_failed" };
-  let recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
-  if (recovered.status === "failed" && JINA_TRANSIENT_FAILURES.has(recovered.reason)) {
-    await (dependencies.wait ?? ((delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs))))(750);
-    recovered = await fetchValidatedPublicText(readerTarget, dependencies, "text/plain,text/markdown;q=0.9");
-  }
-  if (recovered.status !== "ok") {
-    return { status: "failed", reason: `reader_recovery_failed_${recovered.reason}` };
-  }
-  if (recovered.url !== readerTarget.url.toString()) {
-    return { status: "failed", reason: "reader_redirect_mismatch" };
-  }
-  if (normalizedJinaSource(recovered.text) !== originalTarget.url.toString()) {
-    return { status: "failed", reason: "reader_source_mismatch" };
-  }
-  return {
-    ...recovered,
-    // Evidence classification and citations must stay bound to the source the
-    // model named, never to the rendering intermediary.
-    url: originalTarget.url.toString(),
-    host: originalTarget.hostname.replace(/^www\./i, "").toLowerCase(),
-    retrievalMethod: "reader_recovery",
-    retrievalProvider: "jina-reader",
-    retrievalUrl: recovered.url
-  };
-}
-
-// server/adapters/basicFacts.ts
 var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
 var PRIMARY_SEARCH_USES_PER_BATCH = 3;
 var REPAIR_SEARCH_USES = 4;
@@ -12690,7 +12729,7 @@ async function archivedAffiliation(domain, subjectName3, ventureName) {
   const subjectNeedles = nameNeedles(subjectName3);
   if (!subjectNeedles.length) return null;
   const domainRoot = clean4.split(".")[0] ?? "";
-  const ventureNeedles = [ventureName.trim().toLowerCase(), domainRoot].filter((t) => t.length >= 3);
+  const ventureNeedles = [ventureName.trim().toLowerCase(), domainRoot].filter((t) => t.length >= 3).map(needleRegex);
   if (!ventureNeedles.length) return null;
   const paths = [`${clean4}/team`, `${clean4}/about`];
   for (const p of paths) {
@@ -12706,7 +12745,7 @@ async function archivedAffiliation(domain, subjectName3, ventureName) {
       }
       let text2;
       try {
-        text2 = (await response.text()).toLowerCase();
+        text2 = htmlToText(await response.text());
       } catch {
         recordCall("wayback", "snapshot-fetch", 0, "response_text_error", "failed");
         continue;
@@ -12715,7 +12754,7 @@ async function archivedAffiliation(domain, subjectName3, ventureName) {
         recordCall("wayback", "snapshot-fetch", 0, "empty_snapshot", "partial");
         continue;
       }
-      const matched = subjectNeedles.some((n) => text2.includes(n)) && ventureNeedles.some((n) => text2.includes(n));
+      const matched = subjectNeedles.some((n) => n.test(text2)) && ventureNeedles.some((n) => n.test(text2));
       recordCall("wayback", "snapshot-fetch", 0, matched ? "subject_and_venture_match" : "no_match", "succeeded");
       if (matched) {
         return {
@@ -12730,12 +12769,16 @@ async function archivedAffiliation(domain, subjectName3, ventureName) {
   }
   return null;
 }
+function needleRegex(needle) {
+  const parts = needle.split(/\s+/).map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`(?:^|[^\\p{L}\\p{N}])${parts.join("\\s+")}(?:[^\\p{L}\\p{N}]|$)`, "iu");
+}
 function nameNeedles(name) {
   const n = name.trim().toLowerCase();
   const toks = n.split(/\s+/).filter((t) => t.length > 1);
   if (toks.length < 2) return [];
   const out = /* @__PURE__ */ new Set([n, `${toks[0]} ${toks[toks.length - 1]}`]);
-  return [...out];
+  return [...out].map(needleRegex);
 }
 
 // server/adapters/wallet.ts

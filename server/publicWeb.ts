@@ -42,7 +42,7 @@ function antiBotChallengeHeaders(headers: Headers): boolean {
 
 /** Match only explicit interstitial machinery, not an article that happens to
  * discuss bot protection. These pages sometimes arrive with HTTP 200. */
-function antiBotChallengeBody(contentType: string, text: string): boolean {
+export function antiBotChallengeBody(contentType: string, text: string): boolean {
   if (!/html|xhtml/i.test(contentType)) return false;
   const sample = text.slice(0, 200_000);
   const cloudflareTitle = /<title[^>]*>\s*just a moment(?:\.{3})?\s*<\/title>/i.test(sample);

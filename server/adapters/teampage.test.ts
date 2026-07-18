@@ -118,4 +118,25 @@ describe("official project team document discovery", () => {
     ]);
     expect(team.some((person) => person.name === "Random")).toBe(false);
   });
+
+  it("rejects a team page whose redirect chain lands off the project's domain", async () => {
+    const roster = `Founder Alice Example leads engineering and the core team. ${"Product protocol leadership. ".repeat(20)}`;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === "https://jup.ag/team") {
+        // Simulate redirect:"follow" landing on an unrelated host: the body is a
+        // convincing roster, but response.url reports the redirect target.
+        const res = new Response(roster, { status: 200, headers: { "content-type": "text/plain" } });
+        Object.defineProperty(res, "url", { value: "https://parked-lander.example/team" });
+        return res;
+      }
+      return new Response("not found", { status: 404, headers: { "content-type": "text/plain" } });
+    }));
+
+    const { fetchTeamPage } = await import("./teampage");
+    const team = await fetchTeamPage("jup.ag", "Jupiter");
+    expect(team).toEqual([]);
+    // The off-domain roster must never reach extraction as first-party content.
+    expect(structuredMock).not.toHaveBeenCalled();
+  });
 });

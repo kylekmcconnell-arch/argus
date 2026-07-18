@@ -4,6 +4,7 @@
 // Only a parked page or explicit coming-soon page served by the domain can
 // support a SiteNotLive finding downstream.
 import { recordCall } from "../cost";
+import { antiBotChallengeBody } from "../publicWeb";
 
 export type SiteSubstanceStatus =
   | "live"
@@ -36,7 +37,6 @@ const COMING = /coming[\s_-]*soon|under[\s_-]*construction|launching[\s_-]*soon|
 const HARD_COMING = /coming[\s_-]*soon|under[\s_-]*construction|launching[\s_-]*soon/i;
 const PARKED = /this[\s_-]*domain[\s_-]*is[\s_-]*for[\s_-]*sale|buy[\s_-]*this[\s_-]*domain|hugedomains|sedoparking|parkingcrew|domain[\s_-]*(is[\s_-]*)?parked/i;
 const PRODUCT = /\b(docs|whitepaper|dashboard|pricing|features|roadmap|marketplace|explorer|portfolio|order\s*book|connect\s*wallet|launch\s*app|sign\s*in|log\s*in|deposit|withdraw|governance|staking)\b/i;
-const ANTI_BOT = /cf-chl-|challenge-platform|just a moment(?:\.{3})?|checking (?:your )?browser(?: before accessing)?|verify (?:that )?you are human|captcha-delivery|_pxcaptcha|perimeterx|datadome|incapsula|akamai bot manager|bot verification/i;
 const DNS_CODES = new Set(["ENOTFOUND", "EAI_AGAIN", "EAI_FAIL", "ENODATA", "ENONAME"]);
 
 type PageSuccess = { kind: "page"; url: string; html: string };
@@ -72,7 +72,11 @@ function isAntiBotResponse(response: Response, body: string): boolean {
   const challenge = response.headers.get("x-datadome")
     ?? response.headers.get("x-captcha")
     ?? "";
-  return /challenge|captcha/i.test(`${mitigation} ${challenge}`) || ANTI_BOT.test(body);
+  // Body detection requires interstitial machinery in conjunction (publicWeb's
+  // rule): a live page whose copy merely says "just a moment", or that carries a
+  // Bot Fight Mode script tag, must not be classified as blocked.
+  return /challenge|captcha/i.test(`${mitigation} ${challenge}`)
+    || antiBotChallengeBody(response.headers.get("content-type") ?? "text/html", body);
 }
 
 async function get(url: string, opts?: { requireHtml?: boolean }): Promise<PageResult> {
@@ -267,8 +271,11 @@ export async function checkSiteSubstance(domain: string): Promise<SiteSubstance 
   }
 
   // Require an explicit marker in the served title, metadata, or visible body.
-  // Incidental waitlist text on a substantial product surface is not enough.
-  const hardComingMarker = HARD_COMING.test(`${title} ${meta}`);
+  // Incidental waitlist text on a substantial product surface is not enough:
+  // "Mobile app launching soon" in a live product's meta must never produce a
+  // Verified SiteNotLive finding, so the hard markers are also gated on the
+  // absence of a substantial product surface.
+  const hardComingMarker = HARD_COMING.test(`${title} ${meta}`) && !hasSubstantialProductSurface;
   const comingOnlySurface = COMING.test(`${title} ${meta} ${body}`) && !hasSubstantialProductSurface;
   if (hardComingMarker || comingOnlySurface) {
     const excerpt = [title, meta].find((value) => COMING.test(value)) || body.match(COMING)?.[0] || "coming-soon marker";

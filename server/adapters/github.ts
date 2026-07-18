@@ -3,11 +3,14 @@
 // memberships and the org repos they push to are a near-permanent record of who
 // they actually build with, independent of LinkedIn or their bio.
 //
-// Resolution is the disciplined part. A name search alone is ambiguous, so we
-// only ACT on a gold match: a GitHub account whose `twitter_username` equals the
-// subject's X handle. That single field ties the two identities with almost no
-// false-positive surface. A bare same-login coincidence is reported but not
-// trusted. Evidence discipline over reach.
+// Resolution is the disciplined part. A name search alone is ambiguous, and a
+// GitHub profile's `twitter_username` is an unverified claim BY that GitHub
+// account, so on its own it can never confirm the identity it points at (anyone
+// can register an account naming the subject's handle). We only ACT on a gold
+// match: the twitter_username points at the subject AND something on the
+// subject's side points back (their X bio/website references that exact GitHub
+// login, or the GitHub account's blog is the subject's own declared site). A
+// one-directional claim is reported as a lead, never trusted.
 
 import type { Adapter, CollectContext } from "./types";
 import { recordCall } from "../cost";
@@ -68,13 +71,30 @@ export interface GithubMatch {
   name?: string;
   bio?: string;
   company?: string;
-  confidence: "gold" | "weak";
+  confidence: "gold" | "claimed" | "weak";
 }
 
-// Resolve the subject's GitHub account. Gold = twitter_username matches the X
-// handle. Weak = login equals the handle but no twitter confirmation (reported,
-// never acted on). Returns null if nothing credible.
-export async function resolveGithub(handle: string, name: string | undefined, key: string): Promise<GithubMatch | null> {
+const apexOf = (value: string | undefined): string => {
+  if (!value?.trim()) return "";
+  try {
+    return new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+};
+
+// Resolve the subject's GitHub account. Gold = the account's twitter_username
+// points at the subject AND the subject's side points back (X bio/website
+// references github.com/<login>, or the account's blog is the subject's own
+// declared site). Claimed = twitter_username points at the subject with nothing
+// pointing back (a lead: the field is self-asserted and forgeable). Weak = login
+// equals the handle but no twitter confirmation. Only gold is acted on.
+export async function resolveGithub(
+  handle: string,
+  name: string | undefined,
+  key: string,
+  subject?: { bioText?: string; siteDomain?: string },
+): Promise<GithubMatch | null> {
   const h = handle.replace(/^@/, "").toLowerCase();
   const candidates = new Set<string>([h]);
   for (const q of [name, handle.replace(/^@/, "")]) {
@@ -82,18 +102,26 @@ export async function resolveGithub(handle: string, name: string | undefined, ke
     const found = await ghJson<{ items?: { login: string }[] }>(`/search/users?q=${encodeURIComponent(q)}&per_page=5`, key);
     for (const it of found?.items ?? []) candidates.add(it.login);
   }
+  const bioText = (subject?.bioText ?? "").toLowerCase();
+  const siteApex = apexOf(subject?.siteDomain);
+  let claimed: GithubMatch | null = null;
   let weak: GithubMatch | null = null;
   for (const login of [...candidates].slice(0, 8)) {
     const u = await ghJson<GhUser>(`/users/${encodeURIComponent(login)}`, key);
     if (!u) continue;
     if ((u.twitter_username ?? "").toLowerCase() === h) {
-      return { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "gold" };
+      const subjectLinksBack = !!bioText && bioText.includes(`github.com/${u.login.toLowerCase()}`);
+      const blogIsSubjectSite = !!siteApex && apexOf(u.blog) === siteApex;
+      if (subjectLinksBack || blogIsSubjectSite) {
+        return { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "gold" };
+      }
+      if (!claimed) claimed = { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "claimed" };
     }
     if (!weak && u.login.toLowerCase() === h) {
       weak = { login: u.login, name: u.name, bio: u.bio, company: u.company, confidence: "weak" };
     }
   }
-  return weak;
+  return claimed ?? weak;
 }
 
 // Org memberships + the org-owned repos the user pushes to: the affiliations.
@@ -122,7 +150,10 @@ export const githubAdapter: Adapter = {
     if (!key) return;
     const name = ctx.evidence.profile.display_name;
     ctx.emit({ phase: "P1 · Identity", label: "GitHub resolution", detail: `Matching ${ctx.handle} to a GitHub account by linked X handle…`, source: "github", tone: "neutral" });
-    const match = await resolveGithub(ctx.handle, name, key);
+    const match = await resolveGithub(ctx.handle, name, key, {
+      bioText: [ctx.evidence.profile.bio, ctx.evidence.profile.website].filter(Boolean).join(" "),
+      siteDomain: ctx.evidence.profile.website,
+    });
     if (!match) {
       ctx.recordCheck?.({
         id: "code-footprint-github",
@@ -133,8 +164,20 @@ export const githubAdapter: Adapter = {
       ctx.emit({ phase: "P1 · Identity", label: "No GitHub match", detail: "No GitHub account links back to this X handle.", source: "github", tone: "neutral" });
       return;
     }
+    if (match.confidence === "claimed") {
+      // The GitHub account claims this X handle, but nothing on the subject's
+      // side points back. Self-asserted and forgeable: surface as a lead only.
+      ctx.recordCheck?.({
+        id: "code-footprint-github",
+        status: "unknown",
+        note: `github.com/${match.login} names this X handle, but nothing on the subject's side links back to it`,
+        provider: "github",
+      });
+      ctx.emit({ phase: "P1 · Identity", label: "Possible GitHub", detail: `github.com/${match.login} names ${ctx.handle} in its profile, but the subject's bio and site never reference it. Unconfirmed, not attributed.`, source: "github", tone: "warn" });
+      return;
+    }
     if (match.confidence === "weak") {
-      // login coincidence without a twitter_username confirmation — surface as a
+      // login coincidence without a twitter_username confirmation: surface as a
       // lead only, never an attributed fact.
       ctx.recordCheck?.({
         id: "code-footprint-github",
@@ -145,7 +188,7 @@ export const githubAdapter: Adapter = {
       ctx.emit({ phase: "P1 · Identity", label: "Possible GitHub", detail: `github.com/${match.login} shares the handle but does not link back to X. Unconfirmed, not attributed.`, source: "github", tone: "warn" });
       return;
     }
-    // gold: twitter_username == subject handle
+    // gold: twitter_username points at the subject AND the subject links back
     ctx.evidence.profile.identity_confidence = "Probable";
     ctx.evidence.profile.identity_note = `GitHub github.com/${match.login}${match.name ? ` (${match.name})` : ""} links back to this X handle.`;
     ctx.recordCheck?.({

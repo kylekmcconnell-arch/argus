@@ -135,6 +135,38 @@ describe("keyless adapter attempt accounting", () => {
     ]));
   });
 
+  it("matches a roster whose name is split across markup tags", async () => {
+    const rows = [
+      ["urlkey", "timestamp", "original", "mimetype", "statuscode", "digest", "length"],
+      ["org,example)/team", "20200102030405", "https://example.org/team", "text/html", "200", "abc", "100"],
+    ];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(JSON.stringify(rows), 200, "application/json"))
+      .mockResolvedValueOnce(response("<div><span>Kyle</span>\n<span>McConnell</span> leads <b>Example</b> Labs</div>"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await withCostLedger(() => archivedAffiliation("example.org", "Kyle McConnell", "Example"));
+    expect(result).toMatchObject({ year: "2020", where: "team" });
+  });
+
+  it("does NOT match a subject name embedded inside longer words", async () => {
+    // "ed chen" must never match inside "watched chennai": needles are whole
+    // words on stripped text, not raw substrings of the HTML.
+    const teamRows = [
+      ["urlkey", "timestamp", "original", "mimetype", "statuscode", "digest", "length"],
+      ["org,example)/team", "20200102030405", "https://example.org/team", "text/html", "200", "abc", "100"],
+    ];
+    const emptyRows = [["urlkey", "timestamp", "original", "mimetype", "statuscode", "digest", "length"]];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(JSON.stringify(teamRows), 200, "application/json"))
+      .mockResolvedValueOnce(response("We watched chennai adoption grow. Example is expanding."))
+      .mockResolvedValueOnce(response(JSON.stringify(emptyRows), 200, "application/json"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await withCostLedger(() => archivedAffiliation("example.org", "Ed Chen", "Example"));
+    expect(result).toBeNull();
+  });
+
   it("does NOT match when the archived page names the subject but not the venture", async () => {
     // The core forensic guard: a subject-name substring on a page that is not the
     // venture's own (wrong/misguessed domain, a coincidental mention) must not

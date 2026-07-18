@@ -218,6 +218,35 @@ describe("checkSiteSubstance attribution", () => {
     await expect(checkSiteSubstance("example.org")).resolves.toMatchObject({ status: "live" });
   });
 
+  it("keeps a substantial live product site live when its meta mentions a launching-soon feature", async () => {
+    const product = [
+      "Trade on-chain perps with the live order book, deposit, withdraw, staking, and governance.",
+      "Documentation, pricing, and whitepaper resources are available today.",
+      "Operational product information. ".repeat(16),
+    ].join(" ");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(
+      `<html><head><title>Example DEX</title><meta content="Trade on-chain perps. Mobile app launching soon." name="description"></head><body>${product}</body></html>`,
+    )));
+
+    await expect(checkSiteSubstance("example.org")).resolves.toMatchObject({ status: "live" });
+  });
+
+  it("keeps a live page live when a bot-mitigation script tag appears without an interstitial", async () => {
+    const product = [
+      "Dashboard docs governance staking marketplace features live today.",
+      "Connect wallet, deposit, withdraw, and use the explorer in just a moment.",
+      "Operational product information. ".repeat(16),
+    ].join(" ");
+    // Cloudflare Bot Fight Mode injects challenge-platform scripts into ordinary
+    // 200 pages; only title-plus-runtime or runtime-plus-human-prompt is a real
+    // interstitial.
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response(
+      `<html><head><title>Example DEX</title><script src="/cdn-cgi/challenge-platform/scripts/jsd/main.js"></script></head><body>${product}</body></html>`,
+    )));
+
+    await expect(checkSiteSubstance("example.org")).resolves.toMatchObject({ status: "live" });
+  });
+
   it("keeps bundle-only coming-soon strings neutral for a client-rendered shell", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response('<div id="root"></div><script type="module" src="/app.js"></script>'))

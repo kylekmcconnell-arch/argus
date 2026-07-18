@@ -89,7 +89,7 @@ async function discoverTeamDocumentUrls(domain: string): Promise<string[]> {
   return [...new Set(bodies.flatMap((body) => teamDocumentUrlsFromIndex(d, body)))];
 }
 
-function htmlToText(html: string): string {
+export function htmlToText(html: string): string {
   return html
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
@@ -99,7 +99,7 @@ function htmlToText(html: string): string {
     .trim();
 }
 
-async function fetchPage(url: string): Promise<{ url: string; text: string } | null> {
+async function fetchPage(url: string, expectedApex: string): Promise<{ url: string; text: string } | null> {
   let response: Response;
   try {
     response = await fetch(url, { headers: { "user-agent": "Mozilla/5.0 (compatible; ARGUS/1.0)", accept: "text/html,text/markdown,text/plain" }, redirect: "follow", signal: AbortSignal.timeout(8000) });
@@ -109,6 +109,21 @@ async function fetchPage(url: string): Promise<{ url: string; text: string } | n
   }
   if (!response.ok) {
     recordCall("site-fetch", "team-page", 0, `http_${response.status}`, "failed");
+    return null;
+  }
+  // The same host pin teamDocumentUrlsFromIndex enforces, applied to the URL the
+  // redirect chain actually landed on. Without it, a lapsed domain 301ing to an
+  // unrelated roster-bearing site would be attributed as the project's own
+  // first-party team page.
+  const finalUrl = response.url || url;
+  try {
+    const finalHost = new URL(finalUrl).hostname.toLowerCase();
+    if (finalHost !== expectedApex && !finalHost.endsWith(`.${expectedApex}`)) {
+      recordCall("site-fetch", "team-page", 0, "redirected_offsite", "partial");
+      return null;
+    }
+  } catch {
+    recordCall("site-fetch", "team-page", 0, "redirected_offsite", "partial");
     return null;
   }
   const ct = response.headers.get("content-type") ?? "";
@@ -131,7 +146,7 @@ async function fetchPage(url: string): Promise<{ url: string; text: string } | n
     return null;
   }
   recordCall("site-fetch", "team-page", 0, undefined, "succeeded");
-  return { url, text };
+  return { url: finalUrl, text };
 }
 
 const roleEvidencePattern = (role: string): RegExp => {
@@ -303,16 +318,18 @@ async function discoverFounderAuthoredForumUrls(domain: string, verifiedTeam: Te
 }
 
 export async function fetchTeamPage(domain: string, projectName?: string): Promise<TeamMember[]> {
+  const apex = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  if (!apex) return [];
   const urls = [...new Set([
     ...(await discoverTeamDocumentUrls(domain)),
     ...candidateUrls(domain),
   ])];
   if (!urls.length) return [];
-  const pages = (await Promise.all(urls.map(fetchPage))).filter(Boolean) as TeamPage[];
+  const pages = (await Promise.all(urls.map((u) => fetchPage(u, apex)))).filter(Boolean) as TeamPage[];
   if (!pages.length) return [];
   const directTeam = await extractTeamFromPages(pages, projectName);
   const forumUrls = await discoverFounderAuthoredForumUrls(domain, directTeam);
-  const forumPages = (await Promise.all(forumUrls.map(fetchPage))).filter(Boolean) as TeamPage[];
+  const forumPages = (await Promise.all(forumUrls.map((u) => fetchPage(u, apex)))).filter(Boolean) as TeamPage[];
   const forumTeam = await extractTeamFromPages(forumPages, projectName, true);
   const seen = new Set<string>();
   return [...directTeam, ...forumTeam].filter((person) => {
