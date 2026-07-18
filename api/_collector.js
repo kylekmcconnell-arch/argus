@@ -12684,12 +12684,15 @@ async function newestSnapshot(urlPath) {
   recordCall("wayback", "cdx-search", 0, void 0, "succeeded");
   return { timestamp: last[ti], original: last[oi] };
 }
-async function archivedAffiliation(domain, name) {
+async function archivedAffiliation(domain, subjectName3, ventureName) {
   const clean4 = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
-  if (!clean4 || !name) return null;
-  const needles = nameNeedles(name);
-  if (!needles.length) return null;
-  const paths = [`${clean4}/team`, `${clean4}/about`, clean4];
+  if (!clean4 || !subjectName3) return null;
+  const subjectNeedles = nameNeedles(subjectName3);
+  if (!subjectNeedles.length) return null;
+  const domainRoot = clean4.split(".")[0] ?? "";
+  const ventureNeedles = [ventureName.trim().toLowerCase(), domainRoot].filter((t) => t.length >= 3);
+  if (!ventureNeedles.length) return null;
+  const paths = [`${clean4}/team`, `${clean4}/about`];
   for (const p of paths) {
     const snap = await newestSnapshot(p);
     if (!snap) continue;
@@ -12712,13 +12715,13 @@ async function archivedAffiliation(domain, name) {
         recordCall("wayback", "snapshot-fetch", 0, "empty_snapshot", "partial");
         continue;
       }
-      const matched = needles.some((n) => text2.includes(n));
-      recordCall("wayback", "snapshot-fetch", 0, matched ? "name_match" : "no_name_match", "succeeded");
+      const matched = subjectNeedles.some((n) => text2.includes(n)) && ventureNeedles.some((n) => text2.includes(n));
+      recordCall("wayback", "snapshot-fetch", 0, matched ? "subject_and_venture_match" : "no_match", "succeeded");
       if (matched) {
         return {
           url: `https://web.archive.org/web/${snap.timestamp}/${snap.original}`,
           year: snap.timestamp.slice(0, 4),
-          where: p.replace(clean4, "").replace(/^\//, "") || "homepage"
+          where: p.replace(clean4, "").replace(/^\//, "") || "team"
         };
       }
     } catch {
@@ -17098,8 +17101,11 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         outcome: "Active" /* ACTIVE */,
         evidence_url: null,
         notes: [v.evidence, "single-source lead, unverified"].filter(Boolean).join(" \xB7 "),
+        // Widened so an archived-page corroboration can promote this lead to a
+        // scoreable artifact below (default stays an unverified model lead).
         evidence_origin: "model_lead",
-        artifact_verified: false
+        artifact_verified: false,
+        provider: void 0
       };
       ctx.evidence.ventures.push(rec);
       return { v, rec };
@@ -17111,13 +17117,14 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         const corrob = [];
         const subjectU = ctx.handle.replace(/^@/, "").toLowerCase();
         const xHandle = v.x_handle ?? (v.evidence?.match(/@([A-Za-z0-9_]{2,30})/g) ?? []).map((s) => s.slice(1)).find((u) => u.toLowerCase() !== subjectU);
-        const domain2 = v.domain ?? v.evidence?.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|app|finance|org|net|co|ai|gg|so))\b/i)?.[1];
+        let archiveVerified = false;
         try {
-          if (domain2) {
-            const arch = await archivedAffiliation(domain2, ctx.evidence.profile.display_name);
+          if (v.domain) {
+            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name);
             if (arch) {
               corrob.push(`archived ${arch.where} page (${arch.year})`);
               rec.evidence_url = arch.url;
+              archiveVerified = true;
             }
           }
           if (xHandle) {
@@ -17128,8 +17135,14 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         }
         if (corrob.length) {
           corroboratedAffiliations += 1;
-          rec.notes = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" \xB7 ");
-          ctx.emit({ phase: "P0 \xB7 Intake", label: `Affiliation corroborated \xB7 ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""}: ${corrob.join("; ")}.`, source: "argus", tone: "good" });
+          const base = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" \xB7 ");
+          rec.notes = base;
+          if (archiveVerified) {
+            rec.evidence_origin = "deterministic";
+            rec.artifact_verified = true;
+            rec.provider = "wayback";
+          }
+          ctx.emit({ phase: "P0 \xB7 Intake", label: `Affiliation corroborated \xB7 ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""}: ${corrob.join("; ")}${archiveVerified ? " (verified, scoreable)" : ""}.`, source: "argus", tone: "good" });
         }
       })
     );

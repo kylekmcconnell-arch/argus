@@ -1013,8 +1013,11 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
           outcome: VentureOutcome.ACTIVE,
           evidence_url: null as string | null,
           notes: [v.evidence, "single-source lead, unverified"].filter(Boolean).join(" · "),
-          evidence_origin: "model_lead" as const,
+          // Widened so an archived-page corroboration can promote this lead to a
+          // scoreable artifact below (default stays an unverified model lead).
+          evidence_origin: "model_lead" as "model_lead" | "deterministic",
           artifact_verified: false,
+          provider: undefined as string | undefined,
         };
         ctx.evidence.ventures.push(rec);
         return { v, rec };
@@ -1028,15 +1031,21 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
     await Promise.all(
       pending.slice(0, 5).map(async ({ v, rec }) => {
         const corrob: string[] = [];
-        // The project handle / domain is often only in the cited post text, not
-        // the structured field — recover it so corroboration can actually run.
+        // The project handle is often only in the cited post text, not the
+        // structured field — recover it so the follow-graph note can run.
         const subjectU = ctx.handle.replace(/^@/, "").toLowerCase();
         const xHandle = v.x_handle ?? (v.evidence?.match(/@([A-Za-z0-9_]{2,30})/g) ?? []).map((s) => s.slice(1)).find((u) => u.toLowerCase() !== subjectU);
-        const domain = v.domain ?? v.evidence?.match(/\b([a-z0-9][a-z0-9-]*\.(?:xyz|io|com|fi|app|finance|org|net|co|ai|gg|so))\b/i)?.[1];
+        // Only Grok's STRUCTURED domain claim drives a scoreable promotion: a
+        // domain scavenged from free post text is too weak to carry deterministic
+        // weight (it could be a press/platform host, not the venture's own site).
+        let archiveVerified = false;
         try {
-          if (domain) {
-            const arch = await archivedAffiliation(domain, ctx.evidence.profile.display_name);
-            if (arch) { corrob.push(`archived ${arch.where} page (${arch.year})`); rec.evidence_url = arch.url; }
+          if (v.domain) {
+            // The archived page must name BOTH the subject AND the venture on its
+            // own /team or /about page, so this is a genuine first-party team tie
+            // (not a coincidental mention on a wrong or misguessed domain).
+            const arch = await archivedAffiliation(v.domain, ctx.evidence.profile.display_name, v.name);
+            if (arch) { corrob.push(`archived ${arch.where} page (${arch.year})`); rec.evidence_url = arch.url; archiveVerified = true; }
           }
           if (xHandle) {
             const follows = await followsSubject("@" + xHandle.replace(/^@/, ""), ctx.handle);
@@ -1045,8 +1054,18 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
         } catch { /* corroboration is best-effort; the lead still stands */ }
         if (corrob.length) {
           corroboratedAffiliations += 1;
-          rec.notes = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" · ");
-          ctx.emit({ phase: "P0 · Intake", label: `Affiliation corroborated · ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""}: ${corrob.join("; ")}.`, source: "argus", tone: "good" });
+          const base = [v.evidence, `corroborated: ${corrob.join("; ")}`].filter(Boolean).join(" · ");
+          rec.notes = base;
+          if (archiveVerified) {
+            // Promote from single-source model lead to a scoreable artifact: the
+            // venture's own archived team/about page independently ties this person
+            // to it, so F2/F3/F4/F6 can use it instead of abstaining. A follow-graph
+            // tie alone never reaches here.
+            rec.evidence_origin = "deterministic";
+            rec.artifact_verified = true;
+            rec.provider = "wayback";
+          }
+          ctx.emit({ phase: "P0 · Intake", label: `Affiliation corroborated · ${v.name}`, detail: `${v.role}${v.year ? `, ${v.year}` : ""}: ${corrob.join("; ")}${archiveVerified ? " (verified, scoreable)" : ""}.`, source: "argus", tone: "good" });
         }
       }),
     );

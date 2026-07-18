@@ -123,7 +123,7 @@ describe("keyless adapter attempt accounting", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     const captured = await withCostLedger(async () => ({
-      result: await archivedAffiliation("example.org", "Kyle McConnell"),
+      result: await archivedAffiliation("example.org", "Kyle McConnell", "Example"),
       cost: getCost(),
     }));
 
@@ -131,7 +131,26 @@ describe("keyless adapter attempt accounting", () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(captured.cost.calls).toEqual(expect.arrayContaining([
       expect.objectContaining({ provider: "wayback", op: "cdx-search", calls: 1, succeeded: 1, failed: 0 }),
-      expect.objectContaining({ provider: "wayback", op: "snapshot-fetch", calls: 1, succeeded: 1, failed: 0, meta: "name_match" }),
+      expect.objectContaining({ provider: "wayback", op: "snapshot-fetch", calls: 1, succeeded: 1, failed: 0, meta: "subject_and_venture_match" }),
     ]));
+  });
+
+  it("does NOT match when the archived page names the subject but not the venture", async () => {
+    // The core forensic guard: a subject-name substring on a page that is not the
+    // venture's own (wrong/misguessed domain, a coincidental mention) must not
+    // corroborate — the venture identity has to be present too.
+    const teamRows = [
+      ["urlkey", "timestamp", "original", "mimetype", "statuscode", "digest", "length"],
+      ["org,example)/team", "20200102030405", "https://example.org/team", "text/html", "200", "abc", "100"],
+    ];
+    const emptyRows = [["urlkey", "timestamp", "original", "mimetype", "statuscode", "digest", "length"]];
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(JSON.stringify(teamRows), 200, "application/json")) // cdx /team
+      .mockResolvedValueOnce(response("Kyle McConnell recently joined an unrelated startup.")) // page: subject, no venture/root
+      .mockResolvedValueOnce(response(JSON.stringify(emptyRows), 200, "application/json")); // cdx /about: no snapshot
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await withCostLedger(() => archivedAffiliation("example.org", "Kyle McConnell", "Example"));
+    expect(result).toBeNull();
   });
 });

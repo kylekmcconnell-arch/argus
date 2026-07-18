@@ -53,18 +53,30 @@ async function newestSnapshot(urlPath: string): Promise<Snapshot | null> {
   return { timestamp: last[ti], original: last[oi] };
 }
 
-// Does the subject's name appear in an archived team/about/home page of `domain`?
-// Returns the archived URL + year on a hit, else null.
+// Does an archived team/about page of `domain` name BOTH the subject AND the
+// venture itself? Requiring the venture's own identity (its brand name or its
+// domain root) on the page confirms the page belongs to the venture, so a
+// subject-name hit is a genuine first-party team tie rather than a coincidental
+// mention (a footer, a testimonial, a different same-named person) on an
+// unrelated or model-misguessed domain. Returns the archived URL + year, else null.
 export async function archivedAffiliation(
   domain: string,
-  name: string,
+  subjectName: string,
+  ventureName: string,
 ): Promise<{ url: string; year: string; where: string } | null> {
   const clean = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
-  if (!clean || !name) return null;
-  const needles = nameNeedles(name);
-  if (!needles.length) return null;
+  if (!clean || !subjectName) return null;
+  const subjectNeedles = nameNeedles(subjectName);
+  if (!subjectNeedles.length) return null;
+  // The venture is confirmed present when its brand name or its domain's root
+  // label appears (both are on a venture's own site). Guard against 1-2 char roots.
+  const domainRoot = clean.split(".")[0] ?? "";
+  const ventureNeedles = [ventureName.trim().toLowerCase(), domainRoot].filter((t) => t.length >= 3);
+  if (!ventureNeedles.length) return null;
 
-  const paths = [`${clean}/team`, `${clean}/about`, clean];
+  // Only a first-party team/about page carries the weight to tie a person to a
+  // venture; a bare homepage naming someone is too weak to promote to scoreable.
+  const paths = [`${clean}/team`, `${clean}/about`];
   for (const p of paths) {
     const snap = await newestSnapshot(p);
     if (!snap) continue;
@@ -87,13 +99,13 @@ export async function archivedAffiliation(
         recordCall("wayback", "snapshot-fetch", 0, "empty_snapshot", "partial");
         continue;
       }
-      const matched = needles.some((n) => text.includes(n));
-      recordCall("wayback", "snapshot-fetch", 0, matched ? "name_match" : "no_name_match", "succeeded");
+      const matched = subjectNeedles.some((n) => text.includes(n)) && ventureNeedles.some((n) => text.includes(n));
+      recordCall("wayback", "snapshot-fetch", 0, matched ? "subject_and_venture_match" : "no_match", "succeeded");
       if (matched) {
         return {
           url: `https://web.archive.org/web/${snap.timestamp}/${snap.original}`,
           year: snap.timestamp.slice(0, 4),
-          where: p.replace(clean, "").replace(/^\//, "") || "homepage",
+          where: p.replace(clean, "").replace(/^\//, "") || "team",
         };
       }
     } catch {
