@@ -13,9 +13,19 @@ const PATTERNS: Record<SubjectClass, RegExp[]> = {
     /\bventure\b/i, /\bcapital\b/i, /\bVC\b/i, /\bfund\b/i, /\bGP\b/i,
     /\bgeneral partner\b/i, /\blimited partner\b/i, /\bportfolio\b/i,
     /\bangel investor\b/i, /\blaunchpad\b/i, /\baccelerator\b/i,
+    // Backing language is a fund signal even when the bio never says
+    // "venture"/"capital"/"fund": "we back bold entrepreneurs", "we invest in
+    // founders". The FOUNDER "building" pattern below is guarded so the
+    // entrepreneurs a fund backs are not misread as the fund itself building.
+    /\bwe (?:back|fund|invest in)\b/i,
+    /\bback(?:ing|s|ed)?\s+(?:bold\s+)?(?:entrepreneurs?|founders?|builders?|startups?|teams?|companies|projects)\b/i,
   ],
   [SubjectClass.FOUNDER]: [
-    /\bfounder\b/i, /\bco-?founder\b/i, /\bCEO\b/i, /\bCTO\b/i, /\bbuilding\b/i,
+    /\bfounder\b/i, /\bco-?founder\b/i, /\bCEO\b/i, /\bCTO\b/i,
+    // "building" is a founder signal only when the SUBJECT builds; when it
+    // follows an entity the subject backs ("entrepreneurs building the next
+    // internet") it belongs to that entity, not the account being audited.
+    /(?<!\b(?:entrepreneurs?|founders?|builders?|startups?|teams?|companies|projects)\s)\bbuilding\b/i,
     /\bbuilder\b/i, /\bwe'?re building\b/i, /\bcreator of\b/i, /\bfounded\b/i,
   ],
   // A project/protocol's OWN brand account: an organization, not a person. Uses

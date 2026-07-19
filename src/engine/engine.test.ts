@@ -571,6 +571,20 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(res2.subject_class).toBe(SubjectClass.KOL);
   });
 
+  it("classifies a fund whose bio backs builders without VC keywords as INVESTOR", () => {
+    // The real @a16zcrypto bio: no "venture/capital/fund" keyword, and the
+    // entrepreneurs it backs are "building" (that must not misfire as FOUNDER).
+    const res = classifySubject("We back bold entrepreneurs building the next internet.");
+    expect(res.applicable_classes).toContain(SubjectClass.INVESTOR);
+    expect(res.applicable_classes).not.toContain(SubjectClass.FOUNDER);
+  });
+
+  it("still classifies a real builder bio as FOUNDER when the subject is the one building", () => {
+    const res = classifySubject("building a new L2. previously eng at coinbase.");
+    expect(res.applicable_classes).toContain(SubjectClass.FOUNDER);
+    expect(res.applicable_classes).not.toContain(SubjectClass.INVESTOR);
+  });
+
   it("ADVISOR advised a rug with allocation -> capped", () => {
     const a = new Audit("@advisor_x", { subject_class: SubjectClass.ADVISOR });
     a.setIdentity("Confirmed");

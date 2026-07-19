@@ -381,14 +381,23 @@ var PATTERNS = {
     /\bportfolio\b/i,
     /\bangel investor\b/i,
     /\blaunchpad\b/i,
-    /\baccelerator\b/i
+    /\baccelerator\b/i,
+    // Backing language is a fund signal even when the bio never says
+    // "venture"/"capital"/"fund": "we back bold entrepreneurs", "we invest in
+    // founders". The FOUNDER "building" pattern below is guarded so the
+    // entrepreneurs a fund backs are not misread as the fund itself building.
+    /\bwe (?:back|fund|invest in)\b/i,
+    /\bback(?:ing|s|ed)?\s+(?:bold\s+)?(?:entrepreneurs?|founders?|builders?|startups?|teams?|companies|projects)\b/i
   ],
   ["FOUNDER" /* FOUNDER */]: [
     /\bfounder\b/i,
     /\bco-?founder\b/i,
     /\bCEO\b/i,
     /\bCTO\b/i,
-    /\bbuilding\b/i,
+    // "building" is a founder signal only when the SUBJECT builds; when it
+    // follows an entity the subject backs ("entrepreneurs building the next
+    // internet") it belongs to that entity, not the account being audited.
+    /(?<!\b(?:entrepreneurs?|founders?|builders?|startups?|teams?|companies|projects)\s)\bbuilding\b/i,
     /\bbuilder\b/i,
     /\bwe'?re building\b/i,
     /\bcreator of\b/i,
@@ -17372,6 +17381,13 @@ function providerBackedRoles(evidence) {
     else if (/advisor|adviser|board/.test(role)) roles.add("ADVISOR" /* ADVISOR */);
     else if (/contributor|engineer|developer|employee|manager|director|lead|role on record/.test(role)) roles.add("MEMBER" /* MEMBER */);
     else if (/\binvestor\b|\bpartner\b|\bprincipal\b|\bventure capital(?:ist)?\b|\bvc\b|\bgp\b/.test(role)) roles.add("INVESTOR" /* INVESTOR */);
+  }
+  for (const fact of evidence.basicFacts ?? []) {
+    if (fact.artifact_verified !== true) continue;
+    if (fact.status !== "verified" && fact.status !== "corroborated") continue;
+    if (fact.predicate === "founder" || fact.predicate === "founded" || fact.predicate === "executive") {
+      roles.add("FOUNDER" /* FOUNDER */);
+    }
   }
   if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
     roles.add("AGENCY" /* AGENCY */);

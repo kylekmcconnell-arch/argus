@@ -1179,6 +1179,18 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     else if (/contributor|engineer|developer|employee|manager|director|lead|role on record/.test(role)) roles.add(SubjectClass.MEMBER);
     else if (/\binvestor\b|\bpartner\b|\bprincipal\b|\bventure capital(?:ist)?\b|\bvc\b|\bgp\b/.test(role)) roles.add(SubjectClass.INVESTOR);
   }
+  // A verified founder or executive fact is provider-backed role evidence just
+  // as much as a verified venture row is: a subject whose bio carries no role
+  // keyword (a cryptic or personal bio) but whom a fetched first-party or
+  // independent source names as a company's founder or executive must still
+  // route to FOUNDER, not publish INCOMPLETE for lack of a governing role.
+  for (const fact of evidence.basicFacts ?? []) {
+    if (fact.artifact_verified !== true) continue;
+    if (fact.status !== "verified" && fact.status !== "corroborated") continue;
+    if (fact.predicate === "founder" || fact.predicate === "founded" || fact.predicate === "executive") {
+      roles.add(SubjectClass.FOUNDER);
+    }
+  }
   if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
     roles.add(SubjectClass.AGENCY);
   }

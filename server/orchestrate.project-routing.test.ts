@@ -135,6 +135,35 @@ describe("provider-backed project routing", () => {
     ]);
   });
 
+  it("routes a person with a cryptic bio to FOUNDER on a verified founder fact", () => {
+    // The @VitalikButerin shell: a personal, keyword-free bio (no "founder"),
+    // no official website, and ventures that arrived only as model leads, so
+    // classifier + venture routing both come up empty. A fetched source that
+    // names the subject as a company founder must still route the subject.
+    const evidence = emptyEvidence("@vitalikbuterin");
+    evidence.profile.bio = "I choose balance. First-level balance.";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-07-19T14:00:00.000Z";
+    evidence.basicFacts = [basicFact("founder", "Ethereum")];
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.FOUNDER]);
+  });
+
+  it("does not route to FOUNDER on a non-founder fact or an unresolved founder fact", () => {
+    const evidence = emptyEvidence("@subject");
+    evidence.profile.bio = "gm";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.profile.profile_captured_at = "2026-07-19T14:00:00.000Z";
+    // A verified education fact is not a role signal; a founder fact that only
+    // reached "conflicted" (not verified/corroborated) must not route either.
+    evidence.basicFacts = [
+      basicFact("education", "MIT"),
+      { ...basicFact("founder", "SomeCo"), status: "conflicted" as const },
+    ];
+    expect(providerBackedRoles(evidence)).toEqual([]);
+  });
+
   it("routes a verb-phrase product bio to PROJECT once the official site is linked", () => {
     // The @ponsdotfamily prod shell: "Launch coins on Robinhood via <t.co>"
     // carries no protocol/platform noun, so keyword routing alone left the
