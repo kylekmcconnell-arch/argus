@@ -2092,6 +2092,7 @@ const CHECK_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   "founder-asset-distinction": ["F4_build_substance", "F5_reputation_integrity"],
   "founder-repeat-backing": ["F3_repeat_backing"],
   "vc-portfolio-track-record": ["I2_portfolio_quality"],
+  "investor-fund-scale": ["I3_fund_scale_tier"],
   "news-press": ["F5_reputation_integrity", "P2_product_substance", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "ofac-sanctions-name": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation"],
@@ -2897,6 +2898,29 @@ function serializeAnalystEvidencePacket(
   input: Record<string, unknown>,
   options: AnalystEvidencePacketOptions,
 ): string {
+  // A check outcome's position in the frozen checklist says nothing about how
+  // much it informs a score. Truncating positionally lets a block of
+  // not-applicable rows (14 of them on an investor subject) crowd out the sole
+  // substantive assessment for an axis, which silently abstains that axis. Rank
+  // by informativeness before the cap, then restore checklist order. Same
+  // invariant retainSourceArtifacts already enforces for source artifacts.
+  const checkOutcomeRank = (row: unknown): number => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return 2;
+    const status = String((row as Record<string, unknown>).status ?? "").toLowerCase();
+    if (status === "confirmed" || status === "finding") return 0;
+    if (status === "checked-empty") return 1;
+    if (status === "not-applicable") return 3;
+    return 2;
+  };
+  const retainCheckOutcomes = (rows: readonly unknown[], limit: number): unknown[] => {
+    if (rows.length <= limit) return [...rows];
+    return rows
+      .map((row, index) => ({ row, index, rank: checkOutcomeRank(row) }))
+      .sort((left, right) => left.rank - right.rank || left.index - right.index)
+      .slice(0, limit)
+      .sort((left, right) => left.index - right.index)
+      .map((entry) => entry.row);
+  };
   const sectionLimits: Record<string, number> = {
     ventures: 12,
     testimonials: 12,
@@ -3023,7 +3047,9 @@ function serializeAnalystEvidencePacket(
     // coverage baseline even exists.
     const selected = section === "sourceArtifacts"
       ? retainSourceArtifacts(source, options.axisCatalog ? source.length : limit)
-      : source.slice(0, limit);
+      : section === "checkOutcomes"
+        ? retainCheckOutcomes(source, limit)
+        : source.slice(0, limit);
     const included = selected
       .map((item) => section === "sourceArtifacts" ? compactSourceArtifact(item) : compactObject(item))
       .filter((item) => item !== undefined);
@@ -3438,12 +3464,16 @@ export async function analyzeSubject(
     `not identity proof. A real-looking photo never establishes who operates the ` +
     `account, and an AI, stock, celebrity, logo, cartoon, unclear, or missing photo ` +
     `never establishes impersonation by itself. Use it only as a review lead.\n\n` +
-    `FUND SCALE RULE: score I3 only from verified fund_scale artifacts. Keep ` +
+    `FUND SCALE RULE: score I3 from verified fund_scale artifacts. Keep ` +
     `firm-wide AUM separate from an individual vehicle close, never sum several ` +
     `vehicles into AUM, and treat first_close or at_least values as lower bounds. ` +
     `An affiliated fund's scale is context for that fund and is never the audited ` +
     `person's personal capital. Historical vehicle closes remain fixed facts, while ` +
-    `historical or undated AUM must not be presented as current.\n\n` +
+    `historical or undated AUM must not be presented as current. When no verified ` +
+    `fund_scale artifact exists but the completed fund-scale assessment (the ` +
+    `investor-fund-scale check) recorded a null result, score I3 at the low end ` +
+    `for lack of a demonstrated source-backed scale; it is a null result on this ` +
+    `axis only, never adverse evidence or counter-evidence against any other axis.\n\n` +
     `INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this ` +
     `scoring packet. Do not infer anything about the subject from their absence. ` +
     `Use all remaining collected evidence according to its provenance and ` +

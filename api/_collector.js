@@ -3620,6 +3620,7 @@ var CHECK_AXIS_ELIGIBILITY = {
   "founder-asset-distinction": ["F4_build_substance", "F5_reputation_integrity"],
   "founder-repeat-backing": ["F3_repeat_backing"],
   "vc-portfolio-track-record": ["I2_portfolio_quality"],
+  "investor-fund-scale": ["I3_fund_scale_tier"],
   "news-press": ["F5_reputation_integrity", "P2_product_substance", "P5_traction_and_liveness", "I5_reputation_fud", "AG2_client_outcomes", "AG4_reputation_fud", "AD2_advised_outcomes", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "us-legal-history": ["F5_reputation_integrity", "P6_transparency_integrity", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME3_conduct_reputation"],
   "ofac-sanctions-name": ["F1_identity_verifiability", "F5_reputation_integrity", "P1_team_and_identity", "P6_transparency_integrity", "K1_identity_roster", "K5_cabal_fud", "I1_identity_legitimacy", "I5_reputation_fud", "AG1_identity_legitimacy", "AG4_reputation_fud", "AD1_identity_verifiability", "AD5_reputation_fud", "ME1_identity", "ME3_conduct_reputation"],
@@ -4219,6 +4220,18 @@ var pruneTrustGraphPacket = (packet) => {
   return true;
 };
 function serializeAnalystEvidencePacket(input, options) {
+  const checkOutcomeRank = (row) => {
+    if (!row || typeof row !== "object" || Array.isArray(row)) return 2;
+    const status = String(row.status ?? "").toLowerCase();
+    if (status === "confirmed" || status === "finding") return 0;
+    if (status === "checked-empty") return 1;
+    if (status === "not-applicable") return 3;
+    return 2;
+  };
+  const retainCheckOutcomes = (rows, limit) => {
+    if (rows.length <= limit) return [...rows];
+    return rows.map((row, index) => ({ row, index, rank: checkOutcomeRank(row) })).sort((left, right) => left.rank - right.rank || left.index - right.index).slice(0, limit).sort((left, right) => left.index - right.index).map((entry) => entry.row);
+  };
   const sectionLimits = {
     ventures: 12,
     testimonials: 12,
@@ -4307,7 +4320,7 @@ function serializeAnalystEvidencePacket(input, options) {
       const record2 = item;
       return record2.evidence_origin !== "model_lead" && record2.artifact_verified !== false;
     });
-    const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source2, options.axisCatalog ? source2.length : limit) : source2.slice(0, limit);
+    const selected = section === "sourceArtifacts" ? retainSourceArtifacts(source2, options.axisCatalog ? source2.length : limit) : section === "checkOutcomes" ? retainCheckOutcomes(source2, limit) : source2.slice(0, limit);
     const included = selected.map((item) => section === "sourceArtifacts" ? compactSourceArtifact(item) : compactObject(item)).filter((item) => item !== void 0);
     packet[section] = included;
     coverage[section] = { available: source2.length, included: included.length };
@@ -4558,7 +4571,7 @@ PUBLIC DILIGENCE GAP RULE: identity gaps must be resolvable through public or co
 
 PROFILE PHOTO RULE: profileAuthenticity is a visual-integrity triage screen, not identity proof. A real-looking photo never establishes who operates the account, and an AI, stock, celebrity, logo, cartoon, unclear, or missing photo never establishes impersonation by itself. Use it only as a review lead.
 
-FUND SCALE RULE: score I3 only from verified fund_scale artifacts. Keep firm-wide AUM separate from an individual vehicle close, never sum several vehicles into AUM, and treat first_close or at_least values as lower bounds. An affiliated fund's scale is context for that fund and is never the audited person's personal capital. Historical vehicle closes remain fixed facts, while historical or undated AUM must not be presented as current.
+FUND SCALE RULE: score I3 from verified fund_scale artifacts. Keep firm-wide AUM separate from an individual vehicle close, never sum several vehicles into AUM, and treat first_close or at_least values as lower bounds. An affiliated fund's scale is context for that fund and is never the audited person's personal capital. Historical vehicle closes remain fixed facts, while historical or undated AUM must not be presented as current. When no verified fund_scale artifact exists but the completed fund-scale assessment (the investor-fund-scale check) recorded a null result, score I3 at the low end for lack of a demonstrated source-backed scale; it is a null result on this axis only, never adverse evidence or counter-evidence against any other axis.
 
 INVESTIGATIVE LEAD EXCLUSION: investigative leads are excluded from this scoring packet. Do not infer anything about the subject from their absence. Use all remaining collected evidence according to its provenance and verification state.
 
@@ -4805,6 +4818,10 @@ var CHECKS = [
   // This row is a scoring input for F3 only; it never gates report completeness.
   { id: "founder-repeat-backing", label: "Repeat backing and re-investment", defaultNote: "repeat financing, re-backing, or re-investment across ventures was not assessed", role: "FOUNDER" },
   { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR", criticalFor: ["INVESTOR"] },
+  // A completed fund-scale assessment is a scoring input for I3 only; like
+  // founder-repeat-backing it never gates report completeness (a fund whose AUM
+  // is not publicly source-backed is scored low on scale, not abstained).
+  { id: "investor-fund-scale", label: "Fund scale", defaultNote: "fund AUM or close amount was not assessed against source-backed evidence", role: "INVESTOR" },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
   // Sanctions, legal history, and flagged-subject graph reconciliation are
   // legal-grade decision gates, not provider diagnostics. A report must never
@@ -4892,6 +4909,32 @@ var FOUNDER_DILIGENCE_PERSON_CHECK_IDS = Object.freeze([
   "founder-control-conflicts",
   "founder-legal-regulatory",
   "founder-asset-distinction",
+  "vc-portfolio-track-record",
+  "news-press",
+  "us-legal-history",
+  "ofac-sanctions-name",
+  "trust-graph-connections"
+]);
+var REPEAT_BACKING_ERA_PERSON_CHECK_IDS = Object.freeze([
+  "identity-resolution",
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "affiliations-associates",
+  "promoted-token-performance",
+  "project-token-identity",
+  "project-product-substance",
+  "project-team-identity",
+  "project-backing-partners",
+  "project-traction-liveness",
+  "project-transparency",
+  "founder-identity-authority",
+  "founder-company-relationships",
+  "founder-track-record",
+  "founder-control-conflicts",
+  "founder-legal-regulatory",
+  "founder-asset-distinction",
+  "founder-repeat-backing",
   "vc-portfolio-track-record",
   "news-press",
   "us-legal-history",
@@ -13263,6 +13306,7 @@ var ACCEPTED_CHECK_CONTRACTS = [
   new Set(LEGACY_PERSON_CHECK_IDS),
   new Set(PROJECT_DILIGENCE_PERSON_CHECK_IDS),
   new Set(FOUNDER_DILIGENCE_PERSON_CHECK_IDS),
+  new Set(REPEAT_BACKING_ERA_PERSON_CHECK_IDS),
   EXPECTED_PERSON_CHECK_IDS
 ];
 var record = (value) => value !== null && typeof value === "object" && !Array.isArray(value) ? value : null;
@@ -18533,6 +18577,19 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       const attempts = attemptDelta(fundScaleBefore, attemptTotals(["grok", "cache", "fund-scale-web", "twitterapi"]));
       const state = result.state === "skipped" ? "unavailable" : result.state === "failed" || result.state === "partial" ? result.state : observedRunState(attempts);
       checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", state, result.detail);
+      if (result.state !== "skipped" && result.state !== "failed") {
+        const fundScaleConfirmed = ctx.evidence.sourceArtifacts.some(
+          (artifact) => artifact.kind === "fund_scale" && artifact.match === "fund_scale_confirmed"
+        );
+        if (!fundScaleConfirmed) {
+          checkTracker.record({
+            id: "investor-fund-scale",
+            status: "finding",
+            note: "assessed fund scale: a completed source-backed search verified no fund AUM or close amount for this fund. A null result on this axis, not adverse evidence.",
+            provider: "fund-scale-web"
+          });
+        }
+      }
     } catch (error) {
       const detail = `Fund-scale verification failed: ${String(error)}`;
       checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "failed", detail);

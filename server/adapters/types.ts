@@ -36,6 +36,7 @@ export type PersonCheckId =
   | "founder-asset-distinction"
   | "founder-repeat-backing"
   | "vc-portfolio-track-record"
+  | "investor-fund-scale"
   | "news-press"
   | "us-legal-history"
   | "ofac-sanctions-name"

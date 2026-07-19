@@ -75,6 +75,7 @@ export const NEUTRAL_NULL_FINDING_CHECK_IDS: ReadonlySet<string> = new Set<strin
   "founder-repeat-backing",
   "project-token-identity",
   "project-backing-partners",
+  "investor-fund-scale",
 ]);
 
 /** A "finding" that genuinely signals an adverse discovery (not a neutral null). */

@@ -79,6 +79,10 @@ const CHECKS: readonly CheckDefinition[] = [
   // This row is a scoring input for F3 only; it never gates report completeness.
   { id: "founder-repeat-backing", label: "Repeat backing and re-investment", defaultNote: "repeat financing, re-backing, or re-investment across ventures was not assessed", role: "FOUNDER" },
   { id: "vc-portfolio-track-record", label: "Portfolio track record", defaultNote: "no completed source-backed portfolio verification was recorded", role: "INVESTOR", criticalFor: ["INVESTOR"] },
+  // A completed fund-scale assessment is a scoring input for I3 only; like
+  // founder-repeat-backing it never gates report completeness (a fund whose AUM
+  // is not publicly source-backed is scored low on scale, not abstained).
+  { id: "investor-fund-scale", label: "Fund scale", defaultNote: "fund AUM or close amount was not assessed against source-backed evidence", role: "INVESTOR" },
   { id: "news-press", label: "News & press", defaultNote: "server collector did not run a news/press check" },
   // Sanctions, legal history, and flagged-subject graph reconciliation are
   // legal-grade decision gates, not provider diagnostics. A report must never
@@ -182,6 +186,39 @@ export const FOUNDER_DILIGENCE_PERSON_CHECK_IDS: readonly PersonCheckId[] = Obje
   "founder-control-conflicts",
   "founder-legal-regulatory",
   "founder-asset-distinction",
+  "vc-portfolio-track-record",
+  "news-press",
+  "us-legal-history",
+  "ofac-sanctions-name",
+  "trust-graph-connections",
+]);
+
+/**
+ * Exact checklist frozen after founder repeat-backing (F3) shipped and before
+ * the investor fund-scale (I3) assessment was added. Reports persisted under
+ * this shape must still qualify for the trust-graph KB after the new check
+ * lands (contract matching is exact-set).
+ */
+export const REPEAT_BACKING_ERA_PERSON_CHECK_IDS: readonly PersonCheckId[] = Object.freeze([
+  "identity-resolution",
+  "profile-photo-authenticity",
+  "code-footprint-github",
+  "identity-continuity",
+  "affiliations-associates",
+  "promoted-token-performance",
+  "project-token-identity",
+  "project-product-substance",
+  "project-team-identity",
+  "project-backing-partners",
+  "project-traction-liveness",
+  "project-transparency",
+  "founder-identity-authority",
+  "founder-company-relationships",
+  "founder-track-record",
+  "founder-control-conflicts",
+  "founder-legal-regulatory",
+  "founder-asset-distinction",
+  "founder-repeat-backing",
   "vc-portfolio-track-record",
   "news-press",
   "us-legal-history",

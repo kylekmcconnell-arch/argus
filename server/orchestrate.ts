@@ -2761,6 +2761,23 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           ? result.state
           : observedRunState(attempts);
       checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", state, result.detail);
+      // A completed fund-scale assessment (the search ran, not skipped/failed)
+      // that confirmed no source-backed scale is substantive I3 evidence: it
+      // keeps I3_fund_scale_tier scoreable at the low end instead of abstaining
+      // the whole investor subject. Same idiom as project-token-identity.
+      if (result.state !== "skipped" && result.state !== "failed") {
+        const fundScaleConfirmed = ctx.evidence.sourceArtifacts.some(
+          (artifact) => artifact.kind === "fund_scale" && artifact.match === "fund_scale_confirmed",
+        );
+        if (!fundScaleConfirmed) {
+          checkTracker.record({
+            id: "investor-fund-scale",
+            status: "finding",
+            note: "assessed fund scale: a completed source-backed search verified no fund AUM or close amount for this fund. A null result on this axis, not adverse evidence.",
+            provider: "fund-scale-web",
+          });
+        }
+      }
     } catch (error) {
       const detail = `Fund-scale verification failed: ${String(error)}`;
       checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "failed", detail);
