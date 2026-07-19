@@ -1755,14 +1755,10 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       provenance: "Frozen scoring policy",
       href: "#role-breakdown" as `#${string}`,
     }] : []),
-    ...(legacyCoverageNotCaptured || readiness.unresolved ? [{
-      id: "coverage-limit",
-      title: readinessGuidance,
-      provenance: legacyCoverageNotCaptured
-        ? "Check-level coverage was not recorded for this version"
-        : `${readiness.successful}/${readiness.applicable} applicable outcomes recorded`,
-      href: diligenceChecks.length > 0 ? "#scan-methodology" as `#${string}` : undefined,
-    }] : []),
+    // Coverage bookkeeping ("N of M checks recorded, treat as provisional")
+    // deliberately does NOT render here: it lives in the verdict header chip
+    // and the methodology rail. A verdict section leads with findings about
+    // the subject, never with our own process status.
     ...visibleContradictions.slice(0, 2).map((contradiction, index) => ({
       id: `contradiction-${index}`,
       title: contradiction.claim,
@@ -1782,14 +1778,33 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   ];
   const favorableVerdict = presentedVerdict === "PASS"
     || (presentedVerdict === "PROVISIONAL" && report.composite_verdict === "PASS");
+  // Risk cards lead with a FINDING about the subject, never with our process
+  // status: an assessed-null axis gets its deterministic conclusion, any other
+  // weak axis gets the analyst's own first gap statement (already specific,
+  // already dash-stripped server-side), and only then a thin-evidence fallback.
+  // A solid or exceptional strength band is not a risk driver even when its
+  // integer floor dips just under the 70 percent line.
+  const bandTierFor = (axis: string): string | undefined => f.projectStrengthBands?.[axis]?.tier;
+  const ASSESSED_NULL_RISK_TITLES: Record<string, string> = {
+    P3_token_conduct: "No token could be tied to the project's official identity.",
+    P4_backing_and_partners: "No outside backers or partners are verified.",
+  };
+  const sentence = (value: string): string => /[.!?]$/.test(value) ? value : `${value}.`;
   const lowAxisDrivers: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
     .filter((axis) => axis.weight > 0 && axis.score / axis.weight < 0.7)
+    .filter((axis) => !["solid", "exceptional"].includes(bandTierFor(axis.axis) ?? ""))
     .sort((left, right) => (left.weight ? left.score / left.weight : 1) - (right.weight ? right.score / right.weight : 1))
     .map((axis) => {
       const questions = Math.max(axis.gaps.length, axis.gapArtifacts.length);
+      const firstGap = (axis.gaps[0] ?? "").trim();
+      const title = bandTierFor(axis.axis) === "assessed_null"
+        ? (ASSESSED_NULL_RISK_TITLES[axis.axis] ?? `${diligenceAreaLabel(axis.axis)} was assessed with no positive record.`)
+        : firstGap && firstGap.length <= 140
+          ? sentence(firstGap)
+          : `Verified evidence on ${diligenceAreaLabel(axis.axis).toLowerCase()} is thin.`;
       return {
         id: `low-axis-${axis.axis}`,
-        title: `${diligenceAreaLabel(axis.axis)} needs more verification.`,
+        title,
         detail: axis.rationale,
         provenance: `Limited evidence${questionMeta(questions)}`,
         href: axisHref(axis.axis),

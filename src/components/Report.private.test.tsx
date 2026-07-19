@@ -543,8 +543,61 @@ describe("decision-safe person report presentation", () => {
     expect(dossier.report.composite_verdict).not.toBe("PASS");
     const verdictDrivers = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
     const counterweight = container.querySelector('section[aria-labelledby="confidence-limits-title"]')?.textContent ?? "";
-    expect(verdictDrivers).toMatch(/hard cap governs|needs more verification/i);
+    expect(verdictDrivers).toMatch(/hard cap governs|is thin|assessed with no positive record|No token could be tied|No outside backers/i);
+    // The risk section leads with findings, never with our own process status.
+    expect(verdictDrivers).not.toContain("needs more verification");
+    expect(verdictDrivers).not.toContain("Treat the score and verdict as provisional");
     expect(counterweight).toContain("What argues against the risk case");
+  });
+
+  it("titles assessed-null axes with their deterministic finding and keeps coverage out of the risk section", () => {
+    const base = buildReport(SUBJECTS[0]);
+    const governing = base.report.role_reports.find((role) => role.role === base.report.governing_role)!;
+    const axisName = Object.keys(governing.axes)[0]!;
+    const artifactId = `art_v1_${"c".repeat(64)}`;
+    const dossier = {
+      ...base,
+      axisCitationVersion: 1 as const,
+      axisEvidenceCatalog: [{
+        artifactId,
+        kind: "axis_evidence" as const,
+        provider: "project-core-evidence",
+        operation: "checkOutcomes:project-backing-partners",
+        section: "checkOutcomes",
+        title: "Assessed backing and partners: no verified backer appears",
+        contentHash: "c".repeat(64),
+        eligibleAxes: [axisName],
+        verification: "verified" as const,
+        scope: "direct_subject" as const,
+      }],
+      projectStrengthBands: {
+        [axisName]: {
+          tier: "assessed_null" as const,
+          minScore: 0,
+          maxScore: 5,
+          reasons: ["completed backing assessment found no verified backer or partner"],
+          anchorArtifactIds: [artifactId],
+        },
+      },
+      report: {
+        ...base.report,
+        role_reports: base.report.role_reports.map((role) => role.role === governing.role ? {
+          ...role,
+          axes: {
+            ...role.axes,
+            [axisName]: { ...role.axes[axisName], score: 0, evidenceRefs: [artifactId] },
+          },
+        } : role),
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    const verdictDrivers = container.querySelector('section[aria-labelledby="verdict-rationale-title"]')?.textContent ?? "";
+    expect(verdictDrivers).toMatch(/assessed with no positive record|No token could be tied|No outside backers/);
+    expect(verdictDrivers).not.toContain("needs more verification");
   });
 
   it("translates internal axis and provider language into an investor-readable summary", () => {
