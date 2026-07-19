@@ -644,7 +644,28 @@ const isVerifiedCounterArtifact = (
   artifact?.verification === "verified" && artifact.counterEligibleAxes?.includes(axis) === true;
 const isOneTierCounterArtifact = (artifact: AxisEvidenceRecord | undefined): boolean =>
   artifact?.operation === "findings:ProjectTokenDrawdown";
-const UNRESOLVED_TEAM_IDENTITY_CLAIM = /(?:\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:remains?|is|are|was|were|appears?)\s+(?:still\s+)?(?:unresolved|unnamed|anonymous|unknown|incomplete|absent|missing)\b)|(?:\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:could\s+not\s+be|has\s+not\s+been|have\s+not\s+been)\s+(?:identified|named|resolved|verified|confirmed|corroborated|surfaced|disclosed|enumerated)\b)|(?:\b(?:unresolved|unnamed|anonymous|unknown|incomplete|absent|missing)\b(?:\s+[\w-]+){0,7}\s+\b(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\b(?:no|absent|absence\s+of|without|missing|lacks?)\s+(?:\w+\s+){0,6}(?:named\s+)?(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\babsence\s+of\s+named\s+(?:founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b)|(?:\b(?:named\s+)?(?:founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)\b(?:\s+[\w-]+){0,7}\s+\b(?:(?:is|are|was|were)\s+)?not\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\b)/i;
+const TEAM_IDENTITY_NOUN = "(?:identity|founders?|co-?founders?|team|leadership|operators?|executives?|leaders?)";
+// The unresolved-identity gate polices claims about the audited team itself,
+// so the negation must bind to that noun. A team noun serving as the object of
+// a preposition ("profiles for two executives", "litigation involving the
+// founders") or qualified as another asset's staff ("treasury multisig
+// operators", "partner's team") is not a claim that the team is unresolved.
+const SUBJECT_TEAM_NOUN =
+  "(?<!\\b(?:for|of|about|regarding|involving|against|concerning|with|by|on|around|toward|towards)\\s(?:[\\w-]+\\s){0,3})" +
+  "(?<!\\b(?:multi-?sig(?:nature)?s?|wallet|treasury|custody|partner(?:'s|s'?)?|counterpart(?:y|ies)(?:'s)?|vendor(?:'s|s)?)\\s)" +
+  TEAM_IDENTITY_NOUN;
+// Exonerating double negation ("no anonymous founders", "not an anonymous
+// team") AFFIRMS the named team and must not read as an absence claim.
+const EXONERATING_TEAM_ADJECTIVES = "anonymous|unnamed|undisclosed|unidentified|unknown|unverified|pseudonymous|hidden";
+const UNRESOLVED_TEAM_IDENTITY_CLAIM = new RegExp(
+  `(?:\\b${SUBJECT_TEAM_NOUN}\\b(?:\\s+[\\w-]+){0,7}\\s+\\b(?:remains?|is|are|was|were|appears?)\\s+(?:still\\s+)?(?:unresolved|unnamed|anonymous|unknown|incomplete|absent|missing)\\b)` +
+  `|(?:\\b${SUBJECT_TEAM_NOUN}\\b(?:\\s+[\\w-]+){0,7}\\s+\\b(?:could\\s+not\\s+be|has\\s+not\\s+been|have\\s+not\\s+been)\\s+(?:identified|named|resolved|verified|confirmed|corroborated|surfaced|disclosed|enumerated)\\b)` +
+  `|(?:(?<!\\b(?:not|no|never|without|longer)\\s)(?<!\\b(?:not|no|never)\\s(?:an?|the)\\s)\\b(?:unresolved|unnamed|anonymous|unknown|incomplete|absent|missing)\\b(?:\\s+[\\w-]+){0,7}\\s+\\b${TEAM_IDENTITY_NOUN}\\b)` +
+  `|(?:\\b(?:no|absent|absence\\s+of|without|missing|lacks?)\\s+(?:(?!(?:${EXONERATING_TEAM_ADJECTIVES}|about|regarding|involving|against|concerning|surrounding|toward|towards|over|on|with|by|from|to)\\b)[\\w-]+\\s+){0,6}(?:named\\s+)?${TEAM_IDENTITY_NOUN}\\b)` +
+  `|(?:\\babsence\\s+of\\s+named\\s+${TEAM_IDENTITY_NOUN}\\b)` +
+  `|(?:\\b(?:named\\s+)?${SUBJECT_TEAM_NOUN}\\b(?:\\s+[\\w-]+){0,7}\\s+\\b(?:(?:is|are|was|were)\\s+)?not\\s+(?:surfaced|disclosed|present|identified|named|resolved|verified|confirmed|corroborated|enumerated)\\b)`,
+  "i",
+);
 const describesGroundedTeamAsUnresolved = (value: string): boolean => {
   if (UNRESOLVED_TEAM_IDENTITY_CLAIM.test(value)) return true;
   const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim();
@@ -684,7 +705,19 @@ const founderFundamentalsAffirmativelyRelyOnSocial = (value: string): boolean =>
         sentence.slice(fundamental.index, social.index),
       );
   });
-const ABSENT_NOTABLE_FOLLOWERS_CLAIM = /(?:\b(?:no|zero)\s+(?:named\s+|verified\s+|documented\s+|structured\s+|observed\s+)?notable\s+followers?\b|\b(?:absence|lack|missing)\s+of\s+(?:named\s+|verified\s+|documented\s+|observed\s+)?notable\s+followers?\b|\bnotable\s+followers?\b(?:\s+[\w-]+){0,10}\s+(?:are|were|remain)?\s*not\s+(?:listed|documented|present|included|provided|available|observed|surfaced)\b|\b(?:notable\s+followers?|observed\s+network)(?:\s+(?:evidence|data|array|list|collection|section))?\s+(?:is|was|remains?)\s+(?:empty|absent|missing|unavailable|not\s+present)\b|\bnone\b(?:\s+[\w-]+){0,8}\s+notable\s+followers?\b|\bno\s+direct\s+observed\s+network\s+evidence\b)/i;
+// The absence gate polices claims that the followers themselves are absent.
+// Partial-coverage wording about follower metadata ("notable follower depth is
+// not documented") is endorsed gap phrasing, and a partitive subject ("none of
+// the observed notable followers are flagged") presupposes the followers exist.
+const ABSENT_NOTABLE_FOLLOWERS_CLAIM = new RegExp(
+  "(?:\\b(?:no|zero)\\s+(?:named\\s+|verified\\s+|documented\\s+|structured\\s+|observed\\s+)?notable\\s+followers?\\b" +
+  "|\\b(?:absence|lack|missing)\\s+of\\s+(?:named\\s+|verified\\s+|documented\\s+|observed\\s+)?notable\\s+followers?\\b" +
+  "|\\bnotable\\s+followers?\\b(?:\\s+(?!(?:depth|coverage|count|counts|breadth|sampling|pagination|history|beyond)\\b)[\\w-]+){0,10}\\s+(?:are|were|remain)?\\s*not\\s+(?:listed|documented|present|included|provided|available|observed|surfaced)\\b" +
+  "|\\b(?:notable\\s+followers?|observed\\s+network)(?:\\s+(?:evidence|data|array|list|collection|section))?\\s+(?:is|was|remains?)\\s+(?:empty|absent|missing|unavailable|not\\s+present)\\b" +
+  "|\\bnone\\b(?:\\s+[\\w-]+){0,6}\\s+(?:are|were|is|was|qualify|qualifies|qualified|count|counts|counted|rank|ranks|ranked)\\s+(?:as\\s+)?(?:[\\w-]+\\s+){0,2}notable\\s+followers?\\b" +
+  "|\\bno\\s+direct\\s+observed\\s+network\\s+evidence\\b)",
+  "i",
+);
 const describesGroundedNotableFollowersAsAbsent = (value: string): boolean =>
   ABSENT_NOTABLE_FOLLOWERS_CLAIM.test(value);
 
@@ -814,9 +847,11 @@ export function normalizeAnalystCitationEligibility(
     ) return candidate;
     const support = eligibleValues([row.primaryEvidenceRef, ...row.additionalEvidenceRefs], axis, true);
     if (!support.length) return candidate;
-    const supportIds = new Set(support.map((ref) => artifactFor(ref)!.artifactId));
-    const counter = eligibleValues(row.counterEvidenceRefs, axis, true)
-      .filter((ref) => !supportIds.has(artifactFor(ref)!.artifactId));
+    // Overlap policy belongs to normalizeAnalystSupportCounterOverlap, which
+    // runs first. Deduplicating counter against support here would resolve the
+    // sole-support overlap case in favor of support, silently erasing the
+    // counter-evidence marker the strict validator must reject for repair.
+    const counter = eligibleValues(row.counterEvidenceRefs, axis, true);
     const coverage = eligibleValues(row.coverageRefs, axis, false);
     const changed = support[0] !== row.primaryEvidenceRef
       || support.length - 1 !== row.additionalEvidenceRefs.length
@@ -849,6 +884,18 @@ export function normalizeAnalystCitationEligibility(
   return value;
 }
 
+// The uiCopyPolicy CI gate bans em and en dashes but can only see authored
+// string literals; model-generated verdict copy (headline, identity note,
+// rationales, gaps) is the one user-facing channel it cannot reach, so the
+// banned dashes are normalized deterministically before the copy is frozen.
+// A digit range keeps a plain hyphen; a prose dash becomes a comma pause.
+const stripBannedDashes = (value: string): string => value
+  .replace(/(\d)\s*[\u2013\u2014]\s*(?=\d)/g, "$1-")
+  .replace(/\s*[\u2013\u2014]+\s*/g, ", ")
+  .replace(/^,\s*/, "")
+  .replace(/,\s*$/, "")
+  .trim();
+
 // Tool schemas constrain the shape Claude is asked to return, but provider
 // responses are still untrusted input. An analyst result is usable only when it
 // contains one (and only one) finite, in-range score for every requested axis.
@@ -873,8 +920,8 @@ export function validateAnalystVerdict(
     !["axes", "headline", "identity_note"].includes(key))) {
     return reject("root-extra-field");
   }
-  const headline = typeof raw.headline === "string" ? raw.headline.trim() : "";
-  const identityNote = typeof raw.identity_note === "string" ? raw.identity_note.trim() : "";
+  const headline = typeof raw.headline === "string" ? stripBannedDashes(raw.headline) : "";
+  const identityNote = typeof raw.identity_note === "string" ? stripBannedDashes(raw.identity_note) : "";
   if (!headline || !identityNote) return reject("blank-headline-or-identity-note");
 
   const expected = new Map<string, AnalystAxis>();
@@ -908,16 +955,6 @@ export function validateAnalystVerdict(
       && (artifact.section === "team"
         || (artifact.section === "checkOutcomes"
           && artifact.operation === "checkOutcomes:project-team-identity")));
-  const axisNarrative = JSON.stringify(raw.axes ?? "");
-  if (
-    hasGroundedProjectTeam
-    && (describesGroundedTeamAsUnresolved(headline)
-      || describesGroundedTeamAsUnresolved(identityNote)
-      || describesGroundedTeamAsUnresolved(axisNarrative))
-  ) {
-    return reject("grounded-team-described-as-unresolved");
-  }
-  const hasFounderAxis = [...expected.values()].some((axis) => axis.role === "FOUNDER");
   const rawAxisRow = (axis: string): unknown => {
     if (Array.isArray(raw.axes)) {
       return raw.axes.find((candidate) =>
@@ -928,6 +965,21 @@ export function validateAnalystVerdict(
       ? (raw.axes as Record<string, unknown>)[axis]
       : undefined;
   };
+  const axisNarrative = JSON.stringify(raw.axes ?? "");
+  // The team and follower gates scan only the row that owns the claim plus the
+  // headline and identity note. A true statement on another axis ("the
+  // treasury multisig operators are not disclosed" on P6, "one partner's team
+  // is unknown" on P4) is not an internal contradiction about the subject.
+  const teamAxisNarrative = JSON.stringify(rawAxisRow("P1_team_and_identity") ?? "");
+  if (
+    hasGroundedProjectTeam
+    && (describesGroundedTeamAsUnresolved(headline)
+      || describesGroundedTeamAsUnresolved(identityNote)
+      || describesGroundedTeamAsUnresolved(teamAxisNarrative))
+  ) {
+    return reject("grounded-team-described-as-unresolved");
+  }
+  const hasFounderAxis = [...expected.values()].some((axis) => axis.role === "FOUNDER");
   const networkMisusedForFounderFundamentals = ["F2_track_record", "F3_repeat_backing"]
     .filter((axis) => expected.get(axis)?.role === "FOUNDER")
     .some((axis) => founderFundamentalsAffirmativelyRelyOnSocial(
@@ -981,11 +1033,12 @@ export function validateAnalystVerdict(
       artifact.section === "notableFollowers"
       && artifact.eligibleAxes.includes("F6_network_quality")
       && isSubstantiveArtifact(artifact));
+  const followerAxisNarrative = JSON.stringify(rawAxisRow("F6_network_quality") ?? "");
   if (
     hasGroundedNotableFollowers
     && (describesGroundedNotableFollowersAsAbsent(headline)
       || describesGroundedNotableFollowersAsAbsent(identityNote)
-      || describesGroundedNotableFollowersAsAbsent(axisNarrative))
+      || describesGroundedNotableFollowersAsAbsent(followerAxisNarrative))
   ) {
     return reject("grounded-notable-followers-described-as-absent");
   }
@@ -1033,7 +1086,7 @@ export function validateAnalystVerdict(
   };
   const validGaps = (value: unknown): string[] | null => {
     if (!Array.isArray(value) || value.length > 6) return null;
-    const gaps = value.map((item) => typeof item === "string" ? item.trim() : "");
+    const gaps = value.map((item) => typeof item === "string" ? stripBannedDashes(item) : "");
     if (gaps.some((gap) => !gap || gap.length > 400) || new Set(gaps).size !== gaps.length) return null;
     return gaps;
   };
@@ -1217,7 +1270,7 @@ export function validateAnalystVerdict(
     seen.set(row.axis, {
       axis: row.axis,
       score: row.score,
-      rationale: row.rationale.trim(),
+      rationale: stripBannedDashes(row.rationale),
       evidenceRefs,
       counterEvidenceRefs,
       gaps,
@@ -1644,13 +1697,25 @@ export function deriveProjectStrengthBands(
   ], artifactIds(p2Anchors), p2FloorTier);
 
   const tokenDisclosures = [...tokenDisclosureFacts];
-  const p3Tier: ProjectStrengthTier = !verifiedToken ? "none"
-    : scaleSignals >= 2
+  // A project with no canonical token record has no token conduct to measure,
+  // and the preflight treats a "none" band as missing evidence for the WHOLE
+  // axis set. Verified conduct disclosures therefore keep the axis scoreable
+  // for tokenless brand and company subjects; market-tier strength still
+  // requires the verified token, and a discovered token that failed official
+  // verification still fails closed to "none".
+  const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0]
+    .filter(Boolean).length;
+  const p3Tier: ProjectStrengthTier = verifiedToken
+    ? (scaleSignals >= 2
       && tokenDisclosures.length > 0
       && auditFacts.length > 0 ? "exceptional"
-      : moderateMarket ? "solid" : "emerging";
+      : moderateMarket ? "solid" : "emerging")
+    : !token && tokenlessConductCategories > 0
+      ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
+      : "none";
   setBand("P3_token_conduct", p3Tier, [
     ...(verifiedToken ? ["canonical token verified"] : []),
+    ...(!token && p3Tier !== "none" ? ["no canonical token; conduct scored from verified disclosures"] : []),
     ...(moderateMarket ? ["measured market activity"] : []),
     ...(governanceFacts.length ? ["verified token governance"] : []),
     ...(tokenDisclosures.length ? ["verified token economic disclosure"] : []),
@@ -2028,6 +2093,8 @@ const PROJECT_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   funding: ["P4_backing_and_partners"],
   investor: ["P4_backing_and_partners"],
   governance: ["P3_token_conduct", "P6_transparency_integrity"],
+  control: ["P3_token_conduct", "P6_transparency_integrity"],
+  conflict_of_interest: ["P6_transparency_integrity"],
   tokenomics: ["P3_token_conduct", "P6_transparency_integrity"],
   vesting: ["P3_token_conduct", "P6_transparency_integrity"],
   treasury: ["P3_token_conduct", "P6_transparency_integrity"],

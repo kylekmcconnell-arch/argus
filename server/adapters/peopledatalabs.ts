@@ -227,9 +227,17 @@ export const peopledatalabsAdapter: Adapter = {
         }
         if (!ex.period && period) ex.period = period;
         if (!ex.evidence_url && x.url) ex.evidence_url = httpify(x.url);
-        ex.provider = "peopledatalabs";
-        ex.evidence_origin = "deterministic";
-        ex.artifact_verified = true;
+        if (ex.artifact_verified !== true) {
+          // Promote only the facts the PDL record actually established. A name
+          // match proves employment, not the model-claimed title: keeping that
+          // title while swapping provenance to deterministic would let an
+          // unverified "founder" claim pass providerBackedRoles and govern the
+          // scoring methodology. The verified record owns the governing role.
+          ex.role = title;
+          ex.provider = "peopledatalabs";
+          ex.evidence_origin = "deterministic";
+          ex.artifact_verified = true;
+        }
         confirmed.push(company);
       } else {
         const rec = {

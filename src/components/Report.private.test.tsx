@@ -92,6 +92,87 @@ describe("private person report evidence boundary", () => {
     expect(context).not.toContain("Model Venture");
   });
 
+  it("renders a server-derived model-enriched lead once, not re-derived from the sanitized team copy", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const groundedMember = {
+      name: "Jane Founder",
+      handle: "@jane_founder",
+      role: "CEO",
+      source: "https://example.com/team",
+      provider: "firecrawl",
+      evidence_origin: "deterministic" as const,
+      artifact_verified: true,
+      identity_link_evidence_origin: "model_lead" as const,
+    };
+    const dossier = {
+      ...base,
+      // assembleDossier ships the sanitized copy in webTeam (handle stripped)
+      // and the lead copy in webTeamLeads (handle kept, source suffixed).
+      webTeam: [{ ...groundedMember, handle: undefined, linkedin: undefined }],
+      webTeamLeads: [{
+        ...groundedMember,
+        evidence_origin: "model_lead" as const,
+        artifact_verified: false,
+        provider: "grok",
+        source: "https://example.com/team · unverified model-enriched links",
+      }],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const candidatesCard = () => [...container.querySelectorAll<HTMLElement>("div")]
+      .find((el) => el.className.includes("border-caution/25"));
+    expect(candidatesCard()).toBeDefined();
+    expect((candidatesCard()?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(1);
+    expect(candidatesCard()?.textContent).toContain("candidate @jane_founder");
+
+    // Legacy persisted dossiers without webTeamLeads still derive the lead client-side.
+    const { webTeamLeads: _omitted, ...legacy } = dossier;
+    act(() => {
+      root.render(<Report dossier={legacy} onReset={() => {}} onAudit={() => {}} />);
+    });
+    expect((candidatesCard()?.textContent?.match(/Jane Founder/g) ?? []).length).toBe(1);
+  });
+
+  it("renders never-collected follow and acknowledgment checks as unchecked instead of affirmative negatives", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      evidence: {
+        ...base.evidence,
+        testimonials: [{
+          claimed_endorser_handle: "@unchecked_endorser",
+          claimed_relationship: "advisor",
+        }, {
+          claimed_endorser_handle: "@screened_endorser",
+          claimed_relationship: "investor",
+          follows_subject: false,
+          public_acknowledgment: "none",
+        }],
+      },
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const rowText = (handle: string) => [...container.querySelectorAll<HTMLElement>("div")]
+      .find((el) => el.className.includes("grid-cols-[1.4fr_1fr_auto]") && el.textContent?.includes(handle))
+      ?.textContent ?? "";
+
+    const unchecked = rowText("@unchecked_endorser");
+    expect(unchecked).toContain("follow unchecked");
+    expect(unchecked).toContain("ack unchecked");
+    expect(unchecked).not.toContain("no follow");
+    expect(unchecked).not.toContain("no ack");
+
+    const screened = rowText("@screened_endorser");
+    expect(screened).toContain("no follow");
+    expect(screened).toContain("no ack");
+  });
+
   it("does not mount subject-specific supplemental panels", () => {
     const dossier = {
       ...buildReport(SUBJECTS[1]),

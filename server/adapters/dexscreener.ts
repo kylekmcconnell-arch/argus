@@ -8,6 +8,10 @@ import { recordCall } from "../cost";
 import { SubjectClass } from "../../src/engine";
 
 const BASE = "https://api.dexscreener.com";
+// extractClaims captures EVERY distinct promoted token, so a prolific promoter
+// can carry dozens of CA-bearing promos; the cap bounds this pass (the
+// lifecycle pass in orchestrate.ts caps the same input at 3).
+const MAX_PROMO_LOOKUPS = 8;
 const isRecord = (value: unknown): value is Record<string, any> => !!value && typeof value === "object" && !Array.isArray(value);
 const recordDex = (op: string, status: "succeeded" | "partial" | "failed", detail?: string) => {
   recordCall("dexscreener", op, 0, ["keyless", detail].filter(Boolean).join(" · "), status);
@@ -198,12 +202,14 @@ export const dexscreenerAdapter: Adapter = {
     if (ctx.evidence.roles.includes(SubjectClass.PROJECT) && !ctx.evidence.roles.includes(SubjectClass.KOL)) {
       return { state: "skipped" as const, attempts: 0, detail: "project-account token mentions are not KOL promotions" };
     }
-    const promos = ctx.evidence.promotions.filter((p) => p.contract_address);
-    if (!promos.length) return;
-    ctx.emit({ phase: "On-chain", label: "DEX liquidity scan", detail: `Resolving ${promos.length} promoted token(s) on DexScreener…`, tone: "neutral" });
-    for (const p of promos) {
+    const withContract = ctx.evidence.promotions.filter((p) => p.contract_address);
+    if (!withContract.length) return;
+    const promos = withContract.slice(0, MAX_PROMO_LOOKUPS);
+    ctx.emit({ phase: "On-chain", label: "DEX liquidity scan", detail: `Resolving ${promos.length}${withContract.length > promos.length ? ` of ${withContract.length}` : ""} promoted token(s) on DexScreener…`, tone: "neutral" });
+    // Parallel: the worst case is one 8s timeout window, not a serial crawl.
+    await Promise.all(promos.map(async (p) => {
       const snap = await lookupToken(p.contract_address!);
-      if (!snap) continue;
+      if (!snap) return;
       const thin = (snap.liquidityUsd ?? 0) < 10000;
       p.perf_current = snap.priceUsd;
       ctx.recordCheck?.({
@@ -220,6 +226,6 @@ export const dexscreenerAdapter: Adapter = {
         source: "dexscreener",
         tone: thin ? "warn" : "neutral",
       });
-    }
+    }));
   },
 };

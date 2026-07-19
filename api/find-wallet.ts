@@ -13,7 +13,10 @@ const EVM = /^0x[a-fA-F0-9]{40}$/;
 const SOL = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const NAME = /\.(eth|lens|sol|cb\.id|crypto|nft|x|dao)$/i;
 const ADDR_IN_TEXT = /0x[a-fA-F0-9]{40}/g;
-const NAME_IN_TEXT = /\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b/gi;
+// Lookarounds keep hostname/URL fragments out: "vitalik.eth.limo",
+// "sub.someone.eth", or a name inside a URL path is a third party's gateway
+// link, not the subject's own name (mirrors server/adapters/wallet.ts).
+const NAME_IN_TEXT = /(?<![./])\b[a-z0-9][a-z0-9-]{1,38}\.(?:base\.eth|eth|sol|lens)\b(?!\.[a-z0-9])/gi;
 const TW = "https://api.twitterapi.io";
 
 async function getJson(url: string, headers?: Record<string, string>): Promise<any> {
@@ -30,7 +33,10 @@ async function ensideas(name: string): Promise<string | null> {
 }
 async function snsResolve(name: string): Promise<string | null> {
   const j = await getJson(`https://sns-sdk-proxy.bonfida.workers.dev/resolve/${encodeURIComponent(name.replace(/\.sol$/i, ""))}`);
-  return j && typeof j.result === "string" ? j.result : null;
+  // The proxy returns HTTP 200 { s: "error", result: "Domain not found" } for
+  // unregistered names: require the ok flag and a base58 address shape
+  // (mirrors server/adapters/wallet.ts).
+  return j && j.s === "ok" && typeof j.result === "string" && SOL.test(j.result) ? j.result : null;
 }
 async function resolveName(name: string): Promise<{ address: string; chain: string } | null> {
   const lower = name.toLowerCase();

@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { SubjectClass } from "../src/engine";
+import { SubjectClass, VentureOutcome, type Venture } from "../src/engine";
 import { emptyEvidence, type BasicFact, type BasicFactPredicate } from "../src/data/evidence";
 import type { CheckObservation, CollectContext } from "./adapters/types";
 import {
   axisCatalog,
   coalesceTeamMembersByHandle,
   collectProjectCoreEvidenceOutcomes,
+  mergeDiscoveredAffiliations,
   projectVerifiedBasicFacts,
   providerBackedRoles,
 } from "./orchestrate";
@@ -306,5 +307,126 @@ describe("provider-backed project routing", () => {
     evidence.profile.profile_captured_at = capturedAt;
 
     expect(providerBackedRoles(evidence)).not.toContain(SubjectClass.PROJECT);
+  });
+});
+
+describe("provider-backed employment title routing", () => {
+  const withVerifiedRole = (role: string) => {
+    const evidence = emptyEvidence("@person");
+    evidence.ventures.push({
+      project_name: "Example Corp",
+      role,
+      period: "2024",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "peopledatalabs",
+    });
+    return evidence;
+  };
+
+  it.each([
+    "Principal Engineer",
+    "Partnerships Lead",
+    "Principal Product Manager",
+    "Venture Lead",
+  ])("routes the verified employment title %s to MEMBER, not the investor fund methodology", (role) => {
+    expect(providerBackedRoles(withVerifiedRole(role))).toEqual([SubjectClass.MEMBER]);
+  });
+
+  it("does not route Head of Capital Markets to INVESTOR", () => {
+    expect(providerBackedRoles(withVerifiedRole("Head of Capital Markets"))).not.toContain(SubjectClass.INVESTOR);
+  });
+
+  it.each([
+    "Investor",
+    "General Partner",
+    "Principal",
+    "Venture Capitalist",
+  ])("keeps the professional capital-allocation title %s on INVESTOR", (role) => {
+    expect(providerBackedRoles(withVerifiedRole(role))).toEqual([SubjectClass.INVESTOR]);
+  });
+});
+
+describe("discovered-affiliation merge", () => {
+  it("backfills bridge keys onto a colliding claims-extracted venture and keeps it corroboratable", () => {
+    const ventures: Venture[] = [{
+      project_name: "Deks",
+      role: "founder",
+      period: "2023",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    }];
+
+    const pending = mergeDiscoveredAffiliations(ventures, [{
+      name: "Deks",
+      role: "founder",
+      year: "2023",
+      evidence: "Named as founder in a launch article.",
+      x_handle: "@deksxyz",
+      domain: "deks.xyz",
+    }]);
+
+    expect(ventures).toHaveLength(1);
+    expect(ventures[0]).toMatchObject({
+      project_name: "Deks",
+      x_handle: "@deksxyz",
+      domain: "deks.xyz",
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    });
+    expect(ventures[0].notes).toContain("Named as founder in a launch article.");
+    expect(pending).toHaveLength(1);
+    expect(pending[0].rec).toBe(ventures[0]);
+  });
+
+  it("merges bridge keys onto a provider-verified venture without touching its provenance or re-queueing it", () => {
+    const ventures: Venture[] = [{
+      project_name: "Deks",
+      role: "Founder",
+      period: "2023",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "peopledatalabs",
+    }];
+
+    const pending = mergeDiscoveredAffiliations(ventures, [{
+      name: "Deks",
+      role: "founder",
+      x_handle: "@deksxyz",
+    }]);
+
+    expect(pending).toEqual([]);
+    expect(ventures[0]).toMatchObject({
+      x_handle: "@deksxyz",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "peopledatalabs",
+    });
+  });
+
+  it("still pushes a fresh discovery as an unverified model lead in the corroboration queue", () => {
+    const ventures: Venture[] = [];
+
+    const pending = mergeDiscoveredAffiliations(ventures, [{
+      name: "Deks",
+      role: "founder",
+      x_handle: "@deksxyz",
+      domain: "deks.xyz",
+    }]);
+
+    expect(ventures).toEqual([expect.objectContaining({
+      project_name: "Deks",
+      x_handle: "@deksxyz",
+      domain: "deks.xyz",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      notes: expect.stringContaining("single-source lead, unverified"),
+    })]);
+    expect(pending).toHaveLength(1);
+    expect(pending[0].rec).toBe(ventures[0]);
   });
 });

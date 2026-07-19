@@ -10,7 +10,7 @@
 //    return the fixture dossier unchanged, so the demo always works.
 // The engine always owns caps, banding and the composite verdict.
 
-import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEntityKey, repeatBackingSignal, type Finding } from "../src/engine";
+import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEntityKey, repeatBackingSignal, type Finding, type Venture } from "../src/engine";
 import { env } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
@@ -554,16 +554,99 @@ async function collectProjectSiteSubstance(ctx: CollectContext, domain: string):
   applySiteSubstanceOutcome(ctx, domain, site);
 }
 
+// The bare-domain grab from bio TEXT (distinct from the profile's website
+// field). An email's host must never qualify: "team@gmail.com" would otherwise
+// make gmail.com the subject's official website, which seeds product-substance
+// credit, official-source classification, and team-page fetches. Emails are
+// stripped before matching. Exported for tests.
+export function bioWebsiteDomain(bio: string): string | undefined {
+  return bio
+    .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, " ")
+    .match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
+}
+
+/**
+ * Fold discovered affiliations into the ventures evidence. A fresh lead is
+ * pushed immediately as a live record the corroboration loop refines in place.
+ * A name collision with an existing venture (claims extraction seeds the
+ * subject's primary venture with NO x_handle/domain) backfills the missing
+ * bridge keys instead of dropping the discovery, so archive corroboration and
+ * the venture-scoped adverse sweep still reach it. Returns the records
+ * eligible for corroboration: every fresh lead plus each collided row that is
+ * still an unverified model lead (a provider-verified row keeps its own
+ * provenance and never re-enters the queue). Exported for tests.
+ */
+export function mergeDiscoveredAffiliations(
+  ventures: Venture[],
+  discovered: readonly DiscoveredAffiliation[],
+): { v: DiscoveredAffiliation; rec: Venture }[] {
+  const byName = new Map(ventures.map((row) => [row.project_name.toLowerCase(), row]));
+  const pending: { v: DiscoveredAffiliation; rec: Venture }[] = [];
+  for (const v of discovered) {
+    const existing = byName.get(v.name.toLowerCase());
+    if (existing) {
+      existing.x_handle ??= v.x_handle;
+      existing.domain ??= v.domain;
+      if (v.evidence) existing.notes = [existing.notes, v.evidence].filter(Boolean).join(" · ");
+      if (existing.evidence_origin === "model_lead" && existing.artifact_verified !== true) {
+        pending.push({ v, rec: existing });
+      }
+      continue;
+    }
+    const rec: Venture = {
+      project_name: v.name,
+      // Canonical bridge keys: the venture's own X account / domain. Without
+      // these the graph keys the project on its fuzzy name and never connects
+      // it to the same project seen in another audit.
+      x_handle: v.x_handle,
+      domain: v.domain,
+      role: v.role,
+      period: v.year ?? "",
+      outcome: VentureOutcome.ACTIVE,
+      evidence_url: null,
+      notes: [v.evidence, "single-source lead, unverified"].filter(Boolean).join(" · "),
+      // An archived-page corroboration can promote this lead to a scoreable
+      // artifact below (default stays an unverified model lead).
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    };
+    ventures.push(rec);
+    byName.set(v.name.toLowerCase(), rec);
+    pending.push({ v, rec });
+  }
+  return pending;
+}
+
 // Cold handle: resolve the profile, pull recent posts, and extract self-claims
 // so the verification adapters have something to check. Without this an unknown
 // subject has no ventures/endorsements/advisory seats to verify.
-async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
+// Exported for tests.
+export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
   if (!profileAlreadyResolved) await resolveProfile(ctx);
   const siteUrl = canonicalPublicProfileWebsite(ctx.evidence.profile.website) ?? undefined;
+  const bioDomain = bioWebsiteDomain(ctx.evidence.profile.bio);
+  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
+
+  // Three provider chains with no data dependency on one another run
+  // concurrently (handle history; corpus then wallet resolution, which reads
+  // the corpus posts; site liveness), so this prelude costs one slow provider,
+  // not the sum. Results are applied in the original order below so every
+  // evidence merge stays identical to the serial pipeline.
+  const [hist, { corpus, foundWallets }] = await Promise.all([
+    handleHistory(ctx.handle),
+    (async () => {
+      const corpus = await collectCorpus(ctx.handle);
+      const foundWallets = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...corpus.posts].join(" \n "));
+      return { corpus, foundWallets };
+    })(),
+    // Site liveness is deterministic and should not disappear when the language
+    // model is unavailable. Running token identity first means slogan-only project
+    // accounts can supply their verified CoinGecko homepage here.
+    collectProjectSiteSubstance(ctx, domain),
+  ]);
 
   // Handle-change history: a rebrand to escape a burned reputation is a real
   // flag, and the old handles let us search the subject's history under them.
-  const hist = await handleHistory(ctx.handle);
   if (hist && hist.priorHandles.length) {
     ctx.evidence.profile.prior_handles = hist.priorHandles;
     ctx.recordCheck?.({
@@ -587,7 +670,6 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
   // Claim-targeted corpus: recent originals + keyword search over the whole
   // history (pinned/announcement posts where claims actually live), ranked and
   // date-stamped — not just the newest 20 items (mostly replies/gm, and gameable).
-  const corpus = await collectCorpus(ctx.handle);
   const posts = corpus.posts;
   if (posts.length) {
     ctx.evidence.recentActivity = corpus.newest.length ? corpus.newest : posts; // newest originals drive tone/dormancy
@@ -596,20 +678,12 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
 
   // Find-wallet: a self-disclosed wallet (a 0x address or ENS/basename/.sol name)
   // in the bio/posts. The richer corpus surfaces more contract/URL mentions.
-  const foundWallets = await resolveForHandle(ctx.handle, [ctx.evidence.profile.bio, ...posts].join(" \n "));
   if (foundWallets.length) {
     for (const w of foundWallets) {
       ctx.evidence.wallets.push({ address: w.address, chain: w.chain, link_tier: w.tier, notes: w.source });
     }
     ctx.emit({ phase: "P0 · Intake", label: "Wallet resolved", detail: `${foundWallets.length} wallet${foundWallets.length > 1 ? "s" : ""}: ${foundWallets.map((w) => `${w.address.slice(0, 8)}… (${w.chain}, ${w.source.includes("Farcaster") ? "Farcaster" : "self-disclosed"})`).join(", ")}. Running on-chain forensics.`, source: "find-wallet", tone: "good" });
   }
-
-  const bioDomain = ctx.evidence.profile.bio.match(/\b([a-z0-9-]+\.(?:xyz|io|com|fi|net|finance|app|org|co|gg|network|dev|ai|so|money))\b/i)?.[1];
-  const domain = (siteUrl ?? (bioDomain ? `https://${bioDomain}` : "")).replace(/^https?:\/\//, "").replace(/\/.*$/, "");
-  // Site liveness is deterministic and should not disappear when the language
-  // model is unavailable. Running token identity first means slogan-only project
-  // accounts can supply their verified CoinGecko homepage here.
-  await collectProjectSiteSubstance(ctx, domain);
 
   const canExtractClaims = analystAvailable();
   if (canExtractClaims) {
@@ -996,32 +1070,9 @@ async function coldIntake(ctx: CollectContext, profileAlreadyResolved = false) {
   const discovered = [...mergedMap.values()];
   if (discovered.length) {
     // 1. Push every fresh lead immediately so the audit never blocks on
-    //    corroboration. Each record is a live object we refine in place below.
-    const have = new Set(ctx.evidence.ventures.map((v) => v.project_name.toLowerCase()));
-    const pending = discovered
-      .filter((v) => { const k = v.name.toLowerCase(); if (have.has(k)) return false; have.add(k); return true; })
-      .map((v) => {
-        const rec = {
-          project_name: v.name,
-          // Canonical bridge keys — the venture's own X account / domain. Without
-          // these the graph keys the project on its fuzzy name and never connects
-          // it to the same project seen in another audit.
-          x_handle: v.x_handle,
-          domain: v.domain,
-          role: v.role,
-          period: v.year ?? "",
-          outcome: VentureOutcome.ACTIVE,
-          evidence_url: null as string | null,
-          notes: [v.evidence, "single-source lead, unverified"].filter(Boolean).join(" · "),
-          // Widened so an archived-page corroboration can promote this lead to a
-          // scoreable artifact below (default stays an unverified model lead).
-          evidence_origin: "model_lead" as "model_lead" | "deterministic",
-          artifact_verified: false,
-          provider: undefined as string | undefined,
-        };
-        ctx.evidence.ventures.push(rec);
-        return { v, rec };
-      });
+    //    corroboration. Each record is a live object we refine in place below;
+    //    a name collision merges bridge keys instead of dropping the discovery.
+    const pending = mergeDiscoveredAffiliations(ctx.evidence.ventures, discovered);
     ctx.emit({ phase: "P0 · Intake", label: "Affiliations discovered", detail: `${discovered.length} public affiliation${discovered.length === 1 ? "" : "s"} tied to the subject: ${discovered.slice(0, 5).map((v) => v.name).join(", ")}.`, source: "grok", tone: "good" });
 
     // 2. Corroborate the top leads against a second, independent source, all in
@@ -1119,8 +1170,13 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     const role = (venture.role ?? "").toLowerCase();
     if (/founder|co-?founder|\bceo\b|\bcto\b|creator|owner/.test(role)) roles.add(SubjectClass.FOUNDER);
     else if (/advisor|adviser|board/.test(role)) roles.add(SubjectClass.ADVISOR);
-    else if (/investor|partner|principal|venture|capital|\bgp\b/.test(role)) roles.add(SubjectClass.INVESTOR);
+    // Employment words outrank the investor keywords: this gate reads raw job
+    // titles (PDL employment records), and "Principal Engineer" or
+    // "Partnerships Lead" is staff, not the professional capital allocation
+    // INVESTOR must mean. The investor terms are whole words for the same
+    // reason ("Partnerships" is not "Partner"; "Capital Markets" is not a fund).
     else if (/contributor|engineer|developer|employee|manager|director|lead|role on record/.test(role)) roles.add(SubjectClass.MEMBER);
+    else if (/\binvestor\b|\bpartner\b|\bprincipal\b|\bventure capital(?:ist)?\b|\bvc\b|\bgp\b/.test(role)) roles.add(SubjectClass.INVESTOR);
   }
   if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
     roles.add(SubjectClass.AGENCY);
@@ -1410,9 +1466,14 @@ export function collectFounderDecisionQuestionOutcomes(ctx: CollectContext): voi
     // founder's legal question.
     const answered = ledgerAnswered
       && (group.id !== "founder-legal-regulatory" || facts.length > 0);
-    const completedSearch = entries.every((entry) => entry.providerRuns.some((run) =>
-      run.state === "succeeded" || run.state === "completed_empty",
-    ));
+    // Last-run-wins via the canonical helper (the asset branch above already
+    // uses it): only an explicit final completed-empty pass may read as a
+    // completed screen. A failed or partial targeted repair, or a succeeded
+    // batch that left only unverified leads, stays unavailable.
+    const completedSearch = entries.every((entry) => {
+      const outcome = basicFactQuestionOutcome(entry);
+      return outcome === "answered" || outcome === "checked_empty";
+    });
     if (answered) {
       const hasAttributedConcern = facts.some((fact) =>
         fact.predicate === "legal_regulatory_event" || fact.predicate === "conflict_of_interest",
@@ -1814,24 +1875,39 @@ async function adverseSignalsAndTooling(ctx: CollectContext) {
 // then collapsed. The collapse is observed on-chain (Verified, but NOT proof of
 // fraud, so it surfaces without capping); the multi-generation migration is a
 // heuristic, reported as "possible".
-async function tokenLifecycle(ctx: CollectContext) {
+// Exported for tests.
+export async function tokenLifecycle(ctx: CollectContext) {
   const { evidence } = ctx;
-  // ONLY analyze tokens the subject verifiably owns — i.e. a contract the subject
-  // actually posted. A ticker alone can't attribute on-chain conduct: "$WORLD"
-  // (a common word) matches dozens of unrelated copycat tokens, and blaming their
-  // collapses / counting them as "the subject's contracts" is exactly the false
-  // signal that mislabels a real project by ticker collision.
+  // Same subject-class guard as the dexscreener adapter: a project account's
+  // own token mentions are not KOL promotions, and a project token drawdown
+  // must never charge the promotion-conduct axes (ProjectTokenDrawdown covers
+  // that case as P5-only by design).
+  if (evidence.roles.includes(SubjectClass.PROJECT) && !evidence.roles.includes(SubjectClass.KOL)) return;
+  // ONLY analyze ticker + contract pairs. A ticker alone can't attribute
+  // on-chain conduct: "$WORLD" (a common word) matches dozens of unrelated
+  // copycat tokens, and blaming their collapses / counting them as "the
+  // subject's contracts" is exactly the false signal that mislabels a real
+  // project by ticker collision. The pair itself is still only as trustworthy
+  // as the promotions row it came from; provenance is inherited below.
   const promos = evidence.promotions.filter((p) => p.ticker && p.contract_address).slice(0, 3);
   if (!promos.length) return;
   await Promise.all(
     promos.map(async (p) => {
       const sig = await detectTokenLifecycle(p.ticker, p.contract_address);
       if (!sig) return;
+      // The collapse is observed on-chain, but the subject-to-contract join
+      // inherits the promotion row's provenance: a model-extracted pairing is
+      // never verified evidence about the subject, so it fails closed as a
+      // lead (artifactIsEligible rejects model_lead rows) instead of
+      // laundering into a Verified deterministic finding.
+      const attributionVerified = p.evidence_origin !== "model_lead" && p.artifact_verified === true;
       ctx.recordCheck?.({
         id: "promoted-token-performance",
         status: sig.dive ? "finding" : "confirmed",
         note: sig.dive
-          ? `$${sig.ticker} verified contract collapse: ${sig.dive.detail}`
+          ? attributionVerified
+            ? `$${sig.ticker} verified contract collapse: ${sig.dive.detail}`
+            : `$${sig.ticker} promoted-contract collapse (model-extracted promotion, attribution unverified): ${sig.dive.detail}`
           : `$${sig.ticker} lifecycle lookup completed with no collapse surfaced`,
         provider: "dexscreener",
         sourceCount: 1,
@@ -1839,15 +1915,15 @@ async function tokenLifecycle(ctx: CollectContext) {
       if (!sig.dive) return; // dive is gated on the verified contract inside detect
       evidence.findings.push({
         finding_type: "TokenCollapse",
-        claim: `$${sig.ticker} (${p.contract_address!.slice(0, 8)}…) launched and collapsed to near-zero (${sig.dive.detail}).`,
+        claim: `$${sig.ticker} (${p.contract_address!.slice(0, 8)}…) launched and collapsed to near-zero (${sig.dive.detail}).${attributionVerified ? "" : " The claim that the subject promoted this contract is model-extracted and not yet verified."}`,
         source_url: `https://dexscreener.com/search?q=${encodeURIComponent(sig.dive.address)}`,
         source_date: "",
         source_author: "dexscreener",
-        verification_status: "Verified",
+        verification_status: attributionVerified ? "Verified" : "Reported",
         independent_source_count: 1,
         polarity: -1,
-        evidence_origin: "deterministic",
-        artifact_verified: true,
+        evidence_origin: attributionVerified ? "deterministic" : "model_lead",
+        artifact_verified: attributionVerified,
       });
       ctx.emit({ phase: "Token", label: `$${sig.ticker} collapse`, detail: `${sig.dive.detail}. The dive-after-launch pattern.`, source: "dexscreener", tone: "bad" });
     }),

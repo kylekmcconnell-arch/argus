@@ -9,6 +9,11 @@ import { SubjectClass } from "../../src/engine";
 const PRO = "https://pro-api.coingecko.com/api/v3";
 const PUBLIC = "https://api.coingecko.com/api/v3";
 
+// extractClaims captures EVERY distinct promoted token, so a prolific promoter
+// can carry dozens of CA-bearing promos; the cap bounds this pass (the
+// lifecycle pass in orchestrate.ts caps the same input at 3).
+const MAX_PROMO_LOOKUPS = 8;
+
 // chain id -> CoinGecko asset-platform id
 const PLATFORM: Record<string, string> = {
   ethereum: "ethereum",
@@ -82,12 +87,14 @@ export const coingeckoAdapter: Adapter = {
     if (ctx.evidence.roles.includes(SubjectClass.PROJECT) && !ctx.evidence.roles.includes(SubjectClass.KOL)) {
       return { state: "skipped" as const, attempts: 0, detail: "project-account token mentions are not KOL promotions" };
     }
-    const promos = ctx.evidence.promotions.filter((p) => p.contract_address && p.chain);
-    if (!promos.length) return;
+    const withContract = ctx.evidence.promotions.filter((p) => p.contract_address && p.chain);
+    if (!withContract.length) return;
+    const promos = withContract.slice(0, MAX_PROMO_LOOKUPS);
     ctx.emit({ phase: "On-chain", label: "Market data", detail: "Cross-referencing promoted tokens against CoinGecko (source of record)…", tone: "neutral" });
-    for (const p of promos) {
+    // Parallel: the worst case is one 10s timeout window, not a serial crawl.
+    await Promise.all(promos.map(async (p) => {
       const t = await tokenByContract(p.chain!, p.contract_address!);
-      if (!t) continue;
+      if (!t) return;
       const downBad = (t.ath_change_pct ?? 0) < -90;
       ctx.recordCheck?.({
         id: "promoted-token-performance",
@@ -103,6 +110,6 @@ export const coingeckoAdapter: Adapter = {
         source: "coingecko",
         tone: downBad ? "warn" : "neutral",
       });
-    }
+    }));
   },
 };

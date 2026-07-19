@@ -307,6 +307,62 @@ describe("report case lifecycle API", () => {
     expect(String(fetchMock.mock.calls[2][0])).toContain(versionId);
   });
 
+  it("pages archived activation events past the PostgREST row cap instead of dropping older cases", async () => {
+    const noisyCaseId = "00000000-0000-4000-8000-000000000101";
+    const quietCaseId = "00000000-0000-4000-8000-000000000102";
+    const noisyVersionId = "00000000-0000-4000-8000-000000000201";
+    const quietVersionId = "00000000-0000-4000-8000-000000000202";
+    // A heavily re-activated case fills the whole first page, pushing the
+    // quiet case's only activation event onto the second page.
+    const fullFirstPage = Array.from({ length: 1000 }, (_, index) => ({
+      case_id: noisyCaseId,
+      report_version_id: noisyVersionId,
+      created_at: `2026-07-10T22:${String(59 - Math.floor(index / 60)).padStart(2, "0")}:00.000Z`,
+    }));
+    const versionRow = (id: string, caseId: string) => ({
+      id,
+      case_id: caseId,
+      version: 1,
+      verdict: "CAUTION",
+      score: 50,
+      completeness_state: "partial",
+      attestation_state: "analyst_submitted",
+      methodology_version: "v2",
+      created_at: "2026-07-10T22:00:00.000Z",
+      cost: { usd: 0.1 },
+      contributor_label: "Kyle",
+    });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(jsonResponse([
+        { id: noisyCaseId, kind: "token", canonical_ref: "0xaaa", display_query: "$AAA", updated_at: "2026-07-11T01:00:00.000Z" },
+        { id: quietCaseId, kind: "token", canonical_ref: "0xbbb", display_query: "$BBB", updated_at: "2026-07-11T02:00:00.000Z" },
+      ]))
+      .mockResolvedValueOnce(jsonResponse(fullFirstPage))
+      .mockResolvedValueOnce(jsonResponse([{
+        case_id: quietCaseId,
+        report_version_id: quietVersionId,
+        created_at: "2026-07-09T00:00:00.000Z",
+      }]))
+      .mockResolvedValueOnce(jsonResponse([
+        versionRow(noisyVersionId, noisyCaseId),
+        versionRow(quietVersionId, quietCaseId),
+      ]))
+      .mockResolvedValueOnce(jsonResponse([]));
+    vi.stubGlobal("fetch", fetchMock);
+    const { res, captured } = response();
+
+    await handler(request("GET", { query: { list: "1", status: "archived" } }), res);
+
+    expect(captured.statusCode).toBe(200);
+    const body = captured.body as { reports: Array<{ ref: string; reportVersionId: string }> };
+    expect(body.reports.map((report) => report.ref)).toEqual(["0xaaa", "0xbbb"]);
+    expect(body.reports.map((report) => report.reportVersionId)).toEqual([noisyVersionId, quietVersionId]);
+    expect(String(fetchMock.mock.calls[1][0])).toContain("limit=1000");
+    expect(String(fetchMock.mock.calls[1][0])).toContain("offset=0");
+    expect(String(fetchMock.mock.calls[2][0])).toContain("/rest/v1/case_events?");
+    expect(String(fetchMock.mock.calls[2][0])).toContain("offset=1000");
+  });
+
   it("exposes exact case and immutable version metadata in the active library", async () => {
     const caseId = "00000000-0000-4000-8000-000000000101";
     const versionId = "00000000-0000-4000-8000-000000000201";

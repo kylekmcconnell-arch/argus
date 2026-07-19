@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 vi.mock("../_collector.js", async () => {
@@ -31,7 +31,10 @@ import type { Dossier } from "../../src/data/dossier";
 import type { ScanCheck } from "../../src/lib/scanChecklist";
 import openapiHandler from "./openapi.json";
 import handler, { config } from "./person";
-import { DEEP_INVESTIGATION_MAX_DURATION_SECONDS } from "../../src/lib/investigationRuntime";
+import {
+  ANALYST_FINALIZATION_RESERVE_MS,
+  DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
+} from "../../src/lib/investigationRuntime";
 
 const AUTH_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
 
@@ -124,6 +127,10 @@ describe("v1 person input guard", () => {
     vi.clearAllMocks();
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it.each([
     ["cashtag", "$PEPEBULL"],
     ["case-folded Solana mint", "52hnekedvx3qmpysyxerquicq3qxxfvchqsetyalpump"],
@@ -163,6 +170,30 @@ describe("v1 person input guard", () => {
       }),
     );
     expect(persistServerDossier).not.toHaveBeenCalled();
+  });
+
+  it("hands the collector an absolute analyst deadline of request start plus the ceiling minus the finalization reserve", async () => {
+    vi.useFakeTimers();
+    const requestStartedAt = new Date("2026-07-18T12:00:00.000Z").getTime();
+    vi.setSystemTime(requestStartedAt);
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(runAudit).mockResolvedValue(null);
+    const { res } = response();
+
+    await handler(request("argus"), res);
+
+    // Exact epoch value: a sign flip, dropped term, seconds-for-ms slip, or a
+    // relative (elapsed) budget here would still be "a number" but would push
+    // the analyst past the Fluid Compute ceiling or zero its budget.
+    expect(runAudit).toHaveBeenCalledWith(
+      "argus",
+      expect.any(Function),
+      expect.objectContaining({
+        analystDeadlineAt: requestStartedAt
+          + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
+          - ANALYST_FINALIZATION_RESERVE_MS,
+      }),
+    );
   });
 });
 

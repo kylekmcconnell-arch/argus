@@ -74,11 +74,13 @@ export function resolveInput(raw: string): ResolvedInput {
     return { kind: "token", ref: s, via: "address-candidate" };
   }
 
-  // An X/Twitter profile URL -> extract the handle (x.com/VulcanForged ->
-  // VulcanForged), never send the whole URL to the handle audit. Skip non-profile
-  // paths (home, intent, search, etc.).
+  // An X/Twitter profile URL -> extract the handle (x.com/VulcanForged or
+  // x.com/@VulcanForged -> VulcanForged), never send the whole URL to the handle
+  // audit. Skip non-profile paths (home, intent, search, etc.).
   const NOISE = /^(home|explore|notifications|messages|i|intent|search|hashtag|settings|share|status|about|tos|privacy)$/i;
-  const xHandle = isXUrl && parsedUrl ? parsedUrl.pathname.split("/").filter(Boolean)[0] ?? "" : "";
+  const xHandle = isXUrl && parsedUrl
+    ? (parsedUrl.pathname.split("/").filter(Boolean)[0] ?? "").replace(/^@/, "")
+    : "";
   if (/^[A-Za-z0-9_]{1,30}$/.test(xHandle) && !NOISE.test(xHandle)) {
     return { kind: "handle", ref: xHandle };
   }

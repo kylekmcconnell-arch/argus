@@ -6,7 +6,7 @@ vi.mock("../agent", () => ({ structured }));
 import { getCost, withCostLedger } from "../cost";
 import { checkSiteSubstance } from "./sitecheck";
 import { fetchTeamPage } from "./teampage";
-import { resolveName } from "./wallet";
+import { resolveName, resolveWalletsFromText } from "./wallet";
 import { archivedAffiliation } from "./wayback";
 
 const response = (body: string | null, status = 200, contentType = "text/html") => new Response(body, {
@@ -110,6 +110,44 @@ describe("keyless adapter attempt accounting", () => {
       expect.objectContaining({ provider: "wallet-resolve", op: "api.web3.bio", calls: 1, failed: 1, meta: "transport_error" }),
       expect.objectContaining({ provider: "wallet-resolve", op: "api.ensideas.com", calls: 1, failed: 1, meta: "response_json_error" }),
     ]));
+  });
+
+  it("rejects the Bonfida error envelope and accepts only base58 .sol resolutions", async () => {
+    // Bonfida answers HTTP 200 { s: "error", result: "Domain not found" } for
+    // unregistered names; that string must never come back as an address.
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(JSON.stringify({ s: "error", result: "Domain not found" }), 200, "application/json"))
+      .mockResolvedValueOnce(response(JSON.stringify({ s: "ok", result: "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T" }), 200, "application/json"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const miss = await withCostLedger(() => resolveName("ghost.sol"));
+    const hit = await withCostLedger(() => resolveName("alice.sol"));
+
+    expect(miss).toBeNull();
+    expect(hit).toEqual({ address: "4Nd1mBQtrMJVYVfKf2PJy9NZUZdTAsp7D4xWLs4gDB4T", chain: "solana" });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("does NOT resolve names embedded in gateway hosts, subdomains, or URL paths", async () => {
+    // Third-party gateway links ("vitalik.eth.limo") must not become the
+    // subject's SelfDoxxed wallet; a bare name in the text still resolves.
+    const urls: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      urls.push(String(input));
+      return response(JSON.stringify([{ address: "0x1111111111111111111111111111111111111111" }]), 200, "application/json");
+    }));
+
+    const text = "fan of https://vitalik.eth.limo/ and app.uniswap.eth.link and sub.someone.eth plus https://app.ens.domains/name/nick.eth ; I am alice.eth";
+    const wallets = await withCostLedger(() => resolveWalletsFromText(text));
+
+    expect(urls).toEqual(["https://api.web3.bio/profile/alice.eth"]);
+    expect(wallets).toEqual([
+      expect.objectContaining({
+        address: "0x1111111111111111111111111111111111111111",
+        source: "alice.eth (self-disclosed in X bio/posts)",
+        tier: "SelfDoxxed",
+      }),
+    ]);
   });
 
   it("records Wayback index and snapshot outcomes without pre-counting", async () => {

@@ -5,7 +5,7 @@ import { SubjectClass } from "../src/engine";
 import type { SiteSubstance } from "./adapters/sitecheck";
 import type { CheckObservation, CollectContext } from "./adapters/types";
 import { PersonCheckTracker } from "./checks";
-import { applySiteSubstanceOutcome } from "./orchestrate";
+import { applySiteSubstanceOutcome, bioWebsiteDomain } from "./orchestrate";
 
 function context(roles: SubjectClass[] = [SubjectClass.PROJECT]) {
   const evidence = emptyEvidence("@subject");
@@ -216,5 +216,19 @@ describe("site-liveness evidence attribution", () => {
       status: "confirmed",
       sourceCount: 1,
     })]);
+  });
+});
+
+describe("bio website domain extraction", () => {
+  it("never treats a contact email's host as the subject's website", () => {
+    expect(bioWebsiteDomain("DeFi degen. Contact: team@gmail.com")).toBeUndefined();
+  });
+
+  it("still finds the real domain when the bio also lists a contact email first", () => {
+    expect(bioWebsiteDomain("team@gmail.com | myproject.xyz")).toBe("myproject.xyz");
+  });
+
+  it("keeps extracting a bare domain from bio text", () => {
+    expect(bioWebsiteDomain("building the future at myproject.xyz")).toBe("myproject.xyz");
   });
 });

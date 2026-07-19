@@ -18,6 +18,24 @@ const projectContext = (): CollectContext => {
   return { handle: evidence.profile.handle, evidence, emit: vi.fn(), recordCheck: vi.fn() };
 };
 
+const kolContext = (promoCount: number): CollectContext => {
+  const evidence = emptyEvidence("@kol");
+  evidence.roles = [SubjectClass.KOL];
+  evidence.promotions = Array.from({ length: promoCount }, (_, i) => ({
+    ticker: `TOK${i}`,
+    contract_address: `0x${String(i).padStart(40, "0")}`,
+    chain: "ethereum",
+    evidence_origin: "model_lead" as const,
+    artifact_verified: false,
+  }));
+  return { handle: evidence.profile.handle, evidence, emit: vi.fn(), recordCheck: vi.fn() };
+};
+
+const jsonResponse = (body: unknown) => new Response(JSON.stringify(body), {
+  status: 200,
+  headers: { "content-type": "application/json" },
+});
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -46,5 +64,57 @@ describe("project token-mention scope", () => {
 
     await dexscreenerAdapter.run(ctx);
     expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+});
+
+// A prolific promoter with dozens of CA-bearing promos must not turn the token
+// lane into an uncapped serial crawl of timeout-bounded lookups: the adapters
+// cap at 8 and issue the capped lookups in parallel.
+describe("promotion lookup cap and concurrency", () => {
+  it("dexscreener caps at 8 lookups and starts them all before any response returns", async () => {
+    const ctx = kolContext(12);
+    const resolvers: Array<(r: Response) => void> = [];
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { resolvers.push(resolve); }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const run = dexscreenerAdapter.run(ctx);
+    await new Promise((r) => setTimeout(r, 0));
+    // all capped lookups in flight at once; a serial loop would hold at 1 here
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    for (const resolve of resolvers) resolve(jsonResponse({ pairs: [] }));
+    await run;
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(ctx.recordCheck).toHaveBeenCalledTimes(8);
+    expect(ctx.emit).toHaveBeenCalledWith(expect.objectContaining({
+      detail: expect.stringContaining("8 of 12"),
+    }));
+  });
+
+  it("coingecko caps at 8 lookups and starts them all before any response returns", async () => {
+    const ctx = kolContext(12);
+    const resolvers: Array<(r: Response) => void> = [];
+    const fetchMock = vi.fn(() => new Promise<Response>((resolve) => { resolvers.push(resolve); }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const run = coingeckoAdapter.run(ctx);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    for (const resolve of resolvers) resolve(jsonResponse({ symbol: "tok", name: "Tok" }));
+    await run;
+    expect(fetchMock).toHaveBeenCalledTimes(8);
+    expect(ctx.recordCheck).toHaveBeenCalledTimes(8);
+  });
+
+  it("still resolves every promotion when the count is under the cap", async () => {
+    const ctx = kolContext(3);
+    const fetchMock = vi.fn(async () => jsonResponse({ pairs: [] }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await dexscreenerAdapter.run(ctx);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(ctx.recordCheck).toHaveBeenCalledTimes(3);
+    expect(ctx.emit).toHaveBeenCalledWith(expect.objectContaining({
+      detail: expect.stringContaining("Resolving 3 promoted token(s)"),
+    }));
   });
 });

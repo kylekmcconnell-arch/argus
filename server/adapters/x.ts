@@ -268,15 +268,41 @@ export async function handleHistory(handle: string): Promise<{ priorHandles: str
   return { priorHandles: prior, ...(typeof acct.id_str === "string" ? { idStr: acct.id_str } : {}) };
 }
 
+// One live audit reads the SAME cursorless last_tweets page from three passes
+// (corpus page 1, last-post-at, post-cadence), and each refetch is billed AND
+// contends for the free tier's QPS cap. Memoize the raw page-1 payload per
+// handle for roughly the span of an audit; cursor pages and failure envelopes
+// stay uncached so pagination and later retries behave exactly as before.
+const LAST_TWEETS_MEMO_TTL_MS = 10 * 60_000;
+const LAST_TWEETS_MEMO_MAX = 64; // bound warm-instance growth across audits
+const lastTweetsMemo = new Map<string, { at: number; payload: unknown }>();
+export function clearLastTweetsMemo(): void { lastTweetsMemo.clear(); } // test isolation seam
+async function lastTweetsFirstPage(handle: string, key: string): Promise<any | null> {
+  const u = handle.replace(/^@/, "");
+  const memoKey = u.toLowerCase();
+  const hit = lastTweetsMemo.get(memoKey);
+  if (hit && Date.now() - hit.at < LAST_TWEETS_MEMO_TTL_MS) return hit.payload;
+  const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
+  if (!res || !res.ok) return null;
+  let d: unknown;
+  try { d = await res.json(); } catch { return null; }
+  if (!twitterProviderFailure(asRecord(d))) {
+    if (lastTweetsMemo.size >= LAST_TWEETS_MEMO_MAX) {
+      const oldest = lastTweetsMemo.keys().next().value;
+      if (oldest !== undefined) lastTweetsMemo.delete(oldest);
+    }
+    lastTweetsMemo.set(memoKey, { at: Date.now(), payload: d });
+  }
+  return d;
+}
+
 // twitterapi.io: recent posts, fuel for claim extraction + activity signal.
 export async function getRecentPosts(handle: string, limit = 20): Promise<string[]> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
-  const u = handle.replace(/^@/, "");
   try {
-    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
-    if (!res || !res.ok) return [];
-    const d = (await res.json()) as any;
+    const d = await lastTweetsFirstPage(handle, key);
+    if (!d) return [];
     // twitterapi.io nests the array under data.tweets; tolerate the flatter shapes too.
     const tweets: any[] = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
     return tweets
@@ -295,11 +321,9 @@ import type { PostMeta } from "../../src/lib/cadence";
 export async function getRecentPostsMeta(handle: string, limit = 40): Promise<PostMeta[]> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return [];
-  const u = handle.replace(/^@/, "");
   try {
-    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
-    if (!res || !res.ok) return [];
-    const d = (await res.json()) as any;
+    const d = await lastTweetsFirstPage(handle, key);
+    if (!d) return [];
     const tweets: any[] = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
     return tweets
       .map((t) => ({ text: t.text ?? t.full_text ?? "", createdAt: Date.parse(t.createdAt ?? t.created_at ?? "") }))
@@ -359,9 +383,17 @@ function parseTweet(t: any): CorpusPost {
 }
 
 async function lastTweetsPage(handle: string, key: string, cursor?: string): Promise<{ tweets: any[]; next?: string }> {
-  const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(handle)}${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`, key);
-  if (!res || !res.ok) return { tweets: [] };
-  const d = (await res.json()) as any;
+  let d: any;
+  if (cursor) {
+    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(handle)}&cursor=${encodeURIComponent(cursor)}`, key);
+    if (!res || !res.ok) return { tweets: [] };
+    d = (await res.json()) as any;
+  } else {
+    // Page 1 flows through the shared memo: coldIntake fetches it here, and the
+    // later last-post-at / cadence passes reuse the same raw payload.
+    d = await lastTweetsFirstPage(handle, key);
+    if (!d) return { tweets: [] };
+  }
   const tweets: any[] = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
   return { tweets, next: d.has_next_page ? d.next_cursor : undefined };
 }
@@ -441,11 +473,9 @@ export async function collectCorpus(handle: string): Promise<Corpus> {
 export async function getLastPostAt(handle: string): Promise<string | null> {
   const key = env("TWITTERAPI_KEY");
   if (!key) return null;
-  const u = handle.replace(/^@/, "");
   try {
-    const res = await twFetch(`${TWITTERAPI}/twitter/user/last_tweets?userName=${encodeURIComponent(u)}`, key);
-    if (!res || !res.ok) return null;
-    const d = (await res.json()) as any;
+    const d = await lastTweetsFirstPage(handle, key);
+    if (!d) return null;
     const tweets: any[] = d.data?.tweets ?? d.tweets ?? (Array.isArray(d.data) ? d.data : []);
     const times = tweets
       .map((t) => Date.parse(t.createdAt ?? t.created_at ?? ""))
@@ -574,6 +604,13 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
   });
   const total = candidates.length;
 
+  // Wall-clock guard shared by BOTH paths below: free-tier 429 backoff can drag
+  // every page or chunk out, and an unbounded pass (up to 152 sequential page
+  // fetches on the enumerate path) can sink the whole serverless budget, killing
+  // the ENTIRE audit at maxDuration with no result saved. The deadline makes
+  // this pass always return (partial, honestly counted) instead.
+  const deadline = Date.now() + (opts?.budgetMs ?? 45_000);
+
   // Enumerate only when it FULLY covers the subject's followers AND is cheaper than
   // reverse-checking (capped at 150 pages / ~30k followers for audit-time safety).
   const fc = opts?.followerCount ?? Infinity;
@@ -588,6 +625,7 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
     let observedPage = false;
     let coverageComplete = false;
     for (let page = 0; page < enumPages + 2; page++) {
+      if (Date.now() > deadline) break; // out of budget: keep the observed hits, coverage stays partial
       const url = `${TWITTERAPI}/twitter/user/followers?userName=${encodeURIComponent(u)}&pageSize=200${cursor ? `&cursor=${encodeURIComponent(cursor)}` : ""}`;
       const res = await twFetch(url, key);
       if (!res || !res.ok) break;
@@ -648,11 +686,6 @@ export async function notableFollowers(subject: string, opts?: { followerCount?:
   const toCheck = candidates.slice(0, REVERSE_CAP);
   const hits: NotableFollower[] = [];
   const CHUNK = 15;
-  // Wall-clock guard: on a large account the free-tier 429 backoff can drag each
-  // chunk out, and 34 chunks can eat the whole serverless budget — killing the
-  // ENTIRE audit at maxDuration with no result saved. Cap this one pass so it
-  // always returns (partial, honestly counted) rather than sinking the audit.
-  const deadline = Date.now() + (opts?.budgetMs ?? 45_000);
   let checked = 0;
   for (let i = 0; i < toCheck.length; i += CHUNK) {
     if (Date.now() > deadline) break; // out of time — return what we have, core-first

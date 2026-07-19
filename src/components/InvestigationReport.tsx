@@ -278,8 +278,11 @@ export function InvestigationReport({
       label: `${teamPeople.length} publicly tied team ${teamPeople.length === 1 ? "member" : "members"} identified`,
       detail: teamPeople.slice(0, 4).map((person) => person.name).filter(Boolean).join(", "),
     }] : []),
+    // Checked-empty rows are coverage, never support: a completed no-result
+    // search must not render as positive evidence pulling against the verdict.
+    // They stay visible in the recorded-outcomes rail below.
     ...recordedChecks
-      .filter((check) => check.status !== "finding")
+      .filter((check) => check.status === "confirmed")
       .map((check) => ({ label: check.label, detail: check.note })),
   ].slice(0, 6);
   const concernItems = [

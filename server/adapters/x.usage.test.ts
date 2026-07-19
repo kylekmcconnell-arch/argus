@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { getCost, withCostLedger } from "../cost";
-import { checkFollow, getRecentPosts, grokSearch, handleHistory, notableFollowers, searchAdverseSignals } from "./x";
+import { checkFollow, clearLastTweetsMemo, collectCorpus, getLastPostAt, getRecentPosts, getRecentPostsMeta, grokSearch, handleHistory, notableFollowers, searchAdverseSignals } from "./x";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status,
@@ -9,6 +9,7 @@ const json = (body: unknown, status = 200) => new Response(JSON.stringify(body),
 
 describe("X provider attempt accounting", () => {
   afterEach(() => {
+    clearLastTweetsMemo();
     vi.useRealTimers();
     vi.unstubAllGlobals();
     vi.unstubAllEnvs();
@@ -329,6 +330,67 @@ describe("X provider attempt accounting", () => {
       checked: 1,
       coverage: "partial",
     });
+  });
+
+  it("stops follower-page enumeration at the shared wall-clock budget and stays partial", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    vi.spyOn(Date, "now")
+      .mockReturnValueOnce(1_000) // establish the deadline
+      .mockReturnValueOnce(1_000) // allow page 1
+      .mockReturnValue(1_200); // budget exhausted before page 2
+    // Every page succeeds and offers a next cursor: the throttled-but-healthy
+    // regime that previously ran up to 152 sequential fetches with no deadline.
+    const fetchMock = vi.fn().mockResolvedValue(json({
+      followers: [{ userName: "a16zcrypto" }],
+      has_next_page: true,
+      next_cursor: "next-page",
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const scan = await notableFollowers("@subject", { followerCount: 2_000, budgetMs: 100 });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(scan.coverage).toBe("partial");
+    expect(scan.checked).toBe(1);
+    expect(scan.list).toEqual([{ handle: "a16zcrypto", label: "VC · a16z crypto", size: "" }]);
+  });
+
+  it("serves corpus, last-post-at, and cadence reads from one fetched last_tweets page", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/user/last_tweets")) {
+        return json({ data: { tweets: [
+          { text: "@friend thanks", createdAt: "2026-07-16T00:00:00.000Z", isReply: true },
+          { text: "we are launching", createdAt: "2026-07-10T00:00:00.000Z" },
+        ] } });
+      }
+      return json({ tweets: [] }); // the corpus keyword-search layers
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const corpus = await collectCorpus("@argus");
+    const lastPostAt = await getLastPostAt("@argus");
+    const meta = await getRecentPostsMeta("@argus");
+
+    const lastTweetsCalls = fetchMock.mock.calls.filter(([input]) => String(input).includes("/user/last_tweets"));
+    expect(lastTweetsCalls).toHaveLength(1);
+    expect(corpus.count.originals).toBe(1);
+    // The RAW payload is shared: the reply the corpus drops still counts for dormancy.
+    expect(lastPostAt).toBe("2026-07-16T00:00:00.000Z");
+    expect(meta).toHaveLength(2);
+  });
+
+  it("does not memoize a last_tweets failure envelope, so the next pass refetches", async () => {
+    vi.stubEnv("TWITTERAPI_KEY", "twitter-test-key");
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(json({ status: "error", data: null }))
+      .mockResolvedValueOnce(json({ data: { tweets: [{ text: "hello", createdAt: "2026-07-10T00:00:00.000Z" }] } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getRecentPosts("@argus")).resolves.toEqual([]);
+    await expect(getRecentPosts("@argus")).resolves.toEqual(["hello"]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("records an unreadable memory.lol response once as failed", async () => {

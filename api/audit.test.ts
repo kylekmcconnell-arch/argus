@@ -137,6 +137,30 @@ describe("person audit input guard", () => {
     );
   });
 
+  it("hands the collector an absolute analyst deadline of request start plus the ceiling minus the finalization reserve", async () => {
+    vi.useFakeTimers();
+    const requestStartedAt = new Date("2026-07-18T12:00:00.000Z").getTime();
+    vi.setSystemTime(requestStartedAt);
+    vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });
+    vi.mocked(runAudit).mockResolvedValue(null);
+    const { res } = response();
+
+    await handler(request("argus"), res);
+
+    // Exact epoch value: a sign flip, dropped term, seconds-for-ms slip, or a
+    // relative (elapsed) budget here would still be "a number" but would push
+    // the analyst past the Fluid Compute ceiling or zero its budget.
+    expect(runAudit).toHaveBeenCalledWith(
+      "argus",
+      expect.any(Function),
+      expect.objectContaining({
+        analystDeadlineAt: requestStartedAt
+          + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
+          - ANALYST_FINALIZATION_RESERVE_MS,
+      }),
+    );
+  });
+
   it("keeps the SSE connection active while a slow bounded provider is still working", async () => {
     vi.useFakeTimers();
     vi.mocked(consumeInvestigationQuota).mockResolvedValue({ allowed: true, remaining: 9, used: 1 });

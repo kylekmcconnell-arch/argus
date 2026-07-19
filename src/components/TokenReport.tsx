@@ -274,10 +274,13 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
   const gapChecks = checks.filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
   const supportingFindings = d.findings.filter((finding) => finding.tone === "good");
   const limitingFindings = d.findings.filter((finding) => finding.tone !== "good");
+  // Checked-empty rows are coverage, never support: a completed no-result
+  // search must not render as positive evidence pulling against the verdict.
+  // They stay visible in the recorded-outcomes rail below.
   const supportItems = [
     ...supportingFindings.map((finding) => ({ label: finding.claim, detail: finding.source })),
     ...recordedChecks
-      .filter((check) => check.status !== "finding")
+      .filter((check) => check.status === "confirmed")
       .map((check) => ({ label: check.label, detail: check.note })),
   ].slice(0, 6);
   const concernItems = [

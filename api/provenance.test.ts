@@ -445,6 +445,46 @@ describe("frozen source artifact provenance", () => {
     await expect(persistProvenance(credentials, context, forgedSplitRange, [])).rejects.toThrow(
       "violates project strength band",
     );
+
+    // Press-only split band: when an axis tier is lifted purely by unverified
+    // press, setBand freezes verified floor "none" with minScore 0. Rejecting
+    // this shape sank whole report versions (the PASS-76/83 incident class),
+    // so persistence must accept it.
+    const pressHash = "d".repeat(64);
+    const pressOnly = structuredClone(payload);
+    pressOnly.axisEvidenceCatalog.push({
+      artifactId: `art_v1_${pressHash}`,
+      contentHash: pressHash,
+      kind: "axis_evidence",
+      provider: "google-news",
+      operation: "project-relationship-press",
+      section: "basicFacts",
+      title: "Press coverage of a backing relationship",
+      eligibleAxes: ["P4_backing_and_partners"],
+      verification: "reported",
+      scope: "direct_subject",
+    });
+    pressOnly.projectStrengthBands.P4_backing_and_partners = {
+      tier: "solid",
+      floorTier: "none",
+      minScore: 0,
+      maxScore: Math.floor(p4Weight * 0.84),
+      reasons: ["unverified press widens the ceiling only, never the floor", "1 material relationship source"],
+      anchorArtifactIds: [`art_v1_${pressHash}`],
+    };
+    pressOnly.report.role_reports[0].axes.P4_backing_and_partners = {
+      ...pressOnly.report.role_reports[0].axes.P4_backing_and_partners,
+      score: Math.floor(p4Weight * 0.5),
+      evidenceRefs: [`art_v1_${pressHash}`],
+    };
+    await expect(persistProvenance(credentials, context, pressOnly, [])).resolves.toBeUndefined();
+
+    // A "none" floor enforces no verified minimum, so its minScore must be 0.
+    const forgedNoneFloor = structuredClone(pressOnly);
+    forgedNoneFloor.projectStrengthBands.P4_backing_and_partners.minScore = Math.ceil(p4Weight * 0.85);
+    await expect(persistProvenance(credentials, context, forgedNoneFloor, [])).rejects.toThrow(
+      "violates project strength band",
+    );
   });
 
   it("rejects a scored role that omits any canonical axis", async () => {

@@ -46,6 +46,14 @@ describe("resolveInput", () => {
     expect(resolveInput("someone.sol")).toEqual({ kind: "handle", ref: "someone.sol" });
   });
 
+  it("extracts the handle from an X profile URL with a leading @ in the path", () => {
+    expect(resolveInput("x.com/@gakonst")).toEqual({ kind: "handle", ref: "gakonst" });
+    expect(resolveInput("https://x.com/@gakonst")).toEqual({ kind: "handle", ref: "gakonst" });
+    expect(resolveInput("https://twitter.com/@gakonst")).toEqual({ kind: "handle", ref: "gakonst" });
+    // Stripping the @ must not resurrect non-profile paths as handles.
+    expect(resolveInput("https://x.com/@home")).toEqual({ kind: "site", ref: "https://x.com/@home" });
+  });
+
   it("does not trust lookalike X or DexScreener hostnames", () => {
     expect(resolveInput("https://notx.com/Alice")).toEqual({ kind: "site", ref: "https://notx.com/Alice" });
     expect(resolveInput("https://notdexscreener.com/solana/abc123")).toEqual({

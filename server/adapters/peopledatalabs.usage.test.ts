@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence } from "../../src/data/evidence";
-import { VentureOutcome } from "../../src/engine";
+import { SubjectClass, VentureOutcome } from "../../src/engine";
 import { getCost, withCostLedger } from "../cost";
+import { providerBackedRoles } from "../orchestrate";
 import { enrichPerson, peopledatalabsAdapter } from "./peopledatalabs";
 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
@@ -198,8 +199,87 @@ describe("People Data Labs provider attempt accounting", () => {
     }));
 
     expect(evidence.ventures).toEqual(expect.arrayContaining([
-      expect.objectContaining({ project_name: "Existing Co", provider: "peopledatalabs", evidence_origin: "deterministic", artifact_verified: true }),
-      expect.objectContaining({ project_name: "New Co", provider: "peopledatalabs", evidence_origin: "deterministic", artifact_verified: true }),
+      expect.objectContaining({ project_name: "Existing Co", role: "Founder", provider: "peopledatalabs", evidence_origin: "deterministic", artifact_verified: true }),
+      expect.objectContaining({ project_name: "New Co", role: "Engineer", provider: "peopledatalabs", evidence_origin: "deterministic", artifact_verified: true }),
     ]));
+  });
+
+  it("replaces a model-claimed founder title with the PDL title on promotion, so it cannot become a provider-backed FOUNDER role", async () => {
+    vi.stubEnv("PDL_API_KEY", "pdl-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      data: {
+        full_name: "Ada Lovelace",
+        experience: [
+          { company: { name: "Acme" }, title: { name: "Software Engineer" } },
+        ],
+      },
+    })));
+    const evidence = emptyEvidence("@ada");
+    evidence.profile.display_name = "Ada Lovelace";
+    evidence.ventures.push({
+      project_name: "Acme",
+      role: "Founder & CEO",
+      period: "",
+      outcome: VentureOutcome.UNKNOWN,
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+    });
+
+    await withCostLedger(() => peopledatalabsAdapter.run({
+      handle: evidence.profile.handle,
+      evidence,
+      emit: vi.fn(),
+      recordCheck: vi.fn(),
+    }));
+
+    // The PDL record established employment, not the model-claimed title.
+    expect(evidence.ventures).toEqual([
+      expect.objectContaining({ project_name: "Acme", role: "Software Engineer", provider: "peopledatalabs", evidence_origin: "deterministic", artifact_verified: true }),
+    ]);
+    const roles = providerBackedRoles(evidence);
+    expect(roles).not.toContain(SubjectClass.FOUNDER);
+    expect(roles).toContain(SubjectClass.MEMBER);
+  });
+
+  it("leaves a venture already verified by another provider untouched apart from the corroboration note", async () => {
+    vi.stubEnv("PDL_API_KEY", "pdl-test-key");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({
+      data: {
+        full_name: "Ada Lovelace",
+        experience: [
+          { company: { name: "Acme" }, title: { name: "Engineer" } },
+        ],
+      },
+    })));
+    const evidence = emptyEvidence("@ada");
+    evidence.profile.display_name = "Ada Lovelace";
+    evidence.ventures.push({
+      project_name: "Acme",
+      role: "Founder",
+      period: "2019-2023",
+      outcome: VentureOutcome.UNKNOWN,
+      notes: "founder title from registry filing",
+      provider: "publicweb",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    });
+
+    await withCostLedger(() => peopledatalabsAdapter.run({
+      handle: evidence.profile.handle,
+      evidence,
+      emit: vi.fn(),
+      recordCheck: vi.fn(),
+    }));
+
+    expect(evidence.ventures).toEqual([
+      expect.objectContaining({
+        project_name: "Acme",
+        role: "Founder",
+        provider: "publicweb",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        notes: expect.stringContaining("corroborated: PDL employment record"),
+      }),
+    ]);
   });
 });

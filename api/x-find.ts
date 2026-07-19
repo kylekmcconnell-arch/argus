@@ -17,6 +17,15 @@ const q = (v: unknown) => (typeof v === "string" ? v.trim() : "");
 const HANDLE = /^@?[A-Za-z0-9_]{2,30}$/;
 const bare = (h: string) => h.replace(/^@/, "");
 const num = (...v: any[]) => { for (const x of v) if (typeof x === "number") return x; return undefined; };
+// Hostname of a bio URL, lowercased and www-stripped; "" if unparseable. The bio
+// URL is attacker-authored, so it must never be compared by raw substring.
+const hostOf = (value: string): string => {
+  try {
+    return new URL(/^https?:\/\//i.test(value) ? value : `https://${value}`).hostname.toLowerCase().replace(/^www\./, "");
+  } catch {
+    return "";
+  }
+};
 
 // Grok: the official X handle for a named project.
 type AttemptStatus = "succeeded" | "partial" | "failed";
@@ -166,8 +175,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!p) { res.status(200).json({ available: true, found: true, handle: "@" + handle, note: "Account named but profile could not be resolved." }); return; }
 
   // Confidence: the account's own linked website matching the project's domain is
-  // the strongest possible signal it's genuinely theirs.
-  const siteMatches = !!(domain && p.website && p.website.toLowerCase().includes(domain));
+  // the strongest possible signal it's genuinely theirs. Match hostnames exactly
+  // (subdomains of the project domain pass): an impersonator embedding the real
+  // domain in a spoof subdomain, path, or query must not earn "high".
+  const bioHost = p.website ? hostOf(p.website) : "";
+  const siteMatches = !!(domain && bioHost && (bioHost === domain || bioHost.endsWith("." + domain)));
   const nameMatches = !!(name && p.name && (p.name.toLowerCase().includes(name.toLowerCase().split(/\s+/)[0]) || name.toLowerCase().includes((p.name || "").toLowerCase().split(/\s+/)[0])));
   const confidence = siteMatches ? "high" : seed ? "high" : nameMatches ? "medium" : "low";
   const matchReason = siteMatches ? `the account's own website links to ${domain}` : seed ? "the handle was found on the project's own site" : nameMatches ? "the account name aligns with the project" : "identified by search, not independently confirmed";

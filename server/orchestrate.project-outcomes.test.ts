@@ -1,8 +1,8 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { emptyEvidence, type BasicFact, type BasicFactPredicate } from "../src/data/evidence";
 import { SubjectClass } from "../src/engine";
 import type { CheckObservation, CollectContext } from "./adapters/types";
-import { collectProjectCoreEvidenceOutcomes, recordProjectTokenDrawdownFinding } from "./orchestrate";
+import { collectProjectCoreEvidenceOutcomes, recordProjectTokenDrawdownFinding, tokenLifecycle } from "./orchestrate";
 
 function context() {
   const evidence = emptyEvidence("@project");
@@ -245,5 +245,104 @@ describe("project core evidence outcomes", () => {
       detail: "not a provider-backed project role",
     });
     expect(outcomes).toEqual([]);
+  });
+});
+
+describe("promoted-token lifecycle attribution", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const contract = "0xdead000000000000000000000000000000000001";
+  const collapsedSearchPayload = {
+    pairs: [{
+      chainId: "ethereum",
+      baseToken: { symbol: "DOOM", address: contract },
+      priceUsd: "0.0000001",
+      liquidity: { usd: 1200 },
+      priceChange: { h24: -93 },
+      pairCreatedAt: 1700000000000,
+    }],
+  };
+
+  const lifecycleContext = (roles: SubjectClass[], promotion: Partial<CollectContext["evidence"]["promotions"][number]> = {}) => {
+    const evidence = emptyEvidence("@kol_subject");
+    evidence.roles = roles;
+    evidence.promotions.push({
+      ticker: "DOOM",
+      contract_address: contract,
+      chain: "ethereum",
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      ...promotion,
+    });
+    const checks: CheckObservation[] = [];
+    const ctx: CollectContext = {
+      handle: "@kol_subject",
+      evidence,
+      emit: vi.fn(),
+      recordCheck: (check) => checks.push(check),
+    };
+    return { ctx, evidence, checks };
+  };
+
+  it("keeps a collapse joined through a model-extracted promotion a lead, never a Verified deterministic finding", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(collapsedSearchPayload), { status: 200 }),
+    ));
+    const { ctx, evidence, checks } = lifecycleContext([SubjectClass.KOL]);
+
+    await tokenLifecycle(ctx);
+
+    expect(evidence.findings).toEqual([expect.objectContaining({
+      finding_type: "TokenCollapse",
+      verification_status: "Reported",
+      evidence_origin: "model_lead",
+      artifact_verified: false,
+      polarity: -1,
+      claim: expect.stringContaining("model-extracted and not yet verified"),
+    })]);
+    expect(checks).toEqual([expect.objectContaining({
+      id: "promoted-token-performance",
+      status: "finding",
+      note: expect.stringContaining("attribution unverified"),
+    })]);
+  });
+
+  it("keeps a provider-verified promoted contract's collapse Verified and deterministic", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(collapsedSearchPayload), { status: 200 }),
+    ));
+    const { ctx, evidence, checks } = lifecycleContext([SubjectClass.KOL], {
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "twitterapi",
+    });
+
+    await tokenLifecycle(ctx);
+
+    expect(evidence.findings).toEqual([expect.objectContaining({
+      finding_type: "TokenCollapse",
+      verification_status: "Verified",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+    })]);
+    expect(checks).toEqual([expect.objectContaining({
+      id: "promoted-token-performance",
+      status: "finding",
+      note: expect.stringContaining("verified contract collapse"),
+    })]);
+  });
+
+  it("skips project-account token mentions entirely (they are not KOL promotions)", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const { ctx, evidence, checks } = lifecycleContext([SubjectClass.PROJECT]);
+
+    await tokenLifecycle(ctx);
+
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(evidence.findings).toEqual([]);
+    expect(checks).toEqual([]);
   });
 });

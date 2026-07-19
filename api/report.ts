@@ -350,25 +350,34 @@ async function loadArchivedReports(
   // An archived case has no mutable projection. Resolve the version that was
   // actually activated/backfilled/restored; a newer immutable row may exist if
   // activation failed and must never be presented as the published dossier.
-  const rawEvents = (await Promise.all(caseChunks.map(async (ids) => {
-    const caseFilter = encodeURIComponent(`in.(${ids.join(",")})`);
-    const response = await fetch(
-      `${credentials.url}/rest/v1/case_events?select=id,case_id,report_version_id,created_at&organization_id=eq.${encodeURIComponent(organizationId)}&case_id=${caseFilter}&event_type=in.%28report.version.activated%2Creport.version.backfilled%2Ccase.restored%29&report_version_id=not.is.null&order=created_at.desc,id.desc`,
-      { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
-    );
-    if (!response.ok) throw new Error(`archived published-version events failed (${response.status})`);
-    const rows = await response.json() as unknown;
-    return Array.isArray(rows) ? rows : [];
-  }))).flat();
+  // The event stream is append-only and PostgREST silently caps responses at
+  // max_rows (1000), so page each chunk until every case has resolved its
+  // newest qualifying event or the rows run out.
+  const eventPageLimit = 1000;
   const publishedVersionByCase = new Map<string, string>();
-  for (const value of rawEvents) {
-    const row = asRecord(value);
-    const caseId = typeof row.case_id === "string" ? row.case_id : "";
-    const versionId = typeof row.report_version_id === "string" ? row.report_version_id : "";
-    if (caseId && versionId && !publishedVersionByCase.has(caseId)) {
-      publishedVersionByCase.set(caseId, versionId);
+  await Promise.all(caseChunks.map(async (ids) => {
+    const caseFilter = encodeURIComponent(`in.(${ids.join(",")})`);
+    const unresolved = new Set(ids);
+    for (let offset = 0; unresolved.size > 0; offset += eventPageLimit) {
+      const response = await fetch(
+        `${credentials.url}/rest/v1/case_events?select=id,case_id,report_version_id,created_at&organization_id=eq.${encodeURIComponent(organizationId)}&case_id=${caseFilter}&event_type=in.%28report.version.activated%2Creport.version.backfilled%2Ccase.restored%29&report_version_id=not.is.null&order=created_at.desc,id.desc&limit=${eventPageLimit}&offset=${offset}`,
+        { headers: serviceHeaders(credentials.key), signal: AbortSignal.timeout(10_000) },
+      );
+      if (!response.ok) throw new Error(`archived published-version events failed (${response.status})`);
+      const rows = await response.json() as unknown;
+      if (!Array.isArray(rows)) break;
+      for (const value of rows) {
+        const row = asRecord(value);
+        const caseId = typeof row.case_id === "string" ? row.case_id : "";
+        const versionId = typeof row.report_version_id === "string" ? row.report_version_id : "";
+        if (caseId && versionId && !publishedVersionByCase.has(caseId)) {
+          publishedVersionByCase.set(caseId, versionId);
+          unresolved.delete(caseId);
+        }
+      }
+      if (rows.length < eventPageLimit) break;
     }
-  }
+  }));
   const latestVersionIds = [...new Set(publishedVersionByCase.values())];
   const versionChunks: string[][] = [];
   for (let index = 0; index < latestVersionIds.length; index += 60) {

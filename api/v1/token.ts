@@ -27,7 +27,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader("cache-control", "private, no-store");
   const auth = await requireArgusAuth(req, res, "analyst");
   if (!auth) return;
-  const ref = (req.query.address || req.query.url || req.query.t) as string | undefined;
+  // Repeated query keys parse as arrays; only a single string value is valid.
+  const single = (value: string | string[] | undefined) => (typeof value === "string" ? value : undefined);
+  const ref = single(req.query.address) || single(req.query.url) || single(req.query.t);
   if (!ref) {
     res.status(400).json({ error: "pass ?address=<contract> or ?url=<dexscreener url>" });
     return;

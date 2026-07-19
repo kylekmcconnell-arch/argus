@@ -1,7 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { emptyEvidence } from "../src/data/evidence";
 import { providerStatus } from "./config";
 import { addClaudeUsage, addGrokUsage, withCostLedger } from "./cost";
-import { analystAttemptTotals, runAudit } from "./orchestrate";
+import { analystAttemptTotals, coldIntake, runAudit } from "./orchestrate";
 
 const PROVIDER_ENV = [
   "ANTHROPIC_API_KEY",
@@ -283,5 +284,42 @@ describe("orchestrator provider execution truth", () => {
       }),
     ]));
     expect(dossier?.evidence.ventures.every((venture) => venture.outcome === "Unknown")).toBe(true);
+  });
+});
+
+describe("cold-intake prelude concurrency", () => {
+  beforeEach(() => {
+    for (const key of PROVIDER_ENV) vi.stubEnv(key, "");
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("starts the site-liveness fetch while the handle-history call is still in flight", async () => {
+    const requested: string[] = [];
+    let releaseHistory: (response: Response) => void = () => undefined;
+    const historyGate = new Promise<Response>((resolve) => { releaseHistory = resolve; });
+    const fetchMock = vi.fn((input: unknown) => {
+      const url = String(input);
+      requested.push(url);
+      if (url.includes("memory.lol")) return historyGate;
+      return Promise.resolve(new Response("not found", { status: 404 }));
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const evidence = emptyEvidence("@subject");
+    evidence.profile.bio = "building myproject.xyz";
+    const intake = coldIntake({ handle: "@subject", evidence, emit: () => undefined }, true);
+
+    // A serial prelude only issues the site fetch after handle history
+    // resolves; the concurrent prelude must have both in flight at once.
+    await vi.waitFor(() => {
+      expect(requested.some((url) => url.includes("myproject.xyz"))).toBe(true);
+      expect(requested.some((url) => url.includes("memory.lol"))).toBe(true);
+    });
+    releaseHistory(new Response("not found", { status: 404 }));
+    await intake;
   });
 });

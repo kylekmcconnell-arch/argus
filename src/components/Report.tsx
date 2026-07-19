@@ -503,11 +503,13 @@ function CorroborationTable({
               <div className="mono truncate text-[12.5px] text-ink">{r.who}</div>
               {r.rel && <div className="text-[11px] text-ink-faint">claims: {r.rel}</div>}
             </div>
+            {/* null/undefined means the check never ran: render "unchecked",
+                not an affirmative negative about a named person */}
             <div className="text-[12.5px] text-ink-dim">
               <span className={r.follows ? "text-ink-dim" : "text-ink-faint line-through/0"}>
-                {r.follows ? "follows" : "no follow"}
+                {r.follows ? "follows" : r.follows === false ? "no follow" : "follow unchecked"}
               </span>
-              <span className="text-ink-faint"> · {r.ack && r.ack !== "none" ? r.ack : "no ack"}</span>
+              <span className="text-ink-faint"> · {!r.ack ? "ack unchecked" : r.ack !== "none" ? r.ack : "no ack"}</span>
             </div>
             <div className="text-right">
               <span
@@ -1242,7 +1244,11 @@ function sanitizedGroundedTeamMember(member: ReportTeamMember): ReportTeamMember
 }
 
 function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
-  const inferred = (dossier.webTeam ?? []).flatMap((member) => {
+  // assembleDossier already emits model-enriched grounded members into
+  // webTeamLeads (handle kept, source suffixed); re-deriving them from the
+  // sanitized webTeam copy renders the same person twice. Client derivation
+  // stays only as compat for persisted dossiers that predate webTeamLeads.
+  const inferred = dossier.webTeamLeads ? [] : (dossier.webTeam ?? []).flatMap((member) => {
     if (!groundedTeamMember(member)) return [member];
     if (member.identity_link_evidence_origin !== "model_lead" && member.projects_evidence_origin !== "model_lead") return [];
     return [{

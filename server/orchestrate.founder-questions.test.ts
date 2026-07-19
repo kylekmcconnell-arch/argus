@@ -195,6 +195,55 @@ describe("founder decision question outcomes", () => {
     ]);
   });
 
+  it("keeps a question whose targeted repair pass failed unavailable despite a succeeded batch run", () => {
+    const entry = run("legal_regulatory_event", "unanswered", "succeeded");
+    // The batch-level primary succeeded, then the repair-critical targeted
+    // pass failed: last-run-wins, so this is a gap, not a completed screen.
+    entry.providerRuns.push({ phase: "repair", provider: "claude-web-search", state: "failed" });
+    const { ctx, observations } = context([entry]);
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        id: "founder-legal-regulatory",
+        status: "unavailable",
+        note: expect.stringContaining("partial, failed, or unavailable"),
+      }),
+    ]);
+  });
+
+  it("does not let a succeeded batch that left only unverified leads read as checked-empty", () => {
+    const { ctx, observations } = context([
+      run("legal_regulatory_event", "unanswered", "succeeded"),
+    ]);
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        id: "founder-legal-regulatory",
+        status: "unavailable",
+      }),
+    ]);
+  });
+
+  it("still records checked-empty when the final targeted pass explicitly completed empty", () => {
+    const entry = run("legal_regulatory_event", "unanswered", "succeeded");
+    entry.providerRuns.push({ phase: "repair", provider: "claude-web-search", state: "completed_empty" });
+    const { ctx, observations } = context([entry]);
+
+    collectFounderDecisionQuestionOutcomes(ctx);
+
+    expect(observations).toEqual([
+      expect.objectContaining({
+        id: "founder-legal-regulatory",
+        status: "checked-empty",
+        note: expect.stringContaining("not legal clearance"),
+      }),
+    ]);
+  });
+
   it("does not let a related-company legal event govern the founder legal check", () => {
     const related = {
       ...fact("legal_regulatory_event", "CFTC settlement"),

@@ -341,9 +341,10 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
     ) {
       throw new Error("invalid axis evidence lineage: project strength band");
     }
-    // A floorTier marks a press-widened band: the verified floor must be a
-    // positive tier strictly below the ceiling tier (never adverse/none, and
-    // never widening downward).
+    // A floorTier marks a press-widened band: the verified floor must sit
+    // strictly below the ceiling tier on the positive ladder (never adverse,
+    // never widening downward). A "none" floor is legal: press alone lifted
+    // the tier, so no verified minimum is enforced.
     const floorTier = band.floorTier === undefined ? undefined : String(band.floorTier);
     if (floorTier !== undefined) {
       const floorRank = POSITIVE_TIER_ORDER.indexOf(floorTier as (typeof POSITIVE_TIER_ORDER)[number]);
@@ -496,16 +497,19 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
         if (!band || band.tier === "none") {
           throw new Error(`invalid axis evidence lineage: ${axisId} missing project strength band`);
         }
-        const tierRange = (tier: string): { min: number; max: number } => tier === "adverse"
-          ? { min: 0, max: Math.floor(expectedWeight * 0.39) }
-          : tier === "emerging"
-            ? { min: Math.ceil(expectedWeight * 0.4), max: Math.floor(expectedWeight * 0.69) }
-            : tier === "solid"
-              ? { min: Math.ceil(expectedWeight * 0.7), max: Math.floor(expectedWeight * 0.84) }
-              : { min: Math.ceil(expectedWeight * 0.85), max: expectedWeight };
-        // A press-widened band spans from the verified floor tier's minimum to
-        // the ceiling tier's maximum; floorTier validity (positive, strictly
-        // below tier) was enforced at parse time.
+        const tierRange = (tier: string): { min: number; max: number } => tier === "none"
+          ? { min: 0, max: 0 }
+          : tier === "adverse"
+            ? { min: 0, max: Math.floor(expectedWeight * 0.39) }
+            : tier === "emerging"
+              ? { min: Math.ceil(expectedWeight * 0.4), max: Math.floor(expectedWeight * 0.69) }
+              : tier === "solid"
+                ? { min: Math.ceil(expectedWeight * 0.7), max: Math.floor(expectedWeight * 0.84) }
+                : { min: Math.ceil(expectedWeight * 0.85), max: expectedWeight };
+        // A press-widened band spans from the verified floor tier's minimum
+        // (zero when the floor is "none") to the ceiling tier's maximum;
+        // floorTier validity (strictly below tier, never adverse) was enforced
+        // at parse time.
         const expectedRange = {
           min: tierRange(band.floorTier ?? band.tier).min,
           max: tierRange(band.tier).max,

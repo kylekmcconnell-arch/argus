@@ -215,6 +215,31 @@ describe("token report supplemental evidence boundary", () => {
     expect(counterweight).not.toContain("Liquidity is unlocked and removable.");
   });
 
+  it("keeps checked-empty coverage rows out of the positive counterweight on an adverse verdict", () => {
+    render(dossier({
+      verdict: "FAIL",
+      score: 22,
+      versionContext: {
+        ...versionContext,
+        checks: [
+          { label: "Contract safety", status: "confirmed", note: "GoPlus simulation completed clean" },
+          { label: "Market intelligence", status: "checked-empty", note: "CoinGecko returned no matching asset" },
+        ],
+      },
+      findings: [
+        { claim: "Liquidity is unlocked and removable.", tone: "bad", source: "goplus" },
+      ],
+    }));
+
+    const counterweight = container.querySelector('ul[aria-label="What evidence pulls the other way"]')?.textContent ?? "";
+    expect(counterweight).toContain("Contract safety");
+    expect(counterweight).not.toContain("Market intelligence");
+    expect(counterweight).not.toContain("CoinGecko returned no matching asset");
+
+    const recordedOutcomes = container.querySelector('section[aria-label="Recorded outcomes"]')?.textContent ?? "";
+    expect(recordedOutcomes).toContain("Market intelligence");
+  });
+
   it("keeps every current-data panel paused on an immutable snapshot until explicit opt-in", () => {
     render(dossier({ versionContext }));
 

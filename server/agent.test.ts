@@ -330,6 +330,68 @@ describe("analyst verdict integrity", () => {
     expect(floors).toBeGreaterThanOrEqual(85);
   });
 
+  it("keeps a rich tokenless brand account scoreable instead of abstaining on every axis", () => {
+    const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const tokenlessInput = {
+      profile: {
+        handle: "@custody_company",
+        display_name: "Custody Company",
+        website: "https://custody.example",
+        days_since_post: 1,
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+        profile_captured_at: "2026-07-12T12:00:00.000Z",
+      },
+      team: [
+        { name: "Chief Executive", role: "CEO", provider: "team-page", artifact_verified: true },
+        { name: "Chief Technologist", role: "CTO", provider: "team-page", artifact_verified: true },
+      ],
+      basicFacts: [
+        { predicate: "legal_entity", value: "Custody Company Inc.", status: "verified", artifact_verified: true },
+        { predicate: "official_identity", value: "Custody Company", status: "verified", artifact_verified: true },
+        { predicate: "product", value: "Live production custody platform", status: "verified", artifact_verified: true },
+        { predicate: "repository", value: "github.com/example/custody", status: "verified", artifact_verified: true },
+        { predicate: "governance", value: "Documented board and change-control governance", status: "verified", artifact_verified: true },
+        { predicate: "treasury", value: "Quarterly treasury attestation reports", status: "verified", artifact_verified: true },
+        { predicate: "audit", value: "Independent security audits published", status: "verified", artifact_verified: true },
+        { predicate: "funding", value: "$100M Series C round", status: "verified", artifact_verified: true },
+        { predicate: "investor", value: "Named venture backer disclosed", status: "verified", artifact_verified: true },
+        { predicate: "traction", value: "$5B in platform assets under custody", qualifier: "as of 2026-07-10", status: "verified", artifact_verified: true },
+      ],
+    };
+    const packet = buildScoringEvidencePacket(tokenlessInput, axes);
+    const bands = deriveProjectStrengthBands(packet, axes);
+
+    expect(bands.P3_token_conduct.tier).toBe("solid");
+    expect(inspectAnalystScoringPreflight(axes, packet)).toMatchObject({
+      state: "ready",
+      missingSubstantiveAxes: [],
+    });
+
+    // One conduct-disclosure category alone stays conservative.
+    const governanceOnly = buildScoringEvidencePacket({
+      basicFacts: [{ predicate: "governance", value: "Documented governance process", status: "verified", artifact_verified: true }],
+    }, axes);
+    expect(deriveProjectStrengthBands(governanceOnly, axes).P3_token_conduct.tier).toBe("emerging");
+
+    // A discovered token that failed official verification still fails closed.
+    const unverifiedTokenPacket = buildScoringEvidencePacket({
+      ...tokenlessInput,
+      projectToken: {
+        verified: false,
+        name: "Custody Token",
+        symbol: "CST",
+        capturedAt: "2026-07-12T12:00:00.000Z",
+      },
+    }, axes);
+    expect(deriveProjectStrengthBands(unverifiedTokenPacket, axes).P3_token_conduct.tier).toBe("none");
+    expect(inspectAnalystScoringPreflight(axes, unverifiedTokenPacket)).toMatchObject({
+      state: "insufficient_evidence",
+      missingSubstantiveAxes: ["P3_token_conduct"],
+    });
+  });
+
   it("counts syndicated relationship coverage as one story instead of exceptional corroboration", () => {
     const axes: AnalystAxis[] = [{
       axis: "P4_backing_and_partners",
@@ -1014,6 +1076,68 @@ describe("analyst verdict integrity", () => {
     }, projectAxes, frozen)).not.toBeNull();
   });
 
+  it("accepts exonerating and cross-axis team phrasing when the named team is grounded", () => {
+    const projectAxes: AnalystAxis[] = [
+      { axis: "P1_team_and_identity", weight: 16, role: "PROJECT" },
+      { axis: "P6_transparency_integrity", weight: 13, role: "PROJECT" },
+    ];
+    const frozen = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      team: [{
+        name: "Named Co-Founder",
+        handle: "@namedfounder",
+        role: "co-founder",
+        source: "official project documentation",
+        sourceUrl: "https://docs.example.com/team/founders",
+        provider: "team-page",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+      }],
+      basicFacts: [{
+        predicate: "legal_entity",
+        value: "Example Labs S.A.",
+        status: "verified",
+        artifact_verified: true,
+      }],
+    }, projectAxes));
+    const teamArtifact = frozen.find((artifact) => artifact.section === "team")!;
+    const legalArtifact = frozen.find((artifact) => artifact.operation === "basicFacts:legal_entity")!;
+    const rejection = vi.fn();
+
+    expect(validateAnalystVerdict({
+      axes: [
+        {
+          ...validAxis("P1_team_and_identity", 13, teamArtifact.artifactId),
+          rationale: "The team is publicly named with no anonymous founders and no undisclosed leadership; this is not an anonymous team and there are no unnamed operators.",
+          gaps: [
+            "LinkedIn profiles for two executives could not be identified.",
+            "The staff directory of executives was not enumerated by the provider.",
+          ],
+        },
+        {
+          ...validAxis("P6_transparency_integrity", 8, legalArtifact.artifactId),
+          rationale: "The treasury multisig operators are not disclosed in the docs, though the legal entity is verified.",
+          gaps: ["No litigation involving the founders was found in public records."],
+        },
+      ],
+      headline: "No concerns about the team were identified for this named-team project.",
+      identity_note: "Identity is resolved through the named co-founder; there are no anonymous founders behind the project.",
+    }, projectAxes, frozen, rejection)).not.toBeNull();
+    expect(rejection).not.toHaveBeenCalled();
+
+    expect(validateAnalystVerdict({
+      axes: [
+        {
+          ...validAxis("P1_team_and_identity", 13, teamArtifact.artifactId),
+          rationale: "The founders remain anonymous despite the collected team records.",
+        },
+        validAxis("P6_transparency_integrity", 8, legalArtifact.artifactId),
+      ],
+      headline: "A named public team operates the project.",
+      identity_note: "Identity is resolved through the named co-founder.",
+    }, projectAxes, frozen, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("grounded-team-described-as-unresolved");
+  });
+
   it("keeps social affiliations, empty news, and missing personal GitHub out of founder track record", () => {
     const founderAxes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.FOUNDER).axes)
       .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.FOUNDER }));
@@ -1281,6 +1405,53 @@ describe("analyst verdict integrity", () => {
     }, networkAxes, frozen)).not.toBeNull();
   });
 
+  it("accepts partitive and coverage-limited follower phrasing when observed followers are grounded", () => {
+    const networkAxes: AnalystAxis[] = [
+      { axis: "F1_identity_verifiability", weight: 12, role: "FOUNDER" },
+      { axis: "F6_network_quality", weight: 12, role: "FOUNDER" },
+    ];
+    const frozen = extractScoringEvidenceCatalog(buildScoringEvidencePacket({
+      notableFollowers: [{
+        handle: "@a16zcrypto",
+        name: "a16z crypto",
+        category: "VC",
+        provider: "twitterapi",
+      }],
+      basicFacts: [{
+        predicate: "official_identity",
+        value: "Verified public identity",
+        status: "verified",
+        artifact_verified: true,
+        sources: [{
+          url: "https://example.com/about",
+          excerpt: "The subject's public identity is documented.",
+          provider: "public-web",
+          artifactVerified: true,
+        }],
+      }],
+    }, networkAxes));
+    const followerArtifact = frozen.find((artifact) => artifact.section === "notableFollowers")!;
+    const identityArtifact = frozen.find((artifact) => artifact.operation === "basicFacts:official_identity")!;
+    const rejection = vi.fn();
+
+    expect(validateAnalystVerdict({
+      axes: [
+        {
+          ...validAxis("F1_identity_verifiability", 9, identityArtifact.artifactId),
+          rationale: "Identity rests on verified records; no direct observed network evidence is needed for this axis.",
+        },
+        {
+          ...validAxis("F6_network_quality", 10, followerArtifact.artifactId),
+          rationale: "None of the observed notable followers are flagged accounts; representative accounts include @a16zcrypto.",
+          gaps: ["Notable follower depth beyond the first page is not documented by the provider."],
+        },
+      ],
+      headline: "The subject has an established public network.",
+      identity_note: "Identity is resolved.",
+    }, networkAxes, frozen, rejection)).not.toBeNull();
+    expect(rejection).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       label: "missing axis",
@@ -1395,6 +1566,52 @@ describe("analyst verdict integrity", () => {
 
     expect(normalized).toBe(raw);
     expect(validateAnalystVerdict(normalized, catalog, validationCatalog)).toBeNull();
+  });
+
+  it("keeps the sole-support overlap for strict rejection through the production normalizer sequence", () => {
+    const raw = {
+      axes: [
+        {
+          ...validAxis("F1_identity_verifiability", 8, F1_REF),
+          counterEvidenceRefs: ["e001"],
+        },
+        validAxis("F2_track_record", 20, F2_REF),
+      ],
+      headline: "The only support reference is contradictory.",
+      identity_note: "Identity remains supported by one contested artifact.",
+    };
+
+    let normalized = normalizeAnalystSupportCounterOverlap(raw, validationCatalog);
+    normalized = normalizeAnalystCitationEligibility(normalized, validationCatalog);
+    const rejection = vi.fn();
+
+    expect(normalized).toBe(raw);
+    expect(validateAnalystVerdict(normalized, catalog, validationCatalog, rejection)).toBeNull();
+    expect(rejection).toHaveBeenLastCalledWith("support-counter-overlap:F1_identity_verifiability");
+  });
+
+  it("strips em and en dashes from model verdict copy deterministically", () => {
+    const result = validateAnalystVerdict({
+      axes: [
+        {
+          ...validAxis("F1_identity_verifiability", 10, F1_REF),
+          rationale: "Verified identity\u2014the strongest signal in the packet.",
+          gaps: ["Employment history for 2019\u20132023 remains unconfirmed."],
+        },
+        validAxis("F2_track_record", 20, F2_REF),
+      ],
+      headline: "Strong identity\u2014weaker documented history.",
+      identity_note: "\u2014Identity is resolved\u2014",
+    }, catalog, validationCatalog);
+
+    expect(result).not.toBeNull();
+    expect(JSON.stringify(result)).not.toMatch(/[\u2013\u2014]/);
+    expect(result?.headline).toBe("Strong identity, weaker documented history.");
+    expect(result?.identity_note).toBe("Identity is resolved");
+    expect(result?.axes[0]).toMatchObject({
+      rationale: "Verified identity, the strongest signal in the packet.",
+      gaps: ["Employment history for 2019-2023 remains unconfirmed."],
+    });
   });
 
   it("drops cross-axis extras when eligible substantive support already remains", () => {
@@ -2270,6 +2487,23 @@ describe("analyst verdict integrity", () => {
       "P3_token_conduct",
       "P6_transparency_integrity",
     ]));
+  });
+
+  it("keeps verified project control and conflict facts in the scoring packet", () => {
+    const axes: AnalystAxis[] = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      basicFacts: [
+        { predicate: "control", value: "A 3-of-5 multisig with named signers controls the protocol admin keys", status: "verified", artifact_verified: true },
+        { predicate: "conflict_of_interest", value: "Disclosed related-party market-making agreement with an affiliated trading firm", status: "verified", artifact_verified: true },
+      ],
+    }, axes);
+    const catalog = extractScoringEvidenceCatalog(packet);
+    const control = catalog.find((artifact) => artifact.operation === "basicFacts:control");
+    const conflict = catalog.find((artifact) => artifact.operation === "basicFacts:conflict_of_interest");
+
+    expect(control?.eligibleAxes).toEqual(expect.arrayContaining(["P3_token_conduct", "P6_transparency_integrity"]));
+    expect(conflict?.eligibleAxes).toContain("P6_transparency_integrity");
   });
 
   it("preserves a lower-priority covered axis before applying the 24-row source cap", () => {
@@ -3174,11 +3408,13 @@ describe("analyst verdict integrity", () => {
       eligibleAxes: ["P3_token_conduct", "P6_transparency_integrity"],
       verification: "verified",
     });
+    // Verified governance disclosure keeps P3 scoreable for a tokenless
+    // packet instead of abstaining the entire axis set.
     expect(inspectAnalystScoringPreflight(axes, packet)).toEqual({
-      state: "insufficient_evidence",
+      state: "ready",
       requestedAxisCount: 3,
       evidenceArtifactCount: 2,
-      missingSubstantiveAxes: ["P3_token_conduct"],
+      missingSubstantiveAxes: [],
       unsupportedAxes: [],
     });
   });

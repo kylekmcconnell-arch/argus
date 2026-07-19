@@ -292,7 +292,19 @@ export class Audit {
   }
   addAssociate(a: AssociateInput) {
     const { associate_handle, ...rest } = a;
-    this.associates.push({ ...rest, associate_key: normalizeHandle(associate_handle) });
+    // Associates arrive as provider identifiers, not only X handles: GitHub org
+    // logins allow hyphens and single characters. Those must key by canonical
+    // name (never a truncated @handle, which would bridge the trust graph to an
+    // unrelated account) and must not fail the audit at finalize. Blank input
+    // stays an error: an empty key would falsely merge across audits.
+    let associate_key: string;
+    try {
+      associate_key = normalizeHandle(associate_handle);
+    } catch (err) {
+      associate_key = canonicalEntityKey({ name: associate_handle });
+      if (!associate_key) throw err;
+    }
+    this.associates.push({ ...rest, associate_key });
   }
   addFinding(f: Finding) {
     this.findings.push(f);
@@ -775,12 +787,14 @@ export interface PanoptesEdge {
   [k: string]: unknown;
 }
 
-const HANDLE_TAIL = /@?([A-Za-z0-9_]{2,30})$/;
+// Anchored at both ends: a partial match must never truncate a non-handle
+// identifier onto an unrelated X handle ("ethereum-optimism" is not "@optimism").
+const BARE_HANDLE = /^@?([A-Za-z0-9_]{2,30})$/;
 export function normalizeHandle(raw: string): string {
   raw = raw.trim();
   const url = raw.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i);
   if (url) return "@" + url[1].toLowerCase();
-  const m = raw.match(HANDLE_TAIL);
+  const m = raw.match(BARE_HANDLE);
   if (m) return "@" + m[1].toLowerCase();
   throw new Error(`cannot normalize handle: ${raw}`);
 }

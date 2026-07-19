@@ -5,6 +5,7 @@ import {
   Audit,
   classifySubject,
   validateAxes,
+  normalizeHandle,
   SubjectClass,
   VentureOutcome,
   FounderPattern,
@@ -352,7 +353,8 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     ["model-generated predicate", {}, { evidence_origin: "model_lead" }],
     ["malformed artifact hash", {}, { content_hash: "not-a-sha" }],
   ])("does not cap from an unqualified trust-graph predicate: %s", (_label, graphOverrides, findingOverrides) => {
-    const audit = highScoringFounder(`@unqualified_${String(_label).replace(/\W+/g, "_")}`);
+    // Slice keeps each per-case handle within the 30-char handle bound.
+    const audit = highScoringFounder(`@unq_${String(_label).replace(/\W+/g, "_")}`.slice(0, 31));
     audit.addFinding(trustGraphFinding(graphOverrides, findingOverrides) as never);
 
     const result = audit.finalize();
@@ -605,5 +607,58 @@ describe("ARGUS-P v2 engine (port fidelity)", () => {
     expect(["Unproven", "ProvenOnce", "SerialSuccess", "Mixed"]).toContain(r.founder_summary!.pattern);
     expect(["PASS", "CAUTION", "FAIL"]).toContain(r.composite_verdict);
     expect(r.role_reports.every((rr) => rr.score_total !== null)).toBe(true);
+  });
+});
+
+describe("handle normalization and associate keying", () => {
+  it("normalizeHandle never truncates a hyphenated identifier to its tail", () => {
+    // Pre-fix, the unanchored tail regex mapped "ethereum-optimism" to
+    // "@optimism", silently bridging the trust graph to an unrelated account.
+    expect(() => normalizeHandle("ethereum-optimism")).toThrow(/cannot normalize/);
+    expect(() => normalizeHandle("matter-labs")).toThrow(/cannot normalize/);
+    expect(() => normalizeHandle("Display Name @realhandle")).toThrow(/cannot normalize/);
+  });
+
+  it("normalizeHandle keeps accepting bare handles, @handles, and profile URLs", () => {
+    expect(normalizeHandle("plainhandle")).toBe("@plainhandle");
+    expect(normalizeHandle("@Cypher_Eth")).toBe("@cypher_eth");
+    expect(normalizeHandle("https://x.com/Cypher_Eth")).toBe("@cypher_eth");
+    expect(normalizeHandle("  @padded  ")).toBe("@padded");
+  });
+
+  it("addAssociate keys hyphenated GitHub org logins by full name without collisions", () => {
+    const a = new Audit("@org_subject", { subject_class: SubjectClass.FOUNDER });
+    a.addAssociate({ associate_handle: "solana-labs", relation: "github org" });
+    a.addAssociate({ associate_handle: "matter-labs", relation: "github org" });
+    const keys = a.getAssociates().map((as) => as.associate_key);
+    expect(keys).toEqual(["solana-labs", "matter-labs"]);
+    // Neither key may be an X-handle-shaped "@labs" that a prior audit of the
+    // real @labs account would falsely reconcile with.
+    expect(keys.some((k) => k.startsWith("@"))).toBe(false);
+    const graph = a.toPanoptes();
+    expect(graph.nodes.filter((n) => n.key === "solana-labs" || n.key === "matter-labs")).toHaveLength(2);
+  });
+
+  it("addAssociate with short-tailed org logins does not crash finalize", () => {
+    const a = new Audit("@finalize_survivor", { subject_class: SubjectClass.FOUNDER });
+    a.setIdentity("Confirmed");
+    a.addAssociate({ associate_handle: "company-x", relation: "github org" });
+    a.addAssociate({ associate_handle: "web-3", relation: "github org" });
+    a.addAssociate({ associate_handle: "x", relation: "github org" });
+    const report = a.finalize();
+    expect(report.audit_id).toMatch(/^PA-/);
+    expect(a.getAssociates().map((as) => as.associate_key)).toEqual(["company-x", "web-3", "x"]);
+  });
+
+  it("addAssociate still normalizes X-handle-shaped associates to @keys", () => {
+    const a = new Audit("@handle_subject", { subject_class: SubjectClass.FOUNDER });
+    a.addAssociate({ associate_handle: "@Cypher_Eth", relation: "co-investor" });
+    a.addAssociate({ associate_handle: "vexnode", relation: "co-deployer" });
+    expect(a.getAssociates().map((as) => as.associate_key)).toEqual(["@cypher_eth", "@vexnode"]);
+  });
+
+  it("addAssociate rejects a blank identifier instead of minting an empty graph key", () => {
+    const a = new Audit("@blank_guard", { subject_class: SubjectClass.FOUNDER });
+    expect(() => a.addAssociate({ associate_handle: "   ", relation: "github org" })).toThrow(/cannot normalize/);
   });
 });
