@@ -24,6 +24,9 @@ export interface SubjectProfile {
   avatar_url?: string; // real X profile photo URL, when resolved (else derive from handle)
   avatar_source_state?: "resolved" | "none"; // explicit twitterapi outcome; absence means collection was unavailable
   website?: string;    // independently resolved first-party site, when available
+  /** What the profile website actually served when fetched (sitecheck outcome).
+   * "live" means a substantial product surface was observed on the domain. */
+  site_substance_status?: "live" | "coming_soon" | "unreachable" | "access_blocked" | "unavailable" | "client_rendered";
   bio: string;
   followers: string;
   joined: string;
@@ -88,7 +91,11 @@ export interface AxisEvidenceRecord {
   scope: "direct_subject" | "subject_context";
 }
 
-export type ProjectStrengthTier = "none" | "adverse" | "emerging" | "solid" | "exceptional";
+/** "assessed_null": a deterministic per-axis assessment completed and found no
+ * verified positive record. The axis stays scoreable in the low band (0-39%)
+ * instead of abstaining the subject; distinct from "none" (nothing assessed)
+ * and "adverse" (verified negative evidence). */
+export type ProjectStrengthTier = "none" | "assessed_null" | "adverse" | "emerging" | "solid" | "exceptional";
 
 export interface ProjectStrengthBandRecord {
   tier: ProjectStrengthTier;

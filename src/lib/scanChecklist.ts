@@ -73,6 +73,8 @@ const UNKNOWN_OR_FAILED = new Set<CheckStatus>(["unknown", "unavailable", "stale
 // branch is a neutral null.
 export const NEUTRAL_NULL_FINDING_CHECK_IDS: ReadonlySet<string> = new Set<string>([
   "founder-repeat-backing",
+  "project-token-identity",
+  "project-backing-partners",
 ]);
 
 /** A "finding" that genuinely signals an adverse discovery (not a neutral null). */

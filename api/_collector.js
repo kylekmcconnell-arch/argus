@@ -418,7 +418,13 @@ var PATTERNS = {
     /\b\$[A-Z]{2,6} token\b/i,
     /\bpowered by\b/i,
     /\bmainnet\b/i,
-    /\btestnet\b/i
+    /\btestnet\b/i,
+    // Verb-phrase product bios: the account states what its product DOES
+    // ("Launch coins on Robinhood", "Trade perps on-chain") without naming a
+    // protocol/platform noun. These are brand accounts, not people.
+    /\blaunch (?:coins?|tokens?|memecoins?)\b/i,
+    /\b(?:create|deploy|mint) (?:a )?(?:coins?|tokens?|memecoins?)\b/i,
+    /\btrade (?:perps?|futures|spot|coins?|tokens?|crypto)\b/i
   ],
   ["ADVISOR" /* ADVISOR */]: [
     /\badvisor\b/i,
@@ -2386,8 +2392,8 @@ var PROJECT_SCORING_POLICY = [
   "If an axis has neither affirmative evidence nor verified adverse evidence, do not score it at zero. Mark it unscored and publish the investigation as INCOMPLETE. A zero is a severe assessment, not a synonym for missing data.",
   "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
   "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
-  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation.",
-  "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified.",
+  "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation. A completed token-identity assessment (the project-token-identity check) that binds no canonical token scores P3 at the low end for lack of demonstrated conduct history; it is a null result on this axis only, never adverse conduct evidence or counter-evidence against any other axis.",
+  "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end as a null result on this axis only, never counter-evidence against any other axis.",
   "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
   "A severe canonical-token market drawdown is material counter-evidence for P5 and must be cited, but price performance alone only caps otherwise exceptional traction and liveness at the solid band. It cannot erase verified current protocol usage or imply token misconduct.",
   "P6 transparency and integrity: a named legal operator, terms, public docs or repositories, governance materials, and consistent current disclosures justify a solid score. Published independent audits, treasury reporting, and fuller financial disclosures may justify the exceptional band. An unavailable disclosure path is a confidence gap unless a direct verified search establishes a material nondisclosure.",
@@ -3108,6 +3114,7 @@ var trustedProjectProfileDaysSincePost = (profile) => {
 };
 var projectBandRange = (weight, tier) => {
   if (tier === "none") return { minScore: 0, maxScore: 0 };
+  if (tier === "assessed_null") return { minScore: 0, maxScore: Math.floor(weight * 0.39) };
   if (tier === "adverse") return { minScore: 0, maxScore: Math.floor(weight * 0.39) };
   if (tier === "emerging") return { minScore: Math.ceil(weight * 0.4), maxScore: Math.floor(weight * 0.69) };
   if (tier === "solid") return { minScore: Math.ceil(weight * 0.7), maxScore: Math.floor(weight * 0.84) };
@@ -3187,6 +3194,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const earlyStage = PROJECT_EARLY_STAGE.test(productStageText) && !PROJECT_MATURE_STAGE.test(productStageText);
   const catalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog2);
   const limitingByAxis = new Map(projectAxes.map(({ axis }) => [axis, catalog.filter((artifact) => isVerifiedCounterArtifact(artifact, axis)).map((artifact) => artifact.artifactId)]));
+  const assessmentArtifactFor = (axis, checkId) => catalog.find((artifact) => artifact.operation === `checkOutcomes:${checkId}` && isSubstantiveArtifact(artifact) && artifact.eligibleAxes.includes(axis)) ?? null;
   const bands = {};
   const setBand = (axis, tier, reasons, anchors, floorTier) => {
     const spec = projectAxes.find((candidate) => candidate.axis === axis);
@@ -3230,25 +3238,38 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const tokenDisclosures = [...tokenDisclosureFacts];
   const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0].filter(Boolean).length;
   const p3Tier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
-  setBand("P3_token_conduct", p3Tier, [
+  const p3Assessment = p3Tier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 ? assessmentArtifactFor("P3_token_conduct", "project-token-identity") : null;
+  const p3FinalTier = p3Assessment ? "assessed_null" : p3Tier;
+  setBand("P3_token_conduct", p3FinalTier, [
     ...verifiedToken ? ["canonical token verified"] : [],
-    ...!token && p3Tier !== "none" ? ["no canonical token; conduct scored from verified disclosures"] : [],
+    ...!token && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : [],
+    ...p3Assessment ? ["completed token-identity assessment bound no canonical token"] : [],
     ...moderateMarket ? ["measured market activity"] : [],
     ...governanceFacts.length ? ["verified token governance"] : [],
     ...tokenDisclosures.length ? ["verified token economic disclosure"] : [],
     ...auditFacts.length ? ["verified security review"] : []
-  ], artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts]));
+  ], [
+    ...artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
+    ...p3Assessment ? [p3Assessment.artifactId] : []
+  ]);
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
   let p4FloorTier = fundingFacts.length || investorFacts.length || advisorTeam.length ? "emerging" : "none";
   if (investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4FloorTier = "solid";
   let p4Tier = fundingFacts.length || investorFacts.length || advisorTeam.length || relationshipPress.length ? "emerging" : "none";
   if (relationshipPress.length > 0 || investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4Tier = "solid";
   if (distinctRelationshipKeys.size >= 2) p4Tier = "exceptional";
-  setBand("P4_backing_and_partners", p4Tier, [
+  const p4Assessment = p4Tier === "none" && (limitingByAxis.get("P4_backing_and_partners") ?? []).length === 0 ? assessmentArtifactFor("P4_backing_and_partners", "project-backing-partners") : null;
+  const p4FinalTier = p4Assessment ? "assessed_null" : p4Tier;
+  setBand("P4_backing_and_partners", p4FinalTier, [
     ...relationshipPress.length ? [`${distinctRelationshipKeys.size} material relationship source${distinctRelationshipKeys.size === 1 ? "" : "s"}`] : [],
     ...fundingFacts.length ? ["source-backed financing state"] : [],
-    ...advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : []
-  ], artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...advisorTeam]), p4FloorTier);
+    ...advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : [],
+    ...p4Assessment ? ["completed backing assessment found no verified backer or partner"] : []
+  ], [
+    ...artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...advisorTeam]),
+    ...p4Assessment ? [p4Assessment.artifactId] : []
+    // An assessed-null band is a plain band, never a press-widened one.
+  ], p4Assessment ? void 0 : p4FloorTier);
   const verifiedCurrentActivity = currentSocialActivity;
   let p5FloorTier = verifiedCurrentActivity || protocolTractionFacts.length > 0 || verifiedToken ? "emerging" : "none";
   if (verifiedCurrentActivity && (protocolTractionFacts.length > 0 || moderateMarket)) p5FloorTier = "solid";
@@ -15613,7 +15634,15 @@ async function collectProjectTokenIdentity(ctx) {
   const search = await coinSearch(query);
   if (!search) return { state: "failed", detail: "CoinGecko project search failed", attempts: 1 };
   const candidates = rankedCandidates(query, search);
-  if (!candidates.length) return { state: "executed", detail: "CoinGecko returned no project-token candidates", attempts: 1 };
+  if (!candidates.length) {
+    ctx.recordCheck?.({
+      id: "project-token-identity",
+      status: "finding",
+      note: "assessed token identity: a completed registry search returned no canonical token candidate for this project, so no official token is bound to this account. A null result on this axis, not adverse conduct evidence.",
+      provider: "coingecko"
+    });
+    return { state: "executed", detail: "CoinGecko returned no project-token candidates", attempts: 1 };
+  }
   const detailAttempts = candidates.length;
   const inspected = await Promise.all(candidates.map(async (candidate) => {
     const details2 = await coinDetails(candidate.id);
@@ -15627,6 +15656,12 @@ async function collectProjectTokenIdentity(ctx) {
   }));
   const selected = inspected.find((candidate) => candidate !== null) ?? null;
   if (!selected?.identity) {
+    ctx.recordCheck?.({
+      id: "project-token-identity",
+      status: "finding",
+      note: `assessed token identity: ${candidates.length} registry candidate${candidates.length === 1 ? " was" : "s were"} inspected and none bound to the official X account or website domain, so any token this account references remains unbound to a canonical contract. A null result on this axis, not adverse conduct evidence.`,
+      provider: "coingecko"
+    });
     return {
       state: "executed",
       detail: "CoinGecko candidates did not match the official X account or profile domain",
@@ -16741,6 +16776,7 @@ async function resolveProfile(ctx) {
 }
 function applySiteSubstanceOutcome(ctx, domain, site) {
   ctx.evidence.profile.website = site.url;
+  ctx.evidence.profile.site_substance_status = site.status;
   const isProject = ctx.evidence.roles.includes("PROJECT" /* PROJECT */);
   const verifiedProjectToken = ctx.evidence.projectToken?.verified === true ? ctx.evidence.projectToken : void 0;
   const verifiedNotLive = site.status === "coming_soon" && (site.reason === "coming_soon" || site.reason === "parked");
@@ -17317,6 +17353,9 @@ function providerBackedRoles(evidence) {
   if (roles.has("INVESTOR" /* INVESTOR */) && !evidence.projectToken?.verified) {
     roles.delete("PROJECT" /* PROJECT */);
   }
+  if (roles.size === 0 && evidence.profile.profile_collection_state === "resolved" && evidence.profile.profile_provider === "twitterapi" && canonicalOfficialWebsite(evidence.profile.website) !== null && evidence.profile.site_substance_status === "live") {
+    roles.add("PROJECT" /* PROJECT */);
+  }
   return [...roles];
 }
 function projectVerifiedBasicFacts(ctx) {
@@ -17566,10 +17605,11 @@ function collectProjectCoreEvidenceOutcomes(ctx, options = {}) {
       sourceCount: verifiedBackers.length + verifiedInvestorFacts.reduce((total, fact) => total + fact.sources.length, 0)
     });
   } else {
+    const assessable = (ctx.evidence.webTeam ?? []).length > 0 || (ctx.evidence.basicFacts ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live";
     ctx.recordCheck?.({
       id: "project-backing-partners",
-      status: "checked-empty",
-      note: "bounded scan of up to 32 frozen first-party team and account records found no verified financial backer, investor, or advisor; product partnerships require separate source verification, and model-only leads were excluded",
+      status: assessable ? "finding" : "checked-empty",
+      note: assessable ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified financial backer, investor, or advisor appears; product partnerships require separate source verification, and model-only leads were excluded. A null result on this axis, not adverse evidence." : "bounded scan of up to 32 frozen first-party team and account records found no verified financial backer, investor, or advisor; product partnerships require separate source verification, and model-only leads were excluded",
       provider: "project-core-evidence"
     });
   }

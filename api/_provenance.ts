@@ -30,7 +30,7 @@ const ROLE_ID = /^[A-Z][A-Z0-9_]{0,79}$/;
 const VERIFICATIONS = new Set(["verified", "reported", "observed", "checked_empty", "unavailable"]);
 const ABSENCE_VERIFICATIONS = new Set(["checked_empty", "unavailable"]);
 const SCOPES = new Set(["direct_subject", "subject_context"]);
-const PROJECT_STRENGTH_TIERS = new Set(["none", "adverse", "emerging", "solid", "exceptional"]);
+const PROJECT_STRENGTH_TIERS = new Set(["none", "assessed_null", "adverse", "emerging", "solid", "exceptional"]);
 const CATALOG_ARTIFACT_KEYS = new Set([
   "artifactId", "kind", "provider", "operation", "section", "title", "excerpt",
   "sourceUrl", "capturedAt", "contentHash", "eligibleAxes", "verification", "counterEligibleAxes", "scope",
@@ -344,7 +344,9 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
     // A floorTier marks a press-widened band: the verified floor must sit
     // strictly below the ceiling tier on the positive ladder (never adverse,
     // never widening downward). A "none" floor is legal: press alone lifted
-    // the tier, so no verified minimum is enforced.
+    // the tier, so no verified minimum is enforced. An assessed_null band is
+    // always plain: it is outside the positive ladder, so a floorTier on it
+    // (or as a floor) fails the rank check below.
     const floorTier = band.floorTier === undefined ? undefined : String(band.floorTier);
     if (floorTier !== undefined) {
       const floorRank = POSITIVE_TIER_ORDER.indexOf(floorTier as (typeof POSITIVE_TIER_ORDER)[number]);
@@ -499,7 +501,7 @@ function collectStrictLineage(payload: JsonRecord, context: ProvenanceContext): 
         }
         const tierRange = (tier: string): { min: number; max: number } => tier === "none"
           ? { min: 0, max: 0 }
-          : tier === "adverse"
+          : tier === "assessed_null" || tier === "adverse"
             ? { min: 0, max: Math.floor(expectedWeight * 0.39) }
             : tier === "emerging"
               ? { min: Math.ceil(expectedWeight * 0.4), max: Math.floor(expectedWeight * 0.69) }

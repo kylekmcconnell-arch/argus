@@ -429,6 +429,7 @@ export function applySiteSubstanceOutcome(
   site: SiteSubstance,
 ): void {
   ctx.evidence.profile.website = site.url;
+  ctx.evidence.profile.site_substance_status = site.status;
   const isProject = ctx.evidence.roles.includes(SubjectClass.PROJECT);
   const verifiedProjectToken = ctx.evidence.projectToken?.verified === true
     ? ctx.evidence.projectToken
@@ -1190,6 +1191,20 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
   if (roles.has(SubjectClass.INVESTOR) && !evidence.projectToken?.verified) {
     roles.delete(SubjectClass.PROJECT);
   }
+  // Last-resort structural routing: a brand account whose bio carries no
+  // classifying keyword ("Launch coins on Robinhood via <link>") still routes
+  // to PROJECT when its provider-resolved profile links a credible official
+  // site that served a live product surface when fetched. The served site is
+  // provider-observed evidence of what the account is; without this the
+  // subject is unroutable and publishes as an empty INCOMPLETE shell with no
+  // methodology at all, which helps no one deciding on the subject.
+  if (roles.size === 0
+    && evidence.profile.profile_collection_state === "resolved"
+    && evidence.profile.profile_provider === "twitterapi"
+    && canonicalOfficialWebsite(evidence.profile.website) !== null
+    && evidence.profile.site_substance_status === "live") {
+    roles.add(SubjectClass.PROJECT);
+  }
   return [...roles];
 }
 
@@ -1566,10 +1581,21 @@ export function collectProjectCoreEvidenceOutcomes(
       sourceCount: verifiedBackers.length + verifiedInvestorFacts.reduce((total, fact) => total + fact.sources.length, 0),
     });
   } else {
+    // When the scan actually ran over collected first-party material (a
+    // roster, verified facts, or a fetched live site), an empty result is a
+    // completed ASSESSMENT of this axis (the founder-repeat-backing idiom),
+    // not a coverage gap: without it every young or bootstrapped project
+    // abstains INCOMPLETE on P4 forever. Only a scan with nothing at all to
+    // read stays a checked-empty coverage row.
+    const assessable = (ctx.evidence.webTeam ?? []).length > 0
+      || (ctx.evidence.basicFacts ?? []).length > 0
+      || ctx.evidence.profile.site_substance_status === "live";
     ctx.recordCheck?.({
       id: "project-backing-partners",
-      status: "checked-empty",
-      note: "bounded scan of up to 32 frozen first-party team and account records found no verified financial backer, investor, or advisor; product partnerships require separate source verification, and model-only leads were excluded",
+      status: assessable ? "finding" : "checked-empty",
+      note: assessable
+        ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified financial backer, investor, or advisor appears; product partnerships require separate source verification, and model-only leads were excluded. A null result on this axis, not adverse evidence."
+        : "bounded scan of up to 32 frozen first-party team and account records found no verified financial backer, investor, or advisor; product partnerships require separate source verification, and model-only leads were excluded",
       provider: "project-core-evidence",
     });
   }

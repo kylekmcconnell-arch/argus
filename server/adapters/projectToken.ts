@@ -452,7 +452,19 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
   const search = await coinSearch(query);
   if (!search) return { state: "failed", detail: "CoinGecko project search failed", attempts: 1 };
   const candidates = rankedCandidates(query, search);
-  if (!candidates.length) return { state: "executed", detail: "CoinGecko returned no project-token candidates", attempts: 1 };
+  if (!candidates.length) {
+    // A completed registry search with no candidate is an assessed null on
+    // token identity (the founder-repeat-backing idiom), not a coverage gap:
+    // recording nothing here starves P3 and abstains every tokenless or
+    // pre-listing project. Only the failed search above stays a genuine gap.
+    ctx.recordCheck?.({
+      id: "project-token-identity",
+      status: "finding",
+      note: "assessed token identity: a completed registry search returned no canonical token candidate for this project, so no official token is bound to this account. A null result on this axis, not adverse conduct evidence.",
+      provider: "coingecko",
+    });
+    return { state: "executed", detail: "CoinGecko returned no project-token candidates", attempts: 1 };
+  }
 
   const detailAttempts = candidates.length;
   const inspected = await Promise.all(candidates.map(async (candidate) => {
@@ -467,6 +479,15 @@ export async function collectProjectTokenIdentity(ctx: CollectContext): Promise<
   }));
   const selected = inspected.find((candidate) => candidate !== null) ?? null;
   if (!selected?.identity) {
+    // Candidates existed but none bound to the official X account or domain:
+    // any token this account references stays unbound to a canonical contract.
+    // That completed assessment is substantive P3 evidence in itself.
+    ctx.recordCheck?.({
+      id: "project-token-identity",
+      status: "finding",
+      note: `assessed token identity: ${candidates.length} registry candidate${candidates.length === 1 ? " was" : "s were"} inspected and none bound to the official X account or website domain, so any token this account references remains unbound to a canonical contract. A null result on this axis, not adverse conduct evidence.`,
+      provider: "coingecko",
+    });
     return {
       state: "executed",
       detail: "CoinGecko candidates did not match the official X account or profile domain",

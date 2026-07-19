@@ -485,6 +485,52 @@ describe("frozen source artifact provenance", () => {
     await expect(persistProvenance(credentials, context, forgedNoneFloor, [])).rejects.toThrow(
       "violates project strength band",
     );
+
+    // Assessed-null band: a completed per-axis assessment (an assessed-null
+    // checkOutcome) found no positive record, so the axis scores in the low
+    // band anchored by the assessment artifact itself. Persistence must accept
+    // this shape or every assessed young project loses its whole report.
+    const assessedHash = "e".repeat(64);
+    const assessedNull = structuredClone(payload);
+    assessedNull.axisEvidenceCatalog.push({
+      artifactId: `art_v1_${assessedHash}`,
+      contentHash: assessedHash,
+      kind: "axis_evidence",
+      provider: "project-core-evidence",
+      operation: "checkOutcomes:project-backing-partners",
+      section: "checkOutcomes",
+      title: "Assessed backing and partners: no verified backer appears",
+      eligibleAxes: ["P4_backing_and_partners"],
+      verification: "verified",
+      scope: "direct_subject",
+    });
+    assessedNull.projectStrengthBands.P4_backing_and_partners = {
+      tier: "assessed_null",
+      minScore: 0,
+      maxScore: Math.floor(p4Weight * 0.39),
+      reasons: ["completed backing assessment found no verified backer or partner"],
+      anchorArtifactIds: [`art_v1_${assessedHash}`],
+    };
+    assessedNull.report.role_reports[0].axes.P4_backing_and_partners = {
+      ...assessedNull.report.role_reports[0].axes.P4_backing_and_partners,
+      score: 0,
+      evidenceRefs: [`art_v1_${assessedHash}`],
+    };
+    await expect(persistProvenance(credentials, context, assessedNull, [])).resolves.toBeUndefined();
+
+    // assessed_null is outside the positive ladder: a floorTier on it is forged.
+    const forgedAssessedFloor = structuredClone(assessedNull);
+    forgedAssessedFloor.projectStrengthBands.P4_backing_and_partners.floorTier = "none";
+    await expect(persistProvenance(credentials, context, forgedAssessedFloor, [])).rejects.toThrow(
+      "project strength band floor",
+    );
+
+    // An assessed_null band cannot smuggle a higher range than the low band.
+    const forgedAssessedRange = structuredClone(assessedNull);
+    forgedAssessedRange.projectStrengthBands.P4_backing_and_partners.maxScore = p4Weight;
+    await expect(persistProvenance(credentials, context, forgedAssessedRange, [])).rejects.toThrow(
+      "violates project strength band",
+    );
   });
 
   it("rejects a scored role that omits any canonical axis", async () => {

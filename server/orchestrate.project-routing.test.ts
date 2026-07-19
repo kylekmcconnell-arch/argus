@@ -135,6 +135,37 @@ describe("provider-backed project routing", () => {
     ]);
   });
 
+  it("routes a verb-phrase product bio to PROJECT once the official site is linked", () => {
+    // The @ponsdotfamily prod shell: "Launch coins on Robinhood via <t.co>"
+    // carries no protocol/platform noun, so keyword routing alone left the
+    // subject unroutable and the report published with no methodology.
+    const evidence = resolvedProjectProfile("Launch coins on Robinhood via https://t.co/X4t0HOafyO", "https://ponsfamily.com/");
+    expect(providerBackedRoles(evidence)).toContain(SubjectClass.PROJECT);
+  });
+
+  it("routes a keyword-free brand account to PROJECT when its own site served a live product", () => {
+    const evidence = resolvedProjectProfile("The family way to do it.", "https://ponsfamily.com/");
+    evidence.profile.site_substance_status = "live";
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.PROJECT]);
+  });
+
+  it("keeps a keyword-free account unroutable when the site did not serve a live product", () => {
+    const shell = resolvedProjectProfile("The family way to do it.", "https://ponsfamily.com/");
+    shell.profile.site_substance_status = "client_rendered";
+    expect(providerBackedRoles(shell)).toEqual([]);
+
+    const unfetched = resolvedProjectProfile("The family way to do it.", "https://ponsfamily.com/");
+    expect(providerBackedRoles(unfetched)).toEqual([]);
+  });
+
+  it("never uses the live-site fallback when the bio already classified a role", () => {
+    const evidence = resolvedProjectProfile("Daily alpha calls and gems.", "https://ponsfamily.com/");
+    evidence.profile.site_substance_status = "live";
+    const roles = providerBackedRoles(evidence);
+    expect(roles).toContain(SubjectClass.KOL);
+    expect(roles).not.toContain(SubjectClass.PROJECT);
+  });
+
   it("does not route a non-verified token candidate by name alone", () => {
     const evidence = resolvedProjectProfile("Just use crypto", null);
     evidence.projectToken = {

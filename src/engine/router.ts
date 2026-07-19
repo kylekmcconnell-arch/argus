@@ -32,6 +32,12 @@ const PATTERNS: Record<SubjectClass, RegExp[]> = {
     /\bplatform\b/i, /\bthe official\b/i, /\bofficial account\b/i, /\bwe'?re building\b/i,
     /\bour (?:token|protocol|platform|app|mission|community)\b/i, /\b\$[A-Z]{2,6} token\b/i,
     /\bpowered by\b/i, /\bmainnet\b/i, /\btestnet\b/i,
+    // Verb-phrase product bios: the account states what its product DOES
+    // ("Launch coins on Robinhood", "Trade perps on-chain") without naming a
+    // protocol/platform noun. These are brand accounts, not people.
+    /\blaunch (?:coins?|tokens?|memecoins?)\b/i,
+    /\b(?:create|deploy|mint) (?:a )?(?:coins?|tokens?|memecoins?)\b/i,
+    /\btrade (?:perps?|futures|spot|coins?|tokens?|crypto)\b/i,
   ],
   [SubjectClass.ADVISOR]: [
     /\badvisor\b/i, /\badviser\b/i, /\badvisory\b/i, /\bboard member\b/i,

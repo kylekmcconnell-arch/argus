@@ -129,7 +129,7 @@ describe("project core evidence outcomes", () => {
     }));
   });
 
-  it("records checked-empty after the bounded backing scan and excludes model leads plus ambiguous partner titles", () => {
+  it("records an assessed null after the bounded backing scan ran over real collected records", () => {
     const { ctx, evidence, outcomes } = context();
     evidence.webTeam = [
       {
@@ -149,6 +149,25 @@ describe("project core evidence outcomes", () => {
         artifact_verified: true,
       },
     ];
+
+    collectProjectCoreEvidenceOutcomes(ctx);
+
+    // The scan read real first-party records and found nothing: that is a
+    // completed assessment (substantive for P4 preflight), still excluding
+    // model leads and ambiguous partner titles from ever confirming backing.
+    expect(outcomes).toContainEqual(expect.objectContaining({
+      id: "project-backing-partners",
+      status: "finding",
+      provider: "project-core-evidence",
+      note: expect.stringContaining("no verified financial backer, investor, or advisor appears"),
+    }));
+  });
+
+  it("keeps the backing outcome a checked-empty coverage row when there was nothing to scan", () => {
+    const { ctx, evidence, outcomes } = context();
+    evidence.webTeam = [];
+    evidence.basicFacts = [];
+    evidence.profile.site_substance_status = undefined;
 
     collectProjectCoreEvidenceOutcomes(ctx);
 

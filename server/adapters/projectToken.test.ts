@@ -168,6 +168,33 @@ describe("verified project-token collection", () => {
       detail: expect.stringContaining("did not match"),
     });
     expect(evidence.projectToken).toBeUndefined();
+    // The completed-but-unbound search is an assessed null on P3 (substantive
+    // for preflight), so a token-referencing project can still be scored.
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "finding",
+      note: expect.stringContaining("none bound to the official X account or website domain"),
+    }));
+  });
+
+  it("records an assessed null when the registry search completes with no candidates at all", async () => {
+    const { ctx, evidence } = context("@freshbrand", "Freshbrand Launcher", "https://freshbrand.example/");
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("/search?")) return json({ coins: [] });
+      throw new Error(`unexpected URL ${url}`);
+    }));
+
+    await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("no project-token candidates"),
+    });
+    expect(evidence.projectToken).toBeUndefined();
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "finding",
+      note: expect.stringContaining("no canonical token candidate"),
+    }));
   });
 
   it("rejects a similarly named token with a different official X account and domain", async () => {
