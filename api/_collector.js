@@ -2060,15 +2060,18 @@ var failureMeta = (error, timeoutMs, fallback) => error instanceof Error && erro
 function analystAvailable() {
   return Boolean(env("ANTHROPIC_API_KEY") || env("XAI_API_KEY"));
 }
-async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4) {
+function isTransientAnalystFailure(reason) {
+  return /^transport_error$/.test(reason) || /^timeout_\d+ms$/.test(reason) || /^response_json_error$/.test(reason) || /^http_(?:5\d\d|429)$/.test(reason);
+}
+async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4, onFailure) {
   const deadlineAt = Date.now() + Math.max(0, timeoutMs);
-  const claude = env("ANTHROPIC_API_KEY") ? await structuredClaude(system, user, tool, maxTokens, timeoutMs) : null;
+  const claude = env("ANTHROPIC_API_KEY") ? await structuredClaude(system, user, tool, maxTokens, timeoutMs, onFailure) : null;
   if (claude !== null || !env("XAI_API_KEY")) return claude;
   const remainingMs = Math.max(0, deadlineAt - Date.now());
   if (remainingMs < 1) return null;
-  return structuredGrok(system, user, tool, maxTokens, remainingMs);
+  return structuredGrok(system, user, tool, maxTokens, remainingMs, onFailure);
 }
-async function structuredClaude(system, user, tool, maxTokens, timeoutMs) {
+async function structuredClaude(system, user, tool, maxTokens, timeoutMs, onFailure) {
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
   const startedAt = Date.now();
@@ -2109,6 +2112,7 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs) {
       elapsedMs: Date.now() - startedAt
     }));
     console.error(`[agent] ${tool.name} request failed (${failure})`, e);
+    onFailure?.(failure);
     return null;
   }
   const requestId = res.headers.get("request-id") || res.headers.get("x-request-id");
@@ -2120,6 +2124,7 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs) {
     }
     const failure = res.status === 400 && SCHEMA_COMPILATION_ERROR.test(detail) ? "schema_too_complex" : `http_${res.status}`;
     addClaudeUsage(void 0, tool.name, "failed", failure);
+    onFailure?.(failure);
     console.info("[agent-call]", JSON.stringify({
       ...requestMetrics,
       state: "failed",
@@ -2146,6 +2151,7 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs) {
       elapsedMs: Date.now() - startedAt
     }));
     console.error(`[agent] ${tool.name} response parse failed (${failure})`, e);
+    onFailure?.(failure);
     return null;
   }
   const toolBlocks = Array.isArray(data.content) ? data.content.filter((candidate) => candidate.type === "tool_use") : [];
@@ -2170,9 +2176,10 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs) {
     elapsedMs: Date.now() - startedAt,
     ...block ? {} : { failure: partialReason }
   }));
+  if (!block) onFailure?.(partialReason);
   return block?.input ?? null;
 }
-async function structuredGrok(system, user, tool, maxTokens, timeoutMs) {
+async function structuredGrok(system, user, tool, maxTokens, timeoutMs, onFailure) {
   const key = env("XAI_API_KEY");
   if (!key) return null;
   const startedAt = Date.now();
@@ -2222,6 +2229,7 @@ Return exactly one ${tool.name} object. ${tool.description}` },
       failure,
       elapsedMs: Date.now() - startedAt
     }));
+    onFailure?.(failure);
     return null;
   }
   const requestId = response.headers.get("x-request-id") || response.headers.get("request-id");
@@ -2235,6 +2243,7 @@ Return exactly one ${tool.name} object. ${tool.description}` },
       requestId,
       elapsedMs: Date.now() - startedAt
     }));
+    onFailure?.(`http_${response.status}`);
     return null;
   }
   let data;
@@ -2251,6 +2260,7 @@ Return exactly one ${tool.name} object. ${tool.description}` },
       requestId,
       elapsedMs: Date.now() - startedAt
     }));
+    onFailure?.(failure);
     return null;
   }
   const content = data.choices?.[0]?.message?.content;
@@ -2278,6 +2288,7 @@ Return exactly one ${tool.name} object. ${tool.description}` },
     elapsedMs: Date.now() - startedAt,
     ...valid ? {} : { failure: "invalid_structured_output" }
   }));
+  if (!valid) onFailure?.("invalid_structured_output");
   return valid ? parsed : null;
 }
 async function extractClaims(handle, bio, posts) {
@@ -4562,13 +4573,31 @@ TRUST GRAPH RULE: only qualified connections and structured TrustGraphConnection
     }));
     return null;
   }
-  let raw = await structured(
-    system,
-    user,
-    tool,
-    6e3,
-    firstAttemptTimeoutMs
-  );
+  const MAX_ANALYST_TRANSIENT_RETRIES = 2;
+  const remainingBudgetMs = () => typeof options.analystDeadlineAt === "number" ? Math.min(ANALYST_SCORING_TIMEOUT_MS, Math.max(0, options.analystDeadlineAt - Date.now())) : ANALYST_SCORING_TIMEOUT_MS;
+  const runScoringCall = async (timeoutMs) => {
+    let sawDeterministic = false;
+    let sawTransient = false;
+    const value = await structured(system, user, tool, 6e3, timeoutMs, (reason) => {
+      if (isTransientAnalystFailure(reason)) sawTransient = true;
+      else sawDeterministic = true;
+    });
+    return { value, transient: value === null && sawTransient && !sawDeterministic };
+  };
+  let attempt = await runScoringCall(firstAttemptTimeoutMs);
+  let raw = attempt.value;
+  for (let transientRetry = 1; raw === null && attempt.transient && transientRetry <= MAX_ANALYST_TRANSIENT_RETRIES; transientRetry++) {
+    const backoffMs = 750 * transientRetry;
+    const budgetAfterBackoff = remainingBudgetMs() - backoffMs;
+    if (budgetAfterBackoff < 1e3) {
+      console.warn("[agent-runtime]", JSON.stringify({ tool: "record_verdict", state: "transient_retry_skipped_budget", remainingMs: budgetAfterBackoff }));
+      break;
+    }
+    console.warn("[agent-runtime]", JSON.stringify({ tool: "record_verdict", state: "transient_retry", attempt: transientRetry, backoffMs }));
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    attempt = await runScoringCall(remainingBudgetMs());
+    raw = attempt.value;
+  }
   let rejectionReason = "unknown";
   let normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog, projectScoreBands);
   normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);

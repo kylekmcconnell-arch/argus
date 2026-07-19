@@ -3942,6 +3942,51 @@ describe("analyst verdict integrity", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("recovers a verdict when the first analyst call transiently fails instead of abandoning to INCOMPLETE", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: { handle: "@subject", display_name: "Subject", bio: "Named builder", profile_collection_state: "resolved", profile_provider: "twitterapi" },
+      ventures: [{ project_name: "Verified Venture", role: "founder", outcome: "Active", artifact_verified: true }],
+    }, catalog);
+    const scorerCatalog = extractScoringEvidenceCatalog(evidenceJson);
+    const aliasFor = (axis: string) => {
+      const index = scorerCatalog.findIndex((artifact) =>
+        artifact.verification !== "unavailable"
+        && artifact.verification !== "checked_empty"
+        && artifact.eligibleAxes.includes(axis));
+      return `e${String(index + 1).padStart(3, "0")}`;
+    };
+    const validVerdict = {
+      axes: [
+        { axis: "F1_identity_verifiability", score: 10, rationale: "named identity", primaryEvidenceRef: aliasFor("F1_identity_verifiability"), additionalEvidenceRefs: [], counterEvidenceRefs: [], coverageRefs: [], gaps: [] },
+        { axis: "F2_track_record", score: 20, rationale: "documented history", primaryEvidenceRef: aliasFor("F2_track_record"), additionalEvidenceRefs: [], counterEvidenceRefs: [], coverageRefs: [], gaps: [] },
+      ],
+      headline: "Evidence-backed result",
+      identity_note: "Identity resolved",
+    };
+    let verdictCalls = 0;
+    const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
+      const request = JSON.parse(String(init?.body)) as { tool_choice: { name: string } };
+      if (request.tool_choice.name !== "record_verdict") {
+        return new Response(JSON.stringify({ content: [{ type: "tool_use", name: request.tool_choice.name, input: { contradictions: [] } }], stop_reason: "tool_use", usage: { input_tokens: 10, output_tokens: 2 } }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      verdictCalls += 1;
+      // First scoring attempt blips (a transient upstream 503); the retry must
+      // recover rather than sinking the whole run to a null verdict.
+      if (verdictCalls === 1) {
+        return new Response("upstream unavailable", { status: 503, headers: { "content-type": "text/plain" } });
+      }
+      return new Response(JSON.stringify({ content: [{ type: "tool_use", name: "record_verdict", input: validVerdict }], stop_reason: "tool_use", usage: { input_tokens: 100, output_tokens: 20 } }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const verdict = await analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson);
+
+    expect(verdict).not.toBeNull();
+    expect(verdict?.axes.map((axis) => axis.axis)).toEqual(catalog.map((axis) => axis.axis));
+    expect(verdictCalls).toBeGreaterThanOrEqual(2);
+  });
+
   it("structurally prunes an oversized trust graph to the hard scorer budget", () => {
     const long = "x".repeat(400);
     const ties = Array.from({ length: 4 }, (_, index) => ({
@@ -5297,12 +5342,15 @@ describe("analyst verdict integrity", () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error("offline"));
     vi.stubGlobal("fetch", fetchMock);
     vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     await expect(analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson)).resolves.toBeNull();
 
+    // Each transient (transport) attempt gets the full dedicated scoring window;
+    // a persistent transport failure exhausts the bounded retries then gives up.
     expect(ANALYST_SCORING_TIMEOUT_MS).toBe(180_000);
     expect(timeoutSpy).toHaveBeenCalledWith(ANALYST_SCORING_TIMEOUT_MS);
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
   it("falls back from an Anthropic 400 to a valid Grok JSON-schema verdict", async () => {

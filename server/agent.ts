@@ -34,21 +34,35 @@ interface ToolSchema {
   strict?: boolean;
 }
 
+// A classifier failure reason is TRANSIENT when a retry could plausibly
+// succeed (network drop, timeout, upstream 5xx, rate-limit 429, a truncated
+// JSON body). It is DETERMINISTIC when the same request would fail identically
+// (max-token truncation, an over-complex schema, a 4xx, an ambiguous or missing
+// tool call): retrying those wastes budget and money. Callers that retry (the
+// analyst) pass onFailure to observe the reason and decide.
+export function isTransientAnalystFailure(reason: string): boolean {
+  return /^transport_error$/.test(reason)
+    || /^timeout_\d+ms$/.test(reason)
+    || /^response_json_error$/.test(reason)
+    || /^http_(?:5\d\d|429)$/.test(reason);
+}
+
 export async function structured<T>(
   system: string,
   user: string,
   tool: ToolSchema,
   maxTokens = 2048,
   timeoutMs = 60_000,
+  onFailure?: (reason: string) => void,
 ): Promise<T | null> {
   const deadlineAt = Date.now() + Math.max(0, timeoutMs);
   const claude = env("ANTHROPIC_API_KEY")
-    ? await structuredClaude<T>(system, user, tool, maxTokens, timeoutMs)
+    ? await structuredClaude<T>(system, user, tool, maxTokens, timeoutMs, onFailure)
     : null;
   if (claude !== null || !env("XAI_API_KEY")) return claude;
   const remainingMs = Math.max(0, deadlineAt - Date.now());
   if (remainingMs < 1) return null;
-  return structuredGrok<T>(system, user, tool, maxTokens, remainingMs);
+  return structuredGrok<T>(system, user, tool, maxTokens, remainingMs, onFailure);
 }
 
 // Calls the Anthropic Messages API and forces a single tool call, returning the
@@ -60,6 +74,7 @@ async function structuredClaude<T>(
   tool: ToolSchema,
   maxTokens: number,
   timeoutMs: number,
+  onFailure?: (reason: string) => void,
 ): Promise<T | null> {
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
@@ -101,6 +116,7 @@ async function structuredClaude<T>(
       elapsedMs: Date.now() - startedAt,
     }));
     console.error(`[agent] ${tool.name} request failed (${failure})`, e);
+    onFailure?.(failure);
     return null;
   }
   const requestId = res.headers.get("request-id") || res.headers.get("x-request-id");
@@ -111,6 +127,7 @@ async function structuredClaude<T>(
       ? "schema_too_complex"
       : `http_${res.status}`;
     addClaudeUsage(undefined, tool.name, "failed", failure);
+    onFailure?.(failure);
     console.info("[agent-call]", JSON.stringify({
       ...requestMetrics,
       state: "failed",
@@ -142,6 +159,7 @@ async function structuredClaude<T>(
       elapsedMs: Date.now() - startedAt,
     }));
     console.error(`[agent] ${tool.name} response parse failed (${failure})`, e);
+    onFailure?.(failure);
     return null;
   }
   const toolBlocks = Array.isArray(data.content)
@@ -177,6 +195,7 @@ async function structuredClaude<T>(
     elapsedMs: Date.now() - startedAt,
     ...(block ? {} : { failure: partialReason }),
   }));
+  if (!block) onFailure?.(partialReason);
   return (block?.input as T) ?? null;
 }
 
@@ -189,6 +208,7 @@ async function structuredGrok<T>(
   tool: ToolSchema,
   maxTokens: number,
   timeoutMs: number,
+  onFailure?: (reason: string) => void,
 ): Promise<T | null> {
   const key = env("XAI_API_KEY");
   if (!key) return null;
@@ -237,6 +257,7 @@ async function structuredGrok<T>(
       failure,
       elapsedMs: Date.now() - startedAt,
     }));
+    onFailure?.(failure);
     return null;
   }
   const requestId = response.headers.get("x-request-id") || response.headers.get("request-id");
@@ -250,6 +271,7 @@ async function structuredGrok<T>(
       requestId,
       elapsedMs: Date.now() - startedAt,
     }));
+    onFailure?.(`http_${response.status}`);
     return null;
   }
 
@@ -274,6 +296,7 @@ async function structuredGrok<T>(
       requestId,
       elapsedMs: Date.now() - startedAt,
     }));
+    onFailure?.(failure);
     return null;
   }
   const content = data.choices?.[0]?.message?.content;
@@ -301,6 +324,7 @@ async function structuredGrok<T>(
     elapsedMs: Date.now() - startedAt,
     ...(valid ? {} : { failure: "invalid_structured_output" }),
   }));
+  if (!valid) onFailure?.("invalid_structured_output");
   return valid ? parsed as T : null;
 }
 
@@ -3467,13 +3491,46 @@ export async function analyzeSubject(
     }));
     return null;
   }
-  let raw = await structured<unknown>(
-    system,
-    user,
-    tool,
-    6000,
-    firstAttemptTimeoutMs,
-  );
+  // The analyst call is the linchpin of a multi-minute collection, and
+  // structured() only fails over Claude to Grok once each: if BOTH providers
+  // blip in the same instant (a rate-limit burst, a transient network drop),
+  // it returns null and the whole run would abandon to INCOMPLETE with no
+  // retry (the repair loop below is gated on a non-null response). Retry the
+  // initial call a bounded number of times with a short backoff so a momentary
+  // provider failure does not throw away the entire investigation. This is
+  // distinct from the content-repair loop, which handles a returned-but-invalid
+  // response. Retry ONLY genuinely transient failures: a max-token truncation
+  // or an over-complex schema would fail identically on retry and only waste
+  // budget. Every attempt stays inside the analyst deadline budget.
+  const MAX_ANALYST_TRANSIENT_RETRIES = 2;
+  const remainingBudgetMs = () => typeof options.analystDeadlineAt === "number"
+    ? Math.min(ANALYST_SCORING_TIMEOUT_MS, Math.max(0, options.analystDeadlineAt - Date.now()))
+    : ANALYST_SCORING_TIMEOUT_MS;
+  const runScoringCall = async (timeoutMs: number): Promise<{ value: unknown; transient: boolean }> => {
+    let sawDeterministic = false;
+    let sawTransient = false;
+    const value = await structured<unknown>(system, user, tool, 6000, timeoutMs, (reason) => {
+      if (isTransientAnalystFailure(reason)) sawTransient = true;
+      else sawDeterministic = true;
+    });
+    // Retry only when the failure was purely transient: any deterministic
+    // reason (max_tokens, schema, 4xx, invalid tool call) recurs on retry.
+    return { value, transient: value === null && sawTransient && !sawDeterministic };
+  };
+  let attempt = await runScoringCall(firstAttemptTimeoutMs);
+  let raw = attempt.value;
+  for (let transientRetry = 1; raw === null && attempt.transient && transientRetry <= MAX_ANALYST_TRANSIENT_RETRIES; transientRetry++) {
+    const backoffMs = 750 * transientRetry;
+    const budgetAfterBackoff = remainingBudgetMs() - backoffMs;
+    if (budgetAfterBackoff < 1_000) {
+      console.warn("[agent-runtime]", JSON.stringify({ tool: "record_verdict", state: "transient_retry_skipped_budget", remainingMs: budgetAfterBackoff }));
+      break;
+    }
+    console.warn("[agent-runtime]", JSON.stringify({ tool: "record_verdict", state: "transient_retry", attempt: transientRetry, backoffMs }));
+    await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    attempt = await runScoringCall(remainingBudgetMs());
+    raw = attempt.value;
+  }
   let rejectionReason = "unknown";
   let normalizedRaw = normalizeAnalystSupportCounterOverlap(raw, evidenceCatalog, projectScoreBands);
   normalizedRaw = normalizeAnalystCitationEligibility(normalizedRaw, evidenceCatalog);
