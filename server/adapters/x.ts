@@ -179,10 +179,15 @@ export async function claudeWebSearch(system: string, user: string, opts?: {
         messages: [{ role: "user", content: user }],
         tools: [{ type: "web_search_20250305", name: "web_search", max_uses: opts?.maxSearchUses ?? 4 }],
       }),
-      signal: AbortSignal.timeout(45000),
+      // Claude web_search runs several searches server-side then synthesizes;
+      // 45s was too tight (calls timed out and silently fell back to Grok,
+      // erasing the cost win). Give it room; lanes run in parallel and the
+      // collection budget is ~390s.
+      signal: AbortSignal.timeout(120_000),
     });
-  } catch {
-    addClaudeUsage(undefined, "web-search", "failed", "transport_error");
+  } catch (error) {
+    const reason = error instanceof Error && error.name === "TimeoutError" ? "timeout_120000ms" : "transport_error";
+    addClaudeUsage(undefined, "web-search", "failed", reason);
     return null;
   }
   if (!res.ok) {

@@ -24,7 +24,10 @@ const MAX_LEADS = 28;
 const MAX_SOURCES = 32;
 const MAX_REPAIR_QUESTIONS = 8;
 const MAX_REPAIR_PROVIDER_CALLS = 8;
-const DISCOVERY_TIMEOUT_MS = 50_000;
+// Claude web_search runs several searches server-side then synthesizes; 50s was
+// tight enough that slow calls timed out and fell back to Grok (erasing the cost
+// win). Discovery batches run in parallel, well inside the ~390s budget.
+const DISCOVERY_TIMEOUT_MS = 90_000;
 const RESEARCH_CACHE_VERSION = "v7";
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
