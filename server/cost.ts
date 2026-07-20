@@ -131,6 +131,13 @@ export function recordTwitterapi(op: string, status: ProviderUsageStatus = "succ
   recordCall("twitterapi", op, PRICE.twitterapiCall, meta, status);
 }
 
+/** Grok spend so far in this audit's ledger, in USD. Lets a runaway subject be
+ * stopped mid-run instead of discovered on the invoice. */
+export function grokSpendUsd(): number {
+  const { grok } = currentState();
+  return grok.in * PRICE.grokIn + grok.out * PRICE.grokOut + grok.sources * PRICE.grokSource;
+}
+
 export function addGrokUsage(
   u: { input_tokens?: number; output_tokens?: number; num_sources_used?: number } | undefined,
   toolCalls?: number,
@@ -141,7 +148,14 @@ export function addGrokUsage(
   const { grok } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
-  const sources = typeof u?.num_sources_used === "number" ? u.num_sources_used : (toolCalls ?? 0) * EST_SOURCES_PER_SEARCH;
+  // xAI bills live search PER SOURCE. It reports num_sources_used: 0 even when
+  // it reports several tool calls on the same response, so trusting that zero
+  // booked whole audits at $0.00 while the invoice charged dollars. Never
+  // report less than the tool calls imply: a ledger that under-reports is worse
+  // than no ledger, because it silently disables every budget built on it.
+  const reportedSources = typeof u?.num_sources_used === "number" ? u.num_sources_used : 0;
+  const impliedSources = (toolCalls ?? 0) * EST_SOURCES_PER_SEARCH;
+  const sources = Math.max(reportedSources, impliedSources);
   grok.calls += 1;
   grok.in += tin;
   grok.out += tout;

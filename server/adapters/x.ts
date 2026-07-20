@@ -9,7 +9,7 @@
 
 import type { Adapter, CollectContext } from "./types";
 import { env } from "../config";
-import { addGrokUsage, recordCall, recordTwitterapi } from "../cost";
+import { addGrokUsage, recordCall, recordTwitterapi, grokSpendUsd } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower } from "../../src/data/evidence";
@@ -33,6 +33,13 @@ const twitterProviderFailure = (payload: JsonRecord): string | null => {
 
 // Grok search via the current Responses API + tools (the legacy search_parameters
 // Live Search API was retired -> 410 Gone). Returns the model's text, or null.
+/** Ceiling on live-search spend for a single audit, in honestly-accounted
+ * dollars (see the source-counting note in cost.ts: the previous ledger booked
+ * these calls at $0.00, so any budget built on it was inert). Sized as a
+ * runaway guard above a normal run, not as a normal-run limiter, because
+ * cutting collection short degrades the report. */
+const GROK_AUDIT_SPEND_CEILING_USD = Number(env("ARGUS_GROK_AUDIT_CEILING_USD") || "3.00");
+
 export async function grokSearch(system: string, user: string, opts?: {
   maxToolCalls?: number;
   cacheKey?: string;
@@ -59,6 +66,15 @@ export async function grokSearch(system: string, user: string, opts?: {
     if (opts?.claimProviderCall && !opts.claimProviderCall()) {
       return { status: null, text: null, budgetExhausted: true };
     }
+    // Hard per-audit ceiling. Live search bills per source on top of tokens, so
+    // one pathological subject (a huge account, or a discovery loop that keeps
+    // finding new leads) can outspend a normal audit many times over. Past the
+    // ceiling the audit continues on everything already collected rather than
+    // silently running up the bill.
+    if (grokSpendUsd() >= GROK_AUDIT_SPEND_CEILING_USD) {
+      addGrokUsage(undefined, 0, "live-search", "partial", "audit_spend_ceiling");
+      return { status: null, text: null, budgetExhausted: true };
+    }
     let res: Response;
     try {
       res = await fetch("https://api.x.ai/v1/responses", {
@@ -68,7 +84,7 @@ export async function grokSearch(system: string, user: string, opts?: {
           model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
           input: [{ role: "system", content: system }, { role: "user", content: user }],
           tools: [{ type: "web_search" }, { type: "x_search" }],
-          ...(withCap ? { max_tool_calls: opts?.maxToolCalls ?? 6 } : {}),
+          ...(withCap ? { max_tool_calls: opts?.maxToolCalls ?? 3 } : {}),
         }),
         signal: AbortSignal.timeout(45000),
       });
@@ -737,7 +753,7 @@ export async function acknowledgments(endorsers: string[], subject: string): Pro
     "You generate endorsement-verification leads for a due-diligence collector, with live web and X search. For EACH listed account, surface the strongest candidate public acknowledgment that account may have made of @" + s + " on X, its sentiment, and the exact post URL. " +
     "This is discovery only: do not call a relationship corroborated or contradicted. Without a direct post URL, return ack=none and sentiment=none. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. " +
     'Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none","source_url":"https://x.com/.../status/..."}]}. Provide one entry per listed account and never invent posts.';
-  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
+  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(3, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
   if (!text) return out;
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return out;
@@ -789,7 +805,7 @@ export async function discoverAffiliations(handle: string, name?: string, oldHan
     "For each, also report the venture's own X handle and website domain if you can find them. " +
     "Reply with ONLY compact JSON: {\"affiliations\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate\",\"year\":\"\",\"evidence\":\"one short source phrase\",\"x_handle\":\"@...\",\"domain\":\"example.com\"}]}. " +
     "Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {\"affiliations\":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Find every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Use their own footprint AND project accounts announcing them. Be exhaustive: a serial operator often has 5-15 ventures across years; keep searching until you have run down every lead. Search the web and X including historical posts.`, { maxToolCalls: 10, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Find every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Use their own footprint AND project accounts announcing them. Prioritize the ventures they are best known for; a few well-sourced ventures are worth more than an exhaustive list. Search the web and X including historical posts.`, { maxToolCalls: 4, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];

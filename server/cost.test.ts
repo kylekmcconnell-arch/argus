@@ -108,3 +108,23 @@ describe("per-audit cost isolation", () => {
     }));
   });
 });
+
+describe("live-search source accounting", () => {
+  it("never books zero cost when the provider reports tool calls but no sources", async () => {
+    const captured = await withCostLedger(async () => {
+      // Exactly what xAI returns: several tool calls, num_sources_used 0.
+      addGrokUsage({ input_tokens: 20_000, output_tokens: 900, num_sources_used: 0 }, 6);
+      return getCost();
+    });
+    expect(captured.sources).toBeGreaterThan(0);
+    expect(captured.grokUsd).toBeGreaterThan(0.05);
+  });
+
+  it("prefers the provider's own source count when it actually reports one", async () => {
+    const captured = await withCostLedger(async () => {
+      addGrokUsage({ input_tokens: 1_000, output_tokens: 100, num_sources_used: 40 }, 2);
+      return getCost();
+    });
+    expect(captured.sources).toBe(40);
+  });
+});

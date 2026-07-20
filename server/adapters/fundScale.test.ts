@@ -196,7 +196,9 @@ describe("fund-scale discovery parsing", () => {
     expect(requests[0].input[0].content).toContain("both arrays");
     expect(requests[1].input[0].content).toContain("public investment relationships");
     expect(requests[1].input[0].content).not.toContain("public fund-scale evidence");
-    expect(requests[1].max_tool_calls).toBe(12);
+    // Live search bills per source, so this budget is a cost control, not a
+    // tuning knob: raising it multiplies the per-audit bill.
+    expect(requests[1].max_tool_calls).toBe(4);
   });
 
   it("runs only the focused fund-scale fallback when shared fund scale is empty", async () => {
@@ -245,7 +247,9 @@ describe("fund-scale discovery parsing", () => {
     });
     expect(requests[1].input[0].content).toContain("public fund-scale evidence");
     expect(requests[1].input[0].content).not.toContain("public investment relationships");
-    expect(requests[1].max_tool_calls).toBe(12);
+    // Live search bills per source, so this budget is a cost control, not a
+    // tuning knob: raising it multiplies the per-audit bill.
+    expect(requests[1].max_tool_calls).toBe(4);
   });
 
   it("does not turn a missing shared investments array into a focused search", async () => {

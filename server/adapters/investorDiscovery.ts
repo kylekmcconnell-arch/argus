@@ -52,7 +52,7 @@ export function discoverInvestorEvidenceText(ctx: CollectContext): Promise<strin
     "Find source-linked direct investments, affiliated-fund investments, and source-linked fund-scale claims while keeping every attribution separate.";
 
   const pending = grokSearch(system, user, {
-    maxToolCalls: 14,
+    maxToolCalls: 4,
     cacheKey: `investor-core:v3:${normalizedHandle(ctx)}`,
   });
   discoveryByEvidence.set(ctx.evidence, pending);
@@ -81,7 +81,7 @@ export function discoverFocusedPortfolioEvidenceText(ctx: CollectContext): Promi
   const user = subjectContext(ctx) +
     " Find source-linked direct investments and, separately, investments made by a fund this subject is currently and publicly affiliated with. Keep every attribution separate.";
   const pending = grokSearch(system, user, {
-    maxToolCalls: 12,
+    maxToolCalls: 4,
     cacheKey: `investor-portfolio-focused:v1:${normalizedHandle(ctx)}`,
   });
   focusedPortfolioByEvidence.set(ctx.evidence, pending);
@@ -105,7 +105,7 @@ export function discoverFocusedFundScaleEvidenceText(ctx: CollectContext): Promi
   const user = subjectContext(ctx) +
     " Find source-linked scale claims for the exact subject and, separately, any fund the subject is currently and publicly affiliated with. Keep every attribution separate.";
   const pending = grokSearch(system, user, {
-    maxToolCalls: 12,
+    maxToolCalls: 4,
     cacheKey: `investor-fund-scale-focused:v1:${normalizedHandle(ctx)}`,
   });
   focusedFundScaleByEvidence.set(ctx.evidence, pending);

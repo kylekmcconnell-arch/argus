@@ -6,6 +6,7 @@ function env(key) {
   return process.env[key];
 }
 var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
+var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
 // src/graph/network.ts
 var EVM_ADDRESS = /^0x[0-9a-f]+$/i;

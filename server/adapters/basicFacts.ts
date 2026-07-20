@@ -8,7 +8,7 @@ import {
   type BasicFactQuestionLedgerEntry,
 } from "../../src/data/evidence";
 import { supportsExplicitEmptyBasicFact } from "../../src/lib/basicFactQuestions";
-import { ANALYST_MODEL, env } from "../config";
+import { DISCOVERY_MODEL, env } from "../config";
 import { cacheGet, cacheSet } from "../cache";
 import { addClaudeUsage, recordCall } from "../cost";
 import { fetchPublicTextWithRecovery, type PublicTextDocument, type PublicTextResult } from "../publicWeb";
@@ -16,8 +16,8 @@ import { grokSearch } from "./x";
 import type { Adapter, AdapterRunResult, CollectContext } from "./types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
-const PRIMARY_SEARCH_USES_PER_BATCH = 3;
-const REPAIR_SEARCH_USES = 4;
+const PRIMARY_SEARCH_USES_PER_BATCH = 2;
+const REPAIR_SEARCH_USES = 2;
 const DISCOVERY_BATCH_CONCURRENCY = 3;
 const DISCOVERY_RETRY_DELAY_MS = 350;
 const MAX_LEADS = 28;
@@ -990,7 +990,7 @@ function discoveryPrompt(
     // ARGUS publishes a fact only from a first-party page or two independent
     // sources. A single-sourced row verifies against its page and then dies at
     // that threshold, so corroborating URLs are required, not optional.
-    "For candidate_urls, ALWAYS include at least one and preferably three additional independent public pages that explicitly state the same atomic fact, on different domains from source_url and from each other. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url. A widely documented fact will have several such pages; if you genuinely cannot find a second page stating it, still return the row with the sources you have.",
+    "For candidate_urls, include every additional page ALREADY IN YOUR SEARCH RESULTS that states the same atomic fact, on a different domain from source_url. Do not run extra searches to find them; corroboration should come from pages you have already seen. Do not repeat source_url.",
     "Do not infer. A search answer is only a lead; ARGUS will fetch and verify every URL independently.",
     "Return JSON only in this exact shape:",
     `{"facts":[{"question_id":"${questions[0]?.id ?? `${audience}.official_identity`}","subject":"...","predicate":"${questions.map((question) => question.predicate).join("|")}","value":"one atomic value","qualifier":"optional verbatim role, metric label, or traction as-of/reporting period present in exact_excerpt","event_status":"optional, exact source wording","attributed_entity":"optional, exact source wording","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}`,
@@ -1010,7 +1010,7 @@ function claudeRequestBody(
   maxSearchUses = PRIMARY_SEARCH_USES_PER_BATCH,
 ): Record<string, unknown> {
   return {
-    model: ANALYST_MODEL,
+    model: DISCOVERY_MODEL,
     max_tokens: 3_000,
     system: "You are ARGUS's basic-facts research scout. Search broadly, cite precisely, and return only the requested JSON. Never treat your own answer as verified evidence.",
     messages: assistantContent
@@ -1399,6 +1399,14 @@ async function discoverPrimary(
   ctx: CollectContext,
   questions: readonly BasicFactsResearchQuestion[],
 ): Promise<BasicFactsDiscoveryResult> {
+  // Discovery is the dominant line item in an audit: it pulls whole search
+  // result sets into model input, and Claude input costs 15x Grok input
+  // ($3/M vs $0.20/M). ARGUS_BASIC_FACTS_PRIMARY=grok runs the same questions
+  // on the cheaper searcher, with Claude still available for repair, so the
+  // cost/recall trade can be measured rather than assumed.
+  if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grok" && env("XAI_API_KEY")) {
+    return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
+  }
   if (!env("ANTHROPIC_API_KEY")) return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
   const claude = await discoverBasicFactLeadsDetailed(ctx, {}, questions, "primary");
   if (

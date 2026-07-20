@@ -31,6 +31,7 @@ function providerStatus() {
   }));
 }
 var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
+var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
 // src/engine/taxonomy.ts
 var SubjectClass = /* @__PURE__ */ ((SubjectClass2) => {
@@ -1561,11 +1562,17 @@ function recordCall(provider, op, usd = 0, meta, status = "succeeded") {
 function recordTwitterapi(op, status = "succeeded", meta) {
   recordCall("twitterapi", op, PRICE.twitterapiCall, meta, status);
 }
+function grokSpendUsd() {
+  const { grok } = currentState();
+  return grok.in * PRICE.grokIn + grok.out * PRICE.grokOut + grok.sources * PRICE.grokSource;
+}
 function addGrokUsage(u, toolCalls, op = "live-search", status = "succeeded", outcomeMeta) {
   const { grok } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
-  const sources = typeof u?.num_sources_used === "number" ? u.num_sources_used : (toolCalls ?? 0) * EST_SOURCES_PER_SEARCH;
+  const reportedSources = typeof u?.num_sources_used === "number" ? u.num_sources_used : 0;
+  const impliedSources = (toolCalls ?? 0) * EST_SOURCES_PER_SEARCH;
+  const sources = Math.max(reportedSources, impliedSources);
   grok.calls += 1;
   grok.in += tin;
   grok.out += tout;
@@ -5531,6 +5538,7 @@ var twitterProviderFailure = (payload) => {
   if (payload.data === null) return "provider_data_null";
   return null;
 };
+var GROK_AUDIT_SPEND_CEILING_USD = Number(env("ARGUS_GROK_AUDIT_CEILING_USD") || "3.00");
 async function grokSearch(system, user, opts) {
   const key = env("XAI_API_KEY");
   if (!key) return null;
@@ -5542,6 +5550,10 @@ async function grokSearch(system, user, opts) {
     if (opts?.claimProviderCall && !opts.claimProviderCall()) {
       return { status: null, text: null, budgetExhausted: true };
     }
+    if (grokSpendUsd() >= GROK_AUDIT_SPEND_CEILING_USD) {
+      addGrokUsage(void 0, 0, "live-search", "partial", "audit_spend_ceiling");
+      return { status: null, text: null, budgetExhausted: true };
+    }
     let res;
     try {
       res = await fetch("https://api.x.ai/v1/responses", {
@@ -5551,7 +5563,7 @@ async function grokSearch(system, user, opts) {
           model: env("ARGUS_GROK_MODEL") || "grok-4-fast",
           input: [{ role: "system", content: system }, { role: "user", content: user }],
           tools: [{ type: "web_search" }, { type: "x_search" }],
-          ...withCap ? { max_tool_calls: opts?.maxToolCalls ?? 6 } : {}
+          ...withCap ? { max_tool_calls: opts?.maxToolCalls ?? 3 } : {}
         }),
         signal: AbortSignal.timeout(45e3)
       });
@@ -6045,7 +6057,7 @@ async function acknowledgments(endorsers, subject) {
   if (!key || !list.length) return out;
   const s = subject.replace(/^@/, "");
   const system = "You generate endorsement-verification leads for a due-diligence collector, with live web and X search. For EACH listed account, surface the strongest candidate public acknowledgment that account may have made of @" + s + ' on X, its sentiment, and the exact post URL. This is discovery only: do not call a relationship corroborated or contradicted. Without a direct post URL, return ack=none and sentiment=none. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none","source_url":"https://x.com/.../status/..."}]}. Provide one entry per listed account and never invent posts.';
-  const text2 = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(6, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
+  const text2 = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(3, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
   if (!text2) return out;
   const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return out;
@@ -6069,7 +6081,7 @@ async function discoverAffiliations(handle, name, oldHandles = []) {
   const h = handle.replace(/^@/, "");
   const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")}. Search posts mentioning those old handles too.` : "";
   const system = `You are a forensic due-diligence researcher with live web and X search. Find EVERY company, crypto project, fund, DAO, or venture that THIS SPECIFIC person (the holder of the given X account) is publicly tied to in ANY working capacity: founded, co-founded, led, was an early employee of, worked at, contributed to, was a core team member of, or advised. Work BOTH angles: (1) what the person's own footprint shows, including accelerator/portfolio pages, press, team pages, GitHub orgs, podcasts, and Crunchbase beyond their bio and LinkedIn; (2) reverse mentions from project/company accounts that ever NAMED, TAGGED, or ANNOUNCED this person as a founder/team member (co-founder announcements and 'meet the team' posts are often YEARS old, on the project's timeline, so search historical posts). There MUST be public evidence tying THAT EXACT person to the venture. For each, also report the venture's own X handle and website domain if you can find them. Reply with ONLY compact JSON: {"affiliations":[{"name":"","role":"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate","year":"","evidence":"one short source phrase","x_handle":"@...","domain":"example.com"}]}. Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {"affiliations":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.`;
-  const text2 = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Find every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Use their own footprint AND project accounts announcing them. Be exhaustive: a serial operator often has 5-15 ventures across years; keep searching until you have run down every lead. Search the web and X including historical posts.`, { maxToolCalls: 10, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
+  const text2 = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Find every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Use their own footprint AND project accounts announcing them. Prioritize the ventures they are best known for; a few well-sourced ventures are worth more than an exhaustive list. Search the web and X including historical posts.`, { maxToolCalls: 4, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
   if (!text2) return [];
   const m = text2.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -8610,8 +8622,8 @@ var onchainAdapter = {
 import { createHash as createHash4 } from "node:crypto";
 import { isIP as isIP2 } from "node:net";
 var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
-var PRIMARY_SEARCH_USES_PER_BATCH = 3;
-var REPAIR_SEARCH_USES = 4;
+var PRIMARY_SEARCH_USES_PER_BATCH = 2;
+var REPAIR_SEARCH_USES = 2;
 var DISCOVERY_BATCH_CONCURRENCY = 3;
 var DISCOVERY_RETRY_DELAY_MS = 350;
 var MAX_LEADS = 28;
@@ -9376,7 +9388,7 @@ function discoveryPrompt(ctx, questions, phase = "primary") {
     // ARGUS publishes a fact only from a first-party page or two independent
     // sources. A single-sourced row verifies against its page and then dies at
     // that threshold, so corroborating URLs are required, not optional.
-    "For candidate_urls, ALWAYS include at least one and preferably three additional independent public pages that explicitly state the same atomic fact, on different domains from source_url and from each other. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url. A widely documented fact will have several such pages; if you genuinely cannot find a second page stating it, still return the row with the sources you have.",
+    "For candidate_urls, include every additional page ALREADY IN YOUR SEARCH RESULTS that states the same atomic fact, on a different domain from source_url. Do not run extra searches to find them; corroboration should come from pages you have already seen. Do not repeat source_url.",
     "Do not infer. A search answer is only a lead; ARGUS will fetch and verify every URL independently.",
     "Return JSON only in this exact shape:",
     `{"facts":[{"question_id":"${questions[0]?.id ?? `${audience}.official_identity`}","subject":"...","predicate":"${questions.map((question) => question.predicate).join("|")}","value":"one atomic value","qualifier":"optional verbatim role, metric label, or traction as-of/reporting period present in exact_excerpt","event_status":"optional, exact source wording","attributed_entity":"optional, exact source wording","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}`
@@ -9387,7 +9399,7 @@ function responseText(response) {
 }
 function claudeRequestBody(prompt, assistantContent, maxSearchUses = PRIMARY_SEARCH_USES_PER_BATCH) {
   return {
-    model: ANALYST_MODEL,
+    model: DISCOVERY_MODEL,
     max_tokens: 3e3,
     system: "You are ARGUS's basic-facts research scout. Search broadly, cite precisely, and return only the requested JSON. Never treat your own answer as verified evidence.",
     messages: assistantContent ? [{ role: "user", content: prompt }, { role: "assistant", content: assistantContent }] : [{ role: "user", content: prompt }],
@@ -9653,6 +9665,9 @@ async function discoverGrokBasicFactLeadsDetailed(ctx, questions, phase, options
   return result;
 }
 async function discoverPrimary(ctx, questions) {
+  if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grok" && env("XAI_API_KEY")) {
+    return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
+  }
   if (!env("ANTHROPIC_API_KEY")) return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
   const claude = await discoverBasicFactLeadsDetailed(ctx, {}, questions, "primary");
   if (!env("XAI_API_KEY") || claude.state !== "failed" && !(claude.state === "partial" && claude.leads.length === 0)) return claude;
@@ -13987,7 +14002,7 @@ function discoverInvestorEvidenceText(ctx) {
   const system = 'You discover public investment and fund-scale evidence for a forensic due-diligence collector. Use live web and X search only. For investments, find a bounded representative set disclosed by this exact fund, VC, or angel. For fund scale, find disclosed USD fund closes, first closes, fund vehicle sizes, or dated assets under management for the exact manager or a fund the person currently works for. Prefer the verified manager website, regulatory filings, project financing announcements for investment relationships, or reputable independent editorial reporting. Every candidate must include an exact public source URL. URLs and all model fields are leads only and will be fetched and re-derived. Never use model memory alone. Never infer an investment from a follow, employment, token holding, or company-name match. Never treat a portfolio company round, valuation, TVL, dry powder, deployed capital, target raise, or proposed hard cap as fund scale. Distinguish a personal investment from the portfolio or scale of a fund the person works for. If a source names the fund, attribute it to the affiliated fund and never rewrite it as personal capital. Return only compact JSON with both arrays: {"investments":[{"project":"","investor_entity":"person or fund actually named by the source","investor_x_handle":"@...","attribution":"direct_subject|affiliated_fund","relationship":"invested|backed|led round|incubated","stage":"","year":"","project_x_handle":"@...","project_domain":"example.com","ticker":"$...","contract":"","chain":"","sources":[{"url":"https://...","title":""}]}],"fund_scale":[{"fund_name":"manager or fund entity","fund_vehicle":"named vehicle if stated","fund_x_handle":"@...","attribution":"direct_subject|affiliated_fund","metric_hint":"aum|fund_vehicle|first_close|final_close","amount_hint_usd":0,"sources":[{"url":"https://...","title":""}]}]}. Return at most 10 investment candidates and 6 fund-scale candidates. Return empty arrays when none are found.';
   const user = subjectContext(ctx) + " Find source-linked direct investments, affiliated-fund investments, and source-linked fund-scale claims while keeping every attribution separate.";
   const pending = grokSearch(system, user, {
-    maxToolCalls: 14,
+    maxToolCalls: 4,
     cacheKey: `investor-core:v3:${normalizedHandle(ctx)}`
   });
   discoveryByEvidence.set(ctx.evidence, pending);
@@ -14000,7 +14015,7 @@ function discoverFocusedPortfolioEvidenceText(ctx) {
   const system = `You discover public investment relationships for a forensic due-diligence collector. Use live web and X search only. Find a bounded, representative set of disclosed investments made by this exact fund, VC, or angel. Prefer the fund's official portfolio page, a project or company financing announcement, a regulatory filing, or reputable independent editorial reporting. Every candidate must include at least one exact public source URL; prefer two independent URLs. URLs and all model fields are leads only and will be fetched and independently re-derived. Never use model memory alone. Never infer an investment from a follow, employment, token holding, trading activity, or company-name match. Distinguish a personal investment from the portfolio of a fund the person works for. If a source names the fund, set investor_entity to that fund, attribution to affiliated_fund, and never rewrite it as the person's direct investment. Return only compact JSON: {"investments":[{"project":"","investor_entity":"person or fund actually named by the source","investor_x_handle":"@...","attribution":"direct_subject|affiliated_fund","relationship":"invested|backed|led round|incubated","stage":"","year":"","project_x_handle":"@...","project_domain":"example.com","ticker":"$...","contract":"","chain":"","sources":[{"url":"https://...","title":""}]}]}. Return at most 10 strong source-linked candidates. Return an empty list when none are found.`;
   const user = subjectContext(ctx) + " Find source-linked direct investments and, separately, investments made by a fund this subject is currently and publicly affiliated with. Keep every attribution separate.";
   const pending = grokSearch(system, user, {
-    maxToolCalls: 12,
+    maxToolCalls: 4,
     cacheKey: `investor-portfolio-focused:v1:${normalizedHandle(ctx)}`
   });
   focusedPortfolioByEvidence.set(ctx.evidence, pending);
@@ -14013,7 +14028,7 @@ function discoverFocusedFundScaleEvidenceText(ctx) {
   const system = `You discover public fund-scale evidence for a forensic due-diligence collector. Use live web and X search only. Find disclosed USD fund closes, first closes, completed fund vehicle sizes, or dated assets under management for this exact manager or a fund the person currently works for. Prefer the verified manager website, regulatory filings, or reputable independent editorial reporting. Every candidate must include an exact public source URL; prefer two independent URLs. URLs and all model fields are leads only and will be fetched and independently re-derived. Never use model memory alone. Never treat a portfolio-company financing round, valuation, TVL, revenue, dry powder, deployed or invested capital, target raise, or proposed hard cap as fund scale. Accept USD claims only. Distinguish personal capital from an affiliated fund. If a source names the fund, set attribution to affiliated_fund and never rewrite its capital as the person's own. Return only compact JSON: {"fund_scale":[{"fund_name":"manager or fund entity","fund_vehicle":"named vehicle if stated","fund_x_handle":"@...","attribution":"direct_subject|affiliated_fund","metric_hint":"aum|fund_vehicle|first_close|final_close","amount_hint_usd":0,"sources":[{"url":"https://...","title":""}]}]}. Return at most 6 strong source-linked candidates. Return an empty list when none are found.`;
   const user = subjectContext(ctx) + " Find source-linked scale claims for the exact subject and, separately, any fund the subject is currently and publicly affiliated with. Keep every attribution separate.";
   const pending = grokSearch(system, user, {
-    maxToolCalls: 12,
+    maxToolCalls: 4,
     cacheKey: `investor-fund-scale-focused:v1:${normalizedHandle(ctx)}`
   });
   focusedFundScaleByEvidence.set(ctx.evidence, pending);
