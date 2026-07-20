@@ -1,0 +1,245 @@
+// ARGUS eval harness — record once (live), replay forever (offline, free).
+//
+// Every provider (Claude, Grok, twitterapi, PDL, web) funnels through global
+// `fetch`. RECORD tees every request/response to a fixture while running a real
+// audit; REPLAY serves those fixtures back and re-runs the exact same audit
+// code offline. This pins PROVIDER RESPONSES so the harness isolates OUR
+// pipeline logic from model drift, and turns "Vitalik must score as a founder"
+// and "the Do Kwon report must surface his fraud" into offline assertions.
+//
+// Usage:
+//   tsx eval/harness.ts record @VitalikButerin   (live, costs money, writes fixtures)
+//   tsx eval/harness.ts replay @VitalikButerin   (offline, free, asserts labels)
+//   tsx eval/harness.ts replay-all              (offline, every recorded subject)
+
+import { createHash } from "node:crypto";
+import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { runAudit } from "../server/orchestrate";
+import { withCostLedger, getCost } from "../server/cost";
+import type { Dossier } from "../src/data/dossier";
+import { LABELS, labelFor, type SubjectLabel } from "./labels";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const FIXTURE_DIR = join(HERE, "fixtures");
+const SNAPSHOT_DIR = join(HERE, "snapshots");
+
+interface FixtureEntry {
+  method: string;
+  url: string;
+  bodyHash: string;
+  status: number;
+  body: string;
+}
+interface FixtureFile {
+  handle: string;
+  recordedAt: string;
+  entries: FixtureEntry[];
+}
+
+const norm = (handle: string): string => handle.replace(/^@/, "").toLowerCase();
+const fixturePath = (handle: string): string => join(FIXTURE_DIR, `${norm(handle)}.json`);
+const snapshotPath = (handle: string): string => join(SNAPSHOT_DIR, `${norm(handle)}.json`);
+
+// Strip volatile substrings (ISO timestamps, long digit runs) so a request body
+// hashes stably across runs. Provider prompts embed capture times and post IDs
+// that change run-to-run but do not change the provider's answer.
+function normalizeBody(body: string): string {
+  return body
+    .replace(/\d{4}-\d{2}-\d{2}T[\d:.]+Z?/g, "<ts>")
+    .replace(/\b\d{10,}\b/g, "<num>");
+}
+function hashBody(body: string): string {
+  return createHash("sha256").update(normalizeBody(body)).digest("hex").slice(0, 16);
+}
+
+function describeRequest(input: unknown, init?: { method?: string; body?: unknown }): { method: string; url: string; body: string } {
+  let url = "";
+  if (typeof input === "string") url = input;
+  else if (input instanceof URL) url = input.href;
+  else if (input && typeof input === "object" && "url" in input) url = String((input as { url: unknown }).url);
+  const method = (init?.method ?? "GET").toUpperCase();
+  const body = typeof init?.body === "string" ? init.body : "";
+  return { method, url, body };
+}
+
+// --- searchable projection of a dossier for must-surface / must-not-appear ---
+function searchableText(dossier: Dossier): string {
+  const r = dossier.report;
+  return [
+    dossier.headline,
+    dossier.identity_note,
+    dossier.bio,
+    JSON.stringify(r.publishable_findings ?? []),
+    JSON.stringify(r.role_reports ?? []),
+    JSON.stringify(dossier.axisEvidenceCatalog ?? []),
+    JSON.stringify((dossier as unknown as { basicFacts?: unknown }).basicFacts ?? []),
+  ].join("\n");
+}
+
+interface LabelResult { pass: boolean; failures: string[]; summary: Record<string, unknown>; }
+
+function assertLabels(dossier: Dossier | null, label: SubjectLabel): LabelResult {
+  const failures: string[] = [];
+  if (!dossier) {
+    return { pass: false, failures: ["audit returned no dossier"], summary: { dossier: null } };
+  }
+  const r = dossier.report;
+  const role = r.governing_role;
+  const verdict = r.composite_verdict;
+  const score = r.governing_score;
+  const text = searchableText(dossier);
+
+  if (label.mustNotBeIncomplete) {
+    if (verdict === "INCOMPLETE") failures.push(`published INCOMPLETE (must produce a scored verdict)`);
+    if (score == null) failures.push(`no governing score (must produce a scored verdict)`);
+  }
+  if (label.expectedRole && role !== label.expectedRole) {
+    failures.push(`governing role ${role ?? "null"} != expected ${label.expectedRole}`);
+  }
+  for (const rx of label.mustSurface) {
+    if (!rx.test(text)) failures.push(`must-surface ${rx} not found in the report`);
+  }
+  for (const rx of label.mustNotAppear ?? []) {
+    if (rx.test(text)) failures.push(`must-NOT-appear ${rx} was present`);
+  }
+  if (label.minScore != null && score != null && score < label.minScore) {
+    failures.push(`score ${score} below floor ${label.minScore}`);
+  }
+  if (label.maxScore != null && score != null && score > label.maxScore) {
+    failures.push(`score ${score} above ceiling ${label.maxScore}`);
+  }
+  return {
+    pass: failures.length === 0,
+    failures,
+    summary: { role, verdict, score, headline: dossier.headline },
+  };
+}
+
+function dossierSnapshot(dossier: Dossier): Record<string, unknown> {
+  const r = dossier.report;
+  return {
+    handle: dossier.handle,
+    governing_role: r.governing_role,
+    composite_verdict: r.composite_verdict,
+    governing_score: r.governing_score,
+    cap_applied: r.cap_applied,
+    headline: dossier.headline,
+    findings: (r.publishable_findings ?? []).map((f) => ({
+      severity: (f as { severity?: string }).severity,
+      title: (f as { title?: string }).title,
+    })),
+  };
+}
+
+async function record(handle: string): Promise<number> {
+  const label = labelFor(handle);
+  if (!label) { console.error(`no label for ${handle} (add it to eval/labels.ts)`); return 1; }
+  mkdirSync(FIXTURE_DIR, { recursive: true });
+  mkdirSync(SNAPSHOT_DIR, { recursive: true });
+
+  const realFetch = globalThis.fetch;
+  const entries: FixtureEntry[] = [];
+  globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: unknown }) => {
+    const { method, url, body } = describeRequest(input, init);
+    const res = await realFetch(input as Parameters<typeof fetch>[0], init as Parameters<typeof fetch>[1]);
+    let text = "";
+    try { text = await res.clone().text(); } catch { /* non-text body */ }
+    entries.push({ method, url, bodyHash: hashBody(body), status: res.status, body: text });
+    return res;
+  }) as typeof fetch;
+
+  let dossier: Dossier | null = null;
+  let cost = { usd: 0 } as ReturnType<typeof getCost>;
+  const startedAt = Date.now();
+  try {
+    ({ dossier, cost } = await withCostLedger(async () => {
+      const d = await runAudit(handle, () => {}, { analystDeadlineAt: Date.now() + 180_000 });
+      return { dossier: d, cost: getCost() };
+    }));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+  const elapsedMs = Date.now() - startedAt;
+
+  const fixture: FixtureFile = { handle, recordedAt: new Date().toISOString(), entries };
+  writeFileSync(fixturePath(handle), JSON.stringify(fixture));
+  if (dossier) writeFileSync(snapshotPath(handle), JSON.stringify(dossierSnapshot(dossier), null, 2));
+
+  const result = assertLabels(dossier, label);
+  console.log(`\n=== RECORD ${handle} ===`);
+  console.log(`  ${entries.length} provider requests captured -> ${fixturePath(handle)}`);
+  console.log(`  ledger cost: $${cost.usd.toFixed(3)} · ${elapsedMs}ms`);
+  console.log(`  result: ${JSON.stringify(result.summary)}`);
+  console.log(result.pass ? `  LABELS PASS` : `  LABELS FAIL:\n    - ${result.failures.join("\n    - ")}`);
+  return result.pass ? 0 : 1;
+}
+
+async function replay(handle: string): Promise<number> {
+  const label = labelFor(handle);
+  if (!label) { console.error(`no label for ${handle}`); return 1; }
+  if (!existsSync(fixturePath(handle))) { console.error(`no fixture for ${handle} (record it first)`); return 1; }
+  const fixture = JSON.parse(readFileSync(fixturePath(handle), "utf8")) as FixtureFile;
+
+  const byKey = new Map<string, FixtureEntry[]>();
+  const byUrl = new Map<string, FixtureEntry[]>();
+  for (const e of fixture.entries) {
+    const key = `${e.method} ${e.url} ${e.bodyHash}`;
+    (byKey.get(key) ?? byKey.set(key, []).get(key)!).push(e);
+    (byUrl.get(e.url) ?? byUrl.set(e.url, []).get(e.url)!).push(e);
+  }
+  const shift = (map: Map<string, FixtureEntry[]>, k: string): FixtureEntry | undefined => {
+    const q = map.get(k);
+    return q && q.length ? q.shift() : undefined;
+  };
+
+  const realFetch = globalThis.fetch;
+  const misses: string[] = [];
+  globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: unknown }) => {
+    const { method, url, body } = describeRequest(input, init);
+    const key = `${method} ${url} ${hashBody(body)}`;
+    const entry = shift(byKey, key) ?? shift(byUrl, url);
+    if (!entry) {
+      misses.push(`${method} ${url}`);
+      return new Response(JSON.stringify({ error: "eval replay: no fixture" }), { status: 599, headers: { "content-type": "application/json" } });
+    }
+    return new Response(entry.body, { status: entry.status, headers: { "content-type": "application/json" } });
+  }) as typeof fetch;
+
+  let dossier: Dossier | null = null;
+  try {
+    dossier = await withCostLedger(() => runAudit(handle, () => {}, { analystDeadlineAt: Date.now() + 180_000 }));
+  } finally {
+    globalThis.fetch = realFetch;
+  }
+
+  const result = assertLabels(dossier, label);
+  console.log(`\n=== REPLAY ${handle} (offline) ===`);
+  console.log(`  result: ${JSON.stringify(result.summary)}`);
+  if (misses.length) console.log(`  ${misses.length} fixture misses (first: ${misses.slice(0, 3).join(", ")})`);
+  console.log(result.pass ? `  LABELS PASS` : `  LABELS FAIL:\n    - ${result.failures.join("\n    - ")}`);
+  return result.pass ? 0 : 1;
+}
+
+async function main(): Promise<void> {
+  const [mode, handle] = process.argv.slice(2);
+  let code = 0;
+  if (mode === "record" && handle) code = await record(handle);
+  else if (mode === "replay" && handle) code = await replay(handle);
+  else if (mode === "replay-all") {
+    if (!existsSync(FIXTURE_DIR)) { console.error("no fixtures recorded yet"); process.exitCode = 1; return; }
+    const handles = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith(".json")).map((f) => f.replace(/\.json$/, ""));
+    for (const h of handles) code = (await replay(h)) || code;
+  } else {
+    console.error("usage: tsx eval/harness.ts <record|replay> @handle  |  replay-all");
+    console.error(`labeled subjects: ${LABELS.map((l) => l.handle).join(", ")}`);
+    code = 1;
+  }
+  process.exitCode = code;
+}
+
+main().catch((error: unknown) => {
+  console.error(`eval harness crashed: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+  process.exitCode = 1;
+});
