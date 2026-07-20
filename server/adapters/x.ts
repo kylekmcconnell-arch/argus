@@ -33,12 +33,19 @@ const twitterProviderFailure = (payload: JsonRecord): string | null => {
 
 // Grok search via the current Responses API + tools (the legacy search_parameters
 // Live Search API was retired -> 410 Gone). Returns the model's text, or null.
-/** Ceiling on live-search spend for a single audit, in honestly-accounted
- * dollars (see the source-counting note in cost.ts: the previous ledger booked
- * these calls at $0.00, so any budget built on it was inert). Sized as a
- * runaway guard above a normal run, not as a normal-run limiter, because
- * cutting collection short degrades the report. */
-const GROK_AUDIT_SPEND_CEILING_USD = Number(env("ARGUS_GROK_AUDIT_CEILING_USD") || "3.00");
+/** Ceiling on live-search spend for a single audit, in the cost ledger's own
+ * accounting. This is a RUNAWAY GUARD ONLY, deliberately set well above a
+ * normal audit: measured discovery alone books ~$3-4 of ledger-Grok (many
+ * live-search calls, each billed per source), and a full audit does more. The
+ * previous $3.00 value was chosen against the old under-counting ledger and
+ * silently truncated normal collection mid-run once the ledger was corrected;
+ * $8 clears a normal audit (measured $3-4 of
+ * discovery-Grok, plus the rest of the pipeline) while still tripping a
+ * pathological multi-times-normal loop. NOTE: the ledger's per-source
+ * estimate is uncalibrated against the real xAI invoice, so these are
+ * ledger-dollars, not billed dollars; the guard is sized in the same units it
+ * measures. */
+const GROK_AUDIT_SPEND_CEILING_USD = Number(env("ARGUS_GROK_AUDIT_CEILING_USD") || "8.00");
 
 export async function grokSearch(system: string, user: string, opts?: {
   maxToolCalls?: number;
