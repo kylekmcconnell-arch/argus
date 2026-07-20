@@ -223,29 +223,43 @@ async function replay(handle: string): Promise<number> {
   if (!existsSync(fixturePath(handle))) { console.error(`no fixture for ${handle} (record it first)`); return 1; }
   const fixture = JSON.parse(readFileSync(fixturePath(handle), "utf8")) as FixtureFile;
 
-  const byKey = new Map<string, FixtureEntry[]>();
-  const byUrl = new Map<string, FixtureEntry[]>();
-  for (const e of fixture.entries) {
-    const key = `${e.method} ${e.url} ${e.bodyHash}`;
-    (byKey.get(key) ?? byKey.set(key, []).get(key)!).push(e);
+  // Index entry POSITIONS (not copies) into an exact index and a normalized-url
+  // fallback index, sharing ONE `used` array so a match via either index marks
+  // the entry consumed everywhere. (The prior two-independent-queue design let
+  // an entry be served twice, drifting the accounting and exhausting queues.)
+  const used = new Array<boolean>(fixture.entries.length).fill(false);
+  const byExact = new Map<string, number[]>();
+  const byUrlKey = new Map<string, number[]>();
+  fixture.entries.forEach((e, i) => {
+    const ek = `${e.method} ${e.url} ${e.bodyHash}`;
+    (byExact.get(ek) ?? byExact.set(ek, []).get(ek)!).push(i);
     const uk = `${e.method} ${normalizeUrl(e.url)}`;
-    (byUrl.get(uk) ?? byUrl.set(uk, []).get(uk)!).push(e);
-  }
-  const shift = (map: Map<string, FixtureEntry[]>, k: string): FixtureEntry | undefined => {
-    const q = map.get(k);
-    return q && q.length ? q.shift() : undefined;
+    (byUrlKey.get(uk) ?? byUrlKey.set(uk, []).get(uk)!).push(i);
+  });
+  const takeFirstUnused = (idxs: number[] | undefined): FixtureEntry | undefined => {
+    if (!idxs) return undefined;
+    for (const i of idxs) if (!used[i]) { used[i] = true; return fixture.entries[i]; }
+    return undefined;
   };
+  const shift = (map: Map<string, number[]>, k: string): FixtureEntry | undefined => takeFirstUnused(map.get(k));
 
   const realFetch = globalThis.fetch;
   const misses: string[] = [];
   const missHosts = new Map<string, number>();
+  // DIAGNOSTIC: was a missed url EVER recorded (exhausted queue / ordering) or
+  // never seen (replay took a divergent branch and requested a novel url)?
+  const recordedUrlKeys = new Set(fixture.entries.map((e) => `${e.method} ${normalizeUrl(e.url)}`));
+  const novelMisses: string[] = [];
+  let exhaustedMisses = 0;
   globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: unknown }) => {
     const { method, url, body } = describeRequest(input, init);
     const key = `${method} ${url} ${hashBody(body)}`;
-    const entry = shift(byKey, key) ?? shift(byUrl, `${method} ${normalizeUrl(url)}`);
+    const entry = shift(byExact, key) ?? shift(byUrlKey, `${method} ${normalizeUrl(url)}`);
     if (!entry) {
       misses.push(`${method} ${url}`);
       missHosts.set(hostOf(url), (missHosts.get(hostOf(url)) ?? 0) + 1);
+      if (recordedUrlKeys.has(`${method} ${normalizeUrl(url)}`)) exhaustedMisses++;
+      else if (novelMisses.length < 12) novelMisses.push(`${method} ${url.slice(0, 90)}`);
       return new Response(JSON.stringify({ error: "eval replay: no fixture" }), { status: 599, headers: { "content-type": "application/json" } });
     }
     return new Response(entry.body, { status: entry.status, headers: { "content-type": "application/json" } });
@@ -264,6 +278,8 @@ async function replay(handle: string): Promise<number> {
   if (misses.length) {
     const byHost = [...missHosts.entries()].sort((a, b) => b[1] - a[1]).map(([h, n]) => `${h}:${n}`).join(", ");
     console.log(`  ${misses.length} fixture misses by host: ${byHost}`);
+    console.log(`  classification: ${exhaustedMisses} exhausted-queue (recorded, consumed out of order), ${misses.length - exhaustedMisses} novel (never recorded -> divergent branch)`);
+    if (novelMisses.length) console.log(`  first novel misses:\n    ${novelMisses.join("\n    ")}`);
   }
   console.log(result.pass ? `  LABELS PASS` : `  LABELS FAIL:\n    - ${result.failures.join("\n    - ")}`);
   return result.pass ? 0 : 1;
