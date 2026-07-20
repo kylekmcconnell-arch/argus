@@ -29,3 +29,8 @@ dist-ssr
 # local provider keys
 .env
 .vercel
+
+# eval harness: captured provider data (not committed until replay is deterministic)
+eval/fixtures/
+eval/snapshots/
+.env.eval

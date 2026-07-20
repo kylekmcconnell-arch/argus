@@ -17,7 +17,6 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync } from 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAudit } from "../server/orchestrate";
-import { withCostLedger, getCost } from "../server/cost";
 import type { Dossier } from "../src/data/dossier";
 import { LABELS, labelFor, type SubjectLabel } from "./labels";
 
@@ -39,6 +38,21 @@ interface FixtureFile {
 }
 
 const norm = (handle: string): string => handle.replace(/^@/, "").toLowerCase();
+
+// Normalize a URL for replay matching: web fetches follow redirects and appear
+// under www / trailing-slash variants between record and replay, so key the
+// fallback index on a canonical form.
+function normalizeUrl(raw: string): string {
+  try {
+    const u = new URL(raw);
+    const host = u.hostname.replace(/^www\./, "");
+    const path = u.pathname.replace(/\/$/, "");
+    return `${u.protocol}//${host}${path}${u.search}`;
+  } catch { return raw; }
+}
+function hostOf(raw: string): string {
+  try { return new URL(raw).hostname.replace(/^www\./, ""); } catch { return "invalid"; }
+}
 const fixturePath = (handle: string): string => join(FIXTURE_DIR, `${norm(handle)}.json`);
 const snapshotPath = (handle: string): string => join(SNAPSHOT_DIR, `${norm(handle)}.json`);
 
@@ -151,26 +165,26 @@ async function record(handle: string): Promise<number> {
   }) as typeof fetch;
 
   let dossier: Dossier | null = null;
-  let cost = { usd: 0 } as ReturnType<typeof getCost>;
   const startedAt = Date.now();
   try {
-    ({ dossier, cost } = await withCostLedger(async () => {
-      const d = await runAudit(handle, () => {}, { analystDeadlineAt: Date.now() + 180_000 });
-      return { dossier: d, cost: getCost() };
-    }));
+    // runAudit wraps its OWN cost ledger and attaches the real spend to
+    // dossier.cost, so read that (a wrapping withCostLedger here would see an
+    // empty outer ledger and report $0).
+    dossier = await runAudit(handle, () => {}, { analystDeadlineAt: Date.now() + 180_000 });
   } finally {
     globalThis.fetch = realFetch;
   }
   const elapsedMs = Date.now() - startedAt;
+  const cost = dossier?.cost ?? { usd: 0, grokUsd: 0, claudeUsd: 0, grokCalls: 0, claudeCalls: 0, sources: 0 };
 
   const fixture: FixtureFile = { handle, recordedAt: new Date().toISOString(), entries };
   writeFileSync(fixturePath(handle), JSON.stringify(fixture));
-  if (dossier) writeFileSync(snapshotPath(handle), JSON.stringify(dossierSnapshot(dossier), null, 2));
+  if (dossier) writeFileSync(snapshotPath(handle), JSON.stringify({ ...dossierSnapshot(dossier), cost }, null, 2));
 
   const result = assertLabels(dossier, label);
   console.log(`\n=== RECORD ${handle} ===`);
   console.log(`  ${entries.length} provider requests captured -> ${fixturePath(handle)}`);
-  console.log(`  ledger cost: $${cost.usd.toFixed(3)} · ${elapsedMs}ms`);
+  console.log(`  ledger cost: $${cost.usd.toFixed(3)} total · Grok $${(cost.grokUsd ?? 0).toFixed(3)} (${cost.grokCalls ?? 0} calls, ${cost.sources ?? 0} sources) · Claude $${(cost.claudeUsd ?? 0).toFixed(3)} (${cost.claudeCalls ?? 0} calls) · ${elapsedMs}ms`);
   console.log(`  result: ${JSON.stringify(result.summary)}`);
   console.log(result.pass ? `  LABELS PASS` : `  LABELS FAIL:\n    - ${result.failures.join("\n    - ")}`);
   return result.pass ? 0 : 1;
@@ -187,7 +201,8 @@ async function replay(handle: string): Promise<number> {
   for (const e of fixture.entries) {
     const key = `${e.method} ${e.url} ${e.bodyHash}`;
     (byKey.get(key) ?? byKey.set(key, []).get(key)!).push(e);
-    (byUrl.get(e.url) ?? byUrl.set(e.url, []).get(e.url)!).push(e);
+    const uk = `${e.method} ${normalizeUrl(e.url)}`;
+    (byUrl.get(uk) ?? byUrl.set(uk, []).get(uk)!).push(e);
   }
   const shift = (map: Map<string, FixtureEntry[]>, k: string): FixtureEntry | undefined => {
     const q = map.get(k);
@@ -196,12 +211,14 @@ async function replay(handle: string): Promise<number> {
 
   const realFetch = globalThis.fetch;
   const misses: string[] = [];
+  const missHosts = new Map<string, number>();
   globalThis.fetch = (async (input: unknown, init?: { method?: string; body?: unknown }) => {
     const { method, url, body } = describeRequest(input, init);
     const key = `${method} ${url} ${hashBody(body)}`;
-    const entry = shift(byKey, key) ?? shift(byUrl, url);
+    const entry = shift(byKey, key) ?? shift(byUrl, `${method} ${normalizeUrl(url)}`);
     if (!entry) {
       misses.push(`${method} ${url}`);
+      missHosts.set(hostOf(url), (missHosts.get(hostOf(url)) ?? 0) + 1);
       return new Response(JSON.stringify({ error: "eval replay: no fixture" }), { status: 599, headers: { "content-type": "application/json" } });
     }
     return new Response(entry.body, { status: entry.status, headers: { "content-type": "application/json" } });
@@ -209,7 +226,7 @@ async function replay(handle: string): Promise<number> {
 
   let dossier: Dossier | null = null;
   try {
-    dossier = await withCostLedger(() => runAudit(handle, () => {}, { analystDeadlineAt: Date.now() + 180_000 }));
+    dossier = await runAudit(handle, () => {}, { analystDeadlineAt: Date.now() + 180_000 });
   } finally {
     globalThis.fetch = realFetch;
   }
@@ -217,7 +234,10 @@ async function replay(handle: string): Promise<number> {
   const result = assertLabels(dossier, label);
   console.log(`\n=== REPLAY ${handle} (offline) ===`);
   console.log(`  result: ${JSON.stringify(result.summary)}`);
-  if (misses.length) console.log(`  ${misses.length} fixture misses (first: ${misses.slice(0, 3).join(", ")})`);
+  if (misses.length) {
+    const byHost = [...missHosts.entries()].sort((a, b) => b[1] - a[1]).map(([h, n]) => `${h}:${n}`).join(", ");
+    console.log(`  ${misses.length} fixture misses by host: ${byHost}`);
+  }
   console.log(result.pass ? `  LABELS PASS` : `  LABELS FAIL:\n    - ${result.failures.join("\n    - ")}`);
   return result.pass ? 0 : 1;
 }
