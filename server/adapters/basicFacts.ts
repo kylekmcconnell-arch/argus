@@ -3741,6 +3741,15 @@ const SELF_DECLARED_NOT_THE_SUBJECT = /\b(?:parody|fan\s*account|fan\s*page|not\
  * name-shaped handle has neither them nor a large organic following. */
 const MIN_NOTABLE_FOLLOWERS_FOR_NAME_ALIAS = 10;
 const MIN_FOLLOWERS_FOR_NAME_ALIAS = 250_000;
+// A follower count so large that a squatter holding the exact name-spelling
+// handle is implausible. This is an ALTERNATE authority proof to the notable
+// -follower reverse-check, which structurally under-observes for individuals:
+// the curated reference set is mostly funds and org accounts, and those rarely
+// follow a person even a maximally famous one (observed live: @ethereum and
+// @BitcoinMagazine do not follow @VitalikButerin), so a mega-account would
+// otherwise never clear the notable bar and its pseudonymous display name would
+// block every fact from verifying.
+const NOTABILITY_SELF_EVIDENT_FOLLOWERS = 1_000_000;
 
 function approximateFollowerCount(value: string): number {
   const match = /([\d.,]+)\s*([KMB])?/i.exec(value.trim());
@@ -3772,9 +3781,14 @@ function notabilityBoundNameAlias(ctx: CollectContext): string | null {
   if (!candidate) return null;
   if (subjectAliases(ctx).some((alias) => personKey(alias) === personKey(candidate))) return null;
   if (SELF_DECLARED_NOT_THE_SUBJECT.test(`${profile.display_name} ${profile.bio}`)) return null;
+  const followers = approximateFollowerCount(profile.followers);
+  if (followers < MIN_FOLLOWERS_FOR_NAME_ALIAS) return null;
+  // Either authority proof is sufficient: an observed set of notable followers,
+  // OR a follower count so large that impersonation on the exact handle is
+  // implausible. This never sets resolved_name or identity_confidence, so it
+  // stays a reading-only alias and cannot feed name-based OFAC or court screening.
   const notable = ctx.evidence.notableFollowers?.length ?? 0;
-  if (notable < MIN_NOTABLE_FOLLOWERS_FOR_NAME_ALIAS) return null;
-  if (approximateFollowerCount(profile.followers) < MIN_FOLLOWERS_FOR_NAME_ALIAS) return null;
+  if (notable < MIN_NOTABLE_FOLLOWERS_FOR_NAME_ALIAS && followers < NOTABILITY_SELF_EVIDENT_FOLLOWERS) return null;
   return candidate;
 }
 

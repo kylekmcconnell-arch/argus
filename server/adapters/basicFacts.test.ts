@@ -4645,3 +4645,59 @@ describe("lead value core normalization", () => {
     expect(parsed?.qualifier).toContain("network launched");
   });
 });
+
+// Regression: @VitalikButerin published INCOMPLETE in the live pipeline because
+// his pseudonymous display name ("vitalik.eth") never matched the "Vitalik
+// Buterin" that sources use, so no fact verified and no role routed. The
+// notability-gated reading alias is supposed to bridge that, but its only proof
+// of authority was a >=10 notable-follower reverse-check, which under-observes
+// for individuals (the curated reference set is org/fund accounts that do not
+// follow a person, even a famous one). A mega follower count is an alternate,
+// sufficient authority proof. This alias is READING ONLY and must never leak
+// into resolved_name (which feeds name-based OFAC / court screening).
+describe("pseudonymous mega-account name alias (Vitalik regression)", () => {
+  function pseudonymousFounderCtx(followers: string) {
+    const evidence = emptyEvidence("@VitalikButerin");
+    evidence.profile.display_name = "vitalik.eth";
+    evidence.profile.resolved_name = undefined;
+    evidence.profile.followers = followers;
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.roles = [SubjectClass.FOUNDER];
+    // The real full-pipeline state: the reverse-check found no notable followers.
+    evidence.notableFollowers = [];
+    const ctx: CollectContext = { handle: "@VitalikButerin", evidence, emit: vi.fn() };
+    return { ctx, evidence };
+  }
+
+  const src1 = "https://ethereum.org/en/history/";
+  const src2 = "https://www.coindesk.com/vitalik-ethereum";
+  const founderLeads = async (): Promise<BasicFactLead[]> => [
+    lead({ subject: "Vitalik Buterin", predicate: "founder", value: "Ethereum", questionId: "person.founder", excerpt: "Vitalik Buterin is the co-founder of Ethereum.", sourceUrl: src1, sourceTitle: "Ethereum history", provider: "claude-web-search" }),
+    lead({ subject: "Vitalik Buterin", predicate: "founder", value: "Ethereum", questionId: "person.founder", excerpt: "Vitalik Buterin co-founded Ethereum in 2015.", sourceUrl: src2, sourceTitle: "Coindesk", provider: "claude-web-search" }),
+  ];
+  const founderDocs = () => fetchDocuments({
+    [src1]: document({ url: src1, host: "ethereum.org", text: "<html><body><p>Vitalik Buterin is the co-founder of Ethereum.</p></body></html>", contentHash: "d".repeat(64) }),
+    [src2]: document({ url: src2, host: "coindesk.com", text: "<html><body><p>Vitalik Buterin co-founded Ethereum in 2015.</p></body></html>", contentHash: "e".repeat(64) }),
+  });
+
+  const verifiedFounderOfEthereum = (evidence: ReturnType<typeof pseudonymousFounderCtx>["evidence"]): boolean =>
+    (evidence.basicFacts ?? []).some((fact) =>
+      fact.predicate === "founder" && fact.value === "Ethereum"
+      && (fact.status === "verified" || fact.status === "corroborated"));
+
+  it("verifies a founder fact for a mega-account with a pseudonymous display name", async () => {
+    const { ctx, evidence } = pseudonymousFounderCtx("5.3M");
+    await collectBasicFacts(ctx, { discover: founderLeads, fetchSource: founderDocs() });
+    expect(verifiedFounderOfEthereum(evidence)).toBe(true);
+    // Impersonation safety: the reading alias must never become resolved_name.
+    expect(evidence.profile.resolved_name ?? "").not.toMatch(/Vitalik Buterin/);
+    expect(evidence.profile.identity_confidence ?? "").not.toBe("Confirmed");
+  });
+
+  it("does NOT widen the alias for a sub-mega account with no notable followers", async () => {
+    const { ctx, evidence } = pseudonymousFounderCtx("300K");
+    await collectBasicFacts(ctx, { discover: founderLeads, fetchSource: founderDocs() });
+    expect(verifiedFounderOfEthereum(evidence)).toBe(false);
+  });
+});
