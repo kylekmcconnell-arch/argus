@@ -844,35 +844,46 @@ export interface AckResult {
   sentiment: "positive" | "neutral" | "negative" | "none";
   source_url?: string;
 }
+const ACK_POSITIVE = /\b(?:great|amazing|excited|proud|congrats|congratulations|grateful|honored|honoured|bullish|legend|brilliant|incredible|impressive|welcome)\b/i;
+const ACK_NEGATIVE = /\b(?:scam|rug|fraud|avoid|warning|beware|ponzi|stole|stolen|fake|do not trust|stay away)\b/i;
+const ACK_THANKS = /\b(?:thank|thanks|grateful|appreciate)\b/i;
+function ackSentiment(text: string): AckResult["sentiment"] {
+  if (ACK_NEGATIVE.test(text)) return "negative";
+  if (ACK_POSITIVE.test(text)) return "positive";
+  return "neutral";
+}
+function ackType(text: string): AckResult["ack"] {
+  if (ACK_THANKS.test(text)) return "thanks";
+  if (ACK_POSITIVE.test(text)) return "endorsement";
+  return "mention";
+}
+
+// twitterapi.io (near-free, ~$0.0002/call) replaces Grok live search here: for
+// each claimed endorser, search THEIR posts for a mention of the subject. A hit
+// is a LEAD (its post URL) that an independent collector re-verifies; ack and
+// sentiment are light heuristic labels only, never a corroboration verdict.
 export async function acknowledgments(endorsers: string[], subject: string): Promise<Map<string, AckResult>> {
   const out = new Map<string, AckResult>();
-  const key = env("XAI_API_KEY");
+  const key = env("TWITTERAPI_KEY");
   const list = [...new Set(endorsers.map((e) => e.replace(/^@/, "")).filter(Boolean))];
   if (!key || !list.length) return out;
   const s = subject.replace(/^@/, "");
-  const system =
-    "You generate endorsement-verification leads for a due-diligence collector, with live web and X search. For EACH listed account, surface the strongest candidate public acknowledgment that account may have made of @" + s + " on X, its sentiment, and the exact post URL. " +
-    "This is discovery only: do not call a relationship corroborated or contradicted. Without a direct post URL, return ack=none and sentiment=none. ack is one of none|mention|thanks|endorsement; sentiment is positive|neutral|negative|none. " +
-    'Reply with ONLY compact JSON: {"results":[{"handle":"@...","ack":"none|mention|thanks|endorsement","sentiment":"positive|neutral|negative|none","source_url":"https://x.com/.../status/..."}]}. Provide one entry per listed account and never invent posts.';
-  const text = await grokSearch(system, `Accounts to check: ${list.map((e) => "@" + e).join(", ")}. For each: has it ever publicly acknowledged @${s} on X? Search each account's posts.`, { maxToolCalls: Math.min(3, list.length + 1), cacheKey: `ack:${s}:${[...list].sort().join(",")}` });
-  if (!text) return out;
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return out;
-  try {
-    const arr: any[] = JSON.parse(m[0]).results ?? [];
-    for (const r of arr) {
-      const h = typeof r?.handle === "string" ? r.handle.replace(/^@/, "").toLowerCase() : "";
-      if (!h) continue;
-      const sourceUrl = typeof r?.source_url === "string" && /^https?:\/\/(?:www\.)?(?:x|twitter)\.com\/[A-Za-z0-9_]+\/status\/\d+/i.test(r.source_url)
-        ? r.source_url
-        : undefined;
-      out.set(h, {
-        ack: sourceUrl && ["mention", "thanks", "endorsement"].includes(r.ack) ? r.ack : "none",
-        sentiment: sourceUrl && ["positive", "neutral", "negative"].includes(r.sentiment) ? r.sentiment : "none",
-        source_url: sourceUrl,
-      });
+  const sKey = s.toLowerCase();
+  await Promise.all(list.map(async (endorser) => {
+    const mapKey = endorser.toLowerCase();
+    try {
+      const tweets = await searchFrom(endorser, [`@${s}`], key);
+      const hit = tweets.find((t) => String((t as any)?.text ?? (t as any)?.full_text ?? "").toLowerCase().includes(`@${sKey}`));
+      const id = hit ? String((hit as any)?.id ?? (hit as any)?.id_str ?? "") : "";
+      const rawUrl = hit && typeof (hit as any)?.url === "string" ? (hit as any).url as string : "";
+      const url = /\/status\/\d+/.test(rawUrl) ? rawUrl : id ? `https://x.com/${endorser}/status/${id}` : undefined;
+      if (!hit || !url) { out.set(mapKey, { ack: "none", sentiment: "none" }); return; }
+      const text = String((hit as any)?.text ?? (hit as any)?.full_text ?? "");
+      out.set(mapKey, { ack: ackType(text), sentiment: ackSentiment(text), source_url: url });
+    } catch {
+      out.set(mapKey, { ack: "none", sentiment: "none" });
     }
-  } catch { /* malformed -> treat as unknown */ }
+  }));
   return out;
 }
 
@@ -933,42 +944,6 @@ export async function discoverAffiliations(handle: string, name?: string, oldHan
   }
 }
 
-// Reverse-mention discovery: the complement to discoverAffiliations. That one
-// asks "what has THIS person done"; this one asks "who has ever NAMED this
-// person as theirs". A co-founder announcement, a "meet the team" thread, a
-// launch post tagging the subject — these live on the PROJECT's timeline, not
-// the subject's, and often in OLD posts a recency-biased search skips. This is
-// the angle that catches a role the subject never tweeted about themselves.
-export async function discoverByMentions(handle: string, name?: string, oldHandles: string[] = []): Promise<DiscoveredAffiliation[]> {
-  const h = handle.replace(/^@/, "");
-  const aliasLine = oldHandles.length ? ` This SAME person previously used these X handles: ${oldHandles.map((o) => "@" + o).join(", ")}. Search posts mentioning those old handles too, since their history may live under them.` : "";
-  const system =
-    "You are a forensic due-diligence researcher with live X (Twitter) search. Find every company, crypto project, fund, or DAO ACCOUNT that has publicly NAMED, TAGGED, ANNOUNCED, or referred to the given person as a founder, co-founder, team member, or employee. " +
-    "Search X thoroughly INCLUDING OLDER / HISTORICAL posts, not just recent ones. Co-founder announcements and 'meet the team' posts are often years old. There MUST be a real post tying the project to this exact person. " +
-    "Reply with ONLY compact JSON: {\"affiliations\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate\",\"year\":\"\",\"evidence\":\"the post / what it said\",\"x_handle\":\"@projectAccount\",\"domain\":\"example.com\"}]}. " +
-    "Include ONLY ties backed by a real post you found. If none, return {\"affiliations\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Which project or company accounts on X have ever named, tagged, or announced this person as a founder, co-founder, or team member? Search historical posts too, going back years.`);
-  if (!text) return [];
-  const m = text.match(/\{[\s\S]*\}/);
-  if (!m) return [];
-  try {
-    const parsed = JSON.parse(m[0]);
-    const out: DiscoveredAffiliation[] = Array.isArray(parsed.affiliations) ? parsed.affiliations : [];
-    return out
-      .filter((v) => v && typeof v.name === "string" && v.name.trim())
-      .map((v) => ({
-        name: v.name.trim(),
-        role: v.role || "affiliate",
-        year: v.year,
-        evidence: v.evidence,
-        x_handle: v.x_handle && /^@?[A-Za-z0-9_]{2,30}$/.test(v.x_handle) ? "@" + v.x_handle.replace(/^@/, "") : undefined,
-        domain: v.domain && /^[a-z0-9.-]+\.[a-z]{2,}$/i.test(v.domain) ? v.domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "") : undefined,
-      }))
-      .slice(0, 10);
-  } catch {
-    return [];
-  }
-}
 
 // ── Team extraction from X content ──
 // The people behind a project are usually NAMED in the project account's own
@@ -979,17 +954,29 @@ export interface TeamMember { name: string; handle?: string; role: string; evide
 
 export async function findTeam(handle: string, name: string | undefined, posts: string[] = []): Promise<TeamMember[]> {
   const h = handle.replace(/^@/, "");
-  const postContext = posts.length
-    ? `\n\nThe account's recent posts (mine these for team intros / role + advisor announcements):\n${posts.slice(0, 15).map((p, i) => `${i + 1}. ${p}`).join("\n")}`
+  const key = env("TWITTERAPI_KEY");
+  // Gather the project's own team-signal posts from twitterapi (near-free,
+  // ~$0.0002/call) rather than Grok x_search; Claude then extracts the roster
+  // from them and web-searches each person's other ventures.
+  let corpus = posts.slice(0, 15);
+  if (key) {
+    try {
+      const teamPosts = await searchFrom(h, KW_IDENTITY, key);
+      const extra = teamPosts.map((t) => String((t as any)?.text ?? (t as any)?.full_text ?? "")).filter(Boolean);
+      corpus = [...new Set([...corpus, ...extra])].slice(0, 30);
+    } catch { /* twitterapi unavailable -> extract from the provided posts only */ }
+  }
+  const postContext = corpus.length
+    ? `\n\nThe project account's own posts (mine these for team intros / role + advisor announcements):\n${corpus.map((p, i) => `${i + 1}. ${p}`).join("\n")}`
     : "";
   const system =
-    "You are a forensic researcher with live X search. Identify the PEOPLE publicly tied to the project behind the given X account: founders, cofounders, core team, engineers, AND advisors/backers. " +
-    "Look especially at the account's OWN posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') and posts that tag these people, plus posts mentioning the project that name its people. " +
+    "You are a forensic researcher with live web search, given a crypto/tech project's own X posts below. Identify the PEOPLE publicly tied to the project: founders, cofounders, core team, engineers, AND advisors/backers. " +
+    "Read the provided posts (team intros, 'welcome @x as our CTO', 'our founder @y', 'advised by @z', 'backed by @w') to see who is named, then web-search to confirm each person and their role here. " +
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if they are actually named as one; if they are a founder/cofounder, say so. Do NOT downgrade a founder to advisor. " +
-    "For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that live web/X search reveals. This exposes serial founders and cross-project ties. " +
+    "For EACH person also list their OTHER notable projects or companies (name + their role there, e.g. founder/cofounder/advisor/engineer) that web search reveals. This exposes serial founders and cross-project ties. " +
     "Include ONLY people with real public evidence tying them to THIS project. EXCLUDE the project account itself, generic shillers, hype repliers, and unrelated mentions. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"founder|cofounder|ceo|cto|engineer|advisor|backer\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If none, return {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects. Search the account's own posts and posts mentioning it.${postContext}`, { cacheKey: `team-x:${h}` });
+  const text = await generalWebSearch(system, `Project X account: @${h}${name && name !== h ? ` (${name})` : ""}. Who are the founders, team members, and advisors of this project? Give each person's precise role here AND their other projects.${postContext}`, { cacheKey: `team-x:${h}` });
   return parseTeamJSON(text, h, "X content");
 }
 
@@ -1173,7 +1160,7 @@ export async function searchAdverseSignals(
     "Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. " +
     "Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. " +
     "Reply with ONLY compact JSON: {\"signals\":[{\"category\":\"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud\",\"claim\":\"\",\"source\":\"\",\"source_url\":\"\"}]}. Never use em dashes.";
-  const text = await grokSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}` });
+  const text = await generalWebSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];

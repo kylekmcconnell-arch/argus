@@ -1433,11 +1433,17 @@ async function discoverRepair(
   if (!questions.length) {
     return { provider: "none", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "no critical gaps" };
   }
-  // Keep one governing provider for the entire bounded repair pass. Grok is
-  // preferred when configured so a depleted Claude account cannot trigger a
-  // second failing pass or multiply calls through per-question failover.
-  if (env("XAI_API_KEY")) return discoverGrokBasicFactLeadsDetailed(ctx, questions, "repair");
+  // Keep one governing provider for the entire bounded repair pass. Claude is
+  // preferred to move the audit off Grok live search (the dominant, per-source
+  // cost): repair isolates each critical gap into its own focused search, so a
+  // same-engine second pass still recovers gaps the broad primary missed. Grok
+  // remains a last-resort fallback only when Claude is unavailable.
+  // ARGUS_BASIC_FACTS_REPAIR=grok forces the legacy path for a controlled A/B.
+  if (env("ARGUS_BASIC_FACTS_REPAIR") === "grok" && env("XAI_API_KEY")) {
+    return discoverGrokBasicFactLeadsDetailed(ctx, questions, "repair");
+  }
   if (env("ANTHROPIC_API_KEY")) return discoverBasicFactLeadsDetailed(ctx, {}, questions, "repair");
+  if (env("XAI_API_KEY")) return discoverGrokBasicFactLeadsDetailed(ctx, questions, "repair");
   return { provider: "none", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "no repair search provider configured" };
 }
 
