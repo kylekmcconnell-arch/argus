@@ -1,4 +1,4 @@
-// ARGUS eval harness — record once (live), replay forever (offline, free).
+// ARGUS eval harness: record once (live), replay forever (offline, free).
 //
 // Every provider (Claude, Grok, twitterapi, PDL, web) funnels through global
 // `fetch`. RECORD tees every request/response to a fixture while running a real
@@ -18,7 +18,13 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runAudit } from "../server/orchestrate";
 import type { Dossier } from "../src/data/dossier";
+import { DEEP_INVESTIGATION_MAX_DURATION_SECONDS, ANALYST_FINALIZATION_RESERVE_MS } from "../src/lib/investigationRuntime";
 import { LABELS, labelFor, type SubjectLabel } from "./labels";
+
+// Mirror the production collection budget exactly. A shorter deadline starves
+// the post-barrier passes (basic-facts especially) and manufactures INCOMPLETE
+// verdicts that never happen in prod. This is what the API route passes.
+const prodAnalystDeadline = () => Date.now() + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000 - ANALYST_FINALIZATION_RESERVE_MS;
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURE_DIR = join(HERE, "fixtures");
@@ -165,21 +171,42 @@ async function record(handle: string): Promise<number> {
   }) as typeof fetch;
 
   let dossier: Dossier | null = null;
+  const emits: Array<Record<string, unknown>> = [];
   const startedAt = Date.now();
   try {
     // runAudit wraps its OWN cost ledger and attaches the real spend to
     // dossier.cost, so read that (a wrapping withCostLedger here would see an
-    // empty outer ledger and report $0).
-    dossier = await runAudit(handle, () => {}, { analystDeadlineAt: Date.now() + 180_000 });
+    // empty outer ledger and report $0). Capture the emit stream: it narrates
+    // whether each pass (basic-facts especially) ran, was skipped, or errored.
+    dossier = await runAudit(handle, (e: unknown) => {
+      const ev = (e ?? {}) as Record<string, unknown>;
+      emits.push({ phase: ev.phase, label: ev.label, detail: ev.detail, tone: ev.tone });
+    }, { analystDeadlineAt: prodAnalystDeadline() });
   } finally {
     globalThis.fetch = realFetch;
   }
   const elapsedMs = Date.now() - startedAt;
   const cost = dossier?.cost ?? { usd: 0, grokUsd: 0, claudeUsd: 0, grokCalls: 0, claudeCalls: 0, sources: 0 };
 
+  // Deep diagnostics: what did collection actually verify, and did basic-facts run?
+  const d = dossier as unknown as {
+    basicFacts?: Array<Record<string, unknown>>;
+    basicFactQuestionLedger?: Array<Record<string, unknown>>;
+    ventures?: Array<Record<string, unknown>>;
+    report?: { roles?: unknown; governing_role?: unknown };
+  } | null;
+  const diagnostics = dossier ? {
+    roles: d?.report?.roles,
+    profile: { display_name: dossier.display_name, followers: dossier.followers, bio: dossier.bio, resolved_name: dossier.resolved_name },
+    basicFacts: (d?.basicFacts ?? []).map((f) => ({ predicate: f.predicate, value: f.value, status: f.status, artifact_verified: f.artifact_verified, sources: (f.sources as unknown[])?.length ?? 0 })),
+    basicFactQuestionLedger: (d?.basicFactQuestionLedger ?? []).map((q) => ({ questionId: q.questionId, status: q.status, providerRuns: (q.providerRuns as Array<Record<string, unknown>>)?.map((r) => `${r.phase}:${r.state}`) })),
+    ventures: (d?.ventures ?? []).map((v) => ({ name: v.project_name ?? v.name, role: v.role, evidence_origin: v.evidence_origin, artifact_verified: v.artifact_verified })),
+    emits: emits.filter((e) => e.phase || e.label),
+  } : null;
+
   const fixture: FixtureFile = { handle, recordedAt: new Date().toISOString(), entries };
   writeFileSync(fixturePath(handle), JSON.stringify(fixture));
-  if (dossier) writeFileSync(snapshotPath(handle), JSON.stringify({ ...dossierSnapshot(dossier), cost }, null, 2));
+  if (dossier) writeFileSync(snapshotPath(handle), JSON.stringify({ ...dossierSnapshot(dossier), cost, diagnostics }, null, 2));
 
   const result = assertLabels(dossier, label);
   console.log(`\n=== RECORD ${handle} ===`);
@@ -226,7 +253,7 @@ async function replay(handle: string): Promise<number> {
 
   let dossier: Dossier | null = null;
   try {
-    dossier = await runAudit(handle, () => {}, { analystDeadlineAt: Date.now() + 180_000 });
+    dossier = await runAudit(handle, () => {}, { analystDeadlineAt: prodAnalystDeadline() });
   } finally {
     globalThis.fetch = realFetch;
   }
