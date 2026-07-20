@@ -1,5 +1,5 @@
 import { env } from "../config";
-import { grokSearch } from "./x";
+import { generalWebSearch } from "./x";
 import type { CollectContext } from "./types";
 
 const discoveryByEvidence = new WeakMap<object, Promise<string | null>>();
@@ -32,7 +32,7 @@ const normalizedHandle = (ctx: CollectContext): string =>
  * attribution, and date before anything can enter scoring.
  */
 export function discoverInvestorEvidenceText(ctx: CollectContext): Promise<string | null> {
-  if (!env("XAI_API_KEY")) return Promise.resolve(null);
+  if (!env("ANTHROPIC_API_KEY") && !env("XAI_API_KEY")) return Promise.resolve(null);
   const existing = discoveryByEvidence.get(ctx.evidence);
   if (existing) return existing;
 
@@ -51,7 +51,7 @@ export function discoverInvestorEvidenceText(ctx: CollectContext): Promise<strin
   const user = subjectContext(ctx) + " " +
     "Find source-linked direct investments, affiliated-fund investments, and source-linked fund-scale claims while keeping every attribution separate.";
 
-  const pending = grokSearch(system, user, {
+  const pending = generalWebSearch(system, user, {
     maxToolCalls: 4,
     cacheKey: `investor-core:v3:${normalizedHandle(ctx)}`,
   });
@@ -66,7 +66,7 @@ export function discoverInvestorEvidenceText(ctx: CollectContext): Promise<strin
  * boundary instead of turning provider failure into apparent negative evidence.
  */
 export function discoverFocusedPortfolioEvidenceText(ctx: CollectContext): Promise<string | null> {
-  if (!env("XAI_API_KEY")) return Promise.resolve(null);
+  if (!env("ANTHROPIC_API_KEY") && !env("XAI_API_KEY")) return Promise.resolve(null);
   const existing = focusedPortfolioByEvidence.get(ctx.evidence);
   if (existing) return existing;
 
@@ -80,7 +80,7 @@ export function discoverFocusedPortfolioEvidenceText(ctx: CollectContext): Promi
     "Return at most 10 strong source-linked candidates. Return an empty list when none are found.";
   const user = subjectContext(ctx) +
     " Find source-linked direct investments and, separately, investments made by a fund this subject is currently and publicly affiliated with. Keep every attribution separate.";
-  const pending = grokSearch(system, user, {
+  const pending = generalWebSearch(system, user, {
     maxToolCalls: 4,
     cacheKey: `investor-portfolio-focused:v1:${normalizedHandle(ctx)}`,
   });
@@ -90,7 +90,7 @@ export function discoverFocusedPortfolioEvidenceText(ctx: CollectContext): Promi
 
 /** One focused retry for a valid shared response with no usable fund-scale rows. */
 export function discoverFocusedFundScaleEvidenceText(ctx: CollectContext): Promise<string | null> {
-  if (!env("XAI_API_KEY")) return Promise.resolve(null);
+  if (!env("ANTHROPIC_API_KEY") && !env("XAI_API_KEY")) return Promise.resolve(null);
   const existing = focusedFundScaleByEvidence.get(ctx.evidence);
   if (existing) return existing;
 
@@ -104,7 +104,7 @@ export function discoverFocusedFundScaleEvidenceText(ctx: CollectContext): Promi
     "Return at most 6 strong source-linked candidates. Return an empty list when none are found.";
   const user = subjectContext(ctx) +
     " Find source-linked scale claims for the exact subject and, separately, any fund the subject is currently and publicly affiliated with. Keep every attribution separate.";
-  const pending = grokSearch(system, user, {
+  const pending = generalWebSearch(system, user, {
     maxToolCalls: 4,
     cacheKey: `investor-fund-scale-focused:v1:${normalizedHandle(ctx)}`,
   });
