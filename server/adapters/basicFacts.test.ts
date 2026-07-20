@@ -13,6 +13,9 @@ import {
   verifyBasicFactLead,
   overlappingNetworkAnswers,
 } from "./basicFacts";
+import { readEntityFacts } from "../entityStore";
+
+vi.mock("../entityStore", () => ({ readEntityFacts: vi.fn(async () => null) }));
 
 const NOW = "2026-07-12T12:00:00.000Z";
 
@@ -4699,5 +4702,59 @@ describe("pseudonymous mega-account name alias (Vitalik regression)", () => {
     const { ctx, evidence } = pseudonymousFounderCtx("300K");
     await collectBasicFacts(ctx, { discover: founderLeads, fetchSource: founderDocs() });
     expect(verifiedFounderOfEthereum(evidence)).toBe(false);
+  });
+});
+
+// The knowledge-base read-through: a fresh cache hit lets discovery skip the
+// questions prior audits already answered, and the reused verified facts flow
+// into evidence without re-fetching their sources.
+describe("knowledge base read-through", () => {
+  const cachedFounderFact = () => ({
+    factId: "kb-founder", subjectKey: "alice", predicate: "founder" as const, value: "Acme",
+    normalizedValue: "acme", status: "verified" as const, critical: true,
+    sources: [{
+      url: "https://alice.example/about", sourceClass: "official_subject" as const, relation: "supports" as const,
+      excerpt: "Alice founded Acme.", contentHash: "z".repeat(64), capturedAt: NOW, provider: "public-web" as const, artifactVerified: true,
+    }],
+    evidence_origin: "deterministic" as const, artifact_verified: true, provider: "public-web" as const, questionId: "person.founder",
+  });
+
+  function founderCtx() {
+    const evidence = emptyEvidence("@alice");
+    evidence.profile.display_name = "Alice";
+    evidence.profile.resolved_name = "Alice";
+    evidence.profile.website = "https://alice.example";
+    evidence.profile.profile_collection_state = "resolved";
+    evidence.profile.profile_provider = "twitterapi";
+    evidence.roles = [SubjectClass.FOUNDER];
+    const ctx: CollectContext = { handle: "@alice", evidence, emit: vi.fn(), organizationId: "org1" };
+    return { ctx, evidence };
+  }
+
+  const spyDiscover = (capture: (ids: string[]) => void) =>
+    async (_c: CollectContext, qs: readonly { id: string }[]) => { capture(qs.map((q) => q.id)); return []; };
+
+  it("reuses a cached verified fact and skips its discovery question", async () => {
+    vi.stubEnv("ARGUS_ENTITY_REUSE", "on");
+    vi.mocked(readEntityFacts).mockResolvedValueOnce({ facts: { basicFacts: [cachedFounderFact()] }, updatedAt: NOW, auditCount: 2, entityType: "FOUNDER" });
+    const { ctx, evidence } = founderCtx();
+    let discoveredIds: string[] = [];
+    await collectBasicFacts(ctx, { discover: spyDiscover((ids) => { discoveredIds = ids; }), fetchSource: vi.fn() });
+
+    expect(discoveredIds).not.toContain("person.founder");
+    expect(discoveredIds.length).toBeGreaterThan(0);
+    expect(evidence.basicFacts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ predicate: "founder", value: "Acme", status: "verified" }),
+    ]));
+  });
+
+  it("ignores the knowledge base entirely when the flag is off", async () => {
+    vi.mocked(readEntityFacts).mockClear();
+    const { ctx } = founderCtx();
+    let discoveredIds: string[] = [];
+    await collectBasicFacts(ctx, { discover: spyDiscover((ids) => { discoveredIds = ids; }), fetchSource: vi.fn() });
+
+    expect(discoveredIds).toContain("person.founder");
+    expect(readEntityFacts).not.toHaveBeenCalled();
   });
 });

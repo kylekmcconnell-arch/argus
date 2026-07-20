@@ -13,6 +13,8 @@ import { cacheGet, cacheSet } from "../cache";
 import { addClaudeUsage, recordCall } from "../cost";
 import { fetchPublicTextWithRecovery, type PublicTextDocument, type PublicTextResult } from "../publicWeb";
 import { grokSearch } from "./x";
+import { readEntityFacts } from "../entityStore";
+import { canonicalEntityKey } from "../../src/engine";
 import type { Adapter, AdapterRunResult, CollectContext } from "./types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -3935,11 +3937,45 @@ function questionLedger(
 }
 
 /** Discover role-aware basic facts, verify sources, then repair only critical gaps. */
+// Read-through: reuse the VERIFIED basic facts a prior audit already resolved
+// for this subject, so discovery only searches for what is still missing.
+// Flag-gated (ARGUS_ENTITY_REUSE=on) and freshness-bounded; returns [] when off,
+// unset, or stale, keeping the normal full-discovery path byte-identical.
+const ENTITY_REUSE_TTL_MS = 30 * 24 * 3600 * 1000;
+async function loadReusableBasicFacts(ctx: CollectContext): Promise<BasicFact[]> {
+  if (env("ARGUS_ENTITY_REUSE") !== "on") return [];
+  const rec = await readEntityFacts(ctx.organizationId, canonicalEntityKey({ handle: ctx.handle }), ENTITY_REUSE_TTL_MS);
+  const cached = rec?.facts && typeof rec.facts === "object" ? (rec.facts as { basicFacts?: unknown }).basicFacts : undefined;
+  if (!Array.isArray(cached)) return [];
+  return cached.filter((fact): fact is BasicFact =>
+    Boolean(fact) && typeof fact === "object"
+    && typeof (fact as { predicate?: unknown }).predicate === "string"
+    && typeof (fact as { value?: unknown }).value === "string"
+    && (fact as { artifact_verified?: unknown }).artifact_verified === true
+    && (fact as { predicate?: unknown }).predicate !== "legal_regulatory_event");
+}
+
 export async function collectBasicFacts(
   ctx: CollectContext,
   dependencies: BasicFactsCollectorDependencies = {},
 ): Promise<AdapterRunResult> {
   const questions = basicFactsResearchQuestions(ctx);
+  // A reused fact answers its question already, so discovery skips it entirely.
+  // Gated inside loadReusableBasicFacts by ARGUS_ENTITY_REUSE, so callers that do
+  // not set the flag (all current tests + the default) get [] and the unchanged path.
+  const reusedFacts = await loadReusableBasicFacts(ctx);
+  const questionsToDiscover = reusedFacts.length
+    ? questions.filter((question) => deterministicQuestionAnswerRefs(ctx, question, reusedFacts).length === 0)
+    : questions;
+  if (reusedFacts.length) {
+    ctx.emit({
+      phase: "P0 · Intake",
+      label: "Knowledge base reuse",
+      detail: `Reused ${reusedFacts.length} verified fact${reusedFacts.length === 1 ? "" : "s"} from a prior audit; discovery searches only the ${questionsToDiscover.length} remaining question${questionsToDiscover.length === 1 ? "" : "s"}.`,
+      source: "knowledge-base",
+      tone: "good",
+    });
+  }
   const discover = dependencies.discover ?? discoverPrimary;
   const fetchSource = dependencies.fetchSource ?? fetchPublicTextWithRecovery;
   if (!dependencies.discover && !env("ANTHROPIC_API_KEY") && !env("XAI_API_KEY")) {
@@ -3954,7 +3990,7 @@ export async function collectBasicFacts(
     tone: "neutral",
   });
 
-  const primary = normalizeDiscoveryOutput(await discover(ctx, questions));
+  const primary = normalizeDiscoveryOutput(await discover(ctx, questionsToDiscover));
   const primaryLeads = selectBasicFactLeads([
     ...officialIdentityBootstrapLeads(ctx),
     ...primary.leads,
@@ -4086,7 +4122,11 @@ export async function collectBasicFacts(
     return candidates;
   };
 
-  const primaryVerified = await verifyWithExpandedContext(primaryLeads, MAX_SOURCES);
+  // Reused verified facts join the candidate pool alongside freshly verified
+  // ones, so resolveBasicFactCandidates, gap detection, and the question ledger
+  // all treat them exactly like this-run facts (correct completeness) without
+  // re-fetching their sources.
+  const primaryVerified = [...reusedFacts, ...await verifyWithExpandedContext(primaryLeads, MAX_SOURCES)];
   const primaryFacts = resolveBasicFactCandidates(primaryVerified);
   const missingCritical = questions.filter((question) =>
     question.critical && deterministicQuestionAnswerRefs(ctx, question, primaryFacts).length === 0);
