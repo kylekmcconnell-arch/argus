@@ -52,6 +52,10 @@ export const ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4
  * a wrong row costs a rejected lead rather than a wrong verdict. It is also the
  * dominant cost line, because whole result sets land in model input. Keep it
  * separately configurable so the expensive tier stays where judgment happens
- * (scoring) and the cheap tier can serve retrieval.
+ * (scoring) and the cheap tier can serve retrieval. Kept on the analyst tier by
+ * default: a live A/B showed Haiku basic-facts UNDER-collects (Uniswap dropped
+ * PASS -> CAUTION for want of backer/disclosure records), so the cheap tier is
+ * reserved for grounded-search extraction (ARGUS_EXTRACT_MODEL), not the core
+ * fact verification. ARGUS_DISCOVERY_MODEL can still force a cheaper tier.
  */
 export const DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
