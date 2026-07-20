@@ -24,6 +24,9 @@ const PRICE = {
   claudeIn: 3 / 1e6,
   claudeOut: 15 / 1e6,
   claudeWebSearch: 10 / 1000,
+  haikuIn: 1 / 1e6,
+  haikuOut: 5 / 1e6,
+  serperQuery: 1 / 1000,
   twitterapiCall: 0.0002,
   pdlMatch: 0.1,
   heliusCall: 0.0001,
@@ -178,21 +181,32 @@ export function addClaudeUsage(
   op = "analysis",
   status: ProviderUsageStatus = "succeeded",
   outcomeMeta?: string,
+  model?: string,
 ): void {
   const { claude } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
   const webSearches = u?.server_tool_use?.web_search_requests ?? 0;
+  // Haiku bills 3x cheaper on input than Sonnet; price the call by its model so
+  // the ledger reflects the decoupled discovery pipeline honestly.
+  const haiku = typeof model === "string" && /haiku/i.test(model);
+  const inPrice = haiku ? PRICE.haikuIn : PRICE.claudeIn;
+  const outPrice = haiku ? PRICE.haikuOut : PRICE.claudeOut;
   claude.calls += 1;
   claude.in += tin;
   claude.out += tout;
   recordCall(
     "claude",
     op,
-    tin * PRICE.claudeIn + tout * PRICE.claudeOut + webSearches * PRICE.claudeWebSearch,
-    [`${tin + tout} tok`, webSearches ? `${webSearches} web searches` : "", outcomeMeta].filter(Boolean).join(" · "),
+    tin * inPrice + tout * outPrice + webSearches * PRICE.claudeWebSearch,
+    [`${tin + tout} tok`, haiku ? "haiku" : "", webSearches ? `${webSearches} web searches` : "", outcomeMeta].filter(Boolean).join(" · "),
     status,
   );
+}
+
+/** Book a Serper (Google SERP) query batch. Cheap, flat per-query. */
+export function recordSerper(queries: number, status: ProviderUsageStatus = "succeeded", outcomeMeta?: string): void {
+  recordCall("serper", "search", Math.max(0, queries) * PRICE.serperQuery, [`${queries} quer${queries === 1 ? "y" : "ies"}`, outcomeMeta].filter(Boolean).join(" · "), status);
 }
 
 export function recordPdlMatch(

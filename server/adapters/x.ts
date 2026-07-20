@@ -15,6 +15,7 @@ import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower } from "../../src/data/evidence";
 import { canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
 import { NOTABLE_ACCOUNTS } from "./notableAccounts";
+import { groundedSearch } from "./groundedSearch";
 
 const TWITTERAPI = "https://api.twitterapi.io";
 type JsonRecord = Record<string, unknown>;
@@ -231,6 +232,11 @@ export async function generalWebSearch(system: string, user: string, opts?: {
   claimProviderCall?: () => boolean;
 }): Promise<string | null> {
   if ((env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() !== "grok") {
+    // Ultimate path: decoupled Serper search + page fetch + cheap-model extract
+    // (near-free vs a frontier web_search reading every page in-context). Falls
+    // through when SERPER_API_KEY is unset or grounded search finds nothing.
+    const viaGrounded = await groundedSearch(system, user, { cacheKey: opts?.cacheKey, bypassCache: opts?.bypassCache });
+    if (viaGrounded) return viaGrounded;
     const viaClaude = await claudeWebSearch(system, user, {
       maxSearchUses: opts?.maxToolCalls,
       cacheKey: opts?.cacheKey ? `cw1:${opts.cacheKey}` : undefined,
