@@ -1079,7 +1079,7 @@ export async function searchAdverseSignals(
     "Search X, Trustpilot/review sites, Reddit, and scam-report sites. Run BOTH '<subject> scam', '<subject> rug', and '<subject> fud'-style queries. " +
     "Return candidate leads only. For EACH, provide the one specific page or post that an independent collector should fetch and verify. Do not grade credibility, count independent sources, call anything verified, or infer guilt. Do not repeat the subject's own marketing. If there are no sourced leads, return an empty list. " +
     "Reply with ONLY compact JSON: {\"signals\":[{\"category\":\"rug|slow_rug|liquidity_pull|drain|scam_accusation|fud\",\"claim\":\"\",\"source\":\"\",\"source_url\":\"\"}]}. Never use em dashes.";
-  const text = await grokSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`);
+  const text = await grokSearch(system, `Subject: ${subject}. Surface source URLs that may contain complaints or accusations of rug, slow rug, liquidity pull, wallet drains, exit scam, or FUD. These are leads for later verification, not findings.`, { cacheKey: `adverse:${subject}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -1121,7 +1121,7 @@ export async function detectManipulationTooling(handle: string, name?: string): 
     "You are a forensic research lead generator with live web and X search. Surface candidate first-party pages that may connect the given person to a token bundler, wallet mixer, volume faker, wash-trading generator, or multi-wallet snipe bot. " +
     "Return leads for an independent collector to verify; do not decide that the person operates the tool and do not call the connection verified. Prefer the product's own page, docs, or post and include the role claimed on that page. Legitimate general token-creation or analytics tools do not count. " +
     "Reply with ONLY compact JSON: {\"role_claim\":\"\",\"tools\":[{\"name\":\"\",\"kind\":\"bundler|mixer|volume_faker|snipe_bot|multi_wallet|other\",\"url\":\"\",\"evidence\":\"\"}]}. If none, return {\"role_claim\":\"\",\"tools\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Find candidate first-party pages that may link them to manipulation tooling. Return URLs for later independent verification only.`);
+  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Find candidate first-party pages that may link them to manipulation tooling. Return URLs for later independent verification only.`, { cacheKey: `manip:${h}` });
   if (!text) return null;
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
