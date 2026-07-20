@@ -49,6 +49,7 @@ import { dexscreenerAdapter } from "./adapters/dexscreener";
 import { coingeckoAdapter } from "./adapters/coingecko";
 import { onchainAdapter } from "./adapters/onchain";
 import { basicFactsAdapter, screenSecRegistryForNames } from "./adapters/basicFacts";
+import { writeEntityFacts } from "./entityStore";
 import {
   hasResolvedRealName,
   offchainAdapter,
@@ -3090,6 +3091,34 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // Attach what this run actually spent, so the report library can show it.
   dossier.cost = cost;
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} calls, ≈${cost.sources} search sources · Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
+  // Knowledge base write-back: persist this audit's expensive-to-recompute
+  // VERIFIED facts (identity/ventures/roles/token) so a later audit of the same
+  // or an overlapping entity reuses them instead of re-paying discovery.
+  // Best-effort, org-scoped, verified-only. Time-sensitive + legal signals are
+  // intentionally EXCLUDED: BasicFact legal_regulatory_event, adverse findings,
+  // and sanctions/legal source artifacts must all be re-screened live every run.
+  if (options?.organizationId) {
+    const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) =>
+      fact.artifact_verified === true
+      && (fact.status === "verified" || fact.status === "corroborated")
+      && fact.predicate !== "legal_regulatory_event");
+    const verifiedVentures = (evidence.ventures ?? []).filter((venture) =>
+      venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
+    if (verifiedBasicFacts.length || verifiedVentures.length || evidence.projectToken?.verified === true) {
+      void writeEntityFacts(options.organizationId, canonicalEntityKey({ handle: evidence.profile.handle }), {
+        entityType: evidence.roles[0] ? String(evidence.roles[0]) : null,
+        handle: evidence.profile.handle,
+        displayName: evidence.profile.resolved_name || evidence.profile.display_name,
+        facts: {
+          schema: 1,
+          basicFacts: verifiedBasicFacts,
+          ventures: verifiedVentures,
+          roles: evidence.roles.map((role) => String(role)),
+          projectToken: evidence.projectToken?.verified ? evidence.projectToken : undefined,
+        },
+      });
+    }
+  }
   finishRuntimeStage("pipeline", runtimeStartedAt);
   return dossier;
 }
