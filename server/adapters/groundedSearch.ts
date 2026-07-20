@@ -19,7 +19,13 @@ const SERPER = "https://google.serper.dev/search";
 const EXTRACT_MODEL = () => env("ARGUS_EXTRACT_MODEL") || "claude-haiku-4-5";
 
 const MAX_RESULTS = 12;
-const MAX_PAGES = 6;
+// Page fetches dominate grounded latency. A high-connectivity subject fans out
+// to many generalWebSearch calls, so each must stay fast or collection blows the
+// time budget and the analyst never runs (observed: @Uniswap timed out at 525s).
+// Snippets already carry most facts; a few full pages are the ceiling, each on a
+// hard timeout so one slow origin can't stall the whole call.
+const MAX_PAGES = 4;
+const FETCH_TIMEOUT_MS = 8_000;
 const MAX_PAGE_CHARS = 4_000;
 
 interface SerperResult { title: string; url: string; snippet: string }
@@ -136,14 +142,18 @@ export async function groundedSearch(system: string, user: string, opts?: { cach
   const results = dedupeByUrl(searched.flat()).slice(0, MAX_RESULTS);
   if (!results.length) return null; // Serper found nothing -> fall back to adaptive search
 
-  const fetched = await Promise.all(results.slice(0, MAX_PAGES).map(async (r) => {
+  const fetchWithTimeout = async (url: string): Promise<{ url: string; text: string } | null> => {
     try {
-      const doc = await fetchPublicText(r.url);
-      return doc.status === "ok" ? { url: r.url, text: doc.text.slice(0, MAX_PAGE_CHARS) } : null;
+      const doc = await Promise.race([
+        fetchPublicText(url),
+        new Promise<null>((resolve) => setTimeout(() => resolve(null), FETCH_TIMEOUT_MS)),
+      ]);
+      return doc && doc.status === "ok" ? { url, text: doc.text.slice(0, MAX_PAGE_CHARS) } : null;
     } catch {
       return null;
     }
-  }));
+  };
+  const fetched = await Promise.all(results.slice(0, MAX_PAGES).map((r) => fetchWithTimeout(r.url)));
 
   const resultsBlock = results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.snippet}`).join("\n\n");
   const pagesBlock = fetched.filter((p): p is { url: string; text: string } => Boolean(p))
