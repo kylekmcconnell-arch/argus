@@ -2891,6 +2891,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
     projectToken: evidence.projectToken,
+    // The scale of the venture a founder verifiably founded is scoreable
+    // evidence about them (F2/F4). It was collected and then dropped before.
+    ventureToken: evidence.ventureToken,
     basicFacts: evidence.basicFacts,
     checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
     providerRuns: checkTracker.providers().runs,

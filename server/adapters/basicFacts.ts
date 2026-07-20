@@ -975,13 +975,22 @@ function discoveryPrompt(
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
+    // ARGUS locates the value verbatim in the fetched page, so a composed phrase
+    // verifies against nothing and, because each source phrases it differently,
+    // also stops two sources corroborating one fact.
+    "value must be the shortest phrase that NAMES the thing: an organization, product, token, school, award, or role title. Never a sentence, clause, explanation, date range, or parenthetical. Put dates, amounts, and context in qualifier instead.",
+    "Good value: \"Ethereum\". Bad value: \"Ethereum (conceived 2013, network launched 30 July 2015)\". Good value: \"Bitcoin Magazine\". Bad value: \"Bitcoin Magazine, which he co-founded in 2011 before starting Ethereum\". Good value: \"University of Waterloo\". Bad value: \"Attended University of Waterloo before dropping out to work on Ethereum\".",
+    "Return a row only when the value literally appears in exact_excerpt as written. If the source states the fact only as prose you cannot reduce to a name, skip the row rather than paraphrasing it.",
     "Set question_id to the exact bracketed question ID. The predicate must match that question.",
     "Each exact_excerpt must be a verbatim one-to-three sentence passage that itself explicitly contains the subject identity, the claimed value, and language proving the predicate.",
     "For traction facts, copy the source's exact as-of date or reporting period into qualifier, preferably an explicit date phrase, only when that phrase appears in exact_excerpt. Never infer, normalize, or invent a date. Omit qualifier when the source does not state a period.",
     "Keep an official crypto token separate from a publicly traded equity or debt security. Never put stock in official_token and never put a crypto token in public_security.",
     "For legal_regulatory_event, include attributed_entity and event_status only when the exact excerpt states them. Never attribute a company-only event to a founder or employee.",
     "Keep formal governance, practical control, and explicit conflicts of interest separate. Do not infer control or a conflict from a job title alone.",
-    "For candidate_urls, include up to three additional public pages that explicitly state the same atomic fact. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url.",
+    // ARGUS publishes a fact only from a first-party page or two independent
+    // sources. A single-sourced row verifies against its page and then dies at
+    // that threshold, so corroborating URLs are required, not optional.
+    "For candidate_urls, ALWAYS include at least one and preferably three additional independent public pages that explicitly state the same atomic fact, on different domains from source_url and from each other. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url. A widely documented fact will have several such pages; if you genuinely cannot find a second page stating it, still return the row with the sources you have.",
     "Do not infer. A search answer is only a lead; ARGUS will fetch and verify every URL independently.",
     "Return JSON only in this exact shape:",
     `{"facts":[{"question_id":"${questions[0]?.id ?? `${audience}.official_identity`}","subject":"...","predicate":"${questions.map((question) => question.predicate).join("|")}","value":"one atomic value","qualifier":"optional verbatim role, metric label, or traction as-of/reporting period present in exact_excerpt","event_status":"optional, exact source wording","attributed_entity":"optional, exact source wording","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}`,
@@ -3691,6 +3700,76 @@ function verifiedIdentityExtendsProfile(ctx: CollectContext, candidate: string):
   return handle === candidateTokens.join("");
 }
 
+/**
+ * A pseudonymous display name ("vitalik.eth") appears in none of the sources
+ * that document the person, so every fetched passage fails the subject gate and
+ * NOTHING about that subject can ever verify. The handle itself usually carries
+ * the real name; derive it conservatively (letters only, two or three tokens,
+ * no promotional or generic suffix).
+ */
+function handleDerivedNameCandidate(handle: string): string | null {
+  const raw = handle.replace(/^@/, "").trim();
+  if (!/^[A-Za-z][A-Za-z_]{2,30}$/.test(raw)) return null;
+  const parts = raw.includes("_") ? raw.split(/_+/) : raw.split(/(?=[A-Z])/);
+  const tokens = parts.map((part) => part.trim()).filter(Boolean);
+  if (tokens.length < 2 || tokens.length > 3) return null;
+  if (tokens.some((token) => token.length < 2 || !/^[A-Za-z]+$/.test(token))) return null;
+  const generic = new Set([
+    "the", "official", "real", "crypto", "eth", "ethereum", "defi", "dao", "nft",
+    "labs", "web3", "sol", "solana", "fund", "capital", "team", "hq", "app", "xyz",
+  ]);
+  if (tokens.some((token) => generic.has(token.toLocaleLowerCase()))) return null;
+  const candidate = tokens
+    .map((token) => `${token.slice(0, 1).toLocaleUpperCase()}${token.slice(1).toLocaleLowerCase()}`)
+    .join(" ");
+  return plausiblePersonIdentity(candidate) ? candidate : null;
+}
+
+/** An account that tells you it is not the person it names. */
+const SELF_DECLARED_NOT_THE_SUBJECT = /\b(?:parody|fan\s*account|fan\s*page|not\s+(?:the\s+)?real|unofficial|impersonat\w*|satire|tribute|bot)\b/i;
+
+/** Authority a lookalike account cannot manufacture. Notable followers are
+ * provider-observed top funds, founders and operators; a squatter registering a
+ * name-shaped handle has neither them nor a large organic following. */
+const MIN_NOTABLE_FOLLOWERS_FOR_NAME_ALIAS = 10;
+const MIN_FOLLOWERS_FOR_NAME_ALIAS = 250_000;
+
+function approximateFollowerCount(value: string): number {
+  const match = /([\d.,]+)\s*([KMB])?/i.exec(value.trim());
+  if (!match) return 0;
+  const base = Number(match[1].replace(/,/g, ""));
+  if (!Number.isFinite(base)) return 0;
+  const scale = match[2]?.toUpperCase();
+  return scale === "B" ? base * 1_000_000_000 : scale === "M" ? base * 1_000_000 : scale === "K" ? base * 1_000 : base;
+}
+
+/**
+ * Widen the MATCHING ALIAS SET for a widely-recognized account whose handle
+ * plainly spells a person's name. This is how sources refer to the subject, and
+ * nothing more: it never sets resolved_name and never touches
+ * identity_confidence, because those drive name-based OFAC, sanctions and court
+ * screening, and a name good enough to read a page with is not a name good
+ * enough to run someone's legal history against.
+ *
+ * Gated on account authority rather than page proximity. A page that merely
+ * mentions an account near a name proves nothing (a scam warning does exactly
+ * that), whereas a decade-old account followed by ten top-tier funds and
+ * founders is the account those sources are written about.
+ */
+function notabilityBoundNameAlias(ctx: CollectContext): string | null {
+  if (researchAudience(ctx) === "project") return null;
+  const profile = ctx.evidence.profile;
+  if (profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi") return null;
+  const candidate = handleDerivedNameCandidate(ctx.handle);
+  if (!candidate) return null;
+  if (subjectAliases(ctx).some((alias) => personKey(alias) === personKey(candidate))) return null;
+  if (SELF_DECLARED_NOT_THE_SUBJECT.test(`${profile.display_name} ${profile.bio}`)) return null;
+  const notable = ctx.evidence.notableFollowers?.length ?? 0;
+  if (notable < MIN_NOTABLE_FOLLOWERS_FOR_NAME_ALIAS) return null;
+  if (approximateFollowerCount(profile.followers) < MIN_FOLLOWERS_FOR_NAME_ALIAS) return null;
+  return candidate;
+}
+
 function applyVerifiedPersonIdentity(ctx: CollectContext, facts: readonly BasicFact[]): boolean {
   if (researchAudience(ctx) === "project") return false;
   const candidate = facts
@@ -3852,7 +3931,11 @@ export async function collectBasicFacts(
   ctx.evidence.basicFactLeads = primaryLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = [];
 
-  let aliases = subjectAliases(ctx);
+  // Seeded before the first pass: notable followers are already collected by the
+  // X lane, so a widely-recognized pseudonymous account can match source
+  // passages immediately instead of burning a verification pass finding nothing.
+  const seededNameAlias = notabilityBoundNameAlias(ctx);
+  let aliases = seededNameAlias ? [...subjectAliases(ctx), seededNameAlias] : subjectAliases(ctx);
   const officialHosts = [ctx.evidence.profile.website]
     .filter((value): value is string => Boolean(value))
     .flatMap((value) => {
@@ -3945,6 +4028,11 @@ export async function collectBasicFacts(
       changed = true;
     }
     if (applyVerifiedPersonIdentity(ctx, facts)) changed = true;
+    const nameAlias = notabilityBoundNameAlias(ctx);
+    if (nameAlias && !aliases.some((alias) => personKey(alias) === personKey(nameAlias))) {
+      aliases = [...aliases, nameAlias];
+      changed = true;
+    }
     const nextAliases = [...new Set([...aliases, ...subjectAliases(ctx)])];
     if (nextAliases.length !== aliases.length) {
       aliases = nextAliases;

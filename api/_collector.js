@@ -2423,9 +2423,9 @@ var FOUNDER_SCORING_POLICY = [
   "FOUNDER CALIBRATION POLICY:",
   "Keep score and confidence separate. Score source-backed identity, operating history, products, outcomes, conduct, and network quality. Record unavailable, stale, checked-empty, or uncollected information in coverageRefs and gaps. Missing coverage is not counter-evidence and never erases a verified fact.",
   "F1 identity verifiability: a fetched first-party organization page, regulator or institutional counterparty record, or two independent fetched sources can establish identity and current authority. A People Data Labs miss, an empty exact-name news query, or a missing personal GitHub profile is only a coverage gap.",
-  "F2 track record: use verified founder and executive relationships, prior roles, products, launches, exits, and concrete operating outcomes. Follower count, posting cadence, profile biography, fame, and X follow relationships never establish a founder role or track record.",
+  "F2 track record: use verified founder and executive relationships, prior roles, products, launches, exits, and concrete operating outcomes. Follower count, posting cadence, profile biography, fame, and X follow relationships never establish a founder role or track record. Weigh the OBSERVED SCALE of what the subject verifiably founded: a verified venture token carries market capitalization, rank, and chain, and a founder whose venture independently reached top-tier scale has demonstrated an outcome far beyond merely shipping something. Reserve the exceptional band for exactly that.",
   "F3 repeat backing: require actual source-backed financing, investor, or repeat-counterparty records across distinct events. Social follows, mutual follows, and generic affiliations are network context, not repeat backing. A completed repeat-backing assessment (the founder-repeat-backing check) that establishes no source-backed repeat financing across the known ventures scores F3 at the low end for lack of a demonstrated positive signal; it is a null result on this axis only, never counter-evidence against identity, track record, build substance, or any other axis.",
-  "F4 build substance: verified live products, protocols, documentation, audits, usage, releases, or organization repositories establish build substance. A personal GitHub account is optional and its absence cannot negate a verified live product.",
+  "F4 build substance: verified live products, protocols, documentation, audits, usage, releases, or organization repositories establish build substance. A personal GitHub account is optional and its absence cannot negate a verified live product. A verified venture token is direct evidence the venture shipped and is live at the observed market scale; a large, independently ranked network is the strongest build evidence available and belongs in the exceptional band.",
   "F5 reputation and integrity: use direct-subject, source-verified conduct, legal, regulatory, sanctions, governance, or conflict evidence. A completed clear screen is coverage context, not affirmative character evidence, and an unavailable screen is not adverse evidence.",
   "F6 network quality: use observed professional relationships and notable network evidence only for network quality. Never transfer that evidence into identity, track record, repeat backing, or build substance.",
   "Preserve the entity named by each source. A person may be CEO of an operating company and founder of a related protocol; do not transfer the company title onto the protocol or DAO."
@@ -3866,6 +3866,7 @@ var eligibleAxesFor = (section, value, axisCatalog2, sourceArtifactPeers = [], s
     ...SECTION_AXIS_ELIGIBILITY.profile,
     ...trustedProjectProfileDaysSincePost(value) !== null ? ["P5_traction_and_liveness"] : []
   ] : [];
+  const ventureTokenAxes = section === "ventureToken" ? value.verified === true && (value.verification === "official_x" || value.verification === "official_domain") ? ["F2_track_record", "F4_build_substance"] : [] : [];
   const projectTokenAxes = section === "projectToken" ? [
     "P3_token_conduct",
     ...[value.marketCapUsd, value.volume24hUsd, value.liquidityUsd].some((metric) => typeof metric === "number" && Number.isFinite(metric) && metric > 0) ? ["P5_traction_and_liveness"] : []
@@ -3873,7 +3874,7 @@ var eligibleAxesFor = (section, value, axisCatalog2, sourceArtifactPeers = [], s
   const teamAxes = section === "team" ? SECTION_AXIS_ELIGIBILITY.team.filter((axis) => axis !== "P2_product_substance" && (axis !== "P4_backing_and_partners" || PROJECT_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? "") && !PROJECT_NON_BACKING_TEAM_ROLE.test(recordText(value, ["role"], 180) ?? ""))) : [];
   const recentActivityText = section === "recentActivity" ? recordText(value, ["text", "value", "claim", "title"], 1e3) ?? "" : "";
   const recentActivityAxes = section === "recentActivity" ? SECTION_AXIS_ELIGIBILITY.recentActivity.filter((axis) => (axis !== "P3_token_conduct" || PROJECT_TOKEN_ACTIVITY.test(recentActivityText)) && (axis !== "P6_transparency_integrity" || PROJECT_TRANSPARENCY_ACTIVITY.test(recentActivityText))) : [];
-  const eligible = section === "profile" ? profileAxes : section === "projectToken" ? projectTokenAxes : section === "team" ? teamAxes : section === "recentActivity" ? recentActivityAxes : section === "findings" ? findingAxes : section === "checkOutcomes" && checkId ? candidateOnlyNameScreen ? [] : CHECK_AXIS_ELIGIBILITY[checkId] ?? [] : section === "basicFacts" ? basicFactAxes : section === "sourceArtifacts" ? sourceArtifactEligibleAxes(value, sourceArtifactPeers, subjectHandle, profile) : SECTION_AXIS_ELIGIBILITY[section] ?? [];
+  const eligible = section === "profile" ? profileAxes : section === "ventureToken" ? ventureTokenAxes : section === "projectToken" ? projectTokenAxes : section === "team" ? teamAxes : section === "recentActivity" ? recentActivityAxes : section === "findings" ? findingAxes : section === "checkOutcomes" && checkId ? candidateOnlyNameScreen ? [] : CHECK_AXIS_ELIGIBILITY[checkId] ?? [] : section === "basicFacts" ? basicFactAxes : section === "sourceArtifacts" ? sourceArtifactEligibleAxes(value, sourceArtifactPeers, subjectHandle, profile) : SECTION_AXIS_ELIGIBILITY[section] ?? [];
   const allowed = new Set(eligible);
   return [...new Set(axisCatalog2.filter((axis) => allowed.has(axis.axis)).map((axis) => axis.axis))];
 };
@@ -3986,7 +3987,7 @@ var verificationFor = (section, record2, sourceArtifactPeers = [], subjectHandle
     if (qualifiedConnections.length > 0) return "verified";
     return "unavailable";
   }
-  if (section === "projectToken") {
+  if (section === "projectToken" || section === "ventureToken") {
     return record2.verified === true && (record2.verification === "official_x" || record2.verification === "official_domain") ? "verified" : "unavailable";
   }
   if (section === "basicFacts") {
@@ -4015,6 +4016,7 @@ var providerFor = (section, payload) => {
     const profileProvider = recordText(payload, ["profile_provider"], 100);
     if (profileProvider) return profileProvider;
   }
+  if (section === "ventureToken") return "coingecko";
   if (section === "projectToken") {
     const observed = Array.isArray(payload.providers) ? payload.providers.filter((value) => value === "coingecko" || value === "dexscreener" || value === "geckoterminal") : [];
     return observed.length ? [...new Set(observed)].join("/") : "coingecko";
@@ -4068,7 +4070,7 @@ var makeAxisArtifact = (section, value, axisCatalog2, eligibleOverride, sourceAr
     }
   };
 };
-var SCORING_SINGLE_SECTIONS = ["profile", "profileAuthenticity", "trustGraphScreen", "projectToken"];
+var SCORING_SINGLE_SECTIONS = ["profile", "profileAuthenticity", "trustGraphScreen", "projectToken", "ventureToken"];
 var SCORING_ARRAY_SECTIONS = [
   "findings",
   "ventures",
@@ -9359,13 +9361,22 @@ function discoveryPrompt(ctx, questions, phase = "primary") {
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
     "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
+    // ARGUS locates the value verbatim in the fetched page, so a composed phrase
+    // verifies against nothing and, because each source phrases it differently,
+    // also stops two sources corroborating one fact.
+    "value must be the shortest phrase that NAMES the thing: an organization, product, token, school, award, or role title. Never a sentence, clause, explanation, date range, or parenthetical. Put dates, amounts, and context in qualifier instead.",
+    'Good value: "Ethereum". Bad value: "Ethereum (conceived 2013, network launched 30 July 2015)". Good value: "Bitcoin Magazine". Bad value: "Bitcoin Magazine, which he co-founded in 2011 before starting Ethereum". Good value: "University of Waterloo". Bad value: "Attended University of Waterloo before dropping out to work on Ethereum".',
+    "Return a row only when the value literally appears in exact_excerpt as written. If the source states the fact only as prose you cannot reduce to a name, skip the row rather than paraphrasing it.",
     "Set question_id to the exact bracketed question ID. The predicate must match that question.",
     "Each exact_excerpt must be a verbatim one-to-three sentence passage that itself explicitly contains the subject identity, the claimed value, and language proving the predicate.",
     "For traction facts, copy the source's exact as-of date or reporting period into qualifier, preferably an explicit date phrase, only when that phrase appears in exact_excerpt. Never infer, normalize, or invent a date. Omit qualifier when the source does not state a period.",
     "Keep an official crypto token separate from a publicly traded equity or debt security. Never put stock in official_token and never put a crypto token in public_security.",
     "For legal_regulatory_event, include attributed_entity and event_status only when the exact excerpt states them. Never attribute a company-only event to a founder or employee.",
     "Keep formal governance, practical control, and explicit conflicts of interest separate. Do not infer control or a conflict from a job title alone.",
-    "For candidate_urls, include up to three additional public pages that explicitly state the same atomic fact. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url.",
+    // ARGUS publishes a fact only from a first-party page or two independent
+    // sources. A single-sourced row verifies against its page and then dies at
+    // that threshold, so corroborating URLs are required, not optional.
+    "For candidate_urls, ALWAYS include at least one and preferably three additional independent public pages that explicitly state the same atomic fact, on different domains from source_url and from each other. Prefer the project's official site, docs, governance forum, or primary documents, then independent reporting. Do not repeat source_url. A widely documented fact will have several such pages; if you genuinely cannot find a second page stating it, still return the row with the sources you have.",
     "Do not infer. A search answer is only a lead; ARGUS will fetch and verify every URL independently.",
     "Return JSON only in this exact shape:",
     `{"facts":[{"question_id":"${questions[0]?.id ?? `${audience}.official_identity`}","subject":"...","predicate":"${questions.map((question) => question.predicate).join("|")}","value":"one atomic value","qualifier":"optional verbatim role, metric label, or traction as-of/reporting period present in exact_excerpt","event_status":"optional, exact source wording","attributed_entity":"optional, exact source wording","exact_excerpt":"verbatim source passage","source_url":"https://...","source_title":"...","candidate_urls":["https://..."]}]}`
@@ -11382,6 +11393,62 @@ function verifiedIdentityExtendsProfile(ctx, candidate) {
   const handle = looseTokens(ctx.handle.replace(/^@/, "")).join("");
   return handle === candidateTokens.join("");
 }
+function handleDerivedNameCandidate(handle) {
+  const raw = handle.replace(/^@/, "").trim();
+  if (!/^[A-Za-z][A-Za-z_]{2,30}$/.test(raw)) return null;
+  const parts = raw.includes("_") ? raw.split(/_+/) : raw.split(/(?=[A-Z])/);
+  const tokens = parts.map((part) => part.trim()).filter(Boolean);
+  if (tokens.length < 2 || tokens.length > 3) return null;
+  if (tokens.some((token) => token.length < 2 || !/^[A-Za-z]+$/.test(token))) return null;
+  const generic = /* @__PURE__ */ new Set([
+    "the",
+    "official",
+    "real",
+    "crypto",
+    "eth",
+    "ethereum",
+    "defi",
+    "dao",
+    "nft",
+    "labs",
+    "web3",
+    "sol",
+    "solana",
+    "fund",
+    "capital",
+    "team",
+    "hq",
+    "app",
+    "xyz"
+  ]);
+  if (tokens.some((token) => generic.has(token.toLocaleLowerCase()))) return null;
+  const candidate = tokens.map((token) => `${token.slice(0, 1).toLocaleUpperCase()}${token.slice(1).toLocaleLowerCase()}`).join(" ");
+  return plausiblePersonIdentity(candidate) ? candidate : null;
+}
+var SELF_DECLARED_NOT_THE_SUBJECT = /\b(?:parody|fan\s*account|fan\s*page|not\s+(?:the\s+)?real|unofficial|impersonat\w*|satire|tribute|bot)\b/i;
+var MIN_NOTABLE_FOLLOWERS_FOR_NAME_ALIAS = 10;
+var MIN_FOLLOWERS_FOR_NAME_ALIAS = 25e4;
+function approximateFollowerCount(value) {
+  const match = /([\d.,]+)\s*([KMB])?/i.exec(value.trim());
+  if (!match) return 0;
+  const base = Number(match[1].replace(/,/g, ""));
+  if (!Number.isFinite(base)) return 0;
+  const scale = match[2]?.toUpperCase();
+  return scale === "B" ? base * 1e9 : scale === "M" ? base * 1e6 : scale === "K" ? base * 1e3 : base;
+}
+function notabilityBoundNameAlias(ctx) {
+  if (researchAudience(ctx) === "project") return null;
+  const profile = ctx.evidence.profile;
+  if (profile.profile_collection_state !== "resolved" || profile.profile_provider !== "twitterapi") return null;
+  const candidate = handleDerivedNameCandidate(ctx.handle);
+  if (!candidate) return null;
+  if (subjectAliases(ctx).some((alias) => personKey(alias) === personKey(candidate))) return null;
+  if (SELF_DECLARED_NOT_THE_SUBJECT.test(`${profile.display_name} ${profile.bio}`)) return null;
+  const notable = ctx.evidence.notableFollowers?.length ?? 0;
+  if (notable < MIN_NOTABLE_FOLLOWERS_FOR_NAME_ALIAS) return null;
+  if (approximateFollowerCount(profile.followers) < MIN_FOLLOWERS_FOR_NAME_ALIAS) return null;
+  return candidate;
+}
 function applyVerifiedPersonIdentity(ctx, facts) {
   if (researchAudience(ctx) === "project") return false;
   const candidate = facts.filter((fact) => fact.predicate === "official_identity" && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && verifiedIdentityExtendsProfile(ctx, fact.value)).sort((left, right) => looseTokens(right.value).length - looseTokens(left.value).length)[0];
@@ -11494,7 +11561,8 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   ]);
   ctx.evidence.basicFactLeads = primaryLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = [];
-  let aliases = subjectAliases(ctx);
+  const seededNameAlias = notabilityBoundNameAlias(ctx);
+  let aliases = seededNameAlias ? [...subjectAliases(ctx), seededNameAlias] : subjectAliases(ctx);
   const officialHosts = [ctx.evidence.profile.website].filter((value) => Boolean(value)).flatMap((value) => {
     try {
       return [new URL(value).toString()];
@@ -11572,6 +11640,11 @@ async function collectBasicFacts(ctx, dependencies = {}) {
       changed = true;
     }
     if (applyVerifiedPersonIdentity(ctx, facts)) changed = true;
+    const nameAlias = notabilityBoundNameAlias(ctx);
+    if (nameAlias && !aliases.some((alias) => personKey(alias) === personKey(nameAlias))) {
+      aliases = [...aliases, nameAlias];
+      changed = true;
+    }
     const nextAliases = [.../* @__PURE__ */ new Set([...aliases, ...subjectAliases(ctx)])];
     if (nextAliases.length !== aliases.length) {
       aliases = nextAliases;
@@ -18702,6 +18775,9 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     profileAuthenticity: evidence.profileAuthenticity,
     trustGraphScreen: evidence.trustGraphScreen,
     projectToken: evidence.projectToken,
+    // The scale of the venture a founder verifiably founded is scoreable
+    // evidence about them (F2/F4). It was collected and then dropped before.
+    ventureToken: evidence.ventureToken,
     basicFacts: evidence.basicFacts,
     checkOutcomes: checkTracker.snapshot(evidence.roles, { resolvedRealName: hasResolvedRealName(ctx) }),
     providerRuns: checkTracker.providers().runs

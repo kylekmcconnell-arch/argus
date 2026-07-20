@@ -542,9 +542,9 @@ export const FOUNDER_SCORING_POLICY = [
   "FOUNDER CALIBRATION POLICY:",
   "Keep score and confidence separate. Score source-backed identity, operating history, products, outcomes, conduct, and network quality. Record unavailable, stale, checked-empty, or uncollected information in coverageRefs and gaps. Missing coverage is not counter-evidence and never erases a verified fact.",
   "F1 identity verifiability: a fetched first-party organization page, regulator or institutional counterparty record, or two independent fetched sources can establish identity and current authority. A People Data Labs miss, an empty exact-name news query, or a missing personal GitHub profile is only a coverage gap.",
-  "F2 track record: use verified founder and executive relationships, prior roles, products, launches, exits, and concrete operating outcomes. Follower count, posting cadence, profile biography, fame, and X follow relationships never establish a founder role or track record.",
+  "F2 track record: use verified founder and executive relationships, prior roles, products, launches, exits, and concrete operating outcomes. Follower count, posting cadence, profile biography, fame, and X follow relationships never establish a founder role or track record. Weigh the OBSERVED SCALE of what the subject verifiably founded: a verified venture token carries market capitalization, rank, and chain, and a founder whose venture independently reached top-tier scale has demonstrated an outcome far beyond merely shipping something. Reserve the exceptional band for exactly that.",
   "F3 repeat backing: require actual source-backed financing, investor, or repeat-counterparty records across distinct events. Social follows, mutual follows, and generic affiliations are network context, not repeat backing. A completed repeat-backing assessment (the founder-repeat-backing check) that establishes no source-backed repeat financing across the known ventures scores F3 at the low end for lack of a demonstrated positive signal; it is a null result on this axis only, never counter-evidence against identity, track record, build substance, or any other axis.",
-  "F4 build substance: verified live products, protocols, documentation, audits, usage, releases, or organization repositories establish build substance. A personal GitHub account is optional and its absence cannot negate a verified live product.",
+  "F4 build substance: verified live products, protocols, documentation, audits, usage, releases, or organization repositories establish build substance. A personal GitHub account is optional and its absence cannot negate a verified live product. A verified venture token is direct evidence the venture shipped and is live at the observed market scale; a large, independently ranked network is the strongest build evidence available and belongs in the exceptional band.",
   "F5 reputation and integrity: use direct-subject, source-verified conduct, legal, regulatory, sanctions, governance, or conflict evidence. A completed clear screen is coverage context, not affirmative character evidence, and an unavailable screen is not adverse evidence.",
   "F6 network quality: use observed professional relationships and notable network evidence only for network quality. Never transfer that evidence into identity, track record, repeat backing, or build substance.",
   "Preserve the entity named by each source. A person may be CEO of an operating company and founder of a related protocol; do not transfer the company title onto the protocol or DAO.",
@@ -2375,6 +2375,17 @@ const eligibleAxesFor = (
           : []),
       ]
     : [];
+  // What the founder actually built, at its observed scale. A verified venture
+  // token is bound by the venture's own official X account or domain, so it
+  // says "this person founded a network of this size" - track record and build
+  // substance. It is deliberately NOT eligible for identity, reputation, or
+  // repeat backing: market scale is not conduct evidence about the person.
+  const ventureTokenAxes = section === "ventureToken"
+    ? (value.verified === true
+      && (value.verification === "official_x" || value.verification === "official_domain")
+        ? ["F2_track_record", "F4_build_substance"]
+        : [])
+    : [];
   const projectTokenAxes = section === "projectToken"
     ? [
         "P3_token_conduct",
@@ -2402,6 +2413,8 @@ const eligibleAxesFor = (
     : [];
   const eligible = section === "profile"
     ? profileAxes
+    : section === "ventureToken"
+      ? ventureTokenAxes
     : section === "projectToken"
       ? projectTokenAxes
     : section === "team"
@@ -2537,7 +2550,7 @@ const verificationFor = (
     if (qualifiedConnections.length > 0) return "verified";
     return "unavailable";
   }
-  if (section === "projectToken") {
+  if (section === "projectToken" || section === "ventureToken") {
     return record.verified === true
       && (record.verification === "official_x" || record.verification === "official_domain")
       ? "verified"
@@ -2591,6 +2604,7 @@ const providerFor = (section: string, payload: Record<string, unknown>): string 
     const profileProvider = recordText(payload, ["profile_provider"], 100);
     if (profileProvider) return profileProvider;
   }
+  if (section === "ventureToken") return "coingecko";
   if (section === "projectToken") {
     const observed = Array.isArray(payload.providers)
       ? payload.providers.filter((value): value is string =>
@@ -2670,7 +2684,7 @@ const makeAxisArtifact = (
   };
 };
 
-const SCORING_SINGLE_SECTIONS = ["profile", "profileAuthenticity", "trustGraphScreen", "projectToken"] as const;
+const SCORING_SINGLE_SECTIONS = ["profile", "profileAuthenticity", "trustGraphScreen", "projectToken", "ventureToken"] as const;
 const SCORING_ARRAY_SECTIONS = [
   "findings", "ventures", "testimonials", "advised", "promotions", "wallets", "team",
   "basicFacts",
