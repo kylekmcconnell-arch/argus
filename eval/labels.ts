@@ -56,6 +56,16 @@ export const LABELS: SubjectLabel[] = [
     readyToRecord: true,
   },
   {
+    handle: "@a16zcrypto",
+    displayName: "a16z crypto",
+    expectedRole: "INVESTOR",
+    mustNotBeIncomplete: true,
+    mustSurface: [/a16z|andreessen/i],
+    minScore: 60,
+    validates: "investor/fund-scale discovery moved to Claude web_search (fund recall, task #38)",
+    readyToRecord: true,
+  },
+  {
     // Adverse ground truth. Handle status must be confirmed before recording;
     // a suspended account resolves to INCOMPLETE for the wrong reason. Kept for
     // the adverse-signals (#7) migration, not Phase 1.
