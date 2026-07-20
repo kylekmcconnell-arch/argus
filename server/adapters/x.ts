@@ -906,7 +906,7 @@ export async function discoverAffiliations(handle: string, name?: string, oldHan
     "For each, also report the venture's own X handle and website domain if you can find them. " +
     "Reply with ONLY compact JSON: {\"affiliations\":[{\"name\":\"\",\"role\":\"founder|cofounder|exec|employee|engineer|contributor|advisor|affiliate\",\"year\":\"\",\"evidence\":\"one short source phrase\",\"x_handle\":\"@...\",\"domain\":\"example.com\"}]}. " +
     "Include ONLY affiliations you found real, attributable evidence for. If you cannot confidently tie a venture to THIS person, omit it. If you find nothing, return {\"affiliations\":[]}. NEVER invent, guess, or include a venture just because the name is common. Never use em dashes.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Find every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Use their own footprint AND project accounts announcing them. Prioritize the ventures they are best known for; a few well-sourced ventures are worth more than an exhaustive list. Search the web and X including historical posts.`, { maxToolCalls: 4, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
+  const text = await generalWebSearch(system, `Person: ${name || h} (X handle @${h}).${aliasLine} Find every company or project they have founded, led, worked at, contributed to, or advised, however small the role. Use their own footprint AND project accounts announcing them. Prioritize the ventures they are best known for; a few well-sourced ventures are worth more than an exhaustive list. Search the web and X including historical posts.`, { maxToolCalls: 4, cacheKey: `affil:${h}:${oldHandles.join(",")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
@@ -1027,7 +1027,7 @@ export async function enrichTeamIdentities(
     "Match the RIGHT person: same name + same project/role (check bios, the project's follows, press). If you cannot confidently match one, omit that field rather than guess. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\"}]}. Provide one entry per input name, with fields omitted when unknown. NEVER invent. Never use em dashes.";
   const list = people.map((p) => `${p.name}${p.role ? ` (${p.role})` : ""}`).join("; ");
-  const text = await grokSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich:${project}:${people.map((p) => p.name).sort().join("|")}` });
+  const text = await generalWebSearch(system, `Project: ${project}. Team members to resolve: ${list}. Find each person's X handle and LinkedIn.`, { cacheKey: `enrich:${project}:${people.map((p) => p.name).sort().join("|")}` });
   if (!text) return [];
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return [];
