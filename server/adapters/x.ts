@@ -8,8 +8,8 @@
 //     mention/reply/thank @subject) and recent-activity sentiment.
 
 import type { Adapter, CollectContext } from "./types";
-import { env } from "../config";
-import { addGrokUsage, recordCall, recordTwitterapi, grokSpendUsd } from "../cost";
+import { env, DISCOVERY_MODEL } from "../config";
+import { addGrokUsage, addClaudeUsage, recordCall, recordTwitterapi, grokSpendUsd } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower } from "../../src/data/evidence";
@@ -140,6 +140,100 @@ export async function grokSearch(system: string, user: string, opts?: {
   if (result.status === 400 && !result.budgetExhausted) result = await call(false); // param unsupported -> compat retry
   if (result.text && opts?.cacheKey && !opts.bypassCache) void cacheSet(opts.cacheKey, result.text);
   return result.text;
+}
+
+const ANTHROPIC = "https://api.anthropic.com/v1/messages";
+
+// General-web search via Claude's hosted web_search tool. Same contract as
+// grokSearch (system + user -> the model's synthesized text, usually JSON), but
+// Claude web_search bills a flat $0.01/request instead of Grok's per-source live
+// search (~$0.125+/call, ~12x more). Only for call sites with NO X-corpus
+// dependency: LinkedIn, Crunchbase, GitHub, press, filings, product docs.
+// Returns null ONLY on an API/transport failure, so a dispatcher can fall back
+// to Grok; a search that legitimately finds nothing still returns its empty
+// JSON (non-null) and must not trigger a fallback (no double-billing).
+export async function claudeWebSearch(system: string, user: string, opts?: {
+  maxSearchUses?: number;
+  cacheKey?: string;
+  bypassCache?: boolean;
+}): Promise<string | null> {
+  const key = env("ANTHROPIC_API_KEY");
+  if (!key) return null;
+  if (opts?.cacheKey && !opts.bypassCache) {
+    const hit = await cacheGet(opts.cacheKey);
+    if (hit) return hit;
+  }
+  let res: Response;
+  try {
+    res = await fetch(ANTHROPIC, {
+      method: "POST",
+      headers: {
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: DISCOVERY_MODEL,
+        max_tokens: 3_000,
+        system,
+        messages: [{ role: "user", content: user }],
+        tools: [{ type: "web_search_20250305", name: "web_search", max_uses: opts?.maxSearchUses ?? 4 }],
+      }),
+      signal: AbortSignal.timeout(45000),
+    });
+  } catch {
+    addClaudeUsage(undefined, "web-search", "failed", "transport_error");
+    return null;
+  }
+  if (!res.ok) {
+    addClaudeUsage(undefined, "web-search", "failed", `http_${res.status}`);
+    return null;
+  }
+  let d: JsonRecord;
+  try { d = asRecord(await res.json()); }
+  catch {
+    addClaudeUsage(undefined, "web-search", "failed", "response_json_error");
+    return null;
+  }
+  const usageRecord = asRecord(d.usage);
+  const usage = {
+    input_tokens: optionalNumber(usageRecord.input_tokens),
+    output_tokens: optionalNumber(usageRecord.output_tokens),
+    server_tool_use: {
+      web_search_requests: optionalNumber(asRecord(usageRecord.server_tool_use).web_search_requests),
+    },
+  };
+  const text = (Array.isArray(d.content) ? d.content.map(asRecord) : [])
+    .filter((block) => block.type === "text" && typeof block.text === "string")
+    .map((block) => block.text as string)
+    .join("\n");
+  addClaudeUsage(usage, "web-search", text ? "succeeded" : "partial", text ? undefined : "empty_output");
+  if (text && opts?.cacheKey && !opts.bypassCache) void cacheSet(opts.cacheKey, text);
+  return text || null;
+}
+
+// Dispatcher for GENERAL-WEB discovery (no X-corpus dependency). Tries Claude
+// web_search first (12x cheaper), falling back to Grok live search only when
+// Claude is unavailable or errors (-> null). A Claude search that runs and finds
+// nothing returns its empty JSON (non-null), so the common empty case does NOT
+// re-pay Grok; the fallback exists only to preserve recall when Claude could not
+// answer at all. ARGUS_GENERAL_WEB_PROVIDER=grok forces the legacy path for
+// a controlled A/B or emergency rollback.
+export async function generalWebSearch(system: string, user: string, opts?: {
+  maxToolCalls?: number;
+  cacheKey?: string;
+  bypassCache?: boolean;
+  claimProviderCall?: () => boolean;
+}): Promise<string | null> {
+  if ((env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() !== "grok") {
+    const viaClaude = await claudeWebSearch(system, user, {
+      maxSearchUses: opts?.maxToolCalls,
+      cacheKey: opts?.cacheKey ? `cw1:${opts.cacheKey}` : undefined,
+      bypassCache: opts?.bypassCache,
+    });
+    if (viaClaude) return viaClaude;
+  }
+  return grokSearch(system, user, opts);
 }
 
 // twitterapi.io throttles hard (429) under bursty use, and occasionally 502/503.
@@ -915,7 +1009,7 @@ export async function findTeamOnSite(domain: string, projectName?: string): Prom
     "Be PRECISE about each person's role AT THIS project: only call someone an advisor if the project actually names them as one; if the site/LinkedIn shows them as a founder/cofounder/CEO, use THAT. Do NOT downgrade a founder to advisor. " +
     "For EACH person, also list their OTHER notable projects/companies (name + their role there) that web/LinkedIn/Crunchbase reveal. This exposes serial founders and cross-project ties. " +
     "Reply with ONLY compact JSON: {\"people\":[{\"name\":\"\",\"handle\":\"@...\",\"linkedin\":\"linkedin.com/in/...\",\"role\":\"\",\"kind\":\"team|advisor\",\"evidence\":\"\",\"projects\":[{\"name\":\"\",\"role\":\"\"}]}]}. If nobody, {\"people\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean || projectName}` });
+  const text = await generalWebSearch(system, `Crypto/tech ${anchor}. Find the COMPLETE public team: every founder, executive, core team member, and advisor behind it. Read its LinkedIn company People tab, Crunchbase, GitHub org, and press. Connect each to their X handle and LinkedIn, give each person's PRECISE role here, AND list their other projects. Name as many verifiable people as you can, not just the most famous one.`, { cacheKey: `team-site:${clean || projectName}` });
   return parseTeamJSON(text, undefined, clean ? "web/LinkedIn search" : "web/LinkedIn (by name)");
 }
 
@@ -1121,7 +1215,7 @@ export async function detectManipulationTooling(handle: string, name?: string): 
     "You are a forensic research lead generator with live web and X search. Surface candidate first-party pages that may connect the given person to a token bundler, wallet mixer, volume faker, wash-trading generator, or multi-wallet snipe bot. " +
     "Return leads for an independent collector to verify; do not decide that the person operates the tool and do not call the connection verified. Prefer the product's own page, docs, or post and include the role claimed on that page. Legitimate general token-creation or analytics tools do not count. " +
     "Reply with ONLY compact JSON: {\"role_claim\":\"\",\"tools\":[{\"name\":\"\",\"kind\":\"bundler|mixer|volume_faker|snipe_bot|multi_wallet|other\",\"url\":\"\",\"evidence\":\"\"}]}. If none, return {\"role_claim\":\"\",\"tools\":[]}. NEVER invent. Never use em dashes.";
-  const text = await grokSearch(system, `Person: ${name || h} (X handle @${h}). Find candidate first-party pages that may link them to manipulation tooling. Return URLs for later independent verification only.`, { cacheKey: `manip:${h}` });
+  const text = await generalWebSearch(system, `Person: ${name || h} (X handle @${h}). Find candidate first-party pages that may link them to manipulation tooling. Return URLs for later independent verification only.`, { cacheKey: `manip:${h}` });
   if (!text) return null;
   const m = text.match(/\{[\s\S]*\}/);
   if (!m) return null;
