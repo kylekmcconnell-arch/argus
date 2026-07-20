@@ -673,6 +673,42 @@ function canonicalOfficialTokenLeadValue(value: string): string {
 }
 
 /**
+ * Web-search models answer with the atomic fact plus composed context:
+ * "Ethereum (conceived 2013, network launched 30 July 2015)" or "The Merge
+ * \u2014 Ethereum's transition from Proof-of-Work". That trailing context is useful
+ * discovery colour, but as part of the VALUE it is doubly destructive: the
+ * string cannot be located verbatim in fetched source text, and because every
+ * source gets its own composed phrasing, two sources stating the same fact
+ * never collapse onto one fact key and can never meet the two-source
+ * publication threshold. Reduce the value to its locatable core and keep the
+ * remainder as qualifier context. Conservative by construction: only a trailing
+ * parenthetical, or a trailing dash clause that is plainly a description rather
+ * than part of a name, is removed.
+ */
+function canonicalLeadValueCore(value: string): { value: string; trailing?: string } {
+  const normalized = normalize(value);
+  // Refuse to strip anything that changes what the value MEANS. A rename
+  // ("Aave (originally ETHLend)") means the model merged two entities and the
+  // atomic-venture guard must still see it whole. A denial, dispute, hedge, or
+  // attribution shift ("Ethereum (he was not a founder; disputed)", "SEC fraud
+  // charges (against Terraform Labs, not him personally)") is the opposite of
+  // the claim: stripping it would turn a denial into an assertion.
+  const MEANING_BEARING = /\b(?:also known as|formerly|originally|previously|rebrand(?:ed)?|aka|f\.?k\.?a\.?|not|never|no longer|denies|denied|disputed|contested|alleged(?:ly)?|unproven|unconfirmed|rumou?red|purported(?:ly)?|claimed|proposed|planned|abandoned|withdrawn|parody|fake|impersonat\w*|different|unrelated|another|against|until|but|however|pleaded|charged|indicted)\b/i;
+  if (MEANING_BEARING.test(normalized)) return { value: normalized };
+  // Only a trailing parenthetical is reduced. A dash clause is left alone: in a
+  // role value ("CEO \u2014 Binance") the text after the dash is the organization,
+  // which is the part that makes the role verifiable at all.
+  const parenthetical = /^(.*?[^\s(])\s*\(([^()]{2,160})\)$/.exec(normalized);
+  if (parenthetical) {
+    const base = parenthetical[1].trim();
+    if (base.length >= 2 && /[a-z0-9]/i.test(base)) {
+      return { value: base, trailing: parenthetical[2].trim() };
+    }
+  }
+  return { value: normalized };
+}
+
+/**
  * Hosted search sometimes puts a role after the requested full name. Strip
  * only an unmistakable, delimited role suffix. The fetched source still has
  * to prove the resulting name, so this turns model formatting into a lead and
@@ -735,11 +771,15 @@ export function parseBasicFactLeads(
     const sourceUrl = safeCandidateUrl(row.source_url ?? row.sourceUrl);
     if (!predicate || !PREDICATES.has(predicate) || !subject || !rawValue || !excerpt || !sourceUrl) continue;
     const suppliedQuestionId = clean(row.question_id ?? row.questionId, 100);
-    const value = predicate === "official_token"
+    const bespokeValue = predicate === "official_token"
       ? canonicalOfficialTokenLeadValue(rawValue)
       : predicate === "official_identity" && /^(?:person|investor)\./.test(suppliedQuestionId ?? "")
         ? canonicalOfficialIdentityLeadValue(rawValue)
-        : rawValue;
+        : undefined;
+    const core: { value: string | null; trailing?: string } = bespokeValue === undefined
+      ? canonicalLeadValueCore(rawValue)
+      : { value: bespokeValue };
+    const value = core.value;
     if (!value) continue;
     if (isEmptyAssetPlaceholder(predicate, value)) continue;
     if (!isAtomicValue(predicate, value)) continue;
@@ -755,7 +795,8 @@ export function parseBasicFactLeads(
       && inferredQuestion.audience !== "project"
       && !atomicPersonVentureValue(value)
     ) continue;
-    const qualifier = clean(row.qualifier, 120);
+    const qualifier = clean([clean(row.qualifier, 120), clean(core.trailing, 160)]
+      .filter(Boolean).join(" · "), 240);
     const eventStatus = clean(row.event_status ?? row.eventStatus, 160);
     const attributedEntity = clean(row.attributed_entity ?? row.attributedEntity, 200);
     if (predicate === "legal_regulatory_event" && (!eventStatus || !attributedEntity)) continue;
@@ -3843,9 +3884,13 @@ export async function collectBasicFacts(
     const pending = (async (): Promise<PublicTextResult> => {
       const primary = await fetchAndRecord(url);
       const localized = coinbaseWrappedAssetLocaleFallback(url);
-      if (!localized || isExpectedCoinbaseWrappedAssetPage(primary, localized)) return primary;
-      const recovered = await fetchAndRecord(localized);
-      return recovered.status === "ok" ? recovered : primary;
+      const result = !localized || isExpectedCoinbaseWrappedAssetPage(primary, localized)
+        ? primary
+        : await (async () => {
+          const recovered = await fetchAndRecord(localized);
+          return recovered.status === "ok" ? recovered : primary;
+        })();
+      return result;
     })();
     sourceByUrl.set(key, pending);
     return pending;

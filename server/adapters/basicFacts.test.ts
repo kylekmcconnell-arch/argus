@@ -4596,3 +4596,52 @@ WBTC is an ERC-20 wrapped token issued by BitGo. Coinbase customers can trade WB
     }));
   });
 });
+
+describe("lead value core normalization", () => {
+  const parseValue = (value: string, predicate = "founded", qualifier?: string) => {
+    const { ctx } = context();
+    ctx.handle = "@StaniKulechov";
+    ctx.evidence.profile.display_name = "Stani";
+    ctx.evidence.profile.resolved_name = "Stani";
+    ctx.evidence.roles = [SubjectClass.FOUNDER];
+    const parsed = parseBasicFactLeads(JSON.stringify({
+      facts: [{
+        question_id: `person.${predicate}`,
+        subject: "Stani Kulechov",
+        predicate,
+        value,
+        ...(qualifier ? { qualifier } : {}),
+        exact_excerpt: "Stani Kulechov founded Aave.",
+        source_url: "https://aave.com/about",
+      }],
+    }), "Stani", "claude-web-search", basicFactsResearchQuestions(ctx));
+    return parsed?.[0];
+  };
+
+  it("reduces a benign trailing parenthetical so independent sources share one fact key", () => {
+    const parsed = parseValue("Ethereum (conceived 2013, network launched 30 July 2015)");
+    expect(parsed?.value).toBe("Ethereum");
+    expect(parsed?.qualifier).toContain("conceived 2013");
+  });
+
+  it.each([
+    "Ethereum (he was not a founder; the claim is disputed)",
+    "Ethereum (alleged, unproven)",
+    "Uniswap (a different Hayden Adams, not this account holder)",
+    "Solana (proposed but never launched by this person)",
+  ])("never strips a denial or disclaimer: %s", (value) => {
+    const parsed = parseValue(value);
+    if (parsed) expect(parsed.value).toBe(value);
+  });
+
+  it("keeps the organization attached to a role instead of stripping past a dash", () => {
+    const parsed = parseValue("CEO \u2014 Binance, until he pleaded guilty in November 2023", "current_role");
+    if (parsed) expect(parsed.value).toContain("Binance");
+  });
+
+  it("preserves stripped context even when the model supplies its own qualifier", () => {
+    const parsed = parseValue("Ethereum (network launched 30 July 2015)", "founded", "DeFi protocol");
+    expect(parsed?.value).toBe("Ethereum");
+    expect(parsed?.qualifier).toContain("network launched");
+  });
+});

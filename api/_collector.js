@@ -9152,6 +9152,19 @@ function canonicalOfficialTokenLeadValue(value) {
   const named = new RegExp(`^[^();]{2,100}\\(\\s*(${symbol})\\s*\\)\\s*(?:[\xB7:\\u2013\\u2014]|\\s-\\s|$)`).exec(normalized4)?.[1];
   return named ?? normalized4;
 }
+function canonicalLeadValueCore(value) {
+  const normalized4 = normalize(value);
+  const MEANING_BEARING = /\b(?:also known as|formerly|originally|previously|rebrand(?:ed)?|aka|f\.?k\.?a\.?|not|never|no longer|denies|denied|disputed|contested|alleged(?:ly)?|unproven|unconfirmed|rumou?red|purported(?:ly)?|claimed|proposed|planned|abandoned|withdrawn|parody|fake|impersonat\w*|different|unrelated|another|against|until|but|however|pleaded|charged|indicted)\b/i;
+  if (MEANING_BEARING.test(normalized4)) return { value: normalized4 };
+  const parenthetical = /^(.*?[^\s(])\s*\(([^()]{2,160})\)$/.exec(normalized4);
+  if (parenthetical) {
+    const base = parenthetical[1].trim();
+    if (base.length >= 2 && /[a-z0-9]/i.test(base)) {
+      return { value: base, trailing: parenthetical[2].trim() };
+    }
+  }
+  return { value: normalized4 };
+}
 function canonicalOfficialIdentityLeadValue(value) {
   const normalized4 = normalize(value);
   if (/\b(?:alleged|claimed|purported|self[- ]?described|unconfirmed|unverified)\b/i.test(normalized4)) return null;
@@ -9193,7 +9206,9 @@ function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-sear
     const sourceUrl = safeCandidateUrl(row.source_url ?? row.sourceUrl);
     if (!predicate || !PREDICATES.has(predicate) || !subject || !rawValue || !excerpt || !sourceUrl) continue;
     const suppliedQuestionId = clean(row.question_id ?? row.questionId, 100);
-    const value = predicate === "official_token" ? canonicalOfficialTokenLeadValue(rawValue) : predicate === "official_identity" && /^(?:person|investor)\./.test(suppliedQuestionId ?? "") ? canonicalOfficialIdentityLeadValue(rawValue) : rawValue;
+    const bespokeValue = predicate === "official_token" ? canonicalOfficialTokenLeadValue(rawValue) : predicate === "official_identity" && /^(?:person|investor)\./.test(suppliedQuestionId ?? "") ? canonicalOfficialIdentityLeadValue(rawValue) : void 0;
+    const core = bespokeValue === void 0 ? canonicalLeadValueCore(rawValue) : { value: bespokeValue };
+    const value = core.value;
     if (!value) continue;
     if (isEmptyAssetPlaceholder(predicate, value)) continue;
     if (!isAtomicValue(predicate, value)) continue;
@@ -9203,7 +9218,7 @@ function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-sear
     if (suppliedQuestion && suppliedQuestion.predicate !== predicate) continue;
     const inferredQuestion = suppliedQuestion ?? (questionsByPredicate.get(predicate)?.length === 1 ? questionsByPredicate.get(predicate)?.[0] : void 0);
     if (predicate === "founder" && inferredQuestion && inferredQuestion.audience !== "project" && !atomicPersonVentureValue(value)) continue;
-    const qualifier = clean(row.qualifier, 120);
+    const qualifier = clean([clean(row.qualifier, 120), clean(core.trailing, 160)].filter(Boolean).join(" \xB7 "), 240);
     const eventStatus = clean(row.event_status ?? row.eventStatus, 160);
     const attributedEntity = clean(row.attributed_entity ?? row.attributedEntity, 200);
     if (predicate === "legal_regulatory_event" && (!eventStatus || !attributedEntity)) continue;
@@ -11513,9 +11528,11 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     const pending = (async () => {
       const primary2 = await fetchAndRecord(url);
       const localized = coinbaseWrappedAssetLocaleFallback(url);
-      if (!localized || isExpectedCoinbaseWrappedAssetPage(primary2, localized)) return primary2;
-      const recovered = await fetchAndRecord(localized);
-      return recovered.status === "ok" ? recovered : primary2;
+      const result = !localized || isExpectedCoinbaseWrappedAssetPage(primary2, localized) ? primary2 : await (async () => {
+        const recovered = await fetchAndRecord(localized);
+        return recovered.status === "ok" ? recovered : primary2;
+      })();
+      return result;
     })();
     sourceByUrl.set(key, pending);
     return pending;
