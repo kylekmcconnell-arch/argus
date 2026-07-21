@@ -328,6 +328,9 @@ function mergeProjectedFact(evidence: CollectedEvidence, fact: BasicFact): Basic
   // A deterministic projection may add support, but it cannot erase a frozen
   // conflict that was established by competing values or sources.
   if (same.status !== "conflicted") same.status = "verified";
+  // Floor eligibility is monotonic upward: if a strict (floor-eligible) fact
+  // merges onto a recall-only fact, the merged fact regains floor eligibility.
+  if (fact.floorEligible !== false && same.floorEligible === false) delete same.floorEligible;
   return same;
 }
 
@@ -552,15 +555,59 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
       : token.chain;
     projected.push(makeFact(evidence, "network", chainFootprint, [tokenSource],
       token.deployedChains?.length ? "protocol footprint per DeFiLlama TVL" : undefined));
-    if (typeof token.volume24hUsd === "number" && token.volume24hUsd > 0) {
+
+    // Market/on-chain liveness. A verified canonical token that is ranked,
+    // capitalized, and liquid across multiple market providers is hard evidence
+    // of a live, actively-used product — evidence that CANNOT be hallucinated
+    // and does not depend on fetching the homepage. This is what lets a real
+    // protocol (Aave, Uniswap, …) whose site sits behind Cloudflare bot
+    // management still complete its traction and product-substance questions,
+    // instead of returning INCOMPLETE because a Node fetch was challenged.
+    const rank = typeof token.rank === "number" && token.rank > 0 ? token.rank : null;
+    const marketCap = typeof token.marketCapUsd === "number" && token.marketCapUsd > 0 ? token.marketCapUsd : null;
+    const liquidity = typeof token.liquidityUsd === "number" && token.liquidityUsd > 0 ? token.liquidityUsd : null;
+    const volume = typeof token.volume24hUsd === "number" && token.volume24hUsd > 0 ? token.volume24hUsd : null;
+    const marketDescriptor = [
+      rank !== null ? `CoinGecko rank #${rank}` : null,
+      marketCap !== null ? `${formatUsd(marketCap)} market cap` : null,
+      liquidity !== null ? `${formatUsd(liquidity)} on-chain liquidity` : null,
+      volume !== null ? `${formatUsd(volume)} 24h volume` : null,
+    ].filter((part): part is string => Boolean(part)).join(" · ");
+
+    // Traction: any real market footprint proves the token trades and is used.
+    const hasLiveMarket = rank !== null || marketCap !== null || liquidity !== null || volume !== null;
+    if (hasLiveMarket) {
       projected.push(makeFact(
         evidence,
         "traction",
-        `${formatUsd(token.volume24hUsd)} 24h trading volume`,
+        marketDescriptor,
         [tokenSource],
         `captured ${token.capturedAt.slice(0, 10)}`,
       ));
     }
+
+    // Product substance: an established, canonical protocol token (ranked or
+    // materially capitalized) is a live operating product, even when the
+    // marketing site cannot be fetched. Reserved for the established tier so a
+    // thin new token does not inherit product substance for free.
+    const establishedProtocol = (rank !== null && rank <= 3000) || (marketCap !== null && marketCap >= 10_000_000);
+    if (establishedProtocol) {
+      const providerLabel = (token.providers ?? ["coingecko"]).join(" + ");
+      projected.push(makeFact(
+        evidence,
+        "product",
+        `${token.name} operates a live on-chain protocol; its canonical token ${token.symbol.toUpperCase()} is established and actively traded (${marketDescriptor})`,
+        [source({
+          url: token.sourceUrl,
+          title: "On-chain market liveness",
+          excerpt: `${token.name} (${token.symbol}) is a verified canonical token corroborated across ${providerLabel} with ${marketDescriptor}. An established, liquid, market-listed protocol token is direct evidence of a live operating product.`,
+          capturedAt: token.capturedAt,
+          provider: providerLabel,
+          sourceClass: "regulatory_or_onchain",
+        })],
+      ));
+    }
+
     // Supply ratio -> tokenomics disclosure. The checkable ratio only, never a
     // vesting claim: CoinGecko supply is partly project-self-reported, and a
     // schedule is a different artifact this fact deliberately does not imply.

@@ -1572,10 +1572,17 @@ export function deriveProjectStrengthBands(
     .map((row) => typeof row.artifactId === "string" ? row.artifactId : "")
     .filter(Boolean))];
   const basicFacts = records(packet.basicFacts);
+  // Score FLOORS derive only from strict single-passage facts. A web-corroborated
+  // recall fact (floorEligible === false) counts for coverage/readiness but is
+  // excluded here, so multi-source corroboration can never mint a minimum score
+  // (H2). `floorEligible !== false` keeps every strict fact (flag absent) flooring
+  // exactly as before; every floor tier derives from verifiedFacts(), so this is
+  // the single scoring gate that isolates recall facts from floors.
   const verifiedFacts = (...predicates: string[]): Record<string, unknown>[] => basicFacts.filter((fact) =>
     predicates.includes(String(fact.predicate ?? "").toLowerCase())
     && fact.artifact_verified === true
-    && (fact.status === "verified" || fact.status === "corroborated"));
+    && (fact.status === "verified" || fact.status === "corroborated")
+    && fact.floorEligible !== false);
   const factText = (facts: readonly Record<string, unknown>[]): string => facts
     .map((fact) => `${String(fact.value ?? "")} ${String(fact.claim ?? "")}`)
     .join(" ");

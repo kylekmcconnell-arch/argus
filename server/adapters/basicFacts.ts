@@ -6,6 +6,7 @@ import {
   type BasicFactLead,
   type BasicFactPredicate,
   type BasicFactQuestionLedgerEntry,
+  type BasicFactSource,
 } from "../../src/data/evidence";
 import { supportsExplicitEmptyBasicFact } from "../../src/lib/basicFactQuestions";
 import { DISCOVERY_MODEL, env } from "../config";
@@ -3015,7 +3016,83 @@ const MULTI_VALUE_PREDICATES = new Set<BasicFactPredicate>([
   "network",
 ]);
 
-function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[] {
+// ── Web-corroboration recall independence ───────────────────────────────────
+// PR wires and self-publishing platforms carry no independent editorial
+// judgment: two PR-wire copies, or a Medium post the subject wrote, are not two
+// independent witnesses. They may appear as sources but never COUNT toward the
+// >=2-independent-witness recall bar.
+const NON_INDEPENDENT_HOSTS = /(?:^|\.)(?:prnewswire|globenewswire|businesswire|accesswire|einpresswire|prweb|newsfilecorp|prlog|openpr|issuewire|medium|substack|mirror\.xyz|wordpress|blogspot|tumblr|dev\.to|beehiiv|notion\.site)\.[a-z]/i;
+
+/** Registrable domain (eTLD+1) so subdomains of one publisher count as one host. */
+function registrableDomain(url: string): string | null {
+  try {
+    const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+    const parts = host.split(".");
+    if (parts.length <= 2) return host;
+    const lastTwo = parts.slice(-2).join(".");
+    // Two-label public suffixes we actually see (co.uk, com.au, …); everything
+    // else collapses to the final two labels — sufficient for host-independence.
+    return /^(?:co|com|org|net|gov|ac|edu)\.[a-z]{2}$/.test(lastTwo) ? parts.slice(-3).join(".") : lastTwo;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Distinct independent-press editorial witnesses among the fetched sources:
+ * distinct registrable domains of independent_press rows, excluding PR wires and
+ * self-publishing platforms. official_subject/self sources are already excluded
+ * by only counting independent_press, so recall never relies on self-vouching.
+ */
+function pressWitnessDomains(sources: readonly BasicFactSource[]): Set<string> {
+  const domains = new Set<string>();
+  for (const source of sources) {
+    if (source.sourceClass !== "independent_press") continue;
+    let host: string;
+    try { host = new URL(source.url).hostname; } catch { continue; }
+    if (NON_INDEPENDENT_HOSTS.test(`.${host}.`)) continue;
+    const domain = registrableDomain(source.url);
+    if (domain) domains.add(domain);
+  }
+  return domains;
+}
+
+// Predicates whose cross-source grouping may be relaxed to an atomic anchor so
+// two articles stating the same identity/role/product with slightly different
+// wording corroborate instead of splitting. Money, dates, tokenomics, legal, and
+// security predicates are NEVER relaxed.
+const RECALL_PREDICATES = new Set<BasicFactPredicate>(["official_identity", "founder", "current_role", "executive", "product"]);
+const ANCHOR_STOPWORDS = new Set([
+  "the", "a", "an", "of", "at", "in", "on", "and", "is", "was", "are", "were", "as", "to", "for", "by", "with", "its", "their",
+  "co", "cofounder", "co-founder", "founder", "founders", "creator", "creators", "ceo", "cto", "coo", "cfo", "cmo", "chief",
+  "executive", "officer", "chair", "chairman", "chairwoman", "chairperson", "president", "owner", "managing", "general",
+  "partner", "director", "head", "lead", "vp", "vice", "advisor", "adviser", "investor", "backer", "contributor",
+  "inc", "llc", "ltd", "labs", "lab", "foundation", "company", "companies", "corp", "corporation", "protocol", "dao", "network", "team",
+]);
+
+function anchorTokens(value: string): string {
+  return [...new Set(searchable(value).split(" ").filter((word) => word.length > 1 && !ANCHOR_STOPWORDS.has(word)))].sort().join(" ");
+}
+
+/** Fold a role phrase into a seniority CLASS so 'CEO of X' never groups with 'advisor to X'. */
+function seniorityClass(value: string): string {
+  const text = value.toLowerCase();
+  if (/\b(?:co[- ]?founder|founder|creator|ceo|chief\s+executive|chair(?:man|woman|person)?|president|owner|managing\s+partner|general\s+partner)\b/.test(text)) return "principal";
+  if (/\b(?:cto|coo|cfo|cmo|chief|head|lead|director|vice\s+president|\bvp\b)\b/.test(text)) return "exec";
+  if (/\b(?:advisor|adviser|investor|backer|contributor|ambassador)\b/.test(text)) return "affiliate";
+  return "role";
+}
+
+function atomicAnchor(predicate: BasicFactPredicate, value: string): string {
+  if (predicate === "current_role") return `${seniorityClass(value)}::${anchorTokens(value)}`;
+  return anchorTokens(value);
+}
+
+function dedupeSources(rows: readonly BasicFact[]): BasicFactSource[] {
+  return [...new Map(rows.flatMap((row) => row.sources).map((source) => [source.url, source])).values()];
+}
+
+export function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[] {
   const grouped = new Map<string, BasicFact[]>();
   for (const candidate of candidates) {
     const legalIdentity = candidate.predicate === "legal_regulatory_event"
@@ -3026,8 +3103,10 @@ function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[] {
     rows.push(candidate);
     grouped.set(key, rows);
   }
-  const resolved: BasicFact[] = [...grouped.values()].flatMap((rows): BasicFact[] => {
-    const sources = [...new Map(rows.flatMap((row) => row.sources).map((source) => [source.url, source])).values()];
+  const resolved: BasicFact[] = [];
+  const strictFailures: BasicFact[][] = [];
+  for (const rows of grouped.values()) {
+    const sources = dedupeSources(rows);
     const official = sources.some((source) =>
       source.sourceClass === "official_subject"
       || source.sourceClass === "official_counterparty"
@@ -3038,14 +3117,42 @@ function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[] {
     // A stock or debt-security classification must come from the issuer or a
     // regulator. Two news articles may corroborate a reported claim, but they
     // cannot authoritatively establish the instrument or its listing.
-    if (rows[0]?.predicate === "public_security" && !official) return [];
-    if (!official && independentHosts.size < 2) return [];
-    return [{
+    if (rows[0]?.predicate === "public_security" && !official) continue;
+    if (!official && independentHosts.size < 2) {
+      strictFailures.push(rows);
+      continue;
+    }
+    resolved.push({
       ...rows[0],
       status: official ? "verified" as const : "corroborated" as const,
       sources,
-    }];
-  });
+    });
+  }
+
+  // Recall pass (additive; the strict gate above is untouched). Only the groups
+  // the strict gate REJECTED are re-examined, re-grouped by a coarser atomic
+  // anchor so near-identical identity/role/product claims across independent
+  // outlets can reach the >=2-witness bar. Emits a floorEligible:false
+  // "corroborated" fact — coverage-complete but excluded from score floors (H2).
+  const strictAnchors = new Set(resolved.map((fact) => `${fact.predicate}::${atomicAnchor(fact.predicate, fact.value)}`));
+  const recallGroups = new Map<string, BasicFact[]>();
+  for (const rows of strictFailures) {
+    const predicate = rows[0]?.predicate;
+    if (!predicate || !RECALL_PREDICATES.has(predicate)) continue;
+    const anchor = `${predicate}::${atomicAnchor(predicate, rows[0].value)}`;
+    if (strictAnchors.has(anchor)) continue; // a strict fact already covers this claim
+    recallGroups.set(anchor, [...(recallGroups.get(anchor) ?? []), ...rows]);
+  }
+  for (const rows of recallGroups.values()) {
+    const sources = dedupeSources(rows);
+    if (pressWitnessDomains(sources).size < 2) continue; // <2 independent editorial witnesses
+    // Canonical value: the most frequently stated form, tiebroken to the shortest.
+    const counts = new Map<string, number>();
+    for (const row of rows) counts.set(row.value, (counts.get(row.value) ?? 0) + 1);
+    const value = [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].length - b[0].length)[0][0];
+    const representative = rows.find((row) => row.value === value) ?? rows[0];
+    resolved.push({ ...representative, value, status: "corroborated" as const, floorEligible: false, sources });
+  }
 
   const singletonPredicates = new Set(resolved
     .filter((fact) =>
