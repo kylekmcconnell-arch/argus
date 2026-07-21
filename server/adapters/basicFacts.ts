@@ -1065,6 +1065,7 @@ async function callClaudeSearch(
     "basic-facts-search",
     text || data.stop_reason === "pause_turn" ? "succeeded" : "partial",
     text || data.stop_reason === "pause_turn" ? undefined : "empty_output",
+    DISCOVERY_MODEL,
   );
   return data;
 }

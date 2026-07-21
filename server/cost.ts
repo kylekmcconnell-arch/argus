@@ -1,4 +1,4 @@
-// Per-audit provider ledger: EVERY external call an audit makes — paid or free —
+// Per-audit provider ledger: EVERY external call an audit makes (paid or free),
 // recorded with its op, call count, and estimated dollar cost, then attached to
 // the dossier so the report library can show a full A-to-Z cost breakdown.
 //
@@ -102,7 +102,7 @@ function mergeMeta(current: string | undefined, next: string | undefined): strin
   return [current, clean].filter(Boolean).join(" · ").slice(0, 500);
 }
 
-// Generic: count one provider attempt (usd may be 0 for free providers — still
+// Generic: count one provider attempt (usd may be 0 for free providers - still
 // recorded, the point is the full picture). Existing adapters default to a
 // succeeded attempt; retrying/paid adapters pass their observed outcome.
 export function recordCall(
@@ -200,6 +200,29 @@ export function addClaudeUsage(
     op,
     tin * inPrice + tout * outPrice + webSearches * PRICE.claudeWebSearch,
     [`${tin + tout} tok`, haiku ? "haiku" : "", webSearches ? `${webSearches} web searches` : "", outcomeMeta].filter(Boolean).join(" · "),
+    status,
+  );
+}
+
+/** Book an OpenRouter (OpenAI-compatible) call. OpenRouter returns the ACTUAL
+ * charged cost in usage.cost (USD) when the request sets usage.include, so book
+ * that directly - the ledger matches the invoice instead of a guessed per-token
+ * rate (which no per-model price table could keep current across 400+ models). */
+export function addOpenRouterUsage(
+  usage: { prompt_tokens?: number; completion_tokens?: number; cost?: number } | undefined,
+  op: string,
+  status: ProviderUsageStatus = "succeeded",
+  model?: string,
+  outcomeMeta?: string,
+): void {
+  const usd = typeof usage?.cost === "number" && usage.cost >= 0 ? usage.cost : 0;
+  const tin = usage?.prompt_tokens ?? 0;
+  const tout = usage?.completion_tokens ?? 0;
+  recordCall(
+    "openrouter",
+    op,
+    usd,
+    [`${tin + tout} tok`, model, outcomeMeta].filter(Boolean).join(" · "),
     status,
   );
 }

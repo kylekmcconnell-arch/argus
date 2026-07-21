@@ -10,13 +10,24 @@
 // unchanged; returns null when unavailable or empty so a dispatcher can fall
 // back to the adaptive Claude web_search, then Grok.
 import { env } from "../config";
-import { addClaudeUsage, recordSerper } from "../cost";
+import { addClaudeUsage, addOpenRouterUsage, recordSerper } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
 import { fetchPublicText } from "../publicWeb";
 
 const ANTHROPIC = "https://api.anthropic.com/v1/messages";
+const OPENROUTER = "https://openrouter.ai/api/v1/chat/completions";
 const SERPER = "https://google.serper.dev/search";
 const EXTRACT_MODEL = () => env("ARGUS_EXTRACT_MODEL") || "claude-haiku-4-5";
+
+// Route the cheap extractor through OpenRouter (any OpenAI-compatible model)
+// only when an OpenRouter key is present AND the configured extract model is an
+// OpenRouter slug (provider/model form, e.g. "google/gemini-2.5-flash-lite"). A
+// bare Anthropic id like "claude-haiku-4-5" keeps the native Anthropic path, so
+// this stays dormant until deliberately configured - same pattern as Serper.
+function openRouterExtractModel(): string | null {
+  const model = env("ARGUS_EXTRACT_MODEL");
+  return env("OPENROUTER_API_KEY") && model && model.includes("/") ? model : null;
+}
 
 const MAX_RESULTS = 12;
 // Page fetches dominate grounded latency. A high-connectivity subject fans out
@@ -57,9 +68,60 @@ async function serperSearch(query: string, key: string): Promise<SerperResult[]>
   }
 }
 
+// One plain OpenAI-compatible call through OpenRouter. ZDR is enforced
+// (data_collection: deny) because due-diligence prompts carry real-people PII,
+// and usage.include asks OpenRouter to return the actual charged cost so the
+// ledger matches the invoice rather than a guessed per-token rate.
+async function callOpenRouter(system: string, user: string, maxTokens: number, op: string, model: string): Promise<string | null> {
+  const key = env("OPENROUTER_API_KEY");
+  if (!key) return null;
+  let res: Response;
+  try {
+    res = await fetch(OPENROUTER, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "X-Title": "ARGUS due-diligence" },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        provider: { data_collection: "deny" },
+        usage: { include: true },
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+  } catch (error) {
+    addOpenRouterUsage(undefined, op, "failed", model, error instanceof Error && error.name === "TimeoutError" ? "timeout_60000ms" : "transport_error");
+    return null;
+  }
+  if (!res.ok) {
+    addOpenRouterUsage(undefined, op, "failed", model, `http_${res.status}`);
+    return null;
+  }
+  const d = asRec(await res.json().catch(() => ({})));
+  const usage = asRec(d.usage);
+  const choices = Array.isArray(d.choices) ? d.choices.map(asRec) : [];
+  const message = choices.length ? asRec(choices[0].message) : {};
+  const text = typeof message.content === "string" ? message.content : "";
+  addOpenRouterUsage(
+    {
+      prompt_tokens: typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0,
+      completion_tokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0,
+      ...(typeof usage.cost === "number" ? { cost: usage.cost } : {}),
+    },
+    op,
+    text ? "succeeded" : "partial",
+    model,
+    text ? undefined : "empty_output",
+  );
+  return text || null;
+}
+
 // One plain Claude call (no server tools) on the cheap extraction model. Used
-// for query generation and for the final structured extraction.
+// for query generation and for the final structured extraction. Routes through
+// OpenRouter when configured (see openRouterExtractModel), else native Anthropic.
 async function callExtractModel(system: string, user: string, maxTokens: number, op: string): Promise<string | null> {
+  const orModel = openRouterExtractModel();
+  if (orModel) return callOpenRouter(system, user, maxTokens, op, orModel);
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
   const model = EXTRACT_MODEL();
@@ -127,7 +189,9 @@ function dedupeByUrl(results: SerperResult[]): SerperResult[] {
 
 export async function groundedSearch(system: string, user: string, opts?: { cacheKey?: string; bypassCache?: boolean }): Promise<string | null> {
   const serperKey = env("SERPER_API_KEY");
-  if (!serperKey || !env("ANTHROPIC_API_KEY")) return null; // not provisioned -> caller falls back
+  // Needs Serper for search plus SOME extractor: OpenRouter (when a slug model +
+  // key are set) or native Anthropic. Otherwise not provisioned -> caller falls back.
+  if (!serperKey || (!openRouterExtractModel() && !env("ANTHROPIC_API_KEY"))) return null;
   const cacheKey = opts?.cacheKey ? `gs:${opts.cacheKey}` : undefined;
   if (cacheKey && !opts?.bypassCache) {
     const hit = await cacheGet(cacheKey);

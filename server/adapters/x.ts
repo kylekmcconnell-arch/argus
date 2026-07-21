@@ -213,7 +213,7 @@ export async function claudeWebSearch(system: string, user: string, opts?: {
     .filter((block) => block.type === "text" && typeof block.text === "string")
     .map((block) => block.text as string)
     .join("\n");
-  addClaudeUsage(usage, "web-search", text ? "succeeded" : "partial", text ? undefined : "empty_output");
+  addClaudeUsage(usage, "web-search", text ? "succeeded" : "partial", text ? undefined : "empty_output", DISCOVERY_MODEL);
   if (text && opts?.cacheKey && !opts.bypassCache) void cacheSet(opts.cacheKey, text);
   return text || null;
 }

@@ -1607,6 +1607,18 @@ function addClaudeUsage(u, op = "analysis", status = "succeeded", outcomeMeta, m
     status
   );
 }
+function addOpenRouterUsage(usage, op, status = "succeeded", model, outcomeMeta) {
+  const usd = typeof usage?.cost === "number" && usage.cost >= 0 ? usage.cost : 0;
+  const tin = usage?.prompt_tokens ?? 0;
+  const tout = usage?.completion_tokens ?? 0;
+  recordCall(
+    "openrouter",
+    op,
+    usd,
+    [`${tin + tout} tok`, model, outcomeMeta].filter(Boolean).join(" \xB7 "),
+    status
+  );
+}
 function recordSerper(queries, status = "succeeded", outcomeMeta) {
   recordCall("serper", "search", Math.max(0, queries) * PRICE.serperQuery, [`${queries} quer${queries === 1 ? "y" : "ies"}`, outcomeMeta].filter(Boolean).join(" \xB7 "), status);
 }
@@ -5864,8 +5876,13 @@ async function fetchPublicTextWithRecovery(raw, dependencies = {}) {
 
 // server/adapters/groundedSearch.ts
 var ANTHROPIC = "https://api.anthropic.com/v1/messages";
+var OPENROUTER = "https://openrouter.ai/api/v1/chat/completions";
 var SERPER = "https://google.serper.dev/search";
 var EXTRACT_MODEL = () => env("ARGUS_EXTRACT_MODEL") || "claude-haiku-4-5";
+function openRouterExtractModel() {
+  const model = env("ARGUS_EXTRACT_MODEL");
+  return env("OPENROUTER_API_KEY") && model && model.includes("/") ? model : null;
+}
 var MAX_RESULTS = 12;
 var MAX_PAGES = 4;
 var FETCH_TIMEOUT_MS = 8e3;
@@ -5893,7 +5910,52 @@ async function serperSearch(query, key) {
     return [];
   }
 }
+async function callOpenRouter(system, user, maxTokens, op, model) {
+  const key = env("OPENROUTER_API_KEY");
+  if (!key) return null;
+  let res;
+  try {
+    res = await fetch(OPENROUTER, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json", "X-Title": "ARGUS due-diligence" },
+      body: JSON.stringify({
+        model,
+        max_tokens: maxTokens,
+        messages: [{ role: "system", content: system }, { role: "user", content: user }],
+        provider: { data_collection: "deny" },
+        usage: { include: true }
+      }),
+      signal: AbortSignal.timeout(6e4)
+    });
+  } catch (error) {
+    addOpenRouterUsage(void 0, op, "failed", model, error instanceof Error && error.name === "TimeoutError" ? "timeout_60000ms" : "transport_error");
+    return null;
+  }
+  if (!res.ok) {
+    addOpenRouterUsage(void 0, op, "failed", model, `http_${res.status}`);
+    return null;
+  }
+  const d = asRec(await res.json().catch(() => ({})));
+  const usage = asRec(d.usage);
+  const choices = Array.isArray(d.choices) ? d.choices.map(asRec) : [];
+  const message = choices.length ? asRec(choices[0].message) : {};
+  const text2 = typeof message.content === "string" ? message.content : "";
+  addOpenRouterUsage(
+    {
+      prompt_tokens: typeof usage.prompt_tokens === "number" ? usage.prompt_tokens : 0,
+      completion_tokens: typeof usage.completion_tokens === "number" ? usage.completion_tokens : 0,
+      ...typeof usage.cost === "number" ? { cost: usage.cost } : {}
+    },
+    op,
+    text2 ? "succeeded" : "partial",
+    model,
+    text2 ? void 0 : "empty_output"
+  );
+  return text2 || null;
+}
 async function callExtractModel(system, user, maxTokens, op) {
+  const orModel = openRouterExtractModel();
+  if (orModel) return callOpenRouter(system, user, maxTokens, op, orModel);
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
   const model = EXTRACT_MODEL();
@@ -5961,7 +6023,7 @@ function dedupeByUrl(results) {
 }
 async function groundedSearch(system, user, opts) {
   const serperKey = env("SERPER_API_KEY");
-  if (!serperKey || !env("ANTHROPIC_API_KEY")) return null;
+  if (!serperKey || !openRouterExtractModel() && !env("ANTHROPIC_API_KEY")) return null;
   const cacheKey = opts?.cacheKey ? `gs:${opts.cacheKey}` : void 0;
   if (cacheKey && !opts?.bypassCache) {
     const hit = await cacheGet(cacheKey);
@@ -6138,7 +6200,7 @@ async function claudeWebSearch(system, user, opts) {
     }
   };
   const text2 = (Array.isArray(d.content) ? d.content.map(asRecord2) : []).filter((block) => block.type === "text" && typeof block.text === "string").map((block) => block.text).join("\n");
-  addClaudeUsage(usage, "web-search", text2 ? "succeeded" : "partial", text2 ? void 0 : "empty_output");
+  addClaudeUsage(usage, "web-search", text2 ? "succeeded" : "partial", text2 ? void 0 : "empty_output", DISCOVERY_MODEL);
   if (text2 && opts?.cacheKey && !opts.bypassCache) void cacheSet(opts.cacheKey, text2);
   return text2 || null;
 }
@@ -9754,7 +9816,8 @@ async function callClaudeSearch(prompt, request, assistantContent, maxSearchUses
     data.usage,
     "basic-facts-search",
     text2 || data.stop_reason === "pause_turn" ? "succeeded" : "partial",
-    text2 || data.stop_reason === "pause_turn" ? void 0 : "empty_output"
+    text2 || data.stop_reason === "pause_turn" ? void 0 : "empty_output",
+    DISCOVERY_MODEL
   );
   return data;
 }
