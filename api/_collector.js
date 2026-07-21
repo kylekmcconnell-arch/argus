@@ -2075,7 +2075,8 @@ var DEEP_INVESTIGATION_MAX_DURATION_SECONDS = 600;
 var ANALYST_SCORING_TIMEOUT_MS = 18e4;
 var ANALYST_REPAIR_TIMEOUT_MS = 9e4;
 var ANALYST_FINALIZATION_RESERVE_MS = 9e4;
-var COLLECTION_ANALYST_RESERVE_MS = 19e4;
+var COLLECTION_ANALYST_RESERVE_MS = 22e4;
+var TRUST_GRAPH_SCREEN_RESERVE_MS = 3e4;
 
 // server/agent.ts
 var ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -18769,6 +18770,8 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
   const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
   const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
+  const graphScreenDeadlineAt = collectionDeadlineAt + TRUST_GRAPH_SCREEN_RESERVE_MS;
+  const graphScreenOverBudget = () => Date.now() >= graphScreenDeadlineAt;
   const startRuntimeStage = (stage) => {
     const stageStartedAt = Date.now();
     console.info("[audit-runtime]", JSON.stringify({
@@ -19212,7 +19215,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     checkTracker.provider("fund-scale-verification", "Source-backed fund-scale verification", "skipped", "not a provider-backed investor/fund role");
   }
   const trustGraphStartedAt = startRuntimeStage("trust-graph");
-  if (collectionOverBudget()) {
+  if (graphScreenOverBudget()) {
     checkTracker.provider("trust-graph", "Frozen trust-graph reconciliation", "unavailable", "collection time budget reached before graph reconciliation");
     checkTracker.record({
       id: "trust-graph-connections",

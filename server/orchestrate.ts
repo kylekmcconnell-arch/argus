@@ -42,6 +42,7 @@ import {
   ANALYST_FINALIZATION_RESERVE_MS,
   COLLECTION_ANALYST_RESERVE_MS,
   DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
+  TRUST_GRAPH_SCREEN_RESERVE_MS,
 } from "../src/lib/investigationRuntime";
 import { peopledatalabsAdapter } from "./adapters/peopledatalabs";
 import { githubAdapter } from "./adapters/github";
@@ -2198,6 +2199,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000 - ANALYST_FINALIZATION_RESERVE_MS;
   const collectionDeadlineAt = analystDeadlineAt - COLLECTION_ANALYST_RESERVE_MS;
   const collectionOverBudget = () => Date.now() >= collectionDeadlineAt;
+  // The never-waive trust-graph screen runs AFTER general collection stops, in a
+  // dedicated window carved from the reserve. General adapters halt at
+  // collectionDeadlineAt; the bounded graph screen may still run until here, so a
+  // high-connectivity subject's flagged-subject screen is recorded instead of
+  // skipped. Still leaves ANALYST_SCORING_TIMEOUT_MS before analystDeadlineAt.
+  const graphScreenDeadlineAt = collectionDeadlineAt + TRUST_GRAPH_SCREEN_RESERVE_MS;
+  const graphScreenOverBudget = () => Date.now() >= graphScreenDeadlineAt;
   const startRuntimeStage = (stage: string) => {
     const stageStartedAt = Date.now();
     console.info("[audit-runtime]", JSON.stringify({
@@ -2797,10 +2805,13 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   // The provisional dossier is used only to materialize today's graph; its
   // score/verdict is deliberately omitted from the contribution.
   const trustGraphStartedAt = startRuntimeStage("trust-graph");
-  if (collectionOverBudget()) {
+  if (graphScreenOverBudget()) {
     // Never-waive gate, but graph reconciliation (which scales with connectivity)
-    // must not push the run past the ceiling. Record it unavailable so the report
-    // persists as partial/not-decision-ready rather than not finishing at all.
+    // must not push the run past the ceiling. It runs in its own reserved window
+    // (graphScreenDeadlineAt) past the general collection deadline, so a
+    // high-connectivity subject records a real screen instead of being clipped;
+    // only when even that window is exhausted do we record it unavailable so the
+    // report persists as partial/not-decision-ready rather than not finishing.
     checkTracker.provider("trust-graph", "Frozen trust-graph reconciliation", "unavailable", "collection time budget reached before graph reconciliation");
     checkTracker.record({
       id: "trust-graph-connections",

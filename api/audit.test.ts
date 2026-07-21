@@ -52,6 +52,7 @@ import {
   AUDIT_SSE_HEARTBEAT_MS,
   COLLECTION_ANALYST_RESERVE_MS,
   DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
+  TRUST_GRAPH_SCREEN_RESERVE_MS,
 } from "../src/lib/investigationRuntime";
 
 const AUTH_ORGANIZATION_ID = "00000000-0000-4000-8000-000000000001";
@@ -544,7 +545,10 @@ describe("person audit runtime budget", () => {
     expect(COLLECTION_ANALYST_RESERVE_MS).toBeGreaterThan(0);
     expect(analystReserveMs).toBeLessThan(ceilingMs);
     // Collection still gets the majority of the budget (this is a safety cut-off,
-    // not an aggressive cap that would starve normal scans).
-    expect(ceilingMs - analystReserveMs).toBeGreaterThan(ceilingMs / 2);
+    // not an aggressive cap that would starve normal scans). The trust-graph
+    // screen reserve is carved from the analyst reserve but is itself collection
+    // work, so it counts toward the collection budget.
+    const collectionBudgetMs = ceilingMs - analystReserveMs + TRUST_GRAPH_SCREEN_RESERVE_MS;
+    expect(collectionBudgetMs).toBeGreaterThan(ceilingMs / 2);
   });
 });
