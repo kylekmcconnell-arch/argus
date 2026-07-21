@@ -25,7 +25,13 @@ export const ANALYST_FINALIZATION_RESERVE_MS = 90_000;
 // finish"). Normal subjects finish collection long before this bites, so it is a
 // no-op for them; a pathological subject instead degrades to a persisted partial
 // report scored on whatever evidence was gathered by the cut-off.
-export const COLLECTION_ANALYST_RESERVE_MS = 120_000;
+//
+// MUST be >= ANALYST_SCORING_TIMEOUT_MS: the reserve is the ONLY guarantee the
+// analyst gets its full scoring window. At 120s (< the 180s scorer timeout) a
+// slow analyst on a high-connectivity subject ran past the deadline and the
+// verdict call was cut off, publishing INCOMPLETE on already-collected evidence
+// (observed: @Uniswap timed out at 510s with a full team + token in hand).
+export const COLLECTION_ANALYST_RESERVE_MS = 190_000;
 
 // This is an inactivity deadline, not a cap on the whole investigation. The
 // route emits heartbeats every 15 seconds even while the longer scorer is
