@@ -41,6 +41,30 @@ describe("collectSecurityAudits (auditor-domain corroboration hop)", () => {
     expect(result.corroborated[0].excerpt.toLowerCase()).toContain("aave");
   });
 
+  it("unions auditors named across MULTIPLE candidate pages (one report per auditor)", async () => {
+    // DeFiLlama audit_links typically point at one report per auditor; the
+    // collector must union them, not stop at the first page that matches
+    // (observed live: Uniswap collapsed to "1 auditors are named").
+    const result = await collectSecurityAudits("Uniswap", "https://uniswap.example", [
+      "https://reports.example/trail-of-bits.pdf",
+      "https://reports.example/abdk-certora.html",
+    ], {
+      fetcher: fetcherFor({
+        "https://reports.example/trail-of-bits.pdf":
+          "<html><body>Trail of Bits assessment of Uniswap v3 core.</body></html>",
+        "https://reports.example/abdk-certora.html":
+          "<html><body>ABDK review and Certora formal verification of Uniswap.</body></html>",
+        // The conventional /security page fetch fails outright.
+        "https://uniswap.example/security": 404,
+      }),
+    });
+    expect(result.available).toBe(true);
+    expect(result.selfAttested).toEqual(expect.arrayContaining(["Trail of Bits", "Certora", "ABDK"]));
+    expect(result.selfAttested).toHaveLength(3);
+    // Primary page = the one naming the most auditors.
+    expect(result.securityPageUrl).toBe("https://reports.example/abdk-certora.html");
+  });
+
   it("keeps a self-attesting security page as leads only when no auditor site confirms", async () => {
     const result = await collectSecurityAudits("RugCoin", "https://rugcoin.example", [], {
       fetcher: fetcherFor({

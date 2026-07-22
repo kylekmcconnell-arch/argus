@@ -17700,18 +17700,17 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls2,
   }
   const candidates = [.../* @__PURE__ */ new Set([...candidateUrls2, ...conventionCandidates])].slice(0, 4);
   if (!candidates.length) return empty("No candidate security pages.");
-  let securityPageUrl = null;
-  let securityHtml = null;
+  const matchedPages = [];
   for (const candidate of candidates) {
     const html = await fetchPageText(candidate, fetcher);
-    if (html && AUDITOR_REGISTRY.some((auditor) => auditor.pattern.test(html))) {
-      securityPageUrl = candidate;
-      securityHtml = html;
-      break;
-    }
+    if (!html) continue;
+    const named2 = AUDITOR_REGISTRY.filter((auditor) => auditor.pattern.test(html));
+    if (named2.length) matchedPages.push({ url: candidate, html, named: named2 });
   }
-  if (!securityPageUrl || !securityHtml) return empty("No fetchable security page named a known auditor.");
-  const named = AUDITOR_REGISTRY.filter((auditor) => auditor.pattern.test(securityHtml));
+  if (!matchedPages.length) return empty("No fetchable security page named a known auditor.");
+  const primary = matchedPages.reduce((best, page) => page.named.length > best.named.length ? page : best);
+  const securityPageUrl = primary.url;
+  const named = AUDITOR_REGISTRY.filter((auditor) => matchedPages.some((page) => page.named.includes(auditor)));
   const selfAttested = named.map((auditor) => auditor.name);
   const subjectNeedle = new RegExp(`\\b${escapeRegExp(name)}\\b`, "i");
   const corroborated = [];
@@ -17719,7 +17718,7 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls2,
   const fetchedPages = /* @__PURE__ */ new Map();
   let fetches = 0;
   for (const auditor of named) {
-    const outbound = outboundLinksTo(securityHtml, auditor.domains).slice(0, 2);
+    const outbound = [...new Set(matchedPages.filter((page) => page.named.includes(auditor)).flatMap((page) => outboundLinksTo(page.html, auditor.domains)))].slice(0, 2);
     for (const link of outbound) {
       if (usedAuditorUrls.has(link)) break;
       let html = fetchedPages.get(link);

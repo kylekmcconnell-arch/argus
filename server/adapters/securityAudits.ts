@@ -184,20 +184,25 @@ export async function collectSecurityAudits(
   const candidates = [...new Set([...candidateUrls, ...conventionCandidates])].slice(0, 4);
   if (!candidates.length) return empty("No candidate security pages.");
 
-  // Hop 1: the subject's page names auditors (self-attestation).
-  let securityPageUrl: string | null = null;
-  let securityHtml: string | null = null;
+  // Hop 1: the subject's pages name auditors (self-attestation). Audit
+  // disclosures are commonly SPREAD across candidates -- DeFiLlama audit_links
+  // typically point at one report per auditor -- so stopping at the first
+  // matching page collapsed a Trail-of-Bits+ABDK+Certora protocol to a single
+  // name (observed live: "1 auditors are named" for Uniswap). Scan every
+  // bounded candidate and union the registry matches; the page with the most
+  // matches is the primary security page.
+  const matchedPages: Array<{ url: string; html: string; named: typeof AUDITOR_REGISTRY[number][] }> = [];
   for (const candidate of candidates) {
     const html = await fetchPageText(candidate, fetcher);
-    if (html && AUDITOR_REGISTRY.some((auditor) => auditor.pattern.test(html))) {
-      securityPageUrl = candidate;
-      securityHtml = html;
-      break;
-    }
+    if (!html) continue;
+    const named = AUDITOR_REGISTRY.filter((auditor) => auditor.pattern.test(html));
+    if (named.length) matchedPages.push({ url: candidate, html, named });
   }
-  if (!securityPageUrl || !securityHtml) return empty("No fetchable security page named a known auditor.");
+  if (!matchedPages.length) return empty("No fetchable security page named a known auditor.");
 
-  const named = AUDITOR_REGISTRY.filter((auditor) => auditor.pattern.test(securityHtml));
+  const primary = matchedPages.reduce((best, page) => (page.named.length > best.named.length ? page : best));
+  const securityPageUrl = primary.url;
+  const named = AUDITOR_REGISTRY.filter((auditor) => matchedPages.some((page) => page.named.includes(auditor)));
   const selfAttested = named.map((auditor) => auditor.name);
 
   // Hop 2: the auditor's own domain must name the subject. Prefer the exact
@@ -209,7 +214,10 @@ export async function collectSecurityAudits(
   const fetchedPages = new Map<string, string | null>();
   let fetches = 0;
   for (const auditor of named) {
-    const outbound = outboundLinksTo(securityHtml, auditor.domains).slice(0, 2);
+    // Outbound links come from the pages that actually named this auditor.
+    const outbound = [...new Set(matchedPages
+      .filter((page) => page.named.includes(auditor))
+      .flatMap((page) => outboundLinksTo(page.html, auditor.domains)))].slice(0, 2);
     for (const link of outbound) {
       // One auditor page corroborates ONE claim: sister brands sharing a
       // domain (Spearbit/Cantina) must not each mint a fact from the same
