@@ -631,6 +631,29 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(vesting?.sources[0].provider).toBe("cryptorank");
   });
 
+  it("appends the TVL trend so capital commitment reads as growth or bleed", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.protocolTvl = {
+      slug: "uniswap",
+      name: "Uniswap",
+      symbol: "UNI",
+      tvlUsd: 3_180_000_000,
+      chains: ["Ethereum", "Base", "Arbitrum"],
+      chainBreakdown: [{ chain: "Ethereum", tvlUsd: 2_000_000_000 }],
+      geckoId: "uniswap",
+      change30dPct: 6,
+      sourceUrl: "https://defillama.com/protocol/uniswap",
+      capturedAt: "2026-07-22T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const tvl = evidence.basicFacts?.find((fact) => String(fact.value).includes("total value locked"));
+    expect(tvl?.value).toBe("$3.18B total value locked (Ethereum, Base, Arbitrum) · up 6% vs 30 days ago");
+    expect(tvl?.sources[0].excerpt).toContain("up 6% vs 30 days ago");
+  });
+
   it("appends the fee trend so a reader sees growth or bleed, not just a total", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.roles = [SubjectClass.PROJECT];

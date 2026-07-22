@@ -101,6 +101,13 @@ export interface ProtocolTvl {
    * protocol is listed late, so it bounds, not proves, protocol age.
    */
   firstRecordedAt: string | null;
+  /**
+   * TVL now vs ~30 days ago, signed percent, from the same dated series.
+   * Capital-commitment trend that complements the fee trend: rising fees with
+   * bleeding TVL is a divergence a raw total hides. Null when the series is too
+   * short or undated.
+   */
+  change30dPct: number | null;
   /** Governance identifiers as listed by DeFiLlama (curated listing metadata, e.g. "snapshot:aave.eth", "eip155:1:0x..."). */
   governanceIds: string[];
   /**
@@ -158,6 +165,27 @@ export async function collectProtocolTvl(
   const firstRecordedAt = typeof firstPoint?.date === "number"
     ? new Date(firstPoint.date * 1000).toISOString().slice(0, 10)
     : null;
+
+  // 30-day trend from the same dated series. Requires a comparison point at
+  // least ~20 days back (short/backfilled series yield null, never a guess);
+  // the nearest point to exactly 30 days is used so daily gaps don't skew it.
+  const latestDate = typeof (latest as { date?: unknown })?.date === "number" ? (latest as { date: number }).date : null;
+  let change30dPct: number | null = null;
+  if (latestDate !== null) {
+    const target = latestDate - 30 * 86_400;
+    let prior: { date: number; totalLiquidityUSD: number } | null = null;
+    for (const point of series as { date?: unknown; totalLiquidityUSD?: unknown }[]) {
+      if (typeof point.date !== "number" || typeof point.totalLiquidityUSD !== "number" || point.totalLiquidityUSD <= 0) continue;
+      if (point.date > latestDate - 20 * 86_400) break; // too recent to be a 30d baseline
+      if (!prior || Math.abs(point.date - target) < Math.abs(prior.date - target)) {
+        prior = { date: point.date, totalLiquidityUSD: point.totalLiquidityUSD };
+      }
+    }
+    if (prior) {
+      const raw = ((tvlUsd - prior.totalLiquidityUSD) / prior.totalLiquidityUSD) * 100;
+      change30dPct = Number.isFinite(raw) && Math.abs(raw) <= 10_000 ? Math.round(raw * 10) / 10 : null;
+    }
+  }
   const hacks: ProtocolHackRecord[] = (Array.isArray(data.hacks) ? data.hacks : [])
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
     .map((entry) => ({
@@ -179,6 +207,7 @@ export async function collectProtocolTvl(
       chainBreakdown,
       geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
       firstRecordedAt,
+      change30dPct,
       governanceIds: strArray(data.governanceID),
       hacks,
       sourceUrl: `https://defillama.com/protocol/${slug}`,

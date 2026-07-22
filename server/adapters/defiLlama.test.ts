@@ -151,6 +151,37 @@ describe("formatUsd", () => {
   });
 });
 
+describe("collectProtocolTvl 30d trend", () => {
+  const DAY = 86_400;
+  const NOW = 1_750_000_000;
+
+  it("computes TVL vs the point nearest 30 days back", async () => {
+    const out = await collectProtocolTvl("Aave", {
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody({
+        tvl: [
+          { date: NOW - 35 * DAY, totalLiquidityUSD: 2_900_000_000 },
+          { date: NOW - 30 * DAY, totalLiquidityUSD: 3_000_000_000 },
+          { date: NOW - 10 * DAY, totalLiquidityUSD: 3_500_000_000 },
+          { date: NOW, totalLiquidityUSD: 3_180_000_000 },
+        ],
+      }))),
+    });
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    // (3.18B - 3.0B) / 3.0B = +6%; the 10-day-old point is too recent to be a baseline.
+    expect(out.value.change30dPct).toBe(6);
+  });
+
+  it("yields a null trend for a short or undated series instead of guessing", async () => {
+    const out = await collectProtocolTvl("Aave", {
+      fetcher: fetcherReturning(() => jsonResponse(protocolBody())),
+    });
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.change30dPct).toBe(null);
+  });
+});
+
 describe("collectProtocolFees", () => {
   it("returns fee totals plus the 30d-over-30d trend percent", async () => {
     const out = await collectProtocolFees("Aave", {

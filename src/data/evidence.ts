@@ -237,6 +237,8 @@ export interface ProtocolTvlSnapshot {
   geckoId: string | null;
   /** First date in the TVL series ("TVL history since YYYY"; the series can be backfilled, so this bounds, not proves, age). */
   firstRecordedAt?: string | null;
+  /** TVL now vs ~30 days ago, signed percent; capital-commitment trend. Null when the series is too short. */
+  change30dPct?: number | null;
   /** Governance identifiers as listed by DeFiLlama (curated listing metadata). */
   governanceIds?: string[];
   /** Security incidents recorded in the same DeFiLlama document; frozen with the positives so evidence use is never selective. */

@@ -7839,6 +7839,23 @@ async function collectProtocolTvl(projectName2, options = {}) {
   const chainBreakdown = Object.entries(rawChainTvls).filter(([chain, value]) => typeof value === "number" && value > 0 && !NON_CHAIN_SEGMENT.test(chain)).map(([chain, value]) => ({ chain, tvlUsd: value })).sort((a, b) => b.tvlUsd - a.tvlUsd);
   const firstPoint = series.length ? series[0] : void 0;
   const firstRecordedAt = typeof firstPoint?.date === "number" ? new Date(firstPoint.date * 1e3).toISOString().slice(0, 10) : null;
+  const latestDate = typeof latest?.date === "number" ? latest.date : null;
+  let change30dPct = null;
+  if (latestDate !== null) {
+    const target = latestDate - 30 * 86400;
+    let prior = null;
+    for (const point of series) {
+      if (typeof point.date !== "number" || typeof point.totalLiquidityUSD !== "number" || point.totalLiquidityUSD <= 0) continue;
+      if (point.date > latestDate - 20 * 86400) break;
+      if (!prior || Math.abs(point.date - target) < Math.abs(prior.date - target)) {
+        prior = { date: point.date, totalLiquidityUSD: point.totalLiquidityUSD };
+      }
+    }
+    if (prior) {
+      const raw = (tvlUsd - prior.totalLiquidityUSD) / prior.totalLiquidityUSD * 100;
+      change30dPct = Number.isFinite(raw) && Math.abs(raw) <= 1e4 ? Math.round(raw * 10) / 10 : null;
+    }
+  }
   const hacks = (Array.isArray(data.hacks) ? data.hacks : []).filter((entry) => Boolean(entry) && typeof entry === "object").map((entry) => ({
     date: typeof entry.date === "number" ? new Date(entry.date * 1e3).toISOString().slice(0, 10) : null,
     amountUsd: typeof entry.amount === "number" && entry.amount > 0 ? Math.round(entry.amount) : null,
@@ -7857,6 +7874,7 @@ async function collectProtocolTvl(projectName2, options = {}) {
       chainBreakdown,
       geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
       firstRecordedAt,
+      change30dPct,
       governanceIds: strArray(data.governanceID),
       hacks,
       sourceUrl: `https://defillama.com/protocol/${slug}`
@@ -17026,16 +17044,18 @@ function projectProviderBackedBasicFacts(evidence) {
   const tvlSnapshot = isProject ? evidence.protocolTvl : void 0;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
     const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
+    const tvlTrendPct = typeof tvlSnapshot.change30dPct === "number" ? tvlSnapshot.change30dPct : null;
+    const tvlTrendPhrase = tvlTrendPct === null ? null : Math.abs(tvlTrendPct) < 1 ? "steady vs 30 days ago" : `${tvlTrendPct > 0 ? "up" : "down"} ${Math.abs(tvlTrendPct)}% vs 30 days ago`;
     const historySince = tvlSnapshot.firstRecordedAt ? ` TVL history since ${tvlSnapshot.firstRecordedAt.slice(0, 4)}.` : "";
     const hackNote = tvlSnapshot.hacks?.length ? ` DeFiLlama also records ${tvlSnapshot.hacks.length} security incident${tvlSnapshot.hacks.length === 1 ? "" : "s"}${tvlSnapshot.hacks[0].amountUsd ? `, including ${formatUsd2(tvlSnapshot.hacks[0].amountUsd)}${tvlSnapshot.hacks[0].date ? ` in ${tvlSnapshot.hacks[0].date.slice(0, 4)}` : ""}${tvlSnapshot.hacks[0].returnedFunds ? " (funds returned)" : ""}` : ""}.` : "";
     projected.push(makeFact(
       evidence,
       "traction",
-      `${formatUsd2(tvlSnapshot.tvlUsd)} total value locked${chainList ? ` (${chainList})` : ""}`,
+      `${formatUsd2(tvlSnapshot.tvlUsd)} total value locked${chainList ? ` (${chainList})` : ""}${tvlTrendPhrase ? ` \xB7 ${tvlTrendPhrase}` : ""}`,
       [source({
         url: tvlSnapshot.sourceUrl,
         title: "DeFiLlama TVL record",
-        excerpt: `${tvlSnapshot.name} holds ${formatUsd2(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""} (DeFiLlama on-chain snapshot).${historySince}${hackNote}`,
+        excerpt: `${tvlSnapshot.name} holds ${formatUsd2(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""}${tvlTrendPhrase ? `, ${tvlTrendPhrase}` : ""} (DeFiLlama on-chain snapshot).${historySince}${hackNote}`,
         capturedAt: tvlSnapshot.capturedAt,
         provider: "defillama",
         sourceClass: "regulatory_or_onchain"

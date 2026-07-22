@@ -732,6 +732,13 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   const tvlSnapshot = isProject ? evidence.protocolTvl : undefined;
   if (tvlSnapshot && tvlSnapshot.tvlUsd > 0) {
     const chainList = tvlSnapshot.chains.slice(0, 3).join(", ");
+    // Same trend contract as fees: growth-or-bleed, "steady" under 1% noise.
+    const tvlTrendPct = typeof tvlSnapshot.change30dPct === "number" ? tvlSnapshot.change30dPct : null;
+    const tvlTrendPhrase = tvlTrendPct === null
+      ? null
+      : Math.abs(tvlTrendPct) < 1
+        ? "steady vs 30 days ago"
+        : `${tvlTrendPct > 0 ? "up" : "down"} ${Math.abs(tvlTrendPct)}% vs 30 days ago`;
     const historySince = tvlSnapshot.firstRecordedAt ? ` TVL history since ${tvlSnapshot.firstRecordedAt.slice(0, 4)}.` : "";
     const hackNote = tvlSnapshot.hacks?.length
       ? ` DeFiLlama also records ${tvlSnapshot.hacks.length} security incident${tvlSnapshot.hacks.length === 1 ? "" : "s"}${tvlSnapshot.hacks[0].amountUsd ? `, including ${formatUsd(tvlSnapshot.hacks[0].amountUsd)}${tvlSnapshot.hacks[0].date ? ` in ${tvlSnapshot.hacks[0].date.slice(0, 4)}` : ""}${tvlSnapshot.hacks[0].returnedFunds ? " (funds returned)" : ""}` : ""}.`
@@ -739,11 +746,11 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     projected.push(makeFact(
       evidence,
       "traction",
-      `${formatUsd(tvlSnapshot.tvlUsd)} total value locked${chainList ? ` (${chainList})` : ""}`,
+      `${formatUsd(tvlSnapshot.tvlUsd)} total value locked${chainList ? ` (${chainList})` : ""}${tvlTrendPhrase ? ` · ${tvlTrendPhrase}` : ""}`,
       [source({
         url: tvlSnapshot.sourceUrl,
         title: "DeFiLlama TVL record",
-        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""} (DeFiLlama on-chain snapshot).${historySince}${hackNote}`,
+        excerpt: `${tvlSnapshot.name} holds ${formatUsd(tvlSnapshot.tvlUsd)} in total value locked${chainList ? ` across ${chainList}` : ""}${tvlTrendPhrase ? `, ${tvlTrendPhrase}` : ""} (DeFiLlama on-chain snapshot).${historySince}${hackNote}`,
         capturedAt: tvlSnapshot.capturedAt,
         provider: "defillama",
         sourceClass: "regulatory_or_onchain",
