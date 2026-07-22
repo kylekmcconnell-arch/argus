@@ -1,89 +1,134 @@
-<title>ARGUS architecture map</title>
+<title>ARGUS - anatomy of an investigation</title>
 <style>
   :root{
-    --bg:#0f1216; --panel:#161a21; --card:#1a1f28; --ink:#e8eaee; --dim-ink:#a6abb5; --faint:#6d727c;
-    --line:#262b34; --accent:#f0b429; --accent-ink:#0f1216; --link:#7ea3f0; --good:#52c58a; --warn:#d9a44a;
-    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+    --bg:#0b0e14; --panel:#141821; --card:#171c26; --card-hi:#1b2130;
+    --ink:#eceef2; --dim-ink:#a7adb8; --faint:#697080;
+    --line:#242b38; --accent:#f2b63c; --accent-soft:rgba(242,182,60,.14);
+    --accent-ink:#131002; --good:#57c98e; --warn:#d9a44a;
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,"SF Pro Display","Segoe UI",system-ui,sans-serif;
   }
   @media (prefers-color-scheme: light){ :root{
-    --bg:#fbfaf8; --panel:#ffffff; --card:#ffffff; --ink:#23252b; --dim-ink:#5c6068; --faint:#8a8e96;
-    --line:#e4e2dd; --accent:#b47b0a; --accent-ink:#ffffff; --link:#2456c8; --good:#1a7f4e; --warn:#a06a12;
+    --bg:#f7f5f1; --panel:#ffffff; --card:#ffffff; --card-hi:#fbf8f2;
+    --ink:#20232a; --dim-ink:#5a5f6a; --faint:#8b909b;
+    --line:#e3e0d9; --accent:#a97507; --accent-soft:rgba(169,117,7,.12);
+    --accent-ink:#ffffff; --good:#177a4b; --warn:#996408;
   }}
-  :root[data-theme="dark"]{ --bg:#0f1216; --panel:#161a21; --card:#1a1f28; --ink:#e8eaee; --dim-ink:#a6abb5; --faint:#6d727c; --line:#262b34; --accent:#f0b429; --accent-ink:#0f1216; --link:#7ea3f0; --good:#52c58a; --warn:#d9a44a; }
-  :root[data-theme="light"]{ --bg:#fbfaf8; --panel:#ffffff; --card:#ffffff; --ink:#23252b; --dim-ink:#5c6068; --faint:#8a8e96; --line:#e4e2dd; --accent:#b47b0a; --accent-ink:#ffffff; --link:#2456c8; --good:#1a7f4e; --warn:#a06a12; }
+  :root[data-theme="dark"]{ --bg:#0b0e14; --panel:#141821; --card:#171c26; --card-hi:#1b2130; --ink:#eceef2; --dim-ink:#a7adb8; --faint:#697080; --line:#242b38; --accent:#f2b63c; --accent-soft:rgba(242,182,60,.14); --accent-ink:#131002; --good:#57c98e; --warn:#d9a44a; }
+  :root[data-theme="light"]{ --bg:#f7f5f1; --panel:#ffffff; --card:#ffffff; --card-hi:#fbf8f2; --ink:#20232a; --dim-ink:#5a5f6a; --faint:#8b909b; --line:#e3e0d9; --accent:#a97507; --accent-soft:rgba(169,117,7,.12); --accent-ink:#ffffff; --good:#177a4b; --warn:#996408; }
   *{ box-sizing:border-box; }
-  body{ background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,"Segoe UI",sans-serif; margin:0; }
-  header{ padding:1.6rem 1.5rem .9rem; max-width:1500px; margin:0 auto; }
-  h1{ font-size:1.3rem; margin:0 0 .25rem; }
-  header p{ color:var(--dim-ink); margin:.2rem 0 .8rem; max-width:56rem; }
-  .bar{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
-  .bar .lbl{ color:var(--faint); font-size:.72rem; letter-spacing:.08em; text-transform:uppercase; margin-left:.4rem; }
-  #q{ background:var(--panel); border:1px solid var(--line); border-radius:8px; color:var(--ink); padding:.5rem .8rem; font:inherit; width:min(21rem,90vw); }
+  html{ scroll-behavior:smooth; }
+  body{
+    background:
+      radial-gradient(1100px 500px at 72% -10%, var(--accent-soft), transparent 60%),
+      radial-gradient(circle at 1px 1px, var(--line) 1px, transparent 1.4px) 0 0/26px 26px,
+      var(--bg);
+    color:var(--ink); font:14px/1.5 var(--sans); margin:0;
+  }
+  header{ padding:2.6rem 1.6rem 1rem; max-width:1520px; margin:0 auto; }
+  .eyebrow{ font:600 .68rem/1 var(--mono); letter-spacing:.34em; color:var(--accent); text-transform:uppercase; }
+  .eyebrow .pupil{ display:inline-block; width:.5rem; height:.5rem; border-radius:50%; border:1.5px solid var(--accent); margin:0 .5rem -.05rem 0; position:relative; }
+  .eyebrow .pupil::after{ content:""; position:absolute; inset:2px; border-radius:50%; background:var(--accent); animation:blink 6s infinite; }
+  @keyframes blink{ 0%,92%,100%{ transform:scaleY(1);} 95%{ transform:scaleY(.1);} }
+  h1{ font-size:clamp(1.7rem,3.4vw,2.6rem); font-weight:800; letter-spacing:-.02em; line-height:1.08; margin:.55rem 0 .4rem; text-wrap:balance; }
+  h1 em{ font-style:normal; color:var(--accent); }
+  header .sub{ color:var(--dim-ink); margin:0 0 1.1rem; max-width:56rem; font-size:.95rem; }
+  .statrow{ display:flex; gap:1.6rem 2.4rem; flex-wrap:wrap; margin:0 0 1.2rem; }
+  .stat b{ display:block; font:700 1.35rem/1.1 var(--mono); color:var(--ink); font-variant-numeric:tabular-nums; }
+  .stat span{ font:600 .64rem/1.6 var(--mono); letter-spacing:.18em; text-transform:uppercase; color:var(--faint); }
+  .bar{ display:flex; gap:.55rem; flex-wrap:wrap; align-items:center; }
+  #q{ background:var(--panel); border:1px solid var(--line); border-radius:9px; color:var(--ink); padding:.55rem .85rem; font:inherit; width:min(20rem,90vw); }
   #q:focus{ outline:2px solid var(--accent); outline-offset:1px; }
-  button{ background:var(--panel); border:1px solid var(--line); border-radius:8px; color:var(--ink); padding:.5rem .9rem; font:inherit; cursor:pointer; }
-  button:hover{ border-color:var(--faint); }
-  button.flow.on{ border-color:var(--accent); color:var(--accent); }
-  #flowdesc{ color:var(--dim-ink); font-size:.86rem; margin-top:.6rem; min-height:1.2em; max-width:60rem; }
+  button{ background:var(--panel); border:1px solid var(--line); border-radius:999px; color:var(--dim-ink); padding:.5rem 1rem; font:600 .82rem/1 var(--sans); cursor:pointer; transition:border-color .15s,color .15s,background .15s; }
+  button:hover{ border-color:var(--faint); color:var(--ink); }
+  button.flow.on{ background:var(--accent); border-color:var(--accent); color:var(--accent-ink); }
+  #flowdesc{ color:var(--dim-ink); font-size:.92rem; margin-top:.85rem; min-height:2.6em; max-width:62rem; }
   #flowdesc strong{ color:var(--accent); }
-  .counts{ color:var(--faint); font-size:.8rem; margin-top:.45rem; font-variant-numeric:tabular-nums; }
-  #wrap{ position:relative; overflow-x:auto; padding:0 1.5rem 1rem; }
-  #graph{ position:relative; display:grid; grid-template-columns:repeat(7, minmax(172px,1fr)); gap:0 26px; min-width:1380px; max-width:1500px; margin:0 auto; padding-bottom:2rem; }
-  #edges{ position:absolute; inset:0; pointer-events:none; overflow:visible; }
-  #edges path{ fill:none; stroke:var(--faint); stroke-width:1; opacity:.16; transition:opacity .15s,stroke .15s; }
-  #edges path.lit{ stroke:var(--accent); stroke-width:1.6; opacity:.95; }
-  #edges path.lit2{ stroke:var(--accent); stroke-width:1; opacity:.32; }
-  #edges path.hide{ opacity:.04; }
-  .col h2{ font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); margin:1.1rem 0 .1rem; }
-  .col .colsub{ font-size:.68rem; color:var(--faint); opacity:.75; margin:0 0 .55rem; }
-  .node{ position:relative; z-index:2; background:var(--card); border:1px solid var(--line); border-left:3px solid var(--line); border-radius:9px; padding:.5rem .65rem; margin:0 0 .55rem; cursor:pointer; transition:opacity .15s,border-color .15s; }
-  .node .t{ font-weight:600; font-size:.82rem; line-height:1.25; padding-right:1.1rem; }
-  .node .s{ color:var(--faint); font-size:.66rem; font-family:var(--mono); margin-top:.15rem; }
-  .node .chip{ position:absolute; top:.45rem; right:.5rem; font-family:var(--mono); font-size:.6rem; color:var(--warn); border:1px solid var(--warn); border-radius:999px; padding:0 .35rem; opacity:.85; }
+  #flowdesc em{ color:var(--faint); font-style:normal; font-size:.84rem; }
+  #flowdesc .stepno{ font:700 .78rem/1 var(--mono); color:var(--accent); margin-right:.5rem; }
+  #wrap{ position:relative; overflow-x:auto; padding:0 1.6rem 1rem; }
+  #graph{ position:relative; display:grid; grid-template-columns:repeat(7,minmax(174px,1fr)); gap:0 28px; min-width:1400px; max-width:1520px; margin:0 auto; padding-bottom:2.4rem; }
+  #iris{ position:absolute; z-index:0; left:44%; top:34%; width:520px; height:520px; transform:translate(-50%,-50%); pointer-events:none; opacity:.5;
+    background:
+      radial-gradient(circle, transparent 58px, var(--accent-soft) 59px, transparent 61px),
+      radial-gradient(circle, transparent 118px, var(--accent-soft) 119px, transparent 121px),
+      radial-gradient(circle, transparent 188px, var(--accent-soft) 189px, transparent 191px),
+      radial-gradient(circle, transparent 258px, var(--accent-soft) 259px, transparent 260px);
+  }
+  #edges{ position:absolute; inset:0; pointer-events:none; overflow:visible; z-index:1; }
+  #edges path{ fill:none; stroke:var(--faint); stroke-width:1; opacity:.15; transition:opacity .2s,stroke .2s; }
+  #edges path.lit{ stroke:var(--accent); stroke-width:1.7; opacity:1; }
+  #edges path.flowing{ stroke-dasharray:5 9; animation:march 1.1s linear infinite; }
+  @keyframes march{ to{ stroke-dashoffset:-14; } }
+  #edges path.lit2{ stroke:var(--accent); stroke-width:1; opacity:.30; }
+  #edges path.hide{ opacity:.035; }
+  .col{ position:relative; z-index:2; }
+  .col h2{ font:700 .66rem/1 var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--ink); margin:1.2rem 0 .15rem; }
+  .col h2::before{ content:""; display:inline-block; width:.55rem; height:.55rem; border:1.5px solid var(--accent); border-radius:2px; margin-right:.45rem; transform:rotate(45deg) translateY(-1px); }
+  .col .colsub{ font-size:.7rem; color:var(--faint); margin:.15rem 0 .6rem; }
+  .node{ position:relative; background:linear-gradient(180deg,var(--card-hi),var(--card)); border:1px solid var(--line); border-left:3px solid var(--line); border-radius:10px; padding:.55rem .7rem; margin:0 0 .55rem; cursor:pointer; transition:opacity .18s,border-color .18s,box-shadow .18s,transform .12s; }
+  .node:hover{ transform:translateY(-1px); border-color:var(--faint); }
+  .node .t{ font-weight:650; font-size:.83rem; line-height:1.25; padding-right:1.2rem; }
+  .node .s{ color:var(--faint); font-size:.64rem; font-family:var(--mono); margin-top:.18rem; }
+  .node .u{ color:var(--dim-ink); font-size:.72rem; line-height:1.35; margin-top:.28rem; }
+  .node .chip{ position:absolute; top:.5rem; right:.55rem; font:600 .58rem/1.3 var(--mono); color:var(--warn); border:1px solid var(--warn); border-radius:999px; padding:.05rem .38rem; opacity:.9; }
   .node .chip.free{ color:var(--good); border-color:var(--good); }
   .node .chip.core{ color:var(--accent); border-color:var(--accent); }
   .node .chip.fallback{ color:var(--faint); border-color:var(--faint); }
-  .node .u{ color:var(--dim-ink); font-size:.72rem; line-height:1.35; margin-top:.25rem; }
-  .node.lit{ border-color:var(--accent); border-left-color:var(--accent); }
-  .node.half{ opacity:.9; border-left-color:var(--warn); }
-  .node.dim{ opacity:.22; }
-  .node .step{ display:none; position:absolute; top:-.5rem; left:-.6rem; width:1.25rem; height:1.25rem; border-radius:50%; background:var(--accent); color:var(--accent-ink); font:700 .72rem/1.25rem var(--mono); text-align:center; }
-  .node.lit .step.on{ display:block; }
-  footer{ max-width:1500px; margin:0 auto; padding:0 1.5rem 3rem; }
-  footer h2{ font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--faint); margin:1.6rem 0 .6rem; }
-  footer ul{ padding-left:1.15rem; color:var(--dim-ink); columns:2; column-gap:2.5rem; max-width:70rem; }
-  footer li{ margin:.35rem 0; break-inside:avoid; }
-  footer li strong{ color:var(--ink); }
-  @media (max-width:760px){ footer ul{ columns:1; } }
+  .node.lit{ border-color:var(--accent); border-left-color:var(--accent); box-shadow:0 0 0 1px var(--accent-soft), 0 4px 22px var(--accent-soft); }
+  .node.half{ opacity:.92; border-left-color:var(--warn); }
+  .node.peek{ border-color:var(--faint); }
+  .node.dim{ opacity:.18; }
+  .node .step{ display:none; position:absolute; top:-.55rem; left:-.65rem; width:1.35rem; height:1.35rem; border-radius:50%; background:var(--accent); color:var(--accent-ink); font:800 .74rem/1.35rem var(--mono); text-align:center; box-shadow:0 2px 10px var(--accent-soft); }
+  .node.lit .step.on{ display:block; animation:pop .28s ease-out; }
+  @keyframes pop{ 0%{ transform:scale(.4); } 70%{ transform:scale(1.18);} 100%{ transform:scale(1);} }
+  @media (prefers-reduced-motion: reduce){
+    .eyebrow .pupil::after, #edges path.flowing, .node.lit .step.on{ animation:none; }
+  }
+  footer{ max-width:1520px; margin:0 auto; padding:.4rem 1.6rem 3.4rem; }
+  footer h2{ font:700 .66rem/1 var(--mono); letter-spacing:.16em; text-transform:uppercase; color:var(--ink); margin:1.4rem 0 .8rem; }
+  .rules{ display:grid; grid-template-columns:repeat(auto-fill,minmax(310px,1fr)); gap:.6rem; max-width:1520px; padding:0; margin:0; list-style:none; }
+  .rules li{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:.6rem .8rem; color:var(--dim-ink); font-size:.8rem; line-height:1.45; }
+  .rules li strong{ color:var(--ink); display:block; margin-bottom:.1rem; }
+  .credit{ color:var(--faint); font-size:.72rem; margin-top:1.6rem; font-family:var(--mono); }
 </style>
 <header>
-  <h1>ARGUS architecture and flows</h1>
-  <p>How a due-diligence request becomes a scored report. <strong>Click any box</strong> to light up what it talks to. <strong>Pick a journey</strong> to trace one path end to end, in numbered steps. Search finds anything. Small print under each name is the code name for engineers.</p>
+  <div class="eyebrow"><span class="pupil"></span>ARGUS · SYSTEM MAP</div>
+  <h1>Anatomy of an <em>investigation</em>.</h1>
+  <p class="sub">Watch a due-diligence request travel the system, step by step. Click any box to see what it talks to; search anything; pick a journey to replay it. Small print is the code name for engineers.</p>
+  <div class="statrow" id="stats">
+    <div class="stat"><b data-n="70">0</b><span>systems</span></div>
+    <div class="stat"><b data-n="92">0</b><span>connections</span></div>
+    <div class="stat"><b data-n="14">0</b><span>evidence collectors</span></div>
+    <div class="stat"><b data-n="600">0</b><span>second ceiling</span></div>
+    <div class="stat"><b data-cash="1">$0</b><span>typical audit</span></div>
+  </div>
   <div class="bar">
-    <input id="q" type="search" placeholder="Find anything: audits, sanctions, Grok, unlock..." autocomplete="off">
+    <input id="q" type="search" placeholder="Find anything: audits, sanctions, Grok..." autocomplete="off">
     <button id="reset">Show everything</button>
-    <span class="lbl">Journeys:</span>
     <span id="flows"></span>
   </div>
   <div id="flowdesc"></div>
-  <div class="counts" id="counts"></div>
 </header>
 <div id="wrap">
   <div id="graph">
+    <div id="iris"></div>
     <svg id="edges"></svg>
   </div>
 </div>
 <footer>
   <h2>Rules a change must never break</h2>
-  <ul>
-    <li><strong>No score without proof:</strong> minimum scores come only from strictly verified facts; corroboration, press, and self-claims can raise the ceiling but never guarantee points.</li>
-    <li><strong>Safety screens are mandatory:</strong> identity, sanctions (name and wallet), bad-actor graph, and founder-asset checks must all run before a report is called complete.</li>
-    <li><strong>Names are never guessed:</strong> legal and sanctions screening only runs on a provider-verified real person.</li>
-    <li><strong>Sanctions run fresh every time</strong> - never served from memory, because someone can be sanctioned tomorrow.</li>
-    <li><strong>AI suggestions are leads, not evidence:</strong> they never pick the methodology, cap a score, or set a floor.</li>
-    <li><strong>Reports are immutable</strong> once saved; every run has its own cost ledger and cannot save without one.</li>
-    <li><strong>Time is budgeted:</strong> evidence gathering stops early enough that scoring and the bad-actor screen always get their full window.</li>
-    <li><strong>One build path:</strong> server code ships inside one bundle; deploys happen only by pushing main.</li>
+  <ul class="rules">
+    <li><strong>No score without proof.</strong> Minimum scores come only from strictly verified facts; corroboration, press, and self-claims can raise the ceiling but never guarantee points.</li>
+    <li><strong>Safety screens are mandatory.</strong> Identity, sanctions (name and wallet), bad-actor graph, and founder-asset checks must all run before a report is called complete.</li>
+    <li><strong>Names are never guessed.</strong> Legal and sanctions screening only runs on a provider-verified real person.</li>
+    <li><strong>Sanctions run fresh every time.</strong> Never served from memory, because someone can be sanctioned tomorrow.</li>
+    <li><strong>AI suggestions are leads, not evidence.</strong> They never pick the methodology, cap a score, or set a floor.</li>
+    <li><strong>Reports are immutable.</strong> Once saved they cannot change; every run carries its own cost ledger and cannot save without one.</li>
+    <li><strong>Time is budgeted.</strong> Evidence gathering stops early enough that scoring and the bad-actor screen always get their full window.</li>
+    <li><strong>One build path.</strong> Server code ships inside one bundle; deploys happen only by pushing main.</li>
   </ul>
+  <p class="credit">machine twin for agents: docs/architecture.json · generated from the live codebase</p>
 </footer>
 <script>
 const COLS = [
@@ -214,21 +259,53 @@ const E = [
 const FLOWS = [
   ["Customer searches a founder or project",
    ["u-analyst","ui-canvas","rt-audit","en-orch","en-intake","en-lanes","en-basics","en-signals","en-tg","en-analyst","en-score","en-clear","en-present","db-versions"],
-   "THE main journey. A customer types @handle and hits Start: the run controller budgets 10 minutes, identity and token are resolved, evidence is gathered in parallel, facts get deep-researched, the bad-actor screen runs in its reserved slot, the AI analyst scores every axis, deterministic math applies caps and bands, the completeness gate decides decision-ready vs provisional, and the report is saved immutably."],
+   "The main journey, replayed above in numbered steps. Bright boxes are the path; soft-lit boxes are the tools each step calls.",
+   ["A member decides to vet someone before capital moves.",
+    "Types @handle, hits Start. A live evidence stream opens.",
+    "Auth and quota check; a 10-minute serverless window opens.",
+    "The run controller carves the budget: collect, screen, score.",
+    "Who is this? Profile resolved; official token bound, never by name.",
+    "Three parallel lanes fan out: identity, token, wallets.",
+    "Deep research: every claim independently fetched and verified.",
+    "Cadence, lifecycle, and adverse sweeps, if time allows.",
+    "The bad-actor screen runs in its reserved slot. Never skipped.",
+    "The AI analyst scores every axis and writes the verdict.",
+    "Deterministic math: hard caps override, the weakest role governs.",
+    "Complete enough? Five safety screens plus 75% coverage decide.",
+    "Decision-ready or provisional. Never silently cleared.",
+    "Saved immutably with its full cost ledger. About a dollar, six minutes."]],
   ["Customer scans a token",
    ["u-analyst","ui-token","rt-v1","en-token","pv-mkts","db-versions"],
-   "The fast path for a contract address: the token scanner pulls market, holder, honeypot, and sanctions data, then saves a token report. Around a minute, about a cent."],
+   "The fast path for a contract address: market, holder, honeypot, and sanctions data into a saved token report. About a minute, about a cent.",
+   ["Someone pastes a contract address.",
+    "The token report screen sends it to the public API.",
+    "One API unit, no long window needed.",
+    "The token scanner pulls safety, holders, and market data.",
+    "Prices, liquidity, and honeypot flags corroborated across sources.",
+    "Saved as an immutable token report."]],
   ["How a fact gets found cheaply",
    ["ad-x","ad-grounded","pv-serper","pv-or"],
-   "Instead of paying the expensive model to browse, the cheap reader gets google results from Serper for a tenth of a cent and has Gemini extract the answer, with zero data retention."],
+   "Instead of paying the expensive model to browse, the cheap reader gets Google results for a tenth of a cent and has Gemini extract the answer with zero data retention.",
+   ["A collector needs a web fact.",
+    "The cheap reader takes the job before any expensive model.",
+    "Serper returns Google results for $0.001.",
+    "Gemini reads the fetched pages and extracts the answer at ~3% of Sonnet's price."]],
   ["How facts are remembered between runs",
    ["en-basics","ad-kb","db-kb"],
-   "Every audit writes its verified facts into fact memory; the next audit of the same entity reads them back instead of re-paying discovery. Sanctions and legal are deliberately never remembered - they run fresh every time."],
+   "Every audit writes its verified facts into fact memory; the next audit reads them back instead of re-paying discovery. Sanctions and legal are never remembered - they run fresh every time.",
+   ["Deep research verifies a fact the hard way once.",
+    "Fact memory stores it, keyed to the entity.",
+    "Next audit of the same entity starts from everything already proven."]],
   ["How audits get verified",
    ["pv-llama","ad-llama","ad-audits","ad-web"],
-   "DeFiLlama lists a protocol's audit links; the audit checker reads auditor names from the URLs themselves (works even when reports are PDFs), then tries to confirm on the auditor's own site. Confirmed audits raise the score ceiling."],
+   "DeFiLlama lists a protocol's audit links; the audit checker reads auditor names from the URLs themselves - works even when reports are PDFs - then tries to confirm on the auditor's own site.",
+   ["DeFiLlama curates the protocol's audit links.",
+    "The DeFi metrics adapter hands them over.",
+    "Auditor names are read from the URLs - PDF-proof, bot-wall-proof.",
+    "Where a page fetches, the auditor's own site confirms the engagement."]],
 ];
 
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
 const graph = document.getElementById("graph");
 const svg = document.getElementById("edges");
 const nodeEl = new Map();
@@ -244,6 +321,8 @@ for (const [id,label,sub] of COLS){
       + (n[5] ? `<div class="u">${n[5]}</div>` : "")
       + (n[4] ? `<span class="chip ${chipClass}">${n[4]}</span>` : "");
     d.addEventListener("click", ev => { ev.stopPropagation(); focusNode(n[0]); });
+    d.addEventListener("mouseenter", () => peek(n[0], true));
+    d.addEventListener("mouseleave", () => peek(n[0], false));
     col.appendChild(d); nodeEl.set(n[0], d);
   }
   graph.appendChild(col);
@@ -271,12 +350,13 @@ function draw(){
   }
   applyState();
 }
-let state = { mode:"all", id:null, q:"", flow:-1 };
+let state = { mode:"all", id:null, q:"", flow:-1, upTo:Infinity };
+let playTimer = null;
 const flowdesc = document.getElementById("flowdesc");
-function setNode(el, lit, half, dim){
-  el.classList.toggle("lit", lit);
-  el.classList.toggle("half", half);
-  el.classList.toggle("dim", dim);
+function stopPlayback(){ if (playTimer){ clearInterval(playTimer); playTimer = null; } }
+function peek(id, on){
+  if (state.mode !== "all") return;
+  for (const nb of (adj.get(id)||[])) nodeEl.get(nb)?.classList.toggle("peek", on);
 }
 function applyState(){
   let litNodes = null, litEdge = () => false;
@@ -289,65 +369,102 @@ function applyState(){
     flowdesc.innerHTML = n ? `<strong>${n[2]}</strong> - lit boxes are everything it talks to. Click again to clear.` : "";
   } else if (state.mode==="search" && state.q){
     const q = state.q.toLowerCase();
-    litNodes = new Set(N.filter(n => (n[2]+" "+n[3]+" "+(n[4]||"")+" "+n[1]).toLowerCase().includes(q)).map(n=>n[0]));
+    litNodes = new Set(N.filter(n => (n[2]+" "+n[3]+" "+(n[4]||"")+" "+(n[5]||"")+" "+n[1]).toLowerCase().includes(q)).map(n=>n[0]));
     litEdge = (a,b) => litNodes.has(a) && litNodes.has(b);
     flowdesc.textContent = `${litNodes.size} match${litNodes.size===1?"":"es"}`;
   } else if (state.mode==="flow" && state.flow>=0){
-    const [name, chain, desc] = FLOWS[state.flow];
-    litNodes = new Set(chain);
-    chain.forEach((id,i)=>steps.set(id, i+1));
-    const pairs = new Set(chain.slice(1).map((id,i)=>[chain[i],id].sort().join("|")));
+    const [name, chain, desc, captions] = FLOWS[state.flow];
+    const visible = chain.slice(0, state.upTo);
+    litNodes = new Set(visible);
+    visible.forEach((id,i)=>steps.set(id, i+1));
+    const pairs = new Set(visible.slice(1).map((id,i)=>[visible[i],id].sort().join("|")));
     litEdge = (a,b) => pairs.has([a,b].sort().join("|"));
-    // Soft-glow every system the path CALLS along the way, so a journey never
-    // reads as "the engine ran but used no tools": neighbors of each step that
-    // are not themselves on the numbered path.
-    for (const id of chain){
-      if (colOf.get(id) === "actors") continue; // a person's OTHER screens are not part of this run
+    for (const id of visible){
+      if (colOf.get(id) === "actors") continue;
       for (const nb of (adj.get(id)||[])) if (!litNodes.has(nb)) halfNodes.add(nb);
     }
-    // One more hop, adapters -> providers only: the collectors a step calls in
-    // turn call outside data sources, and those are part of the run too.
     for (const id of [...halfNodes]) if (colOf.get(id) === "adapters")
       for (const nb of (adj.get(id)||[])) if (colOf.get(nb) === "providers" && !litNodes.has(nb)) halfNodes.add(nb);
-    const inRun = (id) => litNodes.has(id) || halfNodes.has(id);
+    const inRun = (x) => litNodes.has(x) || halfNodes.has(x);
     halfEdge = (a,b) => inRun(a) && inRun(b);
-    flowdesc.innerHTML = `<strong>${name}:</strong> ${desc} <em>Bright boxes are the numbered path; soft-lit boxes are the tools those steps call.</em>`;
+    if (state.upTo <= chain.length && captions){
+      const i = state.upTo - 1;
+      flowdesc.innerHTML = `<span class="stepno">STEP ${state.upTo}/${chain.length}</span> ${captions[i] ?? ""}`;
+    } else {
+      flowdesc.innerHTML = `<strong>${name}:</strong> ${desc}`;
+    }
   } else {
-    flowdesc.textContent = "";
+    flowdesc.innerHTML = `Hover any box to preview its connections. <em>Pick a journey above to replay it.</em>`;
   }
   for (const [id,el] of nodeEl){
     const lit = litNodes ? litNodes.has(id) : false;
     const half = !lit && halfNodes.has(id);
-    setNode(el, lit, half, litNodes ? !lit && !half : false);
+    el.classList.toggle("lit", lit);
+    el.classList.toggle("half", half);
+    el.classList.toggle("dim", litNodes ? !lit && !half : false);
+    if (!litNodes) el.classList.remove("peek");
     const badge = el.querySelector(".step");
     if (steps.has(id)){ badge.textContent = steps.get(id); badge.classList.add("on"); }
     else badge.classList.remove("on");
   }
+  const done = state.mode!=="flow" || state.upTo >= (FLOWS[state.flow]?.[1].length ?? 0);
   for (const [p,a,b] of paths){
     const lit = litEdge(a,b);
     const half = !lit && halfEdge(a,b);
     p.classList.toggle("lit", lit);
+    p.classList.toggle("flowing", lit && state.mode==="flow" && done && !reduceMotion);
     p.classList.toggle("lit2", half);
-    p.classList.toggle("hide", !!litNodes && !lit && !half);
+    p.classList.toggle("hide", (!!litNodes) && !lit && !half);
   }
   document.querySelectorAll("button.flow").forEach((btn,i)=>btn.classList.toggle("on", state.mode==="flow" && state.flow===i));
 }
+function playFlow(i){
+  stopPlayback();
+  const chain = FLOWS[i][1];
+  if (reduceMotion){ state = {mode:"flow",id:null,q:"",flow:i,upTo:chain.length}; applyState(); return; }
+  state = {mode:"flow",id:null,q:"",flow:i,upTo:1}; applyState();
+  playTimer = setInterval(()=>{
+    if (state.mode!=="flow" || state.flow!==i){ stopPlayback(); return; }
+    state.upTo += 1; applyState();
+    if (state.upTo >= chain.length){ stopPlayback(); setTimeout(()=>{ if (state.mode==="flow"&&state.flow===i){ state.upTo = chain.length + 1; applyState(); } }, 1400); }
+  }, 620);
+}
+function clearAll(){
+  stopPlayback();
+  state = {mode:"all",id:null,q:"",flow:-1,upTo:Infinity};
+  document.getElementById("q").value = ""; applyState();
+}
 function focusNode(id){
-  state = (state.mode==="focus" && state.id===id) ? {mode:"all",id:null,q:"",flow:-1} : {mode:"focus",id,q:"",flow:-1};
+  stopPlayback();
+  state = (state.mode==="focus" && state.id===id) ? {mode:"all",id:null,q:"",flow:-1,upTo:Infinity} : {mode:"focus",id,q:"",flow:-1,upTo:Infinity};
   document.getElementById("q").value = ""; applyState();
 }
 const flowsBar = document.getElementById("flows");
 FLOWS.forEach(([name],i)=>{
   const b = document.createElement("button"); b.className="flow"; b.textContent = name;
-  b.addEventListener("click",()=>{ state = (state.mode==="flow"&&state.flow===i)?{mode:"all",id:null,q:"",flow:-1}:{mode:"flow",id:null,q:"",flow:i}; document.getElementById("q").value=""; applyState(); });
+  b.addEventListener("click",()=>{ if (state.mode==="flow"&&state.flow===i){ clearAll(); } else playFlow(i); });
   flowsBar.appendChild(b);
 });
-document.getElementById("q").addEventListener("input", e => { state = e.target.value.trim() ? {mode:"search",id:null,q:e.target.value.trim(),flow:-1} : {mode:"all",id:null,q:"",flow:-1}; applyState(); });
-document.getElementById("reset").addEventListener("click", ()=>{ state={mode:"all",id:null,q:"",flow:-1}; document.getElementById("q").value=""; applyState(); });
-document.addEventListener("keydown", e => { if (e.key==="Escape"){ state={mode:"all",id:null,q:"",flow:-1}; document.getElementById("q").value=""; applyState(); }});
-document.getElementById("counts").textContent = `${N.length} systems · ${E.length} connections · ${FLOWS.length} journeys · 8 rules`;
+document.getElementById("q").addEventListener("input", e => {
+  stopPlayback();
+  state = e.target.value.trim() ? {mode:"search",id:null,q:e.target.value.trim(),flow:-1,upTo:Infinity} : {mode:"all",id:null,q:"",flow:-1,upTo:Infinity};
+  applyState();
+});
+document.getElementById("reset").addEventListener("click", clearAll);
+document.addEventListener("keydown", e => { if (e.key==="Escape") clearAll(); });
+// Count-up stats, then auto-play the customer journey: the map demos itself.
+function countUp(el, target, cash){
+  if (reduceMotion){ el.textContent = cash ? "$1" : String(target); return; }
+  const t0 = performance.now(), dur = 900;
+  const tick = (t)=>{
+    const k = Math.min(1,(t-t0)/dur), v = Math.round(target * (1-Math.pow(1-k,3)));
+    el.textContent = cash ? "$"+v : String(v);
+    if (k<1) requestAnimationFrame(tick);
+  };
+  requestAnimationFrame(tick);
+}
+document.querySelectorAll("#stats b").forEach(b=>countUp(b, Number(b.dataset.n ?? b.dataset.cash), b.dataset.cash !== undefined));
 draw();
 window.addEventListener("resize", draw);
-// Land on the main customer journey so the first thing a visitor sees is the story.
-state = {mode:"flow",id:null,q:"",flow:0}; applyState();
+setTimeout(()=>{ if (state.mode==="all") playFlow(0); }, reduceMotion ? 0 : 700);
 </script>
