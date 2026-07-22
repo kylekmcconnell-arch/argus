@@ -39,7 +39,13 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     configuredService("twitterapi", "twitterapi.io", process.env.TWITTERAPI_KEY, "configure TWITTERAPI_KEY"),
     configuredService("serper", "Serper (grounded search)", process.env.SERPER_API_KEY, "configure SERPER_API_KEY"),
     configuredService("openrouter", "OpenRouter (cheap extraction)", process.env.OPENROUTER_API_KEY, "configure OPENROUTER_API_KEY"),
+    configuredService("cryptorank", "CryptoRank (unlock schedule)", process.env.CRYPTORANK_API_KEY, "configure CRYPTORANK_API_KEY"),
   ];
+
+  // Knowledge-base reuse diagnostic: read-through only engages when
+  // ARGUS_ENTITY_REUSE=on reaches the RUNNING build. A verified fact flapping
+  // back to unanswered on a repeat audit is the symptom of this being off.
+  const entityReuse = (process.env.ARGUS_ENTITY_REUSE || "").trim().toLowerCase() === "on";
 
   // Extraction-routing diagnostic: confirm, without a paid audit, whether the
   // decoupled grounded-search path is provisioned and which model the cheap
@@ -71,6 +77,12 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     mode: "configuration",
     services,
     extraction,
+    knowledgeBase: {
+      reuse: entityReuse,
+      note: entityReuse
+        ? "verified facts from prior audits seed new runs of the same entity"
+        : "read-through INACTIVE: ARGUS_ENTITY_REUSE is not 'on' in this build; repeat audits re-discover everything",
+    },
     down: services.filter((service) => !service.ok).length,
   });
 }

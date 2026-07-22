@@ -35,13 +35,14 @@ describe("provider readiness", () => {
     expect(captured.body).toMatchObject({
       available: true,
       mode: "configuration",
-      down: 2, // twitterapi + openrouter unconfigured
+      down: 3, // twitterapi + openrouter + cryptorank unconfigured
       services: [
         { id: "xai", ok: true },
         { id: "anthropic", ok: true },
         { id: "twitterapi", ok: false, detail: "not configured in this deployment" },
         { id: "serper", ok: true },
         { id: "openrouter", ok: false, detail: "not configured in this deployment" },
+        { id: "cryptorank", ok: false, detail: "not configured in this deployment" },
       ],
       // Serper + a model are set but no OpenRouter key -> grounded search runs on
       // the native Anthropic extractor, not OpenRouter.
@@ -50,16 +51,19 @@ describe("provider readiness", () => {
         extractModel: "google/gemini-2.5-flash-lite",
         extractProvider: "anthropic",
       },
+      knowledgeBase: { reuse: false },
     });
     expect(captured.headers["cache-control"]).toContain("s-maxage=60");
     expect(providerFetch).not.toHaveBeenCalled();
   });
 
-  it("reports OpenRouter routing when the key and a slug model are set", () => {
+  it("reports OpenRouter routing and knowledge-base reuse when configured", () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
     vi.stubEnv("SERPER_API_KEY", "serper-key");
     vi.stubEnv("OPENROUTER_API_KEY", "or-key");
     vi.stubEnv("ARGUS_EXTRACT_MODEL", "google/gemini-2.5-flash-lite");
+    vi.stubEnv("CRYPTORANK_API_KEY", "cr-key");
+    vi.stubEnv("ARGUS_ENTITY_REUSE", "on");
     const { res, captured } = response();
 
     handler({ method: "GET" } as never, res as never);
@@ -69,8 +73,10 @@ describe("provider readiness", () => {
         { id: "xai" }, { id: "anthropic" }, { id: "twitterapi" },
         { id: "serper", ok: true },
         { id: "openrouter", ok: true },
+        { id: "cryptorank", ok: true },
       ],
       extraction: { extractProvider: "openrouter", groundedSearchActive: true },
+      knowledgeBase: { reuse: true },
     });
   });
 
