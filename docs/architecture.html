@@ -1,0 +1,109 @@
+<title>ARGUS architecture map</title>
+<style>
+  :root {
+    --bg:#fbfaf8; --panel:#ffffff; --ink:#23252b; --dim:#5c6068; --faint:#8a8e96;
+    --line:#e4e2dd; --accent:#2456c8; --good:#1a7f4e; --warn:#a06a12; --bad:#b3403a;
+    --mono:ui-monospace,"SF Mono",Menlo,monospace;
+  }
+  @media (prefers-color-scheme: dark){ :root{
+    --bg:#101318; --panel:#171b22; --ink:#e8eaee; --dim:#a6abb5; --faint:#6d727c;
+    --line:#262b34; --accent:#7ea3f0; --good:#52c58a; --warn:#d9a44a; --bad:#e07a72;
+  }}
+  :root[data-theme="dark"]{ --bg:#101318; --panel:#171b22; --ink:#e8eaee; --dim:#a6abb5; --faint:#6d727c; --line:#262b34; --accent:#7ea3f0; --good:#52c58a; --warn:#d9a44a; --bad:#e07a72; }
+  :root[data-theme="light"]{ --bg:#fbfaf8; --panel:#ffffff; --ink:#23252b; --dim:#5c6068; --faint:#8a8e96; --line:#e4e2dd; --accent:#2456c8; --good:#1a7f4e; --warn:#a06a12; --bad:#b3403a; }
+  body{ background:var(--bg); color:var(--ink); font:15px/1.6 -apple-system,"Segoe UI",sans-serif; margin:0; }
+  main{ max-width:52rem; margin:0 auto; padding:2.5rem 1.25rem 4rem; }
+  h1{ font-size:1.45rem; line-height:1.25; margin:0 0 .3rem; text-wrap:balance; }
+  h2{ font-size:.8rem; letter-spacing:.09em; text-transform:uppercase; color:var(--faint); margin:2.4rem 0 .8rem; }
+  p{ margin:.5rem 0; color:var(--dim); }
+  code{ font-family:var(--mono); font-size:.86em; }
+  .scroll{ overflow-x:auto; }
+  table{ border-collapse:collapse; width:100%; font-size:.9rem; }
+  th{ text-align:left; font-size:.7rem; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); font-weight:600; padding:.4rem .7rem .4rem 0; border-bottom:1px solid var(--line); }
+  td{ padding:.45rem .7rem .45rem 0; border-bottom:1px solid var(--line); vertical-align:top; color:var(--dim); }
+  td:first-child{ color:var(--ink); white-space:nowrap; }
+  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1rem 1.2rem; margin:.9rem 0; }
+  .chip{ display:inline-block; font-family:var(--mono); font-size:.7rem; padding:.05rem .45rem; border:1px solid var(--line); border-radius:999px; color:var(--dim); margin-left:.35rem; }
+  .chip.key{ color:var(--warn); border-color:var(--warn); }
+  .chip.free{ color:var(--good); border-color:var(--good); }
+  .chip.cost{ color:var(--bad); border-color:var(--bad); }
+  ol,ul{ padding-left:1.2rem; color:var(--dim); } li{ margin:.4rem 0; }
+  .mermaid{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:.8rem; overflow-x:auto; }
+  .kv{ display:grid; grid-template-columns:auto 1fr; gap:.25rem 1.1rem; font-size:.9rem; }
+  .kv dt{ color:var(--faint); font-family:var(--mono); font-size:.8rem; } .kv dd{ margin:0; color:var(--dim); }
+  .inv li strong{ color:var(--ink); }
+</style>
+<main>
+  <h1>ARGUS architecture, one page</h1>
+  <p>Crypto due-diligence engine: <code>@handle</code> / token / site in, evidence-disciplined scored verdict out. Machine twin for agents: <code>docs/architecture.json</code>. Generated 2026-07-22 from <code>integrate/uniswap-final</code>; update both files with any architecture-level change.</p>
+
+  <h2>System flow</h2>
+  <pre class="mermaid">
+flowchart LR
+  C[React SPA<br/>src/] -->|SSE| A[api/audit.ts<br/>auth + quota + 600s cap]
+  A --> O[orchestrate.ts runAudit<br/>cost-ledger isolated]
+  O --> L1[cold-intake<br/>profile + token + enrich]
+  L1 --> L2[3 adapter lanes<br/>identity / token / wallet]
+  L2 --> BF[basic-facts<br/>Claude web_search + KB reuse]
+  BF --> SP[signal passes<br/>budget-gated]
+  SP --> TG[trust-graph screen<br/>reserved 60s window]
+  TG --> AN[analyst<br/>Sonnet score + verify]
+  AN --> P[(Supabase<br/>immutable versions)]
+  P -->|active projection| C
+  </pre>
+  <p>Server code in <code>server/</code> is esbuild-bundled to <code>api/_collector.js</code>; routes import the bundle. After editing <code>server/</code>, run <code>npm run build</code>.</p>
+
+  <h2>Time budget (600s function ceiling)</h2>
+  <dl class="kv panel">
+    <dt>analyst deadline</dt><dd>start + 600s minus 90s finalization reserve = 510s</dd>
+    <dt>collection stops</dt><dd>analyst deadline minus 250s reserve = 260s in</dd>
+    <dt>trust-graph window</dt><dd>collection stop + 60s (never-waive screen can't be starved)</dd>
+    <dt>analyst window</dt><dd>190s remaining, greater than the 180s scorer timeout - invariant locked by test</dd>
+  </dl>
+
+  <h2>Evidence adapters</h2>
+  <div class="scroll"><table>
+    <tr><th>Adapter</th><th>Answers</th><th>Source</th></tr>
+    <tr><td>basicFacts <span class="chip cost">dominant cost</span></td><td>founders, product, governance, funding, audits</td><td>Claude web_search (Sonnet)</td></tr>
+    <tr><td>x / twitterapi</td><td>profile, posts, follow graph, general web</td><td>twitterapi.io + grounded&rarr;Claude&rarr;Grok</td></tr>
+    <tr><td>groundedSearch <span class="chip key">SERPER</span></td><td>cheap search + extract</td><td>Serper + Gemini via OpenRouter (ZDR)</td></tr>
+    <tr><td>securityAudits</td><td>auditor self-attestation + auditor-site hop</td><td>subject pages, unioned</td></tr>
+    <tr><td>defiLlama <span class="chip free">free</span></td><td>TVL + trend, fees + trend, funding, audit links</td><td>api.llama.fi</td></tr>
+    <tr><td>tokenUnlocks <span class="chip key">CRYPTORANK</span></td><td>next unlock date / size / 90d load</td><td>CryptoRank v3, 2 credits</td></tr>
+    <tr><td>tokenHolders <span class="chip free">free</span></td><td>top-10 concentration, LP lock</td><td>GoPlus</td></tr>
+    <tr><td>trustgraph</td><td>cross-report connections (never-waive)</td><td>org graph in Supabase</td></tr>
+    <tr><td>priorOutcome</td><td>"since last scan" delta</td><td>prior report version</td></tr>
+    <tr><td>offchain <span class="chip">always live</span></td><td>news, courts, OFAC name screen</td><td>google-news / courtlistener / opensanctions</td></tr>
+    <tr><td>projectToken</td><td>canonical token binding (never name-match)</td><td>coingecko / dexscreener</td></tr>
+    <tr><td>entityStore <span class="chip key">ENTITY_REUSE</span></td><td>knowledge base read/write-back</td><td>entity_facts table</td></tr>
+    <tr><td>pdl / github / monid / helius <span class="chip key">keyed</span></td><td>career, repos, private-market, Solana wallets</td><td>metered per key</td></tr>
+  </table></div>
+
+  <h2>Scoring and clearance</h2>
+  <ol>
+    <li><strong>Analyst</strong> (Sonnet, Grok fallback) fills per-axis scores; project axes are clamped to evidence-strength bands (emerging / solid / exceptional) and out-of-band scores are rejected into a repair pass.</li>
+    <li><strong>Engine</strong> sums axes per role, applies hard caps (rug / fraud / hard graph link cap to 10, forcing AVOID); the most-severe role governs and ties break to the LOWER score. PASS 70-100.</li>
+    <li><strong>Clearance</strong> needs every never-waive screen recorded (identity, OFAC name + address, trust-graph, founder-asset) plus 75% recorded coverage; else the verdict publishes PROVISIONAL or INCOMPLETE, never silently cleared.</li>
+  </ol>
+
+  <h2>Quality gates (all must pass before push)</h2>
+  <div class="scroll"><table>
+    <tr><th>Gate</th><th>Proves</th></tr>
+    <tr><td><code>npm run typecheck</code></td><td>all 3 TS projects compile (never bare tsc)</td></tr>
+    <tr><td><code>npm test</code></td><td>~1,880 tests: engine fidelity + invariants</td></tr>
+    <tr><td><code>npm run calibrate</code></td><td>19 golden verdicts - scoring changes can't inflate bad actors</td></tr>
+    <tr><td><code>npm run canary:offline</code></td><td>7 release cases, zero unexpected provider URLs</td></tr>
+    <tr><td><code>npm run truth:check</code></td><td>source-of-truth doc contract</td></tr>
+    <tr><td>CI on main</td><td>the above + Supabase DB gates; deploy = push to main only</td></tr>
+  </table></div>
+
+  <h2>Invariants a change must never break</h2>
+  <ul class="inv">
+    <li><strong>H2:</strong> score floors come only from strictly verified facts; corroboration, press, and self-attestation widen ceilings, never mint minimums.</li>
+    <li><strong>Never-waive screens</strong> must be recorded for clearance; the trust-graph screen owns a reserved budget window.</li>
+    <li><strong>resolved_name</strong> is never inferred; legal and sanctions screens require a provider-resolved real person and always run live (never cached in the KB).</li>
+    <li><strong>Model leads</strong> never route roles, cap scores, or floor scores.</li>
+    <li><strong>Immutability:</strong> report versions are trigger-protected; every audit runs in an isolated cost ledger and cannot persist without one.</li>
+    <li><strong>Copy:</strong> no em or en dashes anywhere in authored copy (CI-enforced).</li>
+  </ul>
+</main>

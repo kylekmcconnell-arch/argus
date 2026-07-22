@@ -1,0 +1,169 @@
+{
+  "$schema": "self-describing architecture map; read this BEFORE excavating the codebase",
+  "app": "ARGUS - crypto due-diligence engine (@handle/token -> evidence -> scored verdict)",
+  "generated": "2026-07-22",
+  "generatedFrom": "branch integrate/uniswap-final",
+  "maintenance": "Update this file in the SAME commit as any architecture-level change (new adapter, pipeline stage, budget constant, invariant, env var). Line anchors drift; trust names over numbers and re-grep when precision matters.",
+  "humanTwin": "docs/architecture.html (same content, visual)",
+
+  "topology": {
+    "units": {
+      "client": "Vite React SPA in src/ (entry src/main.tsx -> src/App.tsx phase-router; pages lazy-loaded)",
+      "apiRoutes": "~55 Vercel serverless functions in api/*.ts; underscore files (_collector.js, _auth.ts, _provenance.ts, _cache.js, _graph.ts) are shared internals, not routes",
+      "serverEngine": "server/ (orchestrator + adapters + analyst agent), bundled by scripts/build-collector.mjs (esbuild, entry server/_entry.ts) into api/_collector.js; API routes import the BUNDLE, never server/ source. Rebuild with `npm run build` after server/ edits",
+      "db": "Supabase Postgres via PostgREST + RPCs; migrations in supabase/migrations/"
+    },
+    "personAuditFlow": "client SSE -> api/audit.ts (requireArgusAuth + consumeInvestigationQuota, config.maxDuration=600) -> runAudit(handle, emit, {organizationId, analystDeadlineAt}) in server/orchestrate.ts -> adapters -> analyst -> persistServerDossier (api/_provenance.ts persist_report_version_bundle RPC) -> SSE done",
+    "tokenAuditFlow": "src/token/audit.ts auditToken() (bundled into _collector + _sweep) serves api/v1/token.ts and the token UI",
+    "keyRoutes": {
+      "api/audit.ts": "authenticated person-investigation SSE stream (the core pipeline entry)",
+      "api/v1/person.ts + api/v1/token.ts": "public documented v1 API",
+      "api/ask.ts": "Q&A over a frozen report",
+      "api/challenge-verdict.ts": "adversarial second-opinion review",
+      "api/health.ts": "zero-spend provider-readiness + extraction-routing diagnostic (check env wiring here before spending on a test audit)",
+      "api/sweep.ts": "manual watchlist sweep; deliberately NO cron",
+      "forensicFamily": "arkham*, deployer*, evm-*, holders, bytecode, site-infra, sanctions*, legal-screen, news, pfp-check, recon-team, find-wallet, vc-portfolio, project-docs, namesake, cryptorank"
+    }
+  },
+
+  "pipeline": {
+    "file": "server/orchestrate.ts (runAudit ~:3168 wraps runAuditWithLedger ~:2193 in withCostLedger)",
+    "stagesOrdered": [
+      "budget-setup: analystDeadlineAt, collectionDeadlineAt = analystDeadline - COLLECTION_ANALYST_RESERVE_MS, graphScreenDeadlineAt = collectionDeadline + TRUST_GRAPH_SCREEN_RESERVE_MS",
+      "cold-intake: resolveProfile (twitterapi) -> projectTokenPass (coingecko/dexscreener/geckoterminal) -> parallel token enrichment (DeFiLlama tvl/fees/funding, holder profile, CryptoRank unlocks, security audits, Monid) -> coldIntake posts/claims/team",
+      "adapter-lanes: 3 concurrent lanes (IDENTITY: x/github/pdl/offchain, TOKEN: dexscreener/coingecko, WALLET: onchain); serial within lane; ARGUS_SERIAL_ADAPTERS collapses",
+      "basic-facts: runs ALONE post-barrier (Claude web_search discovery; the dominant cost line); KB read-through when ARGUS_ENTITY_REUSE=on",
+      "founder financing / venture-token binding / SEC registry screen",
+      "projections: projectProviderBackedBasicFacts, projectVerifiedBasicFacts",
+      "signal-passes (budget-gated, skippable): token-lifecycle, post-cadence, adverse-sweep",
+      "role classification: providerBackedRoles ONLY (model role leads never route)",
+      "project core outcomes (backing/disclosure), portfolio + fund-scale (investor-only)",
+      "trust-graph: LAST collection pass AND a never-waive screen; runs in its reserved window past the general collection deadline",
+      "repeat-backing (deterministic founder F3)",
+      "analyst: scanContradictions + analyzeSubject concurrent under analystDeadlineAt; fail-closed preflight",
+      "finalize: assembleDossier, checkTracker.completeness, prior-outcome delta, cost attach, org-scoped writeEntityFacts (verified facts only; legal/sanctions/adverse EXCLUDED)"
+    ],
+    "budgetModel": {
+      "file": "src/lib/investigationRuntime.ts",
+      "DEEP_INVESTIGATION_MAX_DURATION_SECONDS": 600,
+      "ANALYST_SCORING_TIMEOUT_MS": 180000,
+      "ANALYST_REPAIR_TIMEOUT_MS": 90000,
+      "ANALYST_FINALIZATION_RESERVE_MS": 90000,
+      "COLLECTION_ANALYST_RESERVE_MS": 250000,
+      "TRUST_GRAPH_SCREEN_RESERVE_MS": 60000,
+      "invariant": "COLLECTION_ANALYST_RESERVE_MS - TRUST_GRAPH_SCREEN_RESERVE_MS >= ANALYST_SCORING_TIMEOUT_MS (250-60=190>=180); tested in src/lib/investigationRuntime.test.ts"
+    }
+  },
+
+  "adapters": {
+    "registry": "ADAPTERS in server/orchestrate.ts (~:180); retired-but-present: crunchbase.ts, reddit.ts; bitquery = reserved credential, never runs",
+    "catalog": {
+      "basicFacts.ts": {"collects": "cited foundational facts (founders/product/token/governance/audits/funding/traction)", "via": "Claude web_search on DISCOVERY_MODEL (=ANALYST_MODEL default)", "cost": "DOMINANT cost line", "flags": "ARGUS_BASIC_FACTS_PRIMARY/_REPAIR=grok, ARGUS_ENTITY_REUSE=on"},
+      "x.ts": {"collects": "X profile/posts/follow-graph + general web discovery", "via": "twitterapi.io + dispatcher generalWebSearch: grounded(Serper)->claudeWebSearch->grok", "cost": "twitterapi $0.0002/call; grok ceiling ARGUS_GROK_AUDIT_CEILING_USD=$8"},
+      "groundedSearch.ts": {"collects": "decoupled search+extract", "via": "Serper SERP ($1/1k) + page fetch + cheap extract (ARGUS_EXTRACT_MODEL; OpenRouter+ZDR when model is a provider/model slug e.g. google/gemini-2.5-flash-lite)", "dormantUntil": "SERPER_API_KEY"},
+      "securityAudits.ts": {"collects": "auditor self-attestation (subject pages, unioned across candidates) + auditor-domain corroboration hop", "note": "selfAttested>=2 registry auditors arms the P3/P6 exceptional CEILING; known gap: PDF/Cloudflare-hosted audit reports don't fetch (iteration-9 spec)"},
+      "defiLlama.ts": {"collects": "TVL(+trend) / fees(+30d-over-30d trend) / funding rounds / audit links", "via": "api.llama.fi, free"},
+      "tokenUnlocks.ts": {"collects": "upcoming unlock date/allocation/%supply/$ + 90d load", "via": "CryptoRank v3, <=2 credits/audit", "dormantUntil": "CRYPTORANK_API_KEY"},
+      "tokenHolders.ts": {"collects": "float control: top-10 holder %, LP lock/burn", "via": "GoPlus, free"},
+      "trustgraph.ts": {"collects": "frozen cross-report graph reconciliation (never-waive screen)", "via": "Supabase graph_contributions"},
+      "priorOutcome.ts": {"collects": "'Since last scan' outcome delta vs latest persisted version", "via": "cases -> report_versions read-only"},
+      "offchain.ts": {"collects": "news, US court captions, OFAC SDN exact-name screen, avatar", "via": "google-news/courtlistener/opensanctions", "note": "always LIVE, never KB-cached"},
+      "profilePhoto.ts": {"collects": "PFP integrity screen", "via": "Claude vision"},
+      "peopledatalabs.ts": {"collects": "identity + off-LinkedIn career (F1/F2)", "cost": "~$0.10/match", "dormantUntil": "PDL_API_KEY"},
+      "github.ts": {"collects": "org/repo affiliations, twitter-linked identity", "dormantUntil": "GITHUB_TOKEN"},
+      "monid.ts": {"collects": "private-company enrichment (funding/leadership)", "via": "Monid/Akta, metered", "dormantUntil": "MONID_API_KEY"},
+      "projectToken.ts": {"collects": "canonical token binding via official-X/official-domain (never a name match)"},
+      "portfolio.ts + fundScale.ts + investorDiscovery.ts": {"collects": "investor I2 portfolio + I3 fund scale"},
+      "coingecko/dexscreener/onchain(Helius)/sitecheck/teampage/wayback/wallet/notableAccounts": {"collects": "market data, rug signals, Solana wallets, site substance, /team fetch, archive corroboration, wallet resolution, reverse-follow references"}
+    },
+    "sharedInfra": "server/publicWeb.ts (fetch/normalize), server/cache.ts (provider_cache), server/entityStore.ts (entity_facts KB read/write, org-scoped, gated ARGUS_ENTITY_REUSE)"
+  },
+
+  "scoring": {
+    "flow": "evidence -> server/agent.ts (analyst) -> src/engine/audit.ts (deterministic engine) -> server/checks.ts + src/lib/scanChecklist.ts (completeness) -> src/lib/reportPresentation.ts (display)",
+    "analyst": {
+      "transport": "structured<T>(): Claude ANALYST_MODEL (default claude-sonnet-4-6) then Grok fallback, one deadline, forced single tool call",
+      "tools": "record_claims, record_contradictions, record_verdict",
+      "projectBands": "deriveProjectStrengthBands: per-axis tiers none/assessed_null/adverse/emerging(40-69%)/solid(70-84%)/exceptional(85-100% of weight); validateAnalystVerdict REJECTS out-of-band project scores (triggers repair)",
+      "H2": "floors only from strict verifiedFacts() with floorEligible!==false; recall/corroborated facts + press + audit self-attestation widen the CEILING only"
+    },
+    "engine": {
+      "perRole": "raw = sum(axis scores) + doxBonus(Confirmed 5/Probable 3; PROJECT always 0), then hard caps",
+      "governing": "most-severe verdict governs (AVOID>UNVERIFIABLE_IDENTITY>FAIL>CAUTION>PASS>INCOMPLETE); TIE BREAKS TO THE LOWER SCORE",
+      "bands": "PASS 70-100, CAUTION 40-69, FAIL 0-39; cap ceiling<=10 forces AVOID",
+      "sharedCaps": "deception_confirmed 10, investigator_verified_fraud 10, trust_graph_hard_link 10, trust_graph_medium_link 69",
+      "capEligibility": "model_lead / artifact_verified===false evidence can NEVER trigger a cap or floor"
+    },
+    "completeness": {
+      "gate": "clearanceCoverage (src/lib/scanChecklist.ts): every applicable NEVER_WAIVE check recorded AND recordedPercent >= 75 (floored)",
+      "neverWaive": ["identity-resolution", "ofac-sanctions-name", "ofac-sanctions-address", "trust-graph-connections", "founder-asset-distinction"]
+    },
+    "presentation": "presentPublicReport: complete+band-matching -> DECISION-READY; partial+all-axes-supported+PASS -> PROVISIONAL; adverse+partial -> RISK SIGNAL; else INCOMPLETE. Score/verdict mismatch fails closed"
+  },
+
+  "dataStores": {
+    "cases + case_events": "case lifecycle (api/report.ts, api/_provenance.ts RPCs)",
+    "report_versions": "immutable report snapshots; DB triggers block certified mutation; activate_report_version_with_graph promotes",
+    "report_axis_evidence": "axis citation lineage",
+    "graph_contributions": "org trust graph (api/_graph.ts)",
+    "entity_facts": "knowledge base: verified facts write-back every audit, read-through when ARGUS_ENTITY_REUSE=on; NEVER stores legal/sanctions/adverse",
+    "provider_cache": "server/cache.ts",
+    "provider_usage_events + report_cost_lines": "cost telemetry",
+    "argus_members": "auth + RBAC + quotas (api/_auth.ts, consume_usage_quota RPC)",
+    "clientLocal": "src/lib/auditlog.ts localStorage log (reconciled to ACTIVE version on case open)"
+  },
+
+  "envVars": {
+    "requiredForLive": ["ANTHROPIC_API_KEY", "SUPABASE_URL", "SUPABASE_SECRET_KEY", "TWITTERAPI_KEY"],
+    "providerKeys": ["XAI_API_KEY", "SERPER_API_KEY", "OPENROUTER_API_KEY", "COINGECKO_API_KEY", "CRYPTORANK_API_KEY", "PDL_API_KEY", "GITHUB_TOKEN", "HELIUS_API_KEY", "MONID_API_KEY", "ARKHAM_API_KEY", "ETHERSCAN_API_KEY"],
+    "modelRouting": {
+      "ARGUS_ANALYST_MODEL": "default claude-sonnet-4-6 (verdict quality-critical; do not cheapen without live label validation)",
+      "ARGUS_DISCOVERY_MODEL": "defaults to ANALYST_MODEL; Haiku A/B REGRESSED recall (documented in server/config.ts) - do not lower casually",
+      "ARGUS_EXTRACT_MODEL": "default claude-haiku-4-5; a provider/model slug + OPENROUTER_API_KEY routes via OpenRouter with data_collection=deny (ZDR)",
+      "ARGUS_GENERAL_WEB_PROVIDER": "grok forces legacy grok-direct",
+      "ARGUS_ENTITY_REUSE": "on = KB read-through",
+      "ARGUS_GROK_AUDIT_CEILING_USD": "default 8.00 mid-run Grok stop"
+    },
+    "checkWiring": "GET /api/health reports key presence + extraction routing with zero spend; env changes require a Vercel REDEPLOY to take effect"
+  },
+
+  "costLedger": {
+    "file": "server/cost.ts",
+    "model": "withCostLedger AsyncLocalStorage per-audit isolation; getCost() attaches full LedgerLine[] to the dossier; persist REJECTS a live dossier without an observed ledger",
+    "recorders": "addClaudeUsage (Haiku-vs-Sonnet by model), addGrokUsage (never books fewer sources than tool calls imply - xAI under-reports), addOpenRouterUsage (books ACTUAL usage.cost), recordSerper/Twitterapi/PdlMatch/Helius",
+    "discipline": "live audits cost real dollars (~$0.7-1.5 person audit); ask the user before batteries; never trust the in-app ledger over the provider invoice"
+  },
+
+  "qualityGates": {
+    "npm run typecheck": "tsc -b + server + api tsconfigs (NEVER bare npx tsc --noEmit; it skips 2 projects)",
+    "npm test": "full vitest suite (~1880+ tests): engine fidelity, adapters, invariants",
+    "npm run truth:check": "source-of-truth doc contract",
+    "npm run canary:offline": "7 deterministic release cases, all providers intercepted, 0 unexpected URLs",
+    "npm run calibrate": "19-case golden verdict set; the safety net proving scoring changes don't inflate bad actors",
+    "eval/harness.ts": "record-once(live,$)/replay-forever(offline) label fixtures; only LIVE gates can catch model-quality regressions",
+    "ci": ".github/workflows/ci.yml on push to main: db-gates (supabase test:db) + truth/typecheck/test/calibrate/canary/build",
+    "uiCopyPolicy": "NO em/en dashes in authored runtime copy (also enforced in analyst output + truth:check)"
+  },
+
+  "clientSurface": {
+    "src/App.tsx": "phase router (~19 phases) + report/token/investigation state",
+    "src/components/Report.tsx": "flagship person/project report renderer (176KB; edit with care, fresh context)",
+    "src/components/TokenReport.tsx + src/token/audit.ts": "token dossier + token audit engine",
+    "src/components/InvestigationRun.tsx / LiveRun.tsx": "SSE audit runners",
+    "src/components/InvestigationDecisionCanvas.tsx / InvestigationReport.tsx": "decision canvas",
+    "src/components/SnapshotEvidenceControl.tsx": "frozen-snapshot control + pre-upgrade re-scan nudge"
+  },
+
+  "invariants": [
+    "H2: no score floor from soft evidence - floors only from strict verified facts (floorEligible!==false); recall facts, press, and audit self-attestation are ceiling-only",
+    "Never-waive screens (identity-resolution, ofac name+address, trust-graph-connections, founder-asset-distinction) must be RECORDED for clearance; trust-graph gets a reserved budget window so it is never clipped",
+    "resolved_name is NEVER set from an inferred/model name; legal+OFAC screens require a provider-resolved real person",
+    "model_lead evidence never routes roles, never triggers caps, never floors scores; it stays investigator-visible lead material",
+    "sanctions/legal are screened LIVE every run - never cached in the knowledge base (entity_facts write-back excludes them)",
+    "deploy prod ONLY by pushing main (Vercel git integration); never vercel --prod from a worktree; no cron jobs by design (sweep is manual)",
+    "no em/en dashes anywhere in authored copy (uiCopyPolicy + analyst validator + truth:check)",
+    "budget arithmetic: COLLECTION_ANALYST_RESERVE - TRUST_GRAPH_SCREEN_RESERVE >= ANALYST_SCORING_TIMEOUT; in-flight adapters are never abandoned mid-mutation",
+    "report versions are immutable (DB triggers); every audit runs in an isolated AsyncLocalStorage cost ledger; persist rejects a dossier without one",
+    "after editing server/, run `npm run build` to regenerate api/_collector.js - routes import the bundle, not source"
+  ]
+}
