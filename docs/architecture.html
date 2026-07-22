@@ -31,6 +31,7 @@
   #edges{ position:absolute; inset:0; pointer-events:none; overflow:visible; }
   #edges path{ fill:none; stroke:var(--faint); stroke-width:1; opacity:.16; transition:opacity .15s,stroke .15s; }
   #edges path.lit{ stroke:var(--accent); stroke-width:1.6; opacity:.95; }
+  #edges path.lit2{ stroke:var(--accent); stroke-width:1; opacity:.32; }
   #edges path.hide{ opacity:.04; }
   .col h2{ font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); margin:1.1rem 0 .1rem; }
   .col .colsub{ font-size:.68rem; color:var(--faint); opacity:.75; margin:0 0 .55rem; }
@@ -43,6 +44,7 @@
   .node .chip.fallback{ color:var(--faint); border-color:var(--faint); }
   .node .u{ color:var(--dim-ink); font-size:.72rem; line-height:1.35; margin-top:.25rem; }
   .node.lit{ border-color:var(--accent); border-left-color:var(--accent); }
+  .node.half{ opacity:.9; border-left-color:var(--warn); }
   .node.dim{ opacity:.22; }
   .node .step{ display:none; position:absolute; top:-.5rem; left:-.6rem; width:1.25rem; height:1.25rem; border-radius:50%; background:var(--accent); color:var(--accent-ink); font:700 .72rem/1.25rem var(--mono); text-align:center; }
   .node.lit .step.on{ display:block; }
@@ -271,9 +273,14 @@ function draw(){
 }
 let state = { mode:"all", id:null, q:"", flow:-1 };
 const flowdesc = document.getElementById("flowdesc");
-function setNode(el, lit, dim){ el.classList.toggle("lit", lit); el.classList.toggle("dim", dim); }
+function setNode(el, lit, half, dim){
+  el.classList.toggle("lit", lit);
+  el.classList.toggle("half", half);
+  el.classList.toggle("dim", dim);
+}
 function applyState(){
   let litNodes = null, litEdge = () => false;
+  let halfNodes = new Set(), halfEdge = () => false;
   const steps = new Map();
   if (state.mode==="focus" && state.id){
     litNodes = new Set([state.id, ...(adj.get(state.id)||[])]);
@@ -291,20 +298,37 @@ function applyState(){
     chain.forEach((id,i)=>steps.set(id, i+1));
     const pairs = new Set(chain.slice(1).map((id,i)=>[chain[i],id].sort().join("|")));
     litEdge = (a,b) => pairs.has([a,b].sort().join("|"));
-    flowdesc.innerHTML = `<strong>${name}:</strong> ${desc}`;
+    // Soft-glow every system the path CALLS along the way, so a journey never
+    // reads as "the engine ran but used no tools": neighbors of each step that
+    // are not themselves on the numbered path.
+    for (const id of chain){
+      if (colOf.get(id) === "actors") continue; // a person's OTHER screens are not part of this run
+      for (const nb of (adj.get(id)||[])) if (!litNodes.has(nb)) halfNodes.add(nb);
+    }
+    // One more hop, adapters -> providers only: the collectors a step calls in
+    // turn call outside data sources, and those are part of the run too.
+    for (const id of [...halfNodes]) if (colOf.get(id) === "adapters")
+      for (const nb of (adj.get(id)||[])) if (colOf.get(nb) === "providers" && !litNodes.has(nb)) halfNodes.add(nb);
+    const inRun = (id) => litNodes.has(id) || halfNodes.has(id);
+    halfEdge = (a,b) => inRun(a) && inRun(b);
+    flowdesc.innerHTML = `<strong>${name}:</strong> ${desc} <em>Bright boxes are the numbered path; soft-lit boxes are the tools those steps call.</em>`;
   } else {
     flowdesc.textContent = "";
   }
   for (const [id,el] of nodeEl){
-    setNode(el, litNodes ? litNodes.has(id) : false, litNodes ? !litNodes.has(id) : false);
+    const lit = litNodes ? litNodes.has(id) : false;
+    const half = !lit && halfNodes.has(id);
+    setNode(el, lit, half, litNodes ? !lit && !half : false);
     const badge = el.querySelector(".step");
     if (steps.has(id)){ badge.textContent = steps.get(id); badge.classList.add("on"); }
     else badge.classList.remove("on");
   }
   for (const [p,a,b] of paths){
     const lit = litEdge(a,b);
+    const half = !lit && halfEdge(a,b);
     p.classList.toggle("lit", lit);
-    p.classList.toggle("hide", !!litNodes && !lit);
+    p.classList.toggle("lit2", half);
+    p.classList.toggle("hide", !!litNodes && !lit && !half);
   }
   document.querySelectorAll("button.flow").forEach((btn,i)=>btn.classList.toggle("on", state.mode==="flow" && state.flow===i));
 }
