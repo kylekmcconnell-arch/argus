@@ -1450,8 +1450,8 @@ var delta = {
 };
 var SUBJECTS = [lumen, satoshi, nova, delta];
 function findSubject(handle) {
-  const norm2 = handle.trim().toLowerCase().replace(/^@/, "").replace(/.*\/(?=[^/]+$)/, "");
-  return SUBJECTS.find((s) => s.handle.toLowerCase().replace("@", "") === norm2);
+  const norm3 = handle.trim().toLowerCase().replace(/^@/, "").replace(/.*\/(?=[^/]+$)/, "");
+  return SUBJECTS.find((s) => s.handle.toLowerCase().replace("@", "") === norm3);
 }
 
 // src/data/evidence.ts
@@ -17155,6 +17155,35 @@ function projectProviderBackedBasicFacts(evidence) {
       `captured ${holderSnapshot.capturedAt.slice(0, 10)}`
     ));
   }
+  const unlocksSnapshot = isProject ? evidence.tokenUnlocks : void 0;
+  if (unlocksSnapshot) {
+    const pctText = (value) => `${value >= 10 ? Math.round(value) : Math.round(value * 100) / 100}%`;
+    const nextParts = [
+      `next unlock ${unlocksSnapshot.nextUnlockDate}`,
+      ...unlocksSnapshot.allocationName ? [unlocksSnapshot.allocationName] : [],
+      ...unlocksSnapshot.percentOfSupply !== null ? [`~${pctText(unlocksSnapshot.percentOfSupply)} of supply`] : [],
+      ...unlocksSnapshot.unlockValueUsd !== null ? [`~${formatUsd2(unlocksSnapshot.unlockValueUsd)}`] : [],
+      ...unlocksSnapshot.percentOfMcap !== null ? [`${pctText(unlocksSnapshot.percentOfMcap)} of market cap`] : []
+    ];
+    const tailParts = [
+      ...unlocksSnapshot.next90dPercentOfSupply !== null ? [`~${pctText(unlocksSnapshot.next90dPercentOfSupply)} of supply unlocking within 90 days`] : [],
+      ...unlocksSnapshot.cumulativeUnlockedPercent !== null ? [`${pctText(unlocksSnapshot.cumulativeUnlockedPercent)} already unlocked`] : []
+    ];
+    projected.push(makeFact(
+      evidence,
+      "vesting",
+      [nextParts.join(" \xB7 "), ...tailParts].join(" \xB7 "),
+      [source({
+        url: unlocksSnapshot.sourceUrl,
+        title: "CryptoRank unlock schedule",
+        excerpt: `Tracked vesting schedule: ${nextParts.join(", ")}${tailParts.length ? `; ${tailParts.join("; ")}` : ""}. Scheduled unlocks expand tradable float on known dates; verify allocation recipients before relying on the calendar.`,
+        capturedAt: unlocksSnapshot.capturedAt,
+        provider: "cryptorank",
+        sourceClass: "regulatory_or_onchain"
+      })],
+      `captured ${unlocksSnapshot.capturedAt.slice(0, 10)}`
+    ));
+  }
   const ventureToken = isFounderSubject && !isProject ? evidence.ventureToken : void 0;
   if (ventureToken?.verified) {
     projected.push(makeFact(
@@ -17396,6 +17425,107 @@ async function collectHolderProfile(chain, address) {
   };
 }
 
+// server/adapters/tokenUnlocks.ts
+var API_BASE3 = "https://api.cryptorank.io/v3";
+var FETCH_TIMEOUT_MS3 = 8e3;
+var MAP_CACHE_KEY = "cryptorank:currency-map:v1";
+var norm2 = (value) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+async function boundedJson2(url, key) {
+  try {
+    const res = await Promise.race([
+      fetch(url, { headers: { "X-Api-Key": key }, signal: AbortSignal.timeout(FETCH_TIMEOUT_MS3) }),
+      new Promise((resolve) => setTimeout(() => resolve(null), FETCH_TIMEOUT_MS3 + 500))
+    ]);
+    if (!res || !res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+var dataArray = (payload) => {
+  const rows = Array.isArray(payload) ? payload : payload && typeof payload === "object" && Array.isArray(payload.data) ? payload.data : [];
+  return rows.filter((row) => !!row && typeof row === "object" && !Array.isArray(row));
+};
+function resolveCurrency(entries, tokenName, symbol) {
+  const symbolKey = symbol.trim().toLowerCase();
+  const nameKey = norm2(tokenName);
+  const bySymbol = entries.filter((entry) => (entry.symbol ?? "").toLowerCase() === symbolKey);
+  const agreeing = bySymbol.filter((entry) => norm2(entry.name) === nameKey || norm2(entry.slug.replace(/-/g, " ")) === nameKey);
+  if (agreeing.length === 1) return agreeing[0];
+  if (agreeing.length === 0 && bySymbol.length === 1 && norm2(bySymbol[0].name).includes(nameKey)) return bySymbol[0];
+  return null;
+}
+async function collectUpcomingUnlocks(tokenName, symbol) {
+  const key = env("CRYPTORANK_API_KEY");
+  if (!key) return { available: false, note: "CryptoRank is not configured." };
+  if (!tokenName.trim() || !symbol.trim()) return { available: false, note: "No token identity to resolve." };
+  let entries = null;
+  const cached = await cacheGet(MAP_CACHE_KEY);
+  if (cached) {
+    try {
+      entries = JSON.parse(cached);
+    } catch {
+      entries = null;
+    }
+  }
+  if (!entries) {
+    const payload = await boundedJson2(`${API_BASE3}/currencies/map`, key);
+    if (!payload) {
+      recordCall("cryptorank", "currency-map", 0, "map_unavailable", "failed");
+      return { available: false, note: "CryptoRank currency map was unavailable." };
+    }
+    entries = dataArray(payload).map((row) => ({
+      id: typeof row.id === "number" ? row.id : NaN,
+      slug: typeof row.slug === "string" ? row.slug : "",
+      symbol: typeof row.symbol === "string" ? row.symbol : null,
+      name: typeof row.name === "string" ? row.name : ""
+    })).filter((row) => Number.isFinite(row.id) && row.slug && row.name);
+    recordCall("cryptorank", "currency-map", 0, `${entries.length} currencies \xB7 1 credit`, "succeeded");
+    void cacheSet(MAP_CACHE_KEY, JSON.stringify(entries));
+  }
+  const currency = resolveCurrency(entries, tokenName, symbol);
+  if (!currency) {
+    return { available: false, note: `No unambiguous CryptoRank listing for ${symbol} (${tokenName}).` };
+  }
+  const eventsPayload = await boundedJson2(
+    `${API_BASE3}/currencies/${currency.id}/vesting/events?filter=upcoming&sortBy=time&sortOrder=asc`,
+    key
+  );
+  if (!eventsPayload) {
+    recordCall("cryptorank", "vesting-events", 0, `${currency.slug} \xB7 unavailable`, "failed");
+    return { available: false, note: "CryptoRank vesting events were unavailable." };
+  }
+  const events = dataArray(eventsPayload).map((row) => ({
+    timeMs: typeof row.time === "number" ? row.time : NaN,
+    allocationName: typeof row.allocationName === "string" && row.allocationName.trim() ? row.allocationName.trim() : null,
+    percentOfSupply: typeof row.percentOfSupply === "number" && row.percentOfSupply >= 0 ? row.percentOfSupply : null,
+    unlockValueUsd: Number.isFinite(Number(row.unlockValue)) && Number(row.unlockValue) > 0 ? Number(row.unlockValue) : null,
+    percentOfMcap: typeof row.percentOfMcap === "number" && row.percentOfMcap >= 0 ? row.percentOfMcap : null,
+    cumulativeUnlockedPercent: typeof row.cumulativeUnlockedPercent === "number" ? row.cumulativeUnlockedPercent : null
+  })).filter((event) => Number.isFinite(event.timeMs));
+  if (!events.length) {
+    recordCall("cryptorank", "vesting-events", 0, `${currency.slug} \xB7 no_upcoming`, "succeeded");
+    return { available: false, note: "CryptoRank tracks no upcoming unlock events for this token." };
+  }
+  const next = events[0];
+  const horizonMs = next.timeMs + 90 * 24 * 60 * 60 * 1e3;
+  const next90d = events.filter((event) => event.timeMs <= horizonMs).reduce((total, event) => total + (event.percentOfSupply ?? 0), 0);
+  recordCall("cryptorank", "vesting-events", 0, `${currency.slug} \xB7 next_${new Date(next.timeMs).toISOString().slice(0, 10)} \xB7 1 credit`, "succeeded");
+  return {
+    available: true,
+    value: {
+      nextUnlockDate: new Date(next.timeMs).toISOString().slice(0, 10),
+      allocationName: next.allocationName,
+      percentOfSupply: next.percentOfSupply,
+      unlockValueUsd: next.unlockValueUsd,
+      percentOfMcap: next.percentOfMcap,
+      cumulativeUnlockedPercent: next.cumulativeUnlockedPercent,
+      next90dPercentOfSupply: next90d > 0 ? Math.round(next90d * 100) / 100 : null,
+      sourceUrl: `https://cryptorank.io/price/${currency.slug}/vesting`
+    }
+  };
+}
+
 // server/adapters/securityAudits.ts
 var AUDITOR_REGISTRY = [
   { name: "Trail of Bits", pattern: /trail\s*of\s*bits/i, domains: ["trailofbits.com"] },
@@ -17416,7 +17546,7 @@ var AUDITOR_REGISTRY = [
   { name: "OtterSec", pattern: /otter\s*sec/i, domains: ["osec.io"] },
   { name: "CertiK", pattern: /certik/i, domains: ["certik.com"] }
 ];
-var FETCH_TIMEOUT_MS3 = 15e3;
+var FETCH_TIMEOUT_MS4 = 15e3;
 var MAX_AUDITOR_FETCHES = 4;
 var USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
 async function fetchPageText(url, fetcher) {
@@ -17424,7 +17554,7 @@ async function fetchPageText(url, fetcher) {
   try {
     response = await fetcher(url, {
       headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS3),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS4),
       redirect: "follow"
     });
   } catch {
@@ -18037,7 +18167,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   const [bySubject, people, siteTeam, pageTeam] = await discoveryPromise;
   const postRoleTeam = scanPostsForRoles(posts, ctx.evidence.profile.display_name);
   const webTeam = ctx.evidence.webTeam ?? (ctx.evidence.webTeam = []);
-  const norm2 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
+  const norm3 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
   const byHandle = /* @__PURE__ */ new Map();
   const byName = /* @__PURE__ */ new Map();
   const teamCandidates = [
@@ -18075,15 +18205,15 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     }))
   ];
   for (const t of teamCandidates) {
-    const h = t.handle ? norm2(t.handle) : "";
-    const n = norm2(t.name);
+    const h = t.handle ? norm3(t.handle) : "";
+    const n = norm3(t.name);
     if (!h && !n) continue;
     const existing = h && byHandle.get(h) || n && byName.get(n) || null;
     if (existing) {
       if (!existing.handle && t.handle) {
         existing.handle = t.handle;
         existing.identity_link_evidence_origin = t.identity_link_evidence_origin;
-        byHandle.set(norm2(t.handle), existing);
+        byHandle.set(norm3(t.handle), existing);
       }
       if (!existing.linkedin && t.linkedin) {
         existing.linkedin = t.linkedin;
@@ -18123,8 +18253,8 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     if (h) byHandle.set(h, rec);
     if (n) byName.set(n, rec);
   }
-  const subj = norm2(ctx.handle);
-  const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || webTeam.some((t) => t.artifact_verified === true && norm2(t.handle) === subj);
+  const subj = norm3(ctx.handle);
+  const accountVouchesTeam = !!domain || postRoleTeam.length > 0 || webTeam.some((t) => t.artifact_verified === true && norm3(t.handle) === subj);
   if (webTeam.length && !accountVouchesTeam) {
     ctx.emit({ phase: "P1 \xB7 Team", label: "Uncorroborated team lead", detail: `Found a possible team for the name "${ctx.evidence.profile.display_name || ctx.handle}", but nothing ties THIS account to it. Its handle isn't independently matched, it links no site, and its own posts name no team. Preserved for follow-up but excluded from scoring and the trust graph.`, source: "team-search", tone: "warn" });
     for (const member of webTeam) {
@@ -18139,12 +18269,12 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     const found = await enrichTeamIdentities(ctx.evidence.profile.display_name || ctx.handle, nameOnly.map((m) => ({ name: m.name, role: m.role })));
     let linked = 0;
     for (const f of found) {
-      const m = byName.get(norm2(f.name));
+      const m = byName.get(norm3(f.name));
       if (!m) continue;
       if (!m.handle && f.handle) {
         m.handle = f.handle;
         m.identity_link_evidence_origin = "model_lead";
-        byHandle.set(norm2(f.handle), m);
+        byHandle.set(norm3(f.handle), m);
         linked++;
       }
       if (!m.linkedin && f.linkedin) {
@@ -18164,7 +18294,7 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
     const isLeader = (r) => /founder|cofounder|co-founder|ceo|cto|coo|president|chief/i.test(r ?? "");
     const backedTeam = [...domain ? pageTeam : [], ...postRoleTeam].filter(
       (candidate) => webTeam.some(
-        (member) => !!candidate.handle && norm2(candidate.handle) === norm2(member.handle) || !!candidate.name && norm2(candidate.name) === norm2(member.name)
+        (member) => !!candidate.handle && norm3(candidate.handle) === norm3(member.handle) || !!candidate.name && norm3(candidate.name) === norm3(member.name)
       )
     );
     const leaders = backedTeam.filter((t) => isLeader(t.role));
@@ -18368,7 +18498,7 @@ function projectVerifiedBasicFacts(ctx) {
     (fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")
   );
   if (!facts.length) return;
-  const norm2 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const norm3 = (value) => value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
   const normHandle = (value) => value.trim().replace(/^@/, "").toLowerCase();
   const subjectHandle = normHandle(ctx.handle);
   const citedPersonHandle = (fact) => {
@@ -18398,7 +18528,7 @@ function projectVerifiedBasicFacts(ctx) {
   const people = facts.filter((fact) => fact.predicate === "founder" || fact.predicate === "executive");
   for (const fact of people) {
     const citedHandle = citedPersonHandle(fact);
-    const existing = roster.find((member) => norm2(member.name) === norm2(fact.value) || Boolean(citedHandle && member.handle && normHandle(member.handle) === citedHandle));
+    const existing = roster.find((member) => norm3(member.name) === norm3(fact.value) || Boolean(citedHandle && member.handle && normHandle(member.handle) === citedHandle));
     if (existing) continue;
     const source2 = fact.sources.find((candidate) => candidate.relation === "supports") ?? fact.sources[0];
     if (!source2) continue;
@@ -19164,15 +19294,19 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       const projectName2 = evidence.projectToken.name;
       const capturedAt = evidence.projectToken.capturedAt;
       try {
-        const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome] = await Promise.all([
+        const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome, unlocksOutcome] = await Promise.all([
           collectProtocolTvl(projectName2),
           collectProtocolFunding(projectName2),
           collectProtocolFees(projectName2),
           // Float control (free, keyless): who holds the supply, is the LP
           // locked. Answers the reader's dump/rug question for project tokens.
-          evidence.projectToken.address ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address) : Promise.resolve({ available: false, note: "no canonical token address" })
+          evidence.projectToken.address ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address) : Promise.resolve({ available: false, note: "no canonical token address" }),
+          // Upcoming unlocks (CryptoRank, dormant until keyed): the next-dump
+          // schedule a buyer cannot easily assemble elsewhere.
+          collectUpcomingUnlocks(projectName2, evidence.projectToken.symbol)
         ]);
         if (holdersOutcome.available) evidence.holderProfile = { ...holdersOutcome.value, capturedAt };
+        if (unlocksOutcome.available) evidence.tokenUnlocks = { ...unlocksOutcome.value, capturedAt };
         if (feesOutcome.available) evidence.protocolFees = { ...feesOutcome.value, capturedAt };
         if (tvlOutcome.available) {
           evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };

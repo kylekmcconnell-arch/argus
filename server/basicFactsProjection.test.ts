@@ -607,6 +607,30 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(control?.sources[0].excerpt).toContain("exchanges, custodians, or protocol contracts");
   });
 
+  it("discloses the next unlock and the 90-day unlock load as a vesting fact", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.tokenUnlocks = {
+      nextUnlockDate: "2026-08-01",
+      allocationName: "Team",
+      percentOfSupply: 1.2,
+      unlockValueUsd: 27_000_000,
+      percentOfMcap: 1.8,
+      cumulativeUnlockedPercent: 63,
+      next90dPercentOfSupply: 2,
+      sourceUrl: "https://cryptorank.io/price/uniswap/vesting",
+      capturedAt: "2026-07-22T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const vesting = evidence.basicFacts?.find((fact) => fact.predicate === "vesting");
+    expect(vesting?.value).toBe(
+      "next unlock 2026-08-01 · Team · ~1.2% of supply · ~$27.0M · 1.8% of market cap · ~2% of supply unlocking within 90 days · 63% already unlocked",
+    );
+    expect(vesting?.sources[0].provider).toBe("cryptorank");
+  });
+
   it("appends the fee trend so a reader sees growth or bleed, not just a total", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.roles = [SubjectClass.PROJECT];

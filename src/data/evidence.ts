@@ -255,6 +255,19 @@ export interface HolderProfileSnapshot {
   capturedAt: string;
 }
 
+/** Frozen upcoming-unlock schedule (CryptoRank vesting events). The "next dump" disclosure; never a verdict. */
+export interface TokenUnlocksSnapshot {
+  nextUnlockDate: string;
+  allocationName: string | null;
+  percentOfSupply: number | null;
+  unlockValueUsd: number | null;
+  percentOfMcap: number | null;
+  cumulativeUnlockedPercent: number | null;
+  next90dPercentOfSupply: number | null;
+  sourceUrl: string;
+  capturedAt: string;
+}
+
 /** Frozen protocol fee totals (DeFiLlama /summary/fees). On-chain-derived usage: users actually paid these fees. */
 export interface ProtocolFeesSnapshot {
   slug: string;
@@ -669,6 +682,8 @@ export interface CollectedEvidence {
   protocolFees?: ProtocolFeesSnapshot;
   /** Frozen float-control profile for the verified canonical token (GoPlus holder register). */
   holderProfile?: HolderProfileSnapshot;
+  /** Frozen upcoming-unlock schedule for the verified canonical token (CryptoRank; dormant until keyed). */
+  tokenUnlocks?: TokenUnlocksSnapshot;
   /** Frozen independent-audit evidence (auditor-domain corroborated vs self-attested). */
   securityAudits?: SecurityAuditsSnapshot;
   /** Frozen keyed private-market enrichment (Monid/Akta): funding, leadership, firmographic. */

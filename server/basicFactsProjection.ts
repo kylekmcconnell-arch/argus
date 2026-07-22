@@ -888,6 +888,38 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     ));
   }
 
+  // Upcoming unlocks → the vesting disclosure a buyer actually needs: when is
+  // the next scheduled unlock, how big, and how much is coming inside 90 days.
+  const unlocksSnapshot = isProject ? evidence.tokenUnlocks : undefined;
+  if (unlocksSnapshot) {
+    const pctText = (value: number) => `${value >= 10 ? Math.round(value) : Math.round(value * 100) / 100}%`;
+    const nextParts = [
+      `next unlock ${unlocksSnapshot.nextUnlockDate}`,
+      ...(unlocksSnapshot.allocationName ? [unlocksSnapshot.allocationName] : []),
+      ...(unlocksSnapshot.percentOfSupply !== null ? [`~${pctText(unlocksSnapshot.percentOfSupply)} of supply`] : []),
+      ...(unlocksSnapshot.unlockValueUsd !== null ? [`~${formatUsd(unlocksSnapshot.unlockValueUsd)}`] : []),
+      ...(unlocksSnapshot.percentOfMcap !== null ? [`${pctText(unlocksSnapshot.percentOfMcap)} of market cap`] : []),
+    ];
+    const tailParts = [
+      ...(unlocksSnapshot.next90dPercentOfSupply !== null ? [`~${pctText(unlocksSnapshot.next90dPercentOfSupply)} of supply unlocking within 90 days`] : []),
+      ...(unlocksSnapshot.cumulativeUnlockedPercent !== null ? [`${pctText(unlocksSnapshot.cumulativeUnlockedPercent)} already unlocked`] : []),
+    ];
+    projected.push(makeFact(
+      evidence,
+      "vesting",
+      [nextParts.join(" · "), ...tailParts].join(" · "),
+      [source({
+        url: unlocksSnapshot.sourceUrl,
+        title: "CryptoRank unlock schedule",
+        excerpt: `Tracked vesting schedule: ${nextParts.join(", ")}${tailParts.length ? `; ${tailParts.join("; ")}` : ""}. Scheduled unlocks expand tradable float on known dates; verify allocation recipients before relying on the calendar.`,
+        capturedAt: unlocksSnapshot.capturedAt,
+        provider: "cryptorank",
+        sourceClass: "regulatory_or_onchain",
+      })],
+      `captured ${unlocksSnapshot.capturedAt.slice(0, 10)}`,
+    ));
+  }
+
   // Founder related-asset binding: the verified venture's canonical token,
   // bound through the venture's own official X account / domain (never a name
   // match), answers the founder official_token question. The value stays

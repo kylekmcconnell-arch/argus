@@ -66,6 +66,7 @@ import { collectProjectTokenIdentity, collectVentureTokenIdentity } from "./adap
 import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 import { collectProtocolAuditLinks, collectProtocolFees, collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
 import { collectHolderProfile } from "./adapters/tokenHolders";
+import { collectUpcomingUnlocks } from "./adapters/tokenUnlocks";
 import { collectSecurityAudits } from "./adapters/securityAudits";
 import { collectCompanyEnrichment } from "./adapters/monid";
 
@@ -2315,7 +2316,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       const projectName = evidence.projectToken.name;
       const capturedAt = evidence.projectToken.capturedAt;
       try {
-        const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome] = await Promise.all([
+        const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome, unlocksOutcome] = await Promise.all([
           collectProtocolTvl(projectName),
           collectProtocolFunding(projectName),
           collectProtocolFees(projectName),
@@ -2324,8 +2325,12 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           evidence.projectToken.address
             ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address)
             : Promise.resolve({ available: false as const, note: "no canonical token address" }),
+          // Upcoming unlocks (CryptoRank, dormant until keyed): the next-dump
+          // schedule a buyer cannot easily assemble elsewhere.
+          collectUpcomingUnlocks(projectName, evidence.projectToken.symbol),
         ]);
         if (holdersOutcome.available) evidence.holderProfile = { ...holdersOutcome.value, capturedAt };
+        if (unlocksOutcome.available) evidence.tokenUnlocks = { ...unlocksOutcome.value, capturedAt };
         if (feesOutcome.available) evidence.protocolFees = { ...feesOutcome.value, capturedAt };
         if (tvlOutcome.available) {
           evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
