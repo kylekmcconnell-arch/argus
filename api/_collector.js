@@ -3217,6 +3217,9 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const leaderFacts = verifiedFacts("founder", "founders", "executive");
   const productFacts = verifiedFacts("product", "launched", "launch_date");
   const auditFacts = verifiedFacts("audit", "audits");
+  const securityAudits = packet.securityAudits && typeof packet.securityAudits === "object" && !Array.isArray(packet.securityAudits) ? packet.securityAudits : void 0;
+  const selfAttestedAuditorCount = Array.isArray(securityAudits?.selfAttested) ? securityAudits.selfAttested.filter((name) => typeof name === "string" && name.trim()).length : 0;
+  const auditExceptionalCeiling = auditFacts.length > 0 || selfAttestedAuditorCount >= 2;
   const governanceFacts = verifiedFacts("governance");
   const tokenDisclosureFacts = verifiedFacts("tokenomics", "vesting", "treasury");
   const legalFacts = verifiedFacts("legal_entity");
@@ -3286,9 +3289,11 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   ], artifactIds(p2Anchors), p2FloorTier);
   const tokenDisclosures = [...tokenDisclosureFacts];
   const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0].filter(Boolean).length;
-  const p3Tier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
-  const p3Assessment = p3Tier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 ? assessmentArtifactFor("P3_token_conduct", "project-token-identity") : null;
-  const p3FinalTier = p3Assessment ? "assessed_null" : p3Tier;
+  const p3CeilingTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditExceptionalCeiling ? "exceptional" : moderateMarket ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
+  const p3FloorTier = verifiedToken ? scaleSignals >= 2 && tokenDisclosures.length > 0 && auditFacts.length > 0 ? "exceptional" : moderateMarket ? "solid" : "emerging" : !token && tokenlessConductCategories > 0 ? tokenlessConductCategories >= 2 ? "solid" : "emerging" : "none";
+  const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0 ? assessmentArtifactFor("P3_token_conduct", "project-token-identity") : null;
+  const p3FinalTier = p3Assessment ? "assessed_null" : p3CeilingTier;
+  const p3FinalFloorTier = p3Assessment ? "assessed_null" : p3FloorTier;
   setBand("P3_token_conduct", p3FinalTier, [
     ...verifiedToken ? ["canonical token verified"] : [],
     ...!token && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : [],
@@ -3296,11 +3301,11 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...moderateMarket ? ["measured market activity"] : [],
     ...governanceFacts.length ? ["verified token governance"] : [],
     ...tokenDisclosures.length ? ["verified token economic disclosure"] : [],
-    ...auditFacts.length ? ["verified security review"] : []
+    ...auditFacts.length ? ["verified security review"] : selfAttestedAuditorCount >= 2 ? [`${selfAttestedAuditorCount} reputable auditors attested on the official security page`] : []
   ], [
     ...artifactIds([...token ? [token] : [], ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
     ...p3Assessment ? [p3Assessment.artifactId] : []
-  ]);
+  ], p3FinalFloorTier);
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
   let p4FloorTier = fundingFacts.length || investorFacts.length || advisorTeam.length ? "emerging" : "none";
   if (investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4FloorTier = "solid";
@@ -3352,15 +3357,18 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...token ? [token] : []
   ]), p5FloorTier);
   const disclosureBase = [...legalFacts, ...officialFacts, ...repositoryFacts];
-  let p6Tier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
-  if ((governanceFacts.length > 0 || auditFacts.length > 0) && disclosureBase.length > 0 || legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0) p6Tier = "solid";
-  if (governanceFacts.length && auditFacts.length && (legalFacts.length || repositoryFacts.length)) p6Tier = "exceptional";
+  let p6FloorTier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
+  if ((governanceFacts.length > 0 || auditFacts.length > 0) && disclosureBase.length > 0 || legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0) p6FloorTier = "solid";
+  if (governanceFacts.length && auditFacts.length && (legalFacts.length || repositoryFacts.length)) p6FloorTier = "exceptional";
+  let p6Tier = disclosureBase.length || governanceFacts.length || auditExceptionalCeiling ? "emerging" : "none";
+  if ((governanceFacts.length > 0 || auditExceptionalCeiling) && disclosureBase.length > 0 || legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0) p6Tier = "solid";
+  if (governanceFacts.length && auditExceptionalCeiling && (legalFacts.length || repositoryFacts.length)) p6Tier = "exceptional";
   setBand("P6_transparency_integrity", p6Tier, [
     ...legalFacts.length ? ["verified legal operator"] : [],
     ...repositoryFacts.length ? ["public repository disclosure"] : [],
     ...governanceFacts.length ? ["verified governance disclosure"] : [],
-    ...auditFacts.length ? ["verified audit disclosure"] : []
-  ], artifactIds([...disclosureBase, ...governanceFacts, ...auditFacts]));
+    ...auditFacts.length ? ["verified audit disclosure"] : selfAttestedAuditorCount >= 2 ? [`${selfAttestedAuditorCount} reputable auditors named on the official security page`] : []
+  ], artifactIds([...disclosureBase, ...governanceFacts, ...auditFacts]), p6FloorTier);
   return bands;
 }
 var compactProfileAuthenticity = (value) => {

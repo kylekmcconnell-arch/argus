@@ -1635,6 +1635,24 @@ export function deriveProjectStrengthBands(
   const leaderFacts = verifiedFacts("founder", "founders", "executive");
   const productFacts = verifiedFacts("product", "launched", "launch_date");
   const auditFacts = verifiedFacts("audit", "audits");
+  // Audit CEILING signal (never a floor). The security-audit collector only ever
+  // records selfAttested names that match its curated AUDITOR_REGISTRY (Trail of
+  // Bits, ConsenSys, OpenZeppelin, CertiK, ...) found on the subject's OWN fetched
+  // security page, so >=2 of them is "multiple reputable firms attest an
+  // engagement" -- it cannot be spoofed with arbitrary text. Established protocols
+  // (Uniswap) list several real auditors whose OWN sites the corroboration hop
+  // often can't scrape, so auditFacts stays empty and P3/P6 wrongly cap at solid.
+  // This lets the analyst REACH the exceptional ceiling on those axes; the
+  // enforced FLOOR still requires a strictly corroborated auditFact (H2: soft
+  // evidence never mints a minimum), and the fraud/rug hard caps are independent
+  // of band tiers, so a scam that self-lists auditors still caps at 10.
+  const securityAudits = packet.securityAudits && typeof packet.securityAudits === "object" && !Array.isArray(packet.securityAudits)
+    ? packet.securityAudits as Record<string, unknown>
+    : undefined;
+  const selfAttestedAuditorCount = Array.isArray(securityAudits?.selfAttested)
+    ? securityAudits.selfAttested.filter((name) => typeof name === "string" && name.trim()).length
+    : 0;
+  const auditExceptionalCeiling = auditFacts.length > 0 || selfAttestedAuditorCount >= 2;
   const governanceFacts = verifiedFacts("governance");
   const tokenDisclosureFacts = verifiedFacts("tokenomics", "vesting", "treasury");
   const legalFacts = verifiedFacts("legal_entity");
@@ -1746,7 +1764,18 @@ export function deriveProjectStrengthBands(
   // verification still fails closed to "none".
   const tokenlessConductCategories = [governanceFacts.length > 0, tokenDisclosures.length > 0, auditFacts.length > 0]
     .filter(Boolean).length;
-  const p3Tier: ProjectStrengthTier = verifiedToken
+  // Ceiling uses the audit CEILING signal (reputable self-attestation counts);
+  // floor uses the strict corroborated auditFact only, so a self-attested audit
+  // widens the allowed range without minting an enforced minimum (H2).
+  const p3CeilingTier: ProjectStrengthTier = verifiedToken
+    ? (scaleSignals >= 2
+      && tokenDisclosures.length > 0
+      && auditExceptionalCeiling ? "exceptional"
+      : moderateMarket ? "solid" : "emerging")
+    : !token && tokenlessConductCategories > 0
+      ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
+      : "none";
+  const p3FloorTier: ProjectStrengthTier = verifiedToken
     ? (scaleSignals >= 2
       && tokenDisclosures.length > 0
       && auditFacts.length > 0 ? "exceptional"
@@ -1754,10 +1783,11 @@ export function deriveProjectStrengthBands(
     : !token && tokenlessConductCategories > 0
       ? (tokenlessConductCategories >= 2 ? "solid" : "emerging")
       : "none";
-  const p3Assessment = p3Tier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0
+  const p3Assessment = p3CeilingTier === "none" && (limitingByAxis.get("P3_token_conduct") ?? []).length === 0
     ? assessmentArtifactFor("P3_token_conduct", "project-token-identity")
     : null;
-  const p3FinalTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3Tier;
+  const p3FinalTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3CeilingTier;
+  const p3FinalFloorTier: ProjectStrengthTier = p3Assessment ? "assessed_null" : p3FloorTier;
   setBand("P3_token_conduct", p3FinalTier, [
     ...(verifiedToken ? ["canonical token verified"] : []),
     ...(!token && p3FinalTier !== "none" && !p3Assessment ? ["no canonical token; conduct scored from verified disclosures"] : []),
@@ -1765,11 +1795,13 @@ export function deriveProjectStrengthBands(
     ...(moderateMarket ? ["measured market activity"] : []),
     ...(governanceFacts.length ? ["verified token governance"] : []),
     ...(tokenDisclosures.length ? ["verified token economic disclosure"] : []),
-    ...(auditFacts.length ? ["verified security review"] : []),
+    ...(auditFacts.length
+      ? ["verified security review"]
+      : selfAttestedAuditorCount >= 2 ? [`${selfAttestedAuditorCount} reputable auditors attested on the official security page`] : []),
   ], [
     ...artifactIds([...(token ? [token] : []), ...governanceFacts, ...tokenDisclosures, ...auditFacts]),
     ...(p3Assessment ? [p3Assessment.artifactId] : []),
-  ]);
+  ], p3FinalFloorTier);
 
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
   // Verified-only ladder (press excluded) for the enforced floor: headlines can
@@ -1840,18 +1872,29 @@ export function deriveProjectStrengthBands(
   ]), p5FloorTier);
 
   const disclosureBase = [...legalFacts, ...officialFacts, ...repositoryFacts];
-  let p6Tier: ProjectStrengthTier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
+  // Floor: strict corroborated auditFact. Ceiling: reputable multi-firm
+  // self-attestation also unlocks the exceptional ceiling (H2-safe: floor never
+  // rises on soft evidence).
+  let p6FloorTier: ProjectStrengthTier = disclosureBase.length || governanceFacts.length || auditFacts.length ? "emerging" : "none";
   if (
     ((governanceFacts.length > 0 || auditFacts.length > 0) && disclosureBase.length > 0)
     || (legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0)
+  ) p6FloorTier = "solid";
+  if (governanceFacts.length && auditFacts.length && (legalFacts.length || repositoryFacts.length)) p6FloorTier = "exceptional";
+  let p6Tier: ProjectStrengthTier = disclosureBase.length || governanceFacts.length || auditExceptionalCeiling ? "emerging" : "none";
+  if (
+    ((governanceFacts.length > 0 || auditExceptionalCeiling) && disclosureBase.length > 0)
+    || (legalFacts.length > 0 && officialFacts.length > 0 && repositoryFacts.length > 0)
   ) p6Tier = "solid";
-  if (governanceFacts.length && auditFacts.length && (legalFacts.length || repositoryFacts.length)) p6Tier = "exceptional";
+  if (governanceFacts.length && auditExceptionalCeiling && (legalFacts.length || repositoryFacts.length)) p6Tier = "exceptional";
   setBand("P6_transparency_integrity", p6Tier, [
     ...(legalFacts.length ? ["verified legal operator"] : []),
     ...(repositoryFacts.length ? ["public repository disclosure"] : []),
     ...(governanceFacts.length ? ["verified governance disclosure"] : []),
-    ...(auditFacts.length ? ["verified audit disclosure"] : []),
-  ], artifactIds([...disclosureBase, ...governanceFacts, ...auditFacts]));
+    ...(auditFacts.length
+      ? ["verified audit disclosure"]
+      : selfAttestedAuditorCount >= 2 ? [`${selfAttestedAuditorCount} reputable auditors named on the official security page`] : []),
+  ], artifactIds([...disclosureBase, ...governanceFacts, ...auditFacts]), p6FloorTier);
   return bands;
 }
 
