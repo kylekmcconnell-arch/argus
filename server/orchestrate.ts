@@ -1289,11 +1289,29 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
 
   if (people.length) {
     const peopleSourceCount = people.reduce((total, fact) => total + fact.sources.length, 0);
-    if (
-      ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation"
-      && ctx.evidence.profile.identity_confidence === "Unverified"
-    ) {
-      ctx.evidence.profile.identity_confidence = "Probable";
+    // Public-record identity is CONFIRMED, not merely probable: a founder or
+    // executive fact verified across two or more independent registrable
+    // domains (self-published sources excluded) is the institutional
+    // equivalent of a LinkedIn-linked leader. A Google-obvious identity such
+    // as Uniswap/Hayden Adams must not present as a hedge. Impersonation
+    // still overrides, and single-source identities stay Probable.
+    const registrable = (url: string): string | null => {
+      try { return new URL(url).hostname.replace(/^www\./, "").split(".").slice(-2).join("."); }
+      catch { return null; }
+    };
+    const publicRecordIdentity = people.some((fact) => {
+      const domains = new Set(fact.sources
+        .filter((src) => src.sourceClass !== "official_subject")
+        .map((src) => registrable(src.url))
+        .filter((domain): domain is string => Boolean(domain)));
+      return domains.size >= 2;
+    });
+    if (ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation") {
+      if (publicRecordIdentity) {
+        ctx.evidence.profile.identity_confidence = "Confirmed";
+      } else if (ctx.evidence.profile.identity_confidence === "Unverified") {
+        ctx.evidence.profile.identity_confidence = "Probable";
+      }
     }
     ctx.recordCheck?.({
       id: "identity-resolution",

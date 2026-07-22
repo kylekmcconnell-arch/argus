@@ -654,6 +654,26 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(tvl?.sources[0].excerpt).toContain("up 6% vs 30 days ago");
   });
 
+  it("mints a citable, floor-ineligible fact from multi-firm audit attestation", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.securityAudits = {
+      securityPageUrl: "https://www.certora.com/reports/uniswap-v4.pdf",
+      selfAttested: ["Certora", "ABDK", "OpenZeppelin"],
+      corroborated: [],
+      capturedAt: "2026-07-22T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const attested = evidence.basicFacts?.find((fact) => fact.predicate === "audit");
+    expect(attested?.value).toBe("Security engagements attested: Certora, ABDK, OpenZeppelin");
+    expect(attested?.status).toBe("corroborated");
+    // Citable for the analyst, but can never mint a score floor (H2) and never
+    // counts as a strictly verified auditFact for band floors.
+    expect(attested?.floorEligible).toBe(false);
+  });
+
   it("appends the fee trend so a reader sees growth or bleed, not just a total", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.roles = [SubjectClass.PROJECT];

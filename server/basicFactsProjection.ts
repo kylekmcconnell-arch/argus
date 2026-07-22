@@ -792,6 +792,33 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // scoring gate and question completion.
   const auditsSnapshot = isProject ? evidence.securityAudits : undefined;
   if (auditsSnapshot) {
+    // Multi-firm attestation as a CITABLE fact. The exceptional-band ceiling
+    // already arms on >=2 registry auditors, but every analyst score must cite
+    // evidence; without a citable artifact the permission is unusable and the
+    // analyst honestly reports "no published audit citations". This fact is
+    // corroborated-tier and floorEligible:false, so it can be CITED but can
+    // never mint a score floor (H2) and never counts as a strictly verified
+    // auditFact for band floors.
+    if (!auditsSnapshot.corroborated.length && auditsSnapshot.selfAttested.length >= 2) {
+      const names = auditsSnapshot.selfAttested.slice(0, 5);
+      const attested = makeFact(
+        evidence,
+        "audit",
+        `Security engagements attested: ${names.join(", ")}`,
+        [source({
+          url: auditsSnapshot.securityPageUrl ?? "https://defillama.com/",
+          title: "Curated audit links naming reputable auditors",
+          excerpt: `${names.length} reputable security firms (${names.join(", ")}) are named by the project's curated audit links and security disclosures. Attestation only; no auditor-site confirmation succeeded this run.`,
+          capturedAt: auditsSnapshot.capturedAt,
+          provider: "security-audits",
+          sourceClass: "other_public",
+        })],
+        "attested via curated audit links; not confirmed on auditor sites",
+      );
+      attested.status = "corroborated";
+      attested.floorEligible = false;
+      projected.push(attested);
+    }
     for (const entry of auditsSnapshot.corroborated.slice(0, 4)) {
       projected.push(makeFact(
         evidence,

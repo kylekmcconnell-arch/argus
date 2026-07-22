@@ -17089,6 +17089,26 @@ function projectProviderBackedBasicFacts(evidence) {
   }
   const auditsSnapshot = isProject ? evidence.securityAudits : void 0;
   if (auditsSnapshot) {
+    if (!auditsSnapshot.corroborated.length && auditsSnapshot.selfAttested.length >= 2) {
+      const names = auditsSnapshot.selfAttested.slice(0, 5);
+      const attested = makeFact(
+        evidence,
+        "audit",
+        `Security engagements attested: ${names.join(", ")}`,
+        [source({
+          url: auditsSnapshot.securityPageUrl ?? "https://defillama.com/",
+          title: "Curated audit links naming reputable auditors",
+          excerpt: `${names.length} reputable security firms (${names.join(", ")}) are named by the project's curated audit links and security disclosures. Attestation only; no auditor-site confirmation succeeded this run.`,
+          capturedAt: auditsSnapshot.capturedAt,
+          provider: "security-audits",
+          sourceClass: "other_public"
+        })],
+        "attested via curated audit links; not confirmed on auditor sites"
+      );
+      attested.status = "corroborated";
+      attested.floorEligible = false;
+      projected.push(attested);
+    }
     for (const entry of auditsSnapshot.corroborated.slice(0, 4)) {
       projected.push(makeFact(
         evidence,
@@ -18649,8 +18669,23 @@ function projectVerifiedBasicFacts(ctx) {
   }
   if (people.length) {
     const peopleSourceCount = people.reduce((total, fact) => total + fact.sources.length, 0);
-    if (ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation" && ctx.evidence.profile.identity_confidence === "Unverified") {
-      ctx.evidence.profile.identity_confidence = "Probable";
+    const registrable = (url) => {
+      try {
+        return new URL(url).hostname.replace(/^www\./, "").split(".").slice(-2).join(".");
+      } catch {
+        return null;
+      }
+    };
+    const publicRecordIdentity = people.some((fact) => {
+      const domains = new Set(fact.sources.filter((src) => src.sourceClass !== "official_subject").map((src) => registrable(src.url)).filter((domain) => Boolean(domain)));
+      return domains.size >= 2;
+    });
+    if (ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation") {
+      if (publicRecordIdentity) {
+        ctx.evidence.profile.identity_confidence = "Confirmed";
+      } else if (ctx.evidence.profile.identity_confidence === "Unverified") {
+        ctx.evidence.profile.identity_confidence = "Probable";
+      }
     }
     ctx.recordCheck?.({
       id: "identity-resolution",
