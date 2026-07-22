@@ -1,109 +1,271 @@
 <title>ARGUS architecture map</title>
 <style>
-  :root {
-    --bg:#fbfaf8; --panel:#ffffff; --ink:#23252b; --dim:#5c6068; --faint:#8a8e96;
-    --line:#e4e2dd; --accent:#2456c8; --good:#1a7f4e; --warn:#a06a12; --bad:#b3403a;
+  :root{
+    --bg:#0f1216; --panel:#161a21; --card:#1a1f28; --ink:#e8eaee; --dim-ink:#a6abb5; --faint:#6d727c;
+    --line:#262b34; --accent:#f0b429; --accent-ink:#0f1216; --link:#7ea3f0; --good:#52c58a; --warn:#d9a44a;
     --mono:ui-monospace,"SF Mono",Menlo,monospace;
   }
-  @media (prefers-color-scheme: dark){ :root{
-    --bg:#101318; --panel:#171b22; --ink:#e8eaee; --dim:#a6abb5; --faint:#6d727c;
-    --line:#262b34; --accent:#7ea3f0; --good:#52c58a; --warn:#d9a44a; --bad:#e07a72;
+  @media (prefers-color-scheme: light){ :root{
+    --bg:#fbfaf8; --panel:#ffffff; --card:#ffffff; --ink:#23252b; --dim-ink:#5c6068; --faint:#8a8e96;
+    --line:#e4e2dd; --accent:#b47b0a; --accent-ink:#ffffff; --link:#2456c8; --good:#1a7f4e; --warn:#a06a12;
   }}
-  :root[data-theme="dark"]{ --bg:#101318; --panel:#171b22; --ink:#e8eaee; --dim:#a6abb5; --faint:#6d727c; --line:#262b34; --accent:#7ea3f0; --good:#52c58a; --warn:#d9a44a; --bad:#e07a72; }
-  :root[data-theme="light"]{ --bg:#fbfaf8; --panel:#ffffff; --ink:#23252b; --dim:#5c6068; --faint:#8a8e96; --line:#e4e2dd; --accent:#2456c8; --good:#1a7f4e; --warn:#a06a12; --bad:#b3403a; }
-  body{ background:var(--bg); color:var(--ink); font:15px/1.6 -apple-system,"Segoe UI",sans-serif; margin:0; }
-  main{ max-width:52rem; margin:0 auto; padding:2.5rem 1.25rem 4rem; }
-  h1{ font-size:1.45rem; line-height:1.25; margin:0 0 .3rem; text-wrap:balance; }
-  h2{ font-size:.8rem; letter-spacing:.09em; text-transform:uppercase; color:var(--faint); margin:2.4rem 0 .8rem; }
-  p{ margin:.5rem 0; color:var(--dim); }
-  code{ font-family:var(--mono); font-size:.86em; }
-  .scroll{ overflow-x:auto; }
-  table{ border-collapse:collapse; width:100%; font-size:.9rem; }
-  th{ text-align:left; font-size:.7rem; letter-spacing:.07em; text-transform:uppercase; color:var(--faint); font-weight:600; padding:.4rem .7rem .4rem 0; border-bottom:1px solid var(--line); }
-  td{ padding:.45rem .7rem .45rem 0; border-bottom:1px solid var(--line); vertical-align:top; color:var(--dim); }
-  td:first-child{ color:var(--ink); white-space:nowrap; }
-  .panel{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:1rem 1.2rem; margin:.9rem 0; }
-  .chip{ display:inline-block; font-family:var(--mono); font-size:.7rem; padding:.05rem .45rem; border:1px solid var(--line); border-radius:999px; color:var(--dim); margin-left:.35rem; }
-  .chip.key{ color:var(--warn); border-color:var(--warn); }
-  .chip.free{ color:var(--good); border-color:var(--good); }
-  .chip.cost{ color:var(--bad); border-color:var(--bad); }
-  ol,ul{ padding-left:1.2rem; color:var(--dim); } li{ margin:.4rem 0; }
-  .mermaid{ background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:.8rem; overflow-x:auto; }
-  .kv{ display:grid; grid-template-columns:auto 1fr; gap:.25rem 1.1rem; font-size:.9rem; }
-  .kv dt{ color:var(--faint); font-family:var(--mono); font-size:.8rem; } .kv dd{ margin:0; color:var(--dim); }
-  .inv li strong{ color:var(--ink); }
+  :root[data-theme="dark"]{ --bg:#0f1216; --panel:#161a21; --card:#1a1f28; --ink:#e8eaee; --dim-ink:#a6abb5; --faint:#6d727c; --line:#262b34; --accent:#f0b429; --accent-ink:#0f1216; --link:#7ea3f0; --good:#52c58a; --warn:#d9a44a; }
+  :root[data-theme="light"]{ --bg:#fbfaf8; --panel:#ffffff; --card:#ffffff; --ink:#23252b; --dim-ink:#5c6068; --faint:#8a8e96; --line:#e4e2dd; --accent:#b47b0a; --accent-ink:#ffffff; --link:#2456c8; --good:#1a7f4e; --warn:#a06a12; }
+  *{ box-sizing:border-box; }
+  body{ background:var(--bg); color:var(--ink); font:14px/1.5 -apple-system,"Segoe UI",sans-serif; margin:0; }
+  header{ padding:1.6rem 1.5rem .9rem; max-width:1500px; margin:0 auto; }
+  h1{ font-size:1.3rem; margin:0 0 .25rem; }
+  header p{ color:var(--dim-ink); margin:.2rem 0 .8rem; max-width:52rem; }
+  .bar{ display:flex; gap:.6rem; flex-wrap:wrap; align-items:center; }
+  #q{ background:var(--panel); border:1px solid var(--line); border-radius:8px; color:var(--ink); padding:.5rem .8rem; font:inherit; width:min(24rem,90vw); }
+  #q:focus{ outline:2px solid var(--accent); outline-offset:1px; }
+  button{ background:var(--panel); border:1px solid var(--line); border-radius:8px; color:var(--ink); padding:.5rem .9rem; font:inherit; cursor:pointer; }
+  button:hover{ border-color:var(--faint); }
+  button.flow.on, button#reset:focus{ border-color:var(--accent); color:var(--accent); }
+  .counts{ color:var(--faint); font-size:.8rem; margin-top:.55rem; font-variant-numeric:tabular-nums; }
+  #wrap{ position:relative; overflow-x:auto; padding:0 1.5rem 1rem; }
+  #graph{ position:relative; display:grid; grid-template-columns:repeat(7, minmax(168px,1fr)); gap:0 26px; min-width:1360px; max-width:1500px; margin:0 auto; padding-bottom:2rem; }
+  #edges{ position:absolute; inset:0; pointer-events:none; overflow:visible; }
+  #edges path{ fill:none; stroke:var(--faint); stroke-width:1; opacity:.16; transition:opacity .15s,stroke .15s; }
+  #edges path.lit{ stroke:var(--accent); stroke-width:1.6; opacity:.95; }
+  #edges path.hide{ opacity:.04; }
+  .col h2{ font-size:.68rem; letter-spacing:.1em; text-transform:uppercase; color:var(--faint); margin:1.1rem 0 .55rem; }
+  .node{ position:relative; z-index:2; background:var(--card); border:1px solid var(--line); border-left:3px solid var(--line); border-radius:9px; padding:.5rem .65rem; margin:0 0 .55rem; cursor:pointer; transition:opacity .15s,border-color .15s; }
+  .node .t{ font-weight:600; font-size:.82rem; line-height:1.25; }
+  .node .s{ color:var(--faint); font-size:.68rem; font-family:var(--mono); letter-spacing:.04em; text-transform:uppercase; margin-top:.15rem; }
+  .node .chip{ position:absolute; top:.45rem; right:.5rem; font-family:var(--mono); font-size:.6rem; color:var(--warn); border:1px solid var(--warn); border-radius:999px; padding:0 .35rem; opacity:.85; }
+  .node.lit{ border-color:var(--accent); border-left-color:var(--accent); }
+  .node.dim{ opacity:.22; }
+  footer{ max-width:1500px; margin:0 auto; padding:0 1.5rem 3rem; }
+  footer h2{ font-size:.72rem; letter-spacing:.09em; text-transform:uppercase; color:var(--faint); margin:1.6rem 0 .6rem; }
+  footer ul{ padding-left:1.15rem; color:var(--dim-ink); columns:2; column-gap:2.5rem; max-width:70rem; }
+  footer li{ margin:.35rem 0; break-inside:avoid; }
+  footer li strong{ color:var(--ink); }
+  @media (max-width:760px){ footer ul{ columns:1; } }
 </style>
-<main>
-  <h1>ARGUS architecture, one page</h1>
-  <p>Crypto due-diligence engine: <code>@handle</code> / token / site in, evidence-disciplined scored verdict out. Machine twin for agents: <code>docs/architecture.json</code>. Generated 2026-07-22 from <code>integrate/uniswap-final</code>; update both files with any architecture-level change.</p>
-
-  <h2>System flow</h2>
-  <pre class="mermaid">
-flowchart LR
-  C[React SPA<br/>src/] -->|SSE| A[api/audit.ts<br/>auth + quota + 600s cap]
-  A --> O[orchestrate.ts runAudit<br/>cost-ledger isolated]
-  O --> L1[cold-intake<br/>profile + token + enrich]
-  L1 --> L2[3 adapter lanes<br/>identity / token / wallet]
-  L2 --> BF[basic-facts<br/>Claude web_search + KB reuse]
-  BF --> SP[signal passes<br/>budget-gated]
-  SP --> TG[trust-graph screen<br/>reserved 60s window]
-  TG --> AN[analyst<br/>Sonnet score + verify]
-  AN --> P[(Supabase<br/>immutable versions)]
-  P -->|active projection| C
-  </pre>
-  <p>Server code in <code>server/</code> is esbuild-bundled to <code>api/_collector.js</code>; routes import the bundle. After editing <code>server/</code>, run <code>npm run build</code>.</p>
-
-  <h2>Time budget (600s function ceiling)</h2>
-  <dl class="kv panel">
-    <dt>analyst deadline</dt><dd>start + 600s minus 90s finalization reserve = 510s</dd>
-    <dt>collection stops</dt><dd>analyst deadline minus 250s reserve = 260s in</dd>
-    <dt>trust-graph window</dt><dd>collection stop + 60s (never-waive screen can't be starved)</dd>
-    <dt>analyst window</dt><dd>190s remaining, greater than the 180s scorer timeout - invariant locked by test</dd>
-  </dl>
-
-  <h2>Evidence adapters</h2>
-  <div class="scroll"><table>
-    <tr><th>Adapter</th><th>Answers</th><th>Source</th></tr>
-    <tr><td>basicFacts <span class="chip cost">dominant cost</span></td><td>founders, product, governance, funding, audits</td><td>Claude web_search (Sonnet)</td></tr>
-    <tr><td>x / twitterapi</td><td>profile, posts, follow graph, general web</td><td>twitterapi.io + grounded&rarr;Claude&rarr;Grok</td></tr>
-    <tr><td>groundedSearch <span class="chip key">SERPER</span></td><td>cheap search + extract</td><td>Serper + Gemini via OpenRouter (ZDR)</td></tr>
-    <tr><td>securityAudits</td><td>auditor self-attestation + auditor-site hop</td><td>subject pages, unioned</td></tr>
-    <tr><td>defiLlama <span class="chip free">free</span></td><td>TVL + trend, fees + trend, funding, audit links</td><td>api.llama.fi</td></tr>
-    <tr><td>tokenUnlocks <span class="chip key">CRYPTORANK</span></td><td>next unlock date / size / 90d load</td><td>CryptoRank v3, 2 credits</td></tr>
-    <tr><td>tokenHolders <span class="chip free">free</span></td><td>top-10 concentration, LP lock</td><td>GoPlus</td></tr>
-    <tr><td>trustgraph</td><td>cross-report connections (never-waive)</td><td>org graph in Supabase</td></tr>
-    <tr><td>priorOutcome</td><td>"since last scan" delta</td><td>prior report version</td></tr>
-    <tr><td>offchain <span class="chip">always live</span></td><td>news, courts, OFAC name screen</td><td>google-news / courtlistener / opensanctions</td></tr>
-    <tr><td>projectToken</td><td>canonical token binding (never name-match)</td><td>coingecko / dexscreener</td></tr>
-    <tr><td>entityStore <span class="chip key">ENTITY_REUSE</span></td><td>knowledge base read/write-back</td><td>entity_facts table</td></tr>
-    <tr><td>pdl / github / monid / helius <span class="chip key">keyed</span></td><td>career, repos, private-market, Solana wallets</td><td>metered per key</td></tr>
-  </table></div>
-
-  <h2>Scoring and clearance</h2>
-  <ol>
-    <li><strong>Analyst</strong> (Sonnet, Grok fallback) fills per-axis scores; project axes are clamped to evidence-strength bands (emerging / solid / exceptional) and out-of-band scores are rejected into a repair pass.</li>
-    <li><strong>Engine</strong> sums axes per role, applies hard caps (rug / fraud / hard graph link cap to 10, forcing AVOID); the most-severe role governs and ties break to the LOWER score. PASS 70-100.</li>
-    <li><strong>Clearance</strong> needs every never-waive screen recorded (identity, OFAC name + address, trust-graph, founder-asset) plus 75% recorded coverage; else the verdict publishes PROVISIONAL or INCOMPLETE, never silently cleared.</li>
-  </ol>
-
-  <h2>Quality gates (all must pass before push)</h2>
-  <div class="scroll"><table>
-    <tr><th>Gate</th><th>Proves</th></tr>
-    <tr><td><code>npm run typecheck</code></td><td>all 3 TS projects compile (never bare tsc)</td></tr>
-    <tr><td><code>npm test</code></td><td>~1,880 tests: engine fidelity + invariants</td></tr>
-    <tr><td><code>npm run calibrate</code></td><td>19 golden verdicts - scoring changes can't inflate bad actors</td></tr>
-    <tr><td><code>npm run canary:offline</code></td><td>7 release cases, zero unexpected provider URLs</td></tr>
-    <tr><td><code>npm run truth:check</code></td><td>source-of-truth doc contract</td></tr>
-    <tr><td>CI on main</td><td>the above + Supabase DB gates; deploy = push to main only</td></tr>
-  </table></div>
-
+<header>
+  <h1>ARGUS architecture and flows</h1>
+  <p>Interactive map of the diligence engine: click any system to light its connections, search anything, or trace a named flow. Machine twin for agents: <code style="font-family:var(--mono)">docs/architecture.json</code>.</p>
+  <div class="bar">
+    <input id="q" type="search" placeholder="Find a system, provider, route, or capability" autocomplete="off">
+    <button id="reset">Show all systems</button>
+    <span id="flows"></span>
+  </div>
+  <div class="counts" id="counts"></div>
+</header>
+<div id="wrap">
+  <div id="graph">
+    <svg id="edges"></svg>
+  </div>
+</div>
+<footer>
   <h2>Invariants a change must never break</h2>
-  <ul class="inv">
-    <li><strong>H2:</strong> score floors come only from strictly verified facts; corroboration, press, and self-attestation widen ceilings, never mint minimums.</li>
-    <li><strong>Never-waive screens</strong> must be recorded for clearance; the trust-graph screen owns a reserved budget window.</li>
-    <li><strong>resolved_name</strong> is never inferred; legal and sanctions screens require a provider-resolved real person and always run live (never cached in the KB).</li>
-    <li><strong>Model leads</strong> never route roles, cap scores, or floor scores.</li>
-    <li><strong>Immutability:</strong> report versions are trigger-protected; every audit runs in an isolated cost ledger and cannot persist without one.</li>
-    <li><strong>Copy:</strong> no em or en dashes anywhere in authored copy (CI-enforced).</li>
+  <ul>
+    <li><strong>H2:</strong> score floors come only from strictly verified facts; corroboration, press, and attestation widen ceilings, never mint minimums.</li>
+    <li><strong>Never-waive screens</strong> (identity, OFAC name and address, trust-graph, founder-asset) must be recorded for clearance; the trust-graph screen owns a reserved 60s budget window.</li>
+    <li><strong>resolved_name</strong> is never inferred; legal and sanctions screens require a provider-resolved real person.</li>
+    <li><strong>Sanctions and legal run live every audit</strong> - never cached in the knowledge base.</li>
+    <li><strong>Model leads</strong> never route roles, trigger caps, or floor scores.</li>
+    <li><strong>Report versions are immutable</strong> (DB triggers); every audit runs in an isolated cost ledger and cannot persist without one.</li>
+    <li><strong>Budget arithmetic:</strong> collection reserve minus graph-screen reserve must cover the 180s analyst window (250-60=190).</li>
+    <li><strong>Bundle rule:</strong> API routes import <span style="font-family:var(--mono)">api/_collector.js</span>; after editing <span style="font-family:var(--mono)">server/</span>, run <span style="font-family:var(--mono)">npm run build</span>.</li>
+    <li><strong>Deploy only by pushing main</strong>; no cron - the watchlist sweep is manual by design.</li>
+    <li><strong>No em or en dashes</strong> in authored copy (CI-enforced three ways).</li>
   </ul>
-</main>
+</footer>
+<script>
+const COLS = [
+  ["actors","Actors"],["client","Client surfaces"],["routes","API routes"],
+  ["engine","Engine"],["adapters","Adapters"],["providers","External providers"],["data","Data stores"],
+];
+const N = [
+  ["u-analyst","actors","Analyst / member","actor"],
+  ["u-owner","actors","Owner admin","actor"],
+  ["u-sweep","actors","Manual watchlist sweep","automation"],
+
+  ["ui-canvas","client","Investigation canvas","sse runner"],
+  ["ui-report","client","Report renderer","frontend"],
+  ["ui-token","client","Token report","frontend"],
+  ["ui-graph","client","Trust graph UI","frontend"],
+  ["ui-library","client","Entity library","frontend"],
+  ["ui-watch","client","Watchlist + alerts","frontend"],
+  ["ui-admin","client","Admin + cost","frontend"],
+
+  ["rt-audit","routes","api/audit SSE","600s ceiling"],
+  ["rt-v1","routes","api/v1 person + token","public api"],
+  ["rt-report","routes","report + provenance","serverless"],
+  ["rt-panels","routes","ask / challenge / brief","llm panels"],
+  ["rt-forensics","routes","forensic routes","arkham evm sanctions"],
+  ["rt-graph","routes","graph API","serverless"],
+  ["rt-health","routes","health","zero-spend config"],
+  ["rt-sweep","routes","sweep","manual only"],
+
+  ["en-orch","engine","Orchestrator + budget","runAudit"],
+  ["en-intake","engine","Cold intake","profile + token"],
+  ["en-lanes","engine","Adapter lanes x3","concurrent"],
+  ["en-basics","engine","Basic-facts stage","dominant cost"],
+  ["en-signals","engine","Signal passes","budget-gated"],
+  ["en-tg","engine","Trust-graph screen","never-waive"],
+  ["en-analyst","engine","Analyst","record_verdict"],
+  ["en-score","engine","Scoring engine","caps + bands"],
+  ["en-clear","engine","Clearance + checks","75% + never-waive"],
+  ["en-present","engine","Presentation","decision-ready"],
+  ["en-token","engine","Token engine","src/token"],
+
+  ["ad-basics","adapters","basicFacts","web_search","key"],
+  ["ad-x","adapters","x + twitterapi","dispatcher","key"],
+  ["ad-grounded","adapters","groundedSearch","serper extract","key"],
+  ["ad-audits","adapters","securityAudits","url attestation"],
+  ["ad-llama","adapters","defiLlama","tvl fees funding"],
+  ["ad-unlocks","adapters","tokenUnlocks","vesting","key"],
+  ["ad-holders","adapters","tokenHolders","float control"],
+  ["ad-tgraph","adapters","trustgraph","reconciliation"],
+  ["ad-prior","adapters","priorOutcome","since last scan"],
+  ["ad-offchain","adapters","offchain","always live"],
+  ["ad-pfp","adapters","profilePhoto","vision screen"],
+  ["ad-pdl","adapters","peopledatalabs","career","key"],
+  ["ad-github","adapters","github","forensics","key"],
+  ["ad-monid","adapters","monid","private market","key"],
+  ["ad-ptoken","adapters","projectToken","canonical binding"],
+  ["ad-investor","adapters","portfolio + fundScale","investor axes"],
+  ["ad-kb","adapters","entityStore","knowledge base","flag"],
+  ["ad-cache","adapters","provider cache","read through"],
+  ["ad-web","adapters","publicWeb","fetch + normalize"],
+
+  ["pv-claude","providers","Anthropic Claude","sonnet + haiku"],
+  ["pv-grok","providers","xAI Grok","fallback"],
+  ["pv-or","providers","OpenRouter to Gemini","zdr extract"],
+  ["pv-serper","providers","Serper","$1 per 1k"],
+  ["pv-tw","providers","twitterapi.io","follow graph"],
+  ["pv-llama","providers","DeFiLlama","free"],
+  ["pv-cr","providers","CryptoRank","2 credits"],
+  ["pv-goplus","providers","GoPlus","free"],
+  ["pv-mkts","providers","CoinGecko + DexScreener","market data"],
+  ["pv-osint","providers","OpenSanctions + courts + news","screens"],
+  ["pv-pdl","providers","People Data Labs","$0.10 match"],
+  ["pv-gh","providers","GitHub","repos"],
+  ["pv-monid","providers","Monid / Akta","metered"],
+  ["pv-chain","providers","Helius + Arkham + Etherscan","on-chain"],
+
+  ["db-versions","data","report_versions","immutable"],
+  ["db-cases","data","cases + events","lifecycle"],
+  ["db-graph","data","graph_contributions","org graph"],
+  ["db-kb","data","entity_facts","kb store"],
+  ["db-cache","data","provider_cache","supabase"],
+  ["db-usage","data","usage + cost lines","telemetry"],
+  ["db-members","data","members + quotas","rbac"],
+  ["db-local","data","local audit log","reconciled"],
+];
+const E = [
+  ["u-analyst","ui-canvas"],["u-analyst","ui-report"],["u-analyst","ui-token"],["u-analyst","ui-library"],["u-analyst","ui-watch"],
+  ["u-owner","ui-admin"],["u-sweep","rt-sweep"],
+  ["ui-canvas","rt-audit"],["ui-canvas","db-local"],["ui-report","rt-report"],["ui-report","rt-panels"],["ui-report","rt-forensics"],["ui-report","db-local"],
+  ["ui-token","rt-v1"],["ui-graph","rt-graph"],["ui-library","rt-report"],["ui-watch","rt-report"],["ui-admin","rt-health"],["ui-admin","db-usage"],
+  ["rt-audit","en-orch"],["rt-v1","en-orch"],["rt-v1","en-token"],["rt-sweep","en-token"],
+  ["rt-report","db-versions"],["rt-report","db-cases"],["rt-graph","db-graph"],["rt-panels","pv-claude"],["rt-panels","db-versions"],
+  ["rt-forensics","pv-chain"],["rt-forensics","pv-osint"],["rt-audit","db-members"],
+  ["en-orch","en-intake"],["en-intake","en-lanes"],["en-lanes","en-basics"],["en-basics","en-signals"],["en-signals","en-tg"],["en-tg","en-analyst"],
+  ["en-analyst","en-score"],["en-score","en-clear"],["en-clear","en-present"],
+  ["en-orch","db-versions"],["en-orch","db-usage"],["en-orch","ad-prior"],["en-orch","ad-investor"],
+  ["en-token","pv-mkts"],["en-token","pv-goplus"],["en-token","pv-osint"],["en-token","db-versions"],
+  ["en-intake","ad-ptoken"],["en-intake","ad-x"],["en-intake","ad-llama"],["en-intake","ad-unlocks"],["en-intake","ad-holders"],["en-intake","ad-audits"],["en-intake","ad-monid"],
+  ["en-lanes","ad-x"],["en-lanes","ad-github"],["en-lanes","ad-pdl"],["en-lanes","ad-offchain"],["en-lanes","ad-pfp"],
+  ["en-basics","ad-basics"],["en-basics","ad-kb"],["en-signals","ad-x"],["en-tg","ad-tgraph"],
+  ["en-analyst","pv-claude"],["en-analyst","pv-grok"],
+  ["ad-basics","pv-claude"],["ad-basics","ad-web"],
+  ["ad-x","pv-tw"],["ad-x","pv-grok"],["ad-x","pv-claude"],["ad-x","ad-grounded"],
+  ["ad-grounded","pv-serper"],["ad-grounded","pv-or"],["ad-grounded","ad-web"],
+  ["ad-audits","ad-llama"],["ad-audits","ad-web"],
+  ["ad-llama","pv-llama"],["ad-unlocks","pv-cr"],["ad-holders","pv-goplus"],["ad-ptoken","pv-mkts"],
+  ["ad-offchain","pv-osint"],["ad-pfp","pv-claude"],["ad-pdl","pv-pdl"],["ad-github","pv-gh"],["ad-monid","pv-monid"],["ad-investor","pv-claude"],
+  ["ad-kb","db-kb"],["ad-cache","db-cache"],["ad-tgraph","db-graph"],["ad-prior","db-versions"],["ad-web","ad-cache"],
+];
+const FLOWS = [
+  ["Person audit",["u-analyst","ui-canvas","rt-audit","en-orch","en-intake","en-lanes","en-basics","en-signals","en-tg","en-analyst","en-score","en-clear","en-present","db-versions"]],
+  ["Token scan",["u-analyst","ui-token","rt-v1","en-token","pv-mkts","db-versions"]],
+  ["Grounded search",["ad-x","ad-grounded","pv-serper","pv-or"]],
+  ["Knowledge base",["en-basics","ad-kb","db-kb"]],
+  ["Audit attestation",["pv-llama","ad-llama","ad-audits","ad-web"]],
+];
+
+const graph = document.getElementById("graph");
+const svg = document.getElementById("edges");
+const nodeEl = new Map();
+for (const [id,label] of COLS){
+  const col = document.createElement("div");
+  col.className = "col"; col.dataset.col = id;
+  col.innerHTML = `<h2>${label}</h2>`;
+  for (const n of N.filter(n => n[1]===id)){
+    const d = document.createElement("div");
+    d.className = "node"; d.id = "n-"+n[0];
+    d.innerHTML = `<div class="t">${n[2]}</div><div class="s">${n[3]}</div>` + (n[4] ? `<span class="chip">${n[4]}</span>` : "");
+    d.addEventListener("click", ev => { ev.stopPropagation(); focusNode(n[0]); });
+    col.appendChild(d); nodeEl.set(n[0], d);
+  }
+  graph.appendChild(col);
+}
+const adj = new Map(N.map(n => [n[0], new Set()]));
+for (const [a,b] of E){ adj.get(a)?.add(b); adj.get(b)?.add(a); }
+const colIndex = new Map(COLS.map((c,i)=>[c[0],i]));
+const colOf = new Map(N.map(n=>[n[0],n[1]]));
+const paths = [];
+function draw(){
+  const g = graph.getBoundingClientRect();
+  svg.setAttribute("width", graph.scrollWidth); svg.setAttribute("height", graph.scrollHeight);
+  svg.innerHTML = ""; paths.length = 0;
+  for (const [a,b] of E){
+    const ea = nodeEl.get(a), eb = nodeEl.get(b);
+    if (!ea || !eb) continue;
+    const ra = ea.getBoundingClientRect(), rb = eb.getBoundingClientRect();
+    const leftToRight = colIndex.get(colOf.get(a)) <= colIndex.get(colOf.get(b));
+    const x1 = (leftToRight ? ra.right : ra.left) - g.left, y1 = ra.top + ra.height/2 - g.top;
+    const x2 = (leftToRight ? rb.left : rb.right) - g.left, y2 = rb.top + rb.height/2 - g.top;
+    const dx = Math.max(30, Math.abs(x2-x1)*0.45) * (leftToRight ? 1 : -1);
+    const p = document.createElementNS("http://www.w3.org/2000/svg","path");
+    p.setAttribute("d",`M ${x1} ${y1} C ${x1+dx} ${y1}, ${x2-dx} ${y2}, ${x2} ${y2}`);
+    svg.appendChild(p); paths.push([p,a,b]);
+  }
+  applyState();
+}
+let state = { mode:"all", id:null, q:"", flow:-1 };
+function setNode(el, lit, dim){ el.classList.toggle("lit", lit); el.classList.toggle("dim", dim); }
+function applyState(){
+  let litNodes = null, litEdge = () => false;
+  if (state.mode==="focus" && state.id){
+    litNodes = new Set([state.id, ...(adj.get(state.id)||[])]);
+    litEdge = (a,b) => a===state.id || b===state.id;
+  } else if (state.mode==="search" && state.q){
+    const q = state.q.toLowerCase();
+    litNodes = new Set(N.filter(n => (n[2]+" "+n[3]+" "+(n[4]||"")+" "+n[1]).toLowerCase().includes(q)).map(n=>n[0]));
+    litEdge = (a,b) => litNodes.has(a) && litNodes.has(b);
+  } else if (state.mode==="flow" && state.flow>=0){
+    const chain = FLOWS[state.flow][1];
+    litNodes = new Set(chain);
+    const pairs = new Set(chain.slice(1).map((id,i)=>[chain[i],id].sort().join("|")));
+    litEdge = (a,b) => pairs.has([a,b].sort().join("|"));
+  }
+  for (const [id,el] of nodeEl) setNode(el, litNodes ? litNodes.has(id) : false, litNodes ? !litNodes.has(id) : false);
+  for (const [p,a,b] of paths){
+    const lit = litEdge(a,b);
+    p.classList.toggle("lit", lit);
+    p.classList.toggle("hide", !!litNodes && !lit);
+  }
+  document.querySelectorAll("button.flow").forEach((btn,i)=>btn.classList.toggle("on", state.mode==="flow" && state.flow===i));
+}
+function focusNode(id){
+  state = (state.mode==="focus" && state.id===id) ? {mode:"all",id:null,q:"",flow:-1} : {mode:"focus",id,q:"",flow:-1};
+  document.getElementById("q").value = ""; applyState();
+}
+const flowsBar = document.getElementById("flows");
+FLOWS.forEach(([name],i)=>{
+  const b = document.createElement("button"); b.className="flow"; b.textContent = name;
+  b.addEventListener("click",()=>{ state = (state.mode==="flow"&&state.flow===i)?{mode:"all",id:null,q:"",flow:-1}:{mode:"flow",id:null,q:"",flow:i}; document.getElementById("q").value=""; applyState(); });
+  flowsBar.appendChild(b);
+});
+document.getElementById("q").addEventListener("input", e => { state = e.target.value.trim() ? {mode:"search",id:null,q:e.target.value.trim(),flow:-1} : {mode:"all",id:null,q:"",flow:-1}; applyState(); });
+document.getElementById("reset").addEventListener("click", ()=>{ state={mode:"all",id:null,q:"",flow:-1}; document.getElementById("q").value=""; applyState(); });
+document.addEventListener("keydown", e => { if (e.key==="Escape"){ state={mode:"all",id:null,q:"",flow:-1}; document.getElementById("q").value=""; applyState(); }});
+document.getElementById("counts").textContent = `${N.length} systems · ${E.length} connections · ${FLOWS.length} flows · 10 invariants`;
+draw();
+window.addEventListener("resize", draw);
+</script>
