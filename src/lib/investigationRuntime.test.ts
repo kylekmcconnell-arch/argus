@@ -13,8 +13,12 @@ import {
 // window (INCOMPLETE) or the graph screen loses its window (PROVISIONAL on a
 // clip). Lock the invariants so a future retune cannot silently regress them.
 describe("investigation runtime budget invariants", () => {
-  it("reserves a real, bounded window for the never-waive trust-graph screen", () => {
-    expect(TRUST_GRAPH_SCREEN_RESERVE_MS).toBeGreaterThan(0);
+  it("reserves a robust, bounded window for the never-waive trust-graph screen", () => {
+    // >= 45s: a live run clipped the screen at 30s because a slow optional pass
+    // (Grok adverse-sweep) overran the window; the margin must stay wide enough
+    // to absorb that overrun so the never-waive screen isn't skipped. Guards
+    // against a future retune silently shrinking it back to a flappy value.
+    expect(TRUST_GRAPH_SCREEN_RESERVE_MS).toBeGreaterThanOrEqual(45_000);
     expect(TRUST_GRAPH_SCREEN_RESERVE_MS).toBeLessThan(COLLECTION_ANALYST_RESERVE_MS);
   });
 

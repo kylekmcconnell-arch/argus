@@ -34,8 +34,8 @@ export const ANALYST_FINALIZATION_RESERVE_MS = 90_000;
 // 510s with a full team + token in hand). The reserve now also front-loads a
 // dedicated TRUST_GRAPH_SCREEN_RESERVE_MS window (see below), so the invariant
 // is COLLECTION_ANALYST_RESERVE_MS - TRUST_GRAPH_SCREEN_RESERVE_MS >=
-// ANALYST_SCORING_TIMEOUT_MS (220 - 30 = 190 >= 180).
-export const COLLECTION_ANALYST_RESERVE_MS = 220_000;
+// ANALYST_SCORING_TIMEOUT_MS (250 - 60 = 190 >= 180).
+export const COLLECTION_ANALYST_RESERVE_MS = 250_000;
 
 // The trust-graph reconciliation is the LAST collection pass AND a never-waive
 // safety screen (an unrecorded flagged-subject screen withholds clearance
@@ -46,7 +46,15 @@ export const COLLECTION_ANALYST_RESERVE_MS = 220_000;
 // stops short of, so the fast (bounded, GRAPH_LIMIT-capped) screen always runs
 // and records checked-empty/confirmed/finding. It is carved FROM the analyst
 // reserve above, never from the analyst's own scoring window.
-export const TRUST_GRAPH_SCREEN_RESERVE_MS = 30_000;
+//
+// Widened 30s -> 60s after a live run still clipped the screen (Uniswap flapped
+// FINAL<->PROVISIONAL run-to-run): the screen itself is fast, but a slow OPTIONAL
+// in-flight pass (the Grok adverse-sweep) launched just before the collection
+// deadline can overrun the window. 60s absorbs that overrun. The cost is borne
+// by the optional signal-passes tail (which clips first), NOT the core basic-
+// facts collection, which completes early in adapter-lanes -- so evidence recall
+// is preserved while the never-waive screen becomes reliable.
+export const TRUST_GRAPH_SCREEN_RESERVE_MS = 60_000;
 
 // This is an inactivity deadline, not a cap on the whole investigation. The
 // route emits heartbeats every 15 seconds even while the longer scorer is

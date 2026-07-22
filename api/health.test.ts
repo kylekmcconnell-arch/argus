@@ -22,6 +22,9 @@ describe("provider readiness", () => {
     vi.stubEnv("XAI_API_KEY", "xai-key");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
     vi.stubEnv("TWITTERAPI_KEY", "");
+    vi.stubEnv("SERPER_API_KEY", "serper-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "");
+    vi.stubEnv("ARGUS_EXTRACT_MODEL", "google/gemini-2.5-flash-lite");
     const providerFetch = vi.fn();
     vi.stubGlobal("fetch", providerFetch);
     const { res, captured } = response();
@@ -32,15 +35,43 @@ describe("provider readiness", () => {
     expect(captured.body).toMatchObject({
       available: true,
       mode: "configuration",
-      down: 1,
+      down: 2, // twitterapi + openrouter unconfigured
       services: [
         { id: "xai", ok: true },
         { id: "anthropic", ok: true },
         { id: "twitterapi", ok: false, detail: "not configured in this deployment" },
+        { id: "serper", ok: true },
+        { id: "openrouter", ok: false, detail: "not configured in this deployment" },
       ],
+      // Serper + a model are set but no OpenRouter key -> grounded search runs on
+      // the native Anthropic extractor, not OpenRouter.
+      extraction: {
+        groundedSearchActive: true,
+        extractModel: "google/gemini-2.5-flash-lite",
+        extractProvider: "anthropic",
+      },
     });
-    expect(captured.headers["cache-control"]).toContain("s-maxage=300");
+    expect(captured.headers["cache-control"]).toContain("s-maxage=60");
     expect(providerFetch).not.toHaveBeenCalled();
+  });
+
+  it("reports OpenRouter routing when the key and a slug model are set", () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
+    vi.stubEnv("SERPER_API_KEY", "serper-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "or-key");
+    vi.stubEnv("ARGUS_EXTRACT_MODEL", "google/gemini-2.5-flash-lite");
+    const { res, captured } = response();
+
+    handler({ method: "GET" } as never, res as never);
+
+    expect(captured.body).toMatchObject({
+      services: [
+        { id: "xai" }, { id: "anthropic" }, { id: "twitterapi" },
+        { id: "serper", ok: true },
+        { id: "openrouter", ok: true },
+      ],
+      extraction: { extractProvider: "openrouter", groundedSearchActive: true },
+    });
   });
 
   it("rejects mutating methods", () => {
