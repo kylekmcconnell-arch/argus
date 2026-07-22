@@ -584,6 +584,29 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(tokenomics?.value).not.toContain("not yet circulating");
   });
 
+  it("discloses float control: holder concentration and locked liquidity, neutrally phrased", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.holderProfile = {
+      topHolderPct: 5.6,
+      top10Pct: 31.2,
+      holderCount: 370_041,
+      lpLockedOrBurnedPct: 85,
+      sourceUrl: "https://gopluslabs.io/token-security/1/0x1f98",
+      capturedAt: "2026-07-22T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const control = evidence.basicFacts?.find((fact) => String(fact.value).includes("largest single holder"));
+    expect(control?.predicate).toBe("tokenomics");
+    expect(control?.value).toBe(
+      "largest single holder ~5.6% of supply · top 10 hold ~31% · 370,041 holders · 85% of DEX liquidity locked or burned",
+    );
+    // Neutral framing: concentration is a fact to verify, not an accusation.
+    expect(control?.sources[0].excerpt).toContain("exchanges, custodians, or protocol contracts");
+  });
+
   it("appends the fee trend so a reader sees growth or bleed, not just a total", () => {
     const evidence = emptyEvidence("@uniswap");
     evidence.roles = [SubjectClass.PROJECT];

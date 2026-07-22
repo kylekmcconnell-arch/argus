@@ -245,6 +245,16 @@ export interface ProtocolTvlSnapshot {
   capturedAt: string;
 }
 
+/** Frozen float-control profile (GoPlus holder register) for the verified canonical token. Disclosure data, never a verdict. */
+export interface HolderProfileSnapshot {
+  topHolderPct: number | null;
+  top10Pct: number | null;
+  holderCount: number | null;
+  lpLockedOrBurnedPct: number | null;
+  sourceUrl: string;
+  capturedAt: string;
+}
+
 /** Frozen protocol fee totals (DeFiLlama /summary/fees). On-chain-derived usage: users actually paid these fees. */
 export interface ProtocolFeesSnapshot {
   slug: string;
@@ -657,6 +667,8 @@ export interface CollectedEvidence {
   protocolTvl?: ProtocolTvlSnapshot;
   /** Frozen protocol fee totals (DeFiLlama). A second dated usage metric for P5. */
   protocolFees?: ProtocolFeesSnapshot;
+  /** Frozen float-control profile for the verified canonical token (GoPlus holder register). */
+  holderProfile?: HolderProfileSnapshot;
   /** Frozen independent-audit evidence (auditor-domain corroborated vs self-attested). */
   securityAudits?: SecurityAuditsSnapshot;
   /** Frozen keyed private-market enrichment (Monid/Akta): funding, leadership, firmographic. */

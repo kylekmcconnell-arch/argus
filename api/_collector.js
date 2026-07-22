@@ -17131,6 +17131,30 @@ function projectProviderBackedBasicFacts(evidence) {
       `captured ${feesSnapshot.capturedAt.slice(0, 10)}`
     ));
   }
+  const holderSnapshot = isProject ? evidence.holderProfile : void 0;
+  if (holderSnapshot && (holderSnapshot.topHolderPct !== null || holderSnapshot.lpLockedOrBurnedPct !== null)) {
+    const fmtPct = (value) => `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10}%`;
+    const parts = [
+      ...holderSnapshot.topHolderPct !== null ? [`largest single holder ~${fmtPct(holderSnapshot.topHolderPct)} of supply`] : [],
+      ...holderSnapshot.top10Pct !== null && holderSnapshot.topHolderPct !== null ? [`top 10 hold ~${fmtPct(holderSnapshot.top10Pct)}`] : [],
+      ...holderSnapshot.holderCount !== null ? [`${holderSnapshot.holderCount.toLocaleString("en-US")} holders`] : [],
+      ...holderSnapshot.lpLockedOrBurnedPct !== null ? [`${fmtPct(holderSnapshot.lpLockedOrBurnedPct)} of DEX liquidity locked or burned`] : []
+    ];
+    projected.push(makeFact(
+      evidence,
+      "tokenomics",
+      parts.join(" \xB7 "),
+      [source({
+        url: holderSnapshot.sourceUrl,
+        title: "GoPlus holder register",
+        excerpt: `On-chain holder register: ${parts.join("; ")}. Large holders on established tokens are commonly exchanges, custodians, or protocol contracts; verify before reading concentration as insider control.`,
+        capturedAt: holderSnapshot.capturedAt,
+        provider: "goplus",
+        sourceClass: "regulatory_or_onchain"
+      })],
+      `captured ${holderSnapshot.capturedAt.slice(0, 10)}`
+    ));
+  }
   const ventureToken = isFounderSubject && !isProject ? evidence.ventureToken : void 0;
   if (ventureToken?.verified) {
     projected.push(makeFact(
@@ -17171,6 +17195,207 @@ function projectProviderBackedBasicFacts(evidence) {
   corroborateVenturesAgainstFirstPartySources(evidence);
 }
 
+// src/token/sources.ts
+var GOPLUS_CHAIN = {
+  ethereum: "1",
+  bsc: "56",
+  base: "8453",
+  polygon: "137",
+  arbitrum: "42161",
+  optimism: "10",
+  avalanche: "43114",
+  fantom: "250",
+  cronos: "25",
+  zksync: "324",
+  linea: "59144",
+  scroll: "534352"
+};
+async function dexByTokenResult(address) {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (!res.ok) return { ok: false, pairs: [] };
+    const d = await res.json();
+    return { ok: true, pairs: d.pairs ?? [] };
+  } catch {
+    return { ok: false, pairs: [] };
+  }
+}
+async function dexByToken(address) {
+  const result = await dexByTokenResult(address);
+  return result.pairs;
+}
+var CG_PLATFORM = {
+  ethereum: "ethereum",
+  eth: "ethereum",
+  base: "base",
+  solana: "solana",
+  bsc: "binance-smart-chain",
+  polygon: "polygon-pos",
+  arbitrum: "arbitrum-one",
+  optimism: "optimistic-ethereum",
+  avalanche: "avalanche",
+  fantom: "fantom"
+};
+var CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
+function cleanBlurb(raw) {
+  if (typeof raw !== "string" || !raw.trim()) return null;
+  let s = raw.replace(/<[^>]+>/g, " ").replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1").replace(/https?:\/\/\S+/g, "").replace(/[*_`>#]+/g, " ").replace(/&amp;/g, "&").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
+  if (!s) return null;
+  const sentences = s.match(/[^.!?]+[.!?]+/g);
+  if (sentences && sentences.length) s = sentences.slice(0, 2).join(" ").trim();
+  if (s.length > 300) s = s.slice(0, 297).replace(/\s+\S*$/, "") + "\u2026";
+  return s;
+}
+var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
+async function coingeckoToken(chain, address) {
+  const plat = CG_PLATFORM[chain] ?? chain;
+  try {
+    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
+    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
+    if (!res.ok) return null;
+    const d = await res.json();
+    const tickers = d.tickers ?? [];
+    const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
+    const cex = new Set(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean));
+    const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
+    const homepageValue = (d.links?.homepage ?? []).find((value) => typeof value === "string" && /^https?:\/\//i.test(value));
+    const homepage = typeof homepageValue === "string" ? homepageValue : null;
+    const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
+    const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
+    const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
+    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image, description: cleanBlurb(d.description?.en) };
+  } catch {
+    return null;
+  }
+}
+async function dexByPairResult(chain, pair) {
+  try {
+    const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
+      signal: AbortSignal.timeout(8e3)
+    });
+    if (!res.ok) return { ok: false, pair: null };
+    const d = await res.json();
+    return { ok: true, pair: d.pair ?? d.pairs?.[0] ?? null };
+  } catch {
+    return { ok: false, pair: null };
+  }
+}
+async function dexByPair(chain, pair) {
+  const result = await dexByPairResult(chain, pair);
+  return result.pair;
+}
+function pickPair(pairs, wantAddress) {
+  if (!pairs.length) return null;
+  const byLiq = [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
+  if (wantAddress) {
+    const exact = byLiq.find((p) => p.baseToken?.address === wantAddress);
+    if (exact) return exact;
+    const match = /^0x[0-9a-f]{40}$/i.test(wantAddress) ? byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase()) : void 0;
+    if (match) return match;
+  }
+  return byLiq[0];
+}
+async function honeypotIs(chainId, address) {
+  try {
+    const res = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
+    if (!res.ok) return null;
+    const d = await res.json();
+    return {
+      isHoneypot: !!d.honeypotResult?.isHoneypot,
+      simSuccess: !!d.simulationSuccess,
+      buyTax: d.simulationResult?.buyTax ?? 0,
+      sellTax: d.simulationResult?.sellTax ?? 0,
+      flags: (d.flags ?? []).map((flag) => typeof flag === "string" ? flag : flag.description ?? flag.flag ?? String(flag))
+    };
+  } catch {
+    return null;
+  }
+}
+async function goplusSolana(mint) {
+  try {
+    const res = await fetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
+    if (!res.ok) return null;
+    const d = await res.json();
+    const row = d.result?.[mint] ?? (d.result ? Object.values(d.result)[0] : void 0);
+    return row ?? null;
+  } catch {
+    return null;
+  }
+}
+async function goplus(chainId, address) {
+  const once = async () => {
+    try {
+      const res = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
+      if (!res.ok) return null;
+      const d = await res.json();
+      return d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : void 0) ?? null;
+    } catch {
+      return null;
+    }
+  };
+  let row = await once();
+  if (row && !(row.holders && row.holders.length)) {
+    await new Promise((r) => setTimeout(r, 700));
+    const retry = await once();
+    if (retry?.holders?.length) row = retry;
+  }
+  return row;
+}
+
+// server/adapters/tokenHolders.ts
+var FETCH_TIMEOUT_MS2 = 8e3;
+var isBurnAddr = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
+var isBurnTag = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
+async function collectHolderProfile(chain, address) {
+  const chainId = GOPLUS_CHAIN[chain.trim().toLowerCase()];
+  if (!chainId || !address) {
+    return { available: false, note: `No GoPlus holder register for chain "${chain}".` };
+  }
+  const gp = await Promise.race([
+    goplus(chainId, address).catch(() => null),
+    new Promise((resolve) => setTimeout(() => resolve(null), FETCH_TIMEOUT_MS2))
+  ]);
+  if (!gp) {
+    recordCall("goplus", "holder-profile", 0, `${chain}:${address.slice(0, 10)} \xB7 no_data`, "partial");
+    return { available: false, note: "GoPlus returned no token security record." };
+  }
+  const holders = Array.isArray(gp.holders) ? gp.holders : [];
+  const pct = (raw) => {
+    const value = Number(raw) * 100;
+    return Number.isFinite(value) && value >= 0 ? value : null;
+  };
+  const topHolderPct = holders.length ? pct(holders[0].percent) : null;
+  const top10 = holders.slice(0, 10).map((holder) => pct(holder.percent) ?? 0).reduce((total, share) => total + share, 0);
+  const top10Pct = holders.length ? Math.min(100, top10) : null;
+  const holderCountRaw = Number(gp.holder_count);
+  const holderCount = Number.isFinite(holderCountRaw) && holderCountRaw > 0 ? Math.round(holderCountRaw) : null;
+  const lpHolders = Array.isArray(gp.lp_holders) ? gp.lp_holders : [];
+  let lpLockedOrBurned = 0;
+  for (const holder of lpHolders) {
+    const share = pct(holder.percent);
+    if (share === null) continue;
+    if (isBurnAddr(holder.address) || isBurnTag(holder.tag) || holder.is_locked === 1) lpLockedOrBurned += share;
+  }
+  const lpLockedOrBurnedPct = lpHolders.length ? Math.min(100, lpLockedOrBurned) : null;
+  if (topHolderPct === null && holderCount === null && lpLockedOrBurnedPct === null) {
+    recordCall("goplus", "holder-profile", 0, `${chain}:${address.slice(0, 10)} \xB7 empty_register`, "succeeded");
+    return { available: false, note: "GoPlus reported no holder or liquidity register for this token." };
+  }
+  recordCall("goplus", "holder-profile", 0, `${chain}:${address.slice(0, 10)} \xB7 top_${topHolderPct === null ? "na" : Math.round(topHolderPct)}pct`, "succeeded");
+  return {
+    available: true,
+    value: {
+      topHolderPct,
+      top10Pct,
+      holderCount,
+      lpLockedOrBurnedPct,
+      sourceUrl: `https://gopluslabs.io/token-security/${chainId}/${address}`
+    }
+  };
+}
+
 // server/adapters/securityAudits.ts
 var AUDITOR_REGISTRY = [
   { name: "Trail of Bits", pattern: /trail\s*of\s*bits/i, domains: ["trailofbits.com"] },
@@ -17191,7 +17416,7 @@ var AUDITOR_REGISTRY = [
   { name: "OtterSec", pattern: /otter\s*sec/i, domains: ["osec.io"] },
   { name: "CertiK", pattern: /certik/i, domains: ["certik.com"] }
 ];
-var FETCH_TIMEOUT_MS2 = 15e3;
+var FETCH_TIMEOUT_MS3 = 15e3;
 var MAX_AUDITOR_FETCHES = 4;
 var USER_AGENT = "ARGUS/3.0 (+https://argus-one-flax.vercel.app; due-diligence evidence research)";
 async function fetchPageText(url, fetcher) {
@@ -17199,7 +17424,7 @@ async function fetchPageText(url, fetcher) {
   try {
     response = await fetcher(url, {
       headers: { accept: "text/html,application/xhtml+xml", "user-agent": USER_AGENT },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS2),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS3),
       redirect: "follow"
     });
   } catch {
@@ -18939,11 +19164,15 @@ async function runAuditWithLedger(rawHandle, emit, options) {
       const projectName2 = evidence.projectToken.name;
       const capturedAt = evidence.projectToken.capturedAt;
       try {
-        const [tvlOutcome, fundingOutcome, feesOutcome] = await Promise.all([
+        const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome] = await Promise.all([
           collectProtocolTvl(projectName2),
           collectProtocolFunding(projectName2),
-          collectProtocolFees(projectName2)
+          collectProtocolFees(projectName2),
+          // Float control (free, keyless): who holds the supply, is the LP
+          // locked. Answers the reader's dump/rug question for project tokens.
+          evidence.projectToken.address ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address) : Promise.resolve({ available: false, note: "no canonical token address" })
         ]);
+        if (holdersOutcome.available) evidence.holderProfile = { ...holdersOutcome.value, capturedAt };
         if (feesOutcome.available) evidence.protocolFees = { ...feesOutcome.value, capturedAt };
         if (tvlOutcome.available) {
           evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };
@@ -19547,155 +19776,6 @@ function runAudit(rawHandle, emit, options) {
   return withCostLedger(() => runAuditWithLedger(rawHandle, emit, options));
 }
 
-// src/token/sources.ts
-var GOPLUS_CHAIN = {
-  ethereum: "1",
-  bsc: "56",
-  base: "8453",
-  polygon: "137",
-  arbitrum: "42161",
-  optimism: "10",
-  avalanche: "43114",
-  fantom: "250",
-  cronos: "25",
-  zksync: "324",
-  linea: "59144",
-  scroll: "534352"
-};
-async function dexByTokenResult(address) {
-  try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${address}`, {
-      signal: AbortSignal.timeout(8e3)
-    });
-    if (!res.ok) return { ok: false, pairs: [] };
-    const d = await res.json();
-    return { ok: true, pairs: d.pairs ?? [] };
-  } catch {
-    return { ok: false, pairs: [] };
-  }
-}
-async function dexByToken(address) {
-  const result = await dexByTokenResult(address);
-  return result.pairs;
-}
-var CG_PLATFORM = {
-  ethereum: "ethereum",
-  eth: "ethereum",
-  base: "base",
-  solana: "solana",
-  bsc: "binance-smart-chain",
-  polygon: "polygon-pos",
-  arbitrum: "arbitrum-one",
-  optimism: "optimistic-ethereum",
-  avalanche: "avalanche",
-  fantom: "fantom"
-};
-var CG_DEX = /uniswap|pancake|raydium|sushi|curve|balancer|orca|meteora|aerodrome|camelot|quickswap|trader.?joe|\bdex\b/i;
-function cleanBlurb(raw) {
-  if (typeof raw !== "string" || !raw.trim()) return null;
-  let s = raw.replace(/<[^>]+>/g, " ").replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1").replace(/https?:\/\/\S+/g, "").replace(/[*_`>#]+/g, " ").replace(/&amp;/g, "&").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
-  if (!s) return null;
-  const sentences = s.match(/[^.!?]+[.!?]+/g);
-  if (sentences && sentences.length) s = sentences.slice(0, 2).join(" ").trim();
-  if (s.length > 300) s = s.slice(0, 297).replace(/\s+\S*$/, "") + "\u2026";
-  return s;
-}
-var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
-async function coingeckoToken(chain, address) {
-  const plat = CG_PLATFORM[chain] ?? chain;
-  try {
-    const res = await fetch(`https://api.coingecko.com/api/v3/coins/${plat}/contract/${address}?localization=false&tickers=true&market_data=true&community_data=false&developer_data=false`);
-    if (res.status === 404) return { listed: false, rank: null, mcapUsd: null, marketCount: 0, cexCount: 0, cexNames: [], homepage: null, twitter: null, image: null, description: null };
-    if (!res.ok) return null;
-    const d = await res.json();
-    const tickers = d.tickers ?? [];
-    const markets = new Set(tickers.map((t) => t.market?.name).filter(Boolean));
-    const cex = new Set(tickers.filter((t) => !CG_DEX.test(t.market?.identifier || t.market?.name || "")).map((t) => t.market?.name).filter(Boolean));
-    const cexNames = [...cex].sort((a, b) => (CG_TIER1.test(b) ? 1 : 0) - (CG_TIER1.test(a) ? 1 : 0)).slice(0, 12);
-    const homepageValue = (d.links?.homepage ?? []).find((value) => typeof value === "string" && /^https?:\/\//i.test(value));
-    const homepage = typeof homepageValue === "string" ? homepageValue : null;
-    const tw = typeof d.links?.twitter_screen_name === "string" ? d.links.twitter_screen_name.replace(/^@/, "").trim() : "";
-    const twitter = /^[A-Za-z0-9_]{2,30}$/.test(tw) ? tw : null;
-    const image = d.image?.large ?? d.image?.small ?? d.image?.thumb ?? null;
-    return { listed: true, rank: d.market_cap_rank ?? null, mcapUsd: d.market_data?.market_cap?.usd ?? null, marketCount: markets.size, cexCount: cex.size, cexNames, homepage, twitter, image, description: cleanBlurb(d.description?.en) };
-  } catch {
-    return null;
-  }
-}
-async function dexByPairResult(chain, pair) {
-  try {
-    const res = await fetch(`https://api.dexscreener.com/latest/dex/pairs/${chain}/${pair}`, {
-      signal: AbortSignal.timeout(8e3)
-    });
-    if (!res.ok) return { ok: false, pair: null };
-    const d = await res.json();
-    return { ok: true, pair: d.pair ?? d.pairs?.[0] ?? null };
-  } catch {
-    return { ok: false, pair: null };
-  }
-}
-async function dexByPair(chain, pair) {
-  const result = await dexByPairResult(chain, pair);
-  return result.pair;
-}
-function pickPair(pairs, wantAddress) {
-  if (!pairs.length) return null;
-  const byLiq = [...pairs].sort((a, b) => (b.liquidity?.usd ?? 0) - (a.liquidity?.usd ?? 0));
-  if (wantAddress) {
-    const exact = byLiq.find((p) => p.baseToken?.address === wantAddress);
-    if (exact) return exact;
-    const match = /^0x[0-9a-f]{40}$/i.test(wantAddress) ? byLiq.find((p) => p.baseToken?.address?.toLowerCase() === wantAddress.toLowerCase()) : void 0;
-    if (match) return match;
-  }
-  return byLiq[0];
-}
-async function honeypotIs(chainId, address) {
-  try {
-    const res = await fetch(`https://api.honeypot.is/v2/IsHoneypot?address=${address}&chainID=${chainId}`);
-    if (!res.ok) return null;
-    const d = await res.json();
-    return {
-      isHoneypot: !!d.honeypotResult?.isHoneypot,
-      simSuccess: !!d.simulationSuccess,
-      buyTax: d.simulationResult?.buyTax ?? 0,
-      sellTax: d.simulationResult?.sellTax ?? 0,
-      flags: (d.flags ?? []).map((flag) => typeof flag === "string" ? flag : flag.description ?? flag.flag ?? String(flag))
-    };
-  } catch {
-    return null;
-  }
-}
-async function goplusSolana(mint) {
-  try {
-    const res = await fetch(`https://api.gopluslabs.io/api/v1/solana/token_security?contract_addresses=${mint}`);
-    if (!res.ok) return null;
-    const d = await res.json();
-    const row = d.result?.[mint] ?? (d.result ? Object.values(d.result)[0] : void 0);
-    return row ?? null;
-  } catch {
-    return null;
-  }
-}
-async function goplus(chainId, address) {
-  const once = async () => {
-    try {
-      const res = await fetch(`https://api.gopluslabs.io/api/v1/token_security/${chainId}?contract_addresses=${address}`);
-      if (!res.ok) return null;
-      const d = await res.json();
-      return d.result?.[address.toLowerCase()] ?? (d.result ? Object.values(d.result)[0] : void 0) ?? null;
-    } catch {
-      return null;
-    }
-  };
-  let row = await once();
-  if (row && !(row.holders && row.holders.length)) {
-    await new Promise((r) => setTimeout(r, 700));
-    const retry = await once();
-    if (retry?.holders?.length) row = retry;
-  }
-  return row;
-}
-
 // src/token/audit.ts
 var SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
 async function screenDeployerRisk(address, fetchImpl = fetch) {
@@ -19750,8 +19830,8 @@ function handleFromUrl(url) {
   const m = url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i);
   return m ? "@" + m[1].toLowerCase() : null;
 }
-var isBurnAddr = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
-var isBurnTag = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
+var isBurnAddr2 = (a) => !!a && (/^0x0+$/.test(a) || /0*dead$/i.test(a.replace(/^0x/, "")));
+var isBurnTag2 = (t) => /null|burn|dead|0x0{4,}/i.test(t ?? "");
 function evmSafety(gp, sim) {
   const s = sim;
   const topHolderPct = gp?.holders?.length ? Number(gp.holders[0].percent) * 100 : null;
@@ -19759,7 +19839,7 @@ function evmSafety(gp, sim) {
   for (const h of gp?.lp_holders ?? []) {
     const pct = Number(h.percent) * 100;
     if (!Number.isFinite(pct)) continue;
-    if (isBurnAddr(h.address) || isBurnTag(h.tag)) lpBurnedPct += pct;
+    if (isBurnAddr2(h.address) || isBurnTag2(h.tag)) lpBurnedPct += pct;
     else if (h.is_locked === 1) lpLockedPct += pct;
     else if (h.is_contract !== 1) lpTopUnlockedEoaPct = Math.max(lpTopUnlockedEoaPct, pct);
   }

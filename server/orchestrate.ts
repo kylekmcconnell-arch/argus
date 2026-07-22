@@ -65,6 +65,7 @@ import { collectFundScale } from "./adapters/fundScale";
 import { collectProjectTokenIdentity, collectVentureTokenIdentity } from "./adapters/projectToken";
 import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 import { collectProtocolAuditLinks, collectProtocolFees, collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
+import { collectHolderProfile } from "./adapters/tokenHolders";
 import { collectSecurityAudits } from "./adapters/securityAudits";
 import { collectCompanyEnrichment } from "./adapters/monid";
 
@@ -2314,11 +2315,17 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
       const projectName = evidence.projectToken.name;
       const capturedAt = evidence.projectToken.capturedAt;
       try {
-        const [tvlOutcome, fundingOutcome, feesOutcome] = await Promise.all([
+        const [tvlOutcome, fundingOutcome, feesOutcome, holdersOutcome] = await Promise.all([
           collectProtocolTvl(projectName),
           collectProtocolFunding(projectName),
           collectProtocolFees(projectName),
+          // Float control (free, keyless): who holds the supply, is the LP
+          // locked. Answers the reader's dump/rug question for project tokens.
+          evidence.projectToken.address
+            ? collectHolderProfile(evidence.projectToken.chain, evidence.projectToken.address)
+            : Promise.resolve({ available: false as const, note: "no canonical token address" }),
         ]);
+        if (holdersOutcome.available) evidence.holderProfile = { ...holdersOutcome.value, capturedAt };
         if (feesOutcome.available) evidence.protocolFees = { ...feesOutcome.value, capturedAt };
         if (tvlOutcome.available) {
           evidence.protocolTvl = { ...tvlOutcome.value, capturedAt };

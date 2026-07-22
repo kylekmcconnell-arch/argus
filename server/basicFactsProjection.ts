@@ -858,6 +858,36 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     ));
   }
 
+  // Float control → a tokenomics disclosure the reader actually asks for:
+  // who holds the supply, and is the DEX liquidity locked? Neutral phrasing on
+  // purpose -- on established tokens the largest holders are typically
+  // exchanges, custodians, or protocol contracts, so concentration is stated
+  // as a fact to check, never as an insider accusation.
+  const holderSnapshot = isProject ? evidence.holderProfile : undefined;
+  if (holderSnapshot && (holderSnapshot.topHolderPct !== null || holderSnapshot.lpLockedOrBurnedPct !== null)) {
+    const fmtPct = (value: number) => `${value >= 10 ? Math.round(value) : Math.round(value * 10) / 10}%`;
+    const parts = [
+      ...(holderSnapshot.topHolderPct !== null ? [`largest single holder ~${fmtPct(holderSnapshot.topHolderPct)} of supply`] : []),
+      ...(holderSnapshot.top10Pct !== null && holderSnapshot.topHolderPct !== null ? [`top 10 hold ~${fmtPct(holderSnapshot.top10Pct)}`] : []),
+      ...(holderSnapshot.holderCount !== null ? [`${holderSnapshot.holderCount.toLocaleString("en-US")} holders`] : []),
+      ...(holderSnapshot.lpLockedOrBurnedPct !== null ? [`${fmtPct(holderSnapshot.lpLockedOrBurnedPct)} of DEX liquidity locked or burned`] : []),
+    ];
+    projected.push(makeFact(
+      evidence,
+      "tokenomics",
+      parts.join(" · "),
+      [source({
+        url: holderSnapshot.sourceUrl,
+        title: "GoPlus holder register",
+        excerpt: `On-chain holder register: ${parts.join("; ")}. Large holders on established tokens are commonly exchanges, custodians, or protocol contracts; verify before reading concentration as insider control.`,
+        capturedAt: holderSnapshot.capturedAt,
+        provider: "goplus",
+        sourceClass: "regulatory_or_onchain",
+      })],
+      `captured ${holderSnapshot.capturedAt.slice(0, 10)}`,
+    ));
+  }
+
   // Founder related-asset binding: the verified venture's canonical token,
   // bound through the venture's own official X account / domain (never a name
   // match), answers the founder official_token question. The value stays
