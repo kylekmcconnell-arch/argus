@@ -37,13 +37,40 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
     configuredService("xai", "Grok (xAI)", process.env.XAI_API_KEY, "configure XAI_API_KEY"),
     configuredService("anthropic", "Claude research + analyst", process.env.ANTHROPIC_API_KEY, "configure ANTHROPIC_API_KEY"),
     configuredService("twitterapi", "twitterapi.io", process.env.TWITTERAPI_KEY, "configure TWITTERAPI_KEY"),
+    configuredService("serper", "Serper (grounded search)", process.env.SERPER_API_KEY, "configure SERPER_API_KEY"),
+    configuredService("openrouter", "OpenRouter (cheap extraction)", process.env.OPENROUTER_API_KEY, "configure OPENROUTER_API_KEY"),
   ];
 
-  res.setHeader("cache-control", "public, s-maxage=300, stale-while-revalidate=900");
+  // Extraction-routing diagnostic: confirm, without a paid audit, whether the
+  // decoupled grounded-search path is provisioned and which model the cheap
+  // extractor actually uses. Mirrors groundedSearch.ts exactly: grounded search
+  // runs only with Serper + an extractor, and OpenRouter routing engages only
+  // when its key is set AND ARGUS_EXTRACT_MODEL is a provider/model slug (else
+  // it stays on the native Anthropic extractor). No secret values are exposed.
+  const extractModel = process.env.ARGUS_EXTRACT_MODEL?.trim();
+  const hasOpenRouter = Boolean(process.env.OPENROUTER_API_KEY?.trim());
+  const hasSerper = Boolean(process.env.SERPER_API_KEY?.trim());
+  const hasAnthropic = Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+  const openRouterRouting = Boolean(hasOpenRouter && extractModel && extractModel.includes("/"));
+  const extraction = {
+    groundedSearchActive: hasSerper && (hasOpenRouter || hasAnthropic),
+    extractModel: extractModel || "claude-haiku-4-5 (default, native Anthropic)",
+    extractProvider: openRouterRouting ? "openrouter" : "anthropic",
+    reason: !hasSerper
+      ? "grounded search INACTIVE: SERPER_API_KEY is not set on this build"
+      : openRouterRouting
+        ? "grounded extraction routes through OpenRouter"
+        : hasOpenRouter
+          ? "OpenRouter key set but ARGUS_EXTRACT_MODEL is not a provider/model slug (needs a value like google/gemini-2.5-flash-lite); using native Anthropic extractor"
+          : "grounded extraction uses the native Anthropic extractor (no OpenRouter key)",
+  };
+
+  res.setHeader("cache-control", "public, s-maxage=60, stale-while-revalidate=300");
   return res.status(200).json({
     available: true,
     mode: "configuration",
     services,
+    extraction,
     down: services.filter((service) => !service.ok).length,
   });
 }
