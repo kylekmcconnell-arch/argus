@@ -67,6 +67,7 @@ import { projectProviderBackedBasicFacts } from "./basicFactsProjection";
 import { collectProtocolAuditLinks, collectProtocolFees, collectProtocolFunding, collectProtocolTvl } from "./adapters/defiLlama";
 import { collectHolderProfile } from "./adapters/tokenHolders";
 import { collectUpcomingUnlocks } from "./adapters/tokenUnlocks";
+import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { collectSecurityAudits } from "./adapters/securityAudits";
 import { collectCompanyEnrichment } from "./adapters/monid";
 
@@ -3110,6 +3111,24 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE"
     ? "partial"
     : checkCompleteness;
+  // "Since last scan": one bounded read of the prior persisted outcome so a
+  // repeat scan states its own delta (score/verdict/coverage movement) instead
+  // of leaving the returning user to diff two frozen reports by hand.
+  // Best-effort: first-ever scans and keyless local runs stay silent.
+  if (options?.organizationId) {
+    const prior = await readPriorOutcome(options.organizationId, evidence.profile.handle);
+    if (prior) {
+      const delta = describeOutcomeDelta(prior, {
+        score: typeof dossier.report.governing_score === "number" ? dossier.report.governing_score : null,
+        verdict: dossier.report.composite_verdict ?? null,
+        completeness: dossier.completeness_state ?? null,
+      });
+      if (delta) {
+        checkTracker.provider("prior-outcome", "Since last scan", "executed", delta);
+        emit({ phase: "Finalize", label: "Since last scan", detail: delta, source: "argus", tone: "neutral" });
+      }
+    }
+  }
   dossier.providerSnapshot = checkTracker.providers();
   // Attach what this run actually spent, so the report library can show it.
   dossier.cost = cost;

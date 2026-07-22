@@ -17546,6 +17546,63 @@ async function collectUpcomingUnlocks(tokenName, symbol) {
   };
 }
 
+// server/adapters/priorOutcome.ts
+function creds3() {
+  const url = env("SUPABASE_URL");
+  const key = env("SUPABASE_SECRET_KEY") || env("SUPABASE_SERVICE_ROLE_KEY") || env("SUPABASE_SERVICE_KEY");
+  return url && key ? { url: url.replace(/\/$/, ""), key } : null;
+}
+var authHeaders2 = (key) => ({
+  apikey: key,
+  ...!key.startsWith("sb_secret_") ? { authorization: `Bearer ${key}` } : {},
+  "content-type": "application/json"
+});
+async function readPriorOutcome(organizationId, handle) {
+  const c = creds3();
+  const ref = handle.trim().replace(/^@/, "").toLowerCase();
+  if (!c || !organizationId || !ref) return null;
+  try {
+    const caseUrl = `${c.url}/rest/v1/cases?organization_id=eq.${encodeURIComponent(organizationId)}&kind=eq.person&canonical_ref=in.(${encodeURIComponent(`"${ref}","@${ref}"`)})&select=id&limit=1`;
+    const caseRes = await fetch(caseUrl, { headers: authHeaders2(c.key), signal: AbortSignal.timeout(5e3) });
+    if (!caseRes.ok) return null;
+    const caseRows = await caseRes.json();
+    const caseId = caseRows?.[0]?.id;
+    if (!caseId) return null;
+    const versionUrl = `${c.url}/rest/v1/report_versions?case_id=eq.${encodeURIComponent(caseId)}&organization_id=eq.${encodeURIComponent(organizationId)}&select=version,score,verdict,completeness_state,created_at&order=version.desc&limit=1`;
+    const versionRes = await fetch(versionUrl, { headers: authHeaders2(c.key), signal: AbortSignal.timeout(5e3) });
+    if (!versionRes.ok) return null;
+    const rows = await versionRes.json();
+    const row = rows?.[0];
+    if (!row || typeof row.version !== "number") return null;
+    const score = row.score === null || row.score === void 0 ? null : Number(row.score);
+    return {
+      version: row.version,
+      score: Number.isFinite(score) ? score : null,
+      verdict: typeof row.verdict === "string" && row.verdict ? row.verdict : null,
+      completeness: typeof row.completeness_state === "string" ? row.completeness_state : null,
+      capturedAt: typeof row.created_at === "string" ? row.created_at : null
+    };
+  } catch {
+    return null;
+  }
+}
+function describeOutcomeDelta(prior, current) {
+  const parts = [];
+  if (prior.verdict && current.verdict && prior.verdict !== current.verdict) {
+    parts.push(`verdict ${prior.verdict} -> ${current.verdict}`);
+  }
+  if (prior.score !== null && current.score !== null) {
+    const delta2 = current.score - prior.score;
+    parts.push(delta2 === 0 ? `score steady at ${current.score}` : `score ${prior.score} -> ${current.score} (${delta2 > 0 ? "+" : ""}${delta2})`);
+  }
+  if (prior.completeness && current.completeness && prior.completeness !== current.completeness) {
+    parts.push(`coverage ${prior.completeness} -> ${current.completeness}`);
+  }
+  if (!parts.length) return null;
+  const when = prior.capturedAt ? ` (v${prior.version}, ${prior.capturedAt.slice(0, 10)})` : ` (v${prior.version})`;
+  return `Since last scan${when}: ${parts.join(" \xB7 ")}`;
+}
+
 // server/adapters/securityAudits.ts
 var AUDITOR_REGISTRY = [
   { name: "Trail of Bits", pattern: /trail\s*of\s*bits/i, domains: ["trailofbits.com"] },
@@ -19902,6 +19959,20 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   dossier.checkRuns = checkTracker.snapshot(evidence.roles, checkScope);
   const checkCompleteness = checkTracker.completeness(evidence.roles, checkScope);
   dossier.completeness_state = dossier.report.composite_verdict === "INCOMPLETE" ? "partial" : checkCompleteness;
+  if (options?.organizationId) {
+    const prior = await readPriorOutcome(options.organizationId, evidence.profile.handle);
+    if (prior) {
+      const delta2 = describeOutcomeDelta(prior, {
+        score: typeof dossier.report.governing_score === "number" ? dossier.report.governing_score : null,
+        verdict: dossier.report.composite_verdict ?? null,
+        completeness: dossier.completeness_state ?? null
+      });
+      if (delta2) {
+        checkTracker.provider("prior-outcome", "Since last scan", "executed", delta2);
+        emit({ phase: "Finalize", label: "Since last scan", detail: delta2, source: "argus", tone: "neutral" });
+      }
+    }
+  }
   dossier.providerSnapshot = checkTracker.providers();
   dossier.cost = cost;
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} calls, \u2248${cost.sources} search sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
