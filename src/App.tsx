@@ -2,7 +2,7 @@ import { lazy, Suspense, useState, useCallback, useEffect, useRef } from "react"
 import { AppShell } from "./components/AppShell";
 import { AuditConsole } from "./components/AuditConsole";
 import { Landing } from "./components/Landing";
-import { logAudit, hydrateSharedLog } from "./lib/auditlog";
+import { logAudit, hydrateSharedLog, reconcileAuditOutcome } from "./lib/auditlog";
 import {
   syncReport,
   fetchReport,
@@ -679,6 +679,23 @@ export default function App() {
         const c = { kind: "person" as const, dossier: storedPersonDossier(rep) };
         cacheResult(resultCache.current, ref, c);
         showCached(ref, c);
+        // The ACTIVE stored version is the server truth for this case; fold its
+        // outcome back into the newest audit-log row so the Recent-cases chip
+        // stops contradicting the opened report (chip shows the last RUN, which
+        // may never have become the active projection). Same field mapping as
+        // the run-time logAudit above.
+        const d = c.dossier;
+        reconcileAuditOutcome(ref, "person", {
+          verdict: d.report.composite_verdict,
+          score: d.report.governing_score,
+          summary: d.headline,
+          coverage: deriveDecisionReadiness(d.checkRuns?.length ? d.checkRuns : personChecks({
+            identityConfidence: d.report.identity_confidence ?? undefined,
+            realName: (d.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
+            roles: d.report.roles ?? [],
+            hasAssociates: (d.evidence.associates ?? []).length > 0,
+          })).status,
+        });
         return;
       }
       await new Promise((r) => setTimeout(r, 1500));

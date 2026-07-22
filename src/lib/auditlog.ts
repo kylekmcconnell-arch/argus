@@ -162,6 +162,58 @@ export function applyRoles(ref: string, roles: string[]): void {
   emitLogChange();
 }
 
+// Reconcile the NEWEST logged row for a subject with the ACTIVE stored outcome.
+// The sidebar chip reads the newest row -- i.e. "the last RUN this browser saw"
+// -- while the case page shows the server's active (best-qualified) version.
+// When a run's version does not become the active projection, the chip goes
+// stale-wrong (observed: chip "80 · provisional" while the opened case shows
+// "82 · DECISION-READY"). Opening the case is the moment the client learns the
+// server truth, so fold it back into the newest row. Only the newest matching
+// row is touched (older rows are the historical record), and only when a value
+// actually differs.
+export function reconcileAuditOutcome(
+  ref: string,
+  kind: AuditKind,
+  outcome: { verdict?: string; score?: number | null; coverage?: string; summary?: string },
+): void {
+  const norm = (s?: string) => (s ?? "").trim().toLowerCase().replace(/^[@$]/, "");
+  const target = norm(ref);
+  if (!target) return;
+  const differs = (e: LogEntry): boolean =>
+    (outcome.verdict !== undefined && e.verdict !== outcome.verdict)
+    || (outcome.score !== undefined && e.score !== outcome.score)
+    || (outcome.coverage !== undefined && e.coverage !== outcome.coverage);
+  const rewrite = (e: LogEntry): LogEntry => ({
+    ...e,
+    ...(outcome.verdict !== undefined ? { verdict: outcome.verdict } : {}),
+    ...(outcome.score !== undefined ? { score: outcome.score } : {}),
+    ...(outcome.coverage !== undefined ? { coverage: outcome.coverage } : {}),
+    ...(outcome.summary ? { summary: outcome.summary } : {}),
+  });
+  const reconcileNewest = (rows: LogEntry[], sharedRow: boolean): { rows: LogEntry[]; changed: boolean } => {
+    const index = rows.findIndex((e) => e.kind === kind && norm(e.ref ?? e.query) === target);
+    if (index < 0 || !differs(rows[index])) return { rows, changed: false };
+    const next = [...rows];
+    next[index] = rewrite(rows[index]);
+    void syncEntryUpdate(next[index], sharedRow);
+    return { rows: next, changed: true };
+  };
+  let changed = false;
+  try {
+    const local = reconcileNewest(getLog(), false);
+    if (local.changed) {
+      localStorage.setItem(KEY, JSON.stringify(local.rows));
+      changed = true;
+    }
+  } catch { /* storage unavailable */ }
+  const shared = reconcileNewest(sharedCache, true);
+  if (shared.changed) {
+    sharedCache = shared.rows;
+    changed = true;
+  }
+  if (changed) emitLogChange();
+}
+
 let sharedCache: LogEntry[] = [];
 let hydrated = false;
 // The community feed (all analysts), fetched once per session. Kept SEPARATE
