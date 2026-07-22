@@ -34,6 +34,19 @@ function capturedTime(value: string): string {
   return parsed.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
+// Snapshots captured before this deploy predate the web-corroboration recall
+// and the trend/float/unlock disclosures, so they typically verify a fraction
+// of what a fresh run does (observed: a pre-recall founder snapshot held 4
+// verified facts where a post-recall project run held 18). The frozen verdict
+// stays untouched and trustworthy as a record; the nudge only tells the reader
+// that a re-scan now answers substantially more.
+const ENGINE_RECALL_UPGRADE_AT = Date.parse("2026-07-21T16:50:00.000Z");
+
+function predatesEngineUpgrades(capturedAt: string): boolean {
+  const parsed = Date.parse(capturedAt);
+  return Number.isFinite(parsed) && parsed < ENGINE_RECALL_UPGRADE_AT;
+}
+
 export function SnapshotEvidenceControl({
   snapshotVersion,
   capturedAt,
@@ -60,6 +73,16 @@ export function SnapshotEvidenceControl({
           captured {capturedTime(capturedAt)}
         </time>
       </div>
+
+      {predatesEngineUpgrades(capturedAt) ? (
+        <p
+          role="note"
+          className="tint-caution mt-2 rounded-lg border px-3 py-2 text-[12.5px] leading-relaxed"
+        >
+          This snapshot predates engine upgrades that verify substantially more (founder identity recall,
+          usage trends, float control). The frozen verdict is unchanged; a re-scan will answer more.
+        </p>
+      ) : null}
 
       {enabled ? (
         <p

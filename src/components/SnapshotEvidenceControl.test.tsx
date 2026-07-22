@@ -51,6 +51,23 @@ describe("SnapshotEvidenceControl", () => {
       "Current intelligence · fetched now · not part of snapshot v4 · does not change stored verdict",
     );
   });
+
+  it("nudges a re-scan on snapshots captured before the recall engine upgrades", () => {
+    // The default harness snapshot (2026-07-11) predates the 2026-07-21 recall
+    // ship, so the reader is told a fresh run answers more -- while the frozen
+    // verdict itself is explicitly unchanged.
+    const note = container.querySelector("[role='note']");
+    expect(note?.textContent).toContain("predates engine upgrades");
+    expect(note?.textContent).toContain("verdict is unchanged");
+  });
+
+  it("shows no staleness nudge on a post-upgrade snapshot", async () => {
+    await act(async () => root.render(
+      <SnapshotEvidenceControl snapshotVersion={9} capturedAt="2026-07-22T04:00:00.000Z" />,
+    ));
+    expect(container.querySelector("[role='note']")).toBeNull();
+    expect(container.textContent).toContain("SNAPSHOT v9");
+  });
 });
 
 describe("LiveSupplementalNotice", () => {
