@@ -34,3 +34,4 @@ dist-ssr
 eval/fixtures/
 eval/snapshots/
 .env.eval
+public/architecture.html
