@@ -65,6 +65,40 @@ describe("collectSecurityAudits (auditor-domain corroboration hop)", () => {
     expect(result.securityPageUrl).toBe("https://reports.example/abdk-certora.html");
   });
 
+  it("attests auditors from curated audit-link URLs when nothing fetches (PDF/bot-walled reality)", async () => {
+    // The live Uniswap failure: every audit link is a PDF or bot-walled page,
+    // so page fetches return nothing -- but the URLs themselves carry the
+    // attestation (auditor-hosted domains, auditor names in paths).
+    const result = await collectSecurityAudits("Uniswap", "https://uniswap.example", [
+      "https://www.certora.com/reports/uniswap-v4.pdf",
+      "https://github.com/Uniswap/v3-core/blob/main/audits/abdk/audit.pdf",
+      "https://blog.openzeppelin.com/uniswap-v3-audit",
+    ], {
+      fetcher: fetcherFor({}), // every fetch 404s
+    });
+    expect(result.available).toBe(true);
+    expect(result.selfAttested).toEqual(expect.arrayContaining(["Certora", "ABDK", "OpenZeppelin"]));
+    expect(result.selfAttested).toHaveLength(3);
+    expect(result.corroborated).toEqual([]);
+    expect(result.securityPageUrl).toBe("https://www.certora.com/reports/uniswap-v4.pdf");
+  });
+
+  it("upgrades a URL-attested auditor to corroborated when its auditor-domain link fetches and names the subject", async () => {
+    const result = await collectSecurityAudits("Uniswap", undefined, [
+      "https://www.certora.com/reports/uniswap-v4",
+    ], {
+      fetcher: fetcherFor({
+        "https://www.certora.com/reports/uniswap-v4":
+          "<html><body>Certora formal verification report: our audit of the Uniswap v4 core contracts.</body></html>",
+      }),
+    });
+    expect(result.available).toBe(true);
+    expect(result.selfAttested).toEqual(["Certora"]);
+    expect(result.corroborated).toHaveLength(1);
+    expect(result.corroborated[0]).toMatchObject({ auditor: "Certora" });
+    expect(result.corroborated[0].excerpt.toLowerCase()).toContain("uniswap");
+  });
+
   it("keeps a self-attesting security page as leads only when no auditor site confirms", async () => {
     const result = await collectSecurityAudits("RugCoin", "https://rugcoin.example", [], {
       fetcher: fetcherFor({

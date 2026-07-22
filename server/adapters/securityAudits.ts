@@ -184,6 +184,33 @@ export async function collectSecurityAudits(
   const candidates = [...new Set([...candidateUrls, ...conventionCandidates])].slice(0, 4);
   if (!candidates.length) return empty("No candidate security pages.");
 
+  // URL-level attestation (no fetch). Blue chips publish audits as PDFs or
+  // behind bot walls, so page fetches often return nothing (observed live:
+  // Uniswap -> "No named security auditor found"). But the curated audit-link
+  // URLS themselves carry the evidence: a link hosted on the auditor's OWN
+  // domain, or naming a registry auditor in its path, attests the engagement
+  // regardless of whether the document body is fetchable. These links come
+  // from DeFiLlama's listing (candidateUrls), not the subject's prose, so the
+  // subject cannot mint them by writing auditor names into its own page.
+  const urlAttested = new Map<string, { auditor: (typeof AUDITOR_REGISTRY)[number]; auditorDomainLinks: string[] }>();
+  for (const link of candidateUrls) {
+    let parsed: URL;
+    try { parsed = new URL(link); } catch { continue; }
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    let path = `${parsed.pathname}${parsed.search}`;
+    try { path = decodeURIComponent(path); } catch { /* keep raw path */ }
+    for (const auditor of AUDITOR_REGISTRY) {
+      const domainHit = auditor.domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+      const pathHit = auditor.pattern.test(path);
+      if (!domainHit && !pathHit) continue;
+      const current = urlAttested.get(auditor.name) ?? { auditor, auditorDomainLinks: [] };
+      // Only auditor-domain-hosted links qualify as hop-2 corroboration
+      // candidates; a path mention alone stays attestation-only.
+      if (domainHit && !current.auditorDomainLinks.includes(link)) current.auditorDomainLinks.push(link);
+      urlAttested.set(auditor.name, current);
+    }
+  }
+
   // Hop 1: the subject's pages name auditors (self-attestation). Audit
   // disclosures are commonly SPREAD across candidates -- DeFiLlama audit_links
   // typically point at one report per auditor -- so stopping at the first
@@ -198,11 +225,17 @@ export async function collectSecurityAudits(
     const named = AUDITOR_REGISTRY.filter((auditor) => auditor.pattern.test(html));
     if (named.length) matchedPages.push({ url: candidate, html, named });
   }
-  if (!matchedPages.length) return empty("No fetchable security page named a known auditor.");
+  if (!matchedPages.length && !urlAttested.size) return empty("No fetchable security page or audit link named a known auditor.");
 
-  const primary = matchedPages.reduce((best, page) => (page.named.length > best.named.length ? page : best));
-  const securityPageUrl = primary.url;
-  const named = AUDITOR_REGISTRY.filter((auditor) => matchedPages.some((page) => page.named.includes(auditor)));
+  const primary = matchedPages.length
+    ? matchedPages.reduce((best, page) => (page.named.length > best.named.length ? page : best))
+    : null;
+  const securityPageUrl = primary?.url
+    ?? [...urlAttested.values()].flatMap((entry) => entry.auditorDomainLinks)[0]
+    ?? candidateUrls.find((link) => /^https?:\/\//i.test(link))
+    ?? candidates[0];
+  const named = AUDITOR_REGISTRY.filter((auditor) =>
+    matchedPages.some((page) => page.named.includes(auditor)) || urlAttested.has(auditor.name));
   const selfAttested = named.map((auditor) => auditor.name);
 
   // Hop 2: the auditor's own domain must name the subject. Prefer the exact
@@ -214,10 +247,15 @@ export async function collectSecurityAudits(
   const fetchedPages = new Map<string, string | null>();
   let fetches = 0;
   for (const auditor of named) {
-    // Outbound links come from the pages that actually named this auditor.
-    const outbound = [...new Set(matchedPages
-      .filter((page) => page.named.includes(auditor))
-      .flatMap((page) => outboundLinksTo(page.html, auditor.domains)))].slice(0, 2);
+    // Outbound links come from the pages that actually named this auditor,
+    // plus any curated audit link already hosted on the auditor's own domain
+    // (that URL may itself corroborate if it fetches and names the subject).
+    const outbound = [...new Set([
+      ...matchedPages
+        .filter((page) => page.named.includes(auditor))
+        .flatMap((page) => outboundLinksTo(page.html, auditor.domains)),
+      ...(urlAttested.get(auditor.name)?.auditorDomainLinks ?? []),
+    ])].slice(0, 2);
     for (const link of outbound) {
       // One auditor page corroborates ONE claim: sister brands sharing a
       // domain (Spearbit/Cantina) must not each mint a fact from the same

@@ -17700,6 +17700,29 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls2,
   }
   const candidates = [.../* @__PURE__ */ new Set([...candidateUrls2, ...conventionCandidates])].slice(0, 4);
   if (!candidates.length) return empty("No candidate security pages.");
+  const urlAttested = /* @__PURE__ */ new Map();
+  for (const link of candidateUrls2) {
+    let parsed;
+    try {
+      parsed = new URL(link);
+    } catch {
+      continue;
+    }
+    const host = parsed.hostname.replace(/^www\./, "").toLowerCase();
+    let path = `${parsed.pathname}${parsed.search}`;
+    try {
+      path = decodeURIComponent(path);
+    } catch {
+    }
+    for (const auditor of AUDITOR_REGISTRY) {
+      const domainHit = auditor.domains.some((domain) => host === domain || host.endsWith(`.${domain}`));
+      const pathHit = auditor.pattern.test(path);
+      if (!domainHit && !pathHit) continue;
+      const current = urlAttested.get(auditor.name) ?? { auditor, auditorDomainLinks: [] };
+      if (domainHit && !current.auditorDomainLinks.includes(link)) current.auditorDomainLinks.push(link);
+      urlAttested.set(auditor.name, current);
+    }
+  }
   const matchedPages = [];
   for (const candidate of candidates) {
     const html = await fetchPageText(candidate, fetcher);
@@ -17707,10 +17730,10 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls2,
     const named2 = AUDITOR_REGISTRY.filter((auditor) => auditor.pattern.test(html));
     if (named2.length) matchedPages.push({ url: candidate, html, named: named2 });
   }
-  if (!matchedPages.length) return empty("No fetchable security page named a known auditor.");
-  const primary = matchedPages.reduce((best, page) => page.named.length > best.named.length ? page : best);
-  const securityPageUrl = primary.url;
-  const named = AUDITOR_REGISTRY.filter((auditor) => matchedPages.some((page) => page.named.includes(auditor)));
+  if (!matchedPages.length && !urlAttested.size) return empty("No fetchable security page or audit link named a known auditor.");
+  const primary = matchedPages.length ? matchedPages.reduce((best, page) => page.named.length > best.named.length ? page : best) : null;
+  const securityPageUrl = primary?.url ?? [...urlAttested.values()].flatMap((entry) => entry.auditorDomainLinks)[0] ?? candidateUrls2.find((link) => /^https?:\/\//i.test(link)) ?? candidates[0];
+  const named = AUDITOR_REGISTRY.filter((auditor) => matchedPages.some((page) => page.named.includes(auditor)) || urlAttested.has(auditor.name));
   const selfAttested = named.map((auditor) => auditor.name);
   const subjectNeedle = new RegExp(`\\b${escapeRegExp(name)}\\b`, "i");
   const corroborated = [];
@@ -17718,7 +17741,10 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls2,
   const fetchedPages = /* @__PURE__ */ new Map();
   let fetches = 0;
   for (const auditor of named) {
-    const outbound = [...new Set(matchedPages.filter((page) => page.named.includes(auditor)).flatMap((page) => outboundLinksTo(page.html, auditor.domains)))].slice(0, 2);
+    const outbound = [.../* @__PURE__ */ new Set([
+      ...matchedPages.filter((page) => page.named.includes(auditor)).flatMap((page) => outboundLinksTo(page.html, auditor.domains)),
+      ...urlAttested.get(auditor.name)?.auditorDomainLinks ?? []
+    ])].slice(0, 2);
     for (const link of outbound) {
       if (usedAuditorUrls.has(link)) break;
       let html = fetchedPages.get(link);
