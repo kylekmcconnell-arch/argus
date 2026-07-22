@@ -7918,6 +7918,7 @@ async function collectProtocolFees(projectName2, options = {}) {
   }
   const total24hUsd = typeof payload.total24h === "number" && payload.total24h >= 0 ? Math.round(payload.total24h) : null;
   const total30dUsd = typeof payload.total30d === "number" && payload.total30d >= 0 ? Math.round(payload.total30d) : null;
+  const change30dOver30dPct = typeof payload.change_30dover30d === "number" && Number.isFinite(payload.change_30dover30d) && Math.abs(payload.change_30dover30d) <= 1e4 ? Math.round(payload.change_30dover30d * 10) / 10 : null;
   if (total24hUsd === null && total30dUsd === null) {
     recordCall("defillama", "fees", 0, `${slug} \xB7 no_totals`, "succeeded");
     return { available: false, note: "DeFiLlama reported no fee totals for this protocol." };
@@ -7929,6 +7930,7 @@ async function collectProtocolFees(projectName2, options = {}) {
       slug,
       total24hUsd,
       total30dUsd,
+      change30dOver30dPct,
       sourceUrl: `https://defillama.com/protocol/${slug}`
     }
   };
@@ -16953,10 +16955,14 @@ function projectProviderBackedBasicFacts(evidence) {
       const denominator = typeof token.maxSupply === "number" && token.maxSupply > 0 ? token.maxSupply : token.totalSupply;
       const pct = Math.min(100, Math.round(token.circulatingSupply / denominator * 100));
       const compact3 = (value) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` : Math.round(value).toLocaleString();
+      const marketCap2 = typeof token.marketCapUsd === "number" && token.marketCapUsd > 0 ? token.marketCapUsd : null;
+      const fdvMultiple = marketCap2 !== null ? typeof token.fdvUsd === "number" && token.fdvUsd >= marketCap2 ? token.fdvUsd / marketCap2 : denominator / token.circulatingSupply : null;
+      const overhangPct = 100 - pct;
+      const overhangPhrase = fdvMultiple !== null && fdvMultiple <= 100 ? overhangPct <= 2 || fdvMultiple < 1.02 ? " \xB7 effectively fully diluted" : ` \xB7 ${overhangPct}% of supply not yet circulating \xB7 fully-diluted value ${fdvMultiple >= 10 ? Math.round(fdvMultiple) : Math.round(fdvMultiple * 10) / 10}x market cap` : "";
       projected.push(makeFact(
         evidence,
         "tokenomics",
-        `${compact3(token.circulatingSupply)} of ${compact3(denominator)} supply circulating (${pct}%)`,
+        `${compact3(token.circulatingSupply)} of ${compact3(denominator)} supply circulating (${pct}%)${overhangPhrase}`,
         [tokenSource],
         `captured ${token.capturedAt.slice(0, 10)}`
       ));
@@ -17108,14 +17114,16 @@ function projectProviderBackedBasicFacts(evidence) {
   }
   const feesSnapshot = isProject ? evidence.protocolFees : void 0;
   if (feesSnapshot && typeof feesSnapshot.total30dUsd === "number" && feesSnapshot.total30dUsd > 0) {
+    const trendPct = typeof feesSnapshot.change30dOver30dPct === "number" ? feesSnapshot.change30dOver30dPct : null;
+    const trendPhrase = trendPct === null ? null : Math.abs(trendPct) < 1 ? "steady vs the prior 30 days" : `${trendPct > 0 ? "up" : "down"} ${Math.abs(trendPct)}% vs the prior 30 days`;
     projected.push(makeFact(
       evidence,
       "traction",
-      `${formatUsd2(feesSnapshot.total30dUsd)} protocol fees in 30 days`,
+      `${formatUsd2(feesSnapshot.total30dUsd)} protocol fees in 30 days${trendPhrase ? ` \xB7 ${trendPhrase}` : ""}`,
       [source({
         url: feesSnapshot.sourceUrl,
         title: "DeFiLlama protocol fees record",
-        excerpt: `Users paid ${formatUsd2(feesSnapshot.total30dUsd)} in protocol fees over the trailing 30 days${typeof feesSnapshot.total24hUsd === "number" ? ` (${formatUsd2(feesSnapshot.total24hUsd)} in the last 24 hours)` : ""}.`,
+        excerpt: `Users paid ${formatUsd2(feesSnapshot.total30dUsd)} in protocol fees over the trailing 30 days${typeof feesSnapshot.total24hUsd === "number" ? ` (${formatUsd2(feesSnapshot.total24hUsd)} in the last 24 hours)` : ""}${trendPhrase ? `, ${trendPhrase}` : ""}.`,
         capturedAt: feesSnapshot.capturedAt,
         provider: "defillama",
         sourceClass: "regulatory_or_onchain"

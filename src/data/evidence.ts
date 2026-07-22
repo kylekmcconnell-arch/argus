@@ -250,6 +250,8 @@ export interface ProtocolFeesSnapshot {
   slug: string;
   total24hUsd: number | null;
   total30dUsd: number | null;
+  /** Trailing-30d fees vs the prior 30d, signed percent. Growth-or-bleed trend; null when unreported. */
+  change30dOver30dPct?: number | null;
   sourceUrl: string;
   capturedAt: string;
 }

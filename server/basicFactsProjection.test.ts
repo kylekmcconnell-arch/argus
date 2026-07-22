@@ -529,6 +529,80 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(byPredicate.get("product")?.sources[0].sourceClass).toBe("regulatory_or_onchain");
   });
 
+  it("states supply overhang and the fully-diluted multiple the way a buyer asks it", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Uniswap",
+      symbol: "UNI",
+      coingeckoId: "uniswap",
+      rank: 39,
+      address: "0x1f9840a85d5aF5bf1D1762F925BDADdC4201F984",
+      chain: "Ethereum",
+      sourceUrl: "https://www.coingecko.com/en/coins/uniswap",
+      capturedAt: "2026-07-22T00:00:00.000Z",
+      providers: ["coingecko"],
+      marketCapUsd: 2_300_000_000,
+      circulatingSupply: 630_000_000,
+      maxSupply: 1_000_000_000,
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const tokenomics = evidence.basicFacts?.find((fact) => fact.predicate === "tokenomics");
+    expect(tokenomics?.value).toBe(
+      "630.0M of 1000.0M supply circulating (63%) · 37% of supply not yet circulating · fully-diluted value 1.6x market cap",
+    );
+  });
+
+  it("reports an effectively fully diluted token instead of a meaningless overhang", () => {
+    const evidence = emptyEvidence("@mature");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_domain",
+      name: "Mature",
+      symbol: "MAT",
+      coingeckoId: "mature",
+      rank: 120,
+      address: "0x0000000000000000000000000000000000000001",
+      chain: "Ethereum",
+      sourceUrl: "https://www.coingecko.com/en/coins/mature",
+      capturedAt: "2026-07-22T00:00:00.000Z",
+      providers: ["coingecko"],
+      marketCapUsd: 500_000_000,
+      circulatingSupply: 995_000_000,
+      totalSupply: 1_000_000_000,
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const tokenomics = evidence.basicFacts?.find((fact) => fact.predicate === "tokenomics");
+    expect(tokenomics?.value).toContain("effectively fully diluted");
+    expect(tokenomics?.value).not.toContain("not yet circulating");
+  });
+
+  it("appends the fee trend so a reader sees growth or bleed, not just a total", () => {
+    const evidence = emptyEvidence("@uniswap");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.protocolFees = {
+      slug: "uniswap",
+      total24hUsd: 3_840_000,
+      total30dUsd: 80_400_000,
+      change30dOver30dPct: -12.3,
+      sourceUrl: "https://defillama.com/protocol/uniswap",
+      capturedAt: "2026-07-22T00:00:00.000Z",
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const fees = evidence.basicFacts?.find((fact) => String(fact.value).includes("protocol fees"));
+    expect(fees?.value).toBe("$80.4M protocol fees in 30 days · down 12.3% vs the prior 30 days");
+    expect(fees?.sources[0].excerpt).toContain("down 12.3% vs the prior 30 days");
+  });
+
   it("does not grant product substance to a thin, unranked, low-cap token", () => {
     const evidence = emptyEvidence("@thinproject");
     evidence.roles = [SubjectClass.PROJECT];

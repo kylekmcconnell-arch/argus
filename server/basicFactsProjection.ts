@@ -621,10 +621,26 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
         : token.totalSupply as number;
       const pct = Math.min(100, Math.round((token.circulatingSupply / denominator) * 100));
       const compact = (value: number) => value >= 1e6 ? `${(value / 1e6).toFixed(1)}M` : Math.round(value).toLocaleString();
+      // Supply overhang, stated the way a buyer asks it: how much supply has
+      // not hit the market yet, and what is the fully-diluted value relative to
+      // the market cap? Prefer the provider-reported FDV; fall back to the
+      // supply-implied multiple. Still only checkable ratios, never a schedule.
+      const marketCap = typeof token.marketCapUsd === "number" && token.marketCapUsd > 0 ? token.marketCapUsd : null;
+      const fdvMultiple = marketCap !== null
+        ? (typeof token.fdvUsd === "number" && token.fdvUsd >= marketCap
+          ? token.fdvUsd / marketCap
+          : denominator / token.circulatingSupply)
+        : null;
+      const overhangPct = 100 - pct;
+      const overhangPhrase = fdvMultiple !== null && fdvMultiple <= 100
+        ? (overhangPct <= 2 || fdvMultiple < 1.02
+          ? " · effectively fully diluted"
+          : ` · ${overhangPct}% of supply not yet circulating · fully-diluted value ${fdvMultiple >= 10 ? Math.round(fdvMultiple) : Math.round(fdvMultiple * 10) / 10}x market cap`)
+        : "";
       projected.push(makeFact(
         evidence,
         "tokenomics",
-        `${compact(token.circulatingSupply)} of ${compact(denominator)} supply circulating (${pct}%)`,
+        `${compact(token.circulatingSupply)} of ${compact(denominator)} supply circulating (${pct}%)${overhangPhrase}`,
         [tokenSource],
         `captured ${token.capturedAt.slice(0, 10)}`,
       ));
@@ -818,14 +834,22 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // derived and self-limiting to fake: generating fee volume costs the fees.
   const feesSnapshot = isProject ? evidence.protocolFees : undefined;
   if (feesSnapshot && typeof feesSnapshot.total30dUsd === "number" && feesSnapshot.total30dUsd > 0) {
+    // Trend answers what the raw total cannot: is real usage growing or
+    // bleeding? Small moves (<1%) read as noise and are reported as steady.
+    const trendPct = typeof feesSnapshot.change30dOver30dPct === "number" ? feesSnapshot.change30dOver30dPct : null;
+    const trendPhrase = trendPct === null
+      ? null
+      : Math.abs(trendPct) < 1
+        ? "steady vs the prior 30 days"
+        : `${trendPct > 0 ? "up" : "down"} ${Math.abs(trendPct)}% vs the prior 30 days`;
     projected.push(makeFact(
       evidence,
       "traction",
-      `${formatUsd(feesSnapshot.total30dUsd)} protocol fees in 30 days`,
+      `${formatUsd(feesSnapshot.total30dUsd)} protocol fees in 30 days${trendPhrase ? ` · ${trendPhrase}` : ""}`,
       [source({
         url: feesSnapshot.sourceUrl,
         title: "DeFiLlama protocol fees record",
-        excerpt: `Users paid ${formatUsd(feesSnapshot.total30dUsd)} in protocol fees over the trailing 30 days${typeof feesSnapshot.total24hUsd === "number" ? ` (${formatUsd(feesSnapshot.total24hUsd)} in the last 24 hours)` : ""}.`,
+        excerpt: `Users paid ${formatUsd(feesSnapshot.total30dUsd)} in protocol fees over the trailing 30 days${typeof feesSnapshot.total24hUsd === "number" ? ` (${formatUsd(feesSnapshot.total24hUsd)} in the last 24 hours)` : ""}${trendPhrase ? `, ${trendPhrase}` : ""}.`,
         capturedAt: feesSnapshot.capturedAt,
         provider: "defillama",
         sourceClass: "regulatory_or_onchain",

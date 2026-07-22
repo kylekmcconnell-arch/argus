@@ -259,6 +259,12 @@ export interface ProtocolFees {
   total24hUsd: number | null;
   /** fees paid by users over the trailing 30 days, USD */
   total30dUsd: number | null;
+  /**
+   * Trailing-30d fees vs the PRIOR 30d, as a signed percent (DeFiLlama's
+   * change_30dover30d). The trend answers the diligence question a raw total
+   * cannot: is real usage growing or bleeding? Null when the endpoint omits it.
+   */
+  change30dOver30dPct: number | null;
   sourceUrl: string;
 }
 
@@ -291,14 +297,21 @@ export async function collectProtocolFees(
     recordCall("defillama", "fees", 0, `${slug} · http_${response.status}`, response.status === 400 ? "succeeded" : "failed");
     return { available: false, note: `No DeFiLlama fee record for "${slug}".` };
   }
-  let payload: { total24h?: unknown; total30d?: unknown };
+  let payload: { total24h?: unknown; total30d?: unknown; change_30dover30d?: unknown };
   try {
-    payload = ((await response.json()) ?? {}) as { total24h?: unknown; total30d?: unknown };
+    payload = ((await response.json()) ?? {}) as { total24h?: unknown; total30d?: unknown; change_30dover30d?: unknown };
   } catch {
     return { available: false, note: "DeFiLlama fees response was unreadable." };
   }
   const total24hUsd = typeof payload.total24h === "number" && payload.total24h >= 0 ? Math.round(payload.total24h) : null;
   const total30dUsd = typeof payload.total30d === "number" && payload.total30d >= 0 ? Math.round(payload.total30d) : null;
+  // Period-over-period trend; only a finite, sane percent survives (a listing
+  // gap can produce absurd multiples, which would mislead rather than inform).
+  const change30dOver30dPct = typeof payload.change_30dover30d === "number"
+    && Number.isFinite(payload.change_30dover30d)
+    && Math.abs(payload.change_30dover30d) <= 10_000
+    ? Math.round(payload.change_30dover30d * 10) / 10
+    : null;
   if (total24hUsd === null && total30dUsd === null) {
     recordCall("defillama", "fees", 0, `${slug} · no_totals`, "succeeded");
     return { available: false, note: "DeFiLlama reported no fee totals for this protocol." };
@@ -310,6 +323,7 @@ export async function collectProtocolFees(
       slug,
       total24hUsd,
       total30dUsd,
+      change30dOver30dPct,
       sourceUrl: `https://defillama.com/protocol/${slug}`,
     },
   };

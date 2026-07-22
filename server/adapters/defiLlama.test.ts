@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  collectProtocolFees,
   collectProtocolFunding,
   collectProtocolTvl,
   defiLlamaSlug,
@@ -147,5 +148,30 @@ describe("formatUsd", () => {
     expect(formatUsd(2_400)).toBe("$2.40K");
     expect(formatUsd(500)).toBe("$500");
     expect(formatTvlUsd).toBe(formatUsd);
+  });
+});
+
+describe("collectProtocolFees", () => {
+  it("returns fee totals plus the 30d-over-30d trend percent", async () => {
+    const out = await collectProtocolFees("Aave", {
+      fetcher: fetcherReturning(() => jsonResponse({ total24h: 3_840_000, total30d: 80_400_000, change_30dover30d: -12.34 })),
+    });
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.total30dUsd).toBe(80_400_000);
+    expect(out.value.total24hUsd).toBe(3_840_000);
+    expect(out.value.change30dOver30dPct).toBe(-12.3);
+  });
+
+  it("drops an absent or absurd trend to null instead of misleading", async () => {
+    const absent = await collectProtocolFees("Aave", {
+      fetcher: fetcherReturning(() => jsonResponse({ total24h: 1_000, total30d: 30_000 })),
+    });
+    expect(absent.available && absent.value.change30dOver30dPct).toBe(null);
+    // A listing gap can produce absurd multiples; those must not be reported.
+    const absurd = await collectProtocolFees("Aave", {
+      fetcher: fetcherReturning(() => jsonResponse({ total30d: 30_000, change_30dover30d: 250_000 })),
+    });
+    expect(absurd.available && absurd.value.change30dOver30dPct).toBe(null);
   });
 });
