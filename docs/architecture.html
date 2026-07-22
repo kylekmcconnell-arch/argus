@@ -95,7 +95,7 @@
 <header>
   <div class="eyebrow"><span class="pupil"></span>ARGUS · SYSTEM MAP</div>
   <h1>Anatomy of an <em>investigation</em>.</h1>
-  <p class="sub">Watch a due-diligence request travel the system, step by step. Click any box to see what it talks to; search anything; pick a journey to replay it. Small print is the code name for engineers.</p>
+  <p class="sub">Watch a due-diligence request travel the system, step by step. <strong>Click any box for a plain-English explanation</strong> of what it is and what it talks to; search anything; pick a journey to replay it. Small print is the code name for engineers; jargon is translated at the bottom.</p>
   <div class="statrow" id="stats">
     <div class="stat"><b data-n="70">0</b><span>systems</span></div>
     <div class="stat"><b data-n="92">0</b><span>connections</span></div>
@@ -128,6 +128,19 @@
     <li><strong>Time is budgeted.</strong> Evidence gathering stops early enough that scoring and the bad-actor screen always get their full window.</li>
     <li><strong>One build path.</strong> Server code ships inside one bundle; deploys happen only by pushing main.</li>
   </ul>
+  <h2>Jargon, translated</h2>
+  <ul class="rules">
+    <li><strong>API</strong> A door that other software (not people) uses to ask a system for something and get a structured answer back.</li>
+    <li><strong>v1</strong> Version 1 of a public interface. Numbering it lets it evolve later (v2) without breaking anyone already plugged in.</li>
+    <li><strong>Route / endpoint</strong> One specific door with one job, like "start an investigation" or "open a saved report."</li>
+    <li><strong>Serverless</strong> Code that only exists while handling a request, then vanishes. No servers to babysit; each run pays only for itself.</li>
+    <li><strong>SSE / stream</strong> A connection held open so the server can keep sending updates live, which is how you watch evidence arrive in real time.</li>
+    <li><strong>Adapter / collector</strong> A specialist module that knows how to fetch one kind of evidence, so the engine can send many out at once.</li>
+    <li><strong>Provider</strong> An outside company or dataset we pay (or use free) for raw data: Google results, court records, chain data.</li>
+    <li><strong>Immutable</strong> Cannot be changed after saving. Re-running creates a new version instead of editing history.</li>
+    <li><strong>Cache</strong> A short-term copy of an answer so asking the same question twice does not cost twice.</li>
+    <li><strong>Quota</strong> A daily spending allowance per member, enforced before any paid work starts.</li>
+  </ul>
   <p class="credit">machine twin for agents: docs/architecture.json · generated from the live codebase</p>
 </footer>
 <script>
@@ -141,58 +154,106 @@ const COLS = [
   ["data","Storage","what we keep"],
 ];
 const N = [
-  ["u-analyst","actors","Customer / analyst","runs searches"],
-  ["u-owner","actors","Owner admin","manages access + cost"],
-  ["u-sweep","actors","Watchlist re-check","manual button, no cron"],
+  ["u-analyst","actors","Customer / analyst","runs searches",null,null,
+   "A person with an ARGUS login who runs investigations: you, a fund analyst, a researcher vetting a deal."],
+  ["u-owner","actors","Owner admin","manages access + cost",null,null,
+   "The account owner. Approves team members, sets daily limits, watches what every investigation cost."],
+  ["u-sweep","actors","Watchlist re-check","manual button, no cron",null,null,
+   "A button that re-checks everything on your watchlist. It only runs when a human presses it: nothing in ARGUS runs on a timer, by design."],
 
-  ["ui-canvas","client","Search + live run screen","InvestigationRun"],
-  ["ui-report","client","The report","Report.tsx"],
-  ["ui-token","client","Token report","TokenReport"],
-  ["ui-graph","client","Connections map","TrustGraph"],
-  ["ui-library","client","Entity library","founders, VCs, KOLs"],
-  ["ui-watch","client","Watchlist + alerts","WatchlistPage"],
-  ["ui-admin","client","Admin + spend","AdminPage"],
+  ["ui-canvas","client","Search + live run screen","InvestigationRun",null,null,
+   "The screen where you type a handle and watch the investigation happen live, evidence appearing as it is found."],
+  ["ui-report","client","The report","Report.tsx",null,null,
+   "The finished product: verdict, score, verified facts, open questions, sources. What you would forward to a partner."],
+  ["ui-token","client","Token report","TokenReport",null,null,
+   "The same idea for a token contract: safety flags, holder concentration, market data, sanctions."],
+  ["ui-graph","client","Connections map","TrustGraph",null,null,
+   "A visual web of how everyone you have investigated connects: shared wallets, teams, backers."],
+  ["ui-library","client","Entity library","founders, VCs, KOLs",null,null,
+   "Browsable shelves of everyone investigated so far, organized by type: founders, projects, VCs, KOLs."],
+  ["ui-watch","client","Watchlist + alerts","WatchlistPage",null,null,
+   "Subjects you are tracking over time, with alerts when something about them changes."],
+  ["ui-admin","client","Admin + spend","AdminPage",null,null,
+   "Team management plus the money view: which runs cost what, across every data source."],
 
-  ["rt-audit","routes","Start an investigation","api/audit (SSE)"],
-  ["rt-v1","routes","Public API","api/v1 person + token"],
-  ["rt-report","routes","Open a saved report","report + provenance"],
-  ["rt-panels","routes","Ask-the-report panels","ask / challenge / brief"],
-  ["rt-forensics","routes","Forensic lookups","wallets, sanctions, evm"],
-  ["rt-graph","routes","Graph reads","api/graph"],
-  ["rt-health","routes","Config health check","api/health, zero spend"],
-  ["rt-sweep","routes","Watchlist sweep","api/sweep, manual"],
+  ["rt-audit","routes","Start an investigation","api/audit (SSE)",null,null,
+   "The door the app knocks on to start an investigation. It checks who you are and your quota, then keeps the line open for up to 10 minutes, streaming progress back as it happens."],
+  ["rt-v1","routes","Public API","api/v1 person + token",null,null,
+   "An API is a door other SOFTWARE can use, no screens involved. This is ours: a fund can plug ARGUS into their own tools and request person or token reports programmatically. The v1 just means version 1 of that public interface, so it can evolve without breaking anyone."],
+  ["rt-report","routes","Open a saved report","report + provenance",null,null,
+   "Fetches a saved report from storage when you open one, along with its full evidence lineage."],
+  ["rt-panels","routes","Ask-the-report panels","ask / challenge / brief",null,null,
+   "Powers the follow-up buttons on a report: ask it a question, challenge the verdict, generate a case brief."],
+  ["rt-forensics","routes","Forensic lookups","wallets, sanctions, evm",null,null,
+   "One-off lookup doors used by panels inside reports: trace a wallet, screen a sanctions list, inspect a contract."],
+  ["rt-graph","routes","Graph reads","api/graph",null,null,
+   "Serves the connection web to the graph screen."],
+  ["rt-health","routes","Config health check","api/health, zero spend",null,null,
+   "A free status check: which data sources are configured and wired on the live deployment. Costs nothing to call."],
+  ["rt-sweep","routes","Watchlist sweep","api/sweep, manual",null,null,
+   "The door the watchlist re-check button knocks on. Manual only."],
 
-  ["en-orch","engine","Run controller","budgets the 10 minutes"],
-  ["en-intake","engine","Who is this?","profile + official token"],
-  ["en-lanes","engine","Gather evidence","3 parallel lanes"],
-  ["en-basics","engine","Deep fact research","the expensive step"],
-  ["en-signals","engine","Extra signals","skipped if out of time"],
-  ["en-tg","engine","Bad-actor screen","reserved time slot"],
-  ["en-analyst","engine","AI analyst scores","writes the verdict"],
-  ["en-score","engine","Verdict math","caps, bands, composite"],
-  ["en-clear","engine","Complete enough?","safety screens + 75%"],
-  ["en-present","engine","Final presentation","decision-ready or not"],
-  ["en-token","engine","Token scanner","separate fast path"],
+  ["en-orch","engine","Run controller","budgets the 10 minutes",null,null,
+   "The foreman. Splits the 10-minute window into phases and guarantees scoring and the bad-actor screen always get their share of time."],
+  ["en-intake","engine","Who is this?","profile + official token",null,null,
+   "Establishes identity first: the X profile, and the project's official token, matched through the project's own links, never by name, because names can be faked."],
+  ["en-lanes","engine","Gather evidence","3 parallel lanes",null,null,
+   "Three crews work at once so the job fits the window: one on identity, one on the token, one on wallets."],
+  ["en-basics","engine","Deep fact research","the expensive step",null,null,
+   "The expensive step: an AI researches foundational facts (founders, funding, products), then ARGUS independently fetches every cited page and verifies each claim against the source."],
+  ["en-signals","engine","Extra signals","skipped if out of time",null,null,
+   "Nice-to-have extras: posting cadence, token lifecycle, adverse chatter. The first thing skipped if time runs short."],
+  ["en-tg","engine","Bad-actor screen","reserved time slot",null,null,
+   "Checks the subject against every past investigation for ties to known bad actors. Holds a protected time slot so a slow run can never squeeze it out."],
+  ["en-analyst","engine","AI analyst scores","writes the verdict",null,null,
+   "The AI analyst reads all verified evidence and scores every axis, writing the reasoning behind the verdict."],
+  ["en-score","engine","Verdict math","caps, bands, composite",null,null,
+   "Pure math, no AI: disqualifiers act as hard caps (a prior rug pull caps the score at 10 no matter what), scores stay inside evidence bands, and the weakest role governs the final number."],
+  ["en-clear","engine","Complete enough?","safety screens + 75%",null,null,
+   "Decides whether the report has earned a full verdict: all five safety screens recorded plus 75% coverage. If not, it says PROVISIONAL, it never pretends."],
+  ["en-present","engine","Final presentation","decision-ready or not",null,null,
+   "Formats the outcome honestly: decision-ready, provisional, or incomplete, with the gaps listed."],
+  ["en-token","engine","Token scanner","separate fast path",null,null,
+   "A separate, faster pipeline just for token contracts. About a minute, about a cent."],
 
-  ["ad-basics","adapters","Fact researcher","basicFacts","key"],
-  ["ad-x","adapters","X + social collector","x.ts + twitterapi","key"],
-  ["ad-grounded","adapters","Cheap web reader","groundedSearch","key"],
-  ["ad-audits","adapters","Audit checker","securityAudits"],
-  ["ad-llama","adapters","DeFi metrics","defiLlama"],
-  ["ad-unlocks","adapters","Unlock schedule","tokenUnlocks","key"],
-  ["ad-holders","adapters","Whale + LP check","tokenHolders"],
-  ["ad-tgraph","adapters","Known-bad connections","trustgraph"],
-  ["ad-prior","adapters","What changed since last scan","priorOutcome"],
-  ["ad-offchain","adapters","Courts + sanctions + news","offchain, always live"],
-  ["ad-pfp","adapters","Profile-photo integrity","profilePhoto"],
-  ["ad-pdl","adapters","Career verifier","peopledatalabs","key"],
-  ["ad-github","adapters","Code footprint","github","key"],
-  ["ad-monid","adapters","Private-market data","monid","key"],
-  ["ad-ptoken","adapters","Official-token binder","projectToken"],
-  ["ad-investor","adapters","Investor verifier","portfolio + fundScale"],
-  ["ad-kb","adapters","Fact memory","entityStore","flag"],
-  ["ad-cache","adapters","Response cache","cache.ts"],
-  ["ad-web","adapters","Page fetcher","publicWeb"],
+  ["ad-basics","adapters","Fact researcher","basicFacts","key",null,
+   "The heavy-duty researcher: Claude with live web search finds founders, funding, products, and governance, and every claim is then re-fetched and verified from the original source."],
+  ["ad-x","adapters","X + social collector","x.ts + twitterapi","key",null,
+   "Pulls the X side: profile, posts, follower graph. Also the traffic director that routes general web searches to the cheapest capable searcher."],
+  ["ad-grounded","adapters","Cheap web reader","groundedSearch","key",null,
+   "The budget researcher: Google results from Serper for a tenth of a cent, pages fetched by us, and a cheap AI extracts the answer instead of an expensive one browsing."],
+  ["ad-audits","adapters","Audit checker","securityAudits",null,null,
+   "Finds who audited the code. Reads auditor names from official pages, and from the audit-link URLs themselves when the reports are locked PDFs."],
+  ["ad-llama","adapters","DeFi metrics","defiLlama",null,null,
+   "Pulls usage numbers that cannot be faked cheaply: value locked, fees users actually paid, funding rounds."],
+  ["ad-unlocks","adapters","Unlock schedule","tokenUnlocks","key",null,
+   "Answers 'when does locked supply hit the market next, and how much' from vesting calendars."],
+  ["ad-holders","adapters","Whale + LP check","tokenHolders",null,null,
+   "How concentrated is the token: the top-10 holders' share, and whether the trading liquidity is locked or could be pulled."],
+  ["ad-tgraph","adapters","Known-bad connections","trustgraph",null,null,
+   "Cross-references every past report for shared wallets, teams, or infrastructure with known bad actors."],
+  ["ad-prior","adapters","What changed since last scan","priorOutcome",null,null,
+   "Compares this run to your previous one and says so in the report: score moved, coverage completed."],
+  ["ad-offchain","adapters","Courts + sanctions + news","offchain, always live",null,null,
+   "Court records, sanctions lists, and press. Deliberately never cached: a person can be sanctioned tomorrow, so it checks fresh every run."],
+  ["ad-pfp","adapters","Profile-photo integrity","profilePhoto",null,null,
+   "Is the profile photo a real person, a stolen image, or AI-generated? A common scam tell."],
+  ["ad-pdl","adapters","Career verifier","peopledatalabs","key",null,
+   "Verifies career claims against employment-data records beyond what LinkedIn shows."],
+  ["ad-github","adapters","Code footprint","github","key",null,
+   "Does the team actually ship code? Repos, activity, and identity links between GitHub and X."],
+  ["ad-monid","adapters","Private-market data","monid","key",null,
+   "Private-company records: funding rounds, leadership, firmographics. The PitchBook-style layer."],
+  ["ad-ptoken","adapters","Official-token binder","projectToken",null,null,
+   "Binds the OFFICIAL token through the project's own account and domain, so a copycat token with the same name cannot sneak into the report."],
+  ["ad-investor","adapters","Investor verifier","portfolio + fundScale",null,null,
+   "For VC subjects: verifies the claimed portfolio and fund size from primary sources instead of taking the website's word."],
+  ["ad-kb","adapters","Fact memory","entityStore","flag",null,
+   "The memory: verified facts are saved per entity, so auditing the same subject again starts from everything already proven. Sanctions are never stored here."],
+  ["ad-cache","adapters","Response cache","cache.ts",null,null,
+   "Briefly saves raw provider responses so the same lookup is not paid for twice in quick succession."],
+  ["ad-web","adapters","Page fetcher","publicWeb",null,null,
+   "The shared downloader every researcher uses to fetch and clean web pages before reading them."],
 
   ["pv-claude","providers","Anthropic Claude","sonnet-4-6 + haiku","core",
    "The brain. Scores every verdict, runs deep fact research, checks profile photos. Quality-critical: never downgraded."],
@@ -223,14 +284,22 @@ const N = [
   ["pv-chain","providers","Helius + Arkham + Etherscan","chain apis","key",
    "Wallet forensics: deployer funding traces, cluster analysis, on-chain history."],
 
-  ["db-versions","data","Saved reports","immutable versions"],
-  ["db-cases","data","Case files","lifecycle + events"],
-  ["db-graph","data","Trust-graph store","cross-report links"],
-  ["db-kb","data","Fact memory store","entity_facts"],
-  ["db-cache","data","Response cache","provider_cache"],
-  ["db-usage","data","Cost telemetry","every provider call"],
-  ["db-members","data","Members + quotas","who may spend what"],
-  ["db-local","data","Browser history log","this device only"],
+  ["db-versions","data","Saved reports","immutable versions",null,null,
+   "Every finished report, frozen forever. A re-run creates a NEW version; old ones cannot be edited. That is the audit trail investors can rely on."],
+  ["db-cases","data","Case files","lifecycle + events",null,null,
+   "One folder per subject holding all its report versions and activity over time."],
+  ["db-graph","data","Trust-graph store","cross-report links",null,null,
+   "The stored web of connections between everything ever investigated, used by the bad-actor screen."],
+  ["db-kb","data","Fact memory store","entity_facts",null,null,
+   "The table behind fact memory: what has been verified about each entity, and across how many audits."],
+  ["db-cache","data","Response cache","provider_cache",null,null,
+   "Short-term storage of raw data-source responses to avoid paying twice for the same lookup."],
+  ["db-usage","data","Cost telemetry","every provider call",null,null,
+   "Every provider call and its cost, per run. This is why the report can say what it cost: measured, not guessed."],
+  ["db-members","data","Members + quotas","who may spend what",null,null,
+   "Who is on the team, their role, and their daily spending limits."],
+  ["db-local","data","Browser history log","this device only",null,null,
+   "A history list stored in your own browser, so your recent cases appear instantly. Never leaves your device."],
 ];
 const E = [
   ["u-analyst","ui-canvas"],["u-analyst","ui-report"],["u-analyst","ui-token"],["u-analyst","ui-library"],["u-analyst","ui-watch"],
@@ -366,7 +435,8 @@ function applyState(){
     litNodes = new Set([state.id, ...(adj.get(state.id)||[])]);
     litEdge = (a,b) => a===state.id || b===state.id;
     const n = N.find(n=>n[0]===state.id);
-    flowdesc.innerHTML = n ? `<strong>${n[2]}</strong> - lit boxes are everything it talks to. Click again to clear.` : "";
+    const explain = n ? (n[6] || n[5] || n[3]) : "";
+    flowdesc.innerHTML = n ? `<strong>${n[2]}</strong> ${explain} <em>Lit boxes are everything it talks to; click again to clear.</em>` : "";
   } else if (state.mode==="search" && state.q){
     const q = state.q.toLowerCase();
     litNodes = new Set(N.filter(n => (n[2]+" "+n[3]+" "+(n[4]||"")+" "+(n[5]||"")+" "+n[1]).toLowerCase().includes(q)).map(n=>n[0]));
