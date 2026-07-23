@@ -297,7 +297,7 @@ describe("person audit input guard", () => {
     const stream = captured.chunks.join("");
     expect(stream).toContain("event: persistence\n");
     const done = JSON.parse(stream.match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
-    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null });
+    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null, reason: expect.any(String) });
   });
 
   it("emits no immutable binding when the atomic parent-and-provenance bundle fails", async () => {
@@ -321,8 +321,18 @@ describe("person audit input guard", () => {
     expect(activateReportVersionWithAuthoritativeGraph).not.toHaveBeenCalled();
     expect(activateReportVersion).not.toHaveBeenCalled();
     expect(issuePanelCostToken).not.toHaveBeenCalled();
-    const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
-    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null });
+    const stream = captured.chunks.join("");
+    const done = JSON.parse(stream.match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    expect(done.persistence).toEqual({
+      state: "failed",
+      reportVersionId: null,
+      reason: "invalid axis evidence lineage: F1_identity_verifiability cites absence evidence without a gap",
+    });
+    const persistenceEvent = JSON.parse(stream.match(/event: persistence\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
+    expect(persistenceEvent).toEqual({
+      state: "failed",
+      reason: "invalid axis evidence lineage: F1_identity_verifiability cites absence evidence without a gap",
+    });
   });
 
   it("fails closed when a live audit returns no collector-owned usage ledger", async () => {
@@ -344,7 +354,7 @@ describe("person audit input guard", () => {
     expect(activateReportVersion).not.toHaveBeenCalled();
     expect(issuePanelCostToken).not.toHaveBeenCalled();
     const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
-    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null });
+    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null, reason: expect.any(String) });
   });
 
   it("allows a collector-observed empty ledger when no provider attempt ran", async () => {
@@ -525,7 +535,7 @@ describe("person audit input guard", () => {
     expect(activateReportVersion).not.toHaveBeenCalled();
     expect(issuePanelCostToken).not.toHaveBeenCalled();
     const done = JSON.parse(captured.chunks.join("").match(/event: done\ndata: ([^\n]+)\n\n/)?.[1] ?? "null");
-    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null });
+    expect(done.persistence).toEqual({ state: "failed", reportVersionId: null, reason: expect.any(String) });
   });
 });
 

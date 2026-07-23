@@ -29,6 +29,8 @@ export interface ReportPersistenceContext {
   state: "pending" | "private" | "persisted" | "failed";
   reportVersionId?: string | null;
   panelCostToken?: string | null;
+  /** Sanitized server-side cause when the immutable save failed, for on-page diagnosis. */
+  reason?: string;
   /** Client scan identity used only to ignore stale persistence completions. */
   scanId?: string;
 }

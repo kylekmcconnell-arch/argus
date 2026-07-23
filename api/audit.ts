@@ -234,6 +234,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       send("error", { error: "not_found" });
     } else {
       let reportVersionId: string | null = null;
+      let persistenceFailureReason: string | undefined;
       let persistence: "private" | "persisted" | "failed" = req.query.private === "1" ? "private" : "persisted";
       if (req.query.private !== "1") {
         const persistenceStartedAt = Date.now();
@@ -246,7 +247,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } catch (persistenceError) {
           persistence = "failed";
           console.error("[api/audit] persistence failed", persistenceError);
-          send("persistence", { state: "failed" });
+          // Surface the sanitized cause to the client: a failed immutable save
+          // must be diagnosable from the report page, not only from server logs.
+          persistenceFailureReason = String(persistenceError instanceof Error ? persistenceError.message : persistenceError).slice(0, 300);
+          send("persistence", { state: "failed", reason: persistenceFailureReason });
         } finally {
           console.info("[audit-route-runtime]", JSON.stringify({
             stage: "persistence-complete",
@@ -265,6 +269,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           state: persistence,
           reportVersionId,
           ...(panelCostToken ? { panelCostToken } : {}),
+          ...(persistenceFailureReason ? { reason: persistenceFailureReason } : {}),
         },
       });
     }

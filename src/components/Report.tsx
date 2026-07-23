@@ -2309,6 +2309,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {(persistenceFailed || persistenceMissingCapability) && (
           <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
             Post-scan intelligence is paused because this audit is not safely bound to an immutable version. Rescan before spending on supplemental providers.
+            {f.persistence?.state === "failed" && f.persistence.reason && (
+              <span className="mono mt-1 block text-[11px] text-ink-faint">save error: {f.persistence.reason}</span>
+            )}
           </div>
         )}
         {showTrustGraphSupplemental && <RingAlert handle={report.handle} onAudit={onAudit} snapshotVersion={versionContext?.version} />}
