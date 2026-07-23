@@ -653,13 +653,9 @@ describe("BasicFactsPanel", () => {
           facts={[{
             factId: "fact-traction",
             predicate: "traction",
-            value: [
-              "CoinGecko rank #39 · $2.40B market cap · $15.5M on-chain liquidity · $166M 24h volume · captured 2026-07-22",
-              "$3.18B total value locked · up 2.1% vs 30 days ago · captured 2026-07-22",
-              "$83.0M protocol fees in 30 days · captured 2026-07-22",
-              "CoinGecko rank #39 · $2.36B market cap · $15.4M on-chain liquidity · $165M 24h volume · captured 2026-07-23",
-              "$85.8M protocol fees in 30 days · captured 2026-07-23",
-            ],
+            // The real frozen shape: pairwise upstream merges baked ", " joins
+            // into ONE string, with stale captures interleaved.
+            value: "CoinGecko rank #39 · $2.40B market cap · $15.5M on-chain liquidity · $166M 24h volume · captured 2026-07-22, $3.18B total value locked (Ethereum, Base, Arbitrum) · up 2.1% vs 30 days ago · captured 2026-07-22, $83.0M protocol fees in 30 days · captured 2026-07-22, CoinGecko rank #39 · $2.36B market cap · $15.4M on-chain liquidity · $165M 24h volume · captured 2026-07-23, $85.8M protocol fees in 30 days · captured 2026-07-23",
             status: "verified",
             critical: true,
             sources: [{ url: "https://www.coingecko.com/en/coins/uniswap", title: "CoinGecko token record", relation: "supports" }],
@@ -675,6 +671,28 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).toContain("captured 2026-07-23");
     expect(container.textContent).not.toContain("captured 2026-07-22");
     expect(container.querySelector('dl[class*="grid"]')).not.toBeNull();
+  });
+
+  it("collapses a pre-joined repeated liveness sentence to its latest copy without a grid", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[{
+            factId: "fact-product",
+            predicate: "product",
+            value: "Uniswap Web App, Uniswap Wallet, Uniswap Protocol, Uniswap operates a live on-chain protocol; its canonical token UNI is established and actively traded (CoinGecko rank #39 · $2.40B market cap), Uniswap operates a live on-chain protocol; its canonical token UNI is established and actively traded (CoinGecko rank #39 · $2.36B market cap)",
+            status: "corroborated",
+            critical: false,
+            sources: [{ url: "https://www.coingecko.com/en/coins/uniswap", title: "On-chain market liveness", relation: "supports" }],
+          }]}
+        />,
+      );
+    });
+    const text = container.textContent ?? "";
+    expect(text).toContain("Uniswap Web App");
+    expect(text).toContain("$2.36B");
+    expect(text).not.toContain("$2.40B");
+    expect(text.match(/operates a live on-chain protocol/g)?.length).toBe(1);
   });
 
   it("lists disclosed funding rounds newest first under the funding answer", () => {

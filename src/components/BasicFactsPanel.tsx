@@ -149,15 +149,36 @@ function numberlessKey(fragment: string): string {
   return fragment.replace(/[\d.,$#%]+/g, "").replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-function dedupeCaptureValues(fact: BasicFactView): BasicFactView {
-  if (!Array.isArray(fact.value) || !CAPTURE_DEDUPE_PREDICATES.has(canonicalBasicFactPredicate(fact.predicate))) return fact;
+// Accumulated captures were pairwise-merged upstream with ", " as the joiner,
+// so a frozen value can arrive as ONE pre-joined string. Turning the joiner
+// after a capture date into the canonical " · " separator lets the segment
+// parser see clean fragments again.
+function normalizeCaptureBoundaries(text: string): string {
+  return text.replace(/(captured \d{4}-\d{2}-\d{2}),\s+/g, "$1 · ");
+}
+
+function keepLatestByShape(pieces: readonly string[]): string[] {
   const byShape = new Map<string, string>();
-  for (const entry of fact.value) {
-    const text = displayValue(entry);
+  for (const piece of pieces) {
+    const text = piece.trim();
     if (text) byShape.set(numberlessKey(text), text);
   }
-  const deduped = [...byShape.values()];
-  return deduped.length ? { ...fact, value: deduped.length === 1 ? deduped[0] : deduped } : fact;
+  return [...byShape.values()];
+}
+
+function dedupeCaptureValues(fact: BasicFactView): BasicFactView {
+  if (!CAPTURE_DEDUPE_PREDICATES.has(canonicalBasicFactPredicate(fact.predicate))) return fact;
+  const elements = Array.isArray(fact.value)
+    ? fact.value.map(displayValue).filter(Boolean)
+    : [displayValue(fact.value)].filter(Boolean);
+  if (!elements.length) return fact;
+  // Element level first (values arrays), then within each element: repeated
+  // shapes joined by ", " collapse to the latest occurrence. Splitting and
+  // rejoining on ", " is the identity unless duplicate shapes collapse, so
+  // ordinary prose ("led by a16z, Polychain") passes through unchanged.
+  const deduped = keepLatestByShape(elements)
+    .map((element) => keepLatestByShape(normalizeCaptureBoundaries(element).split(", ")).join(", "));
+  return { ...fact, value: deduped.length === 1 ? deduped[0] : deduped };
 }
 
 /**
@@ -174,7 +195,10 @@ const METRIC_TOKEN = /(?:\$\s?[\d][\d.,]*\s?[BMK]?\b|#[\d][\d,]*\b|\b[\d][\d.,]*
 
 function parseFactMetrics(fact: BasicFactView): { metrics: FactMetric[]; notes: string[]; captured: string | null } | null {
   const raw = Array.isArray(fact.value) ? fact.value.map(displayValue) : [displayValue(fact.value)];
-  const segments = raw.flatMap((entry) => entry.split(" · ")).map((segment) => segment.trim()).filter(Boolean);
+  const segments = raw
+    .flatMap((entry) => normalizeCaptureBoundaries(entry).split(" · "))
+    .map((segment) => segment.trim())
+    .filter(Boolean);
   const metricByLabel = new Map<string, FactMetric>();
   const notes: string[] = [];
   let captured: string | null = null;
@@ -410,10 +434,13 @@ function factRows(
       continue;
     }
     const sourceRows = dedupeSources([...(existing.sources ?? []), ...(fact.sources ?? [])]);
-    const values = [...new Map([
-      answerFor(existing),
-      answerFor(fact),
-    ].filter((value) => value && !/^(?:No verified answer|Not applicable|Sources disagree|A source was verified)/.test(value))
+    // An already-merged row carries its values as an array; flatten it rather
+    // than letting answerFor stringify it, or a three-way merge bakes ", "
+    // joins into a single value no later pass can take apart.
+    const mergeValues = (candidate: BasicFactView): string[] =>
+      Array.isArray(candidate.value) ? candidate.value.map(displayValue).filter(Boolean) : [answerFor(candidate)];
+    const values = [...new Map([...mergeValues(existing), ...mergeValues(fact)]
+      .filter((value) => value && !/^(?:No verified answer|Not applicable|Sources disagree|A source was verified)/.test(value))
       .map((value) => [canonicalBasicFactComparisonValue(predicate, value), value])).values()];
     const repeatableFounderAsset = predicate === "official_token" && audience !== "project";
     // Two chain lists that OVERLAP answer "which networks" compatibly: one
