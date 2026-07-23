@@ -184,7 +184,9 @@ export async function withRecordedFetch<T>(
       return toResponse(urlTier.length > 1 ? urlTier.shift()! : urlTier[0]);
     }
     const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
-    if (options.allowLiveHosts?.some((allowed) => host === allowed || host.endsWith(`.${allowed}`))) {
+    // "*" = every replay miss goes live (the A/B lane for a variant whose new
+    // provider traffic cannot exist in the baseline recording).
+    if (options.allowLiveHosts?.some((allowed) => allowed === "*" || host === allowed || host.endsWith(`.${allowed}`))) {
       fidelity.liveAllowed += 1;
       const live = await originalFetch(input, init);
       return record(method, url, body, live, join(dir, "live-lane.jsonl"));
