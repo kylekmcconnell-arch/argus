@@ -82,7 +82,7 @@ export function InvestigationDecisionCanvas({
           id="report-risks"
           title={favorable ? "What limits confidence" : "What evidence pulls the other way"}
           description={favorable
-            ? "Adverse findings and incomplete evidence remain visible even when the model signal is favorable."
+            ? "Adverse findings and open evidence gaps remain visible even when the model signal is favorable."
             : "Verified positive evidence stays visible so an adverse verdict is not presented without its counterweight."}
           tone={favorable ? "caution" : "pass"}
           items={narrativeItems("counterweight", countervailingItems, evidenceHref)}

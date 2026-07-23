@@ -332,7 +332,12 @@ export function InvestigationReport({
     ...recordedChecks
       .filter((check) => check.status === "finding")
       .map((check) => ({ label: check.label, detail: check.note })),
-    ...(readiness.status !== "ready" ? [{ label: readiness.title, detail: readiness.guidance }] : []),
+    ...(readiness.status !== "ready" ? [{
+      label: readinessLabel,
+      detail: requiredGapChecks.length
+        ? `${requiredGapChecks.map((check) => check.label).join(", ")} must record a terminal outcome before clearance.`
+        : readiness.guidance.replace(/investigation incomplete/gi, "scan blocked"),
+    }] : []),
   ].slice(0, 6);
   const nextStepItems = [...requiredGapChecks, ...enrichmentGapChecks]
     .slice(0, 6)

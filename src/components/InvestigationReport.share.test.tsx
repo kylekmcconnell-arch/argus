@@ -188,6 +188,7 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("1 required safety gate is still open");
     expect(container.textContent).toContain("Why ARGUS reaches PASS");
     expect(container.textContent).not.toContain("Why ARGUS reaches INCOMPLETE");
+    expect(container.textContent).not.toContain("Investigation incomplete");
   });
 
   it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
