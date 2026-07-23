@@ -563,7 +563,7 @@ export interface BasicFact {
   evidence_origin: "deterministic";
   artifact_verified: true;
   provider: "public-web";
-  discoveryProvider?: "claude-web-search" | "grok" | "argus-identity-bootstrap" | "security-audits";
+  discoveryProvider?: "claude-web-search" | "grok" | "grounded" | "argus-identity-bootstrap" | "security-audits";
   /**
    * Omitted/true: a strict single-passage fact, eligible to set enforced score
    * FLOORS exactly as today. false: completed via the relaxed web-corroboration
@@ -595,7 +595,7 @@ export interface BasicFactLead {
   /** Whether a model proposed the row or ARGUS derived a bounded candidate. */
   evidence_origin: "model_lead" | "deterministic_bootstrap";
   artifact_verified: false;
-  provider: "claude-web-search" | "grok" | "argus-identity-bootstrap" | "security-audits";
+  provider: "claude-web-search" | "grok" | "grounded" | "argus-identity-bootstrap" | "security-audits";
 }
 
 export interface BasicFactQuestionLedgerEntry {
@@ -612,7 +612,7 @@ export interface BasicFactQuestionLedgerEntry {
   /** Providers/search passes asked this exact question, without implying success. */
   providerRuns: Array<{
     phase: "primary" | "repair";
-    provider: "claude-web-search" | "grok" | "sec-registry" | "test" | "none";
+    provider: "claude-web-search" | "grok" | "grounded" | "sec-registry" | "test" | "none";
     state: "succeeded" | "partial" | "completed_empty" | "failed" | "skipped";
   }>;
 }

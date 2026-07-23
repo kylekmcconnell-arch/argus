@@ -1,0 +1,22 @@
+{
+  "uniswap": {
+    "verdictIn": ["PASS"],
+    "scoreMin": 72,
+    "scoreMax": 86,
+    "minVerifiedFacts": 15,
+    "neverIncomplete": true
+  },
+  "vitalikbuterin": {
+    "verdictIn": ["PASS"],
+    "scoreMin": 70,
+    "minVerifiedFacts": 8,
+    "neverIncomplete": true
+  },
+  "aave": {
+    "verdictIn": ["PASS"],
+    "scoreMin": 70,
+    "scoreMax": 90,
+    "minVerifiedFacts": 12,
+    "neverIncomplete": true
+  }
+}

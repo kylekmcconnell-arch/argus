@@ -14,6 +14,7 @@ import { cacheGet, cacheSet } from "../cache";
 import { addClaudeUsage, recordCall } from "../cost";
 import { fetchPublicTextWithRecovery, type PublicTextDocument, type PublicTextResult } from "../publicWeb";
 import { grokSearch } from "./x";
+import { groundedSearch } from "./groundedSearch";
 import { readEntityFacts } from "../entityStore";
 import { canonicalEntityKey } from "../../src/engine";
 import type { Adapter, AdapterRunResult, CollectContext } from "./types";
@@ -122,7 +123,7 @@ function selectBasicFactLeads(leads: readonly BasicFactLead[]): BasicFactLead[] 
   return leads.filter((_lead, index) => selected.has(index)).slice(0, MAX_LEADS);
 }
 
-type DiscoveryProvider = Extract<BasicFactLead["provider"], "claude-web-search" | "grok">;
+type DiscoveryProvider = Extract<BasicFactLead["provider"], "claude-web-search" | "grok" | "grounded">;
 type RequestFn = (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
 
 export type BasicFactsResearchAudience = "person" | "project" | "investor";
@@ -1421,6 +1422,59 @@ export async function discoverGrokBasicFactLeadsDetailed(
   return result;
 }
 
+/**
+ * Discovery over the decoupled grounded pipeline: Serper search + first-party
+ * page fetches + a cheap extractor, instead of a Sonnet-priced native
+ * web_search loop. Same discovery prompt, same lead parser, same downstream
+ * verification boundary; only the searcher changes. Returns "skipped" when
+ * grounded search is not provisioned so the caller falls back to the normal
+ * provider chain.
+ */
+export async function discoverGroundedBasicFactLeadsDetailed(
+  ctx: CollectContext,
+  questions: readonly BasicFactsResearchQuestion[],
+  phase: "primary" | "repair",
+): Promise<BasicFactsDiscoveryResult> {
+  const audience = questions[0]?.audience ?? researchAudience(ctx);
+  const grouped = questionSearchGroups(questions, phase);
+  const canonicalSubject = subjectName(ctx);
+  let unprovisioned = false;
+  const batches = await mapDiscoveryGroups(grouped, async ({ key, batch, questions: batchQuestions, questionSpecific }): Promise<BatchDiscoveryResult> => {
+    const group = {
+      key,
+      batch,
+      questionIds: batchQuestions.map((question) => question.id),
+      questionSpecific,
+    };
+    const fingerprint = createHash("sha256")
+      .update(batchQuestions.map((question) => question.id).sort().join("|"))
+      .digest("hex").slice(0, 12);
+    const text = await groundedSearch(
+      "You are ARGUS's basic-facts research scout. Answer only from the provided sources, cite their exact URLs, and return only the requested JSON. Every answer remains an unverified lead until ARGUS fetches and verifies the exact source passage.",
+      discoveryPrompt(ctx, batchQuestions, phase),
+      { cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grounded:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}` },
+    );
+    if (text === null) {
+      unprovisioned = true;
+      return { ...group, state: "failed", leads: [], attempts: 1, detail: `${key}:grounded_unavailable` };
+    }
+    const parsed = parseBasicFactLeads(text, canonicalSubject, "grounded", batchQuestions);
+    if (!parsed) return { ...group, state: "partial", leads: [], attempts: 1, detail: `${key}:invalid_json` };
+    const rawFactCount = rawBasicFactCount(text);
+    return {
+      ...group,
+      state: parsed.length ? "succeeded" : rawFactCount === 0 ? "completed_empty" : "succeeded",
+      leads: parsed,
+      attempts: 1,
+      detail: `${key}:${parsed.length ? `${parsed.length}_leads` : "completed_empty"}`,
+    };
+  });
+  if (unprovisioned && batches.every((batch) => batch.state === "failed")) {
+    return { provider: "grounded", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "grounded search is not provisioned (needs SERPER_API_KEY + an extractor)" };
+  }
+  return aggregateDiscovery("grounded", batches);
+}
+
 async function discoverPrimary(
   ctx: CollectContext,
   questions: readonly BasicFactsResearchQuestion[],
@@ -1430,6 +1484,14 @@ async function discoverPrimary(
   // ($3/M vs $0.20/M). ARGUS_BASIC_FACTS_PRIMARY=grok runs the same questions
   // on the cheaper searcher, with Claude still available for repair, so the
   // cost/recall trade can be measured rather than assumed.
+  // ARGUS_BASIC_FACTS_PRIMARY=grounded routes the same questions through the
+  // decoupled Serper + fetch + cheap-extract pipeline (no per-search provider
+  // fee, no Sonnet-priced search contexts); an unprovisioned grounded lane
+  // falls through to the normal chain rather than degrading discovery.
+  if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grounded") {
+    const grounded = await discoverGroundedBasicFactLeadsDetailed(ctx, questions, "primary");
+    if (grounded.state !== "skipped") return grounded;
+  }
   if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grok" && env("XAI_API_KEY")) {
     return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
   }

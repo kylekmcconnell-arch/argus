@@ -10109,7 +10109,49 @@ async function discoverGrokBasicFactLeadsDetailed(ctx, questions, phase, options
   }
   return result;
 }
+async function discoverGroundedBasicFactLeadsDetailed(ctx, questions, phase) {
+  const audience = questions[0]?.audience ?? researchAudience(ctx);
+  const grouped = questionSearchGroups(questions, phase);
+  const canonicalSubject = subjectName(ctx);
+  let unprovisioned = false;
+  const batches = await mapDiscoveryGroups(grouped, async ({ key, batch, questions: batchQuestions, questionSpecific }) => {
+    const group = {
+      key,
+      batch,
+      questionIds: batchQuestions.map((question) => question.id),
+      questionSpecific
+    };
+    const fingerprint = createHash4("sha256").update(batchQuestions.map((question) => question.id).sort().join("|")).digest("hex").slice(0, 12);
+    const text2 = await groundedSearch(
+      "You are ARGUS's basic-facts research scout. Answer only from the provided sources, cite their exact URLs, and return only the requested JSON. Every answer remains an unverified lead until ARGUS fetches and verifies the exact source passage.",
+      discoveryPrompt(ctx, batchQuestions, phase),
+      { cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grounded:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}` }
+    );
+    if (text2 === null) {
+      unprovisioned = true;
+      return { ...group, state: "failed", leads: [], attempts: 1, detail: `${key}:grounded_unavailable` };
+    }
+    const parsed = parseBasicFactLeads(text2, canonicalSubject, "grounded", batchQuestions);
+    if (!parsed) return { ...group, state: "partial", leads: [], attempts: 1, detail: `${key}:invalid_json` };
+    const rawFactCount = rawBasicFactCount(text2);
+    return {
+      ...group,
+      state: parsed.length ? "succeeded" : rawFactCount === 0 ? "completed_empty" : "succeeded",
+      leads: parsed,
+      attempts: 1,
+      detail: `${key}:${parsed.length ? `${parsed.length}_leads` : "completed_empty"}`
+    };
+  });
+  if (unprovisioned && batches.every((batch) => batch.state === "failed")) {
+    return { provider: "grounded", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "grounded search is not provisioned (needs SERPER_API_KEY + an extractor)" };
+  }
+  return aggregateDiscovery("grounded", batches);
+}
 async function discoverPrimary(ctx, questions) {
+  if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grounded") {
+    const grounded = await discoverGroundedBasicFactLeadsDetailed(ctx, questions, "primary");
+    if (grounded.state !== "skipped") return grounded;
+  }
   if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grok" && env("XAI_API_KEY")) {
     return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
   }

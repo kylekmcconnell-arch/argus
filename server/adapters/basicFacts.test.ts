@@ -8,6 +8,7 @@ import {
   basicFactsResearchQuestions,
   discoverBasicFactLeads,
   discoverBasicFactLeadsDetailed,
+  discoverGroundedBasicFactLeadsDetailed,
   discoverGrokBasicFactLeadsDetailed,
   parseBasicFactLeads,
   verifyBasicFactLead,
@@ -4836,5 +4837,54 @@ describe("discovery prompt caching", () => {
     // the earlier server_tool_use block passes through untouched.
     expect(resent[resent.length - 1].cache_control).toEqual({ type: "ephemeral" });
     expect(resent[0].cache_control).toBeUndefined();
+  });
+});
+
+// The grounded discovery lane: same prompt, same parser, same verification
+// boundary; only the searcher changes (Serper + fetch + cheap extract instead
+// of a Sonnet-priced native web_search loop). Unprovisioned grounded search
+// must fall through to the normal chain, never degrade discovery.
+describe("grounded discovery lane", () => {
+  it("routes primary discovery through groundedSearch and labels leads grounded", async () => {
+    vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
+    const grounded = await import("./groundedSearch");
+    const spy = vi.spyOn(grounded, "groundedSearch").mockResolvedValue(JSON.stringify({
+      facts: [{
+        predicate: "founder",
+        value: "Hayden Adams",
+        source_url: "https://theblock.co/uniswap-founder",
+        exact_excerpt: "Hayden Adams founded Uniswap",
+        confidence: "high",
+      }],
+    }));
+    try {
+      const { ctx } = context();
+      const questions = basicFactsResearchQuestions(ctx);
+      const result = await discoverGroundedBasicFactLeadsDetailed(ctx, questions, "primary");
+      expect(spy).toHaveBeenCalled();
+      const [system, user] = spy.mock.calls[0];
+      expect(system).toContain("basic-facts research scout");
+      expect(user).toContain("@JupiterExchange");
+      expect(result.provider).toBe("grounded");
+      expect(result.state === "succeeded" || result.state === "partial").toBe(true);
+      expect(result.leads.length).toBeGreaterThan(0);
+      expect(result.leads.every((entry) => entry.provider === "grounded")).toBe(true);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("reports skipped when grounded search is unprovisioned so the caller can fall back", async () => {
+    const grounded = await import("./groundedSearch");
+    const spy = vi.spyOn(grounded, "groundedSearch").mockResolvedValue(null);
+    try {
+      const { ctx } = context();
+      const questions = basicFactsResearchQuestions(ctx);
+      const result = await discoverGroundedBasicFactLeadsDetailed(ctx, questions, "primary");
+      expect(result.state).toBe("skipped");
+      expect(result.leads).toHaveLength(0);
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
