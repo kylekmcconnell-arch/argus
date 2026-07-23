@@ -222,6 +222,44 @@ describe("investigation exact sharing", () => {
     expect(harness.clipboard).toHaveBeenCalledWith("http://localhost:3000/api/card?share=opaque");
   });
 
+  it("copy tldr mints a share link and pastes it under the verdict lines", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ url: "/api/card?share=opaque" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    render(investigation({
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000144",
+        reportVersionId,
+        version: 3,
+        completenessState: "complete",
+        attestationState: "server_collected",
+        methodologyVersion: "test-v1",
+        createdAt: "2026-07-10T12:00:00.000Z",
+        checks: [{ label: "Contract safety", status: "confirmed" }],
+      },
+    }));
+
+    const tldr = [...container.querySelectorAll<HTMLButtonElement>("button")]
+      .find((button) => button.textContent?.trim() === "copy tldr");
+    expect(tldr).toBeDefined();
+    await act(async () => tldr?.click());
+
+    const request = fetchMock.mock.calls[0];
+    expect(request[0]).toBe("/api/share");
+    expect(JSON.parse(String(request[1]?.body))).toEqual({
+      kind: "investigation",
+      ref: address,
+      reportVersionId,
+    });
+    const pasted = String(harness.clipboard.mock.calls[0]?.[0]);
+    const lines = pasted.split("\n");
+    expect(lines[0]).toContain("ARGUS · $ARG investigation · token risk PASS 88/100");
+    expect(lines).toContain("Investigation share test");
+    expect(lines[lines.length - 1]).toBe("http://localhost:3000/api/card?share=opaque");
+  });
+
   it("does not offer a share from a private investigation", () => {
     render(investigation({ persistence: { state: "private", scanId: "private-scan" } }));
 

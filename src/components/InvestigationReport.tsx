@@ -39,6 +39,7 @@ import {
   ShieldWarning,
 } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
+import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
 import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import {
   BasicFactsPanel,
@@ -264,6 +265,28 @@ export function InvestigationReport({
     }
   };
 
+  // Same mint the Share button uses, composed into the TLDR at copy time so a
+  // pasted summary opens without sign-in and unfurls into the report card.
+  const mintShareUrl = async (): Promise<string | null> => {
+    try {
+      const response = await fetch("/api/share", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "investigation",
+          ref: token.address,
+          reportVersionId: versionContext?.reportVersionId
+            ?? (inv.persistence?.state === "persisted" ? inv.persistence.reportVersionId : undefined),
+        }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { url?: unknown };
+      if (!response.ok || typeof body.url !== "string") return null;
+      return new URL(body.url, location.origin).toString();
+    } catch {
+      return null;
+    }
+  };
+
   // The connection web: this token's own subgraph (deployer → funder trail, project
   // account, site) plus every cross-audit tie to other subjects you've scanned.
   const invGraph = investigationContribution(inv);
@@ -295,6 +318,13 @@ export function InvestigationReport({
     ...(readiness.status !== "ready" ? [{ label: readiness.title, detail: readiness.guidance }] : []),
   ].slice(0, 6);
   const nextStepItems = gapChecks.slice(0, 6).map((check) => ({ label: `Resolve ${check.label.toLowerCase()}`, detail: check.note }));
+  // One paste, whole verdict: composed for group chats. The link is appended
+  // at copy time (share link when mintable, app URL else).
+  const tldrBase = [
+    `ARGUS · $${token.symbol} investigation · token risk ${verdictMeta(presentedTokenVerdict).label}${positiveVerdictNeedsQualification || token.score == null ? "" : ` ${token.score}/100`}`,
+    token.headline,
+    nextStepItems[0] ? `Top open item: ${nextStepItems[0].label}.` : "",
+  ].filter(Boolean).join("\n");
   const verifiedItems = recordedChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
   const openQuestionItems = gapChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
   const capturedAt = versionContext?.createdAt
@@ -385,7 +415,14 @@ export function InvestigationReport({
                 <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
               </span>
             )}
+            {canShare && <CopyTldrButton base={tldrBase} mint={mintShareUrl} className="" />}
           </div>
+          <ScoreContextStrip
+            subjectRef={token.address}
+            score={positiveVerdictNeedsQualification ? null : token.score}
+            peerKind="token"
+            align="start"
+          />
           <div
             className="finding tint-var mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5"
             style={{ "--tint": readinessColor } as React.CSSProperties}
