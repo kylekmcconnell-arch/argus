@@ -1903,6 +1903,31 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   // dedicated line attached to the section (never the lead item), so the
   // section leads with what was FOUND while a favorable report still can
   // never show an all-clear body without naming its open questions beside it.
+  // Persona question this answers directly: "why this score and not higher,
+  // and what exactly would raise it?" Deterministic from the stored axis
+  // scores, so it renders on already-saved reports: each area's open points,
+  // with the analyst's own most specific open item as the path to earning
+  // them. Guidance framing by design; never a promise of points.
+  const remainingPointsItems: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows
+    .filter((axis) => axis.weight > 0 && axis.weight - axis.score > 0)
+    .sort((left, right) => (right.weight - right.score) - (left.weight - left.score))
+    .slice(0, 4)
+    .map((axis) => {
+      const open = axis.weight - axis.score;
+      const tier = bandTierFor(axis.axis);
+      const firstGap = (axis.gaps[0] ?? "").trim();
+      return {
+        id: `points-${axis.axis}`,
+        title: `${diligenceAreaLabel(axis.axis)}: ${open} of ${axis.weight} points open`,
+        detail: firstGap
+          ? sentence(firstGap)
+          : "The open questions for this area are listed in the verification plan.",
+        provenance: tier
+          ? `${tier.replace(/_/g, " ")} evidence tier · scored ${axis.score}/${axis.weight}`
+          : `scored ${axis.score}/${axis.weight}`,
+        href: axisHref(axis.axis),
+      };
+    });
   const confidenceLimits: ReportCanvasNarrativeItem[] = confidenceLimitsBase.slice(0, 6);
   const adverseVerdictNarrative = [...confidenceLimits, ...lowAxisDrivers]
     .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
@@ -2362,12 +2387,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   // word (e.g. an INCOMPLETE verdict already reads "INCOMPLETE").
                   // "decision-ready" always adds information next to PASS/CAUTION/etc.
                   && !(readiness.status !== "ready" && m.label.toUpperCase() === readiness.status.toUpperCase()) && (
-                  <span className={`chip ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`}>
+                  <span
+                    className={`chip ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`}
+                    title={readiness.status === "ready"
+                      ? "Decision-ready: every safety screen recorded its outcome and evidence coverage cleared the bar, so this verdict is complete enough to act on."
+                      : "This verdict is published with known gaps; the coverage panel lists exactly what is still open."}
+                  >
                     {readiness.status === "ready" ? "decision-ready" : readiness.status}
                   </span>
                 )}
                 {report.governing_role && (
-                  <span className="mono text-[11px] text-ink-dim">
+                  <span
+                    className="mono text-[11px] text-ink-dim"
+                    title="Subjects can hold several roles (project, founder, investor). Each role is scored separately and the LOWER-scoring role sets the final number, so a strong role can never mask a weak one."
+                  >
                     governed by {ROLE_META[report.governing_role as SubjectClass].label.toLowerCase()}
                   </span>
                 )}
@@ -2639,6 +2672,19 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </details>
           )}
         </div>
+
+        {favorableVerdict && remainingPointsItems.length > 0 && (
+          <div className="panel mt-5 px-5">
+            <ReportCanvasNarrativeSection
+              id="remaining-points"
+              title="Where the remaining points are"
+              description={`This score is ${report.governing_score} of 100. The open points sit in the areas below; each one links to the evidence and the exact questions that would earn them.`}
+              tone="signal"
+              items={remainingPointsItems}
+              emptyCopy=""
+            />
+          </div>
+        )}
 
         <div id="identity-evidence" className="scroll-mt-28">
         {/* Supplemental live checks are deliberately separated from the frozen
