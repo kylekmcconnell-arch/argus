@@ -79,4 +79,59 @@ describe("UsageVisuals", () => {
     });
     expect(container.textContent).toBe("");
   });
+
+  it("shows the fee stat and the holder-concentration bar when frozen", () => {
+    act(() => {
+      root.render(
+        <UsageVisuals
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          tvl={snapshot() as any}
+          fees={{
+            slug: "uniswap",
+            total24hUsd: 3_000_000,
+            total30dUsd: 85_800_000,
+            change30dOver30dPct: 3.4,
+            sourceUrl: "https://defillama.com/protocol/uniswap",
+            capturedAt: "2026-07-22T21:24:00.000Z",
+          }}
+          holders={{
+            topHolderPct: 11,
+            top10Pct: 38,
+            holderCount: 140_972,
+            lpLockedOrBurnedPct: 62,
+            sourceUrl: "https://gopluslabs.io/",
+            capturedAt: "2026-07-22T21:24:00.000Z",
+          }}
+        />,
+      );
+    });
+    expect(container.textContent).toContain("$85.8M");
+    expect(container.textContent).toContain("+3.4% vs prior 30 days");
+    expect(container.textContent).toContain("38%");
+    expect(container.textContent).toContain("of supply sits with the top 10");
+    const holderBar = container.querySelector('[aria-label^="Supply split"]');
+    expect(holderBar?.getAttribute("aria-label")).toContain("largest holder 11%");
+    expect(holderBar?.getAttribute("aria-label")).toContain("next 9 holders 27%");
+    expect(holderBar?.getAttribute("aria-label")).toContain("everyone else 62%");
+    expect(container.textContent).toContain("140,972 holders");
+    expect(container.textContent).toContain("LP 62% locked or burned");
+  });
+
+  it("hides the holder bar on inconsistent percentages", () => {
+    act(() => {
+      root.render(
+        <UsageVisuals
+          holders={{
+            topHolderPct: 44,
+            top10Pct: 38,
+            holderCount: 100,
+            lpLockedOrBurnedPct: null,
+            sourceUrl: "https://gopluslabs.io/",
+            capturedAt: "2026-07-22T21:24:00.000Z",
+          }}
+        />,
+      );
+    });
+    expect(container.querySelector('[aria-label^="Supply split"]')).toBeNull();
+  });
 });

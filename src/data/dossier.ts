@@ -113,6 +113,10 @@ export interface Dossier {
   /** Frozen protocol fundamentals (DeFiLlama), for the hero strip. */
   protocolTvl?: CollectedEvidence["protocolTvl"];
   protocolFunding?: CollectedEvidence["protocolFunding"];
+  /** Frozen protocol fee totals (DeFiLlama); the second dated usage metric for the charts. */
+  protocolFees?: CollectedEvidence["protocolFees"];
+  /** Frozen float-control profile (GoPlus holder register) for the concentration bar. */
+  holderProfile?: CollectedEvidence["holderProfile"];
   /** Plain-language answers to the project's core diligence questions. */
   basicFacts?: DossierBasicFact[];
   /** Model-discovered candidates that remain unverified and unscored. */
@@ -333,6 +337,8 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
     trustGraphScreen: ev.trustGraphScreen,
     ...(ev.protocolTvl ? { protocolTvl: { ...ev.protocolTvl, chains: [...ev.protocolTvl.chains], chainBreakdown: ev.protocolTvl.chainBreakdown.map((entry) => ({ ...entry })) } } : {}),
     ...(ev.protocolFunding ? { protocolFunding: { ...ev.protocolFunding, rounds: ev.protocolFunding.rounds.map((round) => ({ ...round })), leadInvestors: [...ev.protocolFunding.leadInvestors] } } : {}),
+    ...(ev.protocolFees ? { protocolFees: { ...ev.protocolFees } } : {}),
+    ...(ev.holderProfile ? { holderProfile: { ...ev.holderProfile } } : {}),
     projectToken: ev.projectToken ? {
       ...ev.projectToken,
       ...(ev.projectToken.providers ? { providers: [...ev.projectToken.providers] } : {}),

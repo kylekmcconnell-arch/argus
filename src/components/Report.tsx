@@ -2588,9 +2588,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         )}
 
-        {f.protocolTvl && (
+        {(f.protocolTvl || f.protocolFees || f.holderProfile) && (
           <div className="mt-3">
-            <UsageVisuals tvl={f.protocolTvl} />
+            <UsageVisuals tvl={f.protocolTvl} fees={f.protocolFees} holders={f.holderProfile} />
           </div>
         )}
 
