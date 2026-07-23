@@ -119,6 +119,29 @@ async function main(): Promise<void> {
     if (!process.env.ANTHROPIC_API_KEY) {
       throw new Error("record mode is a PAID live run and needs provider keys in .env (ANTHROPIC_API_KEY at minimum)");
     }
+    // Preflight the Anthropic key with a FREE count_tokens call. A dead or
+    // credit-empty key does not stop the pipeline: it silently fails over to
+    // Grok live-search (billed per source), which both corrupts the ground
+    // truth and runs up the exact bill this harness exists to prevent.
+    if (!flags.includes("--allow-degraded-providers")) {
+      const preflight = await fetch("https://api.anthropic.com/v1/messages/count_tokens", {
+        method: "POST",
+        headers: {
+          "x-api-key": process.env.ANTHROPIC_API_KEY,
+          "anthropic-version": "2023-06-01",
+          "content-type": "application/json",
+        },
+        body: JSON.stringify({ model: "claude-haiku-4-5", messages: [{ role: "user", content: "ping" }] }),
+      });
+      if (!preflight.ok) {
+        const detail = (await preflight.text().catch(() => "")).slice(0, 200);
+        throw new Error(
+          `ANTHROPIC_API_KEY preflight failed (${preflight.status}): ${detail}\n`
+          + "Aborting so the run cannot silently fall back to Grok live-search. "
+          + "Fund or replace the key, or pass --allow-degraded-providers to record anyway.",
+        );
+      }
+    }
     const slug = slugFor(handle);
     const dir = join(RECORDINGS_ROOT, slug);
     if (existsSync(join(dir, "calls.jsonl"))) {
