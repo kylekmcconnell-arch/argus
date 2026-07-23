@@ -880,6 +880,18 @@ export async function coldIntake(ctx: CollectContext, profileAlreadyResolved = f
         existing.sourceUrl = t.sourceUrl ?? existing.sourceUrl;
         existing.evidence = t.evidence ?? existing.evidence;
       }
+      // A handle the deterministic record itself asserts (the official
+      // account's own role post, or the fetched team page) is a deterministic
+      // identity binding. Without this, a model candidate that arrived first
+      // keeps the SAME handle flagged model_lead, and an already-bound founder
+      // still renders as a needs-verification lead.
+      if (
+        t.identity_link_evidence_origin === "deterministic"
+        && t.handle && norm(t.handle) === norm(existing.handle)
+        && existing.identity_link_evidence_origin !== "deterministic"
+      ) {
+        existing.identity_link_evidence_origin = "deterministic";
+      }
       continue;
     }
     const rec = {
@@ -3162,7 +3174,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) =>
       fact.artifact_verified === true
       && (fact.status === "verified" || fact.status === "corroborated")
-      && fact.predicate !== "legal_regulatory_event");
+      && fact.predicate !== "legal_regulatory_event"
+      // Provider-projection facts are regenerated fresh every run from free
+      // providers; storing them only grows the row and re-injects stale
+      // captures (the compounding "captured ..., captured ..." duplication).
+      && fact.providerProjection !== true);
     const verifiedVentures = (evidence.ventures ?? []).filter((venture) =>
       venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
     if (verifiedBasicFacts.length || verifiedVentures.length || evidence.projectToken?.verified === true) {

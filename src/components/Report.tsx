@@ -2479,8 +2479,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </div>
           </div>
 
-          {fundamentalTiles.length > 0 && (
-            <dl className="order-3 grid grid-cols-2 gap-px border-t border-line/60 bg-line sm:grid-cols-3 lg:grid-cols-5" aria-label="Verified fundamentals">
+          {/* A lone tile reads as a broken empty band; two or more justify the
+              strip, and the column count tracks the tile count so no cell is
+              ever an empty grey box. */}
+          {fundamentalTiles.length >= 2 && (
+            <dl
+              className="order-3 grid grid-cols-2 gap-px border-t border-line/60 bg-line max-sm:[&>div:last-child:nth-child(odd)]:col-span-2 sm:[grid-template-columns:repeat(var(--tile-count),minmax(0,1fr))]"
+              style={{ "--tile-count": Math.min(fundamentalTiles.length, 5) } as React.CSSProperties}
+              aria-label="Verified fundamentals"
+            >
               {fundamentalTiles.map((tile) => (
                 <div key={tile.key} className="bg-panel px-5 py-3.5">
                   <dt className="stat-label">{tile.label}</dt>
@@ -2575,6 +2582,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               fillRequired={fillDecisionFacts}
               audience={basicFactsAudience}
               questionLedger={f.basicFactQuestionLedger}
+              fundingRounds={f.protocolFunding?.rounds}
             />
           </div>
         )}
@@ -2826,7 +2834,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   <span className="chip">{member.role}</span>
                   {member.handle && <span className="mono text-[11px] text-caution">candidate {member.handle}</span>}
                   {member.linkedin && <span className="text-[11px] text-ink-faint">LinkedIn candidate recorded</span>}
-                  <span className="text-[11px] text-ink-faint">{member.provider ?? member.source}</span>
+                  <span className="text-[11px] text-ink-faint">{sourceProviderLabel(member.provider ?? member.source)}</span>
                   {member.evidence && <span className="min-w-full text-[11px] leading-relaxed text-ink-faint">{member.evidence}</span>}
                   {member.handle && onAudit && (
                     <button

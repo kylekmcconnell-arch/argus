@@ -543,6 +543,12 @@ export interface BasicFact {
   status: BasicFactStatus;
   critical: boolean;
   sources: BasicFactSource[];
+  /**
+   * True for facts re-derived every run from live provider snapshots (market
+   * captures, TVL, fees). Excluded from knowledge-base reuse and write-back:
+   * a reused copy is both stale and a duplicate that compounds across scans.
+   */
+  providerProjection?: boolean;
   qualifier?: string;
   /** Stable role-aware research question that produced the verified answer. */
   questionId?: string;

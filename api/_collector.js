@@ -12111,7 +12111,8 @@ async function loadReusableBasicFacts(ctx) {
   const rec = await readEntityFacts(ctx.organizationId, canonicalEntityKey({ handle: ctx.handle }), ENTITY_REUSE_TTL_MS);
   const cached = rec?.facts && typeof rec.facts === "object" ? rec.facts.basicFacts : void 0;
   if (!Array.isArray(cached)) return [];
-  return cached.filter((fact) => Boolean(fact) && typeof fact === "object" && typeof fact.predicate === "string" && typeof fact.value === "string" && fact.artifact_verified === true && fact.predicate !== "legal_regulatory_event");
+  const projectionLike = (fact) => fact.providerProjection === true || /^captured \d{4}-\d{2}-\d{2}$/.test(String(fact.qualifier ?? "")) || /operates a live on-chain protocol/.test(String(fact.value ?? ""));
+  return cached.filter((fact) => Boolean(fact) && typeof fact === "object" && typeof fact.predicate === "string" && typeof fact.value === "string" && fact.artifact_verified === true && fact.predicate !== "legal_regulatory_event" && !projectionLike(fact));
 }
 async function collectBasicFacts(ctx, dependencies = {}) {
   const questions = basicFactsResearchQuestions(ctx);
@@ -16740,7 +16741,8 @@ function makeFact(evidence, predicate, value, sources, qualifier) {
     ...qualifier ? { qualifier } : {},
     evidence_origin: "deterministic",
     artifact_verified: true,
-    provider: "public-web"
+    provider: "public-web",
+    providerProjection: true
   };
 }
 function profileSource(evidence, capturedAt) {
@@ -18354,6 +18356,9 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
         existing.source = t.source ?? existing.source;
         existing.sourceUrl = t.sourceUrl ?? existing.sourceUrl;
         existing.evidence = t.evidence ?? existing.evidence;
+      }
+      if (t.identity_link_evidence_origin === "deterministic" && t.handle && norm3(t.handle) === norm3(existing.handle) && existing.identity_link_evidence_origin !== "deterministic") {
+        existing.identity_link_evidence_origin = "deterministic";
       }
       continue;
     }
@@ -20029,6 +20034,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         completeness: dossier.completeness_state ?? null
       });
       if (delta2) {
+        dossier.priorOutcome = { ...prior, delta: delta2 };
         checkTracker.provider("prior-outcome", "Since last scan", "executed", delta2);
         emit({ phase: "Finalize", label: "Since last scan", detail: delta2, source: "argus", tone: "neutral" });
       }
@@ -20038,7 +20044,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   dossier.cost = cost;
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} calls, \u2248${cost.sources} search sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
   if (options?.organizationId) {
-    const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.predicate !== "legal_regulatory_event");
+    const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.predicate !== "legal_regulatory_event" && fact.providerProjection !== true);
     const verifiedVentures = (evidence.ventures ?? []).filter((venture) => venture.artifact_verified === true && venture.evidence_origin !== "model_lead");
     if (verifiedBasicFacts.length || verifiedVentures.length || evidence.projectToken?.verified === true) {
       void writeEntityFacts(options.organizationId, canonicalEntityKey({ handle: evidence.profile.handle }), {

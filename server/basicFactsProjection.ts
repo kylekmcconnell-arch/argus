@@ -269,6 +269,7 @@ function makeFact(
     evidence_origin: "deterministic",
     artifact_verified: true,
     provider: "public-web",
+    providerProjection: true,
   };
 }
 

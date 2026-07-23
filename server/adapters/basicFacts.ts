@@ -4055,12 +4055,22 @@ async function loadReusableBasicFacts(ctx: CollectContext): Promise<BasicFact[]>
   const rec = await readEntityFacts(ctx.organizationId, canonicalEntityKey({ handle: ctx.handle }), ENTITY_REUSE_TTL_MS);
   const cached = rec?.facts && typeof rec.facts === "object" ? (rec.facts as { basicFacts?: unknown }).basicFacts : undefined;
   if (!Array.isArray(cached)) return [];
+  // Never reuse provider-projection facts (market captures, TVL, fee
+  // snapshots): every run regenerates them fresh from free providers, so a
+  // reused copy is both stale and a duplicate that compounds across scans.
+  // Rows stored before the marker shipped are caught by their projection
+  // signatures (the "captured YYYY-MM-DD" qualifier, the liveness sentence).
+  const projectionLike = (fact: { providerProjection?: unknown; qualifier?: unknown; value?: unknown }): boolean =>
+    fact.providerProjection === true
+    || /^captured \d{4}-\d{2}-\d{2}$/.test(String(fact.qualifier ?? ""))
+    || /operates a live on-chain protocol/.test(String(fact.value ?? ""));
   return cached.filter((fact): fact is BasicFact =>
     Boolean(fact) && typeof fact === "object"
     && typeof (fact as { predicate?: unknown }).predicate === "string"
     && typeof (fact as { value?: unknown }).value === "string"
     && (fact as { artifact_verified?: unknown }).artifact_verified === true
-    && (fact as { predicate?: unknown }).predicate !== "legal_regulatory_event");
+    && (fact as { predicate?: unknown }).predicate !== "legal_regulatory_event"
+    && !projectionLike(fact as { providerProjection?: unknown; qualifier?: unknown; value?: unknown }));
 }
 
 export async function collectBasicFacts(

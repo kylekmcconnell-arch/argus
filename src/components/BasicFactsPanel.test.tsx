@@ -645,4 +645,66 @@ describe("BasicFactsPanel", () => {
     expect(container.textContent).not.toContain("Sources disagree");
     expect(container.textContent).not.toContain("Conflicted");
   });
+
+  it("renders repeated stale market captures as one stat grid with only the latest numbers", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[{
+            factId: "fact-traction",
+            predicate: "traction",
+            value: [
+              "CoinGecko rank #39 · $2.40B market cap · $15.5M on-chain liquidity · $166M 24h volume · captured 2026-07-22",
+              "$3.18B total value locked · up 2.1% vs 30 days ago · captured 2026-07-22",
+              "$83.0M protocol fees in 30 days · captured 2026-07-22",
+              "CoinGecko rank #39 · $2.36B market cap · $15.4M on-chain liquidity · $165M 24h volume · captured 2026-07-23",
+              "$85.8M protocol fees in 30 days · captured 2026-07-23",
+            ],
+            status: "verified",
+            critical: true,
+            sources: [{ url: "https://www.coingecko.com/en/coins/uniswap", title: "CoinGecko token record", relation: "supports" }],
+          }]}
+        />,
+      );
+    });
+    expect(container.textContent).toContain("$2.36B");
+    expect(container.textContent).toContain("$85.8M");
+    expect(container.textContent).toContain("$3.18B");
+    expect(container.textContent).not.toContain("$2.40B");
+    expect(container.textContent).not.toContain("$83.0M");
+    expect(container.textContent).toContain("captured 2026-07-23");
+    expect(container.textContent).not.toContain("captured 2026-07-22");
+    expect(container.querySelector('dl[class*="grid"]')).not.toBeNull();
+  });
+
+  it("lists disclosed funding rounds newest first under the funding answer", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[{
+            factId: "fact-funding",
+            predicate: "funding",
+            value: "Series B, 6 public funding rounds · $178M raised · led by Andreessen Horowitz, Polychain",
+            status: "corroborated",
+            critical: true,
+            sources: [{ url: "https://theblock.co/uniswap-series-b", title: "theblock.co", relation: "supports" }],
+          }]}
+          fundingRounds={[
+            { date: "2020-08-01", round: "Series A", amountUsd: 11_000_000, leadInvestors: ["Andreessen Horowitz"], otherInvestors: ["USV"], valuationUsd: null },
+            { date: "2022-10-13", round: "Series B", amountUsd: 165_000_000, leadInvestors: ["Polychain"], otherInvestors: [], valuationUsd: 1_660_000_000 },
+          ]}
+        />,
+      );
+    });
+    const list = container.querySelector('[aria-label="Disclosed funding rounds"]');
+    expect(list).not.toBeNull();
+    const rows = [...(list?.querySelectorAll("li") ?? [])].map((row) => row.textContent ?? "");
+    expect(rows[0]).toContain("Series B");
+    expect(rows[0]).toContain("$165M");
+    expect(rows[0]).toContain("led by Polychain");
+    expect(rows[0]).toContain("$1.7B valuation");
+    expect(rows[1]).toContain("Series A");
+    expect(rows[1]).toContain("$11.0M");
+    expect(rows[1]).toContain("+1 more");
+  });
 });

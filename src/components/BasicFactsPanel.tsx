@@ -135,6 +135,143 @@ function sourceLabel(source: BasicFactSourceView, url: string): string {
   }
 }
 
+/**
+ * Deterministic provider captures repeat across scans with only the numbers
+ * moving ("$2.40B market cap · captured 07-22" then "$2.36B · captured
+ * 07-23"). Rendering every capture reads as a spilled paragraph and shows
+ * stale numbers next to fresh ones. Key each fragment by its text with the
+ * numbers stripped and keep the LATEST occurrence, so already-frozen reports
+ * that accumulated captures render clean too.
+ */
+const CAPTURE_DEDUPE_PREDICATES = new Set(["traction", "tokenomics", "product", "network", "funding"]);
+
+function numberlessKey(fragment: string): string {
+  return fragment.replace(/[\d.,$#%]+/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+function dedupeCaptureValues(fact: BasicFactView): BasicFactView {
+  if (!Array.isArray(fact.value) || !CAPTURE_DEDUPE_PREDICATES.has(canonicalBasicFactPredicate(fact.predicate))) return fact;
+  const byShape = new Map<string, string>();
+  for (const entry of fact.value) {
+    const text = displayValue(entry);
+    if (text) byShape.set(numberlessKey(text), text);
+  }
+  const deduped = [...byShape.values()];
+  return deduped.length ? { ...fact, value: deduped.length === 1 ? deduped[0] : deduped } : fact;
+}
+
+/**
+ * Metric segments inside a fact value ("$3.18B total value locked",
+ * "CoinGecko rank #39", "up 2.1% vs 30 days ago") rendered as a stat grid
+ * instead of prose. Non-metric segments ("Series B", "led by a16z") stay as
+ * a supporting line; "captured YYYY-MM-DD" fragments collapse to one date.
+ */
+const METRIC_GRID_PREDICATES = new Set(["traction", "tokenomics", "funding"]);
+
+interface FactMetric { value: string; label: string }
+
+const METRIC_TOKEN = /(?:\$\s?[\d][\d.,]*\s?[BMK]?\b|#[\d][\d,]*\b|\b[\d][\d.,]*\s?(?:%|B\b|M\b|K\b|x\b)?)/;
+
+function parseFactMetrics(fact: BasicFactView): { metrics: FactMetric[]; notes: string[]; captured: string | null } | null {
+  const raw = Array.isArray(fact.value) ? fact.value.map(displayValue) : [displayValue(fact.value)];
+  const segments = raw.flatMap((entry) => entry.split(" · ")).map((segment) => segment.trim()).filter(Boolean);
+  const metricByLabel = new Map<string, FactMetric>();
+  const notes: string[] = [];
+  let captured: string | null = null;
+  for (const segment of segments) {
+    const capturedMatch = segment.match(/^captured (\d{4}-\d{2}-\d{2})$/i);
+    if (capturedMatch) {
+      if (!captured || capturedMatch[1] > captured) captured = capturedMatch[1];
+      continue;
+    }
+    // Sentences are prose, not metrics; a metric segment is a short label
+    // around one number token.
+    const token = segment.length <= 64 && !/[;:]/.test(segment) ? segment.match(METRIC_TOKEN) : null;
+    if (!token || token.index == null) {
+      if (!notes.some((note) => numberlessKey(note) === numberlessKey(segment))) notes.push(segment);
+      continue;
+    }
+    const before = segment.slice(0, token.index).trim();
+    const after = segment.slice(token.index + token[0].length).trim();
+    const direction = /^(?:up|down)$/i.test(before.split(/\s+/).pop() ?? "") ? before.split(/\s+/).pop()! : null;
+    const value = direction ? `${direction} ${token[0].trim()}` : token[0].trim();
+    const label = [direction ? before.slice(0, before.length - direction.length).trim() : before, after]
+      .filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    if (!label) {
+      if (!notes.some((note) => numberlessKey(note) === numberlessKey(segment))) notes.push(segment);
+      continue;
+    }
+    // Latest capture of the same metric wins; earlier ones are stale copies.
+    metricByLabel.set(label.toLowerCase(), { value, label });
+  }
+  const metrics = [...metricByLabel.values()];
+  return metrics.length >= 3 ? { metrics, notes, captured } : null;
+}
+
+function FactStatGrid({ parsed }: { parsed: NonNullable<ReturnType<typeof parseFactMetrics>> }) {
+  return (
+    <div>
+      <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3">
+        {parsed.metrics.slice(0, 9).map((metric) => (
+          <div key={metric.label} className="min-w-0">
+            <dd className="text-[15.5px] font-semibold leading-tight tracking-tight text-ink tabular-nums">{metric.value}</dd>
+            <dt className="mt-0.5 text-[10px] uppercase leading-snug tracking-[0.08em] text-ink-faint">{metric.label}</dt>
+          </div>
+        ))}
+      </dl>
+      {parsed.notes.length > 0 && (
+        <p className="mt-2 text-[12px] leading-relaxed text-ink-dim">{parsed.notes.join(" · ")}</p>
+      )}
+      {parsed.captured && (
+        <p className="mono mt-1.5 text-[10px] text-ink-faint">captured {parsed.captured}</p>
+      )}
+    </div>
+  );
+}
+
+/** One row per disclosed round, newest first: what was raised, when, and who led. */
+export interface FundingRoundView {
+  date: string | null;
+  round: string;
+  amountUsd: number | null;
+  leadInvestors: string[];
+  otherInvestors: string[];
+  valuationUsd: number | null;
+}
+
+function usdShort(amount: number): string {
+  if (amount >= 1e9) return `$${(amount / 1e9).toFixed(amount >= 1e10 ? 0 : 1)}B`;
+  if (amount >= 1e6) return `$${(amount / 1e6).toFixed(amount >= 1e8 ? 0 : 1)}M`;
+  if (amount >= 1e3) return `$${Math.round(amount / 1e3)}K`;
+  return `$${Math.round(amount)}`;
+}
+
+function FundingRoundsList({ rounds }: { rounds: readonly FundingRoundView[] }) {
+  const ordered = [...rounds].sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")));
+  return (
+    <ol className="mt-2.5 divide-y divide-line/50 border-t border-line/60" aria-label="Disclosed funding rounds">
+      {ordered.slice(0, 8).map((round, index) => {
+        const leads = round.leadInvestors.filter(Boolean);
+        const others = round.otherInvestors.filter(Boolean);
+        return (
+          <li key={`${round.round}:${round.date}:${index}`} className="flex flex-wrap items-baseline gap-x-2.5 gap-y-0.5 py-2 text-[12px]">
+            <span className="font-medium text-ink">{round.round}</span>
+            {round.date && <span className="mono text-[10.5px] text-ink-faint">{String(round.date).slice(0, 7)}</span>}
+            <span className="mono ml-auto font-semibold text-ink tabular-nums">{round.amountUsd != null && round.amountUsd > 0 ? usdShort(round.amountUsd) : "undisclosed"}</span>
+            {(leads.length > 0 || round.valuationUsd != null) && (
+              <span className="min-w-full text-[11px] leading-snug text-ink-faint">
+                {leads.length > 0 ? `led by ${leads.slice(0, 3).join(", ")}` : ""}
+                {leads.length > 0 && others.length > 0 ? ` · +${others.length} more` : ""}
+                {round.valuationUsd != null && round.valuationUsd > 0 ? `${leads.length > 0 ? " · " : ""}${usdShort(round.valuationUsd)} valuation` : ""}
+              </span>
+            )}
+          </li>
+        );
+      })}
+    </ol>
+  );
+}
+
 function answerFor(fact: BasicFactView): string {
   if (fact.status === "not_applicable") return "Not applicable to this subject.";
   if (fact.status === "checked_empty") {
@@ -375,8 +512,8 @@ function leadRows(facts: readonly BasicFactView[], leads: readonly BasicFactLead
   });
 }
 
-function AnsweredFactCard({ fact, audience, prominent }: {
-  fact: BasicFactView; audience: BasicFactsAudience; prominent: boolean;
+function AnsweredFactCard({ fact, audience, prominent, extra }: {
+  fact: BasicFactView; audience: BasicFactsAudience; prominent: boolean; extra?: React.ReactNode;
 }) {
   const meta = STATUS_META[fact.status as "verified" | "corroborated"];
   // Contradicting sources are ordered first so the visible slice can never
@@ -387,17 +524,26 @@ function AnsweredFactCard({ fact, audience, prominent }: {
   // When the shield line carries the provenance, the qualifier stops reading
   // as prose inside the answer (audit facts qualify their value with the
   // same sentence).
-  const displayFact = hard && fact.predicate === "audit" ? { ...fact, qualifier: undefined } : fact;
+  const qualifierStripped = hard && fact.predicate === "audit" ? { ...fact, qualifier: undefined } : fact;
+  const displayFact = dedupeCaptureValues(qualifierStripped);
+  const statGrid = METRIC_GRID_PREDICATES.has(canonicalBasicFactPredicate(fact.predicate))
+    ? parseFactMetrics(displayFact)
+    : null;
   return (
     <li className={`panel-inset min-w-0 ${prominent ? "border-l-2 border-pass/40 px-3.5 py-3" : "px-3 py-2.5"}`}>
       <div className="flex items-start justify-between gap-2.5">
-        <div className="min-w-0">
-          <p className={`font-semibold leading-snug tracking-tight text-ink tabular-nums ${prominent ? "text-[16.5px]" : "text-[13.5px]"}`}>
-            {answerFor(displayFact)}
-          </p>
+        <div className="min-w-0 flex-1">
+          {statGrid ? (
+            <FactStatGrid parsed={statGrid} />
+          ) : (
+            <p className={`font-semibold leading-snug tracking-tight text-ink tabular-nums ${prominent ? "text-[16.5px]" : "text-[13.5px]"}`}>
+              {answerFor(displayFact)}
+            </p>
+          )}
           <p className="mt-1 text-[10px] uppercase tracking-[0.09em] text-ink-faint">
             {basicFactQuestionFor(fact.predicate, audience)}
           </p>
+          {extra}
         </div>
         {fact.status === "corroborated" ? (
           <span className={`chip shrink-0 normal-case tracking-normal ${meta.className}`}>{meta.label}</span>
@@ -447,6 +593,7 @@ export function BasicFactsPanel({
   fillRequired = false,
   audience = "project",
   questionLedger = [],
+  fundingRounds = [],
 }: {
   id?: string;
   facts?: readonly BasicFactView[];
@@ -454,6 +601,8 @@ export function BasicFactsPanel({
   fillRequired?: boolean;
   audience?: BasicFactsAudience;
   questionLedger?: readonly BasicFactQuestionOutcomeInput[];
+  /** Disclosed rounds from the frozen funding snapshot, listed under the funding answer. */
+  fundingRounds?: readonly FundingRoundView[];
 }) {
   const rows = factRows(facts, fillRequired, audience, questionLedger);
   const discoveryLeads = leadRows(facts, leads);
@@ -507,7 +656,15 @@ export function BasicFactsPanel({
           {keyRows.length > 0 && (
             <ul className="grid gap-2 p-4 pb-0 sm:grid-cols-2 sm:p-5 sm:pb-0" aria-label="Key verified answers">
               {keyRows.map((fact, index) => (
-                <AnsweredFactCard key={fact.factId || `${fact.predicate}:${index}`} fact={fact} audience={audience} prominent />
+                <AnsweredFactCard
+                  key={fact.factId || `${fact.predicate}:${index}`}
+                  fact={fact}
+                  audience={audience}
+                  prominent
+                  extra={fact.predicate === "funding" && fundingRounds.length > 0
+                    ? <FundingRoundsList rounds={fundingRounds} />
+                    : undefined}
+                />
               ))}
             </ul>
           )}

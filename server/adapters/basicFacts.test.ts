@@ -4748,6 +4748,29 @@ describe("knowledge base read-through", () => {
     ]));
   });
 
+  it("never reuses provider-projection facts, marked or legacy-stored", async () => {
+    vi.stubEnv("ARGUS_ENTITY_REUSE", "on");
+    const marked = { ...cachedFounderFact(), factId: "kb-traction", predicate: "traction" as const, value: "CoinGecko rank #39 · $2.40B market cap", normalizedValue: "rank", providerProjection: true, questionId: "project.traction" };
+    const legacyCapture = { ...cachedFounderFact(), factId: "kb-tvl", predicate: "traction" as const, value: "$3.18B total value locked", normalizedValue: "tvl", qualifier: "captured 2026-07-22", questionId: "project.traction" };
+    const legacyLiveness = { ...cachedFounderFact(), factId: "kb-product", predicate: "product" as const, value: "Acme operates a live on-chain protocol; its canonical token ACME is established and actively traded ($1M market cap)", normalizedValue: "live", questionId: "project.product" };
+    vi.mocked(readEntityFacts).mockResolvedValueOnce({
+      facts: { basicFacts: [cachedFounderFact(), marked, legacyCapture, legacyLiveness] },
+      updatedAt: NOW,
+      auditCount: 3,
+      entityType: "FOUNDER",
+    });
+    const { ctx, evidence } = founderCtx();
+    let discoveredIds: string[] = [];
+    await collectBasicFacts(ctx, { discover: spyDiscover((ids) => { discoveredIds = ids; }), fetchSource: vi.fn() });
+
+    // The stable discovery fact still reuses; every projection capture is dropped.
+    expect(discoveredIds).not.toContain("person.founder");
+    const reusedIds = (evidence.basicFacts ?? []).map((fact) => fact.factId);
+    expect(reusedIds).not.toEqual(expect.arrayContaining(["kb-traction"]));
+    expect(reusedIds).not.toEqual(expect.arrayContaining(["kb-tvl"]));
+    expect(reusedIds).not.toEqual(expect.arrayContaining(["kb-product"]));
+  });
+
   it("ignores the knowledge base entirely when the flag is off", async () => {
     vi.mocked(readEntityFacts).mockClear();
     const { ctx } = founderCtx();
