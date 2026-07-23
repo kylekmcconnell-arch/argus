@@ -225,21 +225,32 @@ function ScoreContextStrip({ subjectRef, score }: { subjectRef?: string; score: 
   );
 }
 
-/** One click, one paste: the report as three plain lines with the link. */
-function CopyTldrButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
+/**
+ * One click, one paste: the report as three plain lines plus a link. When a
+ * share link can be minted it is used (viewable without sign-in, and the
+ * pasted link unfurls into the report card); otherwise the app URL stands in.
+ */
+function CopyTldrButton({ base, mint }: { base: string; mint?: () => Promise<string | null> }) {
+  const [state, setState] = useState<"idle" | "working" | "copied">("idle");
   return (
     <button
       type="button"
+      disabled={state === "working"}
       onClick={() => {
-        void navigator.clipboard?.writeText(text).then(() => {
-          setCopied(true);
-          setTimeout(() => setCopied(false), 1600);
-        });
+        if (state === "working") return;
+        setState("working");
+        void (async () => {
+          const link = (await mint?.().catch(() => null))
+            ?? (typeof window !== "undefined" ? window.location.href : "");
+          await navigator.clipboard?.writeText([base, link].filter(Boolean).join("\n"));
+          setState("copied");
+          setTimeout(() => setState("idle"), 1600);
+        })().catch(() => setState("idle"));
       }}
       className="mono mt-2 rounded border border-line px-2 py-1 text-[10px] uppercase tracking-wider text-ink-dim transition hover:text-ink"
+      title="Copies a three-line verdict summary plus a 30-day share link anyone can open"
     >
-      {copied ? "copied" : "copy tldr"}
+      {state === "copied" ? "copied" : state === "working" ? "linking" : "copy tldr"}
     </button>
   );
 }
@@ -1736,6 +1747,28 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       setTimeout(() => setShareState("idle"), 3000);
     }
   };
+  // Same mint as the Share button, but returning the URL for composition (the
+  // TLDR copy) instead of writing it to the clipboard directly. Null on any
+  // failure so callers can fall back to the app URL.
+  const mintShareUrl = async (): Promise<string | null> => {
+    try {
+      const response = await fetch("/api/share", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          kind: "person",
+          ref: report.handle,
+          reportVersionId: f.versionContext?.reportVersionId
+            ?? (f.persistence?.state === "persisted" ? f.persistence.reportVersionId : undefined),
+        }),
+      });
+      const body = (await response.json().catch(() => ({}))) as { url?: unknown };
+      if (!response.ok || typeof body.url !== "string") return null;
+      return new URL(body.url, location.origin).toString();
+    } catch {
+      return null;
+    }
+  };
   const watch = () => {
     if (!canMutateWorkspace) return;
     const watchVerdict = presentation.displayVerdict === "UNVERIFIABLE"
@@ -2002,11 +2035,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       };
     });
   // One paste, whole verdict: composed for group chats and IC memos alike.
-  const tldrText = [
+  // The link is appended at copy time (share link when mintable, app URL else).
+  const tldrBase = [
     `ARGUS · ${f.display_name || f.handle} · ${presentedVerdict} ${report.governing_score ?? "N/A"}/100`,
     f.headline,
     remainingPointsItems[0] ? `Top open item: ${remainingPointsItems[0].title}.` : "",
-    typeof window !== "undefined" ? window.location.href : "",
   ].filter(Boolean).join("\n");
   const confidenceLimits: ReportCanvasNarrativeItem[] = confidenceLimitsBase.slice(0, 6);
   const adverseVerdictNarrative = [...confidenceLimits, ...lowAxisDrivers]
@@ -2458,7 +2491,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 subjectRef={f.handle || f.display_name}
                 score={presentation.primaryScore ? report.governing_score : null}
               />
-              <CopyTldrButton text={tldrText} />
+              <CopyTldrButton base={tldrBase} mint={mintShareUrl} />
             </div>
             <div className="min-w-0 flex-1">
               <div className="eyebrow mb-1.5">{presentation.resultLabel}</div>
