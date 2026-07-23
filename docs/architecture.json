@@ -212,7 +212,6 @@
   "npm run truth:check": "source-of-truth doc contract",
   "npm run canary:offline": "7 deterministic release cases, all providers intercepted, 0 unexpected URLs",
   "npm run calibrate": "19-case golden verdict set; the safety net proving scoring changes don't inflate bad actors",
-  "eval/harness.ts": "record-once(live,$)/replay-forever(offline) label fixtures; only LIVE gates can catch model-quality regressions",
   "ci": ".github/workflows/ci.yml on push to main: db-gates (supabase test:db) + truth/typecheck/test/calibrate/canary/build",
   "uiCopyPolicy": "NO em/en dashes in authored runtime copy (also enforced in analyst output + truth:check)",
   "evalHarness": "server/evalHarness.ts + scripts/eval-harness.ts: record ONE paid live audit's provider traffic (headers never stored, sensitive params redacted) to eval/recordings/<slug>/, then npm run eval:replay re-runs the full pipeline offline deterministically against eval/expectations.json; --allow-live hosts create an A/B lane (e.g. Serper live vs frozen Claude discovery)"

@@ -80,6 +80,7 @@ describe("provider readiness", () => {
       models: {
         analyst: "claude-sonnet-4-6 (default)",
         discovery: "claude-sonnet-4-6 (default) (follows analyst)",
+        discoveryRoute: "claude-web-search (default)",
       },
     });
   });
@@ -87,12 +88,13 @@ describe("provider readiness", () => {
   it("reports model-tier env flips so a cost change verifies without a paid audit", () => {
     vi.stubEnv("ARGUS_ANALYST_MODEL", "claude-sonnet-5");
     vi.stubEnv("ARGUS_DISCOVERY_MODEL", "claude-haiku-4-5");
+    vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
     const { res, captured } = response();
 
     handler({ method: "GET" } as never, res as never);
 
     expect(captured.body).toMatchObject({
-      models: { analyst: "claude-sonnet-5", discovery: "claude-haiku-4-5" },
+      models: { analyst: "claude-sonnet-5", discovery: "claude-haiku-4-5", discoveryRoute: "grounded" },
     });
   });
 

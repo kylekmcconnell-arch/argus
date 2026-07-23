@@ -26,6 +26,12 @@ interface Expectation {
   scoreMax?: number;
   minVerifiedFacts?: number;
   neverIncomplete?: boolean;
+  /** Expected governing role (product judgment, e.g. FOUNDER for Vitalik). */
+  expectedRole?: string;
+  /** Case-insensitive regex sources that MUST appear somewhere in the report. */
+  mustSurface?: string[];
+  /** Regex sources that must NOT appear (false attribution, wrong adverse finding). */
+  mustNotAppear?: string[];
 }
 
 function loadDotEnv(): void {
@@ -49,7 +55,13 @@ function verifiedFactCount(dossier: { basicFacts?: Array<{ status?: string }> })
     .filter((fact) => fact.status === "verified" || fact.status === "corroborated").length;
 }
 
-async function runPipeline(handle: string, dir: string): Promise<EvalSnapshot> {
+interface PipelineOutcome {
+  snapshot: EvalSnapshot;
+  reportText: string;
+  governingRole: string | null;
+}
+
+async function runPipeline(handle: string, dir: string): Promise<PipelineOutcome> {
   // Offline callers must mirror prod's deadline SHAPE (a short analyst window
   // starves basic-facts and fakes INCOMPLETE), but record mode is not bound by
   // the serverless duration cap and a local machine plus home network runs the
@@ -75,22 +87,37 @@ async function runPipeline(handle: string, dir: string): Promise<EvalSnapshot> {
   // attached to the dossier, not an outer ledger this script could open.
   const costUsd = dossier.cost && typeof dossier.cost.usd === "number" ? dossier.cost.usd : null;
   return {
-    subject: handle,
-    recordedAt: new Date().toISOString(),
-    score: typeof dossier.report.governing_score === "number" ? dossier.report.governing_score : null,
-    verdict: dossier.report.composite_verdict ?? null,
-    completeness: dossier.completeness_state ?? null,
-    verifiedFactCount: verifiedFactCount(dossier),
-    costUsd,
+    snapshot: {
+      subject: handle,
+      recordedAt: new Date().toISOString(),
+      score: typeof dossier.report.governing_score === "number" ? dossier.report.governing_score : null,
+      verdict: dossier.report.composite_verdict ?? null,
+      completeness: dossier.completeness_state ?? null,
+      verifiedFactCount: verifiedFactCount(dossier),
+      costUsd,
+    },
+    reportText: JSON.stringify(dossier),
+    governingRole: dossier.report.governing_role ? String(dossier.report.governing_role) : null,
   };
 }
 
-function checkExpectations(slug: string, snapshot: EvalSnapshot): string[] {
+function checkExpectations(slug: string, snapshot: EvalSnapshot, reportText?: string, governingRole?: string | null): string[] {
   if (!existsSync(EXPECTATIONS_PATH)) return [];
   const expectations = JSON.parse(readFileSync(EXPECTATIONS_PATH, "utf8")) as Record<string, Expectation>;
   const expected = expectations[slug];
   if (!expected) return [`no expectations recorded for ${slug} (add to eval/expectations.json)`];
   const failures: string[] = [];
+  if (expected.expectedRole && governingRole !== undefined && governingRole !== expected.expectedRole) {
+    failures.push(`governing role ${governingRole} != ${expected.expectedRole}`);
+  }
+  if (reportText !== undefined) {
+    for (const pattern of expected.mustSurface ?? []) {
+      if (!new RegExp(pattern, "i").test(reportText)) failures.push(`report never surfaces /${pattern}/i`);
+    }
+    for (const pattern of expected.mustNotAppear ?? []) {
+      if (new RegExp(pattern, "i").test(reportText)) failures.push(`report contains forbidden /${pattern}/i`);
+    }
+  }
   if (expected.verdictIn && (!snapshot.verdict || !expected.verdictIn.includes(snapshot.verdict))) {
     failures.push(`verdict ${snapshot.verdict} not in [${expected.verdictIn.join(", ")}]`);
   }
@@ -152,10 +179,11 @@ async function main(): Promise<void> {
       rmSync(dir, { recursive: true });
       console.log(`  replaced prior recording for ${slug}`);
     }
-    const { result: snapshot, recordedCalls } = await withRecordedFetch("record", dir, () => runPipeline(handle, dir));
+    const { result: outcome, recordedCalls } = await withRecordedFetch("record", dir, () => runPipeline(handle, dir));
+    const snapshot = outcome.snapshot;
     writeSnapshot(dir, snapshot);
     console.log(`  ✓ recorded ${slug}: ${recordedCalls} provider calls, score ${snapshot.score} ${snapshot.verdict}, $${snapshot.costUsd?.toFixed(2)}`);
-    const failures = checkExpectations(slug, snapshot);
+    const failures = checkExpectations(slug, snapshot, outcome.reportText, outcome.governingRole);
     for (const failure of failures) console.log(`  ▲ ${failure}`);
     process.exit(0);
   }
@@ -169,13 +197,14 @@ async function main(): Promise<void> {
     for (const slug of slugs) {
       const dir = join(RECORDINGS_ROOT, slug);
       const baseline = readSnapshot(dir);
-      const { result: snapshot, fidelity } = await withRecordedFetch(
+      const { result: outcome, fidelity } = await withRecordedFetch(
         "replay",
         dir,
         () => runPipeline(`@${slug}`, dir),
         { allowLiveHosts: allowLive },
       );
-      const failures = checkExpectations(slug, snapshot);
+      const snapshot = outcome.snapshot;
+      const failures = checkExpectations(slug, snapshot, outcome.reportText, outcome.governingRole);
       const drift = baseline
         ? ` · drift vs recording: score ${baseline.score}→${snapshot.score}, facts ${baseline.verifiedFactCount}→${snapshot.verifiedFactCount}`
         : "";

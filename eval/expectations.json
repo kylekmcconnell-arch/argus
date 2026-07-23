@@ -1,22 +1,61 @@
 {
   "uniswap": {
-    "verdictIn": ["PASS"],
+    "verdictIn": [
+      "PASS"
+    ],
     "scoreMin": 72,
     "scoreMax": 86,
     "minVerifiedFacts": 15,
-    "neverIncomplete": true
+    "neverIncomplete": true,
+    "expectedRole": "PROJECT",
+    "mustSurface": [
+      "uniswap"
+    ]
   },
   "vitalikbuterin": {
-    "verdictIn": ["PASS"],
+    "verdictIn": [
+      "PASS"
+    ],
     "scoreMin": 70,
     "minVerifiedFacts": 8,
-    "neverIncomplete": true
+    "neverIncomplete": true,
+    "expectedRole": "FOUNDER",
+    "mustSurface": [
+      "ethereum"
+    ]
   },
   "aave": {
-    "verdictIn": ["PASS"],
+    "verdictIn": [
+      "PASS"
+    ],
     "scoreMin": 70,
     "scoreMax": 90,
     "minVerifiedFacts": 12,
-    "neverIncomplete": true
+    "neverIncomplete": true,
+    "expectedRole": "PROJECT",
+    "mustSurface": [
+      "aave"
+    ]
+  },
+  "a16zcrypto": {
+    "verdictIn": [
+      "PASS"
+    ],
+    "scoreMin": 60,
+    "minVerifiedFacts": 6,
+    "neverIncomplete": true,
+    "expectedRole": "INVESTOR",
+    "mustSurface": [
+      "a16z|andreessen"
+    ]
+  },
+  "stablekwon": {
+    "scoreMax": 40,
+    "neverIncomplete": true,
+    "expectedRole": "FOUNDER",
+    "mustSurface": [
+      "terra|luna|fraud|charg|collapse|indict"
+    ],
+    "_note": "adverse ground truth (do not miss the fraud); confirm handle status before recording (suspended resolves INCOMPLETE for the wrong reason)"
   }
 }

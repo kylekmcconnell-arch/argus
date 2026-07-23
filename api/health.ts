@@ -76,7 +76,9 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
   // ARGUS_DISCOVERY_MODEL env flip took effect without spending on an audit.
   const analystModel = process.env.ARGUS_ANALYST_MODEL?.trim() || "claude-sonnet-4-6 (default)";
   const discoveryModel = process.env.ARGUS_DISCOVERY_MODEL?.trim() || `${analystModel} (follows analyst)`;
-  const models = { analyst: analystModel, discovery: discoveryModel };
+  const discoveryRoute = process.env.ARGUS_BASIC_FACTS_PRIMARY?.trim()
+    || "claude-web-search (default)";
+  const models = { analyst: analystModel, discovery: discoveryModel, discoveryRoute };
 
   res.setHeader("cache-control", "public, s-maxage=60, stale-while-revalidate=300");
   return res.status(200).json({
