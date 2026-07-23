@@ -3142,6 +3142,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         completeness: dossier.completeness_state ?? null,
       });
       if (delta) {
+        dossier.priorOutcome = { ...prior, delta };
         checkTracker.provider("prior-outcome", "Since last scan", "executed", delta);
         emit({ phase: "Finalize", label: "Since last scan", detail: delta, source: "argus", tone: "neutral" });
       }

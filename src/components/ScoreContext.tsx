@@ -1,5 +1,46 @@
 import { useState } from "react";
 import { getLog, type AuditKind } from "../lib/auditlog";
+import type { Dossier } from "../data/dossier";
+
+/**
+ * Org-wide "since last scan" deltas, stamped into the immutable payload at
+ * finalize. Complements the local-history sparkline: this is what changed
+ * between the two persisted versions, visible to every teammate who opens
+ * the report, not just the browser that ran the scans.
+ */
+export function OutcomeDeltaStrip({
+  prior,
+  score,
+  verdict,
+  coverage,
+}: {
+  prior: NonNullable<Dossier["priorOutcome"]>;
+  score: number | null;
+  verdict: string | null;
+  coverage?: string | null;
+}) {
+  const scoreDelta = prior.score != null && score != null ? score - prior.score : null;
+  const when = prior.capturedAt
+    ? new Date(prior.capturedAt).toLocaleDateString(undefined, { dateStyle: "medium" })
+    : null;
+  const verdictChanged = Boolean(prior.verdict && verdict && prior.verdict !== verdict);
+  const coverageChanged = Boolean(prior.completeness && coverage && prior.completeness !== coverage);
+  if (scoreDelta == null && !verdictChanged && !coverageChanged) return null;
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint" aria-label="Changes since the previous scan">
+      <span className="eyebrow">since v{prior.version}{when ? ` · ${when}` : ""}</span>
+      {scoreDelta != null && (
+        <span className={`chip tabular normal-case tracking-normal ${scoreDelta > 0 ? "tint-pass" : scoreDelta < 0 ? "tint-caution" : ""}`}>
+          {scoreDelta === 0
+            ? `score steady at ${score}`
+            : `score ${prior.score} → ${score} (${scoreDelta > 0 ? "+" : ""}${scoreDelta})`}
+        </span>
+      )}
+      {verdictChanged && <span className="chip normal-case tracking-normal">verdict {prior.verdict} → {verdict}</span>}
+      {coverageChanged && <span className="chip normal-case tracking-normal">coverage {prior.completeness} → {coverage}</span>}
+    </div>
+  );
+}
 
 /**
  * The score's memory and context, from this browser's own audit log: a

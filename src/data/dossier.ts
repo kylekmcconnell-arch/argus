@@ -60,6 +60,19 @@ export interface Dossier {
   // Live collector runs freeze the checks the server actually completed into
   // the immutable payload. Older curated fixtures may omit these fields.
   checkRuns?: ScanCheck[];
+  /**
+   * The previous persisted version's outcome, stamped at finalize so a re-scan
+   * can show its own delta org-wide (not just in one browser's local log).
+   * Absent on first scans and on versions persisted before this field shipped.
+   */
+  priorOutcome?: {
+    version: number;
+    score: number | null;
+    verdict: string | null;
+    completeness: string | null;
+    capturedAt: string | null;
+    delta: string;
+  };
   completeness_state?: "complete" | "partial" | "failed";
   providerSnapshot?: {
     capturedAt: string;

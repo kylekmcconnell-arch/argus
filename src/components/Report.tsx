@@ -30,7 +30,7 @@ import type { SourceArtifact } from "../data/evidence";
 import { SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
-import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
+import { CopyTldrButton, OutcomeDeltaStrip, ScoreContextStrip } from "./ScoreContext";
 import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
@@ -2533,6 +2533,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
             )}
             <ProofChipStrip chips={heroProofChips} />
+            {f.priorOutcome && (
+              <OutcomeDeltaStrip
+                prior={f.priorOutcome}
+                score={typeof report.governing_score === "number" ? report.governing_score : null}
+                verdict={report.composite_verdict ?? null}
+                coverage={f.completeness_state}
+              />
+            )}
           </div>
         </section>
 
