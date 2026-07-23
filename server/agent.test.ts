@@ -5876,6 +5876,28 @@ describe("project band reasons contract (failed-persist regression)", () => {
     expect(p4.reasons).toContain("1 verified investor record");
   });
 
+  it("a verified operating partnership supports P4 and carries its artifact", async () => {
+    const { buildScoringEvidencePacket, deriveProjectStrengthBands } = await import("./agent");
+    const { getProfile, SubjectClass } = await import("../src/engine");
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      basicFacts: [{
+        predicate: "partnership",
+        value: "Pyth Network",
+        status: "verified",
+        artifact_verified: true,
+        artifactId: "basic-fact:partnership:pyth",
+      }],
+    }, axes);
+    const packetFact = (JSON.parse(packet) as { basicFacts: Array<{ artifactId: string }> }).basicFacts[0];
+    const p4 = deriveProjectStrengthBands(packet, axes).P4_backing_and_partners;
+
+    expect(p4.tier).toBe("solid");
+    expect(p4.reasons).toContain("1 verified operating relationship");
+    expect(p4.anchorArtifactIds).toContain(packetFact.artifactId);
+  });
+
   it("every derived band satisfies the persist contract: reasons for non-none tiers, unique, capped", async () => {
     const { buildScoringEvidencePacket, deriveProjectStrengthBands } = await import("./agent");
     const { getProfile, SubjectClass } = await import("../src/engine");

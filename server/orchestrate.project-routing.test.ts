@@ -278,6 +278,28 @@ describe("provider-backed project routing", () => {
     expect(outcome.detail).toContain("2 verified disclosure records");
   });
 
+  it("counts a verified operating partnership as backing evidence", () => {
+    const evidence = resolvedProjectProfile("the Solana liquidity protocol", "https://jup.ag");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.basicFacts = [basicFact("partnership", "Pyth Network")];
+    const checks: CheckObservation[] = [];
+    const ctx: CollectContext = {
+      handle: "@JupiterExchange",
+      evidence,
+      emit: () => undefined,
+      recordCheck: (check) => checks.push(check),
+    };
+
+    collectProjectCoreEvidenceOutcomes(ctx);
+
+    expect(checks).toContainEqual(expect.objectContaining({
+      id: "project-backing-partners",
+      status: "confirmed",
+      sourceCount: 1,
+      note: expect.stringContaining("operating-partner record was verified"),
+    }));
+  });
+
   it("counts distinct publishers under a two-label public suffix as independent identity witnesses", () => {
     const evidence = resolvedProjectProfile("the example protocol", "https://project.example");
     evidence.roles = [SubjectClass.PROJECT];

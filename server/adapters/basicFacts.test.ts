@@ -12,6 +12,7 @@ import {
   discoverGrokBasicFactLeadsDetailed,
   discoverPrimary,
   parseBasicFactLeads,
+  resolveBasicFactCandidates,
   verifyBasicFactLead,
   overlappingNetworkAnswers,
 } from "./basicFacts";
@@ -123,6 +124,8 @@ describe("basic-facts lead parsing", () => {
       "project.launched",
       "project.network",
       "project.funding",
+      "project.investor",
+      "project.partnership",
       "project.repository",
       "project.traction",
       "project.legal_entity",
@@ -4216,6 +4219,134 @@ WBTC is an ERC-20 wrapped token issued by BitGo. Coinbase customers can trade WB
       "@JupiterExchange",
       ["https://jup.ag"],
     )).toEqual(expect.objectContaining({ predicate: "funding", status: "verified" }));
+  });
+
+  it("freezes funding to the amount and round stated by the fetched source", () => {
+    const passage = "Jupiter raised a $100 million Series A.";
+    expect(verifyBasicFactLead(
+      lead({
+        predicate: "funding",
+        value: "$100 million Series A announced in 2024",
+        questionId: "project.funding",
+        excerpt: passage,
+        sourceUrl: "https://jup.ag/news/series-a",
+      }),
+      document({
+        url: "https://jup.ag/news/series-a",
+        host: "jup.ag",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toEqual(expect.objectContaining({
+      predicate: "funding",
+      value: "$100 million Series A",
+      status: "verified",
+    }));
+  });
+
+  it("publishes a partnership only after the named counterparty confirms it", () => {
+    const passage = "Jupiter partnered with Pyth Network.";
+    const projectClaim = verifyBasicFactLead(
+      lead({
+        predicate: "partnership",
+        value: "Pyth Network",
+        questionId: "project.partnership",
+        excerpt: passage,
+        sourceUrl: "https://jup.ag/integrations/pyth",
+      }),
+      document({
+        url: "https://jup.ag/integrations/pyth",
+        host: "jup.ag",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    );
+    const counterpartyClaim = verifyBasicFactLead(
+      lead({
+        predicate: "partnership",
+        value: "Pyth Network",
+        questionId: "project.partnership",
+        excerpt: passage,
+        sourceUrl: "https://pyth.network/integrations/jupiter",
+      }),
+      document({
+        url: "https://pyth.network/integrations/jupiter",
+        host: "pyth.network",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    );
+
+    expect(projectClaim).toEqual(expect.objectContaining({
+      predicate: "partnership",
+      status: "verified",
+    }));
+    expect(resolveBasicFactCandidates([projectClaim!])).toEqual([]);
+    expect(counterpartyClaim).toEqual(expect.objectContaining({
+      predicate: "partnership",
+      status: "verified",
+      sources: [expect.objectContaining({ sourceClass: "official_counterparty" })],
+    }));
+    expect(resolveBasicFactCandidates([projectClaim!, counterpartyClaim!])).toEqual([
+      expect.objectContaining({
+        predicate: "partnership",
+        value: "Pyth Network",
+        status: "verified",
+      }),
+    ]);
+  });
+
+  it("does not grant counterparty authority to a lookalike subdomain", () => {
+    const passage = "Jupiter partnered with Pyth Network.";
+    const lookalikeClaim = verifyBasicFactLead(
+      lead({
+        predicate: "partnership",
+        value: "Pyth Network",
+        questionId: "project.partnership",
+        excerpt: passage,
+        sourceUrl: "https://pyth-network.attacker.com/integrations/jupiter",
+      }),
+      document({
+        url: "https://pyth-network.attacker.com/integrations/jupiter",
+        host: "pyth-network.attacker.com",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    );
+
+    expect(lookalikeClaim).toEqual(expect.objectContaining({
+      sources: [expect.not.objectContaining({ sourceClass: "official_counterparty" })],
+    }));
+    expect(resolveBasicFactCandidates([lookalikeClaim!])).toEqual([]);
+  });
+
+  it("rejects an ended partnership even when both parties are named", () => {
+    const passage = "Jupiter is no longer partnered with Pyth Network.";
+    expect(verifyBasicFactLead(
+      lead({
+        predicate: "partnership",
+        value: "Pyth Network",
+        questionId: "project.partnership",
+        excerpt: passage,
+        sourceUrl: "https://pyth.network/integrations/jupiter",
+      }),
+      document({
+        url: "https://pyth.network/integrations/jupiter",
+        host: "pyth.network",
+        text: `<p>${passage}</p>`,
+      }),
+      ["Jupiter", "@JupiterExchange"],
+      "@JupiterExchange",
+      ["https://jup.ag"],
+    )).toBeNull();
   });
 
   it("accepts an official token construction whose subject follows the predicate", () => {

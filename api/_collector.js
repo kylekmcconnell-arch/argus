@@ -1,6 +1,6 @@
 // server/config.ts
 var PROVIDERS = [
-  { id: "claude-research", label: "Claude (cited basic-facts research)", env: ["ANTHROPIC_API_KEY"], free: false, feeds: "founders, product, token, launch, governance, audits, repositories, funding and traction leads with sources" },
+  { id: "claude-research", label: "Claude (cited basic-facts research)", env: ["ANTHROPIC_API_KEY"], free: false, feeds: "founders, product, token, launch, governance, audits, repositories, funding, partnerships and traction leads with sources" },
   { id: "grok", label: "Grok (X + cited web discovery)", env: ["XAI_API_KEY"], free: false, feeds: "testimonial acknowledgment, recent activity, sentiment, portfolio and fund-scale leads" },
   { id: "twitterapi", label: "twitterapi.io (X follow graph)", env: ["TWITTERAPI_KEY"], free: false, feeds: "follower/following graph, profile, account age" },
   { id: "coingecko", label: "CoinGecko", env: ["COINGECKO_API_KEY"], free: true, feeds: "token price/mcap, call performance (K2)" },
@@ -3247,6 +3247,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   const officialFacts = verifiedFacts("official_identity");
   const fundingFacts = verifiedFacts("funding");
   const investorFacts = verifiedFacts("investor");
+  const partnershipFacts = verifiedFacts("partnership");
   const tractionFacts = verifiedFacts("traction");
   const protocolTractionFacts = tractionFacts.filter((fact) => {
     const text2 = factText([fact]);
@@ -3329,10 +3330,10 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...p3Assessment ? [p3Assessment.artifactId] : []
   ], p3FinalFloorTier);
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
-  let p4FloorTier = fundingFacts.length || investorFacts.length || advisorTeam.length ? "emerging" : "none";
-  if (investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4FloorTier = "solid";
-  let p4Tier = fundingFacts.length || investorFacts.length || advisorTeam.length || relationshipPress.length ? "emerging" : "none";
-  if (relationshipPress.length > 0 || investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4Tier = "solid";
+  let p4FloorTier = fundingFacts.length || investorFacts.length || partnershipFacts.length || advisorTeam.length ? "emerging" : "none";
+  if (investorFacts.length > 0 || partnershipFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4FloorTier = "solid";
+  let p4Tier = fundingFacts.length || investorFacts.length || partnershipFacts.length || advisorTeam.length || relationshipPress.length ? "emerging" : "none";
+  if (relationshipPress.length > 0 || investorFacts.length > 0 || partnershipFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4Tier = "solid";
   if (distinctRelationshipKeys.size >= 2) p4Tier = "exceptional";
   const p4Assessment = p4Tier === "none" && (limitingByAxis.get("P4_backing_and_partners") ?? []).length === 0 ? assessmentArtifactFor("P4_backing_and_partners", "project-backing-partners") : null;
   const p4FinalTier = p4Assessment ? "assessed_null" : p4Tier;
@@ -3340,10 +3341,11 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     ...relationshipPress.length ? [`${distinctRelationshipKeys.size} material relationship source${distinctRelationshipKeys.size === 1 ? "" : "s"}`] : [],
     ...fundingFacts.length ? ["source-backed financing state"] : [],
     ...investorFacts.length ? [`${investorFacts.length} verified investor record${investorFacts.length === 1 ? "" : "s"}`] : [],
+    ...partnershipFacts.length ? [`${partnershipFacts.length} verified operating relationship${partnershipFacts.length === 1 ? "" : "s"}`] : [],
     ...advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : [],
     ...p4Assessment ? ["completed backing assessment found no verified backer or partner"] : []
   ], [
-    ...artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...advisorTeam]),
+    ...artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...partnershipFacts, ...advisorTeam]),
     ...p4Assessment ? [p4Assessment.artifactId] : []
     // An assessed-null band is a plain band, never a press-widened one.
   ], p4Assessment ? void 0 : p4FloorTier);
@@ -3758,6 +3760,7 @@ var PROJECT_BASIC_FACT_AXIS_ELIGIBILITY = {
   legal_entity: ["P1_team_and_identity", "P6_transparency_integrity"],
   funding: ["P4_backing_and_partners"],
   investor: ["P4_backing_and_partners"],
+  partnership: ["P4_backing_and_partners"],
   governance: ["P3_token_conduct", "P6_transparency_integrity"],
   control: ["P3_token_conduct", "P6_transparency_integrity"],
   conflict_of_interest: ["P6_transparency_integrity"],
@@ -7758,6 +7761,7 @@ var PROJECT_QUESTIONS = [
   ["legal_entity", "Which legal entity is responsible?"],
   ["funding", "How much funding has it raised?"],
   ["investor", "Who funded it?"],
+  ["partnership", "Which material partners or integrations are verified?"],
   ["governance", "Who controls governance and the treasury?"],
   ["audit", "Has the code been independently audited?"],
   ["repository", "Where is the source code maintained?"],
@@ -7824,6 +7828,10 @@ var PREDICATE_ALIASES = {
   incorporation: "legal_entity",
   company: "legal_entity",
   investors: "investor",
+  partners: "partnership",
+  partnerships: "partnership",
+  integration: "partnership",
+  integrations: "partnership",
   fundraising: "funding",
   security_audits: "audit",
   audits: "audit",
@@ -9118,6 +9126,7 @@ var PREDICATES = /* @__PURE__ */ new Set([
   "public_security",
   "funding",
   "investor",
+  "partnership",
   "product",
   "network",
   "legal_entity",
@@ -9140,7 +9149,10 @@ var CRITICAL_PREDICATES = /* @__PURE__ */ new Set([
   "executive",
   "track_record",
   "official_token",
-  "public_security"
+  "public_security",
+  "funding",
+  "investor",
+  "partnership"
 ]);
 var LEAD_COVERAGE_CATEGORIES = [
   ["official_identity"],
@@ -9162,7 +9174,7 @@ var LEAD_COVERAGE_CATEGORIES = [
   ["control", "conflict_of_interest"],
   ["legal_regulatory_event"],
   ["repository"],
-  ["funding", "investor"],
+  ["funding", "investor", "partnership"],
   ["network"],
   ["founded", "launched"]
 ];
@@ -9189,7 +9201,8 @@ var PROJECT_QUESTIONS2 = [
   { batch: "track_record", predicate: "public_security", question: "Does the organization have a publicly traded equity or debt security distinct from any crypto token?" },
   { batch: "track_record", predicate: "network", question: "Which blockchain networks or chains does it run on?", critical: true },
   { batch: "track_record", predicate: "funding", question: "What source-backed funding rounds or amounts has it raised?", critical: true },
-  { batch: "track_record", predicate: "investor", question: "Which named investors or backers are source-backed? Return one per answer." },
+  { batch: "track_record", predicate: "investor", question: "Which named investors or backers are source-backed? Return one per answer.", critical: true },
+  { batch: "track_record", predicate: "partnership", question: "Which material operating partners, counterparties, or product integrations are source-backed? Return one named relationship per answer and exclude rumors, proposals, and ended relationships.", critical: true },
   { batch: "track_record", predicate: "repository", question: "Where is the official source code maintained?", critical: true },
   { batch: "track_record", predicate: "traction", question: "What concrete, dated usage, revenue, volume, users, fees, TVL, or adoption metrics are public?", critical: true },
   { batch: "structure_risk", predicate: "legal_entity", question: "Which legal entity is responsible for the project?", critical: true },
@@ -9338,6 +9351,8 @@ var STRUCTURED_VALUE_PREDICATES = /* @__PURE__ */ new Set([
   "product",
   "exit",
   "track_record",
+  "funding",
+  "partnership",
   "public_security"
 ]);
 var VALUE_STOP_TOKENS = /* @__PURE__ */ new Set([
@@ -9433,6 +9448,28 @@ var VALUE_DESCRIPTOR_TOKENS = {
     "user",
     "volume"
   ]),
+  funding: /* @__PURE__ */ new Set([
+    "capital",
+    "financing",
+    "funding",
+    "fundraise",
+    "raise",
+    "raised",
+    "round",
+    "seed",
+    "series",
+    "strategic"
+  ]),
+  partnership: /* @__PURE__ */ new Set([
+    "collaboration",
+    "collaborator",
+    "counterparty",
+    "integrated",
+    "integration",
+    "partner",
+    "partnership",
+    "provider"
+  ]),
   public_security: /* @__PURE__ */ new Set([
     "bond",
     "class",
@@ -9514,6 +9551,7 @@ function tickerIsExplicitlyIdentified(passage, ticker) {
 }
 function structuredValueIsSupported(passage, lead, trustedContextTokens = /* @__PURE__ */ new Set()) {
   if (!STRUCTURED_VALUE_PREDICATES.has(lead.predicate)) return false;
+  if (lead.predicate === "funding") return verifiedFundingValue(lead.value, passage) !== null;
   const valueTokens = canonicalValueTokens(lead.value);
   if (!valueTokens.length) return false;
   const passageTokens = new Set(canonicalValueTokens(passage));
@@ -9587,6 +9625,35 @@ function verifiedPublicSecurityValue(value, passage) {
   const supportedClass = MATERIAL_SECURITY_CLAIMS.map((pattern) => pattern.exec(value)?.[0]).find((claim) => claim && looseContainsPhrase(passage, claim));
   return `${ticker} (${issuer}, ${venue ? `${venue}-listed` : "publicly traded"} ${supportedClass ?? "security"})`;
 }
+function fundingAmounts(value) {
+  const pattern = /(?:\b(?:usd|us\$)\s*|[$€£]\s*)\d[\d,]*(?:\.\d+)?\s*(?:thousand|million|billion|[kmb])?\b|\b\d[\d,]*(?:\.\d+)?\s*(?:thousand|million|billion)\s+(?:u\.s\.\s+)?dollars?\b/gi;
+  return [...value.matchAll(pattern)].flatMap((match) => {
+    const display = normalize(match[0]);
+    const normalized4 = display.toLowerCase().replace(/,/g, "").replace(/\s+/g, " ");
+    const numeric = normalized4.match(/\d+(?:\.\d+)?/)?.[0];
+    if (!numeric) return [];
+    const magnitude = /\bbillion\b|\bb\b/.test(normalized4) ? "billion" : /\bmillion\b|\bm\b/.test(normalized4) ? "million" : /\bthousand\b|\bk\b/.test(normalized4) ? "thousand" : "";
+    const currency = /€/.test(display) ? "eur" : /£/.test(display) ? "gbp" : "usd";
+    return [{ display, key: `${currency}:${numeric}:${magnitude}` }];
+  });
+}
+function verifiedFundingValue(value, passage) {
+  const claimed = fundingAmounts(value);
+  const observed = fundingAmounts(passage);
+  const amount = claimed.flatMap((candidate) => {
+    const match = observed.find((source2) => source2.key === candidate.key);
+    return match ? [match.display] : [];
+  })[0];
+  if (!amount) return looseContainsPhrase(passage, value) ? normalize(value) : null;
+  const round = [
+    /\bpre[- ]seed\b/i,
+    /\bseed(?:\s+round)?\b/i,
+    /\bseries\s+[a-h]\b/i,
+    /\bstrategic\s+(?:financing|funding|round)\b/i,
+    /\btoken\s+sale\b/i
+  ].map((pattern) => pattern.exec(value)?.[0]).find((candidate) => candidate && looseContainsPhrase(passage, candidate));
+  return normalize(`${amount}${round ? ` ${round}` : ""}`);
+}
 function safeCandidateUrl(value) {
   if (typeof value !== "string" || value.length > 2e3) return null;
   try {
@@ -9617,7 +9684,7 @@ function rawBasicFactCount(text2) {
 function isAtomicValue(predicate, value) {
   if (/[;\n]/.test(value)) return false;
   if (/\s(?:and|&)\s/i.test(value) && predicate !== "current_role" && predicate !== "prior_role") return false;
-  if (["founder", "executive", "investor"].includes(predicate) && value.includes(",")) return false;
+  if (["founder", "executive", "investor", "partnership"].includes(predicate) && value.includes(",")) return false;
   return true;
 }
 function atomicPersonVentureValue(value) {
@@ -9842,7 +9909,7 @@ function discoveryPrompt(ctx, questions, phase = "primary") {
     targetedIdentityInstruction,
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
-    "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
+    "Return one atomic value per row. Never combine multiple founders, people, investors, partners, integrations, tokens, networks, or products in one value.",
     // ARGUS locates the value verbatim in the fetched page, so a composed phrase
     // verifies against nothing and, because each source phrases it differently,
     // also stops two sources corroborating one fact.
@@ -9852,6 +9919,8 @@ function discoveryPrompt(ctx, questions, phase = "primary") {
     "Set question_id to the exact bracketed question ID. The predicate must match that question.",
     "Each exact_excerpt must be a verbatim one-to-three sentence passage that itself explicitly contains the subject identity, the claimed value, and language proving the predicate.",
     "For traction facts, copy the source's exact as-of date or reporting period into qualifier, preferably an explicit date phrase, only when that phrase appears in exact_excerpt. Never infer, normalize, or invent a date. Omit qualifier when the source does not state a period.",
+    "For funding facts, keep value to the exact amount and named round or stage stated in exact_excerpt. Put a date in qualifier only when exact_excerpt states it.",
+    "For partnership facts, value must be one named counterparty or integration. The excerpt must state a current affirmative operating relationship. Exclude rumors, proposals, co-mentions, denials, former partners, and ended integrations.",
     "Keep an official crypto token separate from a publicly traded equity or debt security. Never put stock in official_token and never put a crypto token in public_security.",
     "For legal_regulatory_event, include attributed_entity and event_status only when the exact excerpt states them. Never attribute a company-only event to a founder or employee.",
     "Keep formal governance, practical control, and explicit conflicts of interest separate. Do not infer control or a conflict from a job title alone.",
@@ -10327,6 +10396,7 @@ var PREDICATE_PATTERNS = {
   public_security: /\b(?:publicly traded|listed (?:on|company)|stock|shares?|equity|debt security|bond|nasdaq|nyse|ticker symbol|initial public offering|ipo)\b/i,
   funding: /\b(?:raised|raises|funding|financing|fundraise|round|capital)\b/i,
   investor: /\b(?:invested|investment|investor|backed|backing|led the round|participated in)\b/i,
+  partnership: /\b(?:partner(?:s|ed)?\s+with|partnership|integration\s+partner|integrat(?:e[sd]?|ion)\s+(?:with|into)|collaborat(?:e[sd]?|ion)\s+with|powered\s+by|uses?\s+(?:the\s+)?[A-Z][A-Za-z0-9.-]+\s+(?:oracle|bridge|infrastructure|network|service|technology))\b/i,
   product: /\b(?:product|platform|protocol|service|aggregator|exchange|marketplace|wallet|application|app)\b/i,
   network: /\b(?:blockchain|network|chain|mainnet|built on|deployed on|runs on|(?:on|for)\s+(?:the\s+)?(?:ethereum|solana|polygon|arbitrum|optimism|avalanche|base|bnb(?:\s+chain)?|bitcoin|cosmos|sui|aptos|near|tron|ton|polkadot|cardano))\b/i,
   legal_entity: /\b(?:legal entity|company|corporation|incorporated|foundation|limited|ltd\.?|inc\.?|llc|labs)\b/i,
@@ -10341,6 +10411,7 @@ var PREDICATE_PATTERNS = {
   repository: /\b(?:github|source code|codebase|repository|repo|open source|open-source)\b/i,
   traction: /\b(?:users?|customers?|volume|tvl|total value locked|transactions?|revenue|fees|usage|adoption|downloads?|active wallets?)\b/i
 };
+var PARTNERSHIP_UNCERTAINTY = /\b(?:alleged|ended|expired|false|former|no longer|not partnered|potential|proposed|rumou?r(?:ed)?|speculative|terminated|would partner)\b/i;
 var EXPLICIT_OFFICIAL_CRYPTO_TOKEN = /\b(?:official|governance|native|utility|crypto(?:currency)?)\s+(?:crypto\s+)?token\b/i;
 var EXPLICIT_WRAPPED_OR_ERC_TOKEN = /\b(?:wrapped(?:\s+[a-z0-9-]+){0,3}\s+token|erc[- ]?\d+\s+(?:wrapped\s+)?token)\b/i;
 function positivePredicateMatches(excerpt, predicate) {
@@ -10420,7 +10491,8 @@ var DIRECT_RELATION_PREDICATES = /* @__PURE__ */ new Set([
   "current_role",
   "prior_role",
   "founder",
-  "executive"
+  "executive",
+  "partnership"
 ]);
 var RELATION_CHAIN_PREDICATES = /* @__PURE__ */ new Set([
   "founded",
@@ -11085,6 +11157,49 @@ function sameOfficialScope(document, officialScopes) {
     return comparableCandidatePath === comparableConfiguredPath || comparableCandidatePath.startsWith(`${comparableConfiguredPath}/`);
   });
 }
+var NON_COUNTERPARTY_RELATIONSHIP_HOSTS = /* @__PURE__ */ new Set([
+  ...PATH_TENANTED_HOSTS,
+  "blockworks.co",
+  "businesswire.com",
+  "coindesk.com",
+  "coinmarketcap.com",
+  "cointelegraph.com",
+  "crunchbase.com",
+  "decrypt.co",
+  "globenewswire.com",
+  "messari.io",
+  "pitchbook.com",
+  "prnewswire.com",
+  "theblock.co",
+  "wikipedia.org",
+  "yahoo.com"
+]);
+var RELATIONSHIP_HOST_STOP_TOKENS = /* @__PURE__ */ new Set([
+  ...HOST_CONTEXT_STOP_TOKENS,
+  "app",
+  "data",
+  "feeds",
+  "finance",
+  "foundation",
+  "global",
+  "labs",
+  "network",
+  "protocol",
+  "service",
+  "services",
+  "technology",
+  "technologies"
+]);
+function relationshipCounterpartyHostMatches(document, value) {
+  const host = normalizedHost(document.host);
+  if (NON_COUNTERPARTY_RELATIONSHIP_HOSTS.has(host)) return false;
+  const registered = registrableDomain(`https://${host}`);
+  const organizationLabel = registered?.split(".")[0] ?? "";
+  const hostTokens = looseTokens(organizationLabel).filter((token) => !RELATIONSHIP_HOST_STOP_TOKENS.has(token));
+  const valueTokens = looseTokens(value).filter((token) => !RELATIONSHIP_HOST_STOP_TOKENS.has(token));
+  if (!hostTokens.length || !valueTokens.length || valueTokens.length > 4) return false;
+  return hostTokens.join("") === valueTokens.join("");
+}
 var REGULATORY_HOSTS = [
   "sec.gov",
   "justice.gov",
@@ -11339,10 +11454,12 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
     "legal_entity",
     "governance",
     "public_security",
-    "official_token"
+    "official_token",
+    "partnership"
   ])).has(lead.predicate);
   const applicableCounterpartyHosts = ventureAssetPredicate ? authoritativeAssetRelationships.flatMap((relationship) => relationship.officialScopes) : officialCounterpartyHosts;
-  const officialCounterparty = !official && counterpartyPredicate && sameOfficialScope(document, applicableCounterpartyHosts);
+  const inferredRelationshipCounterparty = lead.predicate === "partnership" && !official && relationshipCounterpartyHostMatches(document, lead.value);
+  const officialCounterparty = !official && counterpartyPredicate && (sameOfficialScope(document, applicableCounterpartyHosts) || inferredRelationshipCounterparty);
   const contextTokens = official || officialCounterparty ? trustedHostContextTokens(document.host) : /* @__PURE__ */ new Set();
   const personOrInvestorAsset = /^(?:person|investor)\./.test(lead.questionId ?? "");
   const officialAssetPageEvidence = lead.predicate === "official_token" && personOrInvestorAsset && officialCounterparty && authoritativeAssetRelationships.length ? officialVentureAssetPagePassage(document, page, lead, authoritativeAssetRelationships) : null;
@@ -11350,6 +11467,7 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
   if (!excerpt) return null;
   const claimClause = officialAssetPageEvidence ?? governingClaimClause(excerpt, lead, verificationAliases, contextTokens);
   if (!claimClause) return null;
+  if (lead.predicate === "partnership" && PARTNERSHIP_UNCERTAINTY.test(claimClause)) return null;
   if (lead.predicate === "official_token" && authoritativeAssetRelationships.length) {
     const explicitTokenLanguage = Boolean(officialAssetPageEvidence) || EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) || EXPLICIT_WRAPPED_OR_ERC_TOKEN.test(claimClause);
     const affirmativeVentureLink = relationshipBoundTokenHasAffirmativeVentureLink(
@@ -11360,7 +11478,7 @@ function verifyBasicFactLead(lead, document, aliases, subjectKey = lead.subject,
     if (personOrInvestorAsset && (!explicitTokenLanguage || !affirmativeVentureLink)) return null;
     if (!personOrInvestorAsset && !EXPLICIT_OFFICIAL_CRYPTO_TOKEN.test(claimClause) && !affirmativeVentureLink) return null;
   }
-  const verifiedValue = lead.predicate === "public_security" ? verifiedPublicSecurityValue(lead.value, claimClause) : lead.value;
+  const verifiedValue = lead.predicate === "public_security" ? verifiedPublicSecurityValue(lead.value, claimClause) : lead.predicate === "funding" ? verifiedFundingValue(lead.value, claimClause) : lead.value;
   if (!verifiedValue) return null;
   const regulatory = !official && !officialCounterparty && regulatorySourceSupports(document.host, lead.predicate);
   const supportedQualifier = lead.qualifier && looseContainsPhrase(claimClause, lead.qualifier) ? lead.qualifier : void 0;
@@ -11415,6 +11533,7 @@ var MULTI_VALUE_PREDICATES = /* @__PURE__ */ new Set([
   "product",
   "funding",
   "investor",
+  "partnership",
   "governance",
   "public_security",
   "legal_entity",
@@ -11561,6 +11680,15 @@ function resolveBasicFactCandidates(candidates) {
     const sources = dedupeSources(rows);
     const official = sources.some((source2) => source2.sourceClass === "official_subject" || source2.sourceClass === "official_counterparty" || source2.sourceClass === "regulatory_or_onchain");
     const independentHosts = new Set(sources.filter((source2) => source2.sourceClass === "independent_press").map((source2) => new URL(source2.url).hostname.replace(/^www\./, "")));
+    if (rows[0]?.predicate === "partnership") {
+      const counterpartyConfirmed = sources.some((source2) => source2.sourceClass === "official_counterparty");
+      if (!counterpartyConfirmed && independentHosts.size < 2) return [];
+      return [{
+        ...rows[0],
+        status: counterpartyConfirmed ? "verified" : "corroborated",
+        sources
+      }];
+    }
     if (rows[0]?.predicate === "public_security" && !official) continue;
     if (!official && independentHosts.size < 2) {
       strictFailures.push(rows);
@@ -18984,28 +19112,28 @@ function collectProjectCoreEvidenceOutcomes(ctx, options = {}) {
   const verifiedBackers = (ctx.evidence.webTeam ?? []).slice(0, 32).filter(
     (member) => member.artifact_verified === true && member.evidence_origin !== "model_lead" && !!member.provider && PROJECT_BACKING_PROVIDERS.has(member.provider) && PROJECT_BACKING_ROLE.test(member.role)
   );
-  const verifiedInvestorFacts = (ctx.evidence.basicFacts ?? []).filter(
-    (fact) => fact.predicate === "investor" && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")
+  const verifiedBackingFacts = (ctx.evidence.basicFacts ?? []).filter(
+    (fact) => (fact.predicate === "funding" || fact.predicate === "investor" || fact.predicate === "partnership") && fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated")
   );
-  const backingCount = verifiedBackers.length + verifiedInvestorFacts.length;
+  const backingCount = verifiedBackers.length + verifiedBackingFacts.length;
   if (backingCount) {
     const providers = [.../* @__PURE__ */ new Set([
       ...verifiedBackers.map((member) => member.provider),
-      ...verifiedInvestorFacts.length ? ["basic-facts-web"] : []
+      ...verifiedBackingFacts.length ? ["basic-facts-web"] : []
     ])];
     ctx.recordCheck?.({
       id: "project-backing-partners",
       status: "confirmed",
-      note: `${backingCount} named advisor, backer, or investor record${backingCount === 1 ? " was" : "s were"} verified from fetched public evidence; funding terms and institutional investment were not inferred beyond these named records`,
+      note: `${backingCount} funding, investor, advisor, counterparty, or operating-partner record${backingCount === 1 ? " was" : "s were"} verified from fetched public evidence; relationship terms were not inferred beyond those sources`,
       provider: providers.join("/"),
-      sourceCount: verifiedBackers.length + verifiedInvestorFacts.reduce((total, fact) => total + fact.sources.length, 0)
+      sourceCount: verifiedBackers.length + verifiedBackingFacts.reduce((total, fact) => total + fact.sources.length, 0)
     });
   } else {
     const assessable = (ctx.evidence.webTeam ?? []).length > 0 || (ctx.evidence.basicFacts ?? []).length > 0 || ctx.evidence.profile.site_substance_status === "live";
     ctx.recordCheck?.({
       id: "project-backing-partners",
       status: assessable ? "finding" : "checked-empty",
-      note: assessable ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified financial backer, investor, or advisor appears; product partnerships require separate source verification, and model-only leads were excluded. A null result on this axis, not adverse evidence." : "bounded scan of up to 32 frozen first-party team and account records found no verified financial backer, investor, or advisor; product partnerships require separate source verification, and model-only leads were excluded",
+      note: assessable ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified funding, investor, advisor, counterparty, or operating-partner evidence appears. Project-only partnership claims and model-only leads were excluded. This is a null result on this axis, not adverse evidence." : "bounded scan of up to 32 frozen first-party team and account records found no verified funding, investor, advisor, counterparty, or operating-partner evidence; project-only partnership claims and model-only leads were excluded",
       provider: "project-core-evidence"
     });
   }

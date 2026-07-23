@@ -2687,15 +2687,13 @@ function relationshipCounterpartyHostMatches(
 ): boolean {
   const host = normalizedHost(document.host);
   if (NON_COUNTERPARTY_RELATIONSHIP_HOSTS.has(host)) return false;
-  const hostTokens = looseTokens(host).filter((token) => !RELATIONSHIP_HOST_STOP_TOKENS.has(token));
+  const registered = registrableDomain(`https://${host}`);
+  const organizationLabel = registered?.split(".")[0] ?? "";
+  const hostTokens = looseTokens(organizationLabel)
+    .filter((token) => !RELATIONSHIP_HOST_STOP_TOKENS.has(token));
   const valueTokens = looseTokens(value).filter((token) => !RELATIONSHIP_HOST_STOP_TOKENS.has(token));
   if (!hostTokens.length || !valueTokens.length || valueTokens.length > 4) return false;
-  const hostJoined = hostTokens.join("");
-  const valueJoined = valueTokens.join("");
-  return valueTokens.every((token) =>
-    hostTokens.includes(token)
-    || (token.length >= 4 && hostJoined.includes(token))
-    || (hostJoined.length >= 4 && valueJoined.includes(hostJoined)));
+  return hostTokens.join("") === valueTokens.join("");
 }
 
 const REGULATORY_HOSTS = [

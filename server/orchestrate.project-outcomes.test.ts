@@ -120,7 +120,7 @@ describe("project core evidence outcomes", () => {
       status: "confirmed",
       provider: "team-page",
       sourceCount: 1,
-      note: expect.stringContaining("funding terms and institutional investment were not inferred"),
+      note: expect.stringContaining("relationship terms were not inferred beyond those sources"),
     }));
     expect(outcomes).toContainEqual(expect.objectContaining({
       id: "project-transparency",
@@ -159,7 +159,7 @@ describe("project core evidence outcomes", () => {
       id: "project-backing-partners",
       status: "finding",
       provider: "project-core-evidence",
-      note: expect.stringContaining("no verified financial backer, investor, or advisor appears"),
+      note: expect.stringContaining("no verified funding, investor, advisor, counterparty, or operating-partner evidence appears"),
     }));
   });
 
@@ -175,7 +175,7 @@ describe("project core evidence outcomes", () => {
       id: "project-backing-partners",
       status: "checked-empty",
       provider: "project-core-evidence",
-      note: expect.stringContaining("product partnerships require separate source verification"),
+      note: expect.stringContaining("project-only partnership claims and model-only leads were excluded"),
     }));
   });
 
