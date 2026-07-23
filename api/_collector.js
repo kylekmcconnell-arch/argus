@@ -19358,6 +19358,55 @@ function downgradeFixtureEvidenceForLive(seed) {
     basicFactLeads: []
   };
 }
+function mergeManagementIntoWebTeam(evidence, emit) {
+  const management = evidence.companyEnrichment?.management ?? [];
+  if (!management.length) return;
+  const webTeam = evidence.webTeam ?? (evidence.webTeam = []);
+  const norm3 = (value) => (value ?? "").trim().toLowerCase().replace(/^@/, "");
+  let added = 0;
+  let corroborated = 0;
+  for (const person of management) {
+    const name = person.name?.trim();
+    if (!name) continue;
+    const existing = webTeam.find((member) => norm3(member.name) === norm3(name));
+    if (existing) {
+      if (!existing.linkedin && person.linkedin) {
+        existing.linkedin = person.linkedin;
+        existing.identity_link_evidence_origin = "deterministic";
+      }
+      if ((!existing.role || /^team$/i.test(existing.role)) && person.title) existing.role = person.title;
+      if (existing.artifact_verified !== true) {
+        existing.evidence_origin = "deterministic";
+        existing.artifact_verified = true;
+        existing.provider = "monid";
+        corroborated += 1;
+      }
+      continue;
+    }
+    webTeam.push({
+      name,
+      role: person.title?.trim() || "leadership",
+      linkedin: person.linkedin ?? void 0,
+      evidence: person.priorCompanies?.length ? `prior: ${person.priorCompanies.slice(0, 3).join(", ")}` : void 0,
+      source: "Monid/Akta leadership record",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "monid",
+      identity_link_evidence_origin: "deterministic",
+      projects_evidence_origin: "deterministic"
+    });
+    added += 1;
+  }
+  if (added || corroborated) {
+    emit({
+      phase: "P1 \xB7 Team",
+      label: "Leadership roster from private-market data",
+      detail: `${added} leadership profile${added === 1 ? "" : "s"} added${corroborated ? ` and ${corroborated} existing member${corroborated === 1 ? "" : "s"} corroborated` : ""} from the Monid/Akta management record.`,
+      source: "monid",
+      tone: "good"
+    });
+  }
+}
 async function runAuditWithLedger(rawHandle, emit, options) {
   const runtimeStartedAt = Date.now();
   const analystDeadlineAt = options?.analystDeadlineAt ?? runtimeStartedAt + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1e3 - ANALYST_FINALIZATION_RESERVE_MS;
@@ -19507,7 +19556,10 @@ async function runAuditWithLedger(rawHandle, emit, options) {
             }),
             MONID_ENRICHMENT_BUDGET_MS
           );
-          if (enrichment?.available) evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+          if (enrichment?.available) {
+            evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+            mergeManagementIntoWebTeam(evidence, emit);
+          }
         }
       } catch (error) {
         emit({ phase: "Token", label: "Backing enrichment error", detail: String(error), tone: "warn" });

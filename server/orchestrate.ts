@@ -2220,6 +2220,62 @@ interface RunAuditOptions {
   analystDeadlineAt?: number;
 }
 
+/**
+ * Monid management profiles are keyed provider records for the SAME resolved
+ * company whose funding numbers already become corroborated facts; surface
+ * them as verified roster members instead of dropping paid data. Answers the
+ * "why isn't more of the team listed" gap without a new provider.
+ */
+export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Emit): void {
+  const management = evidence.companyEnrichment?.management ?? [];
+  if (!management.length) return;
+  const webTeam = evidence.webTeam ?? (evidence.webTeam = []);
+  const norm = (value?: string | null) => (value ?? "").trim().toLowerCase().replace(/^@/, "");
+  let added = 0;
+  let corroborated = 0;
+  for (const person of management) {
+    const name = person.name?.trim();
+    if (!name) continue;
+    const existing = webTeam.find((member) => norm(member.name) === norm(name));
+    if (existing) {
+      if (!existing.linkedin && person.linkedin) {
+        existing.linkedin = person.linkedin;
+        existing.identity_link_evidence_origin = "deterministic";
+      }
+      if ((!existing.role || /^team$/i.test(existing.role)) && person.title) existing.role = person.title;
+      if (existing.artifact_verified !== true) {
+        existing.evidence_origin = "deterministic";
+        existing.artifact_verified = true;
+        existing.provider = "monid";
+        corroborated += 1;
+      }
+      continue;
+    }
+    webTeam.push({
+      name,
+      role: person.title?.trim() || "leadership",
+      linkedin: person.linkedin ?? undefined,
+      evidence: person.priorCompanies?.length ? `prior: ${person.priorCompanies.slice(0, 3).join(", ")}` : undefined,
+      source: "Monid/Akta leadership record",
+      evidence_origin: "deterministic",
+      artifact_verified: true,
+      provider: "monid",
+      identity_link_evidence_origin: "deterministic",
+      projects_evidence_origin: "deterministic",
+    });
+    added += 1;
+  }
+  if (added || corroborated) {
+    emit({
+      phase: "P1 · Team",
+      label: "Leadership roster from private-market data",
+      detail: `${added} leadership profile${added === 1 ? "" : "s"} added${corroborated ? ` and ${corroborated} existing member${corroborated === 1 ? "" : "s"} corroborated` : ""} from the Monid/Akta management record.`,
+      source: "monid",
+      tone: "good",
+    });
+  }
+}
+
 async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAuditOptions): Promise<Dossier | null> {
   const runtimeStartedAt = Date.now();
   // Single source of truth for the analyst start-by deadline (the route passes
@@ -2422,7 +2478,10 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
             }),
             MONID_ENRICHMENT_BUDGET_MS,
           );
-          if (enrichment?.available) evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+          if (enrichment?.available) {
+            evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+            mergeManagementIntoWebTeam(evidence, emit);
+          }
         }
       } catch (error) {
         emit({ phase: "Token", label: "Backing enrichment error", detail: String(error), tone: "warn" });
