@@ -492,6 +492,7 @@ export type BasicFactPredicate =
   | "legal_regulatory_event"
   | "funding"
   | "investor"
+  | "partnership"
   | "governance"
   | "control"
   | "conflict_of_interest"

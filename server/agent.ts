@@ -1669,6 +1669,7 @@ export function deriveProjectStrengthBands(
   const officialFacts = verifiedFacts("official_identity");
   const fundingFacts = verifiedFacts("funding");
   const investorFacts = verifiedFacts("investor");
+  const partnershipFacts = verifiedFacts("partnership");
   const tractionFacts = verifiedFacts("traction");
   const protocolTractionFacts = tractionFacts.filter((fact) => {
     const text = factText([fact]);
@@ -1823,10 +1824,10 @@ export function deriveProjectStrengthBands(
   const disclosedTreasury = fundingFacts.some((fact) => /\b(?:disclosed treasury|treasury-funded)\b/i.test(factText([fact])));
   // Verified-only ladder (press excluded) for the enforced floor: headlines can
   // suggest a partnership story to the analyst but cannot force a minimum score.
-  let p4FloorTier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || advisorTeam.length ? "emerging" : "none";
-  if (investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4FloorTier = "solid";
-  let p4Tier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || advisorTeam.length || relationshipPress.length ? "emerging" : "none";
-  if (relationshipPress.length > 0 || investorFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4Tier = "solid";
+  let p4FloorTier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || partnershipFacts.length || advisorTeam.length ? "emerging" : "none";
+  if (investorFacts.length > 0 || partnershipFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4FloorTier = "solid";
+  let p4Tier: ProjectStrengthTier = fundingFacts.length || investorFacts.length || partnershipFacts.length || advisorTeam.length || relationshipPress.length ? "emerging" : "none";
+  if (relationshipPress.length > 0 || investorFacts.length > 0 || partnershipFacts.length > 0 || advisorTeam.length >= 2 || disclosedTreasury) p4Tier = "solid";
   if (distinctRelationshipKeys.size >= 2) p4Tier = "exceptional";
   const p4Assessment = p4Tier === "none" && (limitingByAxis.get("P4_backing_and_partners") ?? []).length === 0
     ? assessmentArtifactFor("P4_backing_and_partners", "project-backing-partners")
@@ -1836,10 +1837,11 @@ export function deriveProjectStrengthBands(
     ...(relationshipPress.length ? [`${distinctRelationshipKeys.size} material relationship source${distinctRelationshipKeys.size === 1 ? "" : "s"}`] : []),
     ...(fundingFacts.length ? ["source-backed financing state"] : []),
     ...(investorFacts.length ? [`${investorFacts.length} verified investor record${investorFacts.length === 1 ? "" : "s"}`] : []),
+    ...(partnershipFacts.length ? [`${partnershipFacts.length} verified operating relationship${partnershipFacts.length === 1 ? "" : "s"}`] : []),
     ...(advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : []),
     ...(p4Assessment ? ["completed backing assessment found no verified backer or partner"] : []),
   ], [
-    ...artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...advisorTeam]),
+    ...artifactIds([...relationshipPress, ...fundingFacts, ...investorFacts, ...partnershipFacts, ...advisorTeam]),
     ...(p4Assessment ? [p4Assessment.artifactId] : []),
     // An assessed-null band is a plain band, never a press-widened one.
   ], p4Assessment ? undefined : p4FloorTier);
@@ -2212,6 +2214,7 @@ const PROJECT_BASIC_FACT_AXIS_ELIGIBILITY: Record<string, readonly string[]> = {
   legal_entity: ["P1_team_and_identity", "P6_transparency_integrity"],
   funding: ["P4_backing_and_partners"],
   investor: ["P4_backing_and_partners"],
+  partnership: ["P4_backing_and_partners"],
   governance: ["P3_token_conduct", "P6_transparency_integrity"],
   control: ["P3_token_conduct", "P6_transparency_integrity"],
   conflict_of_interest: ["P6_transparency_integrity"],

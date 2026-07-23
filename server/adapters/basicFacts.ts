@@ -50,6 +50,7 @@ const PREDICATES = new Set<BasicFactPredicate>([
   "public_security",
   "funding",
   "investor",
+  "partnership",
   "product",
   "network",
   "legal_entity",
@@ -67,7 +68,7 @@ const PREDICATES = new Set<BasicFactPredicate>([
 
 const CRITICAL_PREDICATES = new Set<BasicFactPredicate>([
   "official_identity", "current_role", "product", "founder", "executive",
-  "track_record", "official_token", "public_security",
+  "track_record", "official_token", "public_security", "funding", "investor", "partnership",
 ]);
 
 /**
@@ -100,7 +101,7 @@ const LEAD_COVERAGE_CATEGORIES: readonly (readonly BasicFactPredicate[])[] = [
   ["control", "conflict_of_interest"],
   ["legal_regulatory_event"],
   ["repository"],
-  ["funding", "investor"],
+  ["funding", "investor", "partnership"],
   ["network"],
   ["founded", "launched"],
 ];
@@ -177,7 +178,8 @@ const PROJECT_QUESTIONS: readonly QuestionTemplate[] = [
   { batch: "track_record", predicate: "public_security", question: "Does the organization have a publicly traded equity or debt security distinct from any crypto token?" },
   { batch: "track_record", predicate: "network", question: "Which blockchain networks or chains does it run on?", critical: true },
   { batch: "track_record", predicate: "funding", question: "What source-backed funding rounds or amounts has it raised?", critical: true },
-  { batch: "track_record", predicate: "investor", question: "Which named investors or backers are source-backed? Return one per answer." },
+  { batch: "track_record", predicate: "investor", question: "Which named investors or backers are source-backed? Return one per answer.", critical: true },
+  { batch: "track_record", predicate: "partnership", question: "Which material operating partners, counterparties, or product integrations are source-backed? Return one named relationship per answer and exclude rumors, proposals, and ended relationships.", critical: true },
   { batch: "track_record", predicate: "repository", question: "Where is the official source code maintained?", critical: true },
   { batch: "track_record", predicate: "traction", question: "What concrete, dated usage, revenue, volume, users, fees, TVL, or adoption metrics are public?", critical: true },
   { batch: "structure_risk", predicate: "legal_entity", question: "Which legal entity is responsible for the project?", critical: true },
@@ -386,6 +388,8 @@ const STRUCTURED_VALUE_PREDICATES = new Set<BasicFactPredicate>([
   "product",
   "exit",
   "track_record",
+  "funding",
+  "partnership",
   "public_security",
 ]);
 
@@ -417,6 +421,14 @@ const VALUE_DESCRIPTOR_TOKENS: Partial<Record<BasicFactPredicate, ReadonlySet<st
   track_record: new Set([
     "adoption", "aum", "billion", "customer", "download", "fee", "million", "revenue",
     "transaction", "tvl", "user", "volume",
+  ]),
+  funding: new Set([
+    "capital", "financing", "funding", "fundraise", "raise", "raised", "round",
+    "seed", "series", "strategic",
+  ]),
+  partnership: new Set([
+    "collaboration", "collaborator", "counterparty", "integrated", "integration",
+    "partner", "partnership", "provider",
   ]),
   public_security: new Set([
     "bond", "class", "common", "debt", "equity", "ipo", "listed", "nasdaq", "nyse",
@@ -489,6 +501,7 @@ function structuredValueIsSupported(
   trustedContextTokens: ReadonlySet<string> = new Set(),
 ): boolean {
   if (!STRUCTURED_VALUE_PREDICATES.has(lead.predicate)) return false;
+  if (lead.predicate === "funding") return verifiedFundingValue(lead.value, passage) !== null;
   const valueTokens = canonicalValueTokens(lead.value);
   if (!valueTokens.length) return false;
   const passageTokens = new Set(canonicalValueTokens(passage));
@@ -591,6 +604,56 @@ function verifiedPublicSecurityValue(value: string, passage: string): string | n
   return `${ticker} (${issuer}, ${venue ? `${venue}-listed` : "publicly traded"} ${supportedClass ?? "security"})`;
 }
 
+interface FundingAmount {
+  display: string;
+  key: string;
+}
+
+function fundingAmounts(value: string): FundingAmount[] {
+  const pattern = /(?:\b(?:usd|us\$)\s*|[$€£]\s*)\d[\d,]*(?:\.\d+)?\s*(?:thousand|million|billion|[kmb])?\b|\b\d[\d,]*(?:\.\d+)?\s*(?:thousand|million|billion)\s+(?:u\.s\.\s+)?dollars?\b/gi;
+  return [...value.matchAll(pattern)].flatMap((match): FundingAmount[] => {
+    const display = normalize(match[0]);
+    const normalized = display.toLowerCase().replace(/,/g, "").replace(/\s+/g, " ");
+    const numeric = normalized.match(/\d+(?:\.\d+)?/)?.[0];
+    if (!numeric) return [];
+    const magnitude = /\bbillion\b|\bb\b/.test(normalized)
+      ? "billion"
+      : /\bmillion\b|\bm\b/.test(normalized)
+        ? "million"
+        : /\bthousand\b|\bk\b/.test(normalized)
+          ? "thousand"
+          : "";
+    const currency = /€/.test(display)
+      ? "eur"
+      : /£/.test(display)
+        ? "gbp"
+        : "usd";
+    return [{ display, key: `${currency}:${numeric}:${magnitude}` }];
+  });
+}
+
+/** Freeze only the amount and round language the fetched passage actually
+ * states. Search scouts often append a source date or "strategic" label to the
+ * value even when that context is absent from the cited sentence. */
+function verifiedFundingValue(value: string, passage: string): string | null {
+  const claimed = fundingAmounts(value);
+  const observed = fundingAmounts(passage);
+  const amount = claimed.flatMap((candidate) => {
+    const match = observed.find((source) => source.key === candidate.key);
+    return match ? [match.display] : [];
+  })[0];
+  if (!amount) return looseContainsPhrase(passage, value) ? normalize(value) : null;
+  const round = [
+    /\bpre[- ]seed\b/i,
+    /\bseed(?:\s+round)?\b/i,
+    /\bseries\s+[a-h]\b/i,
+    /\bstrategic\s+(?:financing|funding|round)\b/i,
+    /\btoken\s+sale\b/i,
+  ].map((pattern) => pattern.exec(value)?.[0])
+    .find((candidate) => candidate && looseContainsPhrase(passage, candidate));
+  return normalize(`${amount}${round ? ` ${round}` : ""}`);
+}
+
 function safeCandidateUrl(value: unknown): string | null {
   if (typeof value !== "string" || value.length > 2_000) return null;
   try {
@@ -642,7 +705,7 @@ function isAtomicValue(predicate: BasicFactPredicate, value: string): boolean {
   // conjunction guard so a model cannot combine people, ventures, or tokens.
   if (/\s(?:and|&)\s/i.test(value) && predicate !== "current_role" && predicate !== "prior_role") return false;
   // Commas almost always indicate a model-combined roster for people/backers.
-  if (["founder", "executive", "investor"].includes(predicate) && value.includes(",")) return false;
+  if (["founder", "executive", "investor", "partnership"].includes(predicate) && value.includes(",")) return false;
   return true;
 }
 
@@ -981,7 +1044,7 @@ function discoveryPrompt(
     targetedIdentityInstruction,
     "Prefer official first-party pages and primary documents, then reputable independent reporting.",
     "An official counterparty page may support a role, investment, acquisition, or other relationship when it explicitly names both sides. Still return the exact page and passage so ARGUS can verify it.",
-    "Return one atomic value per row. Never combine multiple founders, people, investors, tokens, networks, or products in one value.",
+    "Return one atomic value per row. Never combine multiple founders, people, investors, partners, integrations, tokens, networks, or products in one value.",
     // ARGUS locates the value verbatim in the fetched page, so a composed phrase
     // verifies against nothing and, because each source phrases it differently,
     // also stops two sources corroborating one fact.
@@ -991,6 +1054,8 @@ function discoveryPrompt(
     "Set question_id to the exact bracketed question ID. The predicate must match that question.",
     "Each exact_excerpt must be a verbatim one-to-three sentence passage that itself explicitly contains the subject identity, the claimed value, and language proving the predicate.",
     "For traction facts, copy the source's exact as-of date or reporting period into qualifier, preferably an explicit date phrase, only when that phrase appears in exact_excerpt. Never infer, normalize, or invent a date. Omit qualifier when the source does not state a period.",
+    "For funding facts, keep value to the exact amount and named round or stage stated in exact_excerpt. Put a date in qualifier only when exact_excerpt states it.",
+    "For partnership facts, value must be one named counterparty or integration. The excerpt must state a current affirmative operating relationship. Exclude rumors, proposals, co-mentions, denials, former partners, and ended integrations.",
     "Keep an official crypto token separate from a publicly traded equity or debt security. Never put stock in official_token and never put a crypto token in public_security.",
     "For legal_regulatory_event, include attributed_entity and event_status only when the exact excerpt states them. Never attribute a company-only event to a founder or employee.",
     "Keep formal governance, practical control, and explicit conflicts of interest separate. Do not infer control or a conflict from a job title alone.",
@@ -1692,6 +1757,7 @@ const PREDICATE_PATTERNS: Record<BasicFactPredicate, RegExp> = {
   public_security: /\b(?:publicly traded|listed (?:on|company)|stock|shares?|equity|debt security|bond|nasdaq|nyse|ticker symbol|initial public offering|ipo)\b/i,
   funding: /\b(?:raised|raises|funding|financing|fundraise|round|capital)\b/i,
   investor: /\b(?:invested|investment|investor|backed|backing|led the round|participated in)\b/i,
+  partnership: /\b(?:partner(?:s|ed)?\s+with|partnership|integration\s+partner|integrat(?:e[sd]?|ion)\s+(?:with|into)|collaborat(?:e[sd]?|ion)\s+with|powered\s+by|uses?\s+(?:the\s+)?[A-Z][A-Za-z0-9.-]+\s+(?:oracle|bridge|infrastructure|network|service|technology))\b/i,
   product: /\b(?:product|platform|protocol|service|aggregator|exchange|marketplace|wallet|application|app)\b/i,
   network: /\b(?:blockchain|network|chain|mainnet|built on|deployed on|runs on|(?:on|for)\s+(?:the\s+)?(?:ethereum|solana|polygon|arbitrum|optimism|avalanche|base|bnb(?:\s+chain)?|bitcoin|cosmos|sui|aptos|near|tron|ton|polkadot|cardano))\b/i,
   legal_entity: /\b(?:legal entity|company|corporation|incorporated|foundation|limited|ltd\.?|inc\.?|llc|labs)\b/i,
@@ -1706,6 +1772,8 @@ const PREDICATE_PATTERNS: Record<BasicFactPredicate, RegExp> = {
   repository: /\b(?:github|source code|codebase|repository|repo|open source|open-source)\b/i,
   traction: /\b(?:users?|customers?|volume|tvl|total value locked|transactions?|revenue|fees|usage|adoption|downloads?|active wallets?)\b/i,
 };
+
+const PARTNERSHIP_UNCERTAINTY = /\b(?:alleged|ended|expired|false|former|no longer|not partnered|potential|proposed|rumou?r(?:ed)?|speculative|terminated|would partner)\b/i;
 
 const EXPLICIT_OFFICIAL_CRYPTO_TOKEN = /\b(?:official|governance|native|utility|crypto(?:currency)?)\s+(?:crypto\s+)?token\b/i;
 const EXPLICIT_WRAPPED_OR_ERC_TOKEN = /\b(?:wrapped(?:\s+[a-z0-9-]+){0,3}\s+token|erc[- ]?\d+\s+(?:wrapped\s+)?token)\b/i;
@@ -1802,7 +1870,7 @@ function sourceAnchorPassages(page: string, value: string): string[] {
 
 const EMPTY_CONTEXT_TOKENS: ReadonlySet<string> = new Set();
 const DIRECT_RELATION_PREDICATES = new Set<BasicFactPredicate>([
-  "current_role", "prior_role", "founder", "executive",
+  "current_role", "prior_role", "founder", "executive", "partnership",
 ]);
 const RELATION_CHAIN_PREDICATES = new Set<BasicFactPredicate>([
   "founded", "product", "exit", "track_record", "public_security",
@@ -2596,6 +2664,40 @@ function sameOfficialScope(
   });
 }
 
+const NON_COUNTERPARTY_RELATIONSHIP_HOSTS = new Set([
+  ...PATH_TENANTED_HOSTS,
+  "blockworks.co", "businesswire.com", "coindesk.com", "coinmarketcap.com",
+  "cointelegraph.com", "crunchbase.com", "decrypt.co", "globenewswire.com",
+  "messari.io", "pitchbook.com", "prnewswire.com", "theblock.co", "wikipedia.org",
+  "yahoo.com",
+]);
+const RELATIONSHIP_HOST_STOP_TOKENS = new Set([
+  ...HOST_CONTEXT_STOP_TOKENS,
+  "app", "data", "feeds", "finance", "foundation", "global", "labs", "network",
+  "protocol", "service", "services", "technology", "technologies",
+]);
+
+/** A first-party counterparty page may prove its own current integration. Keep
+ * this inference limited to dedicated domains whose identity matches the one
+ * atomic relationship value; editorial, profile, and shared-tenant hosts never
+ * qualify through their hostname. */
+function relationshipCounterpartyHostMatches(
+  document: Pick<PublicTextDocument, "host">,
+  value: string,
+): boolean {
+  const host = normalizedHost(document.host);
+  if (NON_COUNTERPARTY_RELATIONSHIP_HOSTS.has(host)) return false;
+  const hostTokens = looseTokens(host).filter((token) => !RELATIONSHIP_HOST_STOP_TOKENS.has(token));
+  const valueTokens = looseTokens(value).filter((token) => !RELATIONSHIP_HOST_STOP_TOKENS.has(token));
+  if (!hostTokens.length || !valueTokens.length || valueTokens.length > 4) return false;
+  const hostJoined = hostTokens.join("");
+  const valueJoined = valueTokens.join("");
+  return valueTokens.every((token) =>
+    hostTokens.includes(token)
+    || (token.length >= 4 && hostJoined.includes(token))
+    || (hostJoined.length >= 4 && valueJoined.includes(hostJoined)));
+}
+
 const REGULATORY_HOSTS = [
   "sec.gov",
   "justice.gov",
@@ -2976,14 +3078,20 @@ export function verifyBasicFactLead(
   const counterpartyPredicate = new Set<BasicFactPredicate>([
     "official_identity", "current_role", "prior_role", "founder", "executive", "founded", "product",
     "exit", "track_record", "funding", "investor", "legal_entity", "governance",
-    "public_security", "official_token",
+    "public_security", "official_token", "partnership",
   ]).has(lead.predicate);
   const applicableCounterpartyHosts = ventureAssetPredicate
     ? authoritativeAssetRelationships.flatMap((relationship) => relationship.officialScopes)
     : officialCounterpartyHosts;
+  const inferredRelationshipCounterparty = lead.predicate === "partnership"
+    && !official
+    && relationshipCounterpartyHostMatches(document, lead.value);
   const officialCounterparty = !official
     && counterpartyPredicate
-    && sameOfficialScope(document, applicableCounterpartyHosts);
+    && (
+      sameOfficialScope(document, applicableCounterpartyHosts)
+      || inferredRelationshipCounterparty
+    );
   // A verified first-party/counterparty host may supply only the organization
   // anchor (for example, "our co-founder" on investor.coinbase.com). Subject,
   // predicate, dates, metrics, and every other value component still have to
@@ -3004,6 +3112,7 @@ export function verifyBasicFactLead(
   const claimClause = officialAssetPageEvidence
     ?? governingClaimClause(excerpt, lead, verificationAliases, contextTokens);
   if (!claimClause) return null;
+  if (lead.predicate === "partnership" && PARTNERSHIP_UNCERTAINTY.test(claimClause)) return null;
   // A related venture's first-party page may stand in for the person's name,
   // but only explicit crypto-token language may do so. A stock ticker or
   // security symbol on that same site must remain public_security evidence.
@@ -3024,7 +3133,9 @@ export function verifyBasicFactLead(
   }
   const verifiedValue = lead.predicate === "public_security"
     ? verifiedPublicSecurityValue(lead.value, claimClause)
-    : lead.value;
+    : lead.predicate === "funding"
+      ? verifiedFundingValue(lead.value, claimClause)
+      : lead.value;
   if (!verifiedValue) return null;
   const regulatory = !official && !officialCounterparty
     && regulatorySourceSupports(document.host, lead.predicate);
@@ -3100,7 +3211,7 @@ export function verifyBasicFactLead(
 
 const MULTI_VALUE_PREDICATES = new Set<BasicFactPredicate>([
   "current_role", "prior_role", "education", "founder", "executive", "founded",
-  "launched", "exit", "track_record", "product", "funding", "investor", "governance",
+  "launched", "exit", "track_record", "product", "funding", "investor", "partnership", "governance",
   "public_security", "legal_entity", "legal_regulatory_event", "control", "conflict_of_interest",
   "tokenomics", "vesting", "treasury",
   "audit", "repository", "traction",
@@ -3207,6 +3318,19 @@ export function resolveBasicFactCandidates(candidates: BasicFact[]): BasicFact[]
     const independentHosts = new Set(sources
       .filter((source) => source.sourceClass === "independent_press")
       .map((source) => new URL(source.url).hostname.replace(/^www\./, "")));
+    // The project's own page may describe a desired or promotional
+    // relationship. A partnership becomes governing evidence only when the
+    // named counterparty confirms it on its own domain or two independent
+    // fetched hosts corroborate the same atomic relationship.
+    if (rows[0]?.predicate === "partnership") {
+      const counterpartyConfirmed = sources.some((source) => source.sourceClass === "official_counterparty");
+      if (!counterpartyConfirmed && independentHosts.size < 2) return [];
+      return [{
+        ...rows[0],
+        status: counterpartyConfirmed ? "verified" as const : "corroborated" as const,
+        sources,
+      }];
+    }
     // A stock or debt-security classification must come from the issuer or a
     // regulator. Two news articles may corroborate a reported claim, but they
     // cannot authoritatively establish the instrument or its listing.

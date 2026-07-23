@@ -1578,7 +1578,9 @@ export interface ProjectCoreEvidenceOutcomeOptions {
 /**
  * Record the project-check outcomes that core collection can defend today.
  * This deliberately does not turn model search, notable followers, or a
- * generic "partner" title into evidence of project backing. Transparency stays
+ * generic "partner" title into evidence of project backing. A product
+ * partnership qualifies only through the separately verified Basic Fact path.
+ * Transparency stays
  * unavailable until a fetched source directly proves a qualifying disclosure
  * instead of merely appearing on a disclosure-themed URL. A
  * completed empty search is recorded separately from an unavailable provider.
@@ -1604,24 +1606,24 @@ export function collectProjectCoreEvidenceOutcomes(
       && PROJECT_BACKING_ROLE.test(member.role),
     );
 
-  const verifiedInvestorFacts = (ctx.evidence.basicFacts ?? []).filter((fact) =>
-    fact.predicate === "investor"
+  const verifiedBackingFacts = (ctx.evidence.basicFacts ?? []).filter((fact) =>
+    (fact.predicate === "funding" || fact.predicate === "investor" || fact.predicate === "partnership")
     && fact.artifact_verified === true
     && (fact.status === "verified" || fact.status === "corroborated"),
   );
-  const backingCount = verifiedBackers.length + verifiedInvestorFacts.length;
+  const backingCount = verifiedBackers.length + verifiedBackingFacts.length;
 
   if (backingCount) {
     const providers = [...new Set([
       ...verifiedBackers.map((member) => member.provider!),
-      ...(verifiedInvestorFacts.length ? ["basic-facts-web"] : []),
+      ...(verifiedBackingFacts.length ? ["basic-facts-web"] : []),
     ])];
     ctx.recordCheck?.({
       id: "project-backing-partners",
       status: "confirmed",
-      note: `${backingCount} named advisor, backer, or investor record${backingCount === 1 ? " was" : "s were"} verified from fetched public evidence; funding terms and institutional investment were not inferred beyond these named records`,
+      note: `${backingCount} funding, investor, advisor, counterparty, or operating-partner record${backingCount === 1 ? " was" : "s were"} verified from fetched public evidence; relationship terms were not inferred beyond those sources`,
       provider: providers.join("/"),
-      sourceCount: verifiedBackers.length + verifiedInvestorFacts.reduce((total, fact) => total + fact.sources.length, 0),
+      sourceCount: verifiedBackers.length + verifiedBackingFacts.reduce((total, fact) => total + fact.sources.length, 0),
     });
   } else {
     // When the scan actually ran over collected first-party material (a
@@ -1637,8 +1639,8 @@ export function collectProjectCoreEvidenceOutcomes(
       id: "project-backing-partners",
       status: assessable ? "finding" : "checked-empty",
       note: assessable
-        ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified financial backer, investor, or advisor appears; product partnerships require separate source verification, and model-only leads were excluded. A null result on this axis, not adverse evidence."
-        : "bounded scan of up to 32 frozen first-party team and account records found no verified financial backer, investor, or advisor; product partnerships require separate source verification, and model-only leads were excluded",
+        ? "assessed backing and partners across the collected first-party record (team roster, verified facts, official site): no verified funding, investor, advisor, counterparty, or operating-partner evidence appears. Project-only partnership claims and model-only leads were excluded. This is a null result on this axis, not adverse evidence."
+        : "bounded scan of up to 32 frozen first-party team and account records found no verified funding, investor, advisor, counterparty, or operating-partner evidence; project-only partnership claims and model-only leads were excluded",
       provider: "project-core-evidence",
     });
   }

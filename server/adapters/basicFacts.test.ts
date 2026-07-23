@@ -884,7 +884,6 @@ describe("critical-gap search recovery", () => {
       }),
     ]);
   });
-
   it("caps repair at eight physical Claude calls across continuations and retries", async () => {
     const { ctx } = context();
     const questions = basicFactsResearchQuestions(ctx).filter((question) => question.critical).slice(0, 8);
