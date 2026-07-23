@@ -31,6 +31,7 @@ function providerStatus() {
   }));
 }
 var ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
+var providerFallbacksEnabled = () => (process.env.ARGUS_PROVIDER_FALLBACKS || "").trim().toLowerCase() === "on";
 var DISCOVERY_MODEL = process.env.ARGUS_DISCOVERY_MODEL || ANALYST_MODEL;
 
 // src/engine/taxonomy.ts
@@ -1645,6 +1646,14 @@ function recordHelius(op, status = "succeeded", meta) {
   recordCall("helius", op, PRICE.heliusCall, meta, status);
 }
 var round4 = (n) => Math.round(n * 1e4) / 1e4;
+function providerFailureLines(cost) {
+  return (cost.calls ?? []).filter((line) => (line.failed ?? 0) > 0).map((line) => ({
+    provider: line.provider,
+    op: line.op,
+    failed: line.failed,
+    ...line.meta ? { meta: String(line.meta).slice(0, 160) } : {}
+  }));
+}
 function getCost() {
   const { ledger, grok, claude } = currentState();
   const lines = [...ledger.values()].map((l) => ({ ...l, usd: round4(l.usd) })).sort((a, b) => b.usd - a.usd || b.calls - a.calls);
@@ -2115,6 +2124,7 @@ async function structured(system, user, tool, maxTokens = 2048, timeoutMs = 6e4,
   const deadlineAt = Date.now() + Math.max(0, timeoutMs);
   const claude = env("ANTHROPIC_API_KEY") ? await structuredClaude(system, user, tool, maxTokens, timeoutMs, onFailure) : null;
   if (claude !== null || !env("XAI_API_KEY")) return claude;
+  if (env("ANTHROPIC_API_KEY") && !providerFallbacksEnabled()) return null;
   const remainingMs = Math.max(0, deadlineAt - Date.now());
   if (remainingMs < 1) return null;
   return structuredGrok(system, user, tool, maxTokens, remainingMs, onFailure);
@@ -6042,6 +6052,9 @@ function dedupeByUrl(results) {
   }
   return out;
 }
+function groundedSearchProvisioned() {
+  return Boolean(env("SERPER_API_KEY") && (openRouterExtractModel() || env("ANTHROPIC_API_KEY")));
+}
 async function groundedSearch(system, user, opts) {
   const serperKey = env("SERPER_API_KEY");
   if (!serperKey || !openRouterExtractModel() && !env("ANTHROPIC_API_KEY")) return null;
@@ -6227,16 +6240,20 @@ async function claudeWebSearch(system, user, opts) {
 }
 async function generalWebSearch(system, user, opts) {
   if ((env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() !== "grok") {
-    const viaGrounded = await groundedSearch(system, user, { cacheKey: opts?.cacheKey, bypassCache: opts?.bypassCache });
-    if (viaGrounded) return viaGrounded;
-    const viaClaude = await claudeWebSearch(system, user, {
-      maxSearchUses: opts?.maxToolCalls,
-      cacheKey: opts?.cacheKey ? `cw1:${opts.cacheKey}` : void 0,
-      bypassCache: opts?.bypassCache
-    });
-    if (viaClaude) return viaClaude;
+    if (groundedSearchProvisioned()) {
+      const viaGrounded = await groundedSearch(system, user, { cacheKey: opts?.cacheKey, bypassCache: opts?.bypassCache });
+      if (viaGrounded || !providerFallbacksEnabled()) return viaGrounded;
+    }
+    if (env("ANTHROPIC_API_KEY")) {
+      const viaClaude = await claudeWebSearch(system, user, {
+        maxSearchUses: opts?.maxToolCalls,
+        cacheKey: opts?.cacheKey ? `cw1:${opts.cacheKey}` : void 0,
+        bypassCache: opts?.bypassCache
+      });
+      if (viaClaude || !providerFallbacksEnabled()) return viaClaude;
+    }
   }
-  return grokSearch(system, user, opts);
+  return env("XAI_API_KEY") ? grokSearch(system, user, opts) : null;
 }
 async function twFetch(url, key, tries = 2) {
   const op = url.match(/\/twitter\/([a-z_/]+)/i)?.[1] ?? "other";
@@ -10158,6 +10175,7 @@ async function discoverPrimary(ctx, questions) {
   if (!env("ANTHROPIC_API_KEY")) return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
   const claude = await discoverBasicFactLeadsDetailed(ctx, {}, questions, "primary");
   if (!env("XAI_API_KEY") || claude.state !== "failed" && !(claude.state === "partial" && claude.leads.length === 0)) return claude;
+  if (!providerFallbacksEnabled()) return claude;
   const grok = await discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
   return {
     ...grok,
@@ -20174,6 +20192,18 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   }
   dossier.providerSnapshot = checkTracker.providers();
   dossier.cost = cost;
+  const providerFailures = providerFailureLines(cost);
+  if (providerFailures.length) {
+    dossier.providerFailures = providerFailures;
+    const summary = providerFailures.slice(0, 6).map((line) => `${line.provider} ${line.op}${line.meta ? ` (${line.meta.slice(0, 80)})` : ""}`).join(" \xB7 ");
+    emit({
+      phase: "Finalize",
+      label: `Provider failures this run: ${providerFailures.length}`,
+      detail: `${summary}${providerFallbacksEnabled() ? "" : ". Fallbacks are disabled: affected lanes completed without this provider instead of switching the spend elsewhere."}`,
+      source: "argus",
+      tone: "bad"
+    });
+  }
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} calls, \u2248${cost.sources} search sources \xB7 Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
   if (options?.organizationId) {
     const verifiedBasicFacts = (evidence.basicFacts ?? []).filter((fact) => fact.artifact_verified === true && (fact.status === "verified" || fact.status === "corroborated") && fact.predicate !== "legal_regulatory_event" && fact.providerProjection !== true);

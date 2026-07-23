@@ -61,6 +61,13 @@ export interface Dossier {
   // the immutable payload. Older curated fixtures may omit these fields.
   checkRuns?: ScanCheck[];
   /**
+   * Provider calls that FAILED during this run, stamped at finalize. Owner
+   * policy: failures surface on screen instead of silently switching the
+   * spend to a fallback provider, so the affected lanes visibly completed
+   * without their provider.
+   */
+  providerFailures?: Array<{ provider: string; op: string; failed: number; meta?: string }>;
+  /**
    * The previous persisted version's outcome, stamped at finalize so a re-scan
    * can show its own delta org-wide (not just in one browser's local log).
    * Absent on first scans and on versions persisted before this field shipped.

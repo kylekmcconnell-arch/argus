@@ -107,6 +107,32 @@ export function ScoreContextStrip({
 }
 
 /**
+ * Provider calls that failed during the scan, said plainly on screen. Owner
+ * policy: no silent fallbacks; a failed provider means those lanes completed
+ * without it, and the reader deserves to know before trusting coverage.
+ */
+export function ProviderFailureNotice({ failures }: {
+  failures?: Array<{ provider: string; op: string; failed: number; meta?: string }>;
+}) {
+  if (!failures?.length) return null;
+  const total = failures.reduce((sum, line) => sum + line.failed, 0);
+  return (
+    <div className="finding tint-avoid mt-3 px-4 py-3" role="alert">
+      <p className="text-[12.5px] font-medium text-ink">
+        {total} provider call{total === 1 ? "" : "s"} failed during this scan; no fallback provider was used.
+      </p>
+      <p className="mono mt-1 text-[10.5px] leading-relaxed text-ink-dim">
+        {failures.slice(0, 5).map((line) => `${line.provider} · ${line.op}${line.meta ? ` · ${line.meta.slice(0, 70)}` : ""}`).join("  |  ")}
+        {failures.length > 5 ? `  |  +${failures.length - 5} more` : ""}
+      </p>
+      <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
+        Affected evidence lanes completed without this provider. Fix the provider and rescan to fill the gap.
+      </p>
+    </div>
+  );
+}
+
+/**
  * One click, one paste: the report as three plain lines plus a link. When a
  * share link can be minted it is used (viewable without sign-in, and the
  * pasted link unfurls into the report card); otherwise the app URL stands in.

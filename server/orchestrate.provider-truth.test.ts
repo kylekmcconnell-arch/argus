@@ -151,6 +151,7 @@ describe("orchestrator provider execution truth", () => {
 
   it("does not let a Grok-only founder affiliation request founder scoring", async () => {
     vi.stubEnv("XAI_API_KEY", "xai-key");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-key");
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);

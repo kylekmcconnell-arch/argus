@@ -279,6 +279,30 @@ export interface AuditCost {
 
 const round4 = (n: number) => Math.round(n * 10000) / 10000;
 
+export interface ProviderFailureLine {
+  provider: string;
+  op: string;
+  failed: number;
+  meta?: string;
+}
+
+/**
+ * Every ledger line with at least one failed call, for the on-screen failure
+ * notice. With fallbacks disabled (the default), a failed provider means the
+ * affected lane completed WITHOUT that provider; the owner sees it instead of
+ * a silent switch to a different metered provider.
+ */
+export function providerFailureLines(cost: Pick<AuditCost, "calls">): ProviderFailureLine[] {
+  return (cost.calls ?? [])
+    .filter((line) => (line.failed ?? 0) > 0)
+    .map((line) => ({
+      provider: line.provider,
+      op: line.op,
+      failed: line.failed,
+      ...(line.meta ? { meta: String(line.meta).slice(0, 160) } : {}),
+    }));
+}
+
 export function getCost(): AuditCost {
   const { ledger, grok, claude } = currentState();
   const lines = [...ledger.values()]

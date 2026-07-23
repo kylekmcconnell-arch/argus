@@ -11,7 +11,7 @@
 // The engine always owns caps, banding and the composite verdict.
 
 import { getProfile, classifySubject, SubjectClass, VentureOutcome, canonicalEntityKey, repeatBackingSignal, type Finding, type Venture } from "../src/engine";
-import { env } from "./config";
+import { env, providerFallbacksEnabled } from "./config";
 import { assembleDossier, type Dossier } from "../src/data/dossier";
 import { findSubject, toEvidence } from "../src/data/subjects";
 import { emptyEvidence, type BasicFact, type WebTeamMember } from "../src/data/evidence";
@@ -27,7 +27,7 @@ import {
   inspectAnalystScoringPreflight,
   scanContradictions,
 } from "./agent";
-import { getCost, withCostLedger } from "./cost";
+import { getCost, providerFailureLines, withCostLedger } from "./cost";
 import { PersonCheckTracker, type ProviderRunState } from "./checks";
 
 import { xAdapter, getProfile as xProfile, getRecentPostsMeta, collectCorpus, fmtFollowers, discoverAffiliations, findTeam, findTeamOnSite, enrichTeamIdentities, scanPostsForRoles, followsSubject, handleHistory, searchAdverseSignals, detectManipulationTooling, type DiscoveredAffiliation, type AdverseSignal, type TeamMember } from "./adapters/x";
@@ -3222,6 +3222,22 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   dossier.providerSnapshot = checkTracker.providers();
   // Attach what this run actually spent, so the report library can show it.
   dossier.cost = cost;
+  // Owner policy: a failed provider fails VISIBLY. Stamp the failures into the
+  // payload for the report banner and say it on screen in the live stream.
+  const providerFailures = providerFailureLines(cost);
+  if (providerFailures.length) {
+    dossier.providerFailures = providerFailures;
+    const summary = providerFailures.slice(0, 6)
+      .map((line) => `${line.provider} ${line.op}${line.meta ? ` (${line.meta.slice(0, 80)})` : ""}`)
+      .join(" · ");
+    emit({
+      phase: "Finalize",
+      label: `Provider failures this run: ${providerFailures.length}`,
+      detail: `${summary}${providerFallbacksEnabled() ? "" : ". Fallbacks are disabled: affected lanes completed without this provider instead of switching the spend elsewhere."}`,
+      source: "argus",
+      tone: "bad",
+    });
+  }
   emit({ phase: "Finalize", label: "Audit cost", detail: `~$${cost.usd.toFixed(2)} this audit (Grok $${cost.grokUsd.toFixed(2)} across ${cost.grokCalls} calls, ≈${cost.sources} search sources · Claude $${cost.claudeUsd.toFixed(2)} across ${cost.claudeCalls} calls).`, tone: "neutral" });
   // Knowledge base write-back: persist this audit's expensive-to-recompute
   // VERIFIED facts (identity/ventures/roles/token) so a later audit of the same

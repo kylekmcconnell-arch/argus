@@ -8,14 +8,14 @@
 //     mention/reply/thank @subject) and recent-activity sentiment.
 
 import type { Adapter, CollectContext } from "./types";
-import { env, DISCOVERY_MODEL } from "../config";
+import { env, DISCOVERY_MODEL, providerFallbacksEnabled } from "../config";
 import { addGrokUsage, addClaudeUsage, recordCall, recordTwitterapi, grokSpendUsd } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
 import { TestimonialVerdict, classifyTestimonial } from "../../src/engine";
 import type { NotableFollower } from "../../src/data/evidence";
 import { canonicalPublicProfileWebsite } from "../../src/lib/fundScaleEvidence";
 import { NOTABLE_ACCOUNTS } from "./notableAccounts";
-import { groundedSearch } from "./groundedSearch";
+import { groundedSearch, groundedSearchProvisioned } from "./groundedSearch";
 
 const TWITTERAPI = "https://api.twitterapi.io";
 type JsonRecord = Record<string, unknown>;
@@ -233,18 +233,25 @@ export async function generalWebSearch(system: string, user: string, opts?: {
 }): Promise<string | null> {
   if ((env("ARGUS_GENERAL_WEB_PROVIDER") || "").toLowerCase() !== "grok") {
     // Ultimate path: decoupled Serper search + page fetch + cheap-model extract
-    // (near-free vs a frontier web_search reading every page in-context). Falls
-    // through when SERPER_API_KEY is unset or grounded search finds nothing.
-    const viaGrounded = await groundedSearch(system, user, { cacheKey: opts?.cacheKey, bypassCache: opts?.bypassCache });
-    if (viaGrounded) return viaGrounded;
-    const viaClaude = await claudeWebSearch(system, user, {
-      maxSearchUses: opts?.maxToolCalls,
-      cacheKey: opts?.cacheKey ? `cw1:${opts.cacheKey}` : undefined,
-      bypassCache: opts?.bypassCache,
-    });
-    if (viaClaude) return viaClaude;
+    // (near-free vs a frontier web_search reading every page in-context).
+    // Default policy: the first PROVISIONED provider owns the lane; an empty
+    // or failed result stays empty and visible rather than cascading the same
+    // question onto progressively pricier searchers. ARGUS_PROVIDER_FALLBACKS=on
+    // restores the old cascade.
+    if (groundedSearchProvisioned()) {
+      const viaGrounded = await groundedSearch(system, user, { cacheKey: opts?.cacheKey, bypassCache: opts?.bypassCache });
+      if (viaGrounded || !providerFallbacksEnabled()) return viaGrounded;
+    }
+    if (env("ANTHROPIC_API_KEY")) {
+      const viaClaude = await claudeWebSearch(system, user, {
+        maxSearchUses: opts?.maxToolCalls,
+        cacheKey: opts?.cacheKey ? `cw1:${opts.cacheKey}` : undefined,
+        bypassCache: opts?.bypassCache,
+      });
+      if (viaClaude || !providerFallbacksEnabled()) return viaClaude;
+    }
   }
-  return grokSearch(system, user, opts);
+  return env("XAI_API_KEY") ? grokSearch(system, user, opts) : null;
 }
 
 // twitterapi.io throttles hard (429) under bursty use, and occasionally 502/503.

@@ -17,6 +17,7 @@ describe("Grok analyst fallback", () => {
   it("returns a validated founder verdict after Anthropic fails without using followers for track record", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "forced-anthropic-failure");
     vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     const axes: AnalystAxis[] = [{
       axis: "F2_track_record",
       weight: 28,

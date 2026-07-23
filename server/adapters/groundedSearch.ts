@@ -187,6 +187,11 @@ function dedupeByUrl(results: SerperResult[]): SerperResult[] {
   return out;
 }
 
+/** True when grounded search can actually run (Serper + some extractor). */
+export function groundedSearchProvisioned(): boolean {
+  return Boolean(env("SERPER_API_KEY") && (openRouterExtractModel() || env("ANTHROPIC_API_KEY")));
+}
+
 export async function groundedSearch(system: string, user: string, opts?: { cacheKey?: string; bypassCache?: boolean }): Promise<string | null> {
   const serperKey = env("SERPER_API_KEY");
   // Needs Serper for search plus SOME extractor: OpenRouter (when a slug model +

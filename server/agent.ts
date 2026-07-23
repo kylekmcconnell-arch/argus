@@ -4,7 +4,7 @@
 // same JSON schema and every result passes the same deterministic validators.
 
 import { createHash } from "node:crypto";
-import { ANALYST_MODEL, env } from "./config";
+import { ANALYST_MODEL, env, providerFallbacksEnabled } from "./config";
 import { addClaudeUsage, addGrokUsage } from "./cost";
 import type {
   AxisEvidenceRecord,
@@ -60,6 +60,11 @@ export async function structured<T>(
     ? await structuredClaude<T>(system, user, tool, maxTokens, timeoutMs, onFailure)
     : null;
   if (claude !== null || !env("XAI_API_KEY")) return claude;
+  // A Claude FAILURE only retries on Grok when failover is explicitly enabled:
+  // by default a dead provider fails visibly instead of silently moving the
+  // spend to a different metered provider. With no Anthropic key at all, Grok
+  // is the configured primary, not a fallback.
+  if (env("ANTHROPIC_API_KEY") && !providerFallbacksEnabled()) return null;
   const remainingMs = Math.max(0, deadlineAt - Date.now());
   if (remainingMs < 1) return null;
   return structuredGrok<T>(system, user, tool, maxTokens, remainingMs, onFailure);

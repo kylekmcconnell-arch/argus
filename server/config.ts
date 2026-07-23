@@ -46,6 +46,16 @@ export function providerStatus() {
 }
 
 export const ANALYST_MODEL = process.env.ARGUS_ANALYST_MODEL || "claude-sonnet-4-6";
+
+/**
+ * Failure-driven provider failover (e.g. Claude analyst dies -> Grok retries
+ * the same call). OFF by default by owner decision: a failed provider must
+ * fail VISIBLY (ledger row + on-screen notice), never silently switch the
+ * spend to a different metered provider. ARGUS_PROVIDER_FALLBACKS=on restores
+ * the old failover behavior.
+ */
+export const providerFallbacksEnabled = (): boolean =>
+  (process.env.ARGUS_PROVIDER_FALLBACKS || "").trim().toLowerCase() === "on";
 /**
  * Basic-facts discovery is search-and-extract, not judgment: it reads result
  * pages and emits JSON rows that ARGUS then re-fetches and verifies itself, so

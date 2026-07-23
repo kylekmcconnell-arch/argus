@@ -5359,9 +5359,10 @@ describe("analyst verdict integrity", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
-  it("falls back from an Anthropic 400 to a valid Grok JSON-schema verdict", async () => {
+  it("falls back from an Anthropic 400 to a valid Grok JSON-schema verdict ONLY when failover is opted in", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     const evidenceJson = buildScoringEvidencePacket({
       profile: {
         handle: "@subject",
@@ -5477,6 +5478,50 @@ describe("analyst verdict integrity", () => {
         op: "record_verdict",
         calls: 1,
         succeeded: 1,
+      }),
+    ]));
+  });
+
+  it("by default a failed Anthropic call fails VISIBLY: no Grok retry, failure in the ledger", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("XAI_API_KEY", "xai-test-key");
+    const evidenceJson = buildScoringEvidencePacket({
+      profile: {
+        handle: "@subject",
+        display_name: "Subject",
+        bio: "Named builder",
+        profile_collection_state: "resolved",
+        profile_provider: "twitterapi",
+      },
+      ventures: [{
+        project_name: "Verified Venture",
+        role: "founder",
+        outcome: "Active",
+        artifact_verified: true,
+      }],
+    }, catalog);
+    const fetchMock = vi.fn(async (_input: string | URL | Request) => new Response(JSON.stringify({      type: "error",
+      error: { type: "invalid_request_error", message: "Credit balance is too low." },
+    }), { status: 400, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(console, "error").mockImplementation(() => undefined);
+    vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const { verdict, cost } = await withCostLedger(async () => ({
+      verdict: await analyzeSubject("@subject", ["FOUNDER"], catalog, evidenceJson),
+      cost: getCost(),
+    }));
+
+    expect(verdict).toBeNull();
+    const urls = fetchMock.mock.calls.map(([input]) => String(input));
+    expect(urls.every((url) => url === "https://api.anthropic.com/v1/messages")).toBe(true);
+    expect(cost.grokCalls).toBe(0);
+    expect(cost.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        provider: "claude",
+        op: "record_verdict",
+        failed: 1,
+        meta: expect.stringContaining("http_400"),
       }),
     ]));
   });

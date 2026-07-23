@@ -9,7 +9,7 @@ import {
   type BasicFactSource,
 } from "../../src/data/evidence";
 import { supportsExplicitEmptyBasicFact } from "../../src/lib/basicFactQuestions";
-import { DISCOVERY_MODEL, env } from "../config";
+import { DISCOVERY_MODEL, env, providerFallbacksEnabled } from "../config";
 import { cacheGet, cacheSet } from "../cache";
 import { addClaudeUsage, recordCall } from "../cost";
 import { fetchPublicTextWithRecovery, type PublicTextDocument, type PublicTextResult } from "../publicWeb";
@@ -1501,6 +1501,10 @@ async function discoverPrimary(
     !env("XAI_API_KEY")
     || (claude.state !== "failed" && !(claude.state === "partial" && claude.leads.length === 0))
   ) return claude;
+  // Failure-driven Grok retry only when failover is explicitly enabled: the
+  // default is a VISIBLE failed discovery (ledger + on-screen notice), never a
+  // silent switch of the spend to Grok live-search.
+  if (!providerFallbacksEnabled()) return claude;
   const grok = await discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
   return {
     ...grok,

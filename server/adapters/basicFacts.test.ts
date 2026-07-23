@@ -552,6 +552,7 @@ describe("question-specific asset search", () => {
 
 describe("critical-gap search recovery", () => {
   it("records Grok as the governing provider after Claude primary search fails", async () => {
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     const { ctx, evidence } = context();
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     vi.stubEnv("XAI_API_KEY", "xai-test-key");

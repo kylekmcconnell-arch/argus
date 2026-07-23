@@ -3,7 +3,7 @@
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { OutcomeDeltaStrip } from "./ScoreContext";
+import { OutcomeDeltaStrip, ProviderFailureNotice } from "./ScoreContext";
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -63,6 +63,28 @@ describe("OutcomeDeltaStrip", () => {
   it("renders nothing when there is no comparable outcome", () => {
     act(() => {
       root.render(<OutcomeDeltaStrip prior={prior({ score: null, verdict: null, completeness: null })} score={75} verdict="PASS" coverage="complete" />);
+    });
+    expect(container.textContent).toBe("");
+  });
+});
+
+describe("ProviderFailureNotice", () => {
+  it("says plainly which provider calls failed and that no fallback ran", () => {
+    act(() => {
+      root.render(<ProviderFailureNotice failures={[
+        { provider: "claude", op: "record_verdict", failed: 2, meta: "http_400 credit balance too low" },
+        { provider: "claude", op: "basic-facts-search", failed: 3 },
+      ]} />);
+    });
+    expect(container.textContent).toContain("5 provider calls failed during this scan; no fallback provider was used.");
+    expect(container.textContent).toContain("claude · record_verdict · http_400 credit balance too low");
+    expect(container.textContent).toContain("rescan to fill the gap");
+    expect(container.querySelector('[role="alert"]')).not.toBeNull();
+  });
+
+  it("renders nothing on a clean run", () => {
+    act(() => {
+      root.render(<ProviderFailureNotice failures={[]} />);
     });
     expect(container.textContent).toBe("");
   });

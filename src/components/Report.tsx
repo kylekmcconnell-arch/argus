@@ -30,7 +30,7 @@ import type { SourceArtifact } from "../data/evidence";
 import { SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
-import { CopyTldrButton, OutcomeDeltaStrip, ScoreContextStrip } from "./ScoreContext";
+import { CopyTldrButton, OutcomeDeltaStrip, ProviderFailureNotice, ScoreContextStrip } from "./ScoreContext";
 import { UsageVisuals } from "./UsageVisuals";
 import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
@@ -2547,6 +2547,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <p className="mt-3 text-[12.5px] leading-relaxed text-ink-dim">{readinessGuidance}</p>
             )}
             <ProofChipStrip chips={heroProofChips} />
+            <ProviderFailureNotice failures={f.providerFailures} />
             {f.priorOutcome && (
               <OutcomeDeltaStrip
                 prior={f.priorOutcome}
