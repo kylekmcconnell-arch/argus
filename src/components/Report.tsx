@@ -30,6 +30,7 @@ import type { SourceArtifact } from "../data/evidence";
 import { SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
+import { getLog } from "../lib/auditlog";
 import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
@@ -169,6 +170,78 @@ function scoreBandPosition(score: number, capApplied?: string | null): string {
       : { lo: 0, hi: 39, name: "fail band" };
   const t = (score - band.lo) / (band.hi - band.lo);
   return `${t >= 0.67 ? "top" : t >= 0.34 ? "middle" : "low end"} of the ${band.name}`;
+}
+
+/**
+ * The score's memory and context, from this browser's own audit log: a
+ * history sparkline, the delta vs the previous scan, and where the score sits
+ * among the library's other person/project subjects. Renders nothing until
+ * there is real local history to show, and never claims a global percentile.
+ */
+function ScoreContextStrip({ subjectRef, score }: { subjectRef?: string; score: number | null }) {
+  const norm = (value?: string) => (value ?? "").trim().toLowerCase().replace(/^@/, "");
+  const key = norm(subjectRef);
+  if (!key || score == null) return null;
+  const entries = getLog().filter((entry) => typeof entry.score === "number");
+  const mine = entries
+    .filter((entry) => norm(entry.ref ?? entry.query) === key)
+    .sort((a, b) => a.ts - b.ts);
+  const history = mine.map((entry) => entry.score as number).slice(-10);
+  const prev = history.length >= 2 ? history[history.length - 2] : null;
+  const latestByPeer = new Map<string, number>();
+  for (const entry of entries.filter((entry) => entry.kind === "person").sort((a, b) => a.ts - b.ts)) {
+    latestByPeer.set(norm(entry.ref ?? entry.query), entry.score as number);
+  }
+  latestByPeer.delete(key);
+  const peers = [...latestByPeer.values()];
+  const beaten = peers.filter((peerScore) => peerScore < score).length;
+  const delta = prev == null ? null : score - prev;
+  if (history.length < 2 && peers.length < 3) return null;
+  const w = 96, h = 22, pad = 2;
+  const lo = Math.min(...history), hi = Math.max(...history);
+  const span = Math.max(1, hi - lo);
+  const points = history.map((value, index) => ({
+    x: pad + (index * (w - pad * 2)) / Math.max(1, history.length - 1),
+    y: h - pad - ((value - lo) * (h - pad * 2)) / span,
+  }));
+  const last = points[points.length - 1];
+  return (
+    <div className="mt-2 text-[10.5px] leading-relaxed text-ink-faint">
+      {history.length >= 2 && (
+        <div className="flex items-center justify-center gap-1.5 max-sm:justify-start">
+          <svg width={w} height={h} aria-label={`Score history across ${history.length} scans: ${history.join(", ")}`} className="overflow-visible text-signal-lift">
+            <polyline points={points.map((p) => `${p.x},${p.y}`).join(" ")} fill="none" stroke="currentColor" strokeWidth="1.2" />
+            <circle cx={last.x} cy={last.y} r="2" fill="currentColor" />
+          </svg>
+          {delta != null && (
+            <span className="text-ink-dim">{delta > 0 ? `+${delta}` : delta < 0 ? `${delta}` : "steady"} vs last scan</span>
+          )}
+        </div>
+      )}
+      {peers.length >= 3 && (
+        <div className="mt-0.5">higher than {beaten} of {peers.length} subjects in your library</div>
+      )}
+    </div>
+  );
+}
+
+/** One click, one paste: the report as three plain lines with the link. */
+function CopyTldrButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        void navigator.clipboard?.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1600);
+        });
+      }}
+      className="mono mt-2 rounded border border-line px-2 py-1 text-[10px] uppercase tracking-wider text-ink-dim transition hover:text-ink"
+    >
+      {copied ? "copied" : "copy tldr"}
+    </button>
+  );
 }
 
 type HeroProofTone = "pass" | "caution" | "avoid" | "neutral";
@@ -1928,6 +2001,13 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         href: axisHref(axis.axis),
       };
     });
+  // One paste, whole verdict: composed for group chats and IC memos alike.
+  const tldrText = [
+    `ARGUS · ${f.display_name || f.handle} · ${presentedVerdict} ${report.governing_score ?? "N/A"}/100`,
+    f.headline,
+    remainingPointsItems[0] ? `Top open item: ${remainingPointsItems[0].title}.` : "",
+    typeof window !== "undefined" ? window.location.href : "",
+  ].filter(Boolean).join("\n");
   const confidenceLimits: ReportCanvasNarrativeItem[] = confidenceLimitsBase.slice(0, 6);
   const adverseVerdictNarrative = [...confidenceLimits, ...lowAxisDrivers]
     .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
@@ -2374,6 +2454,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   </span>
                 )}
               </div>
+              <ScoreContextStrip
+                subjectRef={f.handle || f.display_name}
+                score={presentation.primaryScore ? report.governing_score : null}
+              />
+              <CopyTldrButton text={tldrText} />
             </div>
             <div className="min-w-0 flex-1">
               <div className="eyebrow mb-1.5">{presentation.resultLabel}</div>
