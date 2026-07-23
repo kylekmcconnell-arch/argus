@@ -168,7 +168,11 @@ export function assembleDossier(ev: CollectedEvidence, live: boolean): Dossier {
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
     if (!meaningfulTeamValue(member.name) || !meaningfulTeamValue(member.role)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
-    if (member.identity_link_evidence_origin !== "model_lead" && member.projects_evidence_origin !== "model_lead") return [];
+    // Only an unproven identity LINK makes a verified person a candidate
+    // again. Model-found projects alone are stripped from the verified row
+    // (sanitization above) and must not re-render the person with a verify
+    // button: a deterministically-bound founder is not a lead.
+    if (member.identity_link_evidence_origin !== "model_lead") return [];
     return [{
       ...member,
       evidence_origin: "model_lead" as const,

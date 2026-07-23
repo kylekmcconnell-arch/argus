@@ -1010,7 +1010,7 @@ function assembleDossier(ev, live) {
   const webTeamLeads = (ev.webTeam ?? []).flatMap((member) => {
     if (!meaningfulTeamValue(member.name) || !meaningfulTeamValue(member.role)) return [];
     if (!identityGrounded(member)) return [{ ...member }];
-    if (member.identity_link_evidence_origin !== "model_lead" && member.projects_evidence_origin !== "model_lead") return [];
+    if (member.identity_link_evidence_origin !== "model_lead") return [];
     return [{
       ...member,
       evidence_origin: "model_lead",

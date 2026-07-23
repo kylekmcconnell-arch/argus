@@ -201,6 +201,49 @@ describe("frozen source artifact provenance", () => {
     ]));
   });
 
+  it("accepts the frozen snapshot companions (priorOutcome, TVL trend, fees, holders, projection facts)", async () => {
+    const supportId = `art_v1_${"a".repeat(64)}`;
+    const payload = {
+      axisCitationVersion: 1,
+      axisEvidenceCatalog: [{
+        artifactId: supportId,
+        contentHash: "a".repeat(64),
+        kind: "axis_evidence",
+        provider: "github",
+        operation: "account-resolution",
+        section: "identity",
+        title: "GitHub account links to the audited X handle",
+        eligibleAxes: Object.keys(FOUNDER_WEIGHTS),
+        verification: "verified",
+        scope: "direct_subject",
+      }],
+      report: {
+        composite_verdict: "PASS",
+        governing_score: 81,
+        roles: [SubjectClass.FOUNDER],
+        role_reports: [{ role: SubjectClass.FOUNDER, axes: founderAxes(supportId) }],
+      },
+      // The fields a 2026-07 scan freezes alongside the lineage: none of them
+      // participate in the lineage contract, and none may break persistence.
+      priorOutcome: { version: 15, score: 79, verdict: "PASS", completeness: "complete", capturedAt: "2026-07-22T21:24:00.000Z", delta: "Since last scan (v15): score steady at 79" },
+      protocolTvl: {
+        slug: "uniswap", tvlUsd: 3_170_000_000, chains: ["Ethereum"],
+        chainBreakdown: [{ chain: "Ethereum", tvlUsd: 2_190_000_000 }],
+        trend: [{ date: "2026-01-25", tvlUsd: 3_000_000_000 }, { date: "2026-07-23", tvlUsd: 3_170_000_000 }],
+        change30dPct: 1.8, sourceUrl: "https://defillama.com/protocol/uniswap", capturedAt: "2026-07-23T00:53:00.000Z",
+      },
+      protocolFees: { slug: "uniswap", total24hUsd: 3_000_000, total30dUsd: 85_800_000, change30dOver30dPct: 3.4, sourceUrl: "https://defillama.com/protocol/uniswap", capturedAt: "2026-07-23T00:53:00.000Z" },
+      holderProfile: { topHolderPct: 27, top10Pct: 51, holderCount: 388_614, lpLockedOrBurnedPct: null, sourceUrl: "https://gopluslabs.io/", capturedAt: "2026-07-23T00:53:00.000Z" },
+      basicFacts: [{ factId: "fact-1", subjectKey: "@uniswap", predicate: "traction", value: "CoinGecko rank #39", normalizedValue: "rank", status: "verified", critical: true, sources: [], evidence_origin: "deterministic", artifact_verified: true, provider: "public-web", providerProjection: true }],
+    };
+    const prepared = prepareProvenanceRows(
+      { organizationId: "00000000-0000-4000-8000-000000000011", attestationState: "server_collected" },
+      payload,
+      [],
+    );
+    expect(prepared.evidenceItems.length).toBeGreaterThan(0);
+  });
+
   it.each([
     {
       label: "a scalar counterEligibleAxes value",

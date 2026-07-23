@@ -1252,7 +1252,10 @@ function reportTeamLeads(dossier: Dossier): ReportTeamMember[] {
   // stays only as compat for persisted dossiers that predate webTeamLeads.
   const inferred = dossier.webTeamLeads ? [] : (dossier.webTeam ?? []).flatMap((member) => {
     if (!groundedTeamMember(member)) return [member];
-    if (member.identity_link_evidence_origin !== "model_lead" && member.projects_evidence_origin !== "model_lead") return [];
+    // Compat path mirrors assembleDossier: only an unproven identity link
+    // re-renders a verified person as a candidate; model-found projects alone
+    // never do.
+    if (member.identity_link_evidence_origin !== "model_lead") return [];
     return [{
       ...member,
       evidence_origin: "model_lead" as const,
