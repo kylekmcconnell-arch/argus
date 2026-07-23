@@ -79,11 +79,15 @@ async function structuredClaude<T>(
   const key = env("ANTHROPIC_API_KEY");
   if (!key) return null;
   const startedAt = Date.now();
+  // Prompt caching: the scoring rubric (system) and the evidence packet
+  // (user) repeat verbatim across repair attempts and the validator pass
+  // within one run's 5-minute cache window; cache reads bill at 10% of input.
+  // Blocks below the model's minimum cacheable length are ignored harmlessly.
   const requestBody = JSON.stringify({
     model: ANALYST_MODEL,
     max_tokens: maxTokens,
-    system,
-    messages: [{ role: "user", content: user }],
+    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+    messages: [{ role: "user", content: [{ type: "text", text: user, cache_control: { type: "ephemeral" } }] }],
     tools: [tool],
     tool_choice: { type: "tool", name: tool.name, disable_parallel_tool_use: true },
   });

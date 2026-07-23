@@ -19,6 +19,12 @@ vi.mock("../entityStore", () => ({ readEntityFacts: vi.fn(async () => null) }));
 
 const NOW = "2026-07-12T12:00:00.000Z";
 
+// Prompt-caching wraps the discovery prompt in a content-block array; tests
+// read it back as plain text regardless of shape.
+const promptText = (value: unknown): string => Array.isArray(value)
+  ? value.map((block) => String((block as { text?: unknown }).text ?? "")).join("\n")
+  : String(value ?? "");
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.unstubAllEnvs();
@@ -90,7 +96,7 @@ describe("basic-facts lead parsing", () => {
 
     expect(requestBodies).toHaveLength(3);
     const prompts = requestBodies.map((body) =>
-      ((body.messages as Array<{ content?: string }> | undefined)?.[0]?.content ?? ""));
+      promptText((body.messages as Array<{ content?: unknown }> | undefined)?.[0]?.content));
     expect(prompts.every((prompt) => prompt.includes(
       "copy the source's exact as-of date or reporting period into qualifier",
     ))).toBe(true);
@@ -446,7 +452,7 @@ describe("question-specific asset search", () => {
     const prompts: string[] = [];
     const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }> };
-      prompts.push(body.messages?.[0]?.content ?? "");
+      prompts.push(promptText(body.messages?.[0]?.content));
       return new Response(JSON.stringify({
         content: [{ type: "text", text: '{"facts":[]}' }],
         stop_reason: "end_turn",
@@ -633,7 +639,7 @@ describe("critical-gap search recovery", () => {
     await discoverBasicFactLeadsDetailed(ctx, {
       request: async (_input, init) => {
         const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }> };
-        prompt = body.messages?.[0]?.content ?? "";
+        prompt = promptText(body.messages?.[0]?.content);
         return new Response(JSON.stringify({
           content: [{ type: "text", text: '{"facts":[]}' }],
           stop_reason: "end_turn",
@@ -800,7 +806,7 @@ describe("critical-gap search recovery", () => {
     const prompts: string[] = [];
     const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: string }> };
-      prompts.push(body.messages?.[0]?.content ?? "");
+      prompts.push(promptText(body.messages?.[0]?.content));
       return new Response(JSON.stringify({
         content: [{ type: "text", text: '{"facts":[]}' }],
         stop_reason: "end_turn",
@@ -4779,5 +4785,56 @@ describe("knowledge base read-through", () => {
 
     expect(discoveredIds).toContain("person.founder");
     expect(readEntityFacts).not.toHaveBeenCalled();
+  });
+});
+
+// Prompt caching on the discovery path: the user prompt block always carries
+// a cache breakpoint, and a pause_turn continuation decorates the last resent
+// search-round block ONLY when its type is a known-cacheable one (an exotic
+// block must pass through untouched rather than risk a 400 on the batch).
+describe("discovery prompt caching", () => {
+  it("marks the user prompt block and the resent search round for caching", async () => {
+    const { ctx } = context();
+    const requestBodies: Record<string, unknown>[] = [];
+    let call = 0;
+    const request = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => {
+      requestBodies.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      call += 1;
+      const paused = call === 1;
+      return new Response(JSON.stringify(paused
+        ? {
+          content: [
+            { type: "server_tool_use", id: "srvtoolu_1", name: "web_search", input: { query: "jupiter" } },
+            { type: "web_search_tool_result", tool_use_id: "srvtoolu_1", content: [] },
+          ],
+          stop_reason: "pause_turn",
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }
+        : {
+          content: [{ type: "text", text: '{"facts":[]}' }],
+          stop_reason: "end_turn",
+          usage: { input_tokens: 1, output_tokens: 1 },
+        }), { status: 200, headers: { "content-type": "application/json" } });
+    });
+
+    await discoverBasicFactLeads(ctx, {
+      request,
+      cacheRead: async () => null,
+      cacheWrite: async () => undefined,
+    });
+
+    expect(requestBodies.length).toBeGreaterThanOrEqual(2);
+    for (const body of requestBodies) {
+      const user = (body.messages as Array<{ content?: unknown }>)[0].content;
+      expect(Array.isArray(user)).toBe(true);
+      expect((user as Array<Record<string, unknown>>)[0].cache_control).toEqual({ type: "ephemeral" });
+    }
+    const continuation = requestBodies.find((body) => (body.messages as unknown[]).length === 2);
+    expect(continuation).toBeDefined();
+    const resent = (continuation!.messages as Array<{ content?: Array<Record<string, unknown>> }>)[1].content!;
+    // Last block (web_search_tool_result) is cacheable and gets the marker;
+    // the earlier server_tool_use block passes through untouched.
+    expect(resent[resent.length - 1].cache_control).toEqual({ type: "ephemeral" });
+    expect(resent[0].cache_control).toBeUndefined();
   });
 });

@@ -176,6 +176,8 @@ export function addClaudeUsage(
   u: {
     input_tokens?: number;
     output_tokens?: number;
+    cache_creation_input_tokens?: number;
+    cache_read_input_tokens?: number;
     server_tool_use?: { web_search_requests?: number };
   } | undefined,
   op = "analysis",
@@ -186,6 +188,11 @@ export function addClaudeUsage(
   const { claude } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
+  // Prompt-cache tokens bill at their own rates (writes 1.25x input, reads
+  // 0.1x input) and arrive in separate usage fields; folding them in at the
+  // wrong rate would drift the ledger from the invoice in either direction.
+  const cacheWrites = u?.cache_creation_input_tokens ?? 0;
+  const cacheReads = u?.cache_read_input_tokens ?? 0;
   const webSearches = u?.server_tool_use?.web_search_requests ?? 0;
   // Haiku bills 3x cheaper on input than Sonnet; price the call by its model so
   // the ledger reflects the decoupled discovery pipeline honestly.
@@ -193,13 +200,19 @@ export function addClaudeUsage(
   const inPrice = haiku ? PRICE.haikuIn : PRICE.claudeIn;
   const outPrice = haiku ? PRICE.haikuOut : PRICE.claudeOut;
   claude.calls += 1;
-  claude.in += tin;
+  claude.in += tin + cacheWrites + cacheReads;
   claude.out += tout;
   recordCall(
     "claude",
     op,
-    tin * inPrice + tout * outPrice + webSearches * PRICE.claudeWebSearch,
-    [`${tin + tout} tok`, haiku ? "haiku" : "", webSearches ? `${webSearches} web searches` : "", outcomeMeta].filter(Boolean).join(" · "),
+    tin * inPrice + cacheWrites * inPrice * 1.25 + cacheReads * inPrice * 0.1 + tout * outPrice + webSearches * PRICE.claudeWebSearch,
+    [
+      `${tin + tout} tok`,
+      cacheReads || cacheWrites ? `cache r${cacheReads}/w${cacheWrites}` : "",
+      haiku ? "haiku" : "",
+      webSearches ? `${webSearches} web searches` : "",
+      outcomeMeta,
+    ].filter(Boolean).join(" · "),
     status,
   );
 }

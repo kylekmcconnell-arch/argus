@@ -24,6 +24,12 @@ import type { AxisEvidenceRecord, SourceArtifact } from "../src/data/evidence";
 import { getProfile, SubjectClass } from "../src/engine";
 import { ANALYST_REPAIR_TIMEOUT_MS, ANALYST_SCORING_TIMEOUT_MS } from "../src/lib/investigationRuntime";
 import { getCost, withCostLedger } from "./cost";
+// Prompt-caching wraps system and user prompts in content-block arrays;
+// tests read them back as plain text regardless of shape.
+const promptText = (value: unknown): string => Array.isArray(value)
+  ? value.map((block) => String((block as { text?: unknown }).text ?? "")).join("\n")
+  : String(value ?? "");
+
 
 const catalog: AnalystAxis[] = [
   { axis: "F1_identity_verifiability", weight: 12, role: "FOUNDER" },
@@ -4104,8 +4110,8 @@ describe("analyst verdict integrity", () => {
         };
       }>;
     });
-    const contradictionPrompt = requests.find((request) => request.tool_choice.name === "record_contradictions")?.system ?? "";
-    const scoringPrompt = requests.find((request) => request.tool_choice.name === "record_verdict")?.messages[0]?.content ?? "";
+    const contradictionPrompt = promptText(requests.find((request) => request.tool_choice.name === "record_contradictions")?.system);
+    const scoringPrompt = promptText(requests.find((request) => request.tool_choice.name === "record_verdict")?.messages[0]?.content);
 
     expect(contradictionPrompt).toContain("investigative leads are excluded from this evidence packet");
     expect(contradictionPrompt).toContain("when comparing or interpreting finding collections");
@@ -4635,7 +4641,7 @@ describe("analyst verdict integrity", () => {
     let prompt = "";
     const fetchMock = vi.fn(async (_input: unknown, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body)) as { messages: Array<{ content: string }> };
-      prompt = body.messages[0].content;
+      prompt = promptText(body.messages[0].content);
       return new Response(JSON.stringify({
         content: [{
           type: "tool_use",
@@ -4783,7 +4789,7 @@ describe("analyst verdict integrity", () => {
         identity_note: "Identity resolved",
       };
       if (attempt === 2) {
-        expect(request.messages[0].content).toContain(
+        expect(promptText(request.messages[0].content)).toContain(
           "axis-count",
         );
       }
@@ -4858,14 +4864,14 @@ describe("analyst verdict integrity", () => {
         tool_choice: { name: string };
       };
       if (attempt === 1) {
-        expect(request.messages[0].content).toContain(
+        expect(promptText(request.messages[0].content)).toContain(
           "P1_team_and_identity: exceptional evidence, allowed 14-16; P4_backing_and_partners: solid evidence, allowed 10-11",
         );
       } else {
-        expect(request.messages[0].content).toContain(
+        expect(promptText(request.messages[0].content)).toContain(
           "project-scores-outside-evidence-strength-band:P1_team_and_identity,P4_backing_and_partners",
         );
-        expect(request.messages[0].content).toContain(
+        expect(promptText(request.messages[0].content)).toContain(
           "Required bands by axis: P1_team_and_identity: 14-16 (exceptional); P4_backing_and_partners: 10-11 (solid)",
         );
       }
@@ -5057,17 +5063,17 @@ describe("analyst verdict integrity", () => {
         messages: Array<{ content: string }>;
         tool_choice: { name: string };
       };
-      expect(request.messages[0].content).toContain("PUBLIC DILIGENCE GAP RULE");
-      expect(request.messages[0].content).toContain("government-issued ID, passport, SSN or tax ID, home address");
-      expect(request.messages[0].content).toContain("private account credentials");
-      expect(request.messages[0].content).toContain("other non-public personal proof");
-      expect(request.messages[0].content).toContain(
+      expect(promptText(request.messages[0].content)).toContain("PUBLIC DILIGENCE GAP RULE");
+      expect(promptText(request.messages[0].content)).toContain("government-issued ID, passport, SSN or tax ID, home address");
+      expect(promptText(request.messages[0].content)).toContain("private account credentials");
+      expect(promptText(request.messages[0].content)).toContain("other non-public personal proof");
+      expect(promptText(request.messages[0].content)).toContain(
         "A checked-empty reference records a completed clear or negative screen",
       );
-      expect(request.messages[0].content).toContain(
+      expect(promptText(request.messages[0].content)).toContain(
         "it is not an evidence gap and must not create a gap line by itself",
       );
-      const eligibilityLine = request.messages[0].content.split("\n")
+      const eligibilityLine = promptText(request.messages[0].content).split("\n")
         .find((line) => line.startsWith("F1_identity_verifiability |")) ?? "";
       expect(eligibilityLine).toContain(
         `coverageRefs preferred return set (optional; return 0-4 total, never the whole ` +
@@ -5075,14 +5081,14 @@ describe("analyst verdict integrity", () => {
       );
       expect(eligibilityLine).not.toContain(omittedCoverageAlias);
       if (attempt === 2) {
-        expect(request.messages[0].content).toContain(
+        expect(promptText(request.messages[0].content)).toContain(
           "coverage-reference-limit-observed-5-max-4:F1_identity_verifiability",
         );
-        expect(request.messages[0].content).toContain(
+        expect(promptText(request.messages[0].content)).toContain(
           `The prior F1_identity_verifiability coverageRefs contained 5 aliases; the maximum is 4. ` +
           `Return no more than these four preferred aliases: ${coverageCandidates.join(", ")}`,
         );
-        expect(request.messages[0].content).toContain(
+        expect(promptText(request.messages[0].content)).toContain(
           "Do not append or move omitted coverage aliases into support or counter fields",
         );
       }

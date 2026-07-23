@@ -128,3 +128,32 @@ describe("live-search source accounting", () => {
     expect(captured.sources).toBe(40);
   });
 });
+
+// Prompt-cache tokens arrive in their own usage fields and bill at their own
+// rates (writes 1.25x input, reads 0.1x). The ledger must price them exactly,
+// or the in-app numbers drift from the invoice in either direction.
+describe("prompt-cache token pricing", () => {
+  it("prices cache writes at 1.25x and cache reads at 0.1x of the model input rate", async () => {
+    const { withCostLedger, addClaudeUsage, getCost } = await import("./cost");
+    const cost = await withCostLedger(async () => {
+      addClaudeUsage({
+        input_tokens: 1_000,
+        output_tokens: 100,
+        cache_creation_input_tokens: 10_000,
+        cache_read_input_tokens: 100_000,
+      }, "analysis-cached");
+      return getCost();
+    });
+    const line = cost.calls.find((entry) => entry.op === "analysis-cached");
+    expect(line).toBeDefined();
+    // Sonnet rates: in $3/M, out $15/M.
+    const expected = 1_000 * 3 / 1e6
+      + 10_000 * 3 * 1.25 / 1e6
+      + 100_000 * 3 * 0.1 / 1e6
+      + 100 * 15 / 1e6;
+    expect(line!.usd).toBeCloseTo(expected, 8);
+    expect(line!.meta).toContain("cache r100000/w10000");
+    // Uncached equivalent would price the same tokens 10x higher on the reads.
+    expect(line!.usd).toBeLessThan((1_000 + 10_000 + 100_000) * 3 / 1e6 + 100 * 15 / 1e6);
+  });
+});

@@ -1010,18 +1010,37 @@ function responseText(response: ClaudeResponse): string {
     .join("\n");
 }
 
+// Cache markers only on block types that are unambiguously cacheable: a 400
+// from decorating an exotic block would fail the whole discovery batch, which
+// costs far more than the cache ever saves.
+const CACHEABLE_BLOCK_TYPES = new Set(["text", "web_search_tool_result", "tool_use", "tool_result"]);
+
+function withTrailingCacheMarker(content: ClaudeContentBlock[]): ClaudeContentBlock[] {
+  const last = content[content.length - 1];
+  if (!last || !CACHEABLE_BLOCK_TYPES.has(String((last as { type?: unknown }).type))) return content;
+  return [
+    ...content.slice(0, -1),
+    { ...last, cache_control: { type: "ephemeral" } } as ClaudeContentBlock,
+  ];
+}
+
 function claudeRequestBody(
   prompt: string,
   assistantContent?: ClaudeContentBlock[],
   maxSearchUses = PRIMARY_SEARCH_USES_PER_BATCH,
 ): Record<string, unknown> {
+  // Prompt caching: the breakpoint on the user prompt makes the pause_turn
+  // continuation and the transient-failure retry re-read system + tools +
+  // prompt at 10% of input price; the trailing marker on the resent search
+  // round caches the fat first-round content on continuation calls.
+  const userContent = [{ type: "text", text: prompt, cache_control: { type: "ephemeral" } }];
   return {
     model: DISCOVERY_MODEL,
     max_tokens: 3_000,
     system: "You are ARGUS's basic-facts research scout. Search broadly, cite precisely, and return only the requested JSON. Never treat your own answer as verified evidence.",
     messages: assistantContent
-      ? [{ role: "user", content: prompt }, { role: "assistant", content: assistantContent }]
-      : [{ role: "user", content: prompt }],
+      ? [{ role: "user", content: userContent }, { role: "assistant", content: withTrailingCacheMarker(assistantContent) }]
+      : [{ role: "user", content: userContent }],
     tools: [{ type: "web_search_20250305", name: "web_search", max_uses: maxSearchUses }],
   };
 }

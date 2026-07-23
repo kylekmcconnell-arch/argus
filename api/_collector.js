@@ -1594,18 +1594,26 @@ function addClaudeUsage(u, op = "analysis", status = "succeeded", outcomeMeta, m
   const { claude } = currentState();
   const tin = u?.input_tokens ?? 0;
   const tout = u?.output_tokens ?? 0;
+  const cacheWrites = u?.cache_creation_input_tokens ?? 0;
+  const cacheReads = u?.cache_read_input_tokens ?? 0;
   const webSearches = u?.server_tool_use?.web_search_requests ?? 0;
   const haiku = typeof model === "string" && /haiku/i.test(model);
   const inPrice = haiku ? PRICE.haikuIn : PRICE.claudeIn;
   const outPrice = haiku ? PRICE.haikuOut : PRICE.claudeOut;
   claude.calls += 1;
-  claude.in += tin;
+  claude.in += tin + cacheWrites + cacheReads;
   claude.out += tout;
   recordCall(
     "claude",
     op,
-    tin * inPrice + tout * outPrice + webSearches * PRICE.claudeWebSearch,
-    [`${tin + tout} tok`, haiku ? "haiku" : "", webSearches ? `${webSearches} web searches` : "", outcomeMeta].filter(Boolean).join(" \xB7 "),
+    tin * inPrice + cacheWrites * inPrice * 1.25 + cacheReads * inPrice * 0.1 + tout * outPrice + webSearches * PRICE.claudeWebSearch,
+    [
+      `${tin + tout} tok`,
+      cacheReads || cacheWrites ? `cache r${cacheReads}/w${cacheWrites}` : "",
+      haiku ? "haiku" : "",
+      webSearches ? `${webSearches} web searches` : "",
+      outcomeMeta
+    ].filter(Boolean).join(" \xB7 "),
     status
   );
 }
@@ -2118,8 +2126,8 @@ async function structuredClaude(system, user, tool, maxTokens, timeoutMs, onFail
   const requestBody = JSON.stringify({
     model: ANALYST_MODEL,
     max_tokens: maxTokens,
-    system,
-    messages: [{ role: "user", content: user }],
+    system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+    messages: [{ role: "user", content: [{ type: "text", text: user, cache_control: { type: "ephemeral" } }] }],
     tools: [tool],
     tool_choice: { type: "tool", name: tool.name, disable_parallel_tool_use: true }
   });
@@ -9823,12 +9831,22 @@ function discoveryPrompt(ctx, questions, phase = "primary") {
 function responseText(response) {
   return (response.content ?? []).filter((block) => block.type === "text" && typeof block.text === "string").map((block) => block.text).join("\n");
 }
+var CACHEABLE_BLOCK_TYPES = /* @__PURE__ */ new Set(["text", "web_search_tool_result", "tool_use", "tool_result"]);
+function withTrailingCacheMarker(content) {
+  const last = content[content.length - 1];
+  if (!last || !CACHEABLE_BLOCK_TYPES.has(String(last.type))) return content;
+  return [
+    ...content.slice(0, -1),
+    { ...last, cache_control: { type: "ephemeral" } }
+  ];
+}
 function claudeRequestBody(prompt, assistantContent, maxSearchUses = PRIMARY_SEARCH_USES_PER_BATCH) {
+  const userContent = [{ type: "text", text: prompt, cache_control: { type: "ephemeral" } }];
   return {
     model: DISCOVERY_MODEL,
     max_tokens: 3e3,
     system: "You are ARGUS's basic-facts research scout. Search broadly, cite precisely, and return only the requested JSON. Never treat your own answer as verified evidence.",
-    messages: assistantContent ? [{ role: "user", content: prompt }, { role: "assistant", content: assistantContent }] : [{ role: "user", content: prompt }],
+    messages: assistantContent ? [{ role: "user", content: userContent }, { role: "assistant", content: withTrailingCacheMarker(assistantContent) }] : [{ role: "user", content: userContent }],
     tools: [{ type: "web_search_20250305", name: "web_search", max_uses: maxSearchUses }]
   };
 }

@@ -71,12 +71,20 @@ export default function handler(req: VercelRequest, res: VercelResponse) {
           : "grounded extraction uses the native Anthropic extractor (no OpenRouter key)",
   };
 
+  // Model-tier diagnostic: which Claude models the RUNNING build uses for the
+  // two dominant cost paths. Confirms an ARGUS_ANALYST_MODEL /
+  // ARGUS_DISCOVERY_MODEL env flip took effect without spending on an audit.
+  const analystModel = process.env.ARGUS_ANALYST_MODEL?.trim() || "claude-sonnet-4-6 (default)";
+  const discoveryModel = process.env.ARGUS_DISCOVERY_MODEL?.trim() || `${analystModel} (follows analyst)`;
+  const models = { analyst: analystModel, discovery: discoveryModel };
+
   res.setHeader("cache-control", "public, s-maxage=60, stale-while-revalidate=300");
   return res.status(200).json({
     available: true,
     mode: "configuration",
     services,
     extraction,
+    models,
     knowledgeBase: {
       reuse: entityReuse,
       note: entityReuse

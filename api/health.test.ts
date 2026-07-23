@@ -77,6 +77,22 @@ describe("provider readiness", () => {
       ],
       extraction: { extractProvider: "openrouter", groundedSearchActive: true },
       knowledgeBase: { reuse: true },
+      models: {
+        analyst: "claude-sonnet-4-6 (default)",
+        discovery: "claude-sonnet-4-6 (default) (follows analyst)",
+      },
+    });
+  });
+
+  it("reports model-tier env flips so a cost change verifies without a paid audit", () => {
+    vi.stubEnv("ARGUS_ANALYST_MODEL", "claude-sonnet-5");
+    vi.stubEnv("ARGUS_DISCOVERY_MODEL", "claude-haiku-4-5");
+    const { res, captured } = response();
+
+    handler({ method: "GET" } as never, res as never);
+
+    expect(captured.body).toMatchObject({
+      models: { analyst: "claude-sonnet-5", discovery: "claude-haiku-4-5" },
     });
   });
 
