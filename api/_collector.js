@@ -2457,7 +2457,7 @@ ${evidenceJson}`;
       state: "invalid_result_shape",
       received: r.contradictions === null ? "null" : typeof r.contradictions
     }));
-    return [];
+    return null;
   }
   return r.contradictions.filter((candidate) => {
     if (!candidate || typeof candidate !== "object") return false;
