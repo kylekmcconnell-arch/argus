@@ -180,6 +180,7 @@ describe("report case lifecycle API", () => {
         canonicalRef: address,
         completenessState: "partial",
         checks: [{ label: "Contract safety", status: "unknown" }],
+        methodologyVersion: "argus-token-v2-terminal-outcomes",
       }),
     );
     expect(activateReportVersion).toHaveBeenCalledWith(

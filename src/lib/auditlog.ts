@@ -36,7 +36,7 @@ export function presentedAuditVerdict(entry: Pick<LogEntry, "verdict" | "coverag
 export function auditReadinessLabel(entry: Pick<LogEntry, "verdict" | "coverage">): string | undefined {
   const presented = presentedAuditVerdict(entry);
   if (presented !== "INCOMPLETE") return presented;
-  return entry.coverage?.toLowerCase() === "provisional" ? "PROVISIONAL" : "INCOMPLETE";
+  return entry.coverage?.toLowerCase() === "provisional" ? "PROVISIONAL" : "BLOCKED";
 }
 
 export function hasCoverageGap(entry: Pick<LogEntry, "kind" | "verdict" | "coverage" | "flags">): boolean {

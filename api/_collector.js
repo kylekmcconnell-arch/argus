@@ -2451,7 +2451,19 @@ ${evidenceJson}`;
     timeoutMs
   );
   if (!r) return null;
-  return (r.contradictions ?? []).filter((c) => c && c.claim?.trim() && c.conflict?.trim()).map((c) => ({ claim: c.claim.trim(), conflict: c.conflict.trim(), severity: lvl(c.severity), confidence: lvl(c.confidence) })).slice(0, 10);
+  if (!Array.isArray(r.contradictions)) {
+    console.warn("[agent-runtime]", JSON.stringify({
+      tool: "record_contradictions",
+      state: "invalid_result_shape",
+      received: r.contradictions === null ? "null" : typeof r.contradictions
+    }));
+    return [];
+  }
+  return r.contradictions.filter((candidate) => {
+    if (!candidate || typeof candidate !== "object") return false;
+    const contradiction = candidate;
+    return typeof contradiction.claim === "string" && contradiction.claim.trim().length > 0 && typeof contradiction.conflict === "string" && contradiction.conflict.trim().length > 0;
+  }).map((c) => ({ claim: c.claim.trim(), conflict: c.conflict.trim(), severity: lvl(c.severity), confidence: lvl(c.confidence) })).slice(0, 10);
 }
 var PROJECT_SCORING_POLICY = [
   "PROJECT CALIBRATION POLICY:",

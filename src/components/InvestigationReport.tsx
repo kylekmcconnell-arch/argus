@@ -7,7 +7,12 @@ import { OnChainForensics } from "./OnChainForensics";
 import { ProjectResearch } from "./ProjectResearch";
 import { ProjectLinks } from "./ProjectLinks";
 import { MethodologyChecklist } from "./MethodologyChecklist";
-import { personChecks, reconcileInvestigationChecks, tokenChecks } from "../lib/scanChecklist";
+import {
+  clearanceCoverage,
+  personChecks,
+  reconcileInvestigationChecks,
+  tokenChecks,
+} from "../lib/scanChecklist";
 import { deriveDecisionReadiness } from "../lib/decisionReadiness";
 import { ArkhamName } from "./ArkhamName";
 import { useArkhamLabels } from "../lib/useArkhamLabels";
@@ -146,12 +151,26 @@ export function InvestigationReport({
     inv.versionContext ? inv.versionContext.checks : tokenChecks(token),
     token.address,
     projectAccount,
+    inv.projectAccountAudit,
   );
   const readiness = deriveDecisionReadiness(diligenceChecks);
-  const positiveVerdictNeedsQualification = token.verdict === "PASS" && readiness.status !== "ready";
-  const presentedTokenVerdict = positiveVerdictNeedsQualification ? "INCOMPLETE" : token.verdict;
-  const preliminaryTokenMeta = verdictMeta(token.verdict);
-  const readinessColor = readiness.status === "ready" ? "var(--color-pass)" : "var(--color-caution)";
+  const clearance = clearanceCoverage(diligenceChecks);
+  const observedTokenMeta = verdictMeta(token.verdict);
+  const readinessLabel = readiness.status === "ready"
+    ? "DECISION READY"
+    : readiness.status === "provisional"
+      ? "REVIEW WITH GAPS"
+      : "SCAN BLOCKED";
+  const readinessColor = readiness.status === "ready"
+    ? "var(--color-pass)"
+    : readiness.status === "provisional"
+      ? "var(--color-caution)"
+      : "var(--color-avoid)";
+  const recordedChecks = diligenceChecks.filter((check) => ["confirmed", "finding", "checked-empty"].includes(check.status));
+  const gapChecks = diligenceChecks.filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
+  const requiredGapChecks = gapChecks.filter((check) =>
+    check.checkId ? clearance.openNeverWaive.includes(check.checkId) : false);
+  const enrichmentGapChecks = gapChecks.filter((check) => !requiredGapChecks.includes(check));
   const projectChecks = projectAccount
     ? projectAccount.versionContext
       ? projectAccount.versionContext.checks
@@ -183,7 +202,7 @@ export function InvestigationReport({
     showCurrentIntelligence && panelCostToken ? [token.deployer, deployerTrail?.funder?.address] : [],
     panelCostToken,
   );
-  const tm = verdictMeta(presentedTokenVerdict);
+  const tm = observedTokenMeta;
   // The project's GitHub org (from its site links), for commit forensics.
   // The project's own website (first non-social link) → domain intelligence.
   const projectDomain = [...(recon?.socials ?? []), ...(token.socials ?? [])]
@@ -291,8 +310,6 @@ export function InvestigationReport({
   // account, site) plus every cross-audit tie to other subjects you've scanned.
   const invGraph = investigationContribution(inv);
   const connections = subjectConnections("$" + token.symbol, getContributions());
-  const recordedChecks = diligenceChecks.filter((check) => ["confirmed", "finding", "checked-empty"].includes(check.status));
-  const gapChecks = diligenceChecks.filter((check) => ["unknown", "unavailable", "stale"].includes(check.status));
   const supportItems = [
     ...token.findings
       .filter((finding) => finding.tone === "good")
@@ -317,11 +334,16 @@ export function InvestigationReport({
       .map((check) => ({ label: check.label, detail: check.note })),
     ...(readiness.status !== "ready" ? [{ label: readiness.title, detail: readiness.guidance }] : []),
   ].slice(0, 6);
-  const nextStepItems = gapChecks.slice(0, 6).map((check) => ({ label: `Resolve ${check.label.toLowerCase()}`, detail: check.note }));
+  const nextStepItems = [...requiredGapChecks, ...enrichmentGapChecks]
+    .slice(0, 6)
+    .map((check) => ({
+      label: `${requiredGapChecks.includes(check) ? "Required: " : ""}Resolve ${check.label.toLowerCase()}`,
+      detail: check.note,
+    }));
   // One paste, whole verdict: composed for group chats. The link is appended
   // at copy time (share link when mintable, app URL else).
   const tldrBase = [
-    `ARGUS · $${token.symbol} investigation · token risk ${verdictMeta(presentedTokenVerdict).label}${positiveVerdictNeedsQualification || token.score == null ? "" : ` ${token.score}/100`}`,
+    `ARGUS · $${token.symbol} investigation · observed token risk ${observedTokenMeta.label}${token.score == null ? "" : ` ${token.score}/100`} · readiness ${readinessLabel}`,
     token.headline,
     nextStepItems[0] ? `Top open item: ${nextStepItems[0].label}.` : "",
   ].filter(Boolean).join("\n");
@@ -330,10 +352,10 @@ export function InvestigationReport({
   const capturedAt = versionContext?.createdAt
     ? new Date(versionContext.createdAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
     : undefined;
-  const favorableVerdict = presentedTokenVerdict === "PASS";
+  const favorableVerdict = token.verdict === "PASS";
   const decisionCanvasTone = favorableVerdict
     ? "pass"
-    : presentedTokenVerdict === "CAUTION" || presentedTokenVerdict === "INCOMPLETE" || presentedTokenVerdict === "UNVERIFIABLE_IDENTITY"
+    : token.verdict === "CAUTION" || token.verdict === "INCOMPLETE" || token.verdict === "UNVERIFIABLE_IDENTITY"
       ? "caution"
       : "avoid";
 
@@ -362,7 +384,8 @@ export function InvestigationReport({
             )}
             {onReAudit && (
               <button onClick={onReAudit} title="Run this investigation again with current evidence" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
-                <ArrowClockwise size={16} weight="duotone" aria-hidden="true" /> Rescan
+                <ArrowClockwise size={16} weight="duotone" aria-hidden="true" />
+                {readiness.status === "ready" ? "Rescan" : "Retry scan"}
               </button>
             )}
           </div>
@@ -400,55 +423,97 @@ export function InvestigationReport({
         {/* headline */}
         <div className="mt-6">
           <div className="flex flex-wrap items-center gap-3">
-            {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-8 w-8 shrink-0 rounded-lg border border-line object-cover" />}
-            <h1 className="display-sm text-[24px] text-ink">{`Investigation · $${token.symbol}`}</h1>
+            {token.imageUrl && <img src={token.imageUrl} alt="" loading="lazy" referrerPolicy="no-referrer" className="h-9 w-9 shrink-0 rounded-xl border border-line object-cover" />}
+            <div>
+              <p className="eyebrow">Token investigation</p>
+              <h1 className="display-sm mt-0.5 text-[26px] text-ink">{`$${token.symbol}`}</h1>
+            </div>
+            {canShare && <CopyTldrButton base={tldrBase} mint={mintShareUrl} className="ml-auto" />}
           </div>
-          {/* Two DISTINCT scores, labelled so it's obvious what each grades. */}
-          <div className="mt-2.5 flex flex-wrap items-center gap-x-5 gap-y-2">
-            <span className="flex items-center gap-1.5">
-              <span className="eyebrow">Token risk</span>
-              <VerdictPill verdict={presentedTokenVerdict} score={positiveVerdictNeedsQualification ? null : token.score} />
-            </span>
-            {projectAccount && (
-              <span className="flex items-center gap-1.5">
-                <span className="eyebrow">Project account</span>
-                <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
-              </span>
-            )}
-            {canShare && <CopyTldrButton base={tldrBase} mint={mintShareUrl} className="" />}
+
+          <div className="mt-4 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.85fr)]">
+            <section className="panel p-4" aria-label="Observed token risk">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="eyebrow">Observed token risk</span>
+                <VerdictPill verdict={token.verdict} score={token.score} />
+              </div>
+              <p className="mt-2 text-[13px] leading-relaxed text-ink-dim">
+                This is the model result from the evidence that completed. It is kept separate from whether every required diligence gate finished.
+              </p>
+              <ScoreContextStrip
+                subjectRef={token.address}
+                score={token.score}
+                peerKind="token"
+                align="start"
+              />
+            </section>
+
+            <section
+              className="finding tint-var p-4"
+              style={{ "--tint": readinessColor } as React.CSSProperties}
+              aria-label="Investigation readiness"
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="chip tint-var" style={{ "--tint": readinessColor } as React.CSSProperties}>
+                  {readinessLabel}
+                </span>
+                <span className="mono text-[11px] text-ink-faint">
+                  {readiness.successful}/{readiness.applicable} outcomes · {readiness.coveragePercent}%
+                </span>
+              </div>
+              <h2 className="mt-2 text-[15px] font-semibold text-ink">
+                {requiredGapChecks.length
+                  ? `${requiredGapChecks.length} required safety ${requiredGapChecks.length === 1 ? "gate is" : "gates are"} still open`
+                  : readiness.title}
+              </h2>
+              <p className="mt-1.5 text-[12px] leading-relaxed text-ink-dim">
+                {requiredGapChecks.length
+                  ? `${requiredGapChecks.map((check) => check.label).join(", ")} must record a terminal outcome before clearance. ${enrichmentGapChecks.length} other enrichment ${enrichmentGapChecks.length === 1 ? "path remains" : "paths remain"} disclosed below.`
+                  : readiness.guidance}
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <a href="#investigation-methodology" className="text-[12px] font-medium text-signal-lift underline-offset-2 hover:underline">
+                  Review all checks
+                </a>
+                {onReAudit && readiness.status !== "ready" && (
+                  <button type="button" onClick={onReAudit} className="btn-secondary min-h-9 px-3 text-[12px]">
+                    Retry required scan
+                  </button>
+                )}
+              </div>
+            </section>
           </div>
-          <ScoreContextStrip
-            subjectRef={token.address}
-            score={positiveVerdictNeedsQualification ? null : token.score}
-            peerKind="token"
-            align="start"
-          />
-          <div
-            className="finding tint-var mt-3 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2.5"
-            style={{ "--tint": readinessColor } as React.CSSProperties}
-          >
-            <span className="chip tint-var" style={{ "--tint": readinessColor } as React.CSSProperties}>
-              {readiness.status}
-            </span>
-            <span className="text-[12.5px] font-medium text-ink">{readiness.title}</span>
-            <span className="mono text-[11px] text-ink-faint">
-              {readiness.successful}/{readiness.applicable} outcomes · {readiness.coveragePercent}% coverage
-            </span>
-            {positiveVerdictNeedsQualification && (
-              <span className="mono text-[11px]" style={{ color: preliminaryTokenMeta.color }}>
-                preliminary model signal · {preliminaryTokenMeta.label} {token.score ?? "N/A"}
-              </span>
-            )}
-            {projectAccount && projectReadiness && (
-              <span className="mono text-[11px] text-ink-faint">
-                project account · {projectReadiness.status} · {projectReadiness.successful}/{projectReadiness.applicable} outcomes
-              </span>
-            )}
-            <a href="#investigation-methodology" className="ml-auto text-[11px] text-signal-lift underline-offset-2 hover:text-signal-lift hover:underline">
-              Review checks
-            </a>
-            <p className="w-full text-[11px] leading-snug text-ink-faint">{readiness.guidance}</p>
-          </div>
+
+          <dl className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5" aria-label="Market scale">
+            <div className="stat-tile">
+              <dt className="stat-label">CoinGecko rank</dt>
+              <dd className="stat-value mt-1">{token.cg?.rank ? `#${token.cg.rank}` : "N/A"}</dd>
+            </div>
+            <div className="stat-tile">
+              <dt className="stat-label">Market cap</dt>
+              <dd className="stat-value mt-1">{money(token.mcap ?? token.cg?.mcapUsd ?? undefined)}</dd>
+            </div>
+            <div className="stat-tile">
+              <dt className="stat-label">Liquidity</dt>
+              <dd className="stat-value mt-1">{money(token.liquidityUsd)}</dd>
+            </div>
+            <div className="stat-tile">
+              <dt className="stat-label">CEX markets</dt>
+              <dd className="stat-value mt-1">{token.cg?.cexCount ?? "N/A"}</dd>
+            </div>
+            <div className="stat-tile col-span-2 sm:col-span-1">
+              <dt className="stat-label">Holders</dt>
+              <dd className="stat-value mt-1">{token.safety.holderCount ? token.safety.holderCount.toLocaleString() : "N/A"}</dd>
+            </div>
+          </dl>
+
+          {projectAccount && (
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-[12px] text-ink-dim">
+              <span className="eyebrow">Project account</span>
+              <VerdictPill verdict={presentedProjectVerdict ?? "INCOMPLETE"} score={projectPositiveNeedsQualification ? null : projectAccount.report.governing_score} />
+              {projectReadiness && <span>{projectReadiness.successful}/{projectReadiness.applicable} outcomes recorded</span>}
+            </div>
+          )}
           {/* Lead with the TEAM when we know it — don't declare "no team" when it's named below. */}
           {teamPeople.length > 0 ? (
             <p className="mt-3 max-w-3xl text-[13.5px] font-medium leading-relaxed text-ink">
@@ -488,7 +553,7 @@ export function InvestigationReport({
         </div>
 
         <InvestigationDecisionCanvas
-          verdictLabel={verdictMeta(presentedTokenVerdict).label}
+          verdictLabel={observedTokenMeta.label}
           favorable={favorableVerdict}
           verdictTone={decisionCanvasTone}
           supports={supportItems}
@@ -520,7 +585,7 @@ export function InvestigationReport({
           <Card title="On-chain" accent={tm.color}>
             <div className="flex items-center justify-between">
               <span className="mono text-[13.5px] text-ink">{`$${token.symbol}`}</span>
-              <VerdictPill verdict={presentedTokenVerdict} score={positiveVerdictNeedsQualification ? null : token.score} />
+              <VerdictPill verdict={token.verdict} score={token.score} />
             </div>
             <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">{token.headline}</p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">

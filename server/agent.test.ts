@@ -4190,6 +4190,26 @@ describe("analyst verdict integrity", () => {
     expect(findUnsupported(verdictTool.input_schema)).toEqual([]);
   });
 
+  it("quarantines a malformed contradiction result instead of aborting the audit", async () => {
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      content: [{
+        type: "tool_use",
+        name: "record_contradictions",
+        input: { contradictions: { claim: "not an array" } },
+      }],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 20, output_tokens: 10 },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    await expect(scanContradictions("@subject", "{}")).resolves.toBeNull();
+    expect(warn).toHaveBeenCalledWith(
+      "[agent-runtime]",
+      expect.stringContaining("invalid_result_shape"),
+    );
+  });
+
   it("skips contradiction analysis when the route has entered its finalization reserve", async () => {
     vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     const fetchMock = vi.fn();

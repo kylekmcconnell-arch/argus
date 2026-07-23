@@ -394,6 +394,31 @@ describe("reconcileInvestigationChecks", () => {
     expect(reconcileInvestigationChecks(base, TOKEN_ADDRESS, null)).toEqual(base);
     expect(reconcileInvestigationChecks(base, TOKEN_ADDRESS, undefined)).toEqual(base);
   });
+
+  it("stores an explicit unavailable outcome when the embedded project audit fails", () => {
+    const rows = reconcileInvestigationChecks(
+      tokenChecks(dossier()),
+      TOKEN_ADDRESS,
+      null,
+      {
+        state: "failed",
+        note: "Embedded project-account audit failed for @askvenice: invalid analyst response.",
+      },
+    );
+
+    for (const label of [
+      "News & press",
+      "GitHub forensics",
+      "Documents & audits",
+      "Trust-graph reconciliation",
+    ]) {
+      expect(byLabel(rows, label)).toMatchObject({
+        status: "unavailable",
+        provider: "project-account-audit",
+      });
+      expect(byLabel(rows, label).note).toContain("invalid analyst response");
+    }
+  });
 });
 
 describe("token operator/funding trace (Arkham deployer risk)", () => {

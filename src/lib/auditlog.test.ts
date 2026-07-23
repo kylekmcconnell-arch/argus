@@ -20,6 +20,10 @@ describe("audit-list verdict presentation", () => {
     expect(auditReadinessLabel({ verdict: "PASS", coverage: "provisional" })).toBe("PROVISIONAL");
   });
 
+  it("labels a required unfinished path as blocked instead of a generic incomplete result", () => {
+    expect(auditReadinessLabel({ verdict: "PASS", coverage: "incomplete" })).toBe("BLOCKED");
+  });
+
   it.each(["CAUTION", "FAIL", "AVOID"])(
     "never hides an existing %s risk finding behind incomplete coverage",
     (verdict) => {

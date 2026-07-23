@@ -1060,10 +1060,22 @@ var INVESTIGATION_CHECK_BRIDGE = [
   { tokenCheckId: "documents-audits", tokenLabel: "Documents & audits", projectCheckId: "project-transparency", projectLabel: "Transparency and disclosures" },
   { tokenCheckId: "trust-graph-connections", tokenLabel: "Trust-graph reconciliation", projectCheckId: "trust-graph-connections", projectLabel: "Trust-graph connections" }
 ];
-function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount) {
+function reconcileInvestigationChecks(tokenRows, tokenAddress, projectAccount, projectAccountAudit) {
   const rows = tokenRows.map((row) => ({ ...row }));
   const projectRows = projectAccount?.checkRuns;
-  if (!projectRows || !projectRows.length) return rows;
+  if (!projectRows || !projectRows.length) {
+    if (projectAccountAudit) {
+      const note = projectAccountAudit.state === "complete" ? "Embedded project-account audit completed without a stored check ledger." : projectAccountAudit.note;
+      for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
+        const target = rows.find((row) => row.checkId === bridge.tokenCheckId || row.label === bridge.tokenLabel);
+        if (!target || !UNKNOWN_OR_FAILED.has(target.status)) continue;
+        target.status = "unavailable";
+        target.note = note;
+        target.provider = "project-account-audit";
+      }
+    }
+    return rows;
+  }
   const binding = projectRows.find((row) => row.checkId === "project-token-identity" || row.label === "Canonical project token");
   if (!binding || binding.status !== "confirmed") return rows;
   const boundAddress = (projectAccount?.projectToken?.address ?? "").trim().toLowerCase();
@@ -1122,7 +1134,12 @@ function reportChecks(kind, payload) {
   if (kind === "investigation") {
     const investigation = payload;
     const base = investigation.versionContext ? investigation.versionContext.checks.map((check) => ({ ...check })) : tokenChecks(investigation.token);
-    return reconcileInvestigationChecks(base, investigation.token.address, investigation.projectAccount);
+    return reconcileInvestigationChecks(
+      base,
+      investigation.token.address,
+      investigation.projectAccount,
+      investigation.projectAccountAudit
+    );
   }
   if (kind === "person") {
     const dossier = payload;

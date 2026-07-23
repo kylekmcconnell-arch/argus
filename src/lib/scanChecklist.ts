@@ -392,6 +392,11 @@ export interface BoundProjectAccountLike {
   projectToken?: { address?: string | null } | null;
 }
 
+export interface ProjectAccountAuditOutcomeLike {
+  state: "complete" | "failed" | "unavailable";
+  note: string;
+}
+
 const INVESTIGATION_CHECK_BRIDGE: readonly {
   tokenCheckId: string;
   tokenLabel: string;
@@ -408,10 +413,26 @@ export function reconcileInvestigationChecks(
   tokenRows: readonly ScanCheck[],
   tokenAddress: string,
   projectAccount: BoundProjectAccountLike | null | undefined,
+  projectAccountAudit?: ProjectAccountAuditOutcomeLike,
 ): ScanCheck[] {
   const rows = tokenRows.map((row) => ({ ...row }));
   const projectRows = projectAccount?.checkRuns;
-  if (!projectRows || !projectRows.length) return rows;
+  if (!projectRows || !projectRows.length) {
+    if (projectAccountAudit) {
+      const note = projectAccountAudit.state === "complete"
+        ? "Embedded project-account audit completed without a stored check ledger."
+        : projectAccountAudit.note;
+      for (const bridge of INVESTIGATION_CHECK_BRIDGE) {
+        const target = rows.find((row) =>
+          row.checkId === bridge.tokenCheckId || row.label === bridge.tokenLabel);
+        if (!target || !UNKNOWN_OR_FAILED.has(target.status)) continue;
+        target.status = "unavailable";
+        target.note = note;
+        target.provider = "project-account-audit";
+      }
+    }
+    return rows;
+  }
 
   const binding = projectRows.find((row) =>
     row.checkId === "project-token-identity" || row.label === "Canonical project token");

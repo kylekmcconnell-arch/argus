@@ -482,7 +482,7 @@ export async function scanContradictions(
     }));
     return null;
   }
-  const r = await structured<{ contradictions: { claim: string; conflict: string; severity: string; confidence: string }[] }>(
+  const r = await structured<{ contradictions?: unknown }>(
     system,
     user,
     tool,
@@ -490,8 +490,31 @@ export async function scanContradictions(
     timeoutMs,
   );
   if (!r) return null;
-  return (r.contradictions ?? [])
-    .filter((c) => c && c.claim?.trim() && c.conflict?.trim())
+  if (!Array.isArray(r.contradictions)) {
+    // Tool schemas are a contract, but providers can still return malformed
+    // tool input. Contradiction analysis is advisory and must never abort the
+    // governing scorer or discard an otherwise complete project audit.
+    console.warn("[agent-runtime]", JSON.stringify({
+      tool: "record_contradictions",
+      state: "invalid_result_shape",
+      received: r.contradictions === null ? "null" : typeof r.contradictions,
+    }));
+    return null;
+  }
+  return r.contradictions
+    .filter((candidate): candidate is {
+      claim: string;
+      conflict: string;
+      severity?: string;
+      confidence?: string;
+    } => {
+      if (!candidate || typeof candidate !== "object") return false;
+      const contradiction = candidate as Record<string, unknown>;
+      return typeof contradiction.claim === "string"
+        && contradiction.claim.trim().length > 0
+        && typeof contradiction.conflict === "string"
+        && contradiction.conflict.trim().length > 0;
+    })
     .map((c) => ({ claim: c.claim.trim(), conflict: c.conflict.trim(), severity: lvl(c.severity), confidence: lvl(c.confidence) }))
     .slice(0, 10);
 }

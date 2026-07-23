@@ -30,6 +30,12 @@ const MAX_BODY = 1_800_000;
 const MAX_LIFECYCLE_BODY = 25_000;
 const CASE_KINDS = new Set(["person", "token", "investigation", "site"]);
 const STORED_KINDS = new Set([...CASE_KINDS, "watch"]);
+const CLIENT_METHODOLOGY_VERSION: Record<"person" | "token" | "investigation" | "site", string> = {
+  person: "argus-person-client-v1",
+  token: "argus-token-v2-terminal-outcomes",
+  investigation: "argus-investigation-v2-terminal-outcomes",
+  site: "argus-site-v1",
+};
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 type JsonRecord = Record<string, unknown>;
 
@@ -520,7 +526,8 @@ async function createImmutableVersion(
     verdict: typeof row.verdict === "string" ? row.verdict : null,
     score: typeof row.score === "number" ? row.score : null,
     completenessState: qualifiedCompleteness,
-    methodologyVersion: process.env.ARGUS_METHODOLOGY_VERSION || null,
+    methodologyVersion: process.env.ARGUS_METHODOLOGY_VERSION
+      || CLIENT_METHODOLOGY_VERSION[row.kind as "person" | "token" | "investigation" | "site"],
     providerSnapshot: payloadRecord.providerSnapshot ?? payloadRecord.providers ?? {},
     cost: Object.keys(asRecord(payloadRecord.cost)).length ? asRecord(payloadRecord.cost) : {},
   });

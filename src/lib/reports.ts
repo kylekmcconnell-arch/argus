@@ -55,7 +55,12 @@ export function reportChecks(
       : tokenChecks(investigation.token);
     // Credit org-side outcomes the bound project scan recorded in this same
     // payload; without a confirmed canonical binding this is a no-op.
-    return reconcileInvestigationChecks(base, investigation.token.address, investigation.projectAccount);
+    return reconcileInvestigationChecks(
+      base,
+      investigation.token.address,
+      investigation.projectAccount,
+      investigation.projectAccountAudit,
+    );
   }
   if (kind === "person") {
     const dossier = payload as Dossier;

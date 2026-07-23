@@ -51,6 +51,11 @@ export interface DeployerTrail {
 // their real name connected to handle + LinkedIn where possible.
 export interface WebPerson { name: string; handle?: string; linkedin?: string; role: string; evidence?: string }
 
+export interface ProjectAccountAuditOutcome {
+  state: "complete" | "failed" | "unavailable";
+  note: string;
+}
+
 export interface Investigation {
   rootRef: string;
   token: TokenDossier;
@@ -58,6 +63,13 @@ export interface Investigation {
   siteUrl: string | null;
   recon: Recon | null;
   projectAccount: Dossier | null; // people-audit of the project X account
+  /**
+   * Terminal outcome for the embedded project-account audit.
+   *
+   * Older frozen investigations omit this field. New scans always record why
+   * the project evidence ledger exists or why it could not be produced.
+   */
+  projectAccountAudit?: ProjectAccountAuditOutcome;
   founders: FounderCandidate[];
   founderNote: string;            // honest founder-identity summary
   deployerTrail: DeployerTrail | null; // who funded the deployer (Solana)
@@ -253,28 +265,44 @@ export function streamInvestigation(
 
       // ── Hop 3: background the project's X account (ONE paid people-audit, auto) ──
       let projectAccount: Dossier | null = null;
+      let projectAccountAudit: ProjectAccountAuditOutcome;
       if (projectX) {
         const providers = await probeBackend();
         const analystLive = !!providers?.some((p) => p.id === "analyst" && p.configured);
         if (analystLive) {
           h.onHop("backgrounding the project's X account");
           h.onStep(milestone("Step 3 · Background the project account", `Live people-audit of ${projectX}. This is the project's own account, not a named founder.`, "neutral"));
-          projectAccount = await new Promise<Dossier | null>((resolve) => {
+          const projectAuditResult = await new Promise<
+            { dossier: Dossier; error: null } | { dossier: null; error: string }
+          >((resolve) => {
             // PRIVATE: the project account is audited AS PART OF this investigation
             // and shown inside it — it must NOT be saved as a separate standalone
             // report (that's what made @Uniswap appear as a loose "PERSON" card).
             abortLive = streamAudit(projectX, true, {
               onStep: (s) => { if (!aborted) h.onStep(s); },
-              onDone: (d) => resolve(d),
-              onError: () => resolve(null),
+              onDone: (d) => resolve({ dossier: d, error: null }),
+              onError: (error) => resolve({ dossier: null, error }),
             });
           });
+          projectAccount = projectAuditResult.dossier;
+          projectAccountAudit = projectAccount
+            ? { state: "complete", note: `Embedded project-account audit completed for ${projectX}.` }
+            : { state: "failed", note: `Embedded project-account audit failed for ${projectX}: ${projectAuditResult.error}` };
           abortLive = null;
           if (!aborted && projectAccount) h.onStep(milestone("Project account audited", `${projectX}: ${projectAccount.report.composite_verdict} ${projectAccount.report.governing_score}/100.`, projectAccount.report.composite_verdict === "PASS" ? "good" : "warn"));
+          if (!aborted && !projectAccount) h.onStep(milestone("Project account audit blocked", projectAccountAudit.note, "warn"));
         } else {
+          projectAccountAudit = {
+            state: "unavailable",
+            note: `Embedded project-account audit was unavailable for ${projectX}: the analyst provider was not configured.`,
+          };
           h.onStep(milestone("Step 3 · Project account", `Found ${projectX}, but the live people-audit needs provider keys (off in this environment). It can still be audited one-click.`, "warn"));
         }
       } else {
+        projectAccountAudit = {
+          state: "unavailable",
+          note: "Embedded project-account audit was unavailable because no official project X account was resolved.",
+        };
         h.onStep(milestone("Step 3 · Project account", "No project X account to background.", "warn"));
       }
       if (aborted) return;
@@ -288,7 +316,7 @@ export function streamInvestigation(
       }
       const note = founderNote(siteUrl, recon, founders);
       h.onStep(milestone("Investigation complete", note, founders.length ? "good" : "neutral"));
-      h.onDone({ rootRef: input.ref, token, projectX, siteUrl, recon, projectAccount, founders, founderNote: note, deployerTrail, webTeam });
+      h.onDone({ rootRef: input.ref, token, projectX, siteUrl, recon, projectAccount, projectAccountAudit, founders, founderNote: note, deployerTrail, webTeam });
     } catch (e) {
       if (!aborted) h.onError(String(e));
     }

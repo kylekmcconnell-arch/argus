@@ -139,6 +139,57 @@ afterEach(async () => {
 });
 
 describe("investigation exact sharing", () => {
+  it("separates a positive risk signal from a blocked scan instead of presenting a contradictory INCOMPLETE verdict", () => {
+    const recorded = [
+      "contract-safety",
+      "buy-sell-simulation",
+      "holder-distribution",
+      "wallet-clustering",
+      "operator-funding-trace",
+      "market-intelligence",
+      "ofac-sanctions-address",
+    ].map((checkId) => ({
+      checkId,
+      label: checkId,
+      status: "confirmed" as const,
+      decisionCritical: true,
+    }));
+    const open = [
+      "deployer-trail-evm",
+      "bytecode-fingerprint-evm",
+      "documents-audits",
+      "news-press",
+      "github-forensics",
+      "trust-graph-connections",
+    ].map((checkId) => ({
+      checkId,
+      label: checkId === "trust-graph-connections" ? "Trust-graph reconciliation" : checkId,
+      status: "unknown" as const,
+      decisionCritical: true,
+    }));
+
+    render(investigation({
+      token: { ...token(), symbol: "VVV", score: 84 },
+      versionContext: {
+        caseId: "00000000-0000-4000-8000-000000000144",
+        reportVersionId,
+        version: 4,
+        completenessState: "partial",
+        attestationState: "analyst_submitted",
+        methodologyVersion: null,
+        createdAt: "2026-07-23T22:50:55.000Z",
+        checks: [...recorded, ...open],
+      },
+    }));
+
+    expect(container.textContent).toContain("Observed token risk");
+    expect(container.textContent).toContain("PASS 84");
+    expect(container.textContent).toContain("SCAN BLOCKED");
+    expect(container.textContent).toContain("1 required safety gate is still open");
+    expect(container.textContent).toContain("Why ARGUS reaches PASS");
+    expect(container.textContent).not.toContain("Why ARGUS reaches INCOMPLETE");
+  });
+
   it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
     harness.graph = {
       nodes: [
@@ -255,7 +306,7 @@ describe("investigation exact sharing", () => {
     });
     const pasted = String(harness.clipboard.mock.calls[0]?.[0]);
     const lines = pasted.split("\n");
-    expect(lines[0]).toContain("ARGUS · $ARG investigation · token risk PASS 88/100");
+    expect(lines[0]).toContain("ARGUS · $ARG investigation · observed token risk PASS 88/100 · readiness DECISION READY");
     expect(lines).toContain("Investigation share test");
     expect(lines[lines.length - 1]).toBe("http://localhost:3000/api/card?share=opaque");
   });

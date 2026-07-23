@@ -511,7 +511,12 @@ export default function App() {
     logAudit({
       kind: "token", query: `$${inv.token.symbol}`, ref: inv.token.address, image: inv.token.imageUrl, verdict: inv.token.verdict, score: inv.token.score,
       summary: inv.founderNote,
-      coverage: deriveDecisionReadiness(reconcileInvestigationChecks(tokenChecks(inv.token), inv.token.address, inv.projectAccount)).status,
+      coverage: deriveDecisionReadiness(reconcileInvestigationChecks(
+        tokenChecks(inv.token),
+        inv.token.address,
+        inv.projectAccount,
+        inv.projectAccountAudit,
+      )).status,
       flags: ["investigation", inv.recon?.team.state === "named" ? "team-named" : "", inv.projectAccount ? "project-audited" : ""].filter(Boolean),
     });
     const c = investigationContribution(inv);
