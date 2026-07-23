@@ -50,26 +50,30 @@ function verifiedFactCount(dossier: { basicFacts?: Array<{ status?: string }> })
 }
 
 async function runPipeline(handle: string, dir: string): Promise<EvalSnapshot> {
-  // Offline callers MUST mirror prod's analyst deadline: a shorter one starves
-  // basic-facts and fakes INCOMPLETE (learned the expensive way).
+  // Offline callers must mirror prod's deadline SHAPE (a short analyst window
+  // starves basic-facts and fakes INCOMPLETE), but record mode is not bound by
+  // the serverless duration cap and a local machine plus home network runs the
+  // same collection ~1.5-2x slower than Vercel's data center. A wider total
+  // ceiling keeps prod's reserve proportions while guaranteeing the analyst
+  // its full window; replay serves recorded responses instantly either way.
+  const budgetSeconds = Number(process.env.ARGUS_EVAL_BUDGET_SECONDS || DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 2);
   const { runAudit } = await import("../server/orchestrate");
-  const { withCostLedger, getCost } = await import("../server/cost");
   const emits: string[] = [];
   const emitPath = join(dir, "emits.jsonl");
   const startedAt = Date.now();
-  const { dossier, costUsd } = await withCostLedger(async () => {
-    const result = await runAudit(handle, (step) => {
-      emits.push(JSON.stringify(step));
-    }, {
-      analystDeadlineAt: startedAt
-        + DEEP_INVESTIGATION_MAX_DURATION_SECONDS * 1000
-        - ANALYST_FINALIZATION_RESERVE_MS,
-    });
-    return { dossier: result, costUsd: getCost().usd };
+  const dossier = await runAudit(handle, (step) => {
+    emits.push(JSON.stringify(step));
+  }, {
+    analystDeadlineAt: startedAt
+      + budgetSeconds * 1000
+      - ANALYST_FINALIZATION_RESERVE_MS,
   });
   mkdirSync(dir, { recursive: true });
   appendFileSync(emitPath, `${emits.join("\n")}\n`);
   if (!dossier) throw new Error(`runAudit returned null for ${handle}`);
+  // runAudit opens its own cost ledger; the honest spend is what finalize
+  // attached to the dossier, not an outer ledger this script could open.
+  const costUsd = dossier.cost && typeof dossier.cost.usd === "number" ? dossier.cost.usd : null;
   return {
     subject: handle,
     recordedAt: new Date().toISOString(),
