@@ -3258,14 +3258,15 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
     const effectiveTier = tier === "none" && limiting.length > 0 ? "adverse" : tier;
     const range = projectBandRange(spec.weight, effectiveTier);
     const widenedByUnverified = floorTier !== void 0 && floorTier !== effectiveTier && effectiveTier !== "adverse";
+    const composedReasons = [...new Set([
+      ...effectiveTier !== tier ? ["verified score-limiting evidence"] : [],
+      ...widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : [],
+      ...reasons
+    ].map((reason) => reason.slice(0, 240)).filter(Boolean))].slice(0, 12);
     bands[axis] = {
       tier: effectiveTier,
       ...widenedByUnverified ? { minScore: projectBandRange(spec.weight, floorTier).minScore, maxScore: range.maxScore, floorTier } : range,
-      reasons: [
-        ...effectiveTier !== tier ? ["verified score-limiting evidence"] : [],
-        ...widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : [],
-        ...reasons
-      ],
+      reasons: composedReasons.length || effectiveTier === "none" ? composedReasons : ["verified records reached this evidence tier"],
       anchorArtifactIds: [.../* @__PURE__ */ new Set([...anchors, ...limiting])]
     };
   };
@@ -3320,6 +3321,7 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   setBand("P4_backing_and_partners", p4FinalTier, [
     ...relationshipPress.length ? [`${distinctRelationshipKeys.size} material relationship source${distinctRelationshipKeys.size === 1 ? "" : "s"}`] : [],
     ...fundingFacts.length ? ["source-backed financing state"] : [],
+    ...investorFacts.length ? [`${investorFacts.length} verified investor record${investorFacts.length === 1 ? "" : "s"}`] : [],
     ...advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : [],
     ...p4Assessment ? ["completed backing assessment found no verified backer or partner"] : []
   ], [

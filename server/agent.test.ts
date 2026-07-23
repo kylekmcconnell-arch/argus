@@ -5802,3 +5802,57 @@ describe("blue-chip evidence recall (report UX overhaul)", () => {
     expect(deriveProjectStrengthBands(drawdownPacket, p5Axes).P5_traction_and_liveness.tier).toBe("solid");
   });
 });
+
+// The persist boundary rejects any non-none band whose reasons array is empty
+// (strictStringArray min 1). The live P4 investor-only path shipped exactly
+// that once and killed the immutable save; every band must now carry at least
+// one reason for every tier the evidence can produce.
+describe("project band reasons contract (failed-persist regression)", () => {
+  it("an investor-only P4 band carries a reason for its solid tier", async () => {
+    const { buildScoringEvidencePacket, deriveProjectStrengthBands } = await import("./agent");
+    const { getProfile, SubjectClass } = await import("../src/engine");
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packet = buildScoringEvidencePacket({
+      basicFacts: [
+        { predicate: "investor", value: "Named venture backer disclosed", status: "verified", artifact_verified: true },
+      ],
+    }, axes);
+    const bands = deriveProjectStrengthBands(packet, axes);
+    const p4 = bands.P4_backing_and_partners;
+    expect(p4.tier).not.toBe("none");
+    expect(p4.reasons.length).toBeGreaterThanOrEqual(1);
+    expect(p4.reasons).toContain("1 verified investor record");
+  });
+
+  it("every derived band satisfies the persist contract: reasons for non-none tiers, unique, capped", async () => {
+    const { buildScoringEvidencePacket, deriveProjectStrengthBands } = await import("./agent");
+    const { getProfile, SubjectClass } = await import("../src/engine");
+    const axes = Object.entries(getProfile(SubjectClass.PROJECT).axes)
+      .map(([axis, weight]) => ({ axis, weight, role: SubjectClass.PROJECT }));
+    const packets = [
+      buildScoringEvidencePacket({ basicFacts: [] }, axes),
+      buildScoringEvidencePacket({
+        basicFacts: [
+          { predicate: "investor", value: "Backer A", status: "verified", artifact_verified: true },
+          { predicate: "funding", value: "$100M Series C round", status: "verified", artifact_verified: true },
+          { predicate: "governance", value: "Token-holder governance", status: "verified", artifact_verified: true },
+          { predicate: "traction", value: "$5B locked", status: "verified", artifact_verified: true },
+        ],
+      }, axes),
+    ];
+    for (const packet of packets) {
+      for (const [axis, band] of Object.entries(deriveProjectStrengthBands(packet, axes))) {
+        if (band.tier !== "none") {
+          expect(band.reasons.length, `${axis} reasons`).toBeGreaterThanOrEqual(1);
+        }
+        expect(band.reasons.length).toBeLessThanOrEqual(12);
+        expect(new Set(band.reasons).size).toBe(band.reasons.length);
+        for (const reason of band.reasons) {
+          expect(reason.length).toBeLessThanOrEqual(240);
+          expect(reason.trim().length).toBeGreaterThan(0);
+        }
+      }
+    }
+  });
+});

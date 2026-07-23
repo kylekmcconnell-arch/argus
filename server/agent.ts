@@ -1715,16 +1715,23 @@ export function deriveProjectStrengthBands(
     const effectiveTier = tier === "none" && limiting.length > 0 ? "adverse" : tier;
     const range = projectBandRange(spec.weight, effectiveTier);
     const widenedByUnverified = floorTier !== undefined && floorTier !== effectiveTier && effectiveTier !== "adverse";
+    // Persistence enforces the band contract strictly: at least one reason for
+    // every non-none tier, no duplicates, items capped at 240 chars. A band
+    // composition slip here must degrade to a generic reason, never to a
+    // rejected immutable save (the P4 investor-only path shipped empty once).
+    const composedReasons = [...new Set([
+      ...(effectiveTier !== tier ? ["verified score-limiting evidence"] : []),
+      ...(widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : []),
+      ...reasons,
+    ].map((reason) => reason.slice(0, 240)).filter(Boolean))].slice(0, 12);
     bands[axis] = {
       tier: effectiveTier,
       ...(widenedByUnverified
         ? { minScore: projectBandRange(spec.weight, floorTier).minScore, maxScore: range.maxScore, floorTier }
         : range),
-      reasons: [
-        ...(effectiveTier !== tier ? ["verified score-limiting evidence"] : []),
-        ...(widenedByUnverified ? ["unverified press widens the ceiling only, never the floor"] : []),
-        ...reasons,
-      ],
+      reasons: composedReasons.length || effectiveTier === "none"
+        ? composedReasons
+        : ["verified records reached this evidence tier"],
       anchorArtifactIds: [...new Set([...anchors, ...limiting])],
     };
   };
@@ -1819,6 +1826,7 @@ export function deriveProjectStrengthBands(
   setBand("P4_backing_and_partners", p4FinalTier, [
     ...(relationshipPress.length ? [`${distinctRelationshipKeys.size} material relationship source${distinctRelationshipKeys.size === 1 ? "" : "s"}`] : []),
     ...(fundingFacts.length ? ["source-backed financing state"] : []),
+    ...(investorFacts.length ? [`${investorFacts.length} verified investor record${investorFacts.length === 1 ? "" : "s"}`] : []),
     ...(advisorTeam.length ? [`${advisorTeam.length} named advisor or backer record${advisorTeam.length === 1 ? "" : "s"}`] : []),
     ...(p4Assessment ? ["completed backing assessment found no verified backer or partner"] : []),
   ], [
