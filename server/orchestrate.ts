@@ -49,7 +49,7 @@ import { githubAdapter } from "./adapters/github";
 import { dexscreenerAdapter } from "./adapters/dexscreener";
 import { coingeckoAdapter } from "./adapters/coingecko";
 import { onchainAdapter } from "./adapters/onchain";
-import { basicFactsAdapter, screenSecRegistryForNames } from "./adapters/basicFacts";
+import { basicFactsAdapter, registrableDomain, screenSecRegistryForNames } from "./adapters/basicFacts";
 import { writeEntityFacts } from "./entityStore";
 import {
   hasResolvedRealName,
@@ -1307,14 +1307,10 @@ export function projectVerifiedBasicFacts(ctx: CollectContext): void {
     // equivalent of a LinkedIn-linked leader. A Google-obvious identity such
     // as Uniswap/Hayden Adams must not present as a hedge. Impersonation
     // still overrides, and single-source identities stay Probable.
-    const registrable = (url: string): string | null => {
-      try { return new URL(url).hostname.replace(/^www\./, "").split(".").slice(-2).join("."); }
-      catch { return null; }
-    };
     const publicRecordIdentity = people.some((fact) => {
       const domains = new Set(fact.sources
         .filter((src) => src.sourceClass !== "official_subject")
-        .map((src) => registrable(src.url))
+        .map((src) => registrableDomain(src.url))
         .filter((domain): domain is string => Boolean(domain)));
       return domains.size >= 2;
     });

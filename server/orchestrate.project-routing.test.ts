@@ -278,6 +278,34 @@ describe("provider-backed project routing", () => {
     expect(outcome.detail).toContain("2 verified disclosure records");
   });
 
+  it("counts distinct publishers under a two-label public suffix as independent identity witnesses", () => {
+    const evidence = resolvedProjectProfile("the example protocol", "https://project.example");
+    evidence.roles = [SubjectClass.PROJECT];
+    const founder = basicFact("founder", "Alice Example", "Founder");
+    founder.sources = [
+      {
+        ...founder.sources[0],
+        url: "https://www.bbc.co.uk/news/alice-example",
+        sourceClass: "independent_press",
+      },
+      {
+        ...founder.sources[0],
+        url: "https://www.telegraph.co.uk/business/alice-example",
+        sourceClass: "independent_press",
+      },
+    ];
+    evidence.basicFacts = [founder];
+    const ctx: CollectContext = {
+      handle: "@project",
+      evidence,
+      emit: () => undefined,
+    };
+
+    projectVerifiedBasicFacts(ctx);
+
+    expect(evidence.profile.identity_confidence).toBe("Confirmed");
+  });
+
   it("merges a verified full-name fact into the roster member with the same cited X handle", () => {
     const evidence = resolvedProjectProfile("the Solana liquidity protocol", "https://jup.ag");
     evidence.roles = [SubjectClass.PROJECT];

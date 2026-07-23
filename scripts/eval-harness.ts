@@ -5,6 +5,8 @@
 //   npm run eval:replay -- --all           every recorded subject
 //   npm run eval:replay -- @uniswap --allow-live google.serper.dev,openrouter.ai
 //                                          replay everything EXCEPT the listed hosts (A/B lane)
+//   npm run eval:replay -- @uniswap --force-live-tool record_verdict
+//                                          rerun only the identical analyst request for variance checks
 //
 // Replay asserts eval/expectations.json and reports drift against the
 // recording-time snapshot. Record mode needs provider keys in .env (never
@@ -12,6 +14,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, appendFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { withRecordedFetch, writeSnapshot, readSnapshot, type EvalSnapshot } from "../server/evalHarness";
+import { parseEvalHarnessArgs } from "./evalHarnessArgs";
 import {
   ANALYST_FINALIZATION_RESERVE_MS,
   DEEP_INVESTIGATION_MAX_DURATION_SECONDS,
@@ -139,10 +142,13 @@ function checkExpectations(slug: string, snapshot: EvalSnapshot, reportText?: st
 async function main(): Promise<void> {
   loadDotEnv();
   const [command, ...rest] = process.argv.slice(2);
-  const flags = rest.filter((arg) => arg.startsWith("--"));
-  const subjects = rest.filter((arg) => !arg.startsWith("--"));
-  const allowLive = flags.find((flag) => flag.startsWith("--allow-live"))?.split("=")[1]?.split(",")
-    ?? (flags.includes("--allow-live") ? rest[rest.indexOf("--allow-live") + 1]?.split(",") : undefined);
+  const {
+    flags,
+    subjects,
+    allowLiveHosts,
+    forceLiveHosts,
+    forceLiveTools,
+  } = parseEvalHarnessArgs(rest);
 
   if (command === "record") {
     const handle = subjects[0];
@@ -154,7 +160,7 @@ async function main(): Promise<void> {
     // credit-empty key does not stop the pipeline: it silently fails over to
     // Grok live-search (billed per source), which both corrupts the ground
     // truth and runs up the exact bill this harness exists to prevent.
-    if (!flags.includes("--allow-degraded-providers")) {
+    if (!flags.has("--allow-degraded-providers")) {
       const preflight = await fetch("https://api.anthropic.com/v1/messages/count_tokens", {
         method: "POST",
         headers: {
@@ -189,7 +195,7 @@ async function main(): Promise<void> {
   }
 
   if (command === "replay") {
-    const slugs = flags.includes("--all") || subjects.length === 0
+    const slugs = flags.has("--all") || subjects.length === 0
       ? (existsSync(RECORDINGS_ROOT) ? readdirSync(RECORDINGS_ROOT) : [])
       : subjects.map(slugFor);
     if (!slugs.length) throw new Error("no recordings found; run eval:record first");
@@ -201,14 +207,14 @@ async function main(): Promise<void> {
         "replay",
         dir,
         () => runPipeline(`@${slug}`, dir),
-        { allowLiveHosts: allowLive },
+        { allowLiveHosts, forceLiveHosts, forceLiveTools },
       );
       const snapshot = outcome.snapshot;
       const failures = checkExpectations(slug, snapshot, outcome.reportText, outcome.governingRole);
       const drift = baseline
         ? ` · drift vs recording: score ${baseline.score}→${snapshot.score}, facts ${baseline.verifiedFactCount}→${snapshot.verifiedFactCount}`
         : "";
-      const fidelityLine = `exact ${fidelity.exactHits} · url-fallback ${fidelity.urlFallbackHits} · live ${fidelity.liveAllowed} · misses ${fidelity.misses.length}`;
+      const fidelityLine = `exact ${fidelity.exactHits} · url-fallback ${fidelity.urlFallbackHits} · live ${fidelity.liveAllowed} · forced-live ${fidelity.liveForced} · misses ${fidelity.misses.length}`;
       console.log(`  ${failures.length ? "✗" : "✓"} ${slug}: score ${snapshot.score} ${snapshot.verdict} · ${snapshot.verifiedFactCount} facts (${fidelityLine})${drift}`);
       for (const failure of failures) console.log(`      ▲ ${failure}`);
       if (failures.length) failed += 1;

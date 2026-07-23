@@ -69,7 +69,11 @@ function resolveCurrency(entries: MapEntry[], tokenName: string, symbol: string)
 }
 
 /** Never throws. Dormant (zero requests) until CRYPTORANK_API_KEY is configured. */
-export async function collectUpcomingUnlocks(tokenName: string, symbol: string): Promise<UnlocksOutcome> {
+export async function collectUpcomingUnlocks(
+  tokenName: string,
+  symbol: string,
+  options: { nowMs?: number } = {},
+): Promise<UnlocksOutcome> {
   const key = env("CRYPTORANK_API_KEY");
   if (!key) return { available: false, note: "CryptoRank is not configured." };
   if (!tokenName.trim() || !symbol.trim()) return { available: false, note: "No token identity to resolve." };
@@ -130,9 +134,10 @@ export async function collectUpcomingUnlocks(tokenName: string, symbol: string):
   }
 
   const next = events[0];
-  const horizonMs = next.timeMs + 90 * 24 * 60 * 60 * 1000;
+  const nowMs = options.nowMs ?? Date.now();
+  const horizonMs = nowMs + 90 * 24 * 60 * 60 * 1000;
   const next90d = events
-    .filter((event) => event.timeMs <= horizonMs)
+    .filter((event) => event.timeMs >= nowMs && event.timeMs <= horizonMs)
     .reduce((total, event) => total + (event.percentOfSupply ?? 0), 0);
   recordCall("cryptorank", "vesting-events", 0, `${currency.slug} · next_${new Date(next.timeMs).toISOString().slice(0, 10)} · 1 credit`, "succeeded");
   return {

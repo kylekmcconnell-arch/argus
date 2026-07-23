@@ -3,6 +3,7 @@ import {
   addClaudeUsage,
   addGrokUsage,
   getCost,
+  providerFailureLines,
   recordCall,
   withCostLedger,
 } from "./cost";
@@ -73,6 +74,21 @@ describe("per-audit cost isolation", () => {
       failed: 0,
       status: "partial",
     }));
+  });
+
+  it("does not turn a recovered retry into a terminal provider failure", () => {
+    const cost = withCostLedger(() => {
+      recordCall("twitterapi", "user-tweets", 0, "http_503", "failed");
+      recordCall("twitterapi", "user-tweets", 0.0002, "retry_ok", "succeeded");
+      recordCall("serper", "search", 0, "http_401", "failed");
+      return getCost();
+    });
+
+    expect(providerFailureLines(cost)).toEqual([expect.objectContaining({
+      provider: "serper",
+      op: "search",
+      failed: 1,
+    })]);
   });
 
   it("counts failed paid attempts even when usage metrics are unavailable", () => {

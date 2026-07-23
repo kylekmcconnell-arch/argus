@@ -107,9 +107,9 @@ export function ScoreContextStrip({
 }
 
 /**
- * Provider calls that failed during the scan, said plainly on screen. Owner
- * policy: no silent fallbacks; a failed provider means those lanes completed
- * without it, and the reader deserves to know before trusting coverage.
+ * Provider operations that ended in failure during the scan, said plainly on
+ * screen. Recovered physical retries stay visible in the cost ledger but do
+ * not produce this missing-evidence warning.
  */
 export function ProviderFailureNotice({ failures }: {
   failures?: Array<{ provider: string; op: string; failed: number; meta?: string }>;
@@ -119,14 +119,14 @@ export function ProviderFailureNotice({ failures }: {
   return (
     <div className="finding tint-avoid mt-3 px-4 py-3" role="alert">
       <p className="text-[12.5px] font-medium text-ink">
-        {total} provider call{total === 1 ? "" : "s"} failed during this scan; no fallback provider was used.
+        {total} provider call{total === 1 ? "" : "s"} ended in failure during this scan.
       </p>
       <p className="mono mt-1 text-[10.5px] leading-relaxed text-ink-dim">
         {failures.slice(0, 5).map((line) => `${line.provider} · ${line.op}${line.meta ? ` · ${line.meta.slice(0, 70)}` : ""}`).join("  |  ")}
         {failures.length > 5 ? `  |  +${failures.length - 5} more` : ""}
       </p>
       <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-        Affected evidence lanes completed without this provider. Fix the provider and rescan to fill the gap.
+        Affected evidence lanes may be incomplete. Fix the provider and rescan to fill the gap.
       </p>
     </div>
   );

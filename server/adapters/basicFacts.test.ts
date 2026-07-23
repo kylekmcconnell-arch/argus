@@ -10,6 +10,7 @@ import {
   discoverBasicFactLeadsDetailed,
   discoverGroundedBasicFactLeadsDetailed,
   discoverGrokBasicFactLeadsDetailed,
+  discoverPrimary,
   parseBasicFactLeads,
   verifyBasicFactLead,
   overlappingNetworkAnswers,
@@ -4848,6 +4849,8 @@ describe("discovery prompt caching", () => {
 describe("grounded discovery lane", () => {
   it("routes primary discovery through groundedSearch and labels leads grounded", async () => {
     vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
+    vi.stubEnv("SERPER_API_KEY", "serper-test-key");
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
     const grounded = await import("./groundedSearch");
     const spy = vi.spyOn(grounded, "groundedSearch").mockResolvedValue(JSON.stringify({
       facts: [{
@@ -4884,8 +4887,75 @@ describe("grounded discovery lane", () => {
       const result = await discoverGroundedBasicFactLeadsDetailed(ctx, questions, "primary");
       expect(result.state).toBe("skipped");
       expect(result.leads).toHaveLength(0);
+      expect(spy).not.toHaveBeenCalled();
     } finally {
       spy.mockRestore();
     }
+  });
+
+  it("reports a configured grounded runtime outage as failed, not unprovisioned", async () => {
+    vi.stubEnv("SERPER_API_KEY", "serper-test-key");
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    const grounded = await import("./groundedSearch");
+    const spy = vi.spyOn(grounded, "groundedSearch").mockResolvedValue(null);
+    try {
+      const { ctx } = context();
+      const questions = basicFactsResearchQuestions(ctx);
+      const result = await discoverGroundedBasicFactLeadsDetailed(ctx, questions, "primary");
+      expect(result.state).toBe("failed");
+      expect(result.failedBatches).toBeGreaterThan(0);
+      expect(result.detail).toContain("grounded_unavailable");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("does not move an unprovisioned grounded lane to Claude when fallbacks are disabled", async () => {
+    vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("SERPER_API_KEY", "");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { ctx } = context();
+
+    const result = await discoverPrimary(ctx, basicFactsResearchQuestions(ctx));
+
+    expect(result.provider).toBe("grounded");
+    expect(result.state).toBe("skipped");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("does not invoke Claude repair after a grounded primary outage when fallbacks are disabled", async () => {
+    vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
+    vi.stubEnv("ANTHROPIC_API_KEY", "anthropic-test-key");
+    vi.stubEnv("SERPER_API_KEY", "");
+    const fetchSpy = vi.fn();
+    vi.stubGlobal("fetch", fetchSpy);
+    const { ctx } = context();
+
+    const result = await collectBasicFacts(ctx);
+
+    expect(result.state).toBe("partial");
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("accepts Serper plus OpenRouter as a fully provisioned grounded primary", async () => {
+    vi.stubEnv("ARGUS_BASIC_FACTS_PRIMARY", "grounded");
+    vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "off");
+    vi.stubEnv("SERPER_API_KEY", "serper-test-key");
+    vi.stubEnv("OPENROUTER_API_KEY", "openrouter-test-key");
+    vi.stubEnv("ARGUS_EXTRACT_MODEL", "google/gemini-2.5-flash-lite");
+    vi.stubEnv("ANTHROPIC_API_KEY", "");
+    vi.stubEnv("XAI_API_KEY", "");
+    const grounded = await import("./groundedSearch");
+    const spy = vi.spyOn(grounded, "groundedSearch").mockResolvedValue('{"facts":[]}');
+    const { ctx } = context();
+
+    const result = await collectBasicFacts(ctx);
+
+    expect(result.state).toBe("partial");
+    expect(spy).toHaveBeenCalled();
   });
 });

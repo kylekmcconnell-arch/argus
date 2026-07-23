@@ -7,8 +7,8 @@
 //   3. publicWeb fetches the top pages,
 //   4. a cheap model (Haiku by default) extracts the structured JSON answer.
 // Same string|null contract as grokSearch/claudeWebSearch, so callers are
-// unchanged; returns null when unavailable or empty so a dispatcher can fall
-// back to the adaptive Claude web_search, then Grok.
+// unchanged; returns null when unavailable or empty. Callers decide whether
+// policy permits another provider.
 import { env } from "../config";
 import { addClaudeUsage, addOpenRouterUsage, recordSerper } from "../cost";
 import { cacheGet, cacheSet } from "../cache";
@@ -40,12 +40,17 @@ const FETCH_TIMEOUT_MS = 8_000;
 const MAX_PAGE_CHARS = 4_000;
 
 interface SerperResult { title: string; url: string; snippet: string }
+interface SerperSearchOutcome {
+  results: SerperResult[];
+  status: "succeeded" | "failed";
+  detail?: string;
+}
 
 function asRec(v: unknown): Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : {};
 }
 
-async function serperSearch(query: string, key: string): Promise<SerperResult[]> {
+async function serperSearch(query: string, key: string): Promise<SerperSearchOutcome> {
   try {
     const res = await fetch(SERPER, {
       method: "POST",
@@ -53,18 +58,24 @@ async function serperSearch(query: string, key: string): Promise<SerperResult[]>
       body: JSON.stringify({ q: query, num: 8 }),
       signal: AbortSignal.timeout(15_000),
     });
-    if (!res.ok) return [];
+    if (!res.ok) return { results: [], status: "failed", detail: `http_${res.status}` };
     const d = asRec(await res.json());
     const organic = Array.isArray(d.organic) ? d.organic.map(asRec) : [];
-    return organic
-      .map((o) => ({
-        title: typeof o.title === "string" ? o.title : "",
-        url: typeof o.link === "string" ? o.link : "",
-        snippet: typeof o.snippet === "string" ? o.snippet : "",
-      }))
-      .filter((r) => /^https?:\/\//.test(r.url));
-  } catch {
-    return [];
+    return {
+      status: "succeeded",
+      results: organic
+        .map((o) => ({
+          title: typeof o.title === "string" ? o.title : "",
+          url: typeof o.link === "string" ? o.link : "",
+          snippet: typeof o.snippet === "string" ? o.snippet : "",
+        }))
+        .filter((r) => /^https?:\/\//.test(r.url)),
+    };
+  } catch (error) {
+    const detail = error instanceof Error && error.name === "TimeoutError"
+      ? "timeout_15000ms"
+      : "transport_or_parse_error";
+    return { results: [], status: "failed", detail };
   }
 }
 
@@ -207,9 +218,24 @@ export async function groundedSearch(system: string, user: string, opts?: { cach
   if (!queries.length) return null;
 
   const searched = await Promise.all(queries.map((q) => serperSearch(q, serperKey)));
-  recordSerper(queries.length);
-  const results = dedupeByUrl(searched.flat()).slice(0, MAX_RESULTS);
-  if (!results.length) return null; // Serper found nothing -> fall back to adaptive search
+  const succeeded = searched.filter((outcome) => outcome.status === "succeeded");
+  const failed = searched.filter((outcome) => outcome.status === "failed");
+  if (succeeded.length) {
+    recordSerper(
+      succeeded.length,
+      "succeeded",
+      succeeded.every((outcome) => outcome.results.length === 0) ? "no_results" : undefined,
+    );
+  }
+  if (failed.length) {
+    recordSerper(
+      failed.length,
+      "failed",
+      [...new Set(failed.flatMap((outcome) => outcome.detail ? [outcome.detail] : []))].join(","),
+    );
+  }
+  const results = dedupeByUrl(searched.flatMap((outcome) => outcome.results)).slice(0, MAX_RESULTS);
+  if (!results.length) return null;
 
   const fetchWithTimeout = async (url: string): Promise<{ url: string; text: string } | null> => {
     try {

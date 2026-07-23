@@ -69,16 +69,17 @@ describe("OutcomeDeltaStrip", () => {
 });
 
 describe("ProviderFailureNotice", () => {
-  it("says plainly which provider calls failed and that no fallback ran", () => {
+  it("says plainly which provider calls ended in failure without asserting fallback state", () => {
     act(() => {
       root.render(<ProviderFailureNotice failures={[
         { provider: "claude", op: "record_verdict", failed: 2, meta: "http_400 credit balance too low" },
         { provider: "claude", op: "basic-facts-search", failed: 3 },
       ]} />);
     });
-    expect(container.textContent).toContain("5 provider calls failed during this scan; no fallback provider was used.");
+    expect(container.textContent).toContain("5 provider calls ended in failure during this scan.");
+    expect(container.textContent).not.toContain("no fallback provider");
     expect(container.textContent).toContain("claude · record_verdict · http_400 credit balance too low");
-    expect(container.textContent).toContain("rescan to fill the gap");
+    expect(container.textContent).toContain("may be incomplete");
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
   });
 

@@ -287,14 +287,14 @@ export interface ProviderFailureLine {
 }
 
 /**
- * Every ledger line with at least one failed call, for the on-screen failure
- * notice. With fallbacks disabled (the default), a failed provider means the
- * affected lane completed WITHOUT that provider; the owner sees it instead of
- * a silent switch to a different metered provider.
+ * Terminally failed provider operations for the on-screen failure notice.
+ * Mixed failed+succeeded lines are recovered physical retries: they remain in
+ * the cost ledger, but must not claim the evidence lane completed without the
+ * provider.
  */
 export function providerFailureLines(cost: Pick<AuditCost, "calls">): ProviderFailureLine[] {
   return (cost.calls ?? [])
-    .filter((line) => (line.failed ?? 0) > 0)
+    .filter((line) => line.status === "failed" && (line.failed ?? 0) > 0)
     .map((line) => ({
       provider: line.provider,
       op: line.op,

@@ -1647,7 +1647,7 @@ function recordHelius(op, status = "succeeded", meta) {
 }
 var round4 = (n) => Math.round(n * 1e4) / 1e4;
 function providerFailureLines(cost) {
-  return (cost.calls ?? []).filter((line) => (line.failed ?? 0) > 0).map((line) => ({
+  return (cost.calls ?? []).filter((line) => line.status === "failed" && (line.failed ?? 0) > 0).map((line) => ({
     provider: line.provider,
     op: line.op,
     failed: line.failed,
@@ -5929,16 +5929,20 @@ async function serperSearch(query, key) {
       body: JSON.stringify({ q: query, num: 8 }),
       signal: AbortSignal.timeout(15e3)
     });
-    if (!res.ok) return [];
+    if (!res.ok) return { results: [], status: "failed", detail: `http_${res.status}` };
     const d = asRec(await res.json());
     const organic = Array.isArray(d.organic) ? d.organic.map(asRec) : [];
-    return organic.map((o) => ({
-      title: typeof o.title === "string" ? o.title : "",
-      url: typeof o.link === "string" ? o.link : "",
-      snippet: typeof o.snippet === "string" ? o.snippet : ""
-    })).filter((r) => /^https?:\/\//.test(r.url));
-  } catch {
-    return [];
+    return {
+      status: "succeeded",
+      results: organic.map((o) => ({
+        title: typeof o.title === "string" ? o.title : "",
+        url: typeof o.link === "string" ? o.link : "",
+        snippet: typeof o.snippet === "string" ? o.snippet : ""
+      })).filter((r) => /^https?:\/\//.test(r.url))
+    };
+  } catch (error) {
+    const detail = error instanceof Error && error.name === "TimeoutError" ? "timeout_15000ms" : "transport_or_parse_error";
+    return { results: [], status: "failed", detail };
   }
 }
 async function callOpenRouter(system, user, maxTokens, op, model) {
@@ -6066,8 +6070,23 @@ async function groundedSearch(system, user, opts) {
   const queries = await generateQueries(system, user);
   if (!queries.length) return null;
   const searched = await Promise.all(queries.map((q) => serperSearch(q, serperKey)));
-  recordSerper(queries.length);
-  const results = dedupeByUrl(searched.flat()).slice(0, MAX_RESULTS);
+  const succeeded = searched.filter((outcome) => outcome.status === "succeeded");
+  const failed = searched.filter((outcome) => outcome.status === "failed");
+  if (succeeded.length) {
+    recordSerper(
+      succeeded.length,
+      "succeeded",
+      succeeded.every((outcome) => outcome.results.length === 0) ? "no_results" : void 0
+    );
+  }
+  if (failed.length) {
+    recordSerper(
+      failed.length,
+      "failed",
+      [...new Set(failed.flatMap((outcome) => outcome.detail ? [outcome.detail] : []))].join(",")
+    );
+  }
+  const results = dedupeByUrl(searched.flatMap((outcome) => outcome.results)).slice(0, MAX_RESULTS);
   if (!results.length) return null;
   const fetchWithTimeout = async (url) => {
     try {
@@ -10127,10 +10146,20 @@ async function discoverGrokBasicFactLeadsDetailed(ctx, questions, phase, options
   return result;
 }
 async function discoverGroundedBasicFactLeadsDetailed(ctx, questions, phase) {
+  if (!groundedSearchProvisioned()) {
+    return {
+      provider: "grounded",
+      state: "skipped",
+      leads: [],
+      attempts: 0,
+      completedBatches: 0,
+      failedBatches: 0,
+      detail: "grounded search is not provisioned (needs SERPER_API_KEY + an extractor)"
+    };
+  }
   const audience = questions[0]?.audience ?? researchAudience(ctx);
   const grouped = questionSearchGroups(questions, phase);
   const canonicalSubject = subjectName(ctx);
-  let unprovisioned = false;
   const batches = await mapDiscoveryGroups(grouped, async ({ key, batch, questions: batchQuestions, questionSpecific }) => {
     const group = {
       key,
@@ -10145,7 +10174,6 @@ async function discoverGroundedBasicFactLeadsDetailed(ctx, questions, phase) {
       { cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grounded:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}` }
     );
     if (text2 === null) {
-      unprovisioned = true;
       return { ...group, state: "failed", leads: [], attempts: 1, detail: `${key}:grounded_unavailable` };
     }
     const parsed = parseBasicFactLeads(text2, canonicalSubject, "grounded", batchQuestions);
@@ -10159,15 +10187,12 @@ async function discoverGroundedBasicFactLeadsDetailed(ctx, questions, phase) {
       detail: `${key}:${parsed.length ? `${parsed.length}_leads` : "completed_empty"}`
     };
   });
-  if (unprovisioned && batches.every((batch) => batch.state === "failed")) {
-    return { provider: "grounded", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "grounded search is not provisioned (needs SERPER_API_KEY + an extractor)" };
-  }
   return aggregateDiscovery("grounded", batches);
 }
 async function discoverPrimary(ctx, questions) {
   if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grounded") {
     const grounded = await discoverGroundedBasicFactLeadsDetailed(ctx, questions, "primary");
-    if (grounded.state !== "skipped") return grounded;
+    if (grounded.state !== "skipped" || !providerFallbacksEnabled()) return grounded;
   }
   if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grok" && env("XAI_API_KEY")) {
     return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
@@ -12227,14 +12252,15 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   }
   const discover = dependencies.discover ?? discoverPrimary;
   const fetchSource = dependencies.fetchSource ?? fetchPublicTextWithRecovery;
-  if (!dependencies.discover && !env("ANTHROPIC_API_KEY") && !env("XAI_API_KEY")) {
+  const groundedPrimaryProvisioned = env("ARGUS_BASIC_FACTS_PRIMARY") === "grounded" && groundedSearchProvisioned();
+  if (!dependencies.discover && !env("ANTHROPIC_API_KEY") && !env("XAI_API_KEY") && !groundedPrimaryProvisioned) {
     return { state: "skipped", detail: "basic-facts web research is not configured" };
   }
   ctx.emit({
     phase: "P0 \xB7 Intake",
     label: "Basic facts research",
     detail: "Searching for foundational facts, then independently fetching and checking every cited passage\u2026",
-    source: env("ANTHROPIC_API_KEY") ? "Claude web search \xB7 public source verification" : "Grok web search \xB7 public source verification",
+    source: groundedPrimaryProvisioned ? "Serper grounded search \xB7 public source verification" : env("ANTHROPIC_API_KEY") ? "Claude web search \xB7 public source verification" : "Grok web search \xB7 public source verification",
     tone: "neutral"
   });
   const primary = normalizeDiscoveryOutput(await discover(ctx, questionsToDiscover));
@@ -12348,6 +12374,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
   const primaryFacts = resolveBasicFactCandidates(primaryVerified);
   const missingCritical = questions.filter((question) => question.critical && deterministicQuestionAnswerRefs(ctx, question, primaryFacts).length === 0);
   const repairQuestions = boundedRepairQuestions(missingCritical);
+  const groundedPrimaryUnavailableWithoutFallback = primary.provider === "grounded" && !providerFallbacksEnabled() && (primary.state === "failed" || primary.state === "skipped" || primary.failedBatches > 0);
   let repair = {
     provider: "none",
     state: "skipped",
@@ -12357,7 +12384,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     failedBatches: 0,
     detail: missingCritical.length ? "repair provider not configured" : "no critical gaps"
   };
-  if (repairQuestions.length && (dependencies.repair || !dependencies.discover)) {
+  if (repairQuestions.length && (dependencies.repair || !dependencies.discover && !groundedPrimaryUnavailableWithoutFallback)) {
     const output = dependencies.repair ? await dependencies.repair(ctx, repairQuestions) : await discoverRepair(ctx, repairQuestions);
     repair = normalizeDiscoveryOutput(output);
     if (missingCritical.length > repairQuestions.length) {
@@ -17596,7 +17623,7 @@ function resolveCurrency(entries, tokenName, symbol) {
   if (agreeing.length === 0 && bySymbol.length === 1 && norm2(bySymbol[0].name).includes(nameKey)) return bySymbol[0];
   return null;
 }
-async function collectUpcomingUnlocks(tokenName, symbol) {
+async function collectUpcomingUnlocks(tokenName, symbol, options = {}) {
   const key = env("CRYPTORANK_API_KEY");
   if (!key) return { available: false, note: "CryptoRank is not configured." };
   if (!tokenName.trim() || !symbol.trim()) return { available: false, note: "No token identity to resolve." };
@@ -17649,8 +17676,9 @@ async function collectUpcomingUnlocks(tokenName, symbol) {
     return { available: false, note: "CryptoRank tracks no upcoming unlock events for this token." };
   }
   const next = events[0];
-  const horizonMs = next.timeMs + 90 * 24 * 60 * 60 * 1e3;
-  const next90d = events.filter((event) => event.timeMs <= horizonMs).reduce((total, event) => total + (event.percentOfSupply ?? 0), 0);
+  const nowMs = options.nowMs ?? Date.now();
+  const horizonMs = nowMs + 90 * 24 * 60 * 60 * 1e3;
+  const next90d = events.filter((event) => event.timeMs >= nowMs && event.timeMs <= horizonMs).reduce((total, event) => total + (event.percentOfSupply ?? 0), 0);
   recordCall("cryptorank", "vesting-events", 0, `${currency.slug} \xB7 next_${new Date(next.timeMs).toISOString().slice(0, 10)} \xB7 1 credit`, "succeeded");
   return {
     available: true,
@@ -18772,15 +18800,8 @@ function projectVerifiedBasicFacts(ctx) {
   }
   if (people.length) {
     const peopleSourceCount = people.reduce((total, fact) => total + fact.sources.length, 0);
-    const registrable = (url) => {
-      try {
-        return new URL(url).hostname.replace(/^www\./, "").split(".").slice(-2).join(".");
-      } catch {
-        return null;
-      }
-    };
     const publicRecordIdentity = people.some((fact) => {
-      const domains = new Set(fact.sources.filter((src) => src.sourceClass !== "official_subject").map((src) => registrable(src.url)).filter((domain) => Boolean(domain)));
+      const domains = new Set(fact.sources.filter((src) => src.sourceClass !== "official_subject").map((src) => registrableDomain(src.url)).filter((domain) => Boolean(domain)));
       return domains.size >= 2;
     });
     if (ctx.evidence.profile.identity_confidence !== "SuspectedImpersonation") {

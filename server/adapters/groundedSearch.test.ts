@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { addOpenRouterUsage, getCost, withCostLedger } from "../cost";
 
 // publicWeb is mocked so the only fetches this test sees are Serper + the
@@ -95,5 +95,40 @@ describe("groundedSearch OpenRouter routing", () => {
     expect(result).toBe("ANSWER");
     expect(urls.some((u) => u.includes("api.anthropic.com"))).toBe(true);
     expect(urls.some((u) => u.includes("openrouter.ai"))).toBe(false);
+  });
+
+  it("records Serper HTTP failures as failed provider attempts", async () => {
+    process.env.SERPER_API_KEY = "configured-but-rejected";
+    process.env.ANTHROPIC_API_KEY = "sk-ant";
+    delete process.env.OPENROUTER_API_KEY;
+    process.env.ARGUS_EXTRACT_MODEL = "claude-haiku-4-5";
+
+    let anthropicHits = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+      if (String(url).includes("serper")) {
+        return new Response('{"message":"unauthorized"}', { status: 401 });
+      }
+      anthropicHits += 1;
+      return ok({
+        content: [{ type: "text", text: anthropicHits === 1 ? '["query one"]' : "must-not-extract" }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      });
+    }));
+
+    const captured = await withCostLedger(async () => {
+      const result = await groundedSearch("system", "user");
+      return { result, cost: getCost() };
+    });
+
+    expect(captured.result).toBeNull();
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "serper",
+      op: "search",
+      failed: 1,
+      succeeded: 0,
+      status: "failed",
+      meta: expect.stringContaining("http_401"),
+    }));
+    expect(anthropicHits).toBe(1);
   });
 });

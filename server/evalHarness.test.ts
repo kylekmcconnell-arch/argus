@@ -69,7 +69,7 @@ describe("eval harness record/replay", () => {
   it("never persists request headers and redacts sensitive query params", async () => {
     globalThis.fetch = vi.fn(async () => new Response("ok", { status: 200 })) as unknown as typeof fetch;
     await withRecordedFetch("record", dir, async () => {
-      await fetch("https://provider.example/data?q=x&api_key=sk-live-123&token=t0", {
+      await fetch("https://provider.example/data?q=x&api_key=sk-live-123&token=t0&access_token=access-live&client_secret=client-live&authorization=query-live", {
         method: "GET",
         headers: { authorization: "Bearer sk-live-123", "x-api-key": "sk-live-123" },
       });
@@ -77,9 +77,15 @@ describe("eval harness record/replay", () => {
     });
     const raw = readFileSync(join(dir, "calls.jsonl"), "utf8");
     expect(raw).not.toContain("sk-live-123");
+    expect(raw).not.toContain("access-live");
+    expect(raw).not.toContain("client-live");
+    expect(raw).not.toContain("query-live");
     expect(raw).not.toContain("Bearer");
     expect(raw).toContain("api_key=REDACTED");
     expect(raw).toContain("token=REDACTED");
+    expect(raw).toContain("access_token=REDACTED");
+    expect(raw).toContain("client_secret=REDACTED");
+    expect(raw).toContain("authorization=REDACTED");
     expect(loadRecording(dir)).toHaveLength(1);
   });
 
@@ -97,6 +103,36 @@ describe("eval harness record/replay", () => {
     expect(replay.result).toBe('{"v":1}');
     expect(replay.fidelity.exactHits).toBe(0);
     expect(replay.fidelity.urlFallbackHits).toBe(1);
+  });
+
+  it("consumes a recording once across both exact and URL tiers", async () => {
+    globalThis.fetch = vi.fn(async () => new Response('{"v":1}', { status: 200 })) as unknown as typeof fetch;
+    await withRecordedFetch("record", dir, async () => {
+      await fetch("https://provider.example/score", { method: "POST", body: '{"prompt":"old"}' });
+      return null;
+    });
+    globalThis.fetch = vi.fn(async () => new Response("must-not-run", { status: 500 })) as unknown as typeof fetch;
+
+    await expect(withRecordedFetch("replay", dir, async () => {
+      await fetch("https://provider.example/score", { method: "POST", body: '{"prompt":"changed"}' });
+      await fetch("https://provider.example/score", { method: "POST", body: '{"prompt":"old"}' });
+      return null;
+    })).rejects.toThrow(/eval replay miss/);
+  });
+
+  it("throws when an extra identical call exceeds the recorded call count", async () => {
+    globalThis.fetch = vi.fn(async () => new Response('{"v":1}', { status: 200 })) as unknown as typeof fetch;
+    await withRecordedFetch("record", dir, async () => {
+      await fetch("https://provider.example/score", { method: "POST", body: '{"prompt":"same"}' });
+      return null;
+    });
+    globalThis.fetch = vi.fn(async () => new Response("must-not-run", { status: 500 })) as unknown as typeof fetch;
+
+    await expect(withRecordedFetch("replay", dir, async () => {
+      await fetch("https://provider.example/score", { method: "POST", body: '{"prompt":"same"}' });
+      await fetch("https://provider.example/score", { method: "POST", body: '{"prompt":"same"}' });
+      return null;
+    })).rejects.toThrow(/eval replay miss/);
   });
 
   it("throws loudly on a miss unless the host is in the live allowlist", async () => {
@@ -117,6 +153,33 @@ describe("eval harness record/replay", () => {
     expect(allowed.result).toBe('{"serper":true}');
     expect(allowed.fidelity.liveAllowed).toBe(1);
     expect(readFileSync(join(dir, "live-lane.jsonl"), "utf8")).toContain("serper");
+  });
+
+  it("can force only an exact recorded analyst tool request live for repeated-input variance checks", async () => {
+    globalThis.fetch = vi.fn(async () => new Response("recorded", { status: 200 })) as unknown as typeof fetch;
+    const body = JSON.stringify({
+      prompt: "identical",
+      tool_choice: { type: "tool", name: "record_verdict" },
+    });
+    await withRecordedFetch("record", dir, async () => {
+      await fetch("https://api.anthropic.com/v1/messages", { method: "POST", body });
+      return null;
+    });
+    const live = vi.fn(async () => new Response("fresh-live", { status: 200 }));
+    globalThis.fetch = live as unknown as typeof fetch;
+
+    const replay = await withRecordedFetch("replay", dir, async () => {
+      const response = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        body,
+      });
+      return response.text();
+    }, { forceLiveTools: ["record_verdict"] });
+
+    expect(replay.result).toBe("fresh-live");
+    expect(replay.fidelity.exactHits).toBe(0);
+    expect(replay.fidelity.liveForced).toBe(1);
+    expect(live).toHaveBeenCalledTimes(1);
   });
 
   it("scrub helpers normalize volatile values and preserve stable text", () => {

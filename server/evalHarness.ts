@@ -32,6 +32,7 @@ export interface ReplayFidelity {
   exactHits: number;
   urlFallbackHits: number;
   liveAllowed: number;
+  liveForced: number;
   misses: Array<{ method: string; url: string }>;
 }
 
@@ -45,7 +46,7 @@ const VOLATILE_PATTERNS: RegExp[] = [
   /\bPA-[0-9A-F]{10,}\b/g, // report ids
 ];
 
-const SENSITIVE_QUERY_PARAM = /^(?:(?:api[-_]?)?key|token|secret|auth|signature|sig|apikey|x[-_]api[-_]key)$/i;
+const SENSITIVE_QUERY_PARAM = /^(?:(?:x[-_]api|api|access|refresh|id|oauth|auth|bearer|session|client)[-_]?)?(?:key|token|secret|auth|authorization|signature|sig|credential|password|passwd)$/i;
 
 export function scrubUrl(rawUrl: string): string {
   try {
@@ -123,10 +124,20 @@ export async function withRecordedFetch<T>(
   mode: EvalMode,
   dir: string,
   work: () => Promise<T>,
-  options: { allowLiveHosts?: string[] } = {},
+  options: {
+    allowLiveHosts?: string[];
+    forceLiveHosts?: string[];
+    forceLiveTools?: string[];
+  } = {},
 ): Promise<{ result: T; fidelity: ReplayFidelity; recordedCalls: number }> {
   mkdirSync(dir, { recursive: true });
-  const fidelity: ReplayFidelity = { exactHits: 0, urlFallbackHits: 0, liveAllowed: 0, misses: [] };
+  const fidelity: ReplayFidelity = {
+    exactHits: 0,
+    urlFallbackHits: 0,
+    liveAllowed: 0,
+    liveForced: 0,
+    misses: [],
+  };
   let recordedCalls = 0;
 
   const byExact = new Map<string, RecordedCall[]>();
@@ -139,6 +150,35 @@ export async function withRecordedFetch<T>(
   }
 
   const originalFetch = globalThis.fetch;
+  const hostAllowed = (host: string, allowedHosts: readonly string[] | undefined): boolean =>
+    allowedHosts?.some((allowed) =>
+      allowed === "*" || host === allowed || host.endsWith(`.${allowed}`)) ?? false;
+  const requestTool = (body: string): string | null => {
+    try {
+      const parsed = JSON.parse(body) as {
+        tool_choice?: { name?: unknown };
+        response_format?: { json_schema?: { name?: unknown } };
+      };
+      const name = parsed.tool_choice?.name ?? parsed.response_format?.json_schema?.name;
+      return typeof name === "string" ? name : null;
+    } catch {
+      return null;
+    }
+  };
+  const removeRecordedCall = (call: RecordedCall): void => {
+    const exactTier = byExact.get(call.key);
+    if (exactTier) {
+      const index = exactTier.indexOf(call);
+      if (index >= 0) exactTier.splice(index, 1);
+      if (exactTier.length === 0) byExact.delete(call.key);
+    }
+    const urlTier = byUrl.get(call.urlKey);
+    if (urlTier) {
+      const index = urlTier.indexOf(call);
+      if (index >= 0) urlTier.splice(index, 1);
+      if (urlTier.length === 0) byUrl.delete(call.urlKey);
+    }
+  };
   const record = (method: string, url: string, body: string, response: Response, sideFile?: string): Promise<Response> => {
     const clone = response.clone();
     return clone.text().then((text) => {
@@ -166,25 +206,30 @@ export async function withRecordedFetch<T>(
       const live = await originalFetch(input, init);
       return record(method, url, body, live);
     }
+    const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
+    // Variance checks need an explicit paid lane that bypasses even an exact
+    // frozen response. Keep this separate from allowLiveHosts, which only
+    // permits changed-request misses to go live.
+    const tool = requestTool(body);
+    const toolForced = tool !== null && options.forceLiveTools?.includes(tool);
+    if (hostAllowed(host, options.forceLiveHosts) || toolForced) {
+      fidelity.liveForced += 1;
+      const live = await originalFetch(input, init);
+      return record(method, url, body, live, join(dir, "live-lane.jsonl"));
+    }
     const exact = byExact.get(matchKey(method, url, body));
     if (exact?.length) {
       fidelity.exactHits += 1;
-      const call = exact.length > 1 ? exact.shift()! : exact[0];
-      // Also consume the url-tier copy so fallback ordering stays aligned.
-      const urlTier = byUrl.get(call.urlKey);
-      if (urlTier) {
-        const index = urlTier.indexOf(call);
-        if (index >= 0 && urlTier.length > 1) urlTier.splice(index, 1);
-      }
+      const call = exact[0];
+      removeRecordedCall(call);
       return toResponse(call);
     }
-    const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
     // A CHANGED request to a live-allowed host goes live BEFORE the url-tier
     // fallback: serving a recorded response for a different request body would
     // poison an A/B variant (e.g. the baseline's verdict answered for a packet
     // it never scored). "*" allows every miss (the variant lane). Identical
     // requests still replay via the exact tier above.
-    const liveAllowed = options.allowLiveHosts?.some((allowed) => allowed === "*" || host === allowed || host.endsWith(`.${allowed}`)) ?? false;
+    const liveAllowed = hostAllowed(host, options.allowLiveHosts);
     if (liveAllowed) {
       fidelity.liveAllowed += 1;
       const live = await originalFetch(input, init);
@@ -193,7 +238,9 @@ export async function withRecordedFetch<T>(
     const urlTier = byUrl.get(urlOnlyKey(method, url));
     if (urlTier?.length) {
       fidelity.urlFallbackHits += 1;
-      return toResponse(urlTier.length > 1 ? urlTier.shift()! : urlTier[0]);
+      const call = urlTier[0];
+      removeRecordedCall(call);
+      return toResponse(call);
     }
     fidelity.misses.push({ method, url: scrubUrl(url) });
     throw new Error(`eval replay miss: ${method} ${scrubUrl(url)} has no recording in ${dir}`);

@@ -14,7 +14,7 @@ import { cacheGet, cacheSet } from "../cache";
 import { addClaudeUsage, recordCall } from "../cost";
 import { fetchPublicTextWithRecovery, type PublicTextDocument, type PublicTextResult } from "../publicWeb";
 import { grokSearch } from "./x";
-import { groundedSearch } from "./groundedSearch";
+import { groundedSearch, groundedSearchProvisioned } from "./groundedSearch";
 import { readEntityFacts } from "../entityStore";
 import { canonicalEntityKey } from "../../src/engine";
 import type { Adapter, AdapterRunResult, CollectContext } from "./types";
@@ -1435,10 +1435,20 @@ export async function discoverGroundedBasicFactLeadsDetailed(
   questions: readonly BasicFactsResearchQuestion[],
   phase: "primary" | "repair",
 ): Promise<BasicFactsDiscoveryResult> {
+  if (!groundedSearchProvisioned()) {
+    return {
+      provider: "grounded",
+      state: "skipped",
+      leads: [],
+      attempts: 0,
+      completedBatches: 0,
+      failedBatches: 0,
+      detail: "grounded search is not provisioned (needs SERPER_API_KEY + an extractor)",
+    };
+  }
   const audience = questions[0]?.audience ?? researchAudience(ctx);
   const grouped = questionSearchGroups(questions, phase);
   const canonicalSubject = subjectName(ctx);
-  let unprovisioned = false;
   const batches = await mapDiscoveryGroups(grouped, async ({ key, batch, questions: batchQuestions, questionSpecific }): Promise<BatchDiscoveryResult> => {
     const group = {
       key,
@@ -1455,7 +1465,6 @@ export async function discoverGroundedBasicFactLeadsDetailed(
       { cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grounded:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}` },
     );
     if (text === null) {
-      unprovisioned = true;
       return { ...group, state: "failed", leads: [], attempts: 1, detail: `${key}:grounded_unavailable` };
     }
     const parsed = parseBasicFactLeads(text, canonicalSubject, "grounded", batchQuestions);
@@ -1469,13 +1478,10 @@ export async function discoverGroundedBasicFactLeadsDetailed(
       detail: `${key}:${parsed.length ? `${parsed.length}_leads` : "completed_empty"}`,
     };
   });
-  if (unprovisioned && batches.every((batch) => batch.state === "failed")) {
-    return { provider: "grounded", state: "skipped", leads: [], attempts: 0, completedBatches: 0, failedBatches: 0, detail: "grounded search is not provisioned (needs SERPER_API_KEY + an extractor)" };
-  }
   return aggregateDiscovery("grounded", batches);
 }
 
-async function discoverPrimary(
+export async function discoverPrimary(
   ctx: CollectContext,
   questions: readonly BasicFactsResearchQuestion[],
 ): Promise<BasicFactsDiscoveryResult> {
@@ -1486,11 +1492,12 @@ async function discoverPrimary(
   // cost/recall trade can be measured rather than assumed.
   // ARGUS_BASIC_FACTS_PRIMARY=grounded routes the same questions through the
   // decoupled Serper + fetch + cheap-extract pipeline (no per-search provider
-  // fee, no Sonnet-priced search contexts); an unprovisioned grounded lane
-  // falls through to the normal chain rather than degrading discovery.
+  // fee, no Sonnet-priced search contexts). An unprovisioned grounded lane
+  // falls through only when provider failover is explicitly enabled; the
+  // default owner policy leaves the skipped lane visible without moving spend.
   if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grounded") {
     const grounded = await discoverGroundedBasicFactLeadsDetailed(ctx, questions, "primary");
-    if (grounded.state !== "skipped") return grounded;
+    if (grounded.state !== "skipped" || !providerFallbacksEnabled()) return grounded;
   }
   if (env("ARGUS_BASIC_FACTS_PRIMARY") === "grok" && env("XAI_API_KEY")) {
     return discoverGrokBasicFactLeadsDetailed(ctx, questions, "primary");
@@ -3110,7 +3117,7 @@ const MULTI_VALUE_PREDICATES = new Set<BasicFactPredicate>([
 const NON_INDEPENDENT_HOSTS = /(?:^|\.)(?:prnewswire|globenewswire|businesswire|accesswire|einpresswire|prweb|newsfilecorp|prlog|openpr|issuewire|medium|substack|mirror\.xyz|wordpress|blogspot|tumblr|dev\.to|beehiiv|notion\.site)\.[a-z]/i;
 
 /** Registrable domain (eTLD+1) so subdomains of one publisher count as one host. */
-function registrableDomain(url: string): string | null {
+export function registrableDomain(url: string): string | null {
   try {
     const host = new URL(url).hostname.replace(/^www\./, "").toLowerCase();
     const parts = host.split(".");
@@ -4181,7 +4188,14 @@ export async function collectBasicFacts(
   }
   const discover = dependencies.discover ?? discoverPrimary;
   const fetchSource = dependencies.fetchSource ?? fetchPublicTextWithRecovery;
-  if (!dependencies.discover && !env("ANTHROPIC_API_KEY") && !env("XAI_API_KEY")) {
+  const groundedPrimaryProvisioned = env("ARGUS_BASIC_FACTS_PRIMARY") === "grounded"
+    && groundedSearchProvisioned();
+  if (
+    !dependencies.discover
+    && !env("ANTHROPIC_API_KEY")
+    && !env("XAI_API_KEY")
+    && !groundedPrimaryProvisioned
+  ) {
     return { state: "skipped", detail: "basic-facts web research is not configured" };
   }
 
@@ -4189,7 +4203,11 @@ export async function collectBasicFacts(
     phase: "P0 · Intake",
     label: "Basic facts research",
     detail: "Searching for foundational facts, then independently fetching and checking every cited passage…",
-    source: env("ANTHROPIC_API_KEY") ? "Claude web search · public source verification" : "Grok web search · public source verification",
+    source: groundedPrimaryProvisioned
+      ? "Serper grounded search · public source verification"
+      : env("ANTHROPIC_API_KEY")
+        ? "Claude web search · public source verification"
+        : "Grok web search · public source verification",
     tone: "neutral",
   });
 
@@ -4334,6 +4352,9 @@ export async function collectBasicFacts(
   const missingCritical = questions.filter((question) =>
     question.critical && deterministicQuestionAnswerRefs(ctx, question, primaryFacts).length === 0);
   const repairQuestions = boundedRepairQuestions(missingCritical);
+  const groundedPrimaryUnavailableWithoutFallback = primary.provider === "grounded"
+    && !providerFallbacksEnabled()
+    && (primary.state === "failed" || primary.state === "skipped" || primary.failedBatches > 0);
   let repair: BasicFactsDiscoveryResult = {
     provider: "none",
     state: "skipped",
@@ -4343,7 +4364,13 @@ export async function collectBasicFacts(
     failedBatches: 0,
     detail: missingCritical.length ? "repair provider not configured" : "no critical gaps",
   };
-  if (repairQuestions.length && (dependencies.repair || !dependencies.discover)) {
+  if (
+    repairQuestions.length
+    && (
+      dependencies.repair
+      || (!dependencies.discover && !groundedPrimaryUnavailableWithoutFallback)
+    )
+  ) {
     const output = dependencies.repair
       ? await dependencies.repair(ctx, repairQuestions)
       : await discoverRepair(ctx, repairQuestions);

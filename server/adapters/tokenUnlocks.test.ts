@@ -45,7 +45,9 @@ describe("collectUpcomingUnlocks", () => {
     delete process.env.CRYPTORANK_API_KEY;
     const fetchSpy = vi.fn();
     vi.stubGlobal("fetch", fetchSpy);
-    const out = await collectUpcomingUnlocks("Uniswap", "UNI");
+    const out = await collectUpcomingUnlocks("Uniswap", "UNI", {
+      nowMs: Date.UTC(2026, 6, 23),
+    });
     expect(out.available).toBe(false);
     expect(fetchSpy).not.toHaveBeenCalled();
   });
@@ -66,11 +68,26 @@ describe("collectUpcomingUnlocks", () => {
     expect(out.value.percentOfSupply).toBe(1.2);
     expect(out.value.unlockValueUsd).toBe(27_000_000);
     expect(out.value.cumulativeUnlockedPercent).toBe(63);
-    // Both events fall inside the 90-day window from the next unlock.
+    // Both events fall inside the 90-day window from the capture time.
     expect(out.value.next90dPercentOfSupply).toBe(2);
     expect(out.value.sourceUrl).toBe("https://cryptorank.io/price/uniswap/vesting");
     // Resolved to id 11 (name agreement), never the same-symbol impostor id 12.
     expect(urls.some((url) => url.includes("/currencies/11/vesting/events"))).toBe(true);
+  });
+
+  it("does not count distant events as unlocking within 90 days", async () => {
+    process.env.CRYPTORANK_API_KEY = "cr-key";
+    vi.stubGlobal("fetch", vi.fn(async (url: string) =>
+      String(url).includes("/currencies/map") ? jsonResponse(mapBody) : jsonResponse(eventsBody)));
+
+    const out = await collectUpcomingUnlocks("Uniswap", "UNI", {
+      nowMs: Date.UTC(2026, 0, 1),
+    });
+
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.nextUnlockDate).toBe("2026-08-01");
+    expect(out.value.next90dPercentOfSupply).toBeNull();
   });
 
   it("fails closed on a symbol collision without name agreement", async () => {

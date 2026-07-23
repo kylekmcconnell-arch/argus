@@ -139,11 +139,13 @@ function sourceLabel(source: BasicFactSourceView, url: string): string {
  * Deterministic provider captures repeat across scans with only the numbers
  * moving ("$2.40B market cap · captured 07-22" then "$2.36B · captured
  * 07-23"). Rendering every capture reads as a spilled paragraph and shows
- * stale numbers next to fresh ones. Key each fragment by its text with the
- * numbers stripped and keep the LATEST occurrence, so already-frozen reports
- * that accumulated captures render clean too.
+ * stale numbers next to fresh ones. Only recognized dated/liveness provider
+ * captures are keyed with numbers stripped and collapsed to their latest
+ * occurrence; ordinary facts retain distinct numeric values.
  */
 const CAPTURE_DEDUPE_PREDICATES = new Set(["traction", "tokenomics", "product", "network", "funding"]);
+const DATED_CAPTURE = /\bcaptured \d{4}-\d{2}-\d{2}\b/i;
+const LIVENESS_CAPTURE = /\boperates a live on-chain protocol\b/i;
 
 function numberlessKey(fragment: string): string {
   return fragment.replace(/[\d.,$#%]+/g, "").replace(/\s+/g, " ").trim().toLowerCase();
@@ -158,12 +160,19 @@ function normalizeCaptureBoundaries(text: string): string {
 }
 
 function keepLatestByShape(pieces: readonly string[]): string[] {
-  const byShape = new Map<string, string>();
-  for (const piece of pieces) {
+  const lastCaptureIndex = new Map<string, number>();
+  pieces.forEach((piece, index) => {
     const text = piece.trim();
-    if (text) byShape.set(numberlessKey(text), text);
-  }
-  return [...byShape.values()];
+    if (text && (DATED_CAPTURE.test(text) || LIVENESS_CAPTURE.test(text))) {
+      lastCaptureIndex.set(numberlessKey(text), index);
+    }
+  });
+  return pieces.flatMap((piece, index) => {
+    const text = piece.trim();
+    if (!text) return [];
+    const capture = DATED_CAPTURE.test(text) || LIVENESS_CAPTURE.test(text);
+    return !capture || lastCaptureIndex.get(numberlessKey(text)) === index ? [text] : [];
+  });
 }
 
 function dedupeCaptureValues(fact: BasicFactView): BasicFactView {
@@ -172,12 +181,16 @@ function dedupeCaptureValues(fact: BasicFactView): BasicFactView {
     ? fact.value.map(displayValue).filter(Boolean)
     : [displayValue(fact.value)].filter(Boolean);
   if (!elements.length) return fact;
-  // Element level first (values arrays), then within each element: repeated
-  // shapes joined by ", " collapse to the latest occurrence. Splitting and
-  // rejoining on ", " is the identity unless duplicate shapes collapse, so
-  // ordinary prose ("led by a16z, Polychain") passes through unchanged.
+  // Element-level dated captures collapse first. The legacy liveness sentence
+  // is the only undated provider projection that needs an internal comma split.
   const deduped = keepLatestByShape(elements)
-    .map((element) => keepLatestByShape(normalizeCaptureBoundaries(element).split(", ")).join(", "));
+    .map((element) => {
+      // Only the legacy liveness projection was comma-joined without dated
+      // boundaries. Ordinary facts such as separate funding rounds retain
+      // their commas and every distinct numeric value.
+      if (!LIVENESS_CAPTURE.test(element)) return element;
+      return keepLatestByShape(element.split(", ")).join(", ");
+    });
   return { ...fact, value: deduped.length === 1 ? deduped[0] : deduped };
 }
 
@@ -195,6 +208,7 @@ const METRIC_TOKEN = /(?:\$\s?[\d][\d.,]*\s?[BMK]?\b|#[\d][\d,]*\b|\b[\d][\d.,]*
 
 function parseFactMetrics(fact: BasicFactView): { metrics: FactMetric[]; notes: string[]; captured: string | null } | null {
   const raw = Array.isArray(fact.value) ? fact.value.map(displayValue) : [displayValue(fact.value)];
+  const captureSeries = raw.some((entry) => DATED_CAPTURE.test(entry));
   const segments = raw
     .flatMap((entry) => normalizeCaptureBoundaries(entry).split(" · "))
     .map((segment) => segment.trim())
@@ -212,7 +226,9 @@ function parseFactMetrics(fact: BasicFactView): { metrics: FactMetric[]; notes: 
     // around one number token.
     const token = segment.length <= 64 && !/[;:]/.test(segment) ? segment.match(METRIC_TOKEN) : null;
     if (!token || token.index == null) {
-      if (!notes.some((note) => numberlessKey(note) === numberlessKey(segment))) notes.push(segment);
+      const noteKey = captureSeries ? numberlessKey(segment) : segment.trim().toLowerCase();
+      if (!notes.some((note) =>
+        (captureSeries ? numberlessKey(note) : note.trim().toLowerCase()) === noteKey)) notes.push(segment);
       continue;
     }
     const before = segment.slice(0, token.index).trim();
@@ -222,11 +238,17 @@ function parseFactMetrics(fact: BasicFactView): { metrics: FactMetric[]; notes: 
     const label = [direction ? before.slice(0, before.length - direction.length).trim() : before, after]
       .filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
     if (!label) {
-      if (!notes.some((note) => numberlessKey(note) === numberlessKey(segment))) notes.push(segment);
+      const noteKey = captureSeries ? numberlessKey(segment) : segment.trim().toLowerCase();
+      if (!notes.some((note) =>
+        (captureSeries ? numberlessKey(note) : note.trim().toLowerCase()) === noteKey)) notes.push(segment);
       continue;
     }
-    // Latest capture of the same metric wins; earlier ones are stale copies.
-    metricByLabel.set(label.toLowerCase(), { value, label });
+    // Latest dated capture of the same metric wins. Outside a capture series,
+    // distinct values with the same label are separate facts and both survive.
+    const metricKey = captureSeries
+      ? label.toLowerCase()
+      : `${label.toLowerCase()}:${value.toLowerCase()}`;
+    metricByLabel.set(metricKey, { value, label });
   }
   const metrics = [...metricByLabel.values()];
   return metrics.length >= 3 ? { metrics, notes, captured } : null;
@@ -237,7 +259,7 @@ function FactStatGrid({ parsed }: { parsed: NonNullable<ReturnType<typeof parseF
     <div>
       <dl className="grid grid-cols-2 gap-x-4 gap-y-2.5 sm:grid-cols-3">
         {parsed.metrics.slice(0, 9).map((metric) => (
-          <div key={metric.label} className="min-w-0">
+          <div key={`${metric.label}:${metric.value}`} className="min-w-0">
             <dd className="text-[15.5px] font-semibold leading-tight tracking-tight text-ink tabular-nums">{metric.value}</dd>
             <dt className="mt-0.5 text-[10px] uppercase leading-snug tracking-[0.08em] text-ink-faint">{metric.label}</dt>
           </div>

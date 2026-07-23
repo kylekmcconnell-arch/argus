@@ -725,4 +725,24 @@ describe("BasicFactsPanel", () => {
     expect(rows[1]).toContain("$11.0M");
     expect(rows[1]).toContain("+1 more");
   });
+
+  it("preserves distinct numeric facts that share the same prose shape", () => {
+    act(() => {
+      root.render(
+        <BasicFactsPanel
+          facts={[{
+            factId: "fact-funding-values",
+            predicate: "funding",
+            value: "raised $11M, raised $165M",
+            status: "corroborated",
+            critical: true,
+            sources: [{ url: "https://example.com/funding", relation: "supports" }],
+          }]}
+        />,
+      );
+    });
+
+    expect(container.textContent).toContain("$11M");
+    expect(container.textContent).toContain("$165M");
+  });
 });
