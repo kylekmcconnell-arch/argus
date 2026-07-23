@@ -71,7 +71,7 @@
       "profilePhoto.ts": {"collects": "PFP integrity screen", "via": "Claude vision"},
       "peopledatalabs.ts": {"collects": "identity + off-LinkedIn career (F1/F2)", "cost": "~$0.10/match", "dormantUntil": "PDL_API_KEY"},
       "github.ts": {"collects": "org/repo affiliations, twitter-linked identity", "dormantUntil": "GITHUB_TOKEN"},
-      "monid.ts": {"collects": "private-company enrichment (funding/leadership)", "via": "Monid/Akta, metered", "dormantUntil": "MONID_API_KEY"},
+      "monid.ts": {"collects": "private-company enrichment (funding/leadership)", "via": "Monid/Akta, metered", "dormantUntil": "MONID_API_KEY", "note": "management profiles merge into webTeam as verified leadership rows (mergeManagementIntoWebTeam)"},
       "projectToken.ts": {"collects": "canonical token binding via official-X/official-domain (never a name match)"},
       "portfolio.ts + fundScale.ts + investorDiscovery.ts": {"collects": "investor I2 portfolio + I3 fund scale"},
       "coingecko/dexscreener/onchain(Helius)/sitecheck/teampage/wayback/wallet/notableAccounts": {"collects": "market data, rug signals, Solana wallets, site substance, /team fetch, archive corroboration, wallet resolution, reverse-follow references"}
@@ -106,7 +106,7 @@
     "report_versions": "immutable report snapshots; DB triggers block certified mutation; activate_report_version_with_graph promotes",
     "report_axis_evidence": "axis citation lineage",
     "graph_contributions": "org trust graph (api/_graph.ts)",
-    "entity_facts": "knowledge base: verified facts write-back every audit, read-through when ARGUS_ENTITY_REUSE=on; NEVER stores legal/sanctions/adverse",
+    "entity_facts": "knowledge base: verified facts write-back every audit, read-through when ARGUS_ENTITY_REUSE=on; NEVER stores legal/sanctions/adverse; NEVER stores or reuses providerProjection facts (market/TVL/fee captures are regenerated free each run - reuse compounds stale duplicates)",
     "provider_cache": "server/cache.ts",
     "provider_usage_events + report_cost_lines": "cost telemetry",
     "argus_members": "auth + RBAC + quotas (api/_auth.ts, consume_usage_quota RPC)",

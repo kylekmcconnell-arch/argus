@@ -272,6 +272,7 @@ function usdShort(amount: number): string {
 
 function FundingRoundsList({ rounds }: { rounds: readonly FundingRoundView[] }) {
   const ordered = [...rounds].sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")));
+  const maxAmount = Math.max(...ordered.map((round) => round.amountUsd ?? 0), 0);
   return (
     <ol className="mt-2.5 divide-y divide-line/50 border-t border-line/60" aria-label="Disclosed funding rounds">
       {ordered.slice(0, 8).map((round, index) => {
@@ -282,6 +283,11 @@ function FundingRoundsList({ rounds }: { rounds: readonly FundingRoundView[] }) 
             <span className="font-medium text-ink">{round.round}</span>
             {round.date && <span className="mono text-[10.5px] text-ink-faint">{String(round.date).slice(0, 7)}</span>}
             <span className="mono ml-auto font-semibold text-ink tabular-nums">{round.amountUsd != null && round.amountUsd > 0 ? usdShort(round.amountUsd) : "undisclosed"}</span>
+            {maxAmount > 0 && round.amountUsd != null && round.amountUsd > 0 && (
+              <span className="block h-1 min-w-full overflow-hidden rounded-full bg-line/50" aria-hidden="true">
+                <span className="block h-full rounded-full bg-signal-lift/70" style={{ width: `${Math.max(2, (round.amountUsd / maxAmount) * 100)}%` }} />
+              </span>
+            )}
             {(leads.length > 0 || round.valuationUsd != null) && (
               <span className="min-w-full text-[11px] leading-snug text-ink-faint">
                 {leads.length > 0 ? `led by ${leads.slice(0, 3).join(", ")}` : ""}
