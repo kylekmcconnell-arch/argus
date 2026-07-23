@@ -7857,6 +7857,21 @@ async function collectProtocolTvl(projectName2, options = {}) {
       change30dPct = Number.isFinite(raw) && Math.abs(raw) <= 1e4 ? Math.round(raw * 10) / 10 : null;
     }
   }
+  const trend = [];
+  if (latestDate !== null) {
+    const horizon = latestDate - 180 * 86400;
+    let nextAt = -Infinity;
+    for (const point of series) {
+      if (typeof point.date !== "number" || typeof point.totalLiquidityUSD !== "number" || point.totalLiquidityUSD <= 0) continue;
+      if (point.date < horizon || point.date < nextAt && point.date !== latestDate) continue;
+      trend.push({ date: new Date(point.date * 1e3).toISOString().slice(0, 10), tvlUsd: Math.round(point.totalLiquidityUSD) });
+      nextAt = point.date + 7 * 86400;
+    }
+    const latestIso = new Date(latestDate * 1e3).toISOString().slice(0, 10);
+    if (trend.length && trend[trend.length - 1].date !== latestIso) {
+      trend.push({ date: latestIso, tvlUsd: Math.round(tvlUsd) });
+    }
+  }
   const hacks = (Array.isArray(data.hacks) ? data.hacks : []).filter((entry) => Boolean(entry) && typeof entry === "object").map((entry) => ({
     date: typeof entry.date === "number" ? new Date(entry.date * 1e3).toISOString().slice(0, 10) : null,
     amountUsd: typeof entry.amount === "number" && entry.amount > 0 ? Math.round(entry.amount) : null,
@@ -7876,6 +7891,7 @@ async function collectProtocolTvl(projectName2, options = {}) {
       geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
       firstRecordedAt,
       change30dPct,
+      trend,
       governanceIds: strArray(data.governanceID),
       hacks,
       sourceUrl: `https://defillama.com/protocol/${slug}`

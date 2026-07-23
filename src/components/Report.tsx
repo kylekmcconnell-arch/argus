@@ -31,6 +31,7 @@ import { SubjectClass, type RoleReport } from "../engine";
 import { verdictMeta, ROLE_META, axisLabel, capLabel } from "../lib/verdict";
 import { isWatched, toggleWatch } from "../lib/watchlist";
 import { CopyTldrButton, OutcomeDeltaStrip, ScoreContextStrip } from "./ScoreContext";
+import { UsageVisuals } from "./UsageVisuals";
 import { getContributions } from "../graph/store";
 import { subjectConnections } from "../graph/network";
 import { Avatar } from "./Avatar";
@@ -2584,6 +2585,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               questionLedger={f.basicFactQuestionLedger}
               fundingRounds={f.protocolFunding?.rounds}
             />
+          </div>
+        )}
+
+        {f.protocolTvl && (
+          <div className="mt-3">
+            <UsageVisuals tvl={f.protocolTvl} />
           </div>
         )}
 

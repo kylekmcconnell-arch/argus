@@ -108,6 +108,11 @@ export interface ProtocolTvl {
    * short or undated.
    */
   change30dPct: number | null;
+  /**
+   * Downsampled TVL trend for the report's chart: weekly points over the last
+   * ~180 days plus the latest reading. Small enough to freeze immutably.
+   */
+  trend: { date: string; tvlUsd: number }[];
   /** Governance identifiers as listed by DeFiLlama (curated listing metadata, e.g. "snapshot:aave.eth", "eip155:1:0x..."). */
   governanceIds: string[];
   /**
@@ -186,6 +191,25 @@ export async function collectProtocolTvl(
       change30dPct = Number.isFinite(raw) && Math.abs(raw) <= 10_000 ? Math.round(raw * 10) / 10 : null;
     }
   }
+  // Weekly trend points over the last ~180 days, always ending on the latest
+  // reading, so the report can draw a real capital-commitment line instead of
+  // quoting one number. Downsampled to keep the immutable payload lean.
+  const trend: { date: string; tvlUsd: number }[] = [];
+  if (latestDate !== null) {
+    const horizon = latestDate - 180 * 86_400;
+    let nextAt = -Infinity;
+    for (const point of series as { date?: unknown; totalLiquidityUSD?: unknown }[]) {
+      if (typeof point.date !== "number" || typeof point.totalLiquidityUSD !== "number" || point.totalLiquidityUSD <= 0) continue;
+      if (point.date < horizon || (point.date < nextAt && point.date !== latestDate)) continue;
+      trend.push({ date: new Date(point.date * 1000).toISOString().slice(0, 10), tvlUsd: Math.round(point.totalLiquidityUSD) });
+      nextAt = point.date + 7 * 86_400;
+    }
+    const latestIso = new Date(latestDate * 1000).toISOString().slice(0, 10);
+    if (trend.length && trend[trend.length - 1].date !== latestIso) {
+      trend.push({ date: latestIso, tvlUsd: Math.round(tvlUsd) });
+    }
+  }
+
   const hacks: ProtocolHackRecord[] = (Array.isArray(data.hacks) ? data.hacks : [])
     .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
     .map((entry) => ({
@@ -208,6 +232,7 @@ export async function collectProtocolTvl(
       geckoId: typeof data.gecko_id === "string" ? data.gecko_id : null,
       firstRecordedAt,
       change30dPct,
+      trend,
       governanceIds: strArray(data.governanceID),
       hacks,
       sourceUrl: `https://defillama.com/protocol/${slug}`,

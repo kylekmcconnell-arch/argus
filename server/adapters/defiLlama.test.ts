@@ -49,6 +49,29 @@ describe("collectProtocolTvl", () => {
     expect(out.value.sourceUrl).toBe("https://defillama.com/protocol/aave");
   });
 
+  it("freezes a weekly downsampled trend ending on the latest reading", async () => {
+    const day = 86_400;
+    const latest = 1_760_000_000;
+    // Daily points over ~30 days: the weekly downsample keeps ~1 in 7 and the
+    // latest reading is always the final point.
+    const tvl = Array.from({ length: 30 }, (_, index) => ({
+      date: latest - (29 - index) * day,
+      totalLiquidityUSD: 10_000_000_000 + index * 50_000_000,
+    }));
+    const out = await collectProtocolTvl("Aave", { fetcher: fetcherReturning(() => jsonResponse(protocolBody({ tvl }))) });
+    expect(out.available).toBe(true);
+    if (!out.available) throw new Error("expected available");
+    expect(out.value.trend.length).toBeGreaterThanOrEqual(4);
+    expect(out.value.trend.length).toBeLessThanOrEqual(6);
+    const lastPoint = out.value.trend[out.value.trend.length - 1];
+    expect(lastPoint.date).toBe(new Date(latest * 1000).toISOString().slice(0, 10));
+    expect(lastPoint.tvlUsd).toBe(10_000_000_000 + 29 * 50_000_000);
+    // Points ascend in time and every value is positive.
+    const dates = out.value.trend.map((point) => point.date);
+    expect([...dates].sort()).toEqual(dates);
+    expect(out.value.trend.every((point) => point.tvlUsd > 0)).toBe(true);
+  });
+
   it("treats a 400 (protocol not found) as a completed no-match, not an outage", async () => {
     const out = await collectProtocolTvl("Nonexistent Thing", {
       fetcher: fetcherReturning(() => new Response("Protocol not found", { status: 400 })),

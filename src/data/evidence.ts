@@ -239,6 +239,8 @@ export interface ProtocolTvlSnapshot {
   firstRecordedAt?: string | null;
   /** TVL now vs ~30 days ago, signed percent; capital-commitment trend. Null when the series is too short. */
   change30dPct?: number | null;
+  /** Downsampled weekly TVL points (~180 days, ends on the latest reading) for the report's trend chart. */
+  trend?: Array<{ date: string; tvlUsd: number }>;
   /** Governance identifiers as listed by DeFiLlama (curated listing metadata). */
   governanceIds?: string[];
   /** Security incidents recorded in the same DeFiLlama document; frozen with the positives so evidence use is never selective. */
