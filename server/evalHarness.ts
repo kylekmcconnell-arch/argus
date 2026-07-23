@@ -178,18 +178,22 @@ export async function withRecordedFetch<T>(
       }
       return toResponse(call);
     }
+    const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
+    // A CHANGED request to a live-allowed host goes live BEFORE the url-tier
+    // fallback: serving a recorded response for a different request body would
+    // poison an A/B variant (e.g. the baseline's verdict answered for a packet
+    // it never scored). "*" allows every miss (the variant lane). Identical
+    // requests still replay via the exact tier above.
+    const liveAllowed = options.allowLiveHosts?.some((allowed) => allowed === "*" || host === allowed || host.endsWith(`.${allowed}`)) ?? false;
+    if (liveAllowed) {
+      fidelity.liveAllowed += 1;
+      const live = await originalFetch(input, init);
+      return record(method, url, body, live, join(dir, "live-lane.jsonl"));
+    }
     const urlTier = byUrl.get(urlOnlyKey(method, url));
     if (urlTier?.length) {
       fidelity.urlFallbackHits += 1;
       return toResponse(urlTier.length > 1 ? urlTier.shift()! : urlTier[0]);
-    }
-    const host = (() => { try { return new URL(url).hostname; } catch { return ""; } })();
-    // "*" = every replay miss goes live (the A/B lane for a variant whose new
-    // provider traffic cannot exist in the baseline recording).
-    if (options.allowLiveHosts?.some((allowed) => allowed === "*" || host === allowed || host.endsWith(`.${allowed}`))) {
-      fidelity.liveAllowed += 1;
-      const live = await originalFetch(input, init);
-      return record(method, url, body, live, join(dir, "live-lane.jsonl"));
     }
     fidelity.misses.push({ method, url: scrubUrl(url) });
     throw new Error(`eval replay miss: ${method} ${scrubUrl(url)} has no recording in ${dir}`);
