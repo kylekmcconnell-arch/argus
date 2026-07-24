@@ -9,6 +9,7 @@ import {
   type BasicFactSource,
 } from "../../src/data/evidence";
 import { supportsExplicitEmptyBasicFact } from "../../src/lib/basicFactQuestions";
+import { canonicalOfficialWebsite } from "../../src/lib/fundScaleEvidence";
 import { DISCOVERY_MODEL, env, providerFallbacksEnabled } from "../config";
 import { cacheGet, cacheSet } from "../cache";
 import { addClaudeUsage, recordCall } from "../cost";
@@ -990,6 +991,57 @@ function subjectAliases(ctx: CollectContext): string[] {
     ctx.handle.replace(/^@/, ""),
   ].filter((value): value is string => Boolean(value?.trim()));
   return [...new Set(aliases.map((value) => value.trim()))];
+}
+
+const OFFICIAL_SITE_HANDLE_SUFFIXES = new Set([
+  "app", "dao", "defi", "dex", "exchange", "finance", "foundation", "labs",
+  "network", "official", "protocol", "sol", "xyz",
+]);
+
+interface OfficialSiteBindingCandidate {
+  identity: string;
+  origin: string;
+  sourceUrl: string;
+}
+
+/**
+ * Recover a first-party site when the X profile itself is suspended or absent.
+ *
+ * A search result is never enough. The candidate domain must match the audited
+ * handle's brand stem, and the freshly fetched page must link back to that exact
+ * X handle. This lets an official site recover a suspended major-project
+ * account without letting an arbitrary name-matched page select a methodology.
+ */
+function officialSiteBindingCandidate(
+  handle: string,
+  sourceUrl: string,
+  identity: string,
+): OfficialSiteBindingCandidate | null {
+  let url: URL;
+  try { url = new URL(sourceUrl); } catch { return null; }
+  if (!/^https?:$/.test(url.protocol)) return null;
+  const host = normalizedHost(url.hostname);
+  if (PATH_TENANTED_HOSTS.has(host) || NON_COUNTERPARTY_RELATIONSHIP_HOSTS.has(host)) return null;
+  const registered = registrableDomain(url.toString());
+  const brandLabel = registered?.split(".")[0] ?? "";
+  const brandKey = looseTokens(brandLabel).join("");
+  const handleKey = looseTokens(handle.replace(/^@/, "")).join("");
+  if (!brandKey || brandKey.length < 3 || !handleKey.startsWith(brandKey)) return null;
+  const suffix = handleKey.slice(brandKey.length);
+  if (suffix && !OFFICIAL_SITE_HANDLE_SUFFIXES.has(suffix)) return null;
+  const discoveredIdentity = identity.trim();
+  return discoveredIdentity
+    ? { identity: discoveredIdentity, origin: url.origin, sourceUrl: url.toString() }
+    : null;
+}
+
+function documentLinksExactHandle(document: PublicTextDocument, handle: string): boolean {
+  const normalized = document.text.replace(/\\\//g, "/");
+  const account = escapedPattern(handle.replace(/^@/, ""));
+  return new RegExp(
+    `(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${account}(?:[/?#"'\\s<]|$)`,
+    "i",
+  ).test(normalized);
 }
 
 function discoveryPrompt(
@@ -4338,7 +4390,6 @@ export async function collectBasicFacts(
     ...officialIdentityBootstrapLeads(ctx),
     ...primary.leads,
   ]);
-  ctx.evidence.basicFactLeads = primaryLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = [];
 
   // Seeded before the first pass: notable followers are already collected by the
@@ -4346,7 +4397,7 @@ export async function collectBasicFacts(
   // passages immediately instead of burning a verification pass finding nothing.
   const seededNameAlias = notabilityBoundNameAlias(ctx);
   let aliases = seededNameAlias ? [...subjectAliases(ctx), seededNameAlias] : subjectAliases(ctx);
-  const officialHosts = [ctx.evidence.profile.website]
+  let officialHosts = [ctx.evidence.profile.website]
     .filter((value): value is string => Boolean(value))
     .flatMap((value) => {
       try { return [new URL(value).toString()]; } catch { return []; }
@@ -4388,6 +4439,65 @@ export async function collectBasicFacts(
     sourceByUrl.set(key, pending);
     return pending;
   };
+
+  const recoverOfficialSiteBindings = async (
+    leads: readonly BasicFactLead[],
+  ): Promise<BasicFactLead[]> => {
+    if (canonicalOfficialWebsite(ctx.evidence.profile.website)) return [];
+    const candidates = new Map<string, OfficialSiteBindingCandidate>();
+    for (const lead of leads) {
+      // Never invent the brand name from the handle or domain. Recovery needs
+      // an explicit identity lead whose value is then checked on the fetched
+      // first-party page and bound to the exact X handle.
+      if (lead.predicate !== "official_identity") continue;
+      const candidate = officialSiteBindingCandidate(ctx.handle, lead.sourceUrl, lead.value);
+      const key = candidate ? `${candidate.origin}\n${searchable(candidate.identity)}` : "";
+      if (candidate && !candidates.has(key)) candidates.set(key, candidate);
+    }
+    const recovered: BasicFactLead[] = [];
+    for (const candidate of [...candidates.values()].slice(0, 4)) {
+      const targets = [...new Set([candidate.sourceUrl, `${candidate.origin}/`])];
+      let boundDocument: PublicTextDocument | null = null;
+      for (const target of targets) {
+        const result = await fetchOnce(target);
+        if (
+          result.status === "ok"
+          && documentLinksExactHandle(result, ctx.handle)
+          && looseContainsPhrase(result.text, candidate.identity)
+        ) {
+          boundDocument = result;
+          break;
+        }
+      }
+      if (!boundDocument) continue;
+      const officialScope = `${candidate.origin}/`;
+      officialHosts = [...new Set([...officialHosts, officialScope])];
+      aliases = [...new Set([...aliases, candidate.identity])];
+      ctx.evidence.profile.website = officialScope;
+      recovered.push({
+        subject: candidate.identity,
+        predicate: "official_identity",
+        value: candidate.identity,
+        // The recovered binding proves a project identity even when the
+        // unavailable X profile caused intake to begin on the person ledger.
+        // Keep the claim on the project contract so person-only full-name
+        // safeguards do not reject a valid first-party brand binding.
+        questionId: "project.official_identity",
+        excerpt: candidate.identity,
+        sourceUrl: boundDocument.url,
+        sourceTitle: "Official site and X account binding",
+        evidence_origin: "deterministic_bootstrap",
+        artifact_verified: false,
+        provider: "argus-identity-bootstrap",
+      });
+      break;
+    }
+    return recovered;
+  };
+
+  const primaryBindingLeads = await recoverOfficialSiteBindings(primaryLeads);
+  const primaryVerificationLeads = mergeLeads(primaryLeads, primaryBindingLeads);
+  ctx.evidence.basicFactLeads = primaryVerificationLeads.map((lead) => ({ ...lead }));
 
   const verifyLeads = async (
     leads: readonly BasicFactLead[],
@@ -4469,7 +4579,7 @@ export async function collectBasicFacts(
   // ones, so resolveBasicFactCandidates, gap detection, and the question ledger
   // all treat them exactly like this-run facts (correct completeness) without
   // re-fetching their sources.
-  const primaryVerified = [...reusedFacts, ...await verifyWithExpandedContext(primaryLeads, MAX_SOURCES)];
+  const primaryVerified = [...reusedFacts, ...await verifyWithExpandedContext(primaryVerificationLeads, MAX_SOURCES)];
   const primaryFacts = resolveBasicFactCandidates(primaryVerified);
   const missingCritical = questions.filter((question) =>
     question.critical && deterministicQuestionAnswerRefs(ctx, question, primaryFacts).length === 0);
@@ -4505,8 +4615,10 @@ export async function collectBasicFacts(
     }
   }
   const repairLeads = selectBasicFactLeads(repair.leads);
-  const repairVerified = await verifyWithExpandedContext(repairLeads, Math.min(12, MAX_SOURCES));
-  const discoveredLeads = mergeLeads(primaryLeads, repairLeads);
+  const repairBindingLeads = await recoverOfficialSiteBindings(repairLeads);
+  const repairVerificationLeads = mergeLeads(repairLeads, repairBindingLeads);
+  const repairVerified = await verifyWithExpandedContext(repairVerificationLeads, Math.min(12, MAX_SOURCES));
+  const discoveredLeads = mergeLeads(primaryVerificationLeads, repairVerificationLeads);
   // A repaired identity can add the full surname alias needed by an earlier
   // source passage, while a repaired role can establish the organization scope
   // needed by an earlier identity lead. Recheck the bounded combined set using

@@ -1214,6 +1214,19 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     if (fact.predicate === "founder" || fact.predicate === "founded" || fact.predicate === "executive") {
       roles.add(SubjectClass.FOUNDER);
     }
+    // When an X account is suspended or missing from the profile provider, a
+    // freshly fetched first-party site can still prove the brand identity by
+    // linking back to that exact handle. The basic-facts collector freezes that
+    // relationship as a verified official_identity fact. Route only when the
+    // verified identity text itself classifies as a project, so a person's own
+    // website never becomes a PROJECT methodology by accident.
+    if (
+      fact.predicate === "official_identity"
+      && canonicalOfficialWebsite(evidence.profile.website) !== null
+      && classifySubject(fact.value).applicable_classes.includes(SubjectClass.PROJECT)
+    ) {
+      roles.add(SubjectClass.PROJECT);
+    }
   }
   if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
     roles.add(SubjectClass.AGENCY);
@@ -2642,11 +2655,29 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const laneFailure = settledLanes.find((entry): entry is PromiseRejectedResult => entry.status === "rejected");
   if (laneFailure) throw laneFailure.reason;
 
+  const officialWebsiteBeforeBasicFacts = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? null;
   await runAdapter(basicFactsAdapter);
   flushLaneProviderRows();
-  if (fixture) {
+  const rolesAfterBasicFacts = providerBackedRoles(evidence);
+  const officialWebsiteAfterBasicFacts = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? null;
+  const recoveredProjectSite = !officialWebsiteBeforeBasicFacts
+    && officialWebsiteAfterBasicFacts !== null
+    && rolesAfterBasicFacts.includes(SubjectClass.PROJECT);
+  if (recoveredProjectSite) {
+    // A suspended or provider-missing project account can only reveal its
+    // official site during source verification. Re-run the two deterministic
+    // website-dependent collectors now that the exact account ↔ domain binding
+    // is frozen, otherwise the scan routes correctly but still omits product
+    // liveness and the canonical token market record.
+    const siteHost = new URL(officialWebsiteAfterBasicFacts).hostname.replace(/^www\./, "");
+    evidence.roles = rolesAfterBasicFacts;
+    await collectProjectSiteSubstance(ctx, siteHost);
+  }
+  if (fixture || (recoveredProjectSite && !evidence.projectToken?.verified)) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
+  } else {
+    evidence.roles = rolesAfterBasicFacts;
   }
   // Founder financing recall: a verified founder's primary venture usually has
   // public funding rounds (the financing record the basic-facts pass otherwise

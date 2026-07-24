@@ -9960,6 +9960,49 @@ function subjectAliases(ctx) {
   ].filter((value) => Boolean(value?.trim()));
   return [...new Set(aliases.map((value) => value.trim()))];
 }
+var OFFICIAL_SITE_HANDLE_SUFFIXES = /* @__PURE__ */ new Set([
+  "app",
+  "dao",
+  "defi",
+  "dex",
+  "exchange",
+  "finance",
+  "foundation",
+  "labs",
+  "network",
+  "official",
+  "protocol",
+  "sol",
+  "xyz"
+]);
+function officialSiteBindingCandidate(handle, sourceUrl, identity) {
+  let url;
+  try {
+    url = new URL(sourceUrl);
+  } catch {
+    return null;
+  }
+  if (!/^https?:$/.test(url.protocol)) return null;
+  const host = normalizedHost(url.hostname);
+  if (PATH_TENANTED_HOSTS.has(host) || NON_COUNTERPARTY_RELATIONSHIP_HOSTS.has(host)) return null;
+  const registered = registrableDomain(url.toString());
+  const brandLabel = registered?.split(".")[0] ?? "";
+  const brandKey = looseTokens(brandLabel).join("");
+  const handleKey = looseTokens(handle.replace(/^@/, "")).join("");
+  if (!brandKey || brandKey.length < 3 || !handleKey.startsWith(brandKey)) return null;
+  const suffix = handleKey.slice(brandKey.length);
+  if (suffix && !OFFICIAL_SITE_HANDLE_SUFFIXES.has(suffix)) return null;
+  const discoveredIdentity = identity.trim();
+  return discoveredIdentity ? { identity: discoveredIdentity, origin: url.origin, sourceUrl: url.toString() } : null;
+}
+function documentLinksExactHandle(document, handle) {
+  const normalized4 = document.text.replace(/\\\//g, "/");
+  const account = escapedPattern(handle.replace(/^@/, ""));
+  return new RegExp(
+    `(?:https?:)?//(?:www\\.)?(?:x|twitter)\\.com/${account}(?:[/?#"'\\s<]|$)`,
+    "i"
+  ).test(normalized4);
+}
 function discoveryPrompt(ctx, questions, phase = "primary") {
   const profile = ctx.evidence.profile;
   const audience = questions[0]?.audience ?? researchAudience(ctx);
@@ -12480,11 +12523,10 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     ...officialIdentityBootstrapLeads(ctx),
     ...primary.leads
   ]);
-  ctx.evidence.basicFactLeads = primaryLeads.map((lead) => ({ ...lead }));
   ctx.evidence.basicFacts = [];
   const seededNameAlias = notabilityBoundNameAlias(ctx);
   let aliases = seededNameAlias ? [...subjectAliases(ctx), seededNameAlias] : subjectAliases(ctx);
-  const officialHosts = [ctx.evidence.profile.website].filter((value) => Boolean(value)).flatMap((value) => {
+  let officialHosts = [ctx.evidence.profile.website].filter((value) => Boolean(value)).flatMap((value) => {
     try {
       return [new URL(value).toString()];
     } catch {
@@ -12526,6 +12568,55 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     sourceByUrl.set(key, pending);
     return pending;
   };
+  const recoverOfficialSiteBindings = async (leads) => {
+    if (canonicalOfficialWebsite(ctx.evidence.profile.website)) return [];
+    const candidates = /* @__PURE__ */ new Map();
+    for (const lead of leads) {
+      if (lead.predicate !== "official_identity") continue;
+      const candidate = officialSiteBindingCandidate(ctx.handle, lead.sourceUrl, lead.value);
+      const key = candidate ? `${candidate.origin}
+${searchable(candidate.identity)}` : "";
+      if (candidate && !candidates.has(key)) candidates.set(key, candidate);
+    }
+    const recovered = [];
+    for (const candidate of [...candidates.values()].slice(0, 4)) {
+      const targets = [.../* @__PURE__ */ new Set([candidate.sourceUrl, `${candidate.origin}/`])];
+      let boundDocument = null;
+      for (const target of targets) {
+        const result = await fetchOnce(target);
+        if (result.status === "ok" && documentLinksExactHandle(result, ctx.handle) && looseContainsPhrase(result.text, candidate.identity)) {
+          boundDocument = result;
+          break;
+        }
+      }
+      if (!boundDocument) continue;
+      const officialScope = `${candidate.origin}/`;
+      officialHosts = [.../* @__PURE__ */ new Set([...officialHosts, officialScope])];
+      aliases = [.../* @__PURE__ */ new Set([...aliases, candidate.identity])];
+      ctx.evidence.profile.website = officialScope;
+      recovered.push({
+        subject: candidate.identity,
+        predicate: "official_identity",
+        value: candidate.identity,
+        // The recovered binding proves a project identity even when the
+        // unavailable X profile caused intake to begin on the person ledger.
+        // Keep the claim on the project contract so person-only full-name
+        // safeguards do not reject a valid first-party brand binding.
+        questionId: "project.official_identity",
+        excerpt: candidate.identity,
+        sourceUrl: boundDocument.url,
+        sourceTitle: "Official site and X account binding",
+        evidence_origin: "deterministic_bootstrap",
+        artifact_verified: false,
+        provider: "argus-identity-bootstrap"
+      });
+      break;
+    }
+    return recovered;
+  };
+  const primaryBindingLeads = await recoverOfficialSiteBindings(primaryLeads);
+  const primaryVerificationLeads = mergeLeads(primaryLeads, primaryBindingLeads);
+  ctx.evidence.basicFactLeads = primaryVerificationLeads.map((lead) => ({ ...lead }));
   const verifyLeads = async (leads, sourceLimit, assetRelationships = ventureAssetRelationships) => {
     const variants = verificationLeadVariants(ctx, leads, officialHosts, officialCounterpartyHosts);
     const primarySources = leads.flatMap((lead) => {
@@ -12582,7 +12673,7 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     }
     return candidates;
   };
-  const primaryVerified = [...reusedFacts, ...await verifyWithExpandedContext(primaryLeads, MAX_SOURCES)];
+  const primaryVerified = [...reusedFacts, ...await verifyWithExpandedContext(primaryVerificationLeads, MAX_SOURCES)];
   const primaryFacts = resolveBasicFactCandidates(primaryVerified);
   const missingCritical = questions.filter((question) => question.critical && deterministicQuestionAnswerRefs(ctx, question, primaryFacts).length === 0);
   const repairQuestions = boundedRepairQuestions(missingCritical);
@@ -12607,8 +12698,10 @@ async function collectBasicFacts(ctx, dependencies = {}) {
     }
   }
   const repairLeads = selectBasicFactLeads(repair.leads);
-  const repairVerified = await verifyWithExpandedContext(repairLeads, Math.min(12, MAX_SOURCES));
-  const discoveredLeads = mergeLeads(primaryLeads, repairLeads);
+  const repairBindingLeads = await recoverOfficialSiteBindings(repairLeads);
+  const repairVerificationLeads = mergeLeads(repairLeads, repairBindingLeads);
+  const repairVerified = await verifyWithExpandedContext(repairVerificationLeads, Math.min(12, MAX_SOURCES));
+  const discoveredLeads = mergeLeads(primaryVerificationLeads, repairVerificationLeads);
   const contextualVerified = await verifyWithExpandedContext(discoveredLeads, MAX_SOURCES);
   const relationshipFactsBeforeFounderRecovery = resolveBasicFactCandidates([
     ...primaryVerified,
@@ -19006,6 +19099,9 @@ function providerBackedRoles(evidence) {
     if (fact.predicate === "founder" || fact.predicate === "founded" || fact.predicate === "executive") {
       roles.add("FOUNDER" /* FOUNDER */);
     }
+    if (fact.predicate === "official_identity" && canonicalOfficialWebsite(evidence.profile.website) !== null && classifySubject(fact.value).applicable_classes.includes("PROJECT" /* PROJECT */)) {
+      roles.add("PROJECT" /* PROJECT */);
+    }
   }
   if (evidence.clientEngagements.some((row) => row.evidence_origin !== "model_lead" && row.artifact_verified === true)) {
     roles.add("AGENCY" /* AGENCY */);
@@ -20052,11 +20148,22 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   flushLaneProviderRows();
   const laneFailure = settledLanes.find((entry) => entry.status === "rejected");
   if (laneFailure) throw laneFailure.reason;
+  const officialWebsiteBeforeBasicFacts = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? null;
   await runAdapter(basicFactsAdapter);
   flushLaneProviderRows();
-  if (fixture) {
+  const rolesAfterBasicFacts = providerBackedRoles(evidence);
+  const officialWebsiteAfterBasicFacts = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? null;
+  const recoveredProjectSite = !officialWebsiteBeforeBasicFacts && officialWebsiteAfterBasicFacts !== null && rolesAfterBasicFacts.includes("PROJECT" /* PROJECT */);
+  if (recoveredProjectSite) {
+    const siteHost = new URL(officialWebsiteAfterBasicFacts).hostname.replace(/^www\./, "");
+    evidence.roles = rolesAfterBasicFacts;
+    await collectProjectSiteSubstance(ctx, siteHost);
+  }
+  if (fixture || recoveredProjectSite && !evidence.projectToken?.verified) {
     await projectTokenPass();
     evidence.roles = providerBackedRoles(evidence);
+  } else {
+    evidence.roles = rolesAfterBasicFacts;
   }
   if (!fixture && !evidence.companyEnrichment && evidence.roles.includes("FOUNDER" /* FOUNDER */)) {
     const primaryVenture = deriveFounderVentureCandidate(evidence);

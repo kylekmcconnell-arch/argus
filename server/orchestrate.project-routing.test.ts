@@ -156,6 +156,15 @@ describe("provider-backed project routing", () => {
     expect(providerBackedRoles(evidence)).toEqual([SubjectClass.FOUNDER]);
   });
 
+  it("routes a suspended brand account from a verified official-site identity binding", () => {
+    const evidence = emptyEvidence("@driftprotocol");
+    evidence.profile.profile_collection_state = "unavailable";
+    evidence.profile.website = "https://www.drift.trade/";
+    evidence.basicFacts = [basicFact("official_identity", "Drift Protocol")];
+
+    expect(providerBackedRoles(evidence)).toEqual([SubjectClass.PROJECT]);
+  });
+
   it("does not route to FOUNDER on a non-founder fact or an unresolved founder fact", () => {
     const evidence = emptyEvidence("@subject");
     evidence.profile.bio = "gm";
