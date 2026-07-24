@@ -13,6 +13,7 @@ export interface DecisionCanvasItem {
 function plainDecisionText(value: string): string {
   return value
     .replace(/\s*\((?:evm|solana)\)\s*/gi, " ")
+    .trim()
     .replace(/^Resolve deployer trail$/i, "Who deployed the contract")
     .replace(/^Resolve bytecode fingerprint$/i, "Copied contract code")
     .replace(/^Resolve wallet clustering$/i, "Connected holder wallets")
