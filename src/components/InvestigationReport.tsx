@@ -105,15 +105,18 @@ function sameTeamIdentity(a: TeamIdentity, b: TeamIdentity): boolean {
   return [...teamIdentityKeys(b)].some((key) => aKeys.has(key));
 }
 
+function teamNameLooksLikeHandle(person: TeamIdentity): boolean {
+  const name = person.name ?? "";
+  return name.startsWith("@")
+    || (!/[\s._-]/.test(name)
+      && normalizedTeamIdentity(name) === normalizedTeamIdentity(person.handle));
+}
+
 function humanTeamName(current: TeamIdentity, incoming: TeamIdentity): string {
   const currentName = current.name ?? "";
   const incomingName = incoming.name ?? "";
-  const currentLooksLikeHandle = currentName.startsWith("@")
-    || (!/[\s._-]/.test(currentName)
-      && normalizedTeamIdentity(currentName) === normalizedTeamIdentity(current.handle));
-  const incomingLooksLikeHandle = incomingName.startsWith("@")
-    || (!/[\s._-]/.test(incomingName)
-      && normalizedTeamIdentity(incomingName) === normalizedTeamIdentity(incoming.handle));
+  const currentLooksLikeHandle = teamNameLooksLikeHandle(current);
+  const incomingLooksLikeHandle = teamNameLooksLikeHandle(incoming);
   if (currentLooksLikeHandle && incomingName && !incomingLooksLikeHandle) return incomingName;
   return currentName || incomingName;
 }
@@ -1113,7 +1116,7 @@ export function InvestigationReport({
                         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                           <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                           <span className="text-[12.5px] text-ink">{m.name}</span>
-                          {m.handle && normalizedTeamIdentity(m.handle) !== normalizedTeamIdentity(m.name) && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
+                          {m.handle && !teamNameLooksLikeHandle(m) && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
                           {m.role && <span className="text-[11px] text-ink-faint">{m.role}</span>}
                           {m.linkedin && (
                             <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>

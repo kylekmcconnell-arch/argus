@@ -327,6 +327,7 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).not.toContain("project scan + project scan");
     const teamSectionText = container.querySelector("#investigation-team")?.textContent ?? "";
     expect(teamSectionText.match(/@twistartups/g)).toHaveLength(1);
+    expect(teamSectionText.match(/@erikvoorhees/g)).toHaveLength(1);
   });
 
   it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
