@@ -117,6 +117,10 @@ function humanTeamName(current: TeamIdentity, incoming: TeamIdentity): string {
   return currentName || incomingName;
 }
 
+function mergeTeamSources(...sources: string[]): string {
+  return [...new Set(sources.flatMap((source) => source.split(" + ")).filter(Boolean))].join(" + ");
+}
+
 function ReportSectionHeading({
   index,
   title,
@@ -399,7 +403,7 @@ export function InvestigationReport({
         linkedin: row.linkedin ?? person.linkedin,
         role: !row.role || /^team$/i.test(row.role) ? person.role : row.role,
         developerProfiles: row.developerProfiles ?? person.developerProfiles,
-        source: row.source === person.source ? row.source : `${row.source} + ${person.source}`,
+        source: mergeTeamSources(row.source, person.source),
       });
     };
     for (const a of projectAccount?.evidence.associates ?? []) {
@@ -455,9 +459,7 @@ export function InvestigationReport({
       existing.linkedin ??= person.linkedin;
       existing.role = !existing.role || /^team$/i.test(existing.role) ? person.role : existing.role;
       existing.developerProfiles ??= person.developerProfiles;
-      if (!existing.source.split(" + ").includes(person.source)) {
-        existing.source = `${existing.source} + ${person.source}`;
-      }
+      existing.source = mergeTeamSources(existing.source, person.source);
     };
     for (const m of teamUnified) {
       add({ name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, developerProfiles: m.developerProfiles, source: m.source });

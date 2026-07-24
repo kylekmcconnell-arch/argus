@@ -313,6 +313,7 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("Built by Erik Voorhees, Teana Baker-Taylor");
     expect(container.textContent).toContain("Team & founders (2)");
     expect(container.textContent).not.toContain("Team & founders (4)");
+    expect(container.textContent).not.toContain("project scan + project scan");
   });
 
   it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
