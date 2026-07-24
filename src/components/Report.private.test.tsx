@@ -1987,6 +1987,17 @@ describe("legacy person report coverage truth", () => {
         answerRefs: [],
         providerRuns: [{ phase: "primary", provider: "test", state: "failed" }],
       }],
+      basicFactLeads: [{
+        subject: base.handle,
+        predicate: "official_token",
+        value: "cbBTC",
+        excerpt: "Coinbase offers a wrapped Bitcoin token.",
+        sourceUrl: "https://www.coinbase.com/cbbtc",
+        sourceTitle: "Coinbase cbBTC",
+        evidence_origin: "model_lead",
+        artifact_verified: false,
+        provider: "claude-web-search",
+      }],
     } as unknown as Dossier;
 
     act(() => {
@@ -2026,7 +2037,7 @@ describe("legacy person report coverage truth", () => {
         kind: "axis_evidence",
         artifactId,
         provider: "twitterapi",
-        operation: "promoted-token-performance",
+        operation: "checkOutcomes:promoted-token-performance",
         section: "methodology",
         title: "Promoted-token performance",
         excerpt: "Not a KOL.",

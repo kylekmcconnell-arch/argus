@@ -2017,7 +2017,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       // Older cited catalogs could retain an "unavailable" artifact even
       // after the frozen checklist marked the same operation not applicable.
       // It is auditable lineage, but it is not an investor follow-up.
-      .filter((artifact) => !notApplicableCheckIds.has(artifact.operation))
+      .filter((artifact) => !notApplicableCheckIds.has(artifact.operation.replace(/^checkOutcomes:/, "")))
       .map((artifact, index) => ({
         id: `verify-axis-artifact-${axis.axis}-${index}`,
         title: artifact.title,
@@ -2285,8 +2285,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     const tokenQuestion = heroLedgerEntry("official_token");
     const tokenClaimObserved = Boolean(
       f.projectToken
-      || basicFacts.some((fact) => canonicalBasicFactPredicate(fact.predicate) === "official_token")
-      || basicFactLeads.some((lead) => canonicalBasicFactPredicate(lead.predicate) === "official_token"),
+      || basicFacts.some((fact) => canonicalBasicFactPredicate(fact.predicate) === "official_token"),
     );
     if (f.projectToken) {
       heroProofChips.push({ key: "token", label: "Token verified", value: `$${f.projectToken.symbol}`, tone: "pass", href: "#project-token", title: `Canonical token bound via ${f.projectToken.verification === "official_x" ? "the official X account" : "the official domain"}, never a name match.` });
