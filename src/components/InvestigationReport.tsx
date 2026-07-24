@@ -1242,8 +1242,8 @@ export function InvestigationReport({
               facts={projectBasicFacts}
               indexedRounds={projectAccount?.protocolFunding?.rounds ?? []}
               tokenSymbol={token.symbol}
-              tokenMarketCap={marketCap}
-              tokenFdv={fullyDilutedValue}
+              tokenMarketCap={projectAccount?.projectToken?.marketCapUsd ?? token.cg?.mcapUsd ?? marketCap}
+              tokenFdv={projectAccount?.projectToken?.fdvUsd ?? fullyDilutedValue}
             />
             <MarketPerformancePanel
               token={token}
