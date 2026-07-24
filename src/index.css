@@ -1,10 +1,10 @@
 @import "tailwindcss";
 
-/* ARGUS: a forensic instrument. Graphite-black intelligence room, one electric
-   royal-blue signal, verdicts that read like stamped findings. DARK is the
-   default (the @theme values); LIGHT is a runtime override on
-   :root[data-theme="light"]. Token NAMES never change — every component flips
-   automatically.
+/* ARGUS: a forensic instrument. A calm light workspace is the product default;
+   the graphite intelligence-room theme remains available as an explicit user
+   choice. The @theme values define dark mode and the light override below
+   supplies the default visual surface. Token NAMES never change — every
+   component flips automatically.
 
    This file also defines the component idioms (.panel, .eyebrow, .chip,
    .verdict-pill, .finding, .btn-x, .stat-tile, .tint-x) that DESIGN.md makes
@@ -48,25 +48,25 @@
   --select: color-mix(in oklab, var(--color-signal-lift) 30%, transparent);
 }
 
-/* LIGHT mode — the alternate. */
+/* LIGHT mode — the product default. */
 :root[data-theme="light"] {
   color-scheme: light;
-  --color-void: #f4f7fb;
+  --color-void: #f7f8fa;
   --color-panel: #ffffff;
-  --color-panel-2: #eef3f9;
-  --color-sidebar: #eff4fa;
-  --color-line: #d8e1ed;
-  --color-line-2: #b4c2d5;
-  --color-control-line: #72829a;
-  --color-ink: #0b1424;
-  --color-ink-dim: #42536a;
-  --color-ink-faint: #5c6e86;
+  --color-panel-2: #f1f3f6;
+  --color-sidebar: #f3f5f8;
+  --color-line: #d9dee7;
+  --color-line-2: #b8c2cf;
+  --color-control-line: #65748a;
+  --color-ink: #101828;
+  --color-ink-dim: #3f4d63;
+  --color-ink-faint: #596a80;
 
-  --color-signal: #2e5edb;
-  --color-signal-dim: #224abd;
-  --color-signal-lift: #224abd;
-  --color-accent-tint: #eaf0ff;
-  --color-eye-pupil: #0b1424;
+  --color-signal: #275ad4;
+  --color-signal-dim: #1f49b8;
+  --color-signal-lift: #1f49b8;
+  --color-accent-tint: #e8eefc;
+  --color-eye-pupil: #101828;
 
   --color-pass: #147a43;
   --color-caution: #8a5b06;
@@ -179,14 +179,22 @@
   );
 }
 :root[data-theme="light"] .panel {
-  background: var(--color-panel);
-  box-shadow: inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent);
+  border-color: color-mix(in oklab, var(--color-line-2) 38%, var(--color-line));
+  background: linear-gradient(
+    180deg,
+    var(--color-panel) 0%,
+    color-mix(in oklab, var(--color-panel-2) 18%, var(--color-panel)) 100%
+  );
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
+    0 1px 2px color-mix(in oklab, var(--color-ink) 6%, transparent),
+    0 16px 36px -30px color-mix(in oklab, var(--color-ink) 26%, transparent);
 }
 
 /* Investigation hero: three equal decision lanes. Risk, readiness, and market
    scale stay visually distinct without collapsing into one ambiguous verdict. */
 .investigation-hero-card {
-  min-height: 232px;
+  min-height: 216px;
   overflow: hidden;
   box-shadow:
     inset 0 1px 0 color-mix(in oklab, var(--color-ink) 4%, transparent),
@@ -255,7 +263,8 @@
 :root[data-theme="light"] .investigation-hero-card {
   box-shadow:
     inset 0 1px 0 color-mix(in oklab, var(--color-ink) 2%, transparent),
-    0 22px 52px -42px color-mix(in oklab, var(--color-ink) 28%, transparent);
+    0 1px 2px color-mix(in oklab, var(--color-ink) 7%, transparent),
+    0 24px 54px -40px color-mix(in oklab, var(--color-ink) 30%, transparent);
 }
 /* Borderless interior zone (a wash, not a box). */
 .panel-inset {
@@ -275,6 +284,12 @@
   background:
     radial-gradient(1050px 500px at 72% -10%, color-mix(in oklab, var(--color-signal) 9%, transparent), transparent 70%),
     radial-gradient(760px 440px at 16% 112%, color-mix(in oklab, var(--color-signal) 3%, transparent), transparent 72%),
+    var(--color-void);
+}
+:root[data-theme="light"] .atmosphere {
+  background:
+    radial-gradient(980px 460px at 78% -8%, color-mix(in oklab, var(--color-signal) 8%, transparent), transparent 72%),
+    radial-gradient(760px 400px at 8% 108%, color-mix(in oklab, var(--color-signal) 3%, transparent), transparent 74%),
     var(--color-void);
 }
 :root[data-theme="dark"] .atmosphere {

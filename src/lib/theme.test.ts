@@ -52,6 +52,11 @@ describe("ARGUS theme persistence", () => {
     expect(readStoredArgusTheme(storage)).toBe("light");
   });
 
+  it("moves users from the old dark-first preference to the new light default once", () => {
+    const storage = memoryStorage({ "argus-theme": "dark" });
+    expect(readStoredArgusTheme(storage)).toBe("light");
+  });
+
   it("falls back safely when storage is blocked", () => {
     const blocked = {
       getItem: vi.fn(() => { throw new Error("blocked"); }),

@@ -33,6 +33,7 @@ vi.mock("../lib/auditlog", () => ({
 }));
 
 import { AppShell } from "./AppShell";
+import { ARGUS_THEME_STORAGE_KEY } from "../lib/theme";
 
 let container: HTMLDivElement;
 let root: Root;
@@ -167,7 +168,7 @@ describe("AppShell mobile navigation drawer", () => {
     expect(document.activeElement).toBe(menuButton());
   });
 
-  it("defaults to dark and persists the explicit light-mode action", async () => {
+  it("persists the explicit light-mode action from a dark session", async () => {
     await renderShell();
     await act(async () => menuButton().click());
 
@@ -179,7 +180,7 @@ describe("AppShell mobile navigation drawer", () => {
 
     expect(document.documentElement.dataset.theme).toBe("light");
     expect(document.documentElement.style.colorScheme).toBe("light");
-    expect(localStorage.getItem("argus-theme")).toBe("light");
+    expect(localStorage.getItem(ARGUS_THEME_STORAGE_KEY)).toBe("light");
     expect(drawer().querySelector("button[aria-label='Switch to dark mode']")).not.toBeNull();
   });
 

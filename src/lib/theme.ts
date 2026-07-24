@@ -1,9 +1,11 @@
 export type ArgusTheme = "dark" | "light";
 
-export const ARGUS_THEME_STORAGE_KEY = "argus-theme";
+// Version the preference so everyone receives the new light-first experience
+// once. Choices made after this release remain sticky.
+export const ARGUS_THEME_STORAGE_KEY = "argus-theme-v2";
 export const ARGUS_THEME_COLORS: Readonly<Record<ArgusTheme, string>> = {
   dark: "#06080c",
-  light: "#f4f7fb",
+  light: "#f7f8fa",
 };
 
 interface ThemeStorage {
