@@ -140,6 +140,38 @@ describe("projectProviderBackedBasicFacts", () => {
     expect(evidence.basicFacts?.some((fact) => fact.value === "Unverified Person")).toBe(false);
   });
 
+  it("projects an identity-bound DEX-native token without manufacturing a CoinGecko source", () => {
+    const evidence = emptyEvidence("@ponsdotfamily");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.projectToken = {
+      verified: true,
+      verification: "official_x",
+      name: "Pons",
+      symbol: "PONS",
+      rank: null,
+      address: "0x39dBED3a2bd333467115dE45665cC57F813C4571",
+      chain: "robinhood",
+      sourceUrl: "https://dexscreener.com/robinhood/0x10cc6bd38112cac182db90b6a71d8bb5939526ba",
+      capturedAt: "2026-07-24T12:19:07.351Z",
+      providers: ["dexscreener", "geckoterminal"],
+      marketCapUsd: 32_135_961,
+      liquidityUsd: 1_543_733,
+      volume24hUsd: 5_762_104,
+    };
+
+    projectProviderBackedBasicFacts(evidence);
+
+    const tokenFact = evidence.basicFacts?.find((fact) => fact.predicate === "official_token");
+    expect(tokenFact).toMatchObject({ value: "$PONS", status: "verified" });
+    expect(tokenFact?.sources[0]).toMatchObject({
+      title: "DexScreener token record",
+      provider: "dexscreener + geckoterminal",
+    });
+    expect(tokenFact?.sources[0].title).not.toContain("CoinGecko");
+    expect(evidence.basicFacts?.find((fact) => fact.predicate === "traction")?.value)
+      .toContain("$32.1M market cap");
+  });
+
   it("uses the resolved project profile for identity and product without retaining namesake citations", () => {
     const evidence = emptyEvidence("@ponsdotfamily");
     evidence.roles = [SubjectClass.PROJECT];

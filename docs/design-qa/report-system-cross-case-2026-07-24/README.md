@@ -35,6 +35,23 @@ This pass tested saved and rendered reports across people, protocols, tokens, an
 - Fresh production scans verified Drift Protocol as a project, bound `$DRIFT` through the official X account and Solana contract, restored market and ATH visuals, and published `CAUTION 52` with complete decision coverage.
 - Fresh production scan `PA-6507556704CC469FA570` publishes Pons v8 as decision-ready `CAUTION 42`, with 7 of 7 terminal checks, three verified facts, no canonical-token or named-operator claim, and six source-linked research leads. Unbound social, namesake, audit-null, and market-cap-as-funding rows are withheld.
 
+## Pons token follow-up
+
+The v8 result above exposed a false canonical-token null during user review.
+Pons' official documentation names `$PONS` and publishes its Robinhood Chain
+contract, while the identity-bound DexScreener record links the exact
+`@ponsdotfamily` account and `ponsfamily.com` domain. The resolver had treated
+CoinGecko as the complete token universe, so a new chain-native asset that was
+not listed there could never reach the canonical token snapshot.
+
+The corrected resolver now falls through from an empty or unbound CoinGecko
+result to DexScreener, requires both the exact provider-frozen X account and
+official domain, and freezes the contract, market, liquidity, volume, pool, and
+GeckoTerminal price history when that dual binding succeeds. A completed
+CoinGecko miss alone can no longer record a substantive "no token" outcome.
+The immutable v8 report remains a historical artifact; a fresh production scan
+is required to publish the corrected evidence.
+
 ## Strengths retained
 
 - Frozen report versions remain immutable.

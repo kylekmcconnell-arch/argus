@@ -4244,7 +4244,7 @@ function deterministicQuestionAnswerRefs(
     && profileIdentityIsSufficient(ctx, question.audience)
   ) add(`profile:${ctx.evidence.profile.profile_provider ?? "provider"}:${ctx.handle.toLowerCase()}`);
   if (question.predicate === "official_token" && ctx.evidence.projectToken?.verified) {
-    add(`project-token:${ctx.evidence.projectToken.coingeckoId}`);
+    add(`project-token:${ctx.evidence.projectToken.coingeckoId ?? `${ctx.evidence.projectToken.chain}:${ctx.evidence.projectToken.address.toLowerCase()}`}`);
   }
 
   const verifiedTeam = (ctx.evidence.webTeam ?? []).filter((member) =>

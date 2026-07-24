@@ -572,13 +572,15 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
 
   const token = evidence.roles.includes(SubjectClass.PROJECT) ? evidence.projectToken : undefined;
   if (token?.verified) {
+    const tokenProviders = token.providers ?? (token.coingeckoId ? ["coingecko" as const] : ["dexscreener" as const]);
+    const primaryTokenProvider = tokenProviders.includes("coingecko") ? "CoinGecko" : "DexScreener";
     const tokenExcerpt = `${token.name} (${token.symbol}) is the canonical project token on ${token.chain}; its identity matched the project's ${token.verification === "official_x" ? "official X account" : "official domain"}.`;
     const tokenSource = source({
       url: token.sourceUrl,
-      title: "CoinGecko token record",
+      title: `${primaryTokenProvider} token record`,
       excerpt: tokenExcerpt,
       capturedAt: token.capturedAt,
-      provider: (token.providers ?? ["coingecko"]).join(" + "),
+      provider: tokenProviders.join(" + "),
       sourceClass: "regulatory_or_onchain",
     });
     projected.push(makeFact(evidence, "official_token", `$${token.symbol.toUpperCase()}`, [tokenSource], token.name));
@@ -627,7 +629,7 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
     // thin new token does not inherit product substance for free.
     const establishedProtocol = (rank !== null && rank <= 3000) || (marketCap !== null && marketCap >= 10_000_000);
     if (establishedProtocol) {
-      const providerLabel = (token.providers ?? ["coingecko"]).join(" + ");
+      const providerLabel = tokenProviders.join(" + ");
       projected.push(makeFact(
         evidence,
         "product",

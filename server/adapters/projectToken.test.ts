@@ -6,6 +6,8 @@ import { collectProjectTokenIdentity } from "./projectToken";
 
 const SOLANA_TOKEN = "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN";
 const OTHER_TOKEN = "So11111111111111111111111111111111111111112";
+const PONS_TOKEN = "0x39dBED3a2bd333467115dE45665cC57F813C4571";
+const PONS_POOL = "0x10CC6BD38112cAc182db90B6a71d8Bb5939526bA";
 
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), {
   status,
@@ -162,18 +164,109 @@ describe("verified project-token collection", () => {
     expect(evidence.profile.website).toBe("https://project.example/");
   });
 
+  it("resolves a new Robinhood Chain token from an exact DexScreener X/domain binding when CoinGecko is empty", async () => {
+    const { ctx, evidence } = context("@ponsdotfamily", "Pons", "https://ponsfamily.com/launchpad");
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({
+        pairs: [{
+          chainId: "robinhood",
+          pairAddress: PONS_POOL,
+          url: `https://dexscreener.com/robinhood/${PONS_POOL.toLowerCase()}`,
+          baseToken: { address: PONS_TOKEN, name: "Pons", symbol: "PONS" },
+          quoteToken: { address: "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73", symbol: "WETH" },
+          priceUsd: "0.04125",
+          marketCap: 32_591_975,
+          fdv: 32_591_975,
+          volume: { h24: 5_742_660.31 },
+          liquidity: { usd: 1_552_550.02 },
+          info: {
+            websites: [{ url: "https://ponsfamily.com/launchpad", label: "Website" }],
+            socials: [{ url: "https://x.com/ponsdotfamily", type: "twitter" }],
+          },
+        }],
+      });
+      if (url.includes("/networks/robinhood/") && url.includes("/ohlcv/day?")) return json({
+        data: { attributes: { ohlcv_list: [
+          [300, 0.03, 0.05, 0.02, 0.04, 1_000],
+          [100, 0.01, 0.02, 0.008, 0.01, 500],
+          [200, 0.02, 0.04, 0.015, 0.03, 800],
+        ] } },
+      });
+      throw new Error(`unexpected URL ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const captured = await withCostLedger(async () => ({
+      result: await collectProjectTokenIdentity(ctx),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toMatchObject({
+      state: "executed",
+      detail: expect.stringContaining("identity-bound DEX pair"),
+      attempts: 3,
+    });
+    expect(evidence.projectToken).toMatchObject({
+      verified: true,
+      verification: "official_x",
+      name: "Pons",
+      symbol: "PONS",
+      address: PONS_TOKEN,
+      chain: "robinhood",
+      homepage: "https://ponsfamily.com/launchpad",
+      officialX: "@ponsdotfamily",
+      priceUsd: 0.04125,
+      marketCapUsd: 32_591_975,
+      fdvUsd: 32_591_975,
+      volume24hUsd: 5_742_660.31,
+      liquidityUsd: 1_552_550.02,
+      pairAddress: PONS_POOL,
+      providers: ["dexscreener", "geckoterminal"],
+      history: {
+        points: [0.01, 0.03, 0.04],
+        first: 0.01,
+        last: 0.04,
+        peak: 0.04,
+        changePct: 300,
+        drawdownPct: 0,
+        timeframe: "day",
+        poolAddress: PONS_POOL,
+        sourceUrl: `https://api.geckoterminal.com/api/v2/networks/robinhood/pools/${PONS_POOL}/ohlcv/day?aggregate=1&limit=90&currency=usd`,
+      },
+    });
+    expect(evidence.projectToken?.coingeckoId).toBeUndefined();
+    expect(captured.cost.calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ provider: "coingecko", op: "project-search", succeeded: 1 }),
+      expect.objectContaining({ provider: "dexscreener", op: "project-search", succeeded: 1 }),
+      expect.objectContaining({ provider: "geckoterminal", op: "project-token-ohlcv-day", succeeded: 1 }),
+    ]));
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-token-identity",
+      status: "confirmed",
+      provider: "dexscreener",
+    }));
+    expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
+      id: "project-traction-liveness",
+      status: "confirmed",
+      provider: "dexscreener/geckoterminal",
+    }));
+  });
+
   it("rejects an exact name match when neither official identity surface matches", async () => {
     const { ctx, evidence } = context("@unrelated", "Project Dex", "https://unrelated.example/");
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url.includes("/search?")) return json(search());
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json(search());
       if (url.includes("/coins/project-token?")) return json(details());
       throw new Error(`unexpected URL ${url}`);
     }));
 
     await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
       state: "executed",
-      detail: expect.stringContaining("did not match"),
+      detail: expect.stringContaining("no identity-bound project token"),
     });
     expect(evidence.projectToken).toBeUndefined();
     // The completed-but-unbound search is an assessed null on P3 (substantive
@@ -181,35 +274,55 @@ describe("verified project-token collection", () => {
     expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
       id: "project-token-identity",
       status: "finding",
-      note: expect.stringContaining("none bound to the official X account or website domain"),
+      note: expect.stringContaining("neither registry produced a contract bound to the official X account or website domain"),
     }));
   });
 
-  it("records an assessed null when the registry search completes with no candidates at all", async () => {
+  it("records an assessed null only when both registry searches complete with no candidates", async () => {
     const { ctx, evidence } = context("@freshbrand", "Freshbrand Launcher", "https://freshbrand.example/");
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url.includes("/search?")) return json({ coins: [] });
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({ coins: [] });
       throw new Error(`unexpected URL ${url}`);
     }));
 
     await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
       state: "executed",
-      detail: expect.stringContaining("no project-token candidates"),
+      attempts: 2,
+      detail: expect.stringContaining("no identity-bound project token"),
     });
     expect(evidence.projectToken).toBeUndefined();
     expect(ctx.recordCheck).toHaveBeenCalledWith(expect.objectContaining({
       id: "project-token-identity",
       status: "finding",
-      note: expect.stringContaining("no canonical token candidate"),
+      provider: "coingecko/dexscreener",
+      note: expect.stringContaining("CoinGecko and DexScreener searches completed"),
     }));
   });
 
-  it("rejects a similarly named token with a different official X account and domain", async () => {
+  it("rejects a similarly named DEX token when an exact X link is paired with the wrong domain", async () => {
     const { ctx, evidence } = context("@realproject", "Project", "https://realproject.example/");
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url.includes("/search?")) return json(search({ name: "Project" }));
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({
+        pairs: [{
+          chainId: "base",
+          pairAddress: "0x2222222222222222222222222222222222222222",
+          url: "https://dexscreener.com/base/0x2222222222222222222222222222222222222222",
+          baseToken: {
+            address: "0x1111111111111111111111111111111111111111",
+            name: "Project",
+            symbol: "PROJECT",
+          },
+          liquidity: { usd: 50_000_000 },
+          info: {
+            websites: [{ url: "https://copycat.example/" }],
+            socials: [{ url: "https://x.com/realproject", type: "twitter" }],
+          },
+        }],
+      });
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json(search({ name: "Project" }));
       if (url.includes("/coins/project-token?")) return json(details({
         name: "Project",
         links: { twitter_screen_name: "copycatproject", homepage: ["https://copycat.example/"] },
@@ -285,7 +398,8 @@ describe("verified project-token collection", () => {
     const { ctx, evidence } = context("@kyle", "Kyle McConnell", "");
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = String(input);
-      if (url.includes("/search?")) return json({
+      if (url.includes("dexscreener.com/latest/dex/search")) return json({ pairs: [] });
+      if (url.includes("coingecko.com") && url.includes("/search?")) return json({
         coins: [{ id: "bitcoin", name: "Bitcoin", symbol: "BTC", market_cap_rank: 1 }],
       });
       throw new Error(`unexpected detail request ${url}`);
@@ -294,10 +408,10 @@ describe("verified project-token collection", () => {
 
     await expect(collectProjectTokenIdentity(ctx)).resolves.toMatchObject({
       state: "executed",
-      attempts: 1,
-      detail: "CoinGecko returned no project-token candidates",
+      attempts: 2,
+      detail: "CoinGecko and DexScreener returned no identity-bound project token",
     });
     expect(evidence.projectToken).toBeUndefined();
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

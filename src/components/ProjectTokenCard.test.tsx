@@ -95,4 +95,21 @@ describe("ProjectTokenCard", () => {
     expect(container.textContent).toContain("Refresh the current market overlay");
     expect(harness.sparkline).not.toHaveBeenCalled();
   });
+
+  it("labels a DEX-native canonical token with its actual market source", () => {
+    const dexNative: ProjectTokenSnapshot = {
+      ...token,
+      coingeckoId: undefined,
+      rank: null,
+      chain: "robinhood",
+      sourceUrl: "https://dexscreener.com/robinhood/pons-pool",
+      providers: ["dexscreener", "geckoterminal"],
+    };
+    act(() => root.render(<ProjectTokenCard token={dexNative} showCurrentIntelligence={false} />));
+
+    expect(container.textContent).toContain("DexScreener");
+    expect(container.textContent).not.toContain("CoinGecko #");
+    expect(container.querySelector('a[href="https://dexscreener.com/robinhood/pons-pool"]')?.textContent)
+      .toContain("DexScreener");
+  });
 });

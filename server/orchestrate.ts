@@ -1809,7 +1809,7 @@ export function recordProjectTokenDrawdownFinding(evidence: CollectedEvidence): 
   const timeframe = token.history!.timeframe === "hour" ? "hourly" : "daily";
   evidence.findings.push({
     finding_type: "ProjectTokenDrawdown",
-    claim: `$${token.symbol} recorded a verified ${Math.abs(drawdownPct).toFixed(1)}% peak-to-latest drawdown in the captured GeckoTerminal ${timeframe} OHLCV window. CoinGecko and DexScreener established canonical token and pool context; price drawdown alone does not establish misconduct.`,
+    claim: `$${token.symbol} recorded a verified ${Math.abs(drawdownPct).toFixed(1)}% peak-to-latest drawdown in the captured GeckoTerminal ${timeframe} OHLCV window. ${token.coingeckoId ? "CoinGecko and DexScreener established" : "DexScreener established"} canonical token and pool context; price drawdown alone does not establish misconduct.`,
     source_url: historySourceUrl,
     source_date: token.capturedAt,
     source_author: "geckoterminal",
@@ -2484,8 +2484,9 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   };
 
   // Resolve the provider-backed profile, then bind an official token before the
-  // rest of intake. This lets a slogan-only project account inherit its exact
-  // CoinGecko homepage before team, product, docs, and site discovery begin.
+  // rest of intake. This lets a slogan-only project account inherit an exact
+  // identity-bound market-registry homepage before team, product, docs, and
+  // site discovery begin.
   if (!fixture) {
     const stageStartedAt = startRuntimeStage("cold-intake");
     await resolveProfile(ctx);
@@ -2516,9 +2517,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         if (holdersOutcome.available) evidence.holderProfile = { ...holdersOutcome.value, capturedAt };
         if (unlocksOutcome.available) evidence.tokenUnlocks = { ...unlocksOutcome.value, capturedAt };
         const canonicalGeckoId = evidence.projectToken.coingeckoId;
-        const tvlIdentityMatched = tvlOutcome.available
+        const tvlIdentityMatched = canonicalGeckoId !== undefined
+          && tvlOutcome.available
           && protocolRecordMatchesCanonicalToken(tvlOutcome.value.geckoId, canonicalGeckoId);
-        const fundingIdentityMatched = fundingOutcome.available
+        const fundingIdentityMatched = canonicalGeckoId !== undefined
+          && fundingOutcome.available
           && protocolRecordMatchesCanonicalToken(fundingOutcome.value.geckoId, canonicalGeckoId);
         // Slug similarity is discovery, not identity. A protocol document can
         // only lend TVL, fees, or funding to the audited project when its own
@@ -2535,11 +2538,11 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         if (fundingIdentityMatched) {
           evidence.protocolFunding = { ...fundingOutcome.value, capturedAt };
         }
-        const mismatchedProtocolSources = [
+        const mismatchedProtocolSources = canonicalGeckoId ? [
           ...(tvlOutcome.available && !tvlIdentityMatched ? [`TVL (${tvlOutcome.value.geckoId ?? "no CoinGecko id"})`] : []),
           ...(fundingOutcome.available && !fundingIdentityMatched ? [`funding (${fundingOutcome.value.geckoId ?? "no CoinGecko id"})`] : []),
           ...(feesOutcome.available && !tvlIdentityMatched && !fundingIdentityMatched ? ["fees"] : []),
-        ];
+        ] : [];
         if (mismatchedProtocolSources.length) {
           emit({
             phase: "Token",

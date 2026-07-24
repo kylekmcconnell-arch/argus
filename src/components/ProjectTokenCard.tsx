@@ -23,6 +23,9 @@ export function ProjectTokenCard({
   onLoadCurrentIntelligence?: () => void;
 }) {
   const verifiedBy = token.verification === "official_x" ? "official X account" : "official project domain";
+  const marketSource = token.providers?.includes("coingecko") || token.coingeckoId
+    ? "CoinGecko"
+    : "DexScreener";
   const chainList = chains?.length
     ? [token.chain, ...chains]
       .filter(Boolean)
@@ -59,7 +62,7 @@ export function ProjectTokenCard({
             </a>
           )}
           <a href={token.sourceUrl} target="_blank" rel="noreferrer" className="btn-chip min-h-9 gap-1.5">
-            CoinGecko <ArrowSquareOut size={13} aria-hidden="true" />
+            {marketSource} <ArrowSquareOut size={13} aria-hidden="true" />
           </a>
         </div>
       </div>

@@ -145,17 +145,18 @@ export interface TraceStep {
  * account. This is separate from `promotions`: a project's own token is part of
  * its capital and product surface, not a KOL-style call.
  *
- * The collector may freeze this record only when CoinGecko's official X handle
- * matches the audited account or its official homepage matches the
+ * The collector may freeze this record only when a market registry's official
+ * X handle matches the audited account or its official homepage matches the
  * provider-returned profile website. A name or ticker match alone is never
- * enough.
+ * enough. CoinGecko is preferred when available; identity-bound DEX records
+ * cover new or chain-native assets that have not reached CoinGecko yet.
  */
 export interface ProjectTokenSnapshot {
   verified: true;
   verification: "official_x" | "official_domain";
   name: string;
   symbol: string;
-  coingeckoId: string;
+  coingeckoId?: string;
   rank: number | null;
   address: string;
   chain: string;
