@@ -61,6 +61,7 @@ import {
   type BasicFactView,
 } from "./BasicFactsPanel";
 import { plainLanguageSummary } from "../lib/plainLanguage";
+import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -343,6 +344,141 @@ function Card({ title, children, accent }: { title: string; children: React.Reac
       <div className="eyebrow mb-2">{title}</div>
       {children}
     </div>
+  );
+}
+
+function fundingDate(value: string | null): string | null {
+  if (!value) return null;
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return Number.isNaN(parsed.getTime())
+    ? null
+    : parsed.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", timeZone: "UTC" });
+}
+
+function CapitalStructurePanel({
+  facts,
+  indexedRounds,
+  tokenSymbol,
+  tokenMarketCap,
+  tokenFdv,
+}: {
+  facts: readonly BasicFactView[];
+  indexedRounds: NonNullable<NonNullable<Investigation["projectAccount"]>["protocolFunding"]>["rounds"];
+  tokenSymbol: string;
+  tokenMarketCap?: number;
+  tokenFdv?: number;
+}) {
+  const fundingFacts = facts.filter((fact) =>
+    fact.predicate === "funding"
+    && (fact.status === "verified" || fact.status === "corroborated"));
+  const funding = summarizeFundingEvidence(fundingFacts, indexedRounds);
+  const newestRound = [...funding.rounds].sort((left, right) =>
+    String(right.date ?? "").localeCompare(String(left.date ?? "")))[0];
+  const projectedRoundCount = fundingFacts
+    .map((fact) => String(fact.value ?? "").match(/\b(\d+)\s+funding rounds?\s+indexed\b/i)?.[1])
+    .find(Boolean);
+  const roundCount = funding.rounds.length || Number(projectedRoundCount ?? 0);
+  const fundingRecordFound = fundingFacts.length > 0 || roundCount > 0;
+  const source = fundingFacts
+    .flatMap((fact) => fact.sources ?? [])
+    .find((candidate) =>
+      candidate.url
+      && candidate.provider !== "monid"
+      && candidate.provider !== "defillama");
+  const namedInvestors = [...new Set([
+    ...(newestRound?.leadInvestors ?? []),
+    ...facts
+      .filter((fact) =>
+        fact.predicate === "investor"
+        && (fact.status === "verified" || fact.status === "corroborated"))
+      .map((fact) => typeof fact.value === "string" ? fact.value.trim() : "")
+      .filter(Boolean),
+  ])].slice(0, 4);
+  const roundDate = fundingDate(newestRound?.date ?? null);
+  const amountKnown = funding.totalKnownUsd > 0;
+
+  return (
+    <section className="panel overflow-hidden" aria-label="Company funding and token market">
+      <div className="border-b border-line/70 px-4 py-4 sm:px-5">
+        <p className="eyebrow text-signal-lift">Two separate kinds of capital</p>
+        <h3 className="mt-1 text-[17px] font-semibold text-ink">Company funding and the ${tokenSymbol} token</h3>
+        <p className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">
+          Company investors and token buyers own different things. The figures below should never be combined.
+        </p>
+      </div>
+      <div className="grid divide-y divide-line/70 md:grid-cols-2 md:divide-x md:divide-y-0">
+        <article className="p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="eyebrow">Company funding</span>
+            <span className={`chip ${amountKnown ? "tint-signal" : fundingRecordFound ? "tint-caution" : ""}`}>
+              {amountKnown ? "EQUITY ROUND" : fundingRecordFound ? "FUNDING RECORD" : "NOT VERIFIED"}
+            </span>
+          </div>
+          {amountKnown ? (
+            <>
+              <p className="display-sm mt-4 text-[27px] leading-none text-ink">{money(funding.totalKnownUsd)}</p>
+              <p className="mt-1.5 text-[12px] text-ink-dim">
+                {roundCount > 1
+                  ? `At least ${roundCount} documented funding rounds`
+                  : `${newestRound?.round ?? "Documented funding round"}${roundDate ? ` · ${roundDate}` : ""}`}
+              </p>
+              {newestRound?.valuationUsd && (
+                <p className="mt-3 text-[12.5px] text-ink">
+                  Company valuation <span className="mono font-medium">{money(newestRound.valuationUsd)}</span>
+                </p>
+              )}
+              {namedInvestors.length > 0 && (
+                <p className="mt-1.5 text-[12px] leading-relaxed text-ink-dim">
+                  Led or backed by {namedInvestors.join(", ")}
+                </p>
+              )}
+              {source?.url && (
+                <a href={source.url} target="_blank" rel="noreferrer" className="link-ext mt-3 inline-flex text-[11.5px]">
+                  Read the funding source
+                </a>
+              )}
+            </>
+          ) : fundingRecordFound ? (
+            <>
+              <p className="mt-4 text-[16px] font-semibold text-ink">Funding record found</p>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
+                ARGUS found {roundCount || "a"} company funding {roundCount === 1 ? "round" : "rounds"}, but the saved source did not verify the amount, valuation, or investors.
+              </p>
+            </>
+          ) : (
+            <>
+              <p className="mt-4 text-[16px] font-semibold text-ink">No company round verified</p>
+              <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
+                This report did not confirm a public company funding announcement.
+              </p>
+            </>
+          )}
+          <p className="mono mt-4 border-t border-line/70 pt-3 text-[10.5px] uppercase tracking-[0.07em] text-ink-faint">
+            Company ownership · not token ownership
+          </p>
+        </article>
+
+        <article className="p-4 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="eyebrow">${tokenSymbol} token</span>
+            <span className="chip tint-pass">CRYPTO ASSET</span>
+          </div>
+          <p className="display-sm mt-4 text-[27px] leading-none text-ink">{money(tokenMarketCap)}</p>
+          <p className="mt-1.5 text-[12px] text-ink-dim">Token market cap when this report was saved</p>
+          {tokenFdv != null && (
+            <p className="mt-3 text-[12.5px] text-ink">
+              Value if all tokens circulated <span className="mono font-medium">{money(tokenFdv)}</span>
+            </p>
+          )}
+          <p className="mt-1.5 text-[12px] leading-relaxed text-ink-dim">
+            Token holders own a tradeable crypto asset. That does not automatically mean they own shares in the company.
+          </p>
+          <p className="mono mt-4 border-t border-line/70 pt-3 text-[10.5px] uppercase tracking-[0.07em] text-ink-faint">
+            Token market value · not company valuation
+          </p>
+        </article>
+      </div>
+    </section>
   );
 }
 
@@ -1099,9 +1235,16 @@ export function InvestigationReport({
           <ReportSectionHeading
             index="03 · Market"
             title="What the market tells us"
-            description="Price, market value, liquidity, ownership, and usage add context to the result. Saved and live figures are labeled separately."
+            description={`Company funding and the $${token.symbol} token are separate. Then review price, liquidity, ownership, and usage.`}
           />
           <div className="mt-3 space-y-3">
+            <CapitalStructurePanel
+              facts={projectBasicFacts}
+              indexedRounds={projectAccount?.protocolFunding?.rounds ?? []}
+              tokenSymbol={token.symbol}
+              tokenMarketCap={marketCap}
+              tokenFdv={fullyDilutedValue}
+            />
             <MarketPerformancePanel
               token={token}
               projectToken={projectAccount?.projectToken}

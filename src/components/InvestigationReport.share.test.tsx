@@ -198,6 +198,74 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).not.toContain("Investigation incomplete");
   });
 
+  it("separates a company's equity round from its token market value", () => {
+    render(investigation({
+      token: {
+        ...token(),
+        symbol: "VVV",
+        name: "Venice Token",
+        mcap: 582_760_000,
+        fdv: 990_280_000,
+      },
+      projectAccount: {
+        handle: "@askvenice",
+        display_name: "Venice",
+        avatar: "",
+        bio: "Private generative AI",
+        followers: "0",
+        joined: "",
+        identity_note: "",
+        headline: "Project account",
+        live: true,
+        notableFollowers: [],
+        contradictions: [],
+        basicFacts: [{
+          factId: "venice-series-a",
+          predicate: "funding",
+          value: "$65 million Series A",
+          qualifier: "July 1, 2026",
+          status: "verified",
+          critical: true,
+          sources: [{
+            url: "https://venice.ai/blog/venice-raises-65-million-series-a",
+            title: "Venice Raises $65 Million Series A at a $1 Billion Valuation",
+            excerpt: "Venice raised a $65 million Series A led by Dragonfly at a $1 billion valuation.",
+            relation: "supports",
+            provider: "public-web",
+            sourceClass: "official_subject",
+          }],
+        }],
+        webTeam: [],
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 80,
+          identity_confidence: "Confirmed",
+          roles: [],
+        },
+        evidence: {
+          ventures: [],
+          testimonials: [],
+          advised: [],
+          associates: [],
+          wallets: [],
+          promotions: [],
+        },
+        graph: { nodes: [], edges: [] },
+      } as unknown as NonNullable<Investigation["projectAccount"]>,
+    }));
+
+    const capital = container.querySelector('[aria-label="Company funding and token market"]');
+    expect(capital?.textContent).toContain("Company funding and the $VVV token");
+    expect(capital?.textContent).toContain("$65.00M");
+    expect(capital?.textContent).toContain("Series A · Jul 1, 2026");
+    expect(capital?.textContent).toContain("Company valuation $1.00B");
+    expect(capital?.textContent).toContain("Led or backed by Dragonfly");
+    expect(capital?.textContent).toContain("$582.76M");
+    expect(capital?.textContent).toContain("Value if all tokens circulated $990.28M");
+    expect(capital?.textContent).toContain("Company ownership · not token ownership");
+    expect(capital?.textContent).toContain("Token market value · not company valuation");
+  });
+
   it("drops legacy Monid team rows that cannot be tied to the official project domain", () => {
     render(investigation({
       siteUrl: "https://venice.ai",

@@ -555,6 +555,23 @@ describe("question-specific asset search", () => {
 });
 
 describe("critical-gap search recovery", () => {
+  it("reserves a focused funding search even when every project question is still open", async () => {
+    const { ctx } = context();
+    const repairIds: string[] = [];
+
+    await collectBasicFacts(ctx, {
+      discover: async () => [],
+      repair: async (_repairContext, questions) => {
+        repairIds.push(...questions.map((question) => question.id));
+        return [];
+      },
+      fetchSource: vi.fn(),
+    });
+
+    expect(repairIds).toHaveLength(9);
+    expect(repairIds).toContain("project.funding");
+  });
+
   it("records Grok as the governing provider after Claude primary search fails", async () => {
     vi.stubEnv("ARGUS_PROVIDER_FALLBACKS", "on");
     const { ctx, evidence } = context();
@@ -837,6 +854,9 @@ describe("critical-gap search recovery", () => {
       !prompt.includes("[project.funding]"))).toBe(true);
     expect(prompts.filter((prompt) => prompt.includes("[project.funding]")).every((prompt) =>
       !prompt.includes("[project.product]"))).toBe(true);
+    const fundingPrompt = prompts.find((prompt) => prompt.includes("[project.funding]"));
+    expect(fundingPrompt).toContain("question-specific company-funding search");
+    expect(fundingPrompt).toContain("site:jup.ag");
     expect(result.questionStates).toEqual({
       "project.product": "completed_empty",
       "project.funding": "completed_empty",

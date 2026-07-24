@@ -254,8 +254,8 @@ const REPAIR_PRIORITY: Record<BasicFactsResearchAudience, readonly BasicFactPred
   ],
   project: [
     "official_identity", "founder", "executive", "product",
-    "security_incident", "official_token", "traction", "audit", "legal_entity",
-    "network", "launched", "funding", "repository", "governance",
+    "security_incident", "official_token", "funding", "traction", "audit",
+    "legal_entity", "network", "launched", "repository", "governance",
   ],
   investor: [
     "official_identity", "current_role", "investor", "track_record",
@@ -1079,14 +1079,23 @@ function discoveryPrompt(
   const questionLedger = questions.map((question, index) =>
     `${index + 1}. [${question.id}] (${question.predicate}${question.critical ? ", decision-critical" : ""}) ${question.question}`,
   ).join("\n");
+  let officialSearchHost = "";
+  try { officialSearchHost = profile.website ? new URL(profile.website).hostname : ""; } catch { /* invalid profile URL stays a non-authoritative hint */ }
   const targetedAssetInstruction = questions.length === 1 && questions[0]?.predicate === "public_security"
     ? "This is a question-specific public-security search. Prefer the issuer's investor-relations site or an official regulator filing. Return a row only when the cited passage identifies the issuer plus an explicit ticker, exchange listing, stock, bond, equity, or debt security."
     : questions.length === 1 && questions[0]?.predicate === "official_token"
       ? "This is a question-specific official-token search. Search the official sites and documentation of the subject's verified current ventures. Return a row only for an affirmatively named official crypto token. If the completed search finds no affirmative source-linked token candidate, return {\"facts\":[]}; never serialize none, no token, a public-company stock, or an unlaunched token plan as a fact."
+      : questions.length === 1 && questions[0]?.predicate === "funding"
+        ? [
+            "This is a question-specific company-funding search.",
+            officialSearchHost
+              ? `Search the official site first with a query equivalent to site:${officialSearchHost} (raised OR funding OR financing OR "Series A" OR "Series B"), prioritizing the newest dated announcement.`
+              : "Search the subject's official site first for its newest dated funding or financing announcement.",
+            "Return the amount raised and named round or stage as the value. Keep company valuation in the exact excerpt so ARGUS can present it separately from the amount raised and from any crypto-token market value.",
+            "Prefer the company's own dated announcement, then add reputable independent reporting as candidate URLs when it states the same round.",
+          ].join(" ")
       : "";
   const identitySearchHint = handleDerivedPersonName(ctx);
-  let officialSearchHost = "";
-  try { officialSearchHost = profile.website ? new URL(profile.website).hostname : ""; } catch { /* invalid profile URL stays a non-authoritative hint */ }
   const targetedIdentityInstruction = questions.length === 1
     && questions[0]?.predicate === "official_identity"
     && audience !== "project"

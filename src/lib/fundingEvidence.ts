@@ -9,6 +9,7 @@ export interface FundingEvidenceSource {
 export interface FundingEvidenceFact {
   predicate: string;
   value?: unknown;
+  qualifier?: string;
   status: string;
   providerProjection?: boolean;
   sources?: FundingEvidenceSource[];
@@ -85,7 +86,7 @@ function roundLabel(text: string): string {
 
 function leadInvestor(text: string): string | null {
   const titleMatch = text.match(/\bin\s+([^.;:]{2,80}?)[- ]led\s+(?:round|raise|financing)\b/i);
-  const proseMatch = text.match(/\b(?:co-)?led\s+by\s+([^.;]{2,100}?)(?=,\s+(?:with|alongside|including)\b|$)/i);
+  const proseMatch = text.match(/\b(?:co-)?led\s+by\s+([^.;]{2,100}?)(?=\s+at\s+(?:a\s+)?(?:US\s*)?\$|,\s+(?:with|alongside|including)\b|$)/i);
   const raw = compact(titleMatch?.[1] ?? proseMatch?.[1]);
   if (!raw) return null;
   const cleaned = raw
@@ -96,12 +97,54 @@ function leadInvestor(text: string): string | null {
   return cleaned.length >= 2 && cleaned.length <= 80 ? cleaned : null;
 }
 
-function sourceEventDate(sources: readonly FundingEvidenceSource[]): string | null {
+function normalizedDate(text: string): string | null {
+  const iso = text.match(/\b((?:19|20)\d{2})-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])\b/);
+  if (iso) return iso[0];
+  const written = text.match(
+    /\b(January|February|March|April|May|June|July|August|September|October|November|December)\s+([0-3]?\d),\s+((?:19|20)\d{2})\b/i,
+  );
+  if (!written) return null;
+  const parsed = new Date(`${written[1]} ${written[2]}, ${written[3]} 00:00:00 UTC`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString().slice(0, 10);
+}
+
+function sourceEventDate(
+  fact: FundingEvidenceFact,
+  sources: readonly FundingEvidenceSource[],
+): string | null {
+  const stated = normalizedDate([
+    compact(fact.qualifier),
+    ...sources.flatMap((source) => [compact(source.title), compact(source.excerpt)]),
+  ].filter(Boolean).join(" "));
+  if (stated) return stated;
   for (const source of sources) {
     const pathDate = compact(source.url).match(/\/((?:19|20)\d{2})\/(0?[1-9]|1[0-2])\/(0?[1-9]|[12]\d|3[01])(?:\/|$)/);
     if (pathDate) {
       return `${pathDate[1]}-${pathDate[2].padStart(2, "0")}-${pathDate[3].padStart(2, "0")}`;
     }
+  }
+  return null;
+}
+
+function valuationAmount(text: string): number | null {
+  const patterns = [
+    /\bvalu(?:e[sd]?|ation)\s+(?:the\s+company\s+)?(?:at|of)\s+(?:US\s*)?\$\s*([\d,.]+)\s*(trillion|billion|million|thousand|[TBMK])\b/i,
+    /(?:US\s*)?\$\s*([\d,.]+)\s*(trillion|billion|million|thousand|[TBMK])\s+(?:pre-money\s+|post-money\s+)?valuation\b/i,
+  ];
+  for (const pattern of patterns) {
+    const match = pattern.exec(text);
+    if (!match) continue;
+    const numeric = Number(match[1].replace(/,/g, ""));
+    if (!Number.isFinite(numeric) || numeric <= 0) continue;
+    const unit = match[2].toLowerCase();
+    const multiplier = unit === "trillion" || unit === "t"
+      ? 1e12
+      : unit === "billion" || unit === "b"
+        ? 1e9
+        : unit === "million" || unit === "m"
+          ? 1e6
+          : 1e3;
+    return Math.round(numeric * multiplier);
   }
   return null;
 }
@@ -129,12 +172,12 @@ function roundFromFact(fact: FundingEvidenceFact): FundingEvidenceRound | null {
   if (!amounts.length) return null;
   const lead = leadInvestor(corpus);
   return {
-    date: sourceEventDate(sources),
+    date: sourceEventDate(fact, sources),
     round: roundLabel(corpus),
     amountUsd: Math.max(...amounts),
     leadInvestors: lead ? [lead] : [],
     otherInvestors: [],
-    valuationUsd: null,
+    valuationUsd: valuationAmount(corpus),
   };
 }
 

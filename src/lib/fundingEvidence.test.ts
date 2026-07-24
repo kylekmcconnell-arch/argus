@@ -81,4 +81,29 @@ describe("summarizeFundingEvidence", () => {
     expect(summary.rounds).toHaveLength(1);
     expect(summary.rounds[0].amountUsd).toBe(165_000_000);
   });
+
+  it("keeps a company valuation separate from the amount raised", () => {
+    const summary = summarizeFundingEvidence([{
+      predicate: "funding",
+      value: "$65 million Series A",
+      qualifier: "July 1, 2026",
+      status: "verified",
+      sources: [{
+        url: "https://venice.ai/blog/venice-raises-65-million-series-a",
+        title: "Venice Raises $65 Million Series A at a $1 Billion Valuation",
+        excerpt: "Venice raised a $65 million Series A led by Dragonfly at a $1 billion valuation.",
+        provider: "public-web",
+        sourceClass: "official_subject",
+      }],
+    }]);
+
+    expect(summary.totalKnownUsd).toBe(65_000_000);
+    expect(summary.rounds).toEqual([expect.objectContaining({
+      date: "2026-07-01",
+      round: "Series A",
+      amountUsd: 65_000_000,
+      valuationUsd: 1_000_000_000,
+      leadInvestors: ["Dragonfly"],
+    })]);
+  });
 });
