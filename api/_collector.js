@@ -7086,22 +7086,37 @@ var xAdapter = {
 };
 
 // server/adapters/teampage.ts
-function candidateUrls(domain) {
-  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+var normalizedApex = (domain) => domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./i, "").toLowerCase();
+function candidateUrlTiers(domain) {
+  const d = normalizedApex(domain);
   if (!d) return [];
-  const paths = ["team", "about", "about-us", "team-members", "our-team", "company", "people", "leadership"];
-  const urls = [];
-  for (const host of [d, `docs.${d}`, `www.${d}`]) {
-    for (const p of paths) {
-      urls.push(`https://${host}/${p}`);
-      urls.push(`https://${host}/${p}.md`);
-    }
-  }
-  return urls;
+  const www = d.startsWith("www.") ? d : `www.${d}`;
+  return [
+    [
+      `https://${d}/team`,
+      `https://${d}/about`,
+      `https://${d}/about-us`,
+      `https://${d}/leadership`,
+      `https://docs.${d}/team`,
+      `https://docs.${d}/team.md`,
+      `https://docs.${d}/about`,
+      `https://docs.${d}/about.md`
+    ],
+    [
+      `https://${d}/our-team`,
+      `https://${d}/team-members`,
+      `https://${d}/people`,
+      `https://${d}/company`,
+      `https://docs.${d}/leadership`,
+      `https://docs.${d}/leadership.md`,
+      `https://${www}/team`,
+      `https://${www}/about`
+    ]
+  ];
 }
 var TEAM_DOCUMENT_HINT = /(?:^|[\/_-])(team|leadership|founders?|people|company|about(?:-us)?|tokenomics|governance|transparency|contributors?)(?:[\/_\-.]|$)/i;
 function teamDocumentUrlsFromIndex(domain, raw) {
-  const apex = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  const apex = normalizedApex(domain);
   if (!apex || !raw) return [];
   const matches = raw.match(/https?:\/\/[^\s<>"'\])}]+/gi) ?? [];
   const out = [];
@@ -7125,7 +7140,7 @@ function teamDocumentUrlsFromIndex(domain, raw) {
   return out;
 }
 async function discoverTeamDocumentUrls(domain) {
-  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  const d = normalizedApex(domain);
   if (!d) return [];
   const indexes = [
     `https://${d}/llms.txt`,
@@ -7141,7 +7156,13 @@ async function discoverTeamDocumentUrls(domain) {
         signal: AbortSignal.timeout(8e3)
       });
       if (!response.ok) {
-        recordCall("site-fetch", "team-doc-index", 0, `http_${response.status}`, "failed");
+        recordCall(
+          "site-fetch",
+          "team-doc-index",
+          0,
+          `http_${response.status}`,
+          response.status === 404 || response.status === 410 ? "partial" : "failed"
+        );
         return "";
       }
       const text2 = await response.text();
@@ -7166,7 +7187,13 @@ async function fetchPage(url, expectedApex) {
     return null;
   }
   if (!response.ok) {
-    recordCall("site-fetch", "team-page", 0, `http_${response.status}`, "failed");
+    recordCall(
+      "site-fetch",
+      "team-page",
+      0,
+      `http_${response.status}`,
+      response.status === 404 || response.status === 410 ? "partial" : "failed"
+    );
     return null;
   }
   const finalUrl = response.url || url;
@@ -7303,7 +7330,7 @@ ${corpus}`,
   });
 }
 async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
-  const apex = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  const apex = normalizedApex(domain);
   if (!apex || !verifiedTeam.length) return [];
   const verifiedAuthors = new Set(verifiedTeam.flatMap((person) => [person.name, person.handle?.replace(/^@/, "")]).filter((value) => Boolean(value?.trim())).map((value) => value.trim().toLowerCase()));
   const searches = ["cofounder", "co-founder"];
@@ -7331,14 +7358,18 @@ async function discoverFounderAuthoredForumUrls(domain, verifiedTeam) {
   return [...new Set(results.flat())].slice(0, 8);
 }
 async function fetchTeamPage(domain, projectName2) {
-  const apex = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  const apex = normalizedApex(domain);
   if (!apex) return [];
-  const urls = [.../* @__PURE__ */ new Set([
+  const [primaryCandidates = [], fallbackCandidates = []] = candidateUrlTiers(domain);
+  const primaryUrls = [.../* @__PURE__ */ new Set([
     ...await discoverTeamDocumentUrls(domain),
-    ...candidateUrls(domain)
+    ...primaryCandidates
   ])];
-  if (!urls.length) return [];
-  const pages = (await Promise.all(urls.map((u) => fetchPage(u, apex)))).filter(Boolean);
+  if (!primaryUrls.length) return [];
+  let pages = (await Promise.all(primaryUrls.map((u) => fetchPage(u, apex)))).filter(Boolean);
+  if (!pages.length && fallbackCandidates.length) {
+    pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex)))).filter(Boolean);
+  }
   if (!pages.length) return [];
   const directTeam = await extractTeamFromPages(pages, projectName2);
   const forumUrls = await discoverFounderAuthoredForumUrls(domain, directTeam);
@@ -9824,7 +9855,7 @@ function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-sear
     if (predicate === "legal_regulatory_event" && (!eventStatus || !attributedEntity)) continue;
     const sourceTitle = clean(row.source_title ?? row.sourceTitle, 240);
     const rawCandidateUrls = row.candidate_urls ?? row.candidateUrls;
-    const candidateUrls2 = Array.isArray(rawCandidateUrls) ? [...new Set(rawCandidateUrls.flatMap((candidate) => {
+    const candidateUrls = Array.isArray(rawCandidateUrls) ? [...new Set(rawCandidateUrls.flatMap((candidate) => {
       const safe = safeCandidateUrl(candidate);
       return safe && safe !== sourceUrl ? [safe] : [];
     }))].slice(0, 4) : [];
@@ -9842,7 +9873,7 @@ function parseBasicFactLeads(text2, expectedSubject, provider = "claude-web-sear
       excerpt,
       sourceUrl,
       ...sourceTitle ? { sourceTitle } : {},
-      ...candidateUrls2.length ? { candidateUrls: candidateUrls2 } : {},
+      ...candidateUrls.length ? { candidateUrls } : {},
       evidence_origin: "model_lead",
       artifact_verified: false,
       provider
@@ -9899,7 +9930,7 @@ function officialIdentityBootstrapLeads(ctx) {
     new URL("/team", website.origin).toString(),
     new URL("/leadership", website.origin).toString()
   ].map(safeCandidateUrl).filter((value) => Boolean(value)))];
-  const [sourceUrl, ...candidateUrls2] = urls;
+  const [sourceUrl, ...candidateUrls] = urls;
   if (!sourceUrl) return [];
   return [{
     subject: subjectName(ctx),
@@ -9909,7 +9940,7 @@ function officialIdentityBootstrapLeads(ctx) {
     excerpt: candidate,
     sourceUrl,
     sourceTitle: "Official identity page candidate",
-    candidateUrls: candidateUrls2,
+    candidateUrls,
     evidence_origin: "deterministic_bootstrap",
     artifact_verified: false,
     provider: "argus-identity-bootstrap"
@@ -13934,7 +13965,13 @@ async function getJson(url) {
     return null;
   }
   if (!response.ok) {
-    recordCall("wallet-resolve", operation, 0, `http_${response.status}`, "failed");
+    recordCall(
+      "wallet-resolve",
+      operation,
+      0,
+      `http_${response.status}`,
+      response.status === 404 || response.status === 410 ? "partial" : "failed"
+    );
     return null;
   }
   let result;
@@ -18057,7 +18094,7 @@ function engagementExcerpt(text2, needle) {
   return null;
 }
 var escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-async function collectSecurityAudits(subjectName3, officialSite, candidateUrls2, deps = {}) {
+async function collectSecurityAudits(subjectName3, officialSite, candidateUrls, deps = {}) {
   const fetcher = deps.fetcher ?? fetch;
   const capturedAt = (/* @__PURE__ */ new Date()).toISOString();
   const name = subjectName3.trim();
@@ -18078,10 +18115,10 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls2,
     } catch {
     }
   }
-  const candidates = [.../* @__PURE__ */ new Set([...candidateUrls2, ...conventionCandidates])].slice(0, 4);
+  const candidates = [.../* @__PURE__ */ new Set([...candidateUrls, ...conventionCandidates])].slice(0, 4);
   if (!candidates.length) return empty("No candidate security pages.");
   const urlAttested = /* @__PURE__ */ new Map();
-  for (const link of candidateUrls2) {
+  for (const link of candidateUrls) {
     let parsed;
     try {
       parsed = new URL(link);
@@ -18112,7 +18149,7 @@ async function collectSecurityAudits(subjectName3, officialSite, candidateUrls2,
   }
   if (!matchedPages.length && !urlAttested.size) return empty("No fetchable security page or audit link named a known auditor.");
   const primary = matchedPages.length ? matchedPages.reduce((best, page) => page.named.length > best.named.length ? page : best) : null;
-  const securityPageUrl = primary?.url ?? [...urlAttested.values()].flatMap((entry) => entry.auditorDomainLinks)[0] ?? candidateUrls2.find((link) => /^https?:\/\//i.test(link)) ?? candidates[0];
+  const securityPageUrl = primary?.url ?? [...urlAttested.values()].flatMap((entry) => entry.auditorDomainLinks)[0] ?? candidateUrls.find((link) => /^https?:\/\//i.test(link)) ?? candidates[0];
   const named = AUDITOR_REGISTRY.filter((auditor) => matchedPages.some((page) => page.named.includes(auditor)) || urlAttested.has(auditor.name));
   const selfAttested = named.map((auditor) => auditor.name);
   const subjectNeedle = new RegExp(`\\b${escapeRegExp(name)}\\b`, "i");

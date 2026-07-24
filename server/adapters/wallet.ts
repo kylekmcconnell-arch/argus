@@ -27,7 +27,13 @@ async function getJson(url: string): Promise<any> {
     return null;
   }
   if (!response.ok) {
-    recordCall("wallet-resolve", operation, 0, `http_${response.status}`, "failed");
+    recordCall(
+      "wallet-resolve",
+      operation,
+      0,
+      `http_${response.status}`,
+      response.status === 404 || response.status === 410 ? "partial" : "failed",
+    );
     return null;
   }
   let result: unknown;

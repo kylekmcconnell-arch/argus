@@ -6,7 +6,7 @@ vi.mock("../agent", () => ({ structured }));
 import { getCost, withCostLedger } from "../cost";
 import { checkSiteSubstance } from "./sitecheck";
 import { fetchTeamPage } from "./teampage";
-import { resolveName, resolveWalletsFromText } from "./wallet";
+import { resolveForHandle, resolveName, resolveWalletsFromText } from "./wallet";
 import { archivedAffiliation } from "./wayback";
 
 const response = (body: string | null, status = 200, contentType = "text/html") => new Response(body, {
@@ -85,11 +85,51 @@ describe("keyless adapter attempt accounting", () => {
     expect(captured.cost.calls).toContainEqual(expect.objectContaining({
       provider: "site-fetch",
       op: "team-page",
-      calls: 48,
+      calls: 8,
       succeeded: 1,
-      partial: 0,
-      failed: 47,
+      partial: 7,
+      failed: 0,
       status: "partial",
+    }));
+  });
+
+  it("caps an absent team-page search and records expected 404s as normal nulls", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response("missing", 404)));
+
+    const captured = await withCostLedger(async () => ({
+      result: await fetchTeamPage("example.org", "Example"),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toEqual([]);
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "site-fetch",
+      op: "team-page",
+      calls: 16,
+      succeeded: 0,
+      partial: 16,
+      failed: 0,
+      status: "partial",
+    }));
+  });
+
+  it("records a missing Farcaster profile as a normal null, not a provider failure", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response("not found", 404, "application/json")));
+
+    const captured = await withCostLedger(async () => ({
+      result: await resolveForHandle("@missing-farcaster-user", "no wallet disclosed"),
+      cost: getCost(),
+    }));
+
+    expect(captured.result).toEqual([]);
+    expect(captured.cost.calls).toContainEqual(expect.objectContaining({
+      provider: "wallet-resolve",
+      op: "api.warpcast.com",
+      calls: 1,
+      failed: 0,
+      partial: 1,
+      status: "partial",
+      meta: "http_404",
     }));
   });
 

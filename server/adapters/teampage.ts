@@ -6,22 +6,39 @@ import { structured } from "../agent";
 import { recordCall } from "../cost";
 import type { TeamMember } from "./x";
 
-// Common places a crypto/tech project lists its people, on the apex domain and on
-// a docs/about subdomain.
-function candidateUrls(domain: string): string[] {
-  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+const normalizedApex = (domain: string) =>
+  domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").replace(/^www\./i, "").toLowerCase();
+
+// Common places a crypto/tech project lists its people. Probe the most likely
+// paths first and stop when one works. The previous 48-URL fan-out made an
+// ordinary "no public team page" result look like a provider outage and added
+// avoidable latency to every project scan.
+function candidateUrlTiers(domain: string): string[][] {
+  const d = normalizedApex(domain);
   if (!d) return [];
-  const paths = ["team", "about", "about-us", "team-members", "our-team", "company", "people", "leadership"];
-  const urls: string[] = [];
-  for (const host of [d, `docs.${d}`, `www.${d}`]) {
-    for (const p of paths) {
-      urls.push(`https://${host}/${p}`);
-      // Docs platforms (GitBook, Mintlify, …) render the roster via JS but serve a
-      // plain-text Markdown version at <path>.md — where the names actually are.
-      urls.push(`https://${host}/${p}.md`);
-    }
-  }
-  return urls;
+  const www = d.startsWith("www.") ? d : `www.${d}`;
+  return [
+    [
+      `https://${d}/team`,
+      `https://${d}/about`,
+      `https://${d}/about-us`,
+      `https://${d}/leadership`,
+      `https://docs.${d}/team`,
+      `https://docs.${d}/team.md`,
+      `https://docs.${d}/about`,
+      `https://docs.${d}/about.md`,
+    ],
+    [
+      `https://${d}/our-team`,
+      `https://${d}/team-members`,
+      `https://${d}/people`,
+      `https://${d}/company`,
+      `https://docs.${d}/leadership`,
+      `https://docs.${d}/leadership.md`,
+      `https://${www}/team`,
+      `https://${www}/about`,
+    ],
+  ];
 }
 
 const TEAM_DOCUMENT_HINT = /(?:^|[\/_-])(team|leadership|founders?|people|company|about(?:-us)?|tokenomics|governance|transparency|contributors?)(?:[\/_\-.]|$)/i;
@@ -33,7 +50,7 @@ const TEAM_DOCUMENT_HINT = /(?:^|[\/_-])(team|leadership|founders?|people|compan
  * index from sending identity collection to an unrelated site.
  */
 export function teamDocumentUrlsFromIndex(domain: string, raw: string): string[] {
-  const apex = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  const apex = normalizedApex(domain);
   if (!apex || !raw) return [];
   const matches = raw.match(/https?:\/\/[^\s<>"'\])}]+/gi) ?? [];
   const out: string[] = [];
@@ -59,7 +76,7 @@ export function teamDocumentUrlsFromIndex(domain: string, raw: string): string[]
 }
 
 async function discoverTeamDocumentUrls(domain: string): Promise<string[]> {
-  const d = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  const d = normalizedApex(domain);
   if (!d) return [];
   const indexes = [
     `https://${d}/llms.txt`,
@@ -75,7 +92,13 @@ async function discoverTeamDocumentUrls(domain: string): Promise<string[]> {
         signal: AbortSignal.timeout(8000),
       });
       if (!response.ok) {
-        recordCall("site-fetch", "team-doc-index", 0, `http_${response.status}`, "failed");
+        recordCall(
+          "site-fetch",
+          "team-doc-index",
+          0,
+          `http_${response.status}`,
+          response.status === 404 || response.status === 410 ? "partial" : "failed",
+        );
         return "";
       }
       const text = await response.text();
@@ -108,7 +131,13 @@ async function fetchPage(url: string, expectedApex: string): Promise<{ url: stri
     return null;
   }
   if (!response.ok) {
-    recordCall("site-fetch", "team-page", 0, `http_${response.status}`, "failed");
+    recordCall(
+      "site-fetch",
+      "team-page",
+      0,
+      `http_${response.status}`,
+      response.status === 404 || response.status === 410 ? "partial" : "failed",
+    );
     return null;
   }
   // The same host pin teamDocumentUrlsFromIndex enforces, applied to the URL the
@@ -280,7 +309,7 @@ async function extractTeamFromPages(
 }
 
 async function discoverFounderAuthoredForumUrls(domain: string, verifiedTeam: TeamMember[]): Promise<string[]> {
-  const apex = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  const apex = normalizedApex(domain);
   if (!apex || !verifiedTeam.length) return [];
   const verifiedAuthors = new Set(verifiedTeam.flatMap((person) => [person.name, person.handle?.replace(/^@/, "")])
     .filter((value): value is string => Boolean(value?.trim()))
@@ -318,14 +347,18 @@ async function discoverFounderAuthoredForumUrls(domain: string, verifiedTeam: Te
 }
 
 export async function fetchTeamPage(domain: string, projectName?: string): Promise<TeamMember[]> {
-  const apex = domain.replace(/^https?:\/\//, "").replace(/\/.*$/, "").toLowerCase();
+  const apex = normalizedApex(domain);
   if (!apex) return [];
-  const urls = [...new Set([
+  const [primaryCandidates = [], fallbackCandidates = []] = candidateUrlTiers(domain);
+  const primaryUrls = [...new Set([
     ...(await discoverTeamDocumentUrls(domain)),
-    ...candidateUrls(domain),
+    ...primaryCandidates,
   ])];
-  if (!urls.length) return [];
-  const pages = (await Promise.all(urls.map((u) => fetchPage(u, apex)))).filter(Boolean) as TeamPage[];
+  if (!primaryUrls.length) return [];
+  let pages = (await Promise.all(primaryUrls.map((u) => fetchPage(u, apex)))).filter(Boolean) as TeamPage[];
+  if (!pages.length && fallbackCandidates.length) {
+    pages = (await Promise.all(fallbackCandidates.map((u) => fetchPage(u, apex)))).filter(Boolean) as TeamPage[];
+  }
   if (!pages.length) return [];
   const directTeam = await extractTeamFromPages(pages, projectName);
   const forumUrls = await discoverFounderAuthoredForumUrls(domain, directTeam);
