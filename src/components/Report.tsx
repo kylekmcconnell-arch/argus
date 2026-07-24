@@ -1350,6 +1350,16 @@ const PROJECT_LEAD_CONTEXT = /\b(?:blockchain|chain|crypto|defi|dex|launchpad|ma
 const PROJECT_RELATIONSHIP_CONTEXT = /\b(?:collaborat|counterpart|integrat|partner|provider|supplier)\w*\b/i;
 const PROJECT_REPOSITORY_CONTEXT = /\b(?:bitbucket|github|gitlab|open[- ]source|repo(?:sitory)?|source code)\b/i;
 const PROJECT_SECURITY_CONTEXT = /\b(?:exchange|issuer|listed|listing|publicly traded|security|stock|ticker|trades under)\b/i;
+const PROJECT_FUNDING_CONTEXT = /\b(?:backed by|financ(?:e|ed|ing)|fund(?:ed|ing|raise)|invest(?:ed|ment|or)|pre[- ]?seed|raise[ds]?|round|seed|series [a-z]|venture capital)\b/i;
+const PROJECT_INVESTOR_CONTEXT = /\b(?:backed by|funded by|invest(?:ed|ment|or)|led (?:the )?(?:financing|round)|participated in (?:the )?(?:financing|round))\b/i;
+const PROJECT_NEGATIVE_AUDIT_CONTEXT = /\b(?:no|not|none|without)\b[^.]{0,80}\baudits?\b|\baudits?\b[^.]{0,80}\b(?:absent|limited|not published|unpublished|unknown)\b/i;
+const UNBOUND_SOCIAL_LEAD_HOSTS = new Set([
+  "facebook.com",
+  "instagram.com",
+  "linkedin.com",
+  "tiktok.com",
+  "youtube.com",
+]);
 
 function projectLeadIsRelevant(dossier: Dossier, lead: BasicFactLeadView): boolean {
   const sourceHost = normalizedHost(lead.sourceUrl);
@@ -1370,10 +1380,20 @@ function projectLeadIsRelevant(dossier: Dossier, lead: BasicFactLeadView): boole
   );
   const predicate = canonicalBasicFactPredicate(lead.predicate);
 
+  // A generic-name social result is especially collision-prone and cannot be
+  // bound to the project merely because its caption repeats the display name.
+  // The exact official X account and official project domain remain eligible.
+  if (sourceHost && UNBOUND_SOCIAL_LEAD_HOSTS.has(sourceHost) && !officialSource) return false;
+
   // A docs page is not a source-code repository, and merely running on a
   // counterparty's chain is not proof of a partnership. Keep those search hits
   // out of the reader-facing lead list until the relationship language exists.
   if (predicate === "repository") return PROJECT_REPOSITORY_CONTEXT.test(text);
+  if (predicate === "funding") return PROJECT_FUNDING_CONTEXT.test(text);
+  if (predicate === "investor") return PROJECT_INVESTOR_CONTEXT.test(text);
+  // A third-party article saying public audit information is limited does not
+  // prove a negative and merely repeats the dedicated audit/disclosure screen.
+  if (predicate === "audit" && PROJECT_NEGATIVE_AUDIT_CONTEXT.test(text)) return false;
   if (predicate === "partnership") {
     return PROJECT_RELATIONSHIP_CONTEXT.test(text)
       && (officialSource || (namesSubject && PROJECT_LEAD_CONTEXT.test(text)));

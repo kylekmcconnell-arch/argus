@@ -424,6 +424,35 @@ describe("private person report evidence boundary", () => {
         sourceTitle: "Pons docs",
         excerpt: "Documentation for launching tokens on Robinhood Chain.",
         provider: "test",
+      }, {
+        predicate: "audit",
+        value: "no independent security audits published",
+        sourceUrl: "https://exchange.example/pons-guide",
+        sourceTitle: "Pons launchpad guide",
+        excerpt: "Public information about Pons audits remains limited.",
+        provider: "test",
+      }, {
+        predicate: "launched",
+        value: "Robinhood Chain",
+        qualifier: "July 22, 2026",
+        sourceUrl: "https://www.instagram.com/p/namesake/",
+        sourceTitle: "Pons",
+        excerpt: "Pons is making waves on Robinhood Chain.",
+        provider: "test",
+      }, {
+        predicate: "funding",
+        value: "$30 million",
+        sourceUrl: "https://www.rootdata.com/projects/detail/Pons",
+        sourceTitle: "Pons",
+        excerpt: "PONS surpassed a market capitalization of $30 million.",
+        provider: "test",
+      }, {
+        predicate: "investor",
+        value: "Robinhood",
+        sourceUrl: "https://www.rootdata.com/projects/detail/Pons",
+        sourceTitle: "Pons",
+        excerpt: "Robinhood ecosystem token PONS surpassed a market capitalization of $30 million.",
+        provider: "test",
       }],
     } as unknown as Dossier;
 
@@ -439,6 +468,10 @@ describe("private person report evidence boundary", () => {
     expect(leads).not.toContain("PoNS medical device");
     expect(leads).not.toContain("Pons docs");
     expect(leads).not.toContain("https://docs.ponsfamily.com/");
+    expect(leads).not.toContain("no independent security audits published");
+    expect(leads).not.toContain("July 22, 2026");
+    expect(leads).not.toContain("$30 million");
+    expect(leads).not.toContain("Who funded it?Robinhood");
   });
 
   it("lets corroborated funding govern a conflicting aggregator projection", () => {
