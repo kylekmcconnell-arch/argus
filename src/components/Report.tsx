@@ -1320,6 +1320,112 @@ function isExactOfficialXProfile(url: string | undefined, handle: string): boole
   }
 }
 
+function normalizedHost(url: string | undefined): string | null {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname.replace(/^www\./, "").toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function sameHostScope(candidate: string | null, official: string | null): boolean {
+  return Boolean(candidate && official && (
+    candidate === official
+    || candidate!.endsWith(`.${official}`)
+    || official!.endsWith(`.${candidate}`)
+  ));
+}
+
+function authoritativeProjectTokenFact(dossier: Dossier, fact: BasicFactView): boolean {
+  if (canonicalBasicFactPredicate(fact.predicate) !== "official_token") return true;
+  if (dossier.projectToken?.verified) return true;
+  return (fact.sources ?? []).some((source) =>
+    source.sourceClass === "official_subject"
+    || source.sourceClass === "official_counterparty"
+    || source.sourceClass === "regulatory_or_onchain");
+}
+
+const PROJECT_LEAD_CONTEXT = /\b(?:blockchain|chain|crypto|defi|dex|launchpad|mainnet|memecoin|on[- ]chain|protocol|smart contract|token|trading|wallet)\b/i;
+const PROJECT_RELATIONSHIP_CONTEXT = /\b(?:collaborat|counterpart|integrat|partner|provider|supplier)\w*\b/i;
+const PROJECT_REPOSITORY_CONTEXT = /\b(?:bitbucket|github|gitlab|open[- ]source|repo(?:sitory)?|source code)\b/i;
+const PROJECT_SECURITY_CONTEXT = /\b(?:exchange|issuer|listed|listing|publicly traded|security|stock|ticker|trades under)\b/i;
+
+function projectLeadIsRelevant(dossier: Dossier, lead: BasicFactLeadView): boolean {
+  const sourceHost = normalizedHost(lead.sourceUrl);
+  const officialHost = normalizedHost(dossier.website);
+  const officialSource = sameHostScope(sourceHost, officialHost)
+    || isExactOfficialXProfile(lead.sourceUrl, dossier.handle);
+  const text = [lead.value, lead.qualifier, lead.sourceTitle, lead.excerpt]
+    .filter(Boolean)
+    .join(" ");
+  const handle = dossier.handle.replace(/^@/, "").toLowerCase();
+  const displayName = dossier.display_name.trim().toLowerCase();
+  const normalizedText = text.toLowerCase();
+  const wordText = normalizedText.replace(/[^a-z0-9]+/g, " ").trim();
+  const wordName = displayName.replace(/[^a-z0-9]+/g, " ").trim();
+  const namesSubject = Boolean(
+    (handle && normalizedText.includes(handle))
+    || (wordName.length >= 3 && ` ${wordText} `.includes(` ${wordName} `)),
+  );
+  const predicate = canonicalBasicFactPredicate(lead.predicate);
+
+  // A docs page is not a source-code repository, and merely running on a
+  // counterparty's chain is not proof of a partnership. Keep those search hits
+  // out of the reader-facing lead list until the relationship language exists.
+  if (predicate === "repository") return PROJECT_REPOSITORY_CONTEXT.test(text);
+  if (predicate === "partnership") {
+    return PROJECT_RELATIONSHIP_CONTEXT.test(text)
+      && (officialSource || (namesSubject && PROJECT_LEAD_CONTEXT.test(text)));
+  }
+  if (predicate === "public_security") {
+    return PROJECT_SECURITY_CONTEXT.test(text)
+      && namesSubject
+      && PROJECT_LEAD_CONTEXT.test(text);
+  }
+  if (officialSource) return true;
+  return namesSubject && PROJECT_LEAD_CONTEXT.test(text);
+}
+
+/**
+ * Frozen discovery remains inspectable without letting generic-name search
+ * collisions dominate the report. Project leads must bind to the official
+ * scope or name the project in project-specific context. Repeated metrics from
+ * one article collapse to one source-level lead.
+ */
+function reportBasicFactLeads(
+  dossier: Dossier,
+  audience: "project" | "investor" | "founder" | "person",
+): BasicFactLeadView[] {
+  const legacyTokenLeads = audience !== "project"
+    ? []
+    : (dossier.basicFacts ?? []).flatMap((fact): BasicFactLeadView[] => {
+      if (authoritativeProjectTokenFact(dossier, fact)) return [];
+      const [primary, ...additional] = fact.sources ?? [];
+      return [{
+        predicate: "official_token",
+        value: fact.value,
+        qualifier: "Reported by secondary sources; canonical token identity is not verified.",
+        sourceUrl: primary?.url,
+        sourceTitle: primary?.title,
+        candidateUrls: additional.map((source) => source.url),
+        provider: primary?.provider ?? fact.provider,
+      }];
+    });
+  const candidates = [...(dossier.basicFactLeads ?? []), ...legacyTokenLeads];
+  const relevant = audience === "project"
+    ? candidates.filter((lead) => projectLeadIsRelevant(dossier, lead))
+    : candidates;
+  const seen = new Set<string>();
+  return relevant.filter((lead) => {
+    const source = lead.sourceUrl || lead.sourceTitle || String(lead.value ?? "");
+    const key = `${canonicalBasicFactPredicate(lead.predicate)}:${source}`.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 /**
  * Frozen payloads stay immutable. This read-time publication projection only
  * removes unrelated identity citations and materializes a first-party product
@@ -1329,15 +1435,11 @@ function reportBasicFacts(dossier: Dossier, audience: "project" | "investor" | "
   const projected = (dossier.basicFacts ?? [])
     .filter((fact) => {
       if (audience !== "project" || canonicalBasicFactPredicate(fact.predicate) !== "official_token") return true;
-      if (dossier.projectToken?.verified) return true;
       // Compatibility repair for frozen reports created before official-token
       // corroboration was tightened. Multiple press articles may preserve a
       // useful ticker lead, but without a first-party/counterparty/on-chain
       // binding they must not render as an answered official-token fact.
-      return (fact.sources ?? []).some((source) =>
-        source.sourceClass === "official_subject"
-        || source.sourceClass === "official_counterparty"
-        || source.sourceClass === "regulatory_or_onchain");
+      return authoritativeProjectTokenFact(dossier, fact);
     })
     .map((fact): BasicFactView => {
       if (fact.predicate !== "official_identity") return fact;
@@ -1532,7 +1634,6 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const unmatchedPortfolioLeadCount = portfolioLeads.filter((lead) =>
     !verifiedPortfolioProjectKeys.has(lead.projectName.trim().toLowerCase())).length;
   const roles = report.roles as SubjectClass[];
-  const basicFactLeads: BasicFactLeadView[] = f.basicFactLeads ?? [];
   const ledgerAudience = f.basicFactQuestionLedger?.[0]?.audience;
   const basicFactsAudience = ledgerAudience === "project"
     ? "project" as const
@@ -1551,8 +1652,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           : roles.includes(SubjectClass.INVESTOR)
             ? "investor" as const
           : roles.includes(SubjectClass.FOUNDER)
-              ? "founder" as const
-              : "person" as const;
+            ? "founder" as const
+            : "person" as const;
+  const basicFactLeads = reportBasicFactLeads(f, basicFactsAudience);
   const publicationBasicFacts = reportBasicFacts(f, basicFactsAudience);
   const fundingEvidence = summarizeFundingEvidence(
     publicationBasicFacts,

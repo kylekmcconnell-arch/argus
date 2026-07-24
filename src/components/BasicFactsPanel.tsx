@@ -57,6 +57,7 @@ export interface BasicFactLeadView {
   predicate: string;
   value?: unknown;
   qualifier?: string;
+  excerpt?: string;
   sourceUrl?: string;
   sourceTitle?: string;
   candidateUrls?: string[];

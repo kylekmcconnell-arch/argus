@@ -337,6 +337,77 @@ describe("private person report evidence boundary", () => {
 
     expect(container.querySelector('[aria-label="Key verified answers"]')?.textContent ?? "")
       .not.toContain("PRESSONLY");
+    expect(container.querySelector('[aria-label="Unverified basic fact leads"]')?.textContent ?? "")
+      .toContain("PRESSONLY");
+  });
+
+  it("removes project namesakes and collapses repeated metrics from the same lead source", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      display_name: "Pons",
+      website: "https://www.ponsfamily.com/launchpad",
+      report: {
+        ...base.report,
+        roles: ["PROJECT"],
+        governing_role: "PROJECT",
+      },
+      basicFactLeads: [{
+        predicate: "founder",
+        value: "MEADGod",
+        sourceUrl: "https://press.example/pons-token",
+        sourceTitle: "PONS token on Robinhood Chain",
+        excerpt: "PONS launchpad founder MEADGod was named after the token launched on Robinhood Chain.",
+        provider: "test",
+      }, {
+        predicate: "founder",
+        value: "Wesley Pons",
+        sourceUrl: "https://ponsdigitalmarketing.example/about",
+        sourceTitle: "Pons Digital Marketing",
+        excerpt: "Wesley Pons founded a digital marketing agency.",
+        provider: "test",
+      }, {
+        predicate: "product",
+        value: "PoNS medical device",
+        sourceUrl: "https://medical.example/pons",
+        sourceTitle: "Portable Neuromodulation Stimulator",
+        excerpt: "The PoNS device uses electrical stimulation for rehabilitation.",
+        provider: "test",
+      }, {
+        predicate: "traction",
+        value: "20,000 launches",
+        sourceUrl: "https://press.example/pons-metrics",
+        sourceTitle: "Pons launchpad metrics",
+        excerpt: "Pons recorded 20,000 token launches on Robinhood Chain.",
+        provider: "test",
+      }, {
+        predicate: "traction",
+        value: "$120 million volume",
+        sourceUrl: "https://press.example/pons-metrics",
+        sourceTitle: "Pons launchpad metrics",
+        excerpt: "Pons recorded $120 million token volume on Robinhood Chain.",
+        provider: "test",
+      }, {
+        predicate: "repository",
+        value: "https://docs.ponsfamily.com/",
+        sourceUrl: "https://docs.ponsfamily.com/",
+        sourceTitle: "Pons docs",
+        excerpt: "Documentation for launching tokens on Robinhood Chain.",
+        provider: "test",
+      }],
+    } as unknown as Dossier;
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
+    });
+
+    const leads = container.querySelector('[aria-label="Unverified basic fact leads"]')?.textContent ?? "";
+    expect(leads).toContain("MEADGod");
+    expect(leads).toContain("20,000 launches");
+    expect(leads).not.toContain("$120 million volume");
+    expect(leads).not.toContain("Wesley Pons");
+    expect(leads).not.toContain("PoNS medical device");
+    expect(leads).not.toContain("https://docs.ponsfamily.com/");
   });
 
   it("lets corroborated funding govern a conflicting aggregator projection", () => {

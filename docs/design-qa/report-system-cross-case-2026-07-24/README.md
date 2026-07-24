@@ -18,6 +18,7 @@ This pass tested saved and rendered reports across people, protocols, tokens, an
 6. Historical snapshots: improved. Upgrade notices now describe checks relevant to the subject type.
 7. Suspended project accounts: improved. A freshly fetched first-party site can recover the project identity only when it names the project and links the exact audited X account.
 8. Canonical token identity: improved. Verified project names now feed the token lookup, while repeated press mentions remain leads until an official account, domain, counterparty, or on-chain record binds the asset.
+9. Research-lead hygiene: improved. Project reports suppress generic namesakes and category errors, and collapse repeated metrics from one article into a single source-level lead.
 
 ## Before
 
@@ -50,6 +51,6 @@ This pass tested saved and rendered reports across people, protocols, tokens, an
 - Source-of-truth contract: passed
 - Deterministic release canaries: 7 of 7
 - Calibration cases: 19 of 19
-- Test suite: 2,008 of 2,008
+- Test suite: 2,009 of 2,009
 - TypeScript checks: passed
 - Production build: passed
