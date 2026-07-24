@@ -64,7 +64,15 @@ function plainCheckNote(value: string): string {
     .replace(/frozen/gi, "saved");
 }
 
-export function MethodologyChecklist({ checks, id }: { checks: ScanCheck[]; id?: string }) {
+export function MethodologyChecklist({
+  checks,
+  id,
+  summaryLabel = "What we checked",
+}: {
+  checks: ScanCheck[];
+  id?: string;
+  summaryLabel?: string;
+}) {
   const [open, setOpen] = useState(false);
   const baseId = useId();
   const buttonId = `${baseId}-trigger`;
@@ -106,13 +114,15 @@ export function MethodologyChecklist({ checks, id }: { checks: ScanCheck[]; id?:
         className="flex w-full items-center gap-2 rounded-xl px-4 py-3 text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal"
       >
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-faint)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 11l3 3L22 4" /><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11" /></svg>
-        <span className="eyebrow">What we checked</span>
-        <span className="text-[12.5px] text-ink-dim">
-          {coverage.successful}/{coverage.inScope} checks finished
-          {coverage.unknownOrFailed ? ` · ${coverage.unknownOrFailed} still open` : ""}
-          {openRequired ? ` · ${openRequired} required` : ""}
-          {coverage.findings ? ` · ${coverage.findings} need attention` : ""}
-          {coverage.notApplicable ? ` · ${coverage.notApplicable} not needed` : ""}
+        <span className="flex min-w-0 flex-1 flex-col gap-0.5 sm:flex-row sm:items-baseline sm:gap-3">
+          <span className="eyebrow shrink-0">{summaryLabel}</span>
+          <span className="text-[12.5px] leading-snug text-ink-dim">
+            {coverage.successful} of {coverage.inScope} {coverage.notApplicable ? "relevant checks" : "checks"} finished
+            {coverage.findings ? ` · ${coverage.findings} ${coverage.findings === 1 ? "needs" : "need"} attention` : ""}
+            {coverage.unknownOrFailed ? ` · ${coverage.unknownOrFailed} still open` : ""}
+            {openRequired ? ` · ${openRequired} required` : ""}
+            {coverage.notApplicable ? ` · ${coverage.notApplicable} did not apply` : ""}
+          </span>
         </span>
         <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-ink-faint)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="ml-auto shrink-0 transition-transform" style={{ transform: open ? "rotate(180deg)" : "none" }}><path d="M6 9l6 6 6-6" /></svg>
       </button>

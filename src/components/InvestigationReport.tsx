@@ -614,6 +614,14 @@ export function InvestigationReport({
     : token.verdict === "CAUTION" || token.verdict === "INCOMPLETE" || token.verdict === "UNVERIFIABLE_IDENTITY"
       ? "caution"
       : "avoid";
+  const hasTeamChapter = teamPeople.length > 0 || advisors.length > 0;
+  const hasConnectionsChapter = Boolean(invGraph && invGraph.nodes.length > 1);
+  const teamChapterNumber = 5;
+  const connectionsChapterNumber = teamChapterNumber + Number(hasTeamChapter);
+  const challengeChapterNumber = connectionsChapterNumber + Number(hasConnectionsChapter);
+  const scanDetailsChapterNumber = challengeChapterNumber + 1;
+  const chapterLabel = (chapter: number, label: string) =>
+    `${String(chapter).padStart(2, "0")} · ${label}`;
 
   return (
     <div className="investigation-story relative min-h-full pb-24">
@@ -908,7 +916,7 @@ export function InvestigationReport({
               { href: "#investigation-visuals", label: "Market", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#investigation-people", label: "People", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> },
               { href: "#investigation-challenge", label: "Challenge", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#investigation-methodology", label: "Next checks", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#investigation-methodology", label: "Scan details", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> },
             ]}
           />
         </div>
@@ -1099,10 +1107,10 @@ export function InvestigationReport({
         </div>
 
         {/* TEAM — the headline section, merged from every source, each clickable */}
-        {(teamPeople.length > 0 || advisors.length > 0) && (
+        {hasTeamChapter && (
           <div id="investigation-team" className="story-chapter report-section scroll-mt-28 mt-7">
             <ReportSectionHeading
-              index="04 · People continued"
+              index={chapterLabel(teamChapterNumber, "Team")}
               title="The named team"
               description="Each person links back to the public source that tied them to this project."
             />
@@ -1211,10 +1219,10 @@ export function InvestigationReport({
 
         {/* Connection web: the subject's graph + its ties to everything else you've
             audited — the deeper map, below the team. */}
-        {invGraph && invGraph.nodes.length > 1 && (
+        {hasConnectionsChapter && invGraph && (
           <div id="investigation-relationships" className="story-chapter story-chapter-muted report-section scroll-mt-28 mt-7">
             <ReportSectionHeading
-              index="04 · Connections"
+              index={chapterLabel(connectionsChapterNumber, "Connections")}
               title="How these people and wallets connect"
               description="The graph shows recorded links. A link by itself does not mean wrongdoing."
             />
@@ -1269,7 +1277,7 @@ export function InvestigationReport({
 
         <div className="story-chapter report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
-            index="05 · Challenge"
+            index={chapterLabel(challengeChapterNumber, "Challenge")}
             title="What could change the result"
             description="Tell ARGUS what looks wrong or missing. We will compare your concern with the evidence saved in this report."
           />
@@ -1284,18 +1292,25 @@ export function InvestigationReport({
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="story-chapter story-chapter-muted report-section mt-7">
           <ReportSectionHeading
-            index="06 · Next"
-            title="What to verify next"
-            description="See what finished, what found a problem, and what still needs an answer before you rely on this report."
+            index={chapterLabel(scanDetailsChapterNumber, "Scan details")}
+            title="What ARGUS checked"
+            description="Open each list to see what finished, what needs attention, and what could not be completed."
           />
-          <MethodologyChecklist id="investigation-methodology" checks={diligenceChecks} />
-        </div>
-        {projectAccount && projectChecks.length > 0 && (
-          <div className="mt-3">
-            <div className="eyebrow mb-1.5">Project account checks</div>
-            <MethodologyChecklist id="investigation-project-methodology" checks={projectChecks} />
+          <div className="mt-3 space-y-3">
+            <MethodologyChecklist
+              id="investigation-methodology"
+              checks={diligenceChecks}
+              summaryLabel="Token checks"
+            />
+            {projectAccount && projectChecks.length > 0 && (
+              <MethodologyChecklist
+                id="investigation-project-methodology"
+                checks={projectChecks}
+                summaryLabel="Project account checks"
+              />
+            )}
           </div>
-        )}
+        </div>
 
         {/* ask-the-report chat — grounded in this investigation's own evidence */}
         <div className="mt-3">

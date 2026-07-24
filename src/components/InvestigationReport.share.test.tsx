@@ -25,7 +25,9 @@ vi.mock("./OnChainForensics", () => ({ OnChainForensics: (props: Record<string, 
 vi.mock("./ProjectResearch", () => ({ ProjectResearch: () => { harness.livePanel("project-research"); return null; } }));
 vi.mock("./ProjectLinks", () => ({ ProjectLinks: () => null }));
 vi.mock("./MethodologyChecklist", () => ({
-  MethodologyChecklist: ({ id }: { id?: string }) => <div id={id} data-panel="methodology" />,
+  MethodologyChecklist: ({ id, summaryLabel }: { id?: string; summaryLabel?: string }) => (
+    <div id={id} data-panel="methodology">{summaryLabel}</div>
+  ),
 }));
 vi.mock("./ArkhamName", () => ({ ArkhamName: () => null }));
 vi.mock("./AddInfo", () => ({ AddInfo: () => { harness.livePanel("add-info"); return null; } }));
@@ -325,9 +327,40 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("Team & founders (3)");
     expect(container.textContent).not.toContain("Team & founders (4)");
     expect(container.textContent).not.toContain("project scan + project scan");
+    expect(container.textContent).toContain("Token checks");
+    expect(container.textContent).toContain("Project account checks");
     const teamSectionText = container.querySelector("#investigation-team")?.textContent ?? "";
     expect(teamSectionText.match(/@twistartups/g)).toHaveLength(1);
     expect(teamSectionText.match(/@erikvoorhees/g)).toHaveLength(1);
+  });
+
+  it("keeps every visible story chapter in one clear sequence", () => {
+    harness.graph = {
+      nodes: [
+        { type: "Token", key: "$ARG", subject: true },
+        { type: "Person", key: "@ada" },
+      ],
+      edges: [{ src: "$ARG", dst: "@ada", type: "BUILT_BY" }],
+    };
+
+    render(investigation({
+      founders: [{ name: "Ada Founder", handle: "@ada", source: "site" }],
+    }));
+
+    const chapterLabels = [...container.querySelectorAll<HTMLElement>(".story-chapter .report-section-heading > div > .eyebrow")]
+      .map((label) => label.textContent);
+    expect(chapterLabels).toEqual([
+      "01 · Short answer",
+      "02 · Why",
+      "03 · Market",
+      "04 · People",
+      "05 · Team",
+      "06 · Connections",
+      "07 · Challenge",
+      "08 · Scan details",
+    ]);
+    expect(container.textContent).toContain("What ARGUS checked");
+    expect(container.textContent).not.toContain("What to verify next");
   });
 
   it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
