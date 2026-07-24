@@ -10,11 +10,29 @@ export interface DecisionCanvasItem {
   detail?: string | undefined;
 }
 
+function plainDecisionText(value: string): string {
+  return value
+    .replace(/\s*\((?:evm|solana)\)\s*/gi, " ")
+    .replace(/^Resolve deployer trail$/i, "Who deployed the contract")
+    .replace(/^Resolve bytecode fingerprint$/i, "Copied contract code")
+    .replace(/^Resolve wallet clustering$/i, "Connected holder wallets")
+    .replace(/^Resolve operator\s*\/\s*funding trace$/i, "Where the deployer’s funds came from")
+    .replace(/^Resolve holder distribution$/i, "Large holder distribution")
+    .replace(/^Corroborated on CoinGecko/i, "Listed on CoinGecko")
+    .replace(/\bWallet clustering\b/gi, "Connected holder wallets")
+    .replace(/holder rows analyzed/gi, "holder wallets checked")
+    .replace(/no elevated concentration surfaced/gi, "no unusual wallet concentration found")
+    .replace(/redeployed-rug clone check;\s*completion outcome not recorded/gi, "We could not finish checking whether the contract copies code from a known scam.")
+    .replace(/completion outcome not recorded/gi, "This check did not finish.")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function narrativeItems(prefix: string, items: DecisionCanvasItem[], href?: `#${string}`): ReportCanvasNarrativeItem[] {
   return items.map((item, index) => ({
     id: `${prefix}-${index}`,
-    title: item.label,
-    ...(item.detail ? { detail: item.detail } : {}),
+    title: plainDecisionText(item.label),
+    ...(item.detail ? { detail: plainDecisionText(item.detail) } : {}),
     ...(href ? { href } : {}),
   }));
 }
@@ -47,8 +65,8 @@ function DecisionLedgerList({
             <li key={`${title}-${index}`}>
               <a href={href} className="group flex items-start gap-2 py-2.5 text-[12.5px] leading-snug text-ink-dim hover:text-ink">
                 <span className="min-w-0 flex-1">
-                  <span className="block font-medium text-ink">{item.label}</span>
-                  {item.detail && <span className="mt-0.5 block text-[11.5px] text-ink-faint">{item.detail}</span>}
+                  <span className="block font-medium text-ink">{plainDecisionText(item.label)}</span>
+                  {item.detail && <span className="mt-0.5 block text-[11.5px] text-ink-faint">{plainDecisionText(item.detail)}</span>}
                 </span>
                 <ArrowRight aria-hidden="true" size={13} weight="bold" className="mt-0.5 shrink-0 text-ink-faint transition group-hover:text-signal-lift" />
               </a>

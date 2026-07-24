@@ -909,7 +909,7 @@ export function InvestigationReport({
               { href: "#investigation-evidence", label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
               ...((teamPeople.length > 0 || advisors.length > 0) ? [{ href: "#investigation-team" as const, label: "Team", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
               ...(invGraph && invGraph.nodes.length > 1 ? [{ href: "#investigation-relationships" as const, label: "Relationships", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              { href: "#investigation-methodology", label: "Sources & checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#investigation-methodology", label: "Checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
             ]}
           />
         </div>
@@ -944,8 +944,8 @@ export function InvestigationReport({
           <div className="report-section mt-7">
             <ReportSectionHeading
               index="02 · Core facts"
-              title="What we verified about the project"
-              description="Verified facts are shown first. Unconfirmed leads are kept in a separate list."
+              title="What we confirmed about the project"
+              description="Confirmed facts are shown first. Possible leads are kept in a separate list."
             />
             <BasicFactsPanel
               id="investigation-basic-facts"
@@ -995,11 +995,15 @@ export function InvestigationReport({
               <span className="mono text-[13.5px] text-ink">{`$${token.symbol}`}</span>
               <VerdictPill verdict={token.verdict} score={token.score} />
             </div>
-            <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">{token.headline}</p>
+            <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">
+              {token.headline
+                .replace(/^Clears the forensic bar:\s*/i, "Passed the main token checks: ")
+                .replace(/owned, tradeable, with real depth/gi, "tradeable with meaningful liquidity")}
+            </p>
             <div className="mt-2 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-ink-faint">
-              <span>liq <span className="mono text-ink-dim">{money(token.liquidityUsd)}</span></span>
-              <span>mc <span className="mono text-ink-dim">{money(token.mcap)}</span></span>
-              <span>chain <span className="mono text-ink-dim capitalize">{token.chain}</span></span>
+              <span>Liquidity <span className="mono text-ink-dim">{money(token.liquidityUsd)}</span></span>
+              <span>Market cap <span className="mono text-ink-dim">{money(token.mcap)}</span></span>
+              <span>Network <span className="mono text-ink-dim capitalize">{token.chain}</span></span>
             </div>
             {/* CEX listings — real centralized-exchange listings are a strong legitimacy signal */}
             {token.cg?.cexNames && token.cg.cexNames.length > 0 ? (
@@ -1015,7 +1019,7 @@ export function InvestigationReport({
             ) : token.cg && token.cg.cexCount === 0 ? (
               <div className="mt-2 border-t border-line/60 pt-2 text-[11px] text-ink-faint">No centralized-exchange listings (DEX-only).</div>
             ) : null}
-            <button onClick={onOpenToken} className="btn-chip tint-signal mt-3">full on-chain report →</button>
+            <button onClick={onOpenToken} className="btn-chip tint-signal mt-3">Open token report →</button>
           </Card>
 
           {/* the people behind it (summary; the full team is its own section below) */}
@@ -1269,7 +1273,7 @@ export function InvestigationReport({
         {/* transparent scan methodology — what ARGUS checked + the outcome of each */}
         <div className="report-section mt-7">
           <ReportSectionHeading
-            index="07 · Sources & checks"
+            index="07 · Checks"
             title="What ARGUS checked"
             description="See which checks finished, which found a problem, and which are still open."
           />

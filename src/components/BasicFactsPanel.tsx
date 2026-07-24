@@ -881,8 +881,8 @@ export function BasicFactsPanel({
             <span className="flex min-w-0 items-center gap-2.5">
               <MagnifyingGlass aria-hidden="true" size={16} weight="bold" className="shrink-0 text-caution" />
               <span>
-                <span className="block text-[12.5px] font-medium text-ink">Research leads awaiting verification</span>
-                <span className="mt-0.5 block text-[10.5px] text-ink-faint">Visible for transparency, excluded from the verdict</span>
+                <span className="block text-[12.5px] font-medium text-ink">Possible leads</span>
+                <span className="mt-0.5 block text-[10.5px] text-ink-faint">Not confirmed and not used in the score</span>
               </span>
             </span>
             <span className="chip tint-caution shrink-0 normal-case tracking-normal">{discoveryLeads.length} leads</span>
@@ -904,7 +904,7 @@ export function BasicFactsPanel({
                       <p className="text-[10px] uppercase tracking-[0.11em] text-ink-faint">{basicFactQuestionFor(lead.predicate, audience)}</p>
                       <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">{leadAnswer || "Candidate answer not recorded"}</p>
                     </div>
-                    <span className="chip tint-caution shrink-0 normal-case tracking-normal">{lead.provider || "AI"} lead</span>
+                    <span className="chip tint-caution shrink-0 normal-case tracking-normal">Possible lead</span>
                   </div>
                   {urls.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1.5">

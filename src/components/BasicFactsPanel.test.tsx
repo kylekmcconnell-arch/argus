@@ -114,8 +114,8 @@ describe("BasicFactsPanel", () => {
       );
     });
 
-    expect(container.textContent).toContain("Research leads awaiting verification");
-    expect(container.textContent).toContain("excluded from the verdict");
+    expect(container.textContent).toContain("Possible leads");
+    expect(container.textContent).toContain("Not confirmed and not used in the score");
     expect(container.textContent).toContain("Candidate founder from model search");
     expect(container.textContent).toContain("$25 million");
     expect(container.textContent).toContain("0 confirmed");
