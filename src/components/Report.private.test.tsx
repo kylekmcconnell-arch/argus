@@ -327,7 +327,7 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    expect(container.textContent).toContain("What is the project's official identity?");
+    expect(container.textContent).toContain("What is the project's official name and website?");
     expect(container.textContent).not.toContain("Who is this person?");
   });
 
@@ -1183,8 +1183,8 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("score withheld");
     expect(container.textContent).toContain("The final score is not ready");
     expect(container.textContent).toContain("key checks are still open");
-    expect(container.textContent).toContain("preliminary raw axis total");
-    expect(container.textContent).toContain("= preliminary 100");
+    expect(container.textContent).toContain("Points before safety limits 95 + 5 bonus");
+    expect(container.textContent).toContain("Current score 100");
     const decisionResult = container.querySelector<HTMLElement>('[aria-label="Decision readiness result"]');
     expect(decisionResult?.classList.contains("max-sm:grid")).toBe(true);
     const preliminarySignal = [...container.querySelectorAll<HTMLElement>(".chip")]
@@ -1264,7 +1264,7 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("Still to check: 3 important questions");
     expect(container.textContent).toContain("Do not rely on this result");
     expect(container.textContent).toContain("This score uses the facts collected so far");
-    expect(container.textContent).toContain("= provisional 71");
+    expect(container.textContent).toContain("Current score 71");
     expect(container.textContent).not.toContain("score withheld");
   });
 

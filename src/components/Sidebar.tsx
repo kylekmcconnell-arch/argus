@@ -459,7 +459,7 @@ export function Sidebar({
                 <span className={compact ? "sr-only" : "min-w-0 flex-1"}>
                   <span className="mono block truncate text-[12.5px] text-ink">{e.query.replace(/^https?:\/\//, "").replace(/\/$/, "")}</span>
                   <span className="block truncate text-[11px] text-ink-faint">
-                    {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}{readinessLabel === "PROVISIONAL" ? " · provisional" : readinessLabel === "BLOCKED" ? " · blocked" : ""}
+                    {KIND_LABEL[e.kind]}{typeof e.score === "number" ? ` · ${e.score}` : ""}{readinessLabel === "PROVISIONAL" ? " · checks open" : readinessLabel === "BLOCKED" ? " · not ready" : ""}
                     {e.contributor && e.contributor !== me && e.contributor !== "anonymous" && (
                       <span className="text-signal-lift"> · {e.contributor}</span>
                     )}

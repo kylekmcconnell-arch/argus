@@ -2,35 +2,35 @@ import { ArgusMark } from "./ArgusMark";
 
 type Status = "live" | "partial" | "planned";
 const PHASES: { n: number; title: string; steps: [string, Status][] }[] = [
-  { n: 1, title: "Token data", steps: [
-    ["DexScreener: liquidity, MC vs FDV, pair age, holders", "live"],
-    ["Corroborate: CoinGecko cross-check, CEX markets", "live"],
-    ["CoinMarketCap, emission schedule, ticker collision", "partial"],
+  { n: 1, title: "Token and market data", steps: [
+    ["Check price, market size, liquidity, trading history, and large holders", "live"],
+    ["Compare the token with CoinGecko and major exchange listings", "live"],
+    ["Check supply schedule and tokens with the same ticker", "partial"],
   ] },
-  { n: 2, title: "Surface intelligence", steps: [
-    ["Render the project site + on-chain pivot (full crawl planned)", "partial"],
-    ["Verify claims independently: Wayback team pages, follow-graph, PDL", "partial"],
-    ["X handle-change history + old-handle mention search", "live"],
+  { n: 2, title: "Website and public claims", steps: [
+    ["Read the project website and connect it to the right token", "partial"],
+    ["Check claims against archived pages, public profiles, and other sources", "partial"],
+    ["Look for X account name changes and mentions of older names", "live"],
   ] },
-  { n: 3, title: "Code and founder forensics", steps: [
-    ["GitHub identity + org/repo forensics (code-quality scan planned)", "partial"],
-    ["Founder background, off-LinkedIn affiliations, notable followers", "live"],
-    ["Funding archaeology: deployer funding-chain to CEX (Helius)", "live"],
-    ["Panoptes trust graph + cross-audit funder/affiliation bridging", "live"],
+  { n: 3, title: "Code, founders, and funding", steps: [
+    ["Find the correct GitHub accounts and review their history", "partial"],
+    ["Check founder backgrounds, public affiliations, and notable followers", "live"],
+    ["Trace where the contract deployer's funds came from", "live"],
+    ["Look for important connections to known people, wallets, and projects", "live"],
   ] },
   { n: 4, title: "Contradiction detection", steps: [
     ["Internal contradiction scan across all collected materials", "live"],
   ] },
-  { n: 5, title: "Specialist analysis modules", steps: [
-    ["Smart-contract scan / rug-pull vectors", "live"],
-    ["Moat, legal & IP, job-posting intel, user validation", "planned"],
-    ["Data provenance, app security, AI attack vectors", "planned"],
+  { n: 5, title: "Special checks", steps: [
+    ["Check the token contract for common scam risks", "live"],
+    ["Check competition, legal risk, hiring, and signs of real users", "planned"],
+    ["Check source quality, app security, and AI-related risks", "planned"],
   ] },
-  { n: 6, title: "Scoring, right-of-reply, verdict", steps: [
-    ["Scoring engine + hard caps", "live"],
-    ["PASS / CAUTION / FAIL verdict", "live"],
-    ["Right-of-reply channel", "planned"],
-    ["Formatted report export", "planned"],
+  { n: 6, title: "Result and follow-up", steps: [
+    ["Calculate the score and apply safety limits", "live"],
+    ["Show a pass, caution, or fail result", "live"],
+    ["Let the subject respond", "planned"],
+    ["Export a formatted report", "planned"],
   ] },
 ];
 
@@ -60,49 +60,44 @@ export function AboutPage({ onStart }: { onStart: () => void }) {
       </div>
       <h1 className="display-sm text-[24px] text-ink">How ARGUS works</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-        ARGUS is the hundred-eyed giant of crypto due-diligence. It audits two things forensically: the
-        <span className="text-ink"> people</span> in a deal and the <span className="text-ink">tokens</span> on-chain.
-        A strong story never papers over a disqualifying fact.
+        ARGUS checks the <span className="text-ink">people</span> behind a project and the
+        <span className="text-ink"> token</span> itself. It shows what looks credible, what looks risky,
+        and what still needs checking.
       </p>
 
-      <Section title="The core rule: hard caps over scores">
-        Every subject is scored to 100 on its own axes, but disqualifying findings act as <span className="text-ink">hard caps</span> that
-        override the weighted total rather than averaging into it. A single confirmed rug, a contradicted
-        endorsement, a honeypot, or a live mint authority cannot be diluted by strong scores elsewhere.
+      <Section title="A serious risk can limit the score">
+        A strong score elsewhere cannot hide a major problem. A confirmed scam, a fake endorsement,
+        a token that cannot be sold, or an owner who can create unlimited new tokens can lower the final result.
       </Section>
 
       <Section title="Auditing people">
-        A subject is routed into every role they hold (founder, fund, KOL, advisor, agency, member) and each role
-        is scored on its own evidence. The composite verdict is governed by the most severe role, never averaged.
+        ARGUS checks each role a person holds, such as founder, investor, advisor, or promoter. The final result
+        reflects the riskiest role instead of averaging serious problems away.
         <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
-          <Card title="Testimonial corroboration" body="Endorsements only count if the named person actually acknowledges the subject. A wall of marquee names nobody confirms scores near zero; a denial caps the score." />
-          <Card title="Repeat-backing signal" body="The strongest positive in venture: a backer from a prior successful exit returning for the new one. Its absence after a claimed exit is a quiet negative." />
-          <Card title="Pseudonymity is neutral" body="Risk lives in behaviour, not identity. Disclosure earns a bonus; only impersonation blocks a verdict." />
-          <Card title="Evidence discipline" body="Every published claim carries a source, a date, and an independent-source count. Only corroborated material is publishable." />
+          <Card title="Endorsements" body="An endorsement only counts when the named person actually confirms it. A denial is a serious warning." />
+          <Card title="Repeat investors" body="It is a strong sign when an investor from a founder's earlier success backs the new project too." />
+          <Card title="Aliases are not automatically risky" body="Using an alias is not a problem by itself. Pretending to be someone else is." />
+          <Card title="Sources" body="Important claims include a source and date. Strong claims should be confirmed by more than one independent source." />
         </div>
       </Section>
 
       <Section title="Auditing tokens">
-        Token audits run live in your browser with no keys, from DexScreener (market, liquidity, trading),
-        GoPlus (contract safety, holders, EVM and Solana), and a honeypot.is buy/sell simulation.
+        Token checks use live market and contract data to test trading, liquidity, large holders, and owner controls.
         <div className="mt-3 grid gap-2.5 sm:grid-cols-2">
-          <Card title="Contract safety" body="Honeypot (simulated), mintable supply, ownership renounced / reclaimable, hidden owner, freeze authority (Solana), taxes. Any of these can hard-cap the verdict to AVOID." />
-          <Card title="Liquidity & lock" body="Pool depth and whether liquidity is locked or burned. Thin or unlocked liquidity is exit risk." />
-          <Card title="Bundle / snipe detection" body="Flags concentrated supply held by fresh non-contract wallets, the signature of a bundled launch or coordinated snipe." />
-          <Card title="Token to people" body="One click from a token to audit the team's X account, the deployer, and top holders, unified in the Panoptes graph." />
+          <Card title="Contract controls" body="ARGUS checks whether the owner can create more tokens, stop transfers, change key settings, or prevent selling." />
+          <Card title="Trading funds" body="ARGUS checks how much money supports trading and whether that money can be removed." />
+          <Card title="Large holders" body="ARGUS looks for a small group of new or connected wallets controlling too much of the supply." />
+          <Card title="People behind the token" body="ARGUS connects the token to its team, the wallet that created it, and its largest holders." />
         </div>
       </Section>
 
       <Section title="Reproducible by design">
-        The scoring model lives in two declarative files and is pinned by a golden-set calibration suite, so the same
-        evidence always yields the same verdict, and tuning the model surfaces exactly which verdicts move. Radar
-        scans trending tokens live; Watchlist re-checks saved audits and flags drift like liquidity pulls.
+        The same saved facts produce the same result. When the scoring rules change, ARGUS tests them against known
+        examples. Radar checks trending tokens, and Watchlist can flag changes such as trading funds being removed.
       </Section>
 
-      <Section title="The full investigation protocol">
-        ARGUS implements a six-phase, twenty-step forensic protocol. Status reflects what runs today,
-        live and keyless, versus what is on the roadmap (web crawl, code forensics, and agent steps
-        unlock with provider keys).
+      <Section title="Every check ARGUS can run">
+        The list below shows what works today, what works in part, and what is planned.
         <div className="mt-3 flex items-center gap-4 text-[11px] text-ink-faint">
           {([["live", "bg-pass"], ["partial", "bg-caution"], ["planned", "bg-line-2"]] as const).map(([l, c]) => (
             <span key={l} className="flex items-center gap-1.5"><span className={`h-2 w-2 rounded-full ${c}`} />{l}</span>

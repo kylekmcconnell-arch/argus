@@ -89,7 +89,7 @@ function HolderDistribution({ token }: { token: TokenDossier }) {
   return (
     <figure className="panel-inset px-3.5 py-3" aria-labelledby="snapshot-holder-distribution">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <figcaption id="snapshot-holder-distribution" className="eyebrow">Holder distribution</figcaption>
+        <figcaption id="snapshot-holder-distribution" className="eyebrow">Large holders</figcaption>
         <span className="mono text-[10.5px] text-ink-faint">
           {token.safety.holderCount ? `${token.safety.holderCount.toLocaleString()} holders` : `${holders.length} tracked wallets`}
         </span>

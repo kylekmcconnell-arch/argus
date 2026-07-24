@@ -92,13 +92,13 @@ describe("AuditConsole", () => {
   it("labels an empty resolution without inventing provider activity", async () => {
     await renderConsole({ steps: [], kind: "resolution" });
 
-    expect(container?.textContent).toContain("Resolving @subject");
-    expect(container?.textContent).toContain("Subject resolution");
-    expect(container?.textContent).not.toContain("Auditing @subject");
-    expect(container?.textContent).not.toContain("Live run");
+    expect(container?.textContent).toContain("Finding @subject");
+    expect(container?.textContent).toContain("Finding the right match");
+    expect(container?.textContent).not.toContain("Checking @subject");
+    expect(container?.textContent).not.toContain("Live check");
     expect(container?.textContent).toContain("Resolving the exact subject");
-    expect(container?.textContent).toContain("Resolving canonical identity before evidence acquisition");
-    expect(container?.textContent).toContain("provider acquisition has not started");
+    expect(container?.textContent).toContain("Confirming the official name and links before searching sources");
+    expect(container?.textContent).toContain("source search has not started");
     expect(container?.textContent).not.toMatch(/DexScreener|GoPlus|Claude|Grok|GitHub/);
   });
 });

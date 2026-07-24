@@ -193,7 +193,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).toContain("Finished checks");
     expect(container.textContent).toContain("Check next");
-    expect(container.querySelector('[role="progressbar"][aria-label="Evidence coverage"]')).not.toBeNull();
+    expect(container.querySelector('[role="progressbar"][aria-label="Checks finished"]')).not.toBeNull();
   });
 
   it("uses adverse evidence to explain an adverse verdict and keeps positive evidence as counterweight", () => {
@@ -232,7 +232,7 @@ describe("token report supplemental evidence boundary", () => {
     }));
 
     const counterweight = container.querySelector('ul[aria-label="What looks credible"]')?.textContent ?? "";
-    expect(counterweight).toContain("Contract safety");
+    expect(counterweight).toContain("Contract controls");
     expect(counterweight).not.toContain("Market intelligence");
     expect(counterweight).not.toContain("CoinGecko returned no matching asset");
 

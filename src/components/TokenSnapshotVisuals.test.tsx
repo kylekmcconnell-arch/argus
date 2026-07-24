@@ -70,7 +70,7 @@ describe("TokenSnapshotVisuals", () => {
 
     expect(container.textContent).toContain("Market and ownership structure");
     expect(container.textContent).toContain("Price momentum at capture");
-    expect(container.textContent).toContain("Holder distribution");
+    expect(container.textContent).toContain("Large holders");
     expect(container.textContent).toContain("Liquidity control");
     expect(container.textContent).toContain("Score breakdown");
     expect(container.querySelector('[role="img"][aria-label^="Supply distribution at capture"]')).not.toBeNull();

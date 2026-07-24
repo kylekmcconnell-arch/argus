@@ -363,7 +363,7 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).toContain("Finished checks");
     expect(container.textContent).toContain("Check next");
-    expect(container.querySelector('[role="progressbar"][aria-label="Evidence coverage"]')).not.toBeNull();
+    expect(container.querySelector('[role="progressbar"][aria-label="Checks finished"]')).not.toBeNull();
   });
 
   it("renders frozen visual intelligence on a snapshot without enabling live panels", () => {

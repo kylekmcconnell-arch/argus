@@ -518,12 +518,12 @@ function RoleCard({ rr, governing, scoreState }: { rr: RoleReport; governing: bo
             <VerdictPill verdict={rr.verdict} />
             {!coverageReady && rr.verdict === "PASS" && (
               <span className="mono text-[11px] font-medium uppercase tracking-wide text-caution">
-                {provisional ? "provisional score" : "scored axes only"}
+                {provisional ? "checks still open" : "score not ready"}
               </span>
             )}
             {rr.cap_applied && (
               <span className="mono text-[11px] font-medium text-avoid">
-                cap · {capLabel(rr.cap_applied)}
+                score limited · {capLabel(rr.cap_applied)}
               </span>
             )}
           </div>
@@ -532,7 +532,7 @@ function RoleCard({ rr, governing, scoreState }: { rr: RoleReport; governing: bo
           <ScoreRing score={rr.score_total} verdict={rr.verdict} size={64} />
           {!coverageReady && (
             <span className="mono mt-0.5 block text-[9px] font-medium uppercase tracking-wide text-caution">
-              {provisional ? "provisional" : "preliminary"}
+              {provisional ? "checks open" : "not ready"}
             </span>
           )}
         </div>
@@ -564,15 +564,15 @@ function RoleCard({ rr, governing, scoreState }: { rr: RoleReport; governing: bo
           </div>
           {rr.dox_bonus > 0 && (
             <div className="panel-inset mt-2 flex items-center justify-between px-3 py-2 text-[12.5px]">
-              <span className="text-ink-dim">Disclosure bonus (identity verified)</span>
+              <span className="text-ink-dim">Verified identity bonus</span>
               <span className="mono text-pass">+{rr.dox_bonus}</span>
             </div>
           )}
           <div className="mt-2 flex items-center justify-between px-1 text-[12.5px] text-ink-faint">
             <span>
-              {coverageReady ? "raw" : provisional ? "provisional raw axis total" : "preliminary raw axis total"} {rr.raw_total} {rr.dox_bonus ? `+ ${rr.dox_bonus} bonus` : ""}
+              Points before safety limits {rr.raw_total} {rr.dox_bonus ? `+ ${rr.dox_bonus} bonus` : ""}
             </span>
-            <span className="mono">= {coverageReady ? "" : provisional ? "provisional " : "preliminary "}{rr.score_total ?? "N/A"}{rr.cap_applied ? " (capped)" : ""}</span>
+            <span className="mono">Current score {rr.score_total ?? "N/A"}{rr.cap_applied ? " (limited)" : ""}</span>
           </div>
         </div>
       )}
@@ -3056,8 +3056,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               ...(f.projectToken ? [{ href: "#project-token" as const, label: "Token", icon: <Cube aria-hidden="true" size={15} weight="bold" /> }] : []),
               { href: "#decision-basis", label: "Why this score", icon: <ListChecks aria-hidden="true" size={15} weight="bold" />, count: governingAxes.length },
               { href: "#identity-evidence", label: "Identity", icon: <Fingerprint aria-hidden="true" size={15} weight="bold" /> },
-              ...(visibleIntelligenceCount > 0 ? [{ href: "#evidence-ledger" as const, label: "Evidence", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount }] : []),
-              { href: "#relationships", label: "Relationships", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
+              ...(visibleIntelligenceCount > 0 ? [{ href: "#evidence-ledger" as const, label: "Sources", icon: <Database aria-hidden="true" size={15} weight="bold" />, count: visibleIntelligenceCount }] : []),
+              { href: "#relationships", label: "Connections", icon: <GraphIcon aria-hidden="true" size={15} weight="bold" />, count: connections.length },
               ...(diligenceChecks.length > 0 ? [{ href: "#scan-methodology" as const, label: "Checks", icon: <UserFocus aria-hidden="true" size={15} weight="bold" />, count: diligenceChecks.length }] : []),
             ]}
           />

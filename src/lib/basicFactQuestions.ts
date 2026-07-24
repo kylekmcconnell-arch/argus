@@ -52,7 +52,7 @@ export function explicitEmptyBasicFactAnswer(predicate: string): string {
 }
 
 const PROJECT_QUESTIONS: readonly BasicFactQuestionDefinition[] = [
-  ["official_identity", "What is the project's official identity?"],
+  ["official_identity", "What is the project's official name and website?"],
   ["product", "What does the project actually do?"],
   ["founder", "Who founded it?"],
   ["executive", "Who operates it today?"],
@@ -61,7 +61,7 @@ const PROJECT_QUESTIONS: readonly BasicFactQuestionDefinition[] = [
   ["official_token", "Does it have an official token?"],
   ["network", "Which networks does it run on?"],
   ["legal_entity", "Which legal entity is responsible?"],
-  ["security_incident", "What hacks, exploits, losses, and recovery outcomes are documented?"],
+  ["security_incident", "Has the project been hacked or lost funds? What happened afterward?"],
   ["funding", "How much funding has it raised?"],
   ["investor", "Who funded it?"],
   ["partnership", "Which material partners or integrations are verified?"],

@@ -21,6 +21,16 @@ function plainDecisionText(value: string): string {
     .replace(/^Resolve holder distribution$/i, "Large holder distribution")
     .replace(/^Corroborated on CoinGecko/i, "Listed on CoinGecko")
     .replace(/\bWallet clustering\b/gi, "Connected holder wallets")
+    .replace(/\bSell simulation passed \(buy ([\d.]+)% \/ sell ([\d.]+)%\)\./gi, "Buying and selling worked in the test ($1% buy fee / $2% sell fee).")
+    .replace(/\bBuy\s*\/\s*sell simulation\b/gi, "Buy and sell test")
+    .replace(/\bHolder distribution\b/gi, "Large holders")
+    .replace(/\bContract safety\b/gi, "Contract controls")
+    .replace(/\bmint authority active\s*·\s*owner active\b/gi, "more tokens can be created · contract owner still has control")
+    .replace(/\bMint authority is live:\s*supply can be minted\.\s*/gi, "More tokens can still be created. ")
+    .replace(/\bOn a token with real centralized-exchange listings this is typically a governed emissions\/ops mechanism, not a rug setup\.\s*/gi, "For a token listed on major exchanges, this may be part of normal operations rather than a scam. ")
+    .replace(/\bConfirm the controller\./gi, "Check who controls this power.")
+    .replace(/\bLiquidity does not appear locked or burned\./gi, "Trading funds are not locked away, so they could still be removed.")
+    .replace(/\bcentralized markets\b/gi, "centralized exchange listings")
     .replace(/holder rows analyzed/gi, "holder wallets checked")
     .replace(/no elevated concentration surfaced/gi, "no unusual wallet concentration found")
     .replace(/redeployed-rug clone check;\s*completion outcome not recorded/gi, "We could not finish checking whether the contract copies code from a known scam.")
@@ -164,13 +174,13 @@ export function InvestigationDecisionCanvas({
           </div>
 
           <aside className="border-t border-line/60 bg-panel-2/20 px-4 py-5 lg:border-l lg:border-t-0" aria-label="Scan progress">
-            <section aria-label="Evidence coverage and freshness">
+            <section aria-label="Checks finished">
               <div className="flex items-center gap-2">
                 <Database size={17} weight="duotone" aria-hidden="true" className="text-signal-lift" />
                 <h3 className="eyebrow text-ink-dim">Scan progress</h3>
                 <span className="mono ml-auto text-[13.5px] font-semibold text-ink">{coveragePercent}%</span>
               </div>
-              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line" role="progressbar" aria-label="Evidence coverage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={coveragePercent}>
+              <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line" role="progressbar" aria-label="Checks finished" aria-valuemin={0} aria-valuemax={100} aria-valuenow={coveragePercent}>
                 <div className="h-full rounded-full bg-signal" style={{ width: `${Math.max(0, Math.min(100, coveragePercent))}%` }} />
               </div>
               <p className="mt-2 text-[11px] leading-snug text-ink-faint">

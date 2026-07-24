@@ -7902,7 +7902,7 @@ function supportsExplicitEmptyBasicFact(predicate) {
   return EXPLICIT_EMPTY_PREDICATES.has(canonicalBasicFactPredicate(predicate));
 }
 var PROJECT_QUESTIONS = [
-  ["official_identity", "What is the project's official identity?"],
+  ["official_identity", "What is the project's official name and website?"],
   ["product", "What does the project actually do?"],
   ["founder", "Who founded it?"],
   ["executive", "Who operates it today?"],
@@ -7911,7 +7911,7 @@ var PROJECT_QUESTIONS = [
   ["official_token", "Does it have an official token?"],
   ["network", "Which networks does it run on?"],
   ["legal_entity", "Which legal entity is responsible?"],
-  ["security_incident", "What hacks, exploits, losses, and recovery outcomes are documented?"],
+  ["security_incident", "Has the project been hacked or lost funds? What happened afterward?"],
   ["funding", "How much funding has it raised?"],
   ["investor", "Who funded it?"],
   ["partnership", "Which material partners or integrations are verified?"],
@@ -21873,7 +21873,7 @@ async function runTokenAudit(input, emit, opts) {
       findings.push({ claim: "The wallet that deployed this token has created honeypot tokens before. This is a serial-scammer signal.", tone: "bad", source: "goplus" });
     }
     if (s.sellTax >= 20) findings.push({ claim: `Sell tax is ${s.sellTax.toFixed(0)}%.`, tone: "bad", source: s.simChecked ? "sim" : "goplus" });
-    if (s.simChecked && !s.honeypot) findings.push({ claim: `Sell simulation passed (buy ${s.buyTax.toFixed(0)}% / sell ${s.sellTax.toFixed(0)}%).`, tone: "good", source: "honeypot.is" });
+    if (s.simChecked && !s.honeypot) findings.push({ claim: `Buying and selling worked in the test (${s.buyTax.toFixed(0)}% buy fee / ${s.sellTax.toFixed(0)}% sell fee).`, tone: "good", source: "honeypot.is" });
     if (s.ownerRenounced && !s.mintable && !s.takeBack && !s.freezable) findings.push({ claim: chain === "solana" ? "Mint and freeze authority revoked." : "Ownership renounced; no mint or take-back.", tone: "good", source: "goplus" });
     const ownerActive = !s.ownerRenounced;
     if (s.ownerChangeBalance && ownerActive) {

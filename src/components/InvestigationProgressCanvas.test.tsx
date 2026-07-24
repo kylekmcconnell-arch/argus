@@ -46,19 +46,19 @@ describe("InvestigationProgressCanvas", () => {
     expect(container?.textContent).toContain("grok");
     expect(container?.textContent).toContain("Candidate lead");
     expect(container?.textContent).not.toContain("GitHub");
-    expect(container?.querySelectorAll("[aria-label='Observed evidence sources'] .chip")).toHaveLength(2);
+    expect(container?.querySelectorAll("[aria-label='Sources checked'] .chip")).toHaveLength(2);
 
     const activeStage = [...(container?.querySelectorAll("ol li") ?? [])]
       .find((element) => element.textContent?.includes("Evidence collection"));
-    expect(activeStage?.textContent).toContain("active");
+    expect(activeStage?.textContent).toContain("checking");
   });
 
   it("keeps an empty resolution truthful and provider-neutral", async () => {
     await renderCanvas({ kind: "resolution", steps: [], working: true });
 
     expect(container?.textContent).toContain("Resolving the exact subject");
-    expect(container?.textContent).toContain("evidence acquisition has not started");
-    expect(container?.textContent).toContain("No source-tagged evidence observed yet");
+    expect(container?.textContent).toContain("confirming the official name and links before searching sources");
+    expect(container?.textContent).toContain("No sources checked yet");
     expect(container?.textContent).not.toMatch(/DexScreener|GoPlus|Claude|Grok|GitHub/);
   });
 

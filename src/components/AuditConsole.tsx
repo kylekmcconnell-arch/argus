@@ -42,10 +42,10 @@ export function AuditConsole({
   const liveAnnouncement = latest
     ? `${latest.phase}: ${latest.label}. ${latest.detail}`
     : kind === "resolution"
-      ? "Resolving the exact subject."
+      ? "Finding the right project or person."
       : working
-        ? "Waiting for the first evidence event."
-        : "No evidence events were observed.";
+        ? "Waiting for the first result."
+        : "No results came back.";
 
   return (
     <>
@@ -61,13 +61,13 @@ export function AuditConsole({
           <div className="mb-5 flex flex-wrap items-start gap-3">
             <div className="min-w-0 flex-1">
               <div className="mono text-[13.5px] text-ink">
-                {kind === "resolution" ? "Resolving" : "Auditing"}{" "}
+                {kind === "resolution" ? "Finding" : "Checking"}{" "}
                 <span className="text-signal-lift">{handle}</span>
               </div>
               <div className="mt-0.5 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">{subtitle}</div>
             </div>
             <span className={`chip ${mode === "live" ? "tint-signal" : ""}`}>
-              {kind === "resolution" ? "Subject resolution" : mode === "live" ? "Live run" : "Curated run"}
+              {kind === "resolution" ? "Finding the right match" : mode === "live" ? "Live check" : "Saved check"}
             </span>
           </div>
 
@@ -78,9 +78,9 @@ export function AuditConsole({
             className={`thin-scroll panel relative mt-4 overflow-y-auto p-4 backdrop-blur sm:p-5 ${
               kind === "resolution" ? "h-[170px] sm:h-[190px]" : "h-[310px] sm:h-[340px]"
             }`}
-            aria-label="Live evidence ledger"
+            aria-label="Live check updates"
           >
-            <div className="eyebrow mb-3">Evidence ledger</div>
+            <div className="eyebrow mb-3">What ARGUS is finding</div>
             <div className="space-y-2.5">
               {steps.map((s, i) => {
                 const tone = TONE[s.tone];
@@ -110,10 +110,10 @@ export function AuditConsole({
                     <span className="scan-line sweep absolute inset-y-0 w-1/2" />
                   </span>
                   {kind === "resolution"
-                    ? "Resolving canonical identity before evidence acquisition…"
+                    ? "Confirming the official name and links before searching sources…"
                     : steps.length
-                      ? "Waiting for the next evidence event…"
-                      : "Waiting for the first evidence event…"}
+                      ? "Waiting for the next result…"
+                      : "Waiting for the first result…"}
                 </div>
               )}
             </div>
@@ -121,8 +121,8 @@ export function AuditConsole({
 
           <div className="mt-3 text-center text-[11px] text-ink-faint">
             {kind === "resolution"
-              ? "Canonical identity resolution · provider acquisition has not started"
-              : "API-only acquisition · evidence-disciplined · reproducible"}
+              ? "Checking the official name and links · source search has not started"
+              : "Live source search · results can be checked again"}
           </div>
         </div>
       </div>

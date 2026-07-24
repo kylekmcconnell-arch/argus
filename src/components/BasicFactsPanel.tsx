@@ -697,7 +697,7 @@ export function BasicFactsPanel({
               Confirmed facts are shown first. Open a source to check any answer.
             </p>
           </div>
-          <div className="panel-inset flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-[11px]" aria-label="Basic facts coverage">
+          <div className="panel-inset flex shrink-0 flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-[11px]" aria-label="Basic facts found">
             <span className="inline-flex items-center gap-1.5 font-medium text-pass">
               <CheckCircle aria-hidden="true" size={14} weight="fill" />
               {answered} confirmed

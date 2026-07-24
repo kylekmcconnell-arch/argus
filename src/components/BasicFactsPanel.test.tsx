@@ -264,7 +264,7 @@ describe("BasicFactsPanel", () => {
     expect(container.querySelector('[aria-label="Key verified answers"]')).toBeNull();
     expect(container.querySelector('[aria-label="Identity review required"]')?.textContent)
       .toContain("Same name, identity not confirmed");
-    expect(container.querySelector('[aria-label="Basic facts coverage"]')?.textContent)
+    expect(container.querySelector('[aria-label="Basic facts found"]')?.textContent)
       .toContain("0 confirmed");
   });
 

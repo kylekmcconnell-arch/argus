@@ -94,9 +94,9 @@ export function InvestigationProgressCanvas({
                   <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
                     {working
                       ? kind === "resolution"
-                        ? "Canonical identity checks are active; evidence acquisition has not started."
-                        : "The run is open and waiting for its first evidence event."
-                      : "This run returned no evidence events."}
+                        ? "ARGUS is confirming the official name and links before searching sources."
+                        : "ARGUS is waiting for the first result."
+                      : "No results came back from this check."}
                   </p>
                 )}
               </div>
@@ -105,22 +105,22 @@ export function InvestigationProgressCanvas({
 
           <dl className="mt-5 grid grid-cols-3 gap-2 border-t border-line/70 pt-4">
             <div>
-              <dt className="stat-label">Events</dt>
+              <dt className="stat-label">Updates</dt>
               <dd className="stat-value">{progress.eventCount}</dd>
             </div>
             <div>
-              <dt className="stat-label">Sources observed</dt>
+              <dt className="stat-label">Sources checked</dt>
               <dd className="stat-value">{progress.observedSources.length}</dd>
             </div>
             <div>
-              <dt className="stat-label">Review flags</dt>
+              <dt className="stat-label">Things to review</dt>
               <dd className="stat-value">{progress.attentionCount}</dd>
             </div>
           </dl>
 
           <div className="mt-4 min-h-6">
             {progress.observedSources.length ? (
-              <div className="flex flex-wrap gap-1.5" aria-label="Observed evidence sources">
+              <div className="flex flex-wrap gap-1.5" aria-label="Sources checked">
                 {progress.observedSources.slice(0, 6).map((source) => (
                   <span key={source.toLowerCase()} className="chip">{source}</span>
                 ))}
@@ -129,14 +129,14 @@ export function InvestigationProgressCanvas({
                 )}
               </div>
             ) : (
-              <span className="mono text-[11px] text-ink-faint">No source-tagged evidence observed yet</span>
+              <span className="mono text-[11px] text-ink-faint">No sources checked yet</span>
             )}
           </div>
         </div>
 
         <div className="bg-panel-2/35 p-5 sm:p-6">
-          <div className="eyebrow">Investigation stages</div>
-          <ol className="mt-3 space-y-1.5" aria-label="Observed investigation stages">
+          <div className="eyebrow">What ARGUS is checking</div>
+          <ol className="mt-3 space-y-1.5" aria-label="Check progress">
             {progress.stages.map((stage) => {
               const Icon = STAGE_ICONS[stage.key] ?? DatabaseIcon;
               return (
@@ -155,7 +155,7 @@ export function InvestigationProgressCanvas({
                   </span>
                   <span className="min-w-0 flex-1 text-[12.5px] font-medium">{stage.label}</span>
                   <span className="mono text-[10px] uppercase tracking-[0.08em]">
-                    {stage.state}
+                    {stage.state === "active" ? "checking" : stage.state === "observed" ? "done" : "waiting"}
                   </span>
                 </li>
               );

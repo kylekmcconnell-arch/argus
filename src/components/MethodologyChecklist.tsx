@@ -35,6 +35,9 @@ function plainCheckLabel(value: string): string {
     .replace(/bytecode fingerprint/gi, "Copied contract code")
     .replace(/wallet clustering/gi, "Connected holder wallets")
     .replace(/operator funding trace/gi, "Where the deployer’s funds came from")
+    .replace(/buy\s*\/\s*sell simulation/gi, "Buy and sell test")
+    .replace(/holder distribution/gi, "Large holders")
+    .replace(/contract safety/gi, "Contract controls")
     .replace(/github forensics/gi, "Code history")
     .replace(/trust graph reconciliation/gi, "Known connections")
     .replace(/\s+/g, " ")
@@ -48,6 +51,9 @@ function plainCheckNote(value: string): string {
     .replace(/provider unavailable/gi, "The data source did not respond.")
     .replace(/corroborated/gi, "confirmed by more than one source")
     .replace(/canonical/gi, "official")
+    .replace(/mint authority active/gi, "more tokens can be created")
+    .replace(/owner active/gi, "contract owner still has control")
+    .replace(/transfers can be paused/gi, "the owner can stop transfers")
     .replace(/no elevated concentration surfaced/gi, "no unusual wallet concentration found");
 }
 

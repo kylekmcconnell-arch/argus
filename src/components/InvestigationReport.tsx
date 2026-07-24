@@ -789,7 +789,7 @@ export function InvestigationReport({
               </div>
               <div className="mt-4">
                 <p className="display-sm text-[27px] leading-none text-ink">{money(marketCap)}</p>
-                <p className="mono mt-1.5 text-[10px] uppercase tracking-[0.1em] text-ink-faint">Market capitalization</p>
+                <p className="mono mt-1.5 text-[10px] uppercase tracking-[0.1em] text-ink-faint">Current market value</p>
               </div>
               <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 xl:grid-cols-2" aria-label="Market size details">
                 <div>
@@ -797,7 +797,7 @@ export function InvestigationReport({
                   <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg.rank}` : "N/A"}</dd>
                 </div>
                 <div>
-                  <dt className="stat-label">Fully diluted value</dt>
+                  <dt className="stat-label" title="Estimated value if every token were circulating.">Value if every token circulated</dt>
                   <dd className="stat-value mt-1">{money(fullyDilutedValue)}</dd>
                 </div>
                 <div>
@@ -906,9 +906,9 @@ export function InvestigationReport({
               { href: "#report-risks", label: "Risks", icon: <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> },
               ...(showProjectBasicFacts ? [{ href: "#investigation-basic-facts" as const, label: "Key facts", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
               { href: "#investigation-visuals", label: "Visuals", icon: <ChartLineUp size={16} weight="duotone" aria-hidden="true" /> },
-              { href: "#investigation-evidence", label: "Evidence", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
+              { href: "#investigation-evidence", label: "Sources", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
               ...((teamPeople.length > 0 || advisors.length > 0) ? [{ href: "#investigation-team" as const, label: "Team", icon: <IdentificationBadge size={16} weight="duotone" aria-hidden="true" /> }] : []),
-              ...(invGraph && invGraph.nodes.length > 1 ? [{ href: "#investigation-relationships" as const, label: "Relationships", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
+              ...(invGraph && invGraph.nodes.length > 1 ? [{ href: "#investigation-relationships" as const, label: "Connections", icon: <Graph size={16} weight="duotone" aria-hidden="true" /> }] : []),
               { href: "#investigation-methodology", label: "Checks", icon: <Database size={16} weight="duotone" aria-hidden="true" /> },
             ]}
           />
@@ -1095,7 +1095,7 @@ export function InvestigationReport({
                   <span className="chip tint-avoid mt-1">serial deployer · {deployerTrail.tokensCreated}+ tokens</span>
                 )}
                 {deployerTrail && <div className="mt-1 leading-snug">{deployerTrail.note}</div>}
-                {!deployerTrail && <div className="mt-0.5">deployer wallet, no identity verification available.</div>}
+                {!deployerTrail && <div className="mt-0.5">We could not confirm who owns the wallet that deployed the contract.</div>}
               </div>
             )}
           </Card>
@@ -1281,7 +1281,7 @@ export function InvestigationReport({
         </div>
         {projectAccount && projectChecks.length > 0 && (
           <div className="mt-3">
-            <div className="eyebrow mb-1.5">Project-account evidence coverage</div>
+            <div className="eyebrow mb-1.5">Project account checks</div>
             <MethodologyChecklist id="investigation-project-methodology" checks={projectChecks} />
           </div>
         )}
