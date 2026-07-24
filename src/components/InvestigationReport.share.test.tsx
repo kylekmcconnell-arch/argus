@@ -271,6 +271,20 @@ describe("investigation exact sharing", () => {
         notableFollowers: [],
         contradictions: [],
         checkRuns: [{ checkId: "identity-resolution", label: "Identity", status: "confirmed" }],
+        basicFacts: [{
+          factId: "existing-teana-executive",
+          predicate: "executive",
+          value: "Teana Baker-Taylor",
+          qualifier: "COO",
+          status: "verified",
+          critical: false,
+          providerProjection: true,
+          sources: [{
+            url: "https://venice.ai/blog/welcome-to-venice",
+            title: "Welcome to Venice",
+            relation: "supports",
+          }],
+        }],
         basicFactLeads: [
           {
             predicate: "official_identity",
@@ -315,6 +329,16 @@ describe("investigation exact sharing", () => {
             evidence_origin: "deterministic",
             artifact_verified: true,
           },
+          {
+            name: "Teana Baker-Taylor",
+            role: "Co-Founder and Chief Operating Officer",
+            linkedin: "https://www.linkedin.com/in/teana-baker-taylor/",
+            source: "Monid/Akta leadership record",
+            sourceUrl: "https://venice.ai",
+            provider: "monid",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+          },
         ],
         report: {
           composite_verdict: "PASS",
@@ -340,6 +364,9 @@ describe("investigation exact sharing", () => {
     expect(keyAnswers?.textContent).toContain("Venice");
     expect(keyAnswers?.textContent).toContain("Erik Voorhees");
     expect(keyAnswers?.textContent).toContain("Jesse Proudman");
+    const leadershipCard = [...(keyAnswers?.querySelectorAll("li") ?? [])]
+      .find((card) => card.textContent?.includes("Who operates it today?"));
+    expect(leadershipCard?.textContent?.match(/Teana Baker-Taylor/g)).toHaveLength(1);
     expect(leads?.textContent).toContain("Private AI");
     expect(leads?.textContent).not.toContain("Erik Voorhees");
     expect(leads?.textContent).toContain("Jesse Proudman");
@@ -348,6 +375,7 @@ describe("investigation exact sharing", () => {
     expect([...facts!.querySelectorAll<HTMLAnchorElement>('a[target="_blank"]')].map((link) => link.href)).toEqual(expect.arrayContaining([
       "https://www.linkedin.com/in/erikvoorhees/",
       "https://www.linkedin.com/in/jesseproudman/",
+      "https://www.linkedin.com/in/teana-baker-taylor/",
     ]));
   });
 

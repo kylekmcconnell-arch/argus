@@ -159,6 +159,39 @@ function domainBoundLeadershipFacts(
   });
 }
 
+function mergeLeadershipFacts(
+  facts: readonly BasicFactView[],
+  leadershipFacts: readonly BasicFactView[],
+): BasicFactView[] {
+  const merged = facts.map((fact) => ({ ...fact, sources: [...(fact.sources ?? [])] }));
+  for (const leadership of leadershipFacts) {
+    const leadershipName = typeof leadership.value === "string"
+      ? normalizedTeamIdentity(leadership.value)
+      : "";
+    const existing = leadershipName
+      ? merged.find((fact) =>
+          fact.predicate === leadership.predicate
+          && typeof fact.value === "string"
+          && normalizedTeamIdentity(fact.value) === leadershipName)
+      : undefined;
+    if (!existing) {
+      merged.push({ ...leadership, sources: [...(leadership.sources ?? [])] });
+      continue;
+    }
+    const sourceKeys = new Set((existing.sources ?? []).map((source) =>
+      `${source.url ?? ""}:${source.relation ?? "supports"}`));
+    for (const source of leadership.sources ?? []) {
+      const key = `${source.url ?? ""}:${source.relation ?? "supports"}`;
+      if (!sourceKeys.has(key)) {
+        existing.sources!.push(source);
+        sourceKeys.add(key);
+      }
+    }
+    existing.qualifier ||= leadership.qualifier;
+  }
+  return merged;
+}
+
 function normalizedTeamIdentity(value?: string): string {
   return (value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
@@ -484,11 +517,10 @@ export function InvestigationReport({
         }],
       }]
     : [];
-  const projectBasicFacts = [
+  const projectBasicFacts = mergeLeadershipFacts([
     ...retainedProjectBasicFacts,
     ...confirmedProjectIdentity,
-    ...domainBoundLeadershipFacts(projectAccount, projectDomain),
-  ];
+  ], domainBoundLeadershipFacts(projectAccount, projectDomain));
   const showProjectBasicFacts = Boolean(projectAccount)
     || projectBasicFacts.length > 0
     || projectBasicFactLeads.length > 0;
