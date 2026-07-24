@@ -1910,6 +1910,12 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
         ? ` DeFiLlama records $${(incident.returnedAmountUsd / 1_000_000).toFixed(incident.returnedAmountUsd % 1_000_000 === 0 ? 0 : 1)}M returned.`
         : " DeFiLlama records the funds as returned."
       : " DeFiLlama does not record returned funds for this incident.";
+    const fullReturnRecorded = incident.returnedFunds
+      && (
+        incident.returnedAmountUsd == null
+        || incident.amountUsd == null
+        || incident.returnedAmountUsd >= incident.amountUsd
+      );
     evidence.findings.push({
       finding_type: "ProtocolSecurityIncident",
       claim: `DeFiLlama records ${amount} ${classification}security incident affecting ${protocol.name}${incident.date ? ` on ${incident.date}` : ""}.${technique}${recovery} This is evidence of protocol security and control failure, not by itself evidence of fraud or intentional misconduct.`,
@@ -1922,6 +1928,14 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
       evidence_origin: "deterministic",
       artifact_verified: true,
       provider: "defillama",
+      protocol_incident: {
+        incident_date: incident.date,
+        observed_at: protocol.capturedAt,
+        amount_usd: incident.amountUsd,
+        reference_tvl_usd: protocol.tvlUsd,
+        recovery_status: fullReturnRecorded ? "recorded_full_return" : "no_recorded_full_return",
+        returned_amount_usd: incident.returnedAmountUsd ?? null,
+      },
       finding_scope: {
         scope: "direct_subject",
         target_entity_key: evidence.profile.handle,

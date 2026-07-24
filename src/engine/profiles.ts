@@ -70,7 +70,15 @@ export const PROFILES: Record<SubjectClass, Profile> = {
       P5_traction_and_liveness: 14,
       P6_transparency_integrity: 12,
     },
-    caps: { team_prior_rug: 10, abandoned_or_dormant: 25 },
+    caps: {
+      team_prior_rug: 10,
+      abandoned_or_dormant: 25,
+      // A recent nine-figure loss, or a loss equal to at least 25% of current
+      // TVL, is a failed capital-safety outcome until recovery is recorded.
+      // FAIL is intentionally distinct from AVOID: an exploit is not proof
+      // that the project committed fraud.
+      recent_critical_protocol_loss_without_recorded_recovery: 39,
+    },
     flags: [
       "no named team behind a project raising money or holding a token",
       "the team (or its members) rugged or abandoned a prior project",

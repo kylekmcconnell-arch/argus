@@ -57,6 +57,14 @@ const packet = (hacks: Array<Record<string, unknown>>) => buildScoringEvidencePa
     evidence_origin: "deterministic",
     artifact_verified: true,
     provider: "defillama",
+    protocol_incident: {
+      incident_date: String(incident.date ?? ""),
+      observed_at: "2026-07-24T12:00:00.000Z",
+      amount_usd: typeof incident.amountUsd === "number" ? incident.amountUsd : null,
+      reference_tvl_usd: 100_000_000,
+      recovery_status: incident.returnedFunds === true ? "recorded_full_return" : "no_recorded_full_return",
+      returned_amount_usd: typeof incident.returnedAmountUsd === "number" ? incident.returnedAmountUsd : null,
+    },
     finding_scope: {
       scope: "direct_subject",
       target_entity_key: "@driftprotocol",

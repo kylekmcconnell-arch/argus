@@ -568,6 +568,7 @@ export const PROJECT_SCORING_POLICY = [
   "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
   "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
   "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation. A completed token-identity assessment (the project-token-identity check) that binds no canonical token scores P3 at the low end for lack of demonstrated conduct history; it is a null result on this axis only, never adverse conduct evidence or counter-evidence against any other axis.",
+  "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
   "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end as a null result on this axis only, never counter-evidence against any other axis.",
   "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
   "A severe canonical-token market drawdown is material counter-evidence for P5 and must be cited, but price performance alone only caps otherwise exceptional traction and liveness at the solid band. It cannot erase verified current protocol usage or imply token misconduct.",
@@ -1727,9 +1728,21 @@ export function deriveProjectStrengthBands(
   const earlyStage = PROJECT_EARLY_STAGE.test(productStageText)
     && !PROJECT_MATURE_STAGE.test(productStageText);
   const catalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog);
-  const severeUnrecoveredProtocolIncident = catalog.some((artifact) => {
-    if (artifact.operation !== "findings:ProtocolSecurityIncident") return false;
-    const text = `${artifact.title} ${artifact.excerpt ?? ""}`;
+  const severeUnrecoveredProtocolIncident = records(packet.findings).some((finding) => {
+    if (recordText(finding, ["finding_type"], 80) !== "ProtocolSecurityIncident") return false;
+    const incident = finding.protocol_incident && typeof finding.protocol_incident === "object" && !Array.isArray(finding.protocol_incident)
+      ? finding.protocol_incident as Record<string, unknown>
+      : undefined;
+    if (incident) {
+      return incident.recovery_status === "no_recorded_full_return"
+        && typeof incident.amount_usd === "number"
+        && Number.isFinite(incident.amount_usd)
+        && incident.amount_usd >= 10_000_000;
+    }
+    // Backward-compatible replay for reports saved before structured incident
+    // predicates shipped. New reports never let this prose path govern a final
+    // score cap; it only preserves the existing two-axis strength ceiling.
+    const text = `${recordText(finding, ["claim"], 500) ?? ""}`;
     const amount = text.match(/\$([\d.]+)\s*([BM])\b/i);
     if (!amount || !/\bdoes not record returned funds\b/i.test(text)) return false;
     const amountUsd = Number(amount[1]) * (amount[2].toUpperCase() === "B" ? 1_000_000_000 : 1_000_000);
@@ -2072,6 +2085,9 @@ const compactTrustGraphScreen = (value: unknown): Record<string, unknown> | unde
 const compactFinding = (value: unknown): Record<string, unknown> | null => {
   if (!value || typeof value !== "object") return null;
   const f = value as Record<string, unknown>;
+  const protocolIncident = f.protocol_incident && typeof f.protocol_incident === "object" && !Array.isArray(f.protocol_incident)
+    ? compactObject(f.protocol_incident, 1)
+    : undefined;
   return {
     finding_type: clip(f.finding_type, 80),
     claim: clip(f.claim, 420),
@@ -2086,6 +2102,7 @@ const compactFinding = (value: unknown): Record<string, unknown> | null => {
     artifact_verified: typeof f.artifact_verified === "boolean" ? f.artifact_verified : undefined,
     content_hash: clip(f.content_hash, 64),
     trust_graph: compactTrustGraphPredicate(f.trust_graph),
+    protocol_incident: protocolIncident,
     finding_scope: compactFindingScope(f.finding_scope),
   };
 };

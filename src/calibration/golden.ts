@@ -370,6 +370,45 @@ export const GOLDEN: GoldenCase[] = [
     }),
     expect: { verdict: "AVOID", governing: SubjectClass.PROJECT, cap: "investigator_verified_fraud", score: { min: 0, max: 10 } },
   },
+  {
+    name: "project:critical-unrecovered-loss",
+    note: "strong historical fundamentals cannot lift a recent catastrophic protocol loss with no recorded full recovery above FAIL",
+    groundTruth: "harmful",
+    evidence: projectEvidence("@critical_loss_project", "Critical Loss Project", "Confirmed", {
+      findings: [{
+        finding_type: "ProtocolSecurityIncident",
+        claim: "DeFiLlama records a $295M protocol security incident with no recorded full return.",
+        source_url: "https://defillama.com/protocol/critical-loss-project",
+        source_date: "2026-04-01",
+        verification_status: "Verified",
+        independent_source_count: 1,
+        polarity: -1,
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        protocol_incident: {
+          incident_date: "2026-04-01",
+          observed_at: PROJECT_FIXTURE_CAPTURED_AT,
+          amount_usd: 295_000_000,
+          reference_tvl_usd: 211_000_000,
+          recovery_status: "no_recorded_full_return",
+          returned_amount_usd: null,
+        },
+        finding_scope: {
+          scope: "direct_subject",
+          target_entity_key: "@critical_loss_project",
+          target_entity_type: "project",
+          relationship_to_subject: "self",
+        },
+      }],
+      axes: completeAxes(SubjectClass.PROJECT, 0.85),
+    }),
+    expect: {
+      verdict: "FAIL",
+      governing: SubjectClass.PROJECT,
+      cap: "recent_critical_protocol_loss_without_recorded_recovery",
+      score: { min: 39, max: 39 },
+    },
+  },
 
   // ── evidence-integrity controls ──
   {

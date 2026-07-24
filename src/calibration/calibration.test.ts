@@ -34,6 +34,7 @@ describe("ARGUS calibration (golden set)", () => {
       "project:established-operating-protocol",
       "project:early-stage-clean",
       "project:verified-fraud-hard-stop",
+      "project:critical-unrecovered-loss",
       "abstain:missing-project-axis",
     ]));
     expect(projectCases.filter((candidate) => candidate.groundTruth === "clean").length).toBeGreaterThanOrEqual(2);

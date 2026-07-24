@@ -87,6 +87,20 @@ export interface TrustGraphPredicate {
 }
 
 /**
+ * Structured protocol-loss data used by deterministic project risk rules.
+ * Keep this separate from the prose claim so a dollar-sign regex can never
+ * decide a final score ceiling.
+ */
+export interface ProtocolIncidentPredicate {
+  incident_date: string | null;
+  observed_at: string;
+  amount_usd: number | null;
+  reference_tvl_usd: number | null;
+  recovery_status: "recorded_full_return" | "no_recorded_full_return";
+  returned_amount_usd: number | null;
+}
+
+/**
  * Entity attribution for a finding. Related-entity evidence is deliberately a
  * separate class from evidence about the audited subject: an allegation about
  * an associate or venture must never be silently rewritten as an allegation
@@ -114,6 +128,8 @@ export interface Finding extends EvidenceProvenance {
   content_hash?: string;
   /** Structured, engine-validated predicate for a frozen cross-report graph cap. */
   trust_graph?: TrustGraphPredicate;
+  /** Structured, provider-frozen predicate for protocol-loss severity rules. */
+  protocol_incident?: ProtocolIncidentPredicate;
   /** Exact entity the claim is about and how that entity relates to the subject. */
   finding_scope?: FindingScope;
   // Model output may surface a lead, but only a deterministically fetched (or
@@ -521,6 +537,40 @@ export class Audit {
       // surfaces, is disqualifying on its own.
       if (this.findings.some((f) => this.findingTargetsSubject(f) && f.finding_type === "ManipulationTooling" && f.verification_status === "Verified" && this.findingHasVerifiedArtifact(f)))
         keys.push("operates_manipulation_tooling");
+    } else if (role === SubjectClass.PROJECT) {
+      const recentCriticalLoss = this.findings.some((finding) => {
+        const incident = finding.protocol_incident;
+        if (
+          !incident
+          || !this.findingTargetsSubject(finding)
+          || finding.finding_type !== "ProtocolSecurityIncident"
+          || finding.verification_status !== "Verified"
+          || finding.independent_source_count < 1
+          || finding.evidence_origin !== "deterministic"
+          || finding.artifact_verified !== true
+          || !this.findingHasVerifiedArtifact(finding)
+          || incident.recovery_status !== "no_recorded_full_return"
+          || typeof incident.amount_usd !== "number"
+          || !Number.isFinite(incident.amount_usd)
+          || incident.amount_usd <= 0
+        ) return false;
+
+        const incidentAt = incident.incident_date ? Date.parse(incident.incident_date) : Number.NaN;
+        const observedAt = Date.parse(incident.observed_at);
+        const ageDays = (observedAt - incidentAt) / 86_400_000;
+        if (!Number.isFinite(ageDays) || ageDays < 0 || ageDays > 365) return false;
+
+        const tvl = typeof incident.reference_tvl_usd === "number"
+          && Number.isFinite(incident.reference_tvl_usd)
+          && incident.reference_tvl_usd > 0
+          ? incident.reference_tvl_usd
+          : null;
+        const catastrophicRelativeLoss = tvl !== null
+          && incident.amount_usd >= 10_000_000
+          && incident.amount_usd >= tvl * 0.25;
+        return incident.amount_usd >= 100_000_000 || catastrophicRelativeLoss;
+      });
+      if (recentCriticalLoss) keys.push("recent_critical_protocol_loss_without_recorded_recovery");
     } else if (role === SubjectClass.KOL) {
       if (
         this.wallets.some(

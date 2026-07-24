@@ -165,7 +165,15 @@ var PROFILES = {
       P5_traction_and_liveness: 14,
       P6_transparency_integrity: 12
     },
-    caps: { team_prior_rug: 10, abandoned_or_dormant: 25 },
+    caps: {
+      team_prior_rug: 10,
+      abandoned_or_dormant: 25,
+      // A recent nine-figure loss, or a loss equal to at least 25% of current
+      // TVL, is a failed capital-safety outcome until recovery is recorded.
+      // FAIL is intentionally distinct from AVOID: an exploit is not proof
+      // that the project committed fraud.
+      recent_critical_protocol_loss_without_recorded_recovery: 39
+    },
     flags: [
       "no named team behind a project raising money or holding a token",
       "the team (or its members) rugged or abandoned a prior project",
@@ -767,6 +775,19 @@ var Audit = class {
       )) keys.push("prior_rug_as_principal");
       if (this.findings.some((f) => this.findingTargetsSubject(f) && f.finding_type === "ManipulationTooling" && f.verification_status === "Verified" && this.findingHasVerifiedArtifact(f)))
         keys.push("operates_manipulation_tooling");
+    } else if (role === "PROJECT" /* PROJECT */) {
+      const recentCriticalLoss = this.findings.some((finding) => {
+        const incident = finding.protocol_incident;
+        if (!incident || !this.findingTargetsSubject(finding) || finding.finding_type !== "ProtocolSecurityIncident" || finding.verification_status !== "Verified" || finding.independent_source_count < 1 || finding.evidence_origin !== "deterministic" || finding.artifact_verified !== true || !this.findingHasVerifiedArtifact(finding) || incident.recovery_status !== "no_recorded_full_return" || typeof incident.amount_usd !== "number" || !Number.isFinite(incident.amount_usd) || incident.amount_usd <= 0) return false;
+        const incidentAt = incident.incident_date ? Date.parse(incident.incident_date) : Number.NaN;
+        const observedAt = Date.parse(incident.observed_at);
+        const ageDays = (observedAt - incidentAt) / 864e5;
+        if (!Number.isFinite(ageDays) || ageDays < 0 || ageDays > 365) return false;
+        const tvl = typeof incident.reference_tvl_usd === "number" && Number.isFinite(incident.reference_tvl_usd) && incident.reference_tvl_usd > 0 ? incident.reference_tvl_usd : null;
+        const catastrophicRelativeLoss = tvl !== null && incident.amount_usd >= 1e7 && incident.amount_usd >= tvl * 0.25;
+        return incident.amount_usd >= 1e8 || catastrophicRelativeLoss;
+      });
+      if (recentCriticalLoss) keys.push("recent_critical_protocol_loss_without_recorded_recovery");
     } else if (role === "KOL" /* KOL */) {
       if (this.wallets.some(
         (w) => w.sold_into_own_promo && (w.link_tier === "SelfDoxxed" || w.link_tier === "InvestigatorAttributed") && w.evidence_origin !== "model_lead" && w.artifact_verified !== false
@@ -2495,6 +2516,7 @@ var PROJECT_SCORING_POLICY = [
   "P1 team and identity: named founders or leaders, a verified official account or domain, and a verified operating or legal entity are strong evidence. Missing LinkedIn profiles, full legal names, or a complete staff directory are confidence gaps, not evidence that a publicly named team is weak or anonymous.",
   "P2 product substance: a live product, first-party documentation, public source repositories, current releases, and independent evidence of operation justify a strong score. A missing whitepaper or audit can limit the exceptional band, but must not erase a verified working product.",
   "P3 token conduct: verified canonical token identity, healthy observable market activity, and no verified adverse conduct justify a solid score. Reserve the exceptional band for verified token economics plus an independent security review. An unknown unlock schedule is a gap, not evidence of dumping or manipulation. A completed token-identity assessment (the project-token-identity check) that binds no canonical token scores P3 at the low end for lack of demonstrated conduct history; it is a null result on this axis only, never adverse conduct evidence or counter-evidence against any other axis.",
+  "A verified, recent critical protocol loss with no recorded full recovery is a failed capital-safety outcome. The deterministic engine limits the final project score to the FAIL band. Do not call the project fraudulent or malicious from the exploit alone.",
   "P4 backing and partners: score source-backed integrations, counterparties, ecosystem partners, backers, and investors. Independent reporting can establish a solid relationship; reserve the exceptional band for direct counterparty, first-party, or multi-source corroboration. Venture funding is not required. A bootstrapped project is not weaker merely because no VC round was found, and a checked-empty funding search is not counter-evidence when meaningful partnerships are verified. A completed backing assessment (the project-backing-partners check) that finds no verified backer or partner in the collected record scores P4 at the low end as a null result on this axis only, never counter-evidence against any other axis.",
   "P5 traction and liveness: current product activity plus concrete usage, volume, users, fees, TVL, transactions, or other market metrics justify a strong score. Social posting alone is only mild support, but verified live usage must not be reduced to moderate merely because another metric was not collected.",
   "A severe canonical-token market drawdown is material counter-evidence for P5 and must be cited, but price performance alone only caps otherwise exceptional traction and liveness at the solid band. It cannot erase verified current protocol usage or imply token misconduct.",
@@ -3302,9 +3324,13 @@ function deriveProjectStrengthBands(evidenceJson, axisCatalog2) {
   ].join(" ");
   const earlyStage = PROJECT_EARLY_STAGE.test(productStageText) && !PROJECT_MATURE_STAGE.test(productStageText);
   const catalog = extractScoringEvidenceCatalog(evidenceJson, axisCatalog2);
-  const severeUnrecoveredProtocolIncident = catalog.some((artifact) => {
-    if (artifact.operation !== "findings:ProtocolSecurityIncident") return false;
-    const text2 = `${artifact.title} ${artifact.excerpt ?? ""}`;
+  const severeUnrecoveredProtocolIncident = records(packet.findings).some((finding) => {
+    if (recordText(finding, ["finding_type"], 80) !== "ProtocolSecurityIncident") return false;
+    const incident = finding.protocol_incident && typeof finding.protocol_incident === "object" && !Array.isArray(finding.protocol_incident) ? finding.protocol_incident : void 0;
+    if (incident) {
+      return incident.recovery_status === "no_recorded_full_return" && typeof incident.amount_usd === "number" && Number.isFinite(incident.amount_usd) && incident.amount_usd >= 1e7;
+    }
+    const text2 = `${recordText(finding, ["claim"], 500) ?? ""}`;
     const amount = text2.match(/\$([\d.]+)\s*([BM])\b/i);
     if (!amount || !/\bdoes not record returned funds\b/i.test(text2)) return false;
     const amountUsd = Number(amount[1]) * (amount[2].toUpperCase() === "B" ? 1e9 : 1e6);
@@ -3534,6 +3560,7 @@ var compactTrustGraphScreen = (value) => {
 var compactFinding = (value) => {
   if (!value || typeof value !== "object") return null;
   const f = value;
+  const protocolIncident = f.protocol_incident && typeof f.protocol_incident === "object" && !Array.isArray(f.protocol_incident) ? compactObject(f.protocol_incident, 1) : void 0;
   return {
     finding_type: clip(f.finding_type, 80),
     claim: clip(f.claim, 420),
@@ -3547,6 +3574,7 @@ var compactFinding = (value) => {
     artifact_verified: typeof f.artifact_verified === "boolean" ? f.artifact_verified : void 0,
     content_hash: clip(f.content_hash, 64),
     trust_graph: compactTrustGraphPredicate(f.trust_graph),
+    protocol_incident: protocolIncident,
     finding_scope: compactFindingScope(f.finding_scope)
   };
 };
@@ -20162,6 +20190,7 @@ function recordProtocolSecurityIncidentFindings(evidence) {
     const classification = incident.classification ? `${incident.classification.toLowerCase()} ` : "";
     const technique = incident.technique ? ` Technique recorded: ${incident.technique}.` : "";
     const recovery = incident.returnedFunds ? incident.returnedAmountUsd ? ` DeFiLlama records $${(incident.returnedAmountUsd / 1e6).toFixed(incident.returnedAmountUsd % 1e6 === 0 ? 0 : 1)}M returned.` : " DeFiLlama records the funds as returned." : " DeFiLlama does not record returned funds for this incident.";
+    const fullReturnRecorded = incident.returnedFunds && (incident.returnedAmountUsd == null || incident.amountUsd == null || incident.returnedAmountUsd >= incident.amountUsd);
     evidence.findings.push({
       finding_type: "ProtocolSecurityIncident",
       claim: `DeFiLlama records ${amount} ${classification}security incident affecting ${protocol.name}${incident.date ? ` on ${incident.date}` : ""}.${technique}${recovery} This is evidence of protocol security and control failure, not by itself evidence of fraud or intentional misconduct.`,
@@ -20174,6 +20203,14 @@ function recordProtocolSecurityIncidentFindings(evidence) {
       evidence_origin: "deterministic",
       artifact_verified: true,
       provider: "defillama",
+      protocol_incident: {
+        incident_date: incident.date,
+        observed_at: protocol.capturedAt,
+        amount_usd: incident.amountUsd,
+        reference_tvl_usd: protocol.tvlUsd,
+        recovery_status: fullReturnRecorded ? "recorded_full_return" : "no_recorded_full_return",
+        returned_amount_usd: incident.returnedAmountUsd ?? null
+      },
       finding_scope: {
         scope: "direct_subject",
         target_entity_key: evidence.profile.handle,

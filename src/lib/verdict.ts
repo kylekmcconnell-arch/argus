@@ -104,6 +104,7 @@ export const CAP_LABELS: Record<string, string> = {
   claimed_advisory_contradicted: "Advisory claim contradicted",
   advised_rug_with_allocation: "Paid advisor to a confirmed rug",
   market_manipulation_services: "Market-manipulation services",
+  recent_critical_protocol_loss_without_recorded_recovery: "Critical protocol loss with no recorded full recovery",
   deception_confirmed: "Confirmed deception finding",
   investigator_verified_fraud: "Investigator-verified fraud",
 };

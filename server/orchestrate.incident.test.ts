@@ -37,6 +37,14 @@ describe("material project incident findings", () => {
       verification_status: "Verified",
       polarity: -1,
       provider: "defillama",
+      protocol_incident: {
+        incident_date: "2026-04-01",
+        observed_at: "2026-07-24T12:00:00.000Z",
+        amount_usd: 295_000_000,
+        reference_tvl_usd: 100_000_000,
+        recovery_status: "no_recorded_full_return",
+        returned_amount_usd: null,
+      },
       finding_scope: expect.objectContaining({
         scope: "direct_subject",
         target_entity_key: "@driftprotocol",
@@ -62,5 +70,36 @@ describe("material project incident findings", () => {
       polarity: -1,
     }));
     expect(evidence.profile.identity_confidence).toBe("Unverified");
+  });
+
+  it("does not treat a partial return as full recovery", () => {
+    const evidence = emptyEvidence("@partialrecovery");
+    evidence.roles = [SubjectClass.PROJECT];
+    evidence.protocolTvl = {
+      slug: "partial-recovery",
+      name: "Partial Recovery",
+      symbol: "PART",
+      tvlUsd: 100_000_000,
+      chains: ["Ethereum"],
+      chainBreakdown: [{ chain: "Ethereum", tvlUsd: 100_000_000 }],
+      geckoId: "partial-recovery",
+      hacks: [{
+        date: "2026-04-01",
+        amountUsd: 150_000_000,
+        returnedFunds: true,
+        returnedAmountUsd: 25_000_000,
+        classification: "Infrastructure",
+        technique: null,
+      }],
+      sourceUrl: "https://defillama.com/protocol/partial-recovery",
+      capturedAt: "2026-07-24T12:00:00.000Z",
+    };
+
+    recordProtocolSecurityIncidentFindings(evidence);
+
+    expect(evidence.findings[0].protocol_incident).toEqual(expect.objectContaining({
+      recovery_status: "no_recorded_full_return",
+      returned_amount_usd: 25_000_000,
+    }));
   });
 });

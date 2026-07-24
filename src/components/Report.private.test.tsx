@@ -85,6 +85,14 @@ describe("private person report evidence boundary", () => {
         sourceUrl: "https://defillama.com/protocol/drift",
         capturedAt: "2026-07-24T12:00:00.000Z",
       },
+      report: {
+        ...base.report,
+        governing_score: 39,
+        score_total: 39,
+        composite_verdict: "FAIL",
+        verdict: "FAIL",
+        cap_applied: "recent_critical_protocol_loss_without_recorded_recovery",
+      },
     };
 
     act(() => {
@@ -95,6 +103,7 @@ describe("private person report evidence boundary", () => {
     expect(alert?.textContent).toContain("Major protocol security incident");
     expect(alert?.textContent).toContain("$295M");
     expect(alert?.textContent).toContain("Apr 1, 2026");
+    expect(alert?.textContent).toContain("limits the report to 39/100");
     expect(alert?.textContent).toContain("Official X account suspended");
     expect(container.textContent).toContain("X profile metrics unavailable");
     expect(alert?.querySelector('a[href="https://x.com/driftprotocol"]')).not.toBeNull();

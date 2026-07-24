@@ -274,6 +274,11 @@ function CriticalSubjectAlerts({ dossier }: { dossier: Dossier }) {
                   {[incident.classification, incident.technique].filter(Boolean).join(" · ") || "Protocol security incident"}
                   <span className="text-ink-faint"> · {incidentRecovery}</span>
                 </p>
+                {dossier.report.cap_applied === "recent_critical_protocol_loss_without_recorded_recovery" && (
+                  <p className="mt-2 rounded-md border border-avoid/25 bg-avoid/[0.06] px-2.5 py-2 text-[11.5px] font-medium leading-relaxed text-avoid">
+                    This loss limits the report to 39/100 until a full recovery is recorded.
+                  </p>
+                )}
                 <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-faint">
                   {incidents.length > 1 && <span>{incidents.length} incidents recorded</span>}
                   {incidentSource && (
