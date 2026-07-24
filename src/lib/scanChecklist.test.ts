@@ -124,6 +124,24 @@ describe("summarizeChecks", () => {
     expect(summary.successful).toBe(2);
     expect(summary.findings).toBe(1);
   });
+
+  it("does not turn an uncorroborated follow graph tie into an adverse finding", () => {
+    const nonFollowing = summarizeChecks([{
+      checkId: "affiliations-associates",
+      label: "Affiliations & associates",
+      status: "finding",
+      note: "4 claimed relationships checked in the X follow graph · 1 did not follow the subject",
+    }]);
+    const contradicted = summarizeChecks([{
+      checkId: "affiliations-associates",
+      label: "Affiliations & associates",
+      status: "finding",
+      note: "1 claimed relationship was explicitly contradicted by the named party",
+    }]);
+
+    expect(nonFollowing.findings).toBe(0);
+    expect(contradicted.findings).toBe(1);
+  });
 });
 
 describe("tokenChecks", () => {

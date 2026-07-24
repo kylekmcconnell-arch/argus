@@ -79,8 +79,18 @@ export const NON_ADVERSE_FINDING_CHECK_IDS: ReadonlySet<string> = new Set<string
 ]);
 
 /** A "finding" that genuinely signals an adverse discovery (not a neutral null). */
-export const isAdverseFinding = (check: Pick<ScanCheck, "status" | "checkId">): boolean =>
-  check.status === "finding" && !(check.checkId !== undefined && NON_ADVERSE_FINDING_CHECK_IDS.has(check.checkId));
+export const isAdverseFinding = (check: Pick<ScanCheck, "status" | "checkId" | "note">): boolean => {
+  if (check.status !== "finding") return false;
+  if (check.checkId !== undefined && NON_ADVERSE_FINDING_CHECK_IDS.has(check.checkId)) return false;
+  // Older snapshots marked any claimed relationship that did not follow the
+  // subject as a finding. A missing follow is lack of corroboration, not a
+  // denial. Preserve a true adverse affiliation only when its stored note
+  // records an explicit contradiction, denial, distancing, or negative signal.
+  if (check.checkId === "affiliations-associates") {
+    return /\b(?:contradict(?:ed|ion)?|den(?:y|ied|ial)|distanc(?:ed|ing)|negative)\b/i.test(check.note ?? "");
+  }
+  return true;
+};
 
 export function summarizeChecks(checks: readonly ScanCheck[]): CoverageSummary {
   const count = (status: CheckStatus) => checks.filter((check) => check.status === status).length;

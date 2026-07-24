@@ -7052,7 +7052,8 @@ var xAdapter = {
     }
     const claims = [...ctx.evidence.testimonials, ...ctx.evidence.advised].filter((t) => t.claimed_endorser_handle || t.project_handle).slice(0, 6);
     let observedRelationships = 0;
-    let adverseRelationships = 0;
+    let nonFollowingRelationships = 0;
+    let contradictedRelationships = 0;
     const ackMap = await acknowledgments(claims.map((t) => t.claimed_endorser_handle || t.project_handle), ctx.handle);
     await Promise.all(
       claims.map(async (t) => {
@@ -7062,13 +7063,16 @@ var xAdapter = {
         if (follows !== null) {
           t.follows_subject = follows;
           observedRelationships += 1;
-          if (!follows) adverseRelationships += 1;
+          if (!follows) nonFollowingRelationships += 1;
         }
         if (ack?.source_url) {
           const lead = `Model-search acknowledgment lead: ${ack.ack}, ${ack.sentiment} (${ack.source_url}); independent artifact verification required`;
           t.notes = [t.notes, lead].filter(Boolean).join(" \xB7 ");
         }
         t.corroboration_verdict = classifyTestimonial(t);
+        if (t.corroboration_verdict === "Contradicted" /* CONTRADICTED */) {
+          contradictedRelationships += 1;
+        }
         const tone = t.corroboration_verdict === "Contradicted" /* CONTRADICTED */ ? "bad" : t.corroboration_verdict === "Corroborated" /* CORROBORATED */ ? "good" : "warn";
         ctx.emit({ phase: "Corroborate", label: `${endorser}`, detail: `${t.claimed_relationship ?? "endorser"}: ${t.corroboration_verdict}${follows === false ? " \xB7 does not follow subject" : ""}`, source: "X", tone });
       })
@@ -7076,8 +7080,8 @@ var xAdapter = {
     if (observedRelationships) {
       ctx.recordCheck?.({
         id: "affiliations-associates",
-        status: adverseRelationships ? "finding" : "confirmed",
-        note: `${observedRelationships} claimed relationship${observedRelationships === 1 ? "" : "s"} checked in the X follow graph${adverseRelationships ? ` \xB7 ${adverseRelationships} did not follow the subject` : ""}`,
+        status: contradictedRelationships ? "finding" : "confirmed",
+        note: `${observedRelationships} claimed relationship${observedRelationships === 1 ? "" : "s"} checked in the X follow graph${nonFollowingRelationships ? ` \xB7 ${nonFollowingRelationships} did not follow the subject and remain uncorroborated` : ""}${contradictedRelationships ? ` \xB7 ${contradictedRelationships} explicitly contradicted` : ""}`,
         provider: "twitterapi.io",
         sourceCount: observedRelationships
       });

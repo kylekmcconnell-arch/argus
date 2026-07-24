@@ -1337,7 +1337,8 @@ export const xAdapter: Adapter = {
       .filter((t) => (t as any).claimed_endorser_handle || (t as any).project_handle)
       .slice(0, 6);
     let observedRelationships = 0;
-    let adverseRelationships = 0;
+    let nonFollowingRelationships = 0;
+    let contradictedRelationships = 0;
     // ONE batched Grok call verifies every endorser; follow-graph checks
     // (twitterapi, cheap) stay per-claim and run alongside.
     const ackMap = await acknowledgments(claims.map((t) => (t as any).claimed_endorser_handle || (t as any).project_handle), ctx.handle);
@@ -1349,7 +1350,7 @@ export const xAdapter: Adapter = {
         if (follows !== null) {
           t.follows_subject = follows;
           observedRelationships += 1;
-          if (!follows) adverseRelationships += 1;
+          if (!follows) nonFollowingRelationships += 1;
         }
         if (ack?.source_url) {
           // Grok supplied the URL, so this is still a model lead: it has not
@@ -1360,6 +1361,9 @@ export const xAdapter: Adapter = {
           t.notes = [t.notes, lead].filter(Boolean).join(" · ");
         }
         t.corroboration_verdict = classifyTestimonial(t);
+        if (t.corroboration_verdict === TestimonialVerdict.CONTRADICTED) {
+          contradictedRelationships += 1;
+        }
         const tone = t.corroboration_verdict === TestimonialVerdict.CONTRADICTED ? "bad" : t.corroboration_verdict === TestimonialVerdict.CORROBORATED ? "good" : "warn";
         ctx.emit({ phase: "Corroborate", label: `${endorser}`, detail: `${(t as any).claimed_relationship ?? "endorser"}: ${t.corroboration_verdict}${follows === false ? " · does not follow subject" : ""}`, source: "X", tone });
       }),
@@ -1367,8 +1371,8 @@ export const xAdapter: Adapter = {
     if (observedRelationships) {
       ctx.recordCheck?.({
         id: "affiliations-associates",
-        status: adverseRelationships ? "finding" : "confirmed",
-        note: `${observedRelationships} claimed relationship${observedRelationships === 1 ? "" : "s"} checked in the X follow graph${adverseRelationships ? ` · ${adverseRelationships} did not follow the subject` : ""}`,
+        status: contradictedRelationships ? "finding" : "confirmed",
+        note: `${observedRelationships} claimed relationship${observedRelationships === 1 ? "" : "s"} checked in the X follow graph${nonFollowingRelationships ? ` · ${nonFollowingRelationships} did not follow the subject and remain uncorroborated` : ""}${contradictedRelationships ? ` · ${contradictedRelationships} explicitly contradicted` : ""}`,
         provider: "twitterapi.io",
         sourceCount: observedRelationships,
       });
