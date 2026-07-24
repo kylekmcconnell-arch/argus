@@ -63,48 +63,44 @@ export function SnapshotEvidenceControl({
   return (
     <section
       aria-label={`Snapshot v${snapshotVersion} evidence mode`}
-      className="panel px-4 py-3"
+      className="panel px-3.5 py-2.5"
     >
-      <div className="flex flex-wrap items-center gap-2">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-2">
         <span className="chip tint-signal">
           SNAPSHOT v{snapshotVersion}
         </span>
         <time dateTime={capturedAt} className="mono text-[11px] text-ink-faint">
           captured {capturedTime(capturedAt)}
         </time>
+        {enabled ? (
+          <p role="status" className="w-full text-[11.5px] leading-relaxed text-caution sm:ml-auto sm:w-auto">
+            Current intelligence · fetched now · not part of snapshot v{snapshotVersion} · does not change stored verdict
+          </p>
+        ) : (
+          <>
+            <p className="w-full text-[11.5px] leading-relaxed text-ink-faint sm:ml-1 sm:min-w-52 sm:flex-1">
+              Current intelligence panels are paused. Live panels are not part of the stored verdict.
+            </p>
+            <button
+              type="button"
+              onClick={loadCurrentIntelligence}
+              className="btn-chip tint-signal shrink-0"
+            >
+              Load current intelligence
+            </button>
+          </>
+        )}
       </div>
 
       {predatesEngineUpgrades(capturedAt) ? (
         <p
           role="note"
-          className="tint-caution mt-2 rounded-lg border px-3 py-2 text-[12.5px] leading-relaxed"
+          className="mt-2 border-t border-line/60 pt-2 text-[11.5px] leading-relaxed text-caution"
         >
           This snapshot predates engine upgrades that verify substantially more (founder identity recall,
           usage trends, float control). The frozen verdict is unchanged; a re-scan will answer more.
         </p>
       ) : null}
-
-      {enabled ? (
-        <p
-          role="status"
-          className="tint-caution mt-2 rounded-lg border px-3 py-2 text-[12.5px] leading-relaxed"
-        >
-          Current intelligence · fetched now · not part of snapshot v{snapshotVersion} · does not change stored verdict
-        </p>
-      ) : (
-        <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
-          <p className="max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">
-            Current intelligence panels are paused. They sit outside this snapshot and are not part of the stored verdict.
-          </p>
-          <button
-            type="button"
-            onClick={loadCurrentIntelligence}
-            className="btn-chip tint-signal shrink-0"
-          >
-            Load current intelligence
-          </button>
-        </div>
-      )}
     </section>
   );
 }

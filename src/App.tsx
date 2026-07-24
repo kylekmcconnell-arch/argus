@@ -1,5 +1,6 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useRef } from "react";
 import { AppShell } from "./components/AppShell";
+import { ArgusMark } from "./components/ArgusMark";
 import { AuditConsole } from "./components/AuditConsole";
 import { Landing } from "./components/Landing";
 import { logAudit, hydrateSharedLog, reconcileAuditOutcome } from "./lib/auditlog";
@@ -70,10 +71,14 @@ const WatchlistPage = lazy(() => import("./components/WatchlistPage").then((modu
 function RouteLoading() {
   return (
     <div className="flex min-h-[55vh] items-center justify-center" role="status" aria-live="polite">
-      <span className="flex items-center gap-2 text-[12.5px] text-ink-faint">
-        <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal" />
-        Loading investigation workspace…
-      </span>
+      <div className="panel flex w-[min(22rem,calc(100%-2rem))] items-center gap-3 px-4 py-3.5">
+        <ArgusMark size={30} live motion="searching" />
+        <div className="min-w-0 flex-1">
+          <p className="text-[12.5px] font-medium text-ink">Opening investigation workspace</p>
+          <p className="mt-0.5 text-[11px] text-ink-faint">Restoring the report and its evidence controls…</p>
+          <span className="scan-bar mt-2 block w-full" aria-hidden />
+        </div>
+      </div>
     </div>
   );
 }
@@ -99,10 +104,14 @@ function CaseBriefLoadingDialog() {
       className="fixed inset-0 z-[100] m-0 ml-auto h-[100dvh] max-h-none w-full max-w-[760px] border-0 border-l border-line bg-void p-0 text-ink shadow-2xl backdrop:bg-black/75"
     >
       <div className="flex h-full items-center justify-center" role="status" aria-live="polite">
-        <span className="flex items-center gap-2 text-[12.5px] text-ink-dim">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal" />
-          Opening case brief…
-        </span>
+        <div className="panel flex w-[min(22rem,calc(100%-2rem))] items-center gap-3 px-4 py-3.5">
+          <ArgusMark size={30} live motion="focused" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[12.5px] font-medium text-ink">Opening case brief</p>
+            <p className="mt-0.5 text-[11px] text-ink-faint">Binding the draft to this evidence snapshot…</p>
+            <span className="scan-bar mt-2 block w-full" aria-hidden />
+          </div>
+        </div>
       </div>
     </dialog>
   );

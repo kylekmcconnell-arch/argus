@@ -209,6 +209,26 @@
   background:
     linear-gradient(90deg, color-mix(in oklab, var(--tint) 9%, var(--color-panel)) 0%, var(--color-panel) 68%);
 }
+.report-section-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  border-top: 1px solid color-mix(in oklab, var(--color-line-2) 62%, transparent);
+  padding: 18px 2px 12px;
+}
+.report-section-heading::before {
+  content: "";
+  align-self: stretch;
+  width: 2px;
+  flex: 0 0 2px;
+  border-radius: 9999px;
+  background: color-mix(in oklab, var(--color-signal) 62%, transparent);
+}
+.report-section-heading > :first-child {
+  flex: 1;
+  min-width: 0;
+}
 .readiness-progress {
   display: block;
   width: 100%;
@@ -543,10 +563,14 @@
 
 .empty-state {
   border-radius: 12px;
-  border: 1px dashed var(--color-line-2);
-  padding: 32px 24px;
+  border: 1px dashed color-mix(in oklab, var(--color-line-2) 78%, transparent);
+  background:
+    radial-gradient(460px 180px at 50% 0%, color-mix(in oklab, var(--color-signal) 6%, transparent), transparent 72%),
+    color-mix(in oklab, var(--color-panel) 74%, transparent);
+  padding: 36px 24px;
   text-align: center;
   font-size: 12.5px;
+  line-height: 1.6;
   color: var(--color-ink-faint);
 }
 }
