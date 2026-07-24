@@ -8,14 +8,43 @@ import { providerAddressKey } from "./providerAddress";
 // wallets they already show (deployer, funder, top holders, cluster members) and
 // upgrade "0x1a2b…" to who the wallet actually belongs to. Best-effort: empty
 // until it resolves, and stays empty if Arkham isn't configured.
-export type ArkhamRisk = { level: string; category?: string; score: number; incomingUsd?: number; isSeed: boolean };
+export type ArkhamTag = { id: string; label: string; rank: number; chain?: string };
+export type ArkhamRiskSource = {
+  address: string;
+  category: string;
+  direction: "forward" | "backward";
+  scoreUsd: number;
+  contributionPct: number;
+  hops: number;
+  firstAt?: string;
+  lastAt?: string;
+};
+export type ArkhamRisk = {
+  level: string;
+  category?: string;
+  score: number;
+  incomingUsd?: number;
+  outgoingUsd?: number;
+  hopDistance?: number;
+  updatedAt?: string;
+  isSeed: boolean;
+  categoryScores: { category: string; score: number }[];
+  topSources: ArkhamRiskSource[];
+};
 export type ArkhamLabel = {
   name: string;
+  entityId?: string;
   type?: string;
   sublabel?: string;
   twitter?: string;
   website?: string;
+  linkedin?: string;
+  crunchbase?: string;
+  tags?: ArkhamTag[];
+  entityWalletCount?: number;
+  entityChainCount?: number;
   isCex: boolean;
+  isService?: boolean;
   isContract: boolean;
   risk?: ArkhamRisk;
 };

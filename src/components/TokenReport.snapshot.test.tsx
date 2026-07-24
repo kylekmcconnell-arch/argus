@@ -22,6 +22,7 @@ vi.mock("./ProjectResearch", () => ({ ProjectResearch: (props: Record<string, un
 vi.mock("./Counterparties", () => ({ Counterparties: (props: Record<string, unknown>) => { harness.livePanel("counterparties", props); return null; } }));
 vi.mock("./RiskPaths", () => ({ RiskPaths: (props: Record<string, unknown>) => { harness.livePanel("risk-paths", props); return null; } }));
 vi.mock("./Holdings", () => ({ Holdings: (props: Record<string, unknown>) => { harness.livePanel("holdings", props); return null; } }));
+vi.mock("./MoneyFlowStory", () => ({ MoneyFlowStory: (props: Record<string, unknown>) => { harness.livePanel("money-flow", props); return null; } }));
 vi.mock("./RingAlert", () => ({ RingAlert: (props: Record<string, unknown>) => { harness.livePanel("ring-alert", props); return null; } }));
 vi.mock("./AddInfo", () => ({ AddInfo: (props: Record<string, unknown>) => { harness.livePanel("add-info", props); return null; } }));
 vi.mock("./LinkEntity", () => ({ LinkEntity: (props: Record<string, unknown>) => { harness.livePanel("link-entity", props); return null; } }));

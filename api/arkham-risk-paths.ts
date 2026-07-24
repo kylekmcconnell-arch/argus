@@ -30,8 +30,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const addr = (typeof req.query.address === "string" ? req.query.address : "").trim();
   if (!addr || addr.length < 8) { res.status(400).json({ error: "address required" }); return; }
 
-  const ck = `arkham-paths:${providerAddressKey(addr)}:v1`;
-  const cached = await cacheGetJson<{ available: boolean; paths: unknown[] }>(ck);
+  const ck = `arkham-paths:${providerAddressKey(addr)}:v2`;
+  const cached = await cacheGetJson<{ available: boolean; paths: unknown[]; briefing?: unknown }>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
   const result = await fetchAddressRiskPaths(addr, key);
@@ -40,7 +40,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(200).json({ available: false, note: "Risk paths lookup failed." });
       return;
     }
-    const out = { available: true, paths: result.paths };
+    const out = { available: true, paths: result.paths, briefing: result.briefing };
     await cacheSetJson(ck, out);
     res.status(200).json(out);
   } finally {

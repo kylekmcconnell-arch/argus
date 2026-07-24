@@ -123,15 +123,28 @@ export interface DeployerRiskPath {
   score: number;
   usd: number;
   hops: number;
+  firstAt?: string;
+  lastAt?: string;
+}
+export interface DeployerRiskBriefing {
+  level: string;
+  score: number;
+  greatestCategory?: string;
+  incomingUsd: number;
+  outgoingUsd: number;
+  hopDistance?: number;
+  updatedAt?: string;
+  categoryScores: { category: string; score: number }[];
 }
 export interface DeployerRiskOutcome {
   available: boolean;
   paths: DeployerRiskPath[];
+  briefing?: DeployerRiskBriefing;
   completedAt: string;
 }
 export type ScreenDeployerRiskFn = (address: string) => Promise<DeployerRiskOutcome | undefined>;
 
-// Concerning-funding categories. Arkham's risk/paths endpoint only returns paths
+// Concerning-funding categories. Arkham's risk briefing only returns sources
 // that contribute to a risk score, so any returned path is already an exposure;
 // these split the tone (hard vs soft) for the surfaced finding.
 const SEVERE_RISK_CATEGORY = /sanction|hack|theft|exploit|ransom|scam|phish|stolen|fraud|terror/i;
@@ -151,9 +164,14 @@ export async function screenDeployerRisk(
   try {
     const r = await fetchImpl(`/api/deployer-risk?address=${encodeURIComponent(address)}`, { signal: AbortSignal.timeout(18000) });
     if (!r.ok) return { available: false, paths: [], completedAt };
-    const d = await r.json() as { available?: boolean; paths?: DeployerRiskPath[] };
+    const d = await r.json() as { available?: boolean; paths?: DeployerRiskPath[]; briefing?: DeployerRiskBriefing };
     if (d?.available !== true) return { available: false, paths: [], completedAt };
-    return { available: true, paths: Array.isArray(d.paths) ? d.paths : [], completedAt };
+    return {
+      available: true,
+      paths: Array.isArray(d.paths) ? d.paths : [],
+      briefing: d.briefing,
+      completedAt,
+    };
   } catch {
     return { available: false, paths: [], completedAt };
   }

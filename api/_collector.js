@@ -21719,7 +21719,12 @@ async function screenDeployerRisk(address, fetchImpl = fetch) {
     if (!r.ok) return { available: false, paths: [], completedAt };
     const d = await r.json();
     if (d?.available !== true) return { available: false, paths: [], completedAt };
-    return { available: true, paths: Array.isArray(d.paths) ? d.paths : [], completedAt };
+    return {
+      available: true,
+      paths: Array.isArray(d.paths) ? d.paths : [],
+      briefing: d.briefing,
+      completedAt
+    };
   } catch {
     return { available: false, paths: [], completedAt };
   }

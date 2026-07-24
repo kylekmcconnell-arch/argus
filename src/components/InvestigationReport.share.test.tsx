@@ -42,6 +42,7 @@ vi.mock("./ArkhamGraphBridge", () => ({ ArkhamGraphBridge: () => null }));
 vi.mock("./Counterparties", () => ({ Counterparties: (props: Record<string, unknown>) => { harness.livePanel("counterparties", props); return null; } }));
 vi.mock("./RiskPaths", () => ({ RiskPaths: (props: Record<string, unknown>) => { harness.livePanel("risk-paths", props); return null; } }));
 vi.mock("./Holdings", () => ({ Holdings: (props: Record<string, unknown>) => { harness.livePanel("holdings", props); return null; } }));
+vi.mock("./MoneyFlowStory", () => ({ MoneyFlowStory: (props: Record<string, unknown>) => { harness.livePanel("money-flow", props); return null; } }));
 vi.mock("./TokenSparkline", () => ({ TokenSparkline: () => { harness.livePanel("sparkline"); return null; } }));
 vi.mock("./NamesakeCheck", () => ({ NamesakeCheck: () => { harness.livePanel("namesake"); return null; } }));
 vi.mock("./ServiceAlert", () => ({ ServiceAlert: () => null }));

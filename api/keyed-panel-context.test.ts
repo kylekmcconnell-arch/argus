@@ -24,7 +24,9 @@ vi.mock("./_cache.js", () => ({
 
 import arkhamCounterpartiesHandler from "./arkham-counterparties";
 import arkhamHoldingsHandler from "./arkham-holdings";
+import arkhamMoneyFlowHandler from "./arkham-money-flow";
 import arkhamRiskPathsHandler from "./arkham-risk-paths";
+import arkhamTokenHoldersHandler from "./arkham-token-holders";
 import arkhamHandler from "./arkham";
 import clusterHandler from "./cluster";
 import cryptorankHandler from "./cryptorank";
@@ -57,6 +59,8 @@ const routes: Route[] = [
   { name: "arkham labels", handler: arkhamHandler, query: { address: ADDRESS }, costs: [{ provider: "arkham", op: "panel:arkham-labels", calls: 2, usd: 0, meta: "subscription/keyed" }] },
   { name: "arkham holdings", handler: arkhamHoldingsHandler, query: { address: ADDRESS, symbol: "ARGUS" }, costs: [{ provider: "arkham", op: "panel:arkham-holdings", calls: 1, usd: 0, meta: "subscription/keyed" }] },
   { name: "arkham counterparties", handler: arkhamCounterpartiesHandler, query: { address: ADDRESS }, costs: [{ provider: "arkham", op: "panel:arkham-counterparties", calls: 1, usd: 0, meta: "subscription/keyed" }] },
+  { name: "arkham money flow", handler: arkhamMoneyFlowHandler, query: { address: ADDRESS, chain: "ethereum" }, costs: [{ provider: "arkham", op: "panel:arkham-money-flow", calls: 2, usd: 0, meta: "subscription/keyed" }] },
+  { name: "arkham token holder groups", handler: arkhamTokenHoldersHandler, query: { address: ADDRESS, chain: "ethereum" }, costs: [{ provider: "arkham", op: "panel:arkham-token-holders", calls: 1, usd: 0, meta: "subscription/keyed" }] },
   { name: "arkham risk paths", handler: arkhamRiskPathsHandler, query: { address: ADDRESS }, costs: [{ provider: "arkham", op: "panel:arkham-risk-paths", calls: 1, usd: 0, meta: "subscription/keyed" }] },
   { name: "EVM deployer", handler: evmDeployerHandler, query: { address: ADDRESS, chain: "ethereum" }, costs: [{ provider: "etherscan", op: "panel:evm-deployer", calls: 1, usd: 0, meta: "subscription/keyed" }] },
   { name: "EVM cluster", handler: evmClusterHandler, query: { address: ADDRESS, chain: "ethereum" }, costs: [{ provider: "goplus", op: "panel:evm-cluster", calls: 1, usd: 0, meta: "keyless" }] },

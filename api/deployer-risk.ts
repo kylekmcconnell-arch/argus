@@ -11,7 +11,6 @@
 // guard against burning them. Budget exhaustion degrades the trace to "not run"
 // (never a false clean), which the checklist records as unknown.
 import type { VercelRequest, VercelResponse } from "@vercel/node";
-// @ts-ignore — bundled JS sibling
 import { cacheGetJson, cacheSetJson } from "./_cache.js";
 import { providerAddressKey } from "../src/lib/providerAddress.js";
 import { fetchAddressRiskPaths } from "./_arkham-core.js";
@@ -25,13 +24,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!key) { res.status(200).json({ available: false, note: "Arkham not configured." }); return; }
 
   // Share the panel cache: a scan-time trace warms the on-demand panel and vice versa.
-  const ck = `arkham-paths:${providerAddressKey(addr)}:v1`;
-  const cached = await cacheGetJson<{ available: boolean; paths: unknown[] }>(ck);
+  const ck = `arkham-paths:${providerAddressKey(addr)}:v2`;
+  const cached = await cacheGetJson<{ available: boolean; paths: unknown[]; briefing?: unknown }>(ck);
   if (cached) { res.status(200).json({ ...cached, _cached: true }); return; }
 
   const result = await fetchAddressRiskPaths(addr, key);
   if (!result.available) { res.status(200).json({ available: false }); return; }
-  const out = { available: true, paths: result.paths };
+  const out = { available: true, paths: result.paths, briefing: result.briefing };
   await cacheSetJson(ck, out);
   res.status(200).json(out);
 }

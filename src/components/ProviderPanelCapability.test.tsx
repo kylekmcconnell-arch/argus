@@ -4,12 +4,14 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Counterparties } from "./Counterparties";
+import { EntityConcentration } from "./EntityConcentration";
 import { EvmDeployer } from "./EvmDeployer";
 import { GithubForensics } from "./GithubForensics";
 import { HolderForensics } from "./HolderForensics";
 import { Holdings } from "./Holdings";
 import { IdentitySweep } from "./IdentitySweep";
 import { MarketIntel } from "./MarketIntel";
+import { MoneyFlowStory } from "./MoneyFlowStory";
 import { PersonGithub } from "./PersonGithub";
 import { RiskPaths } from "./RiskPaths";
 import { WalletClusters } from "./WalletClusters";
@@ -29,6 +31,8 @@ const expectedPaths = [
   "/api/cryptorank",
   "/api/arkham?",
   "/api/arkham-counterparties",
+  "/api/arkham-token-holders",
+  "/api/arkham-money-flow",
   "/api/arkham-risk-paths",
   "/api/arkham-holdings",
   "/api/evm-deployer",
@@ -50,6 +54,8 @@ function Panels({ panelCostToken }: { panelCostToken?: string }) {
         insiderPct={0}
         panelCostToken={panelCostToken}
       />
+      <EntityConcentration address={address} chain="ethereum" symbol="ARG" panelCostToken={panelCostToken} />
+      <MoneyFlowStory address={address} chain="ethereum" panelCostToken={panelCostToken} />
       <Counterparties address={address} subject="$ARG" panelCostToken={panelCostToken} />
       <RiskPaths address={address} panelCostToken={panelCostToken} />
       <Holdings address={address} symbol="ARG" panelCostToken={panelCostToken} />

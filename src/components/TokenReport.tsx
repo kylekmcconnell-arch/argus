@@ -20,6 +20,7 @@ import { AddInfo } from "./AddInfo";
 import { Counterparties } from "./Counterparties";
 import { RiskPaths } from "./RiskPaths";
 import { Holdings } from "./Holdings";
+import { MoneyFlowStory } from "./MoneyFlowStory";
 import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
 import { Unknowns } from "./Unknowns";
@@ -531,6 +532,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         {showCurrentIntelligence && panelCostToken && (
           <div className="mt-4">
             <OnChainForensics token={d} onAudit={onAudit} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />
+            {d.deployer && <div className="mt-3"><MoneyFlowStory address={d.deployer} chain={d.chain} panelCostToken={panelCostToken} /></div>}
             {d.deployer && <div className="mt-3"><Counterparties address={d.deployer} subject={`$${d.symbol}`} chain={d.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} /></div>}
             {d.deployer && <div className="mt-3"><RiskPaths address={d.deployer} panelCostToken={panelCostToken} /></div>}
             {d.deployer && <div className="mt-3"><Holdings address={d.deployer} symbol={d.symbol} panelCostToken={panelCostToken} /></div>}

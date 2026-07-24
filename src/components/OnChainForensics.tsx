@@ -6,6 +6,7 @@ import { OperatorNetwork } from "./OperatorNetwork";
 import { EvmDeployer } from "./EvmDeployer";
 import { BytecodeForensics } from "./BytecodeForensics";
 import { SanctionsScreen } from "./SanctionsScreen";
+import { EntityConcentration } from "./EntityConcentration";
 
 // Unified on-chain forensic suite. The token and investigation reports both ran
 // the same seven panels but mounted them in different orders and hand-wired the
@@ -26,6 +27,13 @@ export function OnChainForensics({ token, onAudit, panelCostToken, record = true
         holderCount={token.safety.holderCount}
         evmTop={token.topHolders.map((h) => ({ pct: h.percent, tag: h.tag, address: h.address, isContract: h.isContract }))}
         insiderPct={token.insiderPct}
+        panelCostToken={panelCostToken}
+      />
+      {/* one real-world entity can spread its balance across many wallets */}
+      <EntityConcentration
+        address={token.address}
+        chain={token.chain}
+        symbol={token.symbol}
         panelCostToken={panelCostToken}
       />
       {/* how many "top holders" are one hand? */}

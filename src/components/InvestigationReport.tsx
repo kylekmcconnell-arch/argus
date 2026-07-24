@@ -24,6 +24,7 @@ import { ArkhamGraphBridge } from "./ArkhamGraphBridge";
 import { Counterparties } from "./Counterparties";
 import { RiskPaths } from "./RiskPaths";
 import { Holdings } from "./Holdings";
+import { MoneyFlowStory } from "./MoneyFlowStory";
 import { TokenSnapshotVisuals } from "./TokenSnapshotVisuals";
 import { MarketPerformancePanel } from "./MarketPerformancePanel";
 import { UsageVisuals } from "./UsageVisuals";
@@ -1467,6 +1468,7 @@ export function InvestigationReport({
               <PanelRequestNotice failure={arkhamState} label="Wallet identity labels" className="mt-3" />
             )}
             {canRecordCurrentIntelligence && <ArkhamGraphBridge subject={`$${token.symbol}`} labels={arkham} />}
+            {token.deployer && <MoneyFlowStory address={token.deployer} chain={token.chain} panelCostToken={panelCostToken} />}
             {token.deployer && <Counterparties address={token.deployer} subject={`$${token.symbol}`} chain={token.chain} panelCostToken={panelCostToken} record={canRecordCurrentIntelligence} />}
             {token.deployer && <RiskPaths address={token.deployer} panelCostToken={panelCostToken} />}
             {token.deployer && <div className="mt-3"><Holdings address={token.deployer} symbol={token.symbol} panelCostToken={panelCostToken} /></div>}
