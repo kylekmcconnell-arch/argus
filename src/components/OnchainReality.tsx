@@ -102,8 +102,8 @@ export function OnchainReality({ promotions, wallets, symbolHints, onAudit }: { 
   return (
     <div className="panel p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="eyebrow">On-chain reality check</span>
-        {state === "loading" && <span className="text-[11px] text-ink-faint">tracing the promoted token on-chain…</span>}
+        <span className="eyebrow">Promoted token check</span>
+        {state === "loading" && <span className="text-[11px] text-ink-faint">checking the promoted token on the blockchain…</span>}
       </div>
 
       {tok && (
@@ -117,7 +117,7 @@ export function OnchainReality({ promotions, wallets, symbolHints, onAudit }: { 
 
       {subject?.deployer && (
         <div className="mt-2 text-[12.5px] text-ink-dim">
-          Deployer <span className="mono text-ink">{shortAddr(subject.deployer)}</span>
+          Token creator <span className="mono text-ink">{shortAddr(subject.deployer)}</span>
           {trail?.walletAgeDays != null && <> · wallet {trail.walletAgeDays}d old</>}
           {trail?.tokensCreated != null && (
             <> · <span className={trail.serialDeployer ? "font-medium text-avoid" : ""}>{trail.tokensCreated} token{trail.tokensCreated === 1 ? "" : "s"} minted{trail.serialDeployer ? " · serial deployer" : ""}</span></>
@@ -129,7 +129,7 @@ export function OnchainReality({ promotions, wallets, symbolHints, onAudit }: { 
       {sweepWallet && <FunderSweep wallet={sweepWallet} onAudit={onAudit} />}
 
       {state === "done" && !tok && !subject?.deployer && (
-        <div className="mt-1.5 text-[12.5px] text-ink-faint">The promoted token could not be resolved on-chain (thin, unlisted, or non-Solana).</div>
+        <div className="mt-1.5 text-[12.5px] text-ink-faint">ARGUS could not match the promoted token to a blockchain address. It may be too new, unlisted, or on an unsupported chain.</div>
       )}
     </div>
   );

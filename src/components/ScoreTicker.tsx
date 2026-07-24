@@ -28,7 +28,7 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
         event.preventDefault();
         onOpen(ref, kind);
       }}
-      title={presentedVerdict === "INCOMPLETE" ? "Open the report. A positive score is not cleared because evidence coverage is incomplete." : "Open the full report"}
+      title={presentedVerdict === "INCOMPLETE" ? "Open the report. Some required checks are still unfinished, so the early score is not ready to use." : "Open the full report"}
       aria-label={`Open stored ${e.kind} case for ${e.query}${typeof e.score === "number" ? `, score ${e.score}` : ""}`}
       className="group panel flex w-[240px] shrink-0 items-center gap-2.5 p-2.5 text-left transition hover:border-line-2 hover:bg-panel/80"
     >
@@ -57,7 +57,7 @@ function ScoreCard({ e, onOpen }: { e: LogEntry; onOpen: (ref: string, kind?: Re
 export function ScoreTicker({
   onOpen,
   filter,
-  label = "Recent cases · open a frozen snapshot",
+  label = "Recent cases · open a saved report",
   max = 12,
 }: {
   onOpen: (ref: string, kind?: ReportKind) => void;

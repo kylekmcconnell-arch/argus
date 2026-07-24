@@ -92,7 +92,7 @@ describe("DecisionBasis", () => {
     expect(container.textContent).toContain("Source links unavailable");
     expect(container.textContent).toContain("ARGUS will not guess which source was used");
     const rescan = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Rescan to capture lineage");
+      .find((button) => button.textContent?.trim() === "Rescan with source links");
     expect(rescan).toBeDefined();
     expect(rescan?.className).toContain("min-h-11");
     act(() => rescan?.click());

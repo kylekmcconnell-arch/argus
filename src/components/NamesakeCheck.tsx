@@ -14,7 +14,7 @@ type Namesake = {
 };
 
 const REL_META: Record<string, { label: string; color: string; blurb: string }> = {
-  created: { label: "created by namesake", color: "var(--color-caution)", blurb: "launched by the person it's named after; their track record IS the token's provenance" },
+  created: { label: "created by namesake", color: "var(--color-caution)", blurb: "The person it is named after launched it, so their track record matters." },
   endorsed: { label: "endorsed", color: "var(--color-pass)", blurb: "the namesake publicly backed this specific token" },
   acknowledged: { label: "acknowledged only", color: "var(--color-caution)", blurb: "mentioned by the namesake, but not endorsed" },
   denied: { label: "publicly denied", color: "var(--color-avoid)", blurb: "the namesake disavowed this token. Any implied affiliation is fake" },

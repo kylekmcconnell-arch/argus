@@ -20,7 +20,7 @@ describe("site recon copied evidence links", () => {
     const text = reconReportText(recon(), { reportVersionId: snapshotVersionId, version: 4 }, "https://argus.test");
 
     expect(text).toContain(`https://argus.test/?version=${snapshotVersionId}`);
-    expect(text).toContain("ARGUS immutable snapshot v4");
+    expect(text).toContain("ARGUS saved report v4");
     expect(text).not.toContain("?site=");
     expect(text).not.toContain("audited live");
   });
@@ -30,6 +30,6 @@ describe("site recon copied evidence links", () => {
 
     expect(text).not.toContain("?site=");
     expect(text).not.toContain("https://argus.test/");
-    expect(text).toContain("private live ARGUS session");
+    expect(text).toContain("private / not saved");
   });
 });

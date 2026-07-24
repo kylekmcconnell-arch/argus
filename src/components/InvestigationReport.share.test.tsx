@@ -189,7 +189,7 @@ describe("investigation exact sharing", () => {
     expect(container.textContent).toContain("Before you use this report");
     expect(container.textContent).toContain("Market size");
     expect(container.textContent).toContain("1 required safety check is not finished");
-    expect(container.querySelector<HTMLProgressElement>('progress[aria-label="Evidence outcomes recorded: 53%"]')?.value).toBe(53);
+    expect(container.querySelector<HTMLProgressElement>('progress[aria-label="Checks finished: 53%"]')?.value).toBe(53);
     expect(container.textContent).toContain("What supports this result");
     expect(container.textContent).not.toContain("INCOMPLETE");
     expect(container.textContent).not.toContain("Investigation incomplete");
@@ -484,7 +484,7 @@ describe("investigation exact sharing", () => {
     }));
 
     const tldr = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "copy tldr");
+      .find((button) => button.textContent?.trim() === "Copy summary");
     expect(tldr).toBeDefined();
     await act(async () => tldr?.click());
 

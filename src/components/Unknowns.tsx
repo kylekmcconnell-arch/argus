@@ -9,11 +9,11 @@ import type { TokenDossier } from "../token/audit";
 function gaps(d: TokenDossier): string[] {
   const g: string[] = [];
   const evm = d.chain !== "solana";
-  if (!d.safety.available) g.push("On-chain contract safety couldn't be verified (no keyless source on this chain). Scored on market data alone.");
-  else if (evm && !d.safety.openSource) g.push("The contract source is not verified or public. Its real behavior can't be read, only its deployed bytecode.");
-  if (evm && d.safety.available && !d.safety.simChecked) g.push("A live buy/sell wasn't simulated. Taxes and sellability are from static flags, not a real trade.");
-  if (!d.deployer) g.push("The deployer wallet couldn't be resolved. No funding trail or serial-launch check is possible.");
-  if (!d.cg) g.push("Not listed on CoinGecko. No exchange or independent market corroboration.");
+  if (!d.safety.available) g.push("ARGUS could not check the token contract on this network. The score uses market data only.");
+  else if (evm && !d.safety.openSource) g.push("The contract code is not public or verified, so ARGUS cannot fully inspect what it can do.");
+  if (evm && d.safety.available && !d.safety.simChecked) g.push("ARGUS did not test a real buy and sell. Fees and sellability come from contract settings instead.");
+  if (!d.deployer) g.push("ARGUS could not identify the wallet that created the token, so it could not trace its funding or other launches.");
+  if (!d.cg) g.push("CoinGecko does not list this token, so ARGUS could not confirm its market through that independent source.");
   if (!d.projectX) g.push("No official X/social account was found linked to the token.");
   if (!d.topHolders.length) g.push("Holder distribution is unavailable. Concentration can't be assessed.");
   return g;
@@ -37,7 +37,7 @@ export function Unknowns({ dossier }: { dossier: TokenDossier }) {
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-[11px] leading-snug text-ink-faint">These are gaps in coverage, not findings against the token. A scan you can't complete is still a reason for caution.</p>
+      <p className="mt-2 text-[11px] leading-snug text-ink-faint">These are unanswered checks, not accusations against the token. Missing information is still a reason to be careful.</p>
     </div>
   );
 }

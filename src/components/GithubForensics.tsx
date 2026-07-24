@@ -29,7 +29,7 @@ export function GithubForensics({ org, login, subjectKey, panelCostToken, record
     try {
       const qs = org ? `org=${encodeURIComponent(org)}` : `login=${encodeURIComponent(login ?? "")}`;
       const d = await fetchPanelJson<GithubData>(`/api/github-forensics?${qs}`, { headers: requiredPanelHeaders(panelCostToken) });
-      setData(d?.available === false ? { note: d.note ?? "GitHub forensics unavailable (no GITHUB_TOKEN)." } : d);
+      setData(d?.available === false ? { note: "GitHub code history is unavailable right now." } : d);
       // A leaked dev email is the strongest bridge key — two projects sharing one
       // are the same team. Record them so the graph connects them automatically.
       const leaks = Array.isArray(d.emailLeaks) ? d.emailLeaks : [];
@@ -44,12 +44,12 @@ export function GithubForensics({ org, login, subjectKey, panelCostToken, record
     }
   };
 
-  if (currentFailure) return <PanelRequestNotice failure={currentFailure} label="GitHub commit forensics" className="mt-3" />;
+  if (currentFailure) return <PanelRequestNotice failure={currentFailure} label="GitHub code history" className="mt-3" />;
   if (!data) {
     return (
       <div className="mt-3 panel p-4">
         <div className="flex items-center justify-between gap-2">
-          <span className="eyebrow">Commit forensics · {label}</span>
+          <span className="eyebrow">Code history · {label}</span>
           <button onClick={run} disabled={loading || !panelCostToken} className="btn-chip tint-signal disabled:opacity-50">
             {loading ? "mining commits…" : panelCostToken ? "reveal the devs →" : "saved report required"}
           </button>
@@ -69,7 +69,7 @@ export function GithubForensics({ org, login, subjectKey, panelCostToken, record
 
   return (
     <div className="mt-3 panel p-4">
-      <div className="eyebrow">Commit forensics · {label}</div>
+      <div className="eyebrow">Code history · {label}</div>
       {data.note && <div className={`mt-1.5 text-[12.5px] leading-relaxed ${leaks.length ? "text-avoid" : "text-ink-dim"}`}>{data.note}</div>}
 
       {leaks.length > 0 && (

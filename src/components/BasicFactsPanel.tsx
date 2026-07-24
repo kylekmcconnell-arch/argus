@@ -5,6 +5,7 @@ import {
   ShieldCheck,
   Warning,
 } from "@phosphor-icons/react";
+import { plainLanguageSummary } from "../lib/plainLanguage";
 import { canonicalBasicFactComparisonValue } from "../data/evidence";
 import {
   basicFactQuestionOutcome,
@@ -333,7 +334,7 @@ function answerFor(fact: BasicFactView): string {
   if (fact.status === "checked_empty") {
     return displayValue(fact.value) || explicitEmptyBasicFactAnswer(fact.predicate);
   }
-  if (fact.status === "unresolved") return "No verified answer was found in this snapshot.";
+  if (fact.status === "unresolved") return "No verified answer was found when this report was saved.";
   const value = displayValue(fact.value) || displayValue(fact.normalizedValue);
   const qualifier = canonicalBasicFactPredicate(fact.predicate) === "official_token"
     ? undefined
@@ -344,7 +345,7 @@ function answerFor(fact: BasicFactView): string {
   if (!answer) return fact.status === "conflicted"
     ? "Sources disagree and no governing answer was selected."
     : "A source was verified, but the answer could not be summarized.";
-  return answer;
+  return plainLanguageSummary(answer);
 }
 
 // The four answers an investor scans first. Everything else compresses.
@@ -368,7 +369,7 @@ function hardVerificationLine(
   }
   if (predicate === "official_token") {
     const onchain = sources.find((source) => source.sourceClass === "regulatory_or_onchain" && safeHttpUrl(source.url));
-    if (onchain) return { line: "Bound via the official account, never a name match", excerpt: onchain.excerpt };
+    if (onchain) return { line: "Confirmed through the official account, not just the name", excerpt: onchain.excerpt };
   }
   return null;
 }
@@ -744,7 +745,7 @@ export function BasicFactsPanel({
             <div>
               <p className="text-[13px] font-medium text-ink">Foundational answers are still being verified</p>
               <p className="mt-1 text-[11.5px] leading-relaxed text-ink-faint">
-                ARGUS found {discoveryLeads.length} possible answer{discoveryLeads.length === 1 ? "" : "s"}, but none cleared source verification in this snapshot.
+                ARGUS found {discoveryLeads.length} possible answer{discoveryLeads.length === 1 ? "" : "s"}, but the available sources did not confirm any of them.
               </p>
             </div>
           </div>

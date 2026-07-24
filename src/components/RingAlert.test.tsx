@@ -67,10 +67,10 @@ describe("RingAlert snapshot semantics", () => {
   it("presents an AVOID signal as a current overlay without revising the snapshot", async () => {
     await renderAlert(3);
 
-    expect(container.textContent).toContain("Current workspace network overlay");
-    expect(container.textContent).toContain("Current overlay suggests AVOID while stored v3 verdict remains unchanged.");
-    expect(container.textContent).toContain("was not captured in snapshot v3");
-    expect(container.textContent).not.toContain("REVISED");
+    expect(container.textContent).toContain("New connection warning");
+    expect(container.textContent).toContain("Connections found after this report was saved suggest AVOID. Saved report v3 has not changed.");
+    expect(container.textContent).toContain("This connection was found after saved report v3");
+    expect(container.textContent).not.toContain("UPDATED RESULT");
     expect(container.textContent).not.toContain("overrides the contract score");
     expect(container.textContent).not.toContain("Hard AVOID regardless");
   });
@@ -84,15 +84,15 @@ describe("RingAlert snapshot semantics", () => {
 
     await renderAlert(7);
 
-    expect(container.textContent).toContain("Current overlay suggests CAUTION while stored v7 verdict remains unchanged.");
-    expect(container.textContent).not.toContain("REVISED");
+    expect(container.textContent).toContain("Connections found after this report was saved suggest CAUTION. Saved report v7 has not changed.");
+    expect(container.textContent).not.toContain("UPDATED RESULT");
   });
 
   it("preserves revised-verdict behavior outside snapshot mode", async () => {
     await renderAlert();
 
-    expect(container.textContent).toContain("REVISED: AVOID");
-    expect(container.textContent).toContain("network reconciliation overrides the contract score");
+    expect(container.textContent).toContain("UPDATED RESULT: AVOID");
+    expect(container.textContent).toContain("A serious connection changes the token-only result");
     expect(container.textContent).toContain("Hard AVOID regardless of the stored verdict.");
   });
 
@@ -110,6 +110,6 @@ describe("RingAlert snapshot semantics", () => {
     };
     await act(async () => harness.subscriber?.());
 
-    expect(container.textContent).toContain("Current overlay suggests CAUTION while stored v5 verdict remains unchanged.");
+    expect(container.textContent).toContain("Connections found after this report was saved suggest CAUTION. Saved report v5 has not changed.");
   });
 });

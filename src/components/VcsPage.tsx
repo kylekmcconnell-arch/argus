@@ -96,7 +96,7 @@ export function VcsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, priv?:
       ) : (
         <p className="empty-state">
           Audit a fund or investor above. Anyone whose audit lands with Investor as the governing role shows up here,
-          with their portfolio and on-chain track record on the report.
+          with their portfolio and blockchain track record on the report.
         </p>
       )}
     </div>

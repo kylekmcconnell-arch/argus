@@ -56,9 +56,9 @@ describe("Providers immutable usage trail", () => {
     await act(async () => {
       root.render(<ProvidersPage />);
     });
-    await vi.waitFor(() => expect(container.textContent).toContain("argus.example · site snapshot v4"));
+    await vi.waitFor(() => expect(container.textContent).toContain("argus.example · site saved report v4"));
 
-    expect(container.textContent).toContain("Immutable usage trail");
+    expect(container.textContent).toContain("Saved source activity");
     expect(container.textContent).toContain("all recorded history");
     expect(container.textContent).toContain("9 events");
     expect(container.textContent).toContain("17 calls");

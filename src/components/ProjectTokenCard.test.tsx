@@ -83,7 +83,7 @@ describe("ProjectTokenCard", () => {
     }));
 
     const action = [...container.querySelectorAll("button")]
-      .find((button) => button.textContent?.includes("Open full on-chain investigation"));
+      .find((button) => button.textContent?.includes("Open full token report"));
     act(() => action?.click());
     expect(onAudit).toHaveBeenCalledWith(token.address);
   });

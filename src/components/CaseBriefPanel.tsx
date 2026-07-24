@@ -551,7 +551,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                 Case brief{viewer ? ` · ${viewer.case.query || viewer.case.ref}` : ""}
               </h2>
               <p id="case-brief-description" className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
-                A human decision record anchored to immutable ARGUS evidence. It never changes the model verdict.
+                A human review saved alongside an ARGUS report. It never changes the ARGUS result.
               </p>
             </div>
             <button
@@ -603,7 +603,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                   </div>
                   <div className="text-right">
                     <div className="text-[11px] uppercase tracking-wider text-ink-dim">
-                      {basisIsProposed ? "Proposed decision basis · unsaved" : "Saved analyst decision basis"}
+                      {basisIsProposed ? "Proposed report version · unsaved" : "Saved report version"}
                     </div>
                     <div className="mono mt-1 text-[13.5px] font-semibold text-ink">
                       {anchorVersion
@@ -611,7 +611,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                         : shortId(draft.anchorReportVersionId)}
                     </div>
                     <div className="mt-0.5 text-[11px] text-ink-dim">
-                      {anchorVersion ? `Immutable evidence captured ${readableDate(anchorVersion.createdAt)}` : "Exact immutable anchor"}
+                      {anchorVersion ? `Report saved ${readableDate(anchorVersion.createdAt)}` : "Exact saved report"}
                     </div>
                   </div>
                 </div>
@@ -623,7 +623,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     </dd>
                   </div>
                   <div>
-                    <dt className="uppercase tracking-wider text-ink-dim">Current model evidence</dt>
+                    <dt className="uppercase tracking-wider text-ink-dim">Current ARGUS report</dt>
                     <dd className="mono mt-1 text-ink-dim">
                       {currentVersion
                         ? `v${currentVersion.version} · ${currentVersion.verdict ?? "No verdict"}${currentVersion.score != null ? ` · ${currentVersion.score}` : ""}`
@@ -631,11 +631,11 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     </dd>
                   </div>
                   <div>
-                    <dt className="uppercase tracking-wider text-ink-dim">Evidence captured</dt>
+                    <dt className="uppercase tracking-wider text-ink-dim">Report saved</dt>
                     <dd className="mt-1 text-ink-dim">{readableDate(currentVersion?.createdAt)}</dd>
                   </div>
                   <div>
-                    <dt className="uppercase tracking-wider text-ink-dim">Coverage</dt>
+                    <dt className="uppercase tracking-wider text-ink-dim">Check status</dt>
                     <dd className="mono mt-1 text-ink-dim">{currentVersion ? `${currentVersion.completenessState} · ${currentVersion.attestationState.replaceAll("_", " ")}` : "N/A"}</dd>
                   </div>
                 </dl>
@@ -657,12 +657,12 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                       rel="noreferrer"
                       className="link-ext text-caution text-[11px]"
                     >
-                      Review current evidence v{currentVersion.version} in new tab
+                      Review current report v{currentVersion.version} in new tab
                     </a>
                   )}
                 </div>
                 <details className="mt-3 border-t border-line/70 pt-3">
-                  <summary className="cursor-pointer text-[11px] text-ink-dim">Exact immutable IDs</summary>
+                  <summary className="cursor-pointer text-[11px] text-ink-dim">Technical IDs</summary>
                   <dl className="mono mt-2 space-y-2 text-[11px] leading-relaxed text-ink-dim">
                     <div>
                       <dt className="uppercase tracking-wider">Case ID</dt>
@@ -684,9 +684,9 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                 <section role="alert" className="tint-caution rounded-xl border p-4">
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div className="max-w-[500px]">
-                      <div className="text-[12.5px] font-medium text-caution">New evidence is available</div>
+                      <div className="text-[12.5px] font-medium text-caution">A newer report is available</div>
                       <p className="mt-1 text-[12.5px] leading-relaxed text-ink-dim">
-                        This brief remains anchored to its older immutable snapshot. Review report v{currentVersion.version}, then explicitly re-anchor before saving conclusions based on it.
+                        This review still uses the older saved report. Review report v{currentVersion.version}, then choose the newer version before saving conclusions based on it.
                       </p>
                     </div>
                     {editable && (
@@ -915,7 +915,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                       {conflictBrief !== undefined
                         ? "Resolve the concurrent revision and evidence basis before saving."
                         : briefDirty
-                          ? "A material save creates the next immutable revision."
+                          ? "Saving important changes creates a new version."
                           : "No unsaved brief fields."}
                     </p>
                   </div>
@@ -996,8 +996,8 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
               <section aria-labelledby="revision-history-heading" className="panel p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <h3 id="revision-history-heading" className="text-[13.5px] font-medium text-ink">Immutable revision timeline</h3>
-                    <p className="mt-0.5 text-[11px] text-ink-dim">Every material save creates a new snapshot. Loaded revisions remain inspectable below.</p>
+                    <h3 id="revision-history-heading" className="text-[13.5px] font-medium text-ink">Version history</h3>
+                    <p className="mt-0.5 text-[11px] text-ink-dim">Every important save creates a new version. Older versions remain available below.</p>
                   </div>
                   <span className="mono text-[11px] text-ink-dim">
                     {viewer.hasOlderRevisions ? `Latest ${orderedRevisions.length} revisions` : `${orderedRevisions.length} revisions`}
@@ -1032,7 +1032,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                                       rel="noreferrer"
                                       className="link-ext"
                                     >
-                                      Review exact evidence
+                                      Review saved report
                                     </a>
                                   )}
                                 </div>
@@ -1061,7 +1061,7 @@ export function CaseBriefPanel({ target, onClose, onDirtyChange }: CaseBriefPane
                     onClick={() => void loadOlderRevisions()}
                     className="mt-3 min-h-8 rounded-lg border border-line-2 px-3 py-1.5 text-[11px] text-ink-dim transition hover:border-signal hover:text-signal-lift focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-signal disabled:opacity-60"
                   >
-                    {historyLoading === "revisions" ? "Loading older revisions…" : "Load older immutable revisions"}
+                    {historyLoading === "revisions" ? "Loading older versions…" : "Load older versions"}
                   </button>
                 )}
               </section>

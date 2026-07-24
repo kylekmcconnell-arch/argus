@@ -37,7 +37,7 @@ export function OutcomeDeltaStrip({
         </span>
       )}
       {verdictChanged && <span className="chip normal-case tracking-normal">verdict {prior.verdict} → {verdict}</span>}
-      {coverageChanged && <span className="chip normal-case tracking-normal">coverage {prior.completeness} → {coverage}</span>}
+      {coverageChanged && <span className="chip normal-case tracking-normal">report status {prior.completeness} → {coverage}</span>}
     </div>
   );
 }
@@ -107,9 +107,8 @@ export function ScoreContextStrip({
 }
 
 /**
- * Provider operations that ended in failure during the scan, said plainly on
- * screen. Recovered physical retries stay visible in the cost ledger but do
- * not produce this missing-evidence warning.
+ * Source checks that ended in failure during the scan, said plainly on screen.
+ * Raw provider diagnostics remain available behind a technical-details fold.
  */
 export function ProviderFailureNotice({ failures }: {
   failures?: Array<{ provider: string; op: string; failed: number; meta?: string }>;
@@ -120,16 +119,19 @@ export function ProviderFailureNotice({ failures }: {
   return (
     <div className="finding tint-avoid mt-3 px-4 py-3" role="alert">
       <p className="text-[12.5px] font-medium text-ink">
-        {operationCount} evidence operation{operationCount === 1 ? "" : "s"} could not complete
+        {operationCount} source check{operationCount === 1 ? "" : "s"} did not finish
         {totalAttempts > operationCount ? ` after ${totalAttempts} failed attempts` : ""}.
       </p>
-      <p className="mono mt-1 text-[10.5px] leading-relaxed text-ink-dim">
-        {failures.slice(0, 5).map((line) => `${line.provider} · ${line.op}${line.meta ? ` · ${line.meta.slice(0, 70)}` : ""}`).join("  |  ")}
-        {failures.length > 5 ? `  |  +${failures.length - 5} more` : ""}
+      <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
+        This may leave part of the report unanswered. Run a new scan later to try those sources again.
       </p>
-      <p className="mt-1 text-[11px] leading-relaxed text-ink-faint">
-        The affected lanes remain disclosed below. Rescan after those sources recover to fill the gaps.
-      </p>
+      <details className="mt-2 text-[10.5px] text-ink-faint">
+        <summary className="cursor-pointer select-none">Technical details</summary>
+        <p className="mono mt-1 leading-relaxed">
+          {failures.slice(0, 5).map((line) => `${line.provider} · ${line.op}${line.meta ? ` · ${line.meta.slice(0, 70)}` : ""}`).join("  |  ")}
+          {failures.length > 5 ? `  |  +${failures.length - 5} more` : ""}
+        </p>
+      </details>
     </div>
   );
 }
@@ -157,9 +159,9 @@ export function CopyTldrButton({ base, mint, className = "mt-2" }: { base: strin
         })().catch(() => setState("idle"));
       }}
       className={`mono ${className} rounded border border-line px-2 py-1 text-[10px] uppercase tracking-wider text-ink-dim transition hover:text-ink`}
-      title="Copies a three-line verdict summary plus a 30-day share link anyone can open"
+      title="Copy a short result summary and a 30-day link anyone can open"
     >
-      {state === "copied" ? "copied" : state === "working" ? "linking" : "copy tldr"}
+      {state === "copied" ? "Copied" : state === "working" ? "Creating link…" : "Copy summary"}
     </button>
   );
 }

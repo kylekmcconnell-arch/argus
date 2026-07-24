@@ -4,6 +4,7 @@ import {
   type ReportCanvasTone,
   type ReportCanvasNarrativeItem,
 } from "./ReportCanvasPrimitives";
+import { plainLanguageSummary } from "../lib/plainLanguage";
 
 export interface DecisionCanvasItem {
   label: string;
@@ -11,7 +12,7 @@ export interface DecisionCanvasItem {
 }
 
 function plainDecisionText(value: string): string {
-  return value
+  return plainLanguageSummary(value)
     .replace(/\s*\((?:evm|solana)\)\s*/gi, " ")
     .trim()
     .replace(/^Resolve deployer trail$/i, "Who deployed the contract")

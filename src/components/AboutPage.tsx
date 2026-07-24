@@ -18,8 +18,8 @@ const PHASES: { n: number; title: string; steps: [string, Status][] }[] = [
     ["Trace where the contract deployer's funds came from", "live"],
     ["Look for important connections to known people, wallets, and projects", "live"],
   ] },
-  { n: 4, title: "Contradiction detection", steps: [
-    ["Internal contradiction scan across all collected materials", "live"],
+  { n: 4, title: "Conflicting claims", steps: [
+    ["Compare claims across every source and flag disagreements", "live"],
   ] },
   { n: 5, title: "Special checks", steps: [
     ["Check the token contract for common scam risks", "live"],
@@ -91,9 +91,9 @@ export function AboutPage({ onStart }: { onStart: () => void }) {
         </div>
       </Section>
 
-      <Section title="Reproducible by design">
+      <Section title="Saved facts, consistent results">
         The same saved facts produce the same result. When the scoring rules change, ARGUS tests them against known
-        examples. Radar checks trending tokens, and Watchlist can flag changes such as trading funds being removed.
+        examples. Radar checks popular tokens, and Watchlist can flag changes such as trading funds being removed.
       </Section>
 
       <Section title="Every check ARGUS can run">
@@ -122,7 +122,7 @@ export function AboutPage({ onStart }: { onStart: () => void }) {
 
       <div className="mt-8 flex items-center gap-3">
         <button onClick={onStart} className="btn-primary px-5 py-2.5 text-[13.5px] font-medium">Start an audit</button>
-        <span className="text-[12.5px] text-ink-faint">API-only acquisition · evidence-disciplined · reproducible</span>
+        <span className="text-[12.5px] text-ink-faint">Current sources · saved reports · repeatable scoring</span>
       </div>
     </div>
   );

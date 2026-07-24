@@ -6,6 +6,7 @@ import {
   type ScanCheck,
   type CheckStatus,
 } from "../lib/scanChecklist";
+import { plainLanguageSummary } from "../lib/plainLanguage";
 
 // Transparent scan methodology: successful execution coverage and evidence
 // outcomes are separate. Collapsed by default so this reads as a trust footer.
@@ -39,13 +40,18 @@ function plainCheckLabel(value: string): string {
     .replace(/holder distribution/gi, "Large holders")
     .replace(/contract safety/gi, "Contract controls")
     .replace(/github forensics/gi, "Code history")
+    .replace(/code footprint\s*\(github\)/gi, "GitHub code history")
     .replace(/trust graph reconciliation/gi, "Known connections")
+    .replace(/trust[- ]graph connections/gi, "Known connections")
+    .replace(/canonical project token/gi, "Official project token")
+    .replace(/traction and liveness/gi, "Usage and activity")
+    .replace(/identity resolution/gi, "Identity and role")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function plainCheckNote(value: string): string {
-  return value
+  return plainLanguageSummary(value)
     .replace(/redeployed-rug clone check;\s*completion outcome not recorded/gi, "We could not finish checking whether this contract copies code from a known scam.")
     .replace(/completion outcome not recorded/gi, "This check did not finish.")
     .replace(/provider unavailable/gi, "The data source did not respond.")
@@ -54,7 +60,8 @@ function plainCheckNote(value: string): string {
     .replace(/mint authority active/gi, "more tokens can be created")
     .replace(/owner active/gi, "contract owner still has control")
     .replace(/transfers can be paused/gi, "the owner can stop transfers")
-    .replace(/no elevated concentration surfaced/gi, "no unusual wallet concentration found");
+    .replace(/no elevated concentration surfaced/gi, "no unusual wallet concentration found")
+    .replace(/frozen/gi, "saved");
 }
 
 export function MethodologyChecklist({ checks, id }: { checks: ScanCheck[]; id?: string }) {

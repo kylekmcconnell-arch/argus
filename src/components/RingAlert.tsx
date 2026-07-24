@@ -43,14 +43,14 @@ export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) 
         <div>
           <div className="flex flex-wrap items-center gap-2">
             <span className="chip">
-              Current workspace network overlay
+              New connection warning
             </span>
             <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}>
               suggests {snapshotSuggestion}
             </span>
           </div>
           <p className="mt-1.5 text-[12.5px] leading-relaxed">
-            Current overlay suggests {snapshotSuggestion} while stored v{snapshotVersion} verdict remains unchanged.
+            Connections found after this report was saved suggest {snapshotSuggestion}. Saved report v{snapshotVersion} has not changed.
           </p>
           {override?.riskEntities && override.riskEntities.length > 0 && (
             <div className="mt-2 flex flex-wrap gap-1.5">
@@ -63,8 +63,8 @@ export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) 
       ) : override ? (
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="verdict-pill tint-var" style={{ "--tint": color } as React.CSSProperties}>REVISED: {override.severity === "caution" ? "CAUTION" : "AVOID"}</span>
-            <span className="text-[11px] uppercase tracking-wider">network reconciliation overrides the contract score</span>
+            <span className="verdict-pill tint-var" style={{ "--tint": color } as React.CSSProperties}>UPDATED RESULT: {override.severity === "caution" ? "CAUTION" : "AVOID"}</span>
+            <span className="text-[11px] uppercase tracking-wider">A serious connection changes the token-only result</span>
           </div>
           <p className="mt-1.5 text-[12.5px] leading-relaxed">{override.line}</p>
           {override.riskEntities && override.riskEntities.length > 0 && (
@@ -78,7 +78,7 @@ export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) 
       ) : (
         <div className="flex items-center gap-2 text-[13.5px] font-semibold text-avoid">
           <span className="text-[15px]">⚠</span>
-          Connected to {conns.length === 1 ? "a flagged subject" : `${conns.length} flagged subjects`} in the shared graph
+          Connected to {conns.length === 1 ? "a flagged case" : `${conns.length} flagged cases`} in your saved reports
         </div>
       )}
       {conns.length > 0 && (
@@ -91,7 +91,7 @@ export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) 
               <span className="mono font-medium text-avoid">{c.other}</span>
             )}
             <span className={`verdict-pill ${c.otherVerdict === "FAIL" ? "tint-fail" : "tint-avoid"}`}>{c.otherVerdict}</span>
-            {c.direct && <span className="text-[11px]">directly surfaced in this subject's audit</span>}
+            {c.direct && <span className="text-[11px]">found directly in this report</span>}
             {c.ties.length > 0 && (
               <span className="flex flex-wrap items-center gap-1 text-[11px] text-ink-faint">
                 via
@@ -103,15 +103,15 @@ export function RingAlert({ handle, onAudit, snapshotVersion }: RingAlertProps) 
             )}
           </div>
         ))}
-        {conns.length > 4 && <div className="text-[11px] text-ink-faint">+{conns.length - 4} more. See the Trust graph.</div>}
+        {conns.length > 4 && <div className="text-[11px] text-ink-faint">+{conns.length - 4} more. See Connections.</div>}
       </div>
       )}
       <p className="mt-1.5 text-[12.5px] text-ink-faint">
         {snapshotMode
-          ? `This overlay comes from the current shared graph and was not captured in snapshot v${snapshotVersion}. Review it as new intelligence; it does not revise the stored verdict.`
+          ? `This connection was found after saved report v${snapshotVersion}. Treat it as new information. Run a new scan if you want it included in the score.`
           : conns.length > 0
-          ? "From the accumulated audit graph (yours + co-analysts'). A shared deployer, funder, or team member with a failed subject is a serial-operator signal no single audit can see."
-          : "Arkham risk + counterparty data on this subject's own wallets. Exposure to a hacker, mixer, or sanctioned entity is a serial-operator / laundering signal the contract score can't see."}
+          ? "ARGUS found a shared deployer, funder, or team member between this subject and a failed case. That can reveal a repeated operator that one report alone would miss."
+          : "Wallet data links this subject to a hacker, mixer, or sanctioned entity. The token contract score cannot detect that connection by itself."}
       </p>
     </div>
   );

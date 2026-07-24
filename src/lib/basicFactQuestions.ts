@@ -41,9 +41,9 @@ export function supportsExplicitEmptyBasicFact(predicate: string): boolean {
 export function explicitEmptyBasicFactAnswer(predicate: string): string {
   switch (canonicalBasicFactPredicate(predicate)) {
     case "official_token":
-      return "No verified official crypto token was found in this snapshot.";
+      return "No verified official crypto token was found when this report was saved.";
     case "public_security":
-      return "No verified public security was found in this snapshot.";
+      return "No verified public security was found when this report was saved.";
     case "security_incident":
       return "No material security incident was verified in the bounded public-source search.";
     default:

@@ -122,7 +122,7 @@ export function MarketIntel({ symbol, contract, chain, panelCostToken }: { symbo
           {/* metric grid — scannable fundamentals */}
           <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
             <div className="stat-tile"><div className="stat-label">market cap</div><div className="stat-value mt-0.5 font-semibold">{money(d.marketCap)}</div></div>
-            <div className="stat-tile"><div className="stat-label">fully diluted</div><div className="stat-value mt-0.5 font-semibold" style={fdvGap ? { color: "var(--color-caution)" } : undefined}>{money(d.fdv)}</div></div>
+            <div className="stat-tile" title="Value if every token were circulating"><div className="stat-label">all-token value (FDV)</div><div className="stat-value mt-0.5 font-semibold" style={fdvGap ? { color: "var(--color-caution)" } : undefined}>{money(d.fdv)}</div></div>
             {d.dilutionPct != null && <div className="stat-tile"><div className="stat-label">circulating</div><div className="stat-value mt-0.5 font-semibold" style={lowCirc ? { color: "var(--color-caution)" } : undefined}>{d.dilutionPct}%</div></div>}
             {d.volMcapRatio != null && <div className="stat-tile" title="24h volume / market cap"><div className="stat-label">vol / mcap</div><div className="stat-value mt-0.5 font-semibold">{d.volMcapRatio}</div></div>}
           </div>
@@ -141,7 +141,7 @@ export function MarketIntel({ symbol, contract, chain, panelCostToken }: { symbo
 
           {(fdvGap || lowCirc) && (
             <p className="mt-2.5 text-[12.5px] leading-relaxed text-caution">
-              {lowCirc ? `Only ${d.dilutionPct}% of max supply circulates` : "FDV far above market cap"}. Significant locked supply remains to hit the market{f?.hasNextUnlock ? ", with an unlock scheduled" : ""}.
+              {lowCirc ? `Only ${d.dilutionPct}% of max supply circulates` : "The all-token value is far above the current market cap"}. A large amount of locked supply could still enter the market{f?.hasNextUnlock ? ", with an unlock scheduled" : ""}.
             </p>
           )}
 

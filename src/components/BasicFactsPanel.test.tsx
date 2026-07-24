@@ -329,7 +329,7 @@ describe("BasicFactsPanel", () => {
     });
 
     expect(container.textContent).toContain("NASDAQ: COIN");
-    expect(container.textContent).toContain("No verified official crypto token was found in this snapshot.");
+    expect(container.textContent).toContain("No verified official crypto token was found when this report was saved.");
     expect(container.textContent).toContain("1 with no result");
     expect(container.textContent).toContain("10 questions");
     expect(container.querySelector('[aria-label="Completed empty basic-fact searches"]')?.textContent)
@@ -353,8 +353,8 @@ describe("BasicFactsPanel", () => {
     });
 
     const emptySearches = container.querySelector('[aria-label="Completed empty basic-fact searches"]');
-    expect(emptySearches?.textContent).toContain("No verified public security was found in this snapshot.");
-    expect(emptySearches?.textContent).toContain("No verified official crypto token was found in this snapshot.");
+    expect(emptySearches?.textContent).toContain("No verified public security was found when this report was saved.");
+    expect(emptySearches?.textContent).toContain("No verified official crypto token was found when this report was saved.");
     expect(container.textContent).toContain("2 with no result");
     expect(container.textContent).not.toContain("Foundational answers are still being verified");
   });

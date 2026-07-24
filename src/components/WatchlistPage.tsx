@@ -234,7 +234,7 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
                 <button onClick={() => onAudit(r.item.id)} className="mono min-w-0 flex-1 truncate text-left text-[13.5px] text-ink hover:text-signal-lift">
                   {r.item.label}
                   <span className="ml-2 text-[11px] text-ink-faint capitalize">
-                    {r.item.kind === "token" ? `${r.item.chain} · live refresh` : "person · stored snapshot"}
+                    {r.item.kind === "token" ? `${r.item.chain} · live refresh` : "person · saved report"}
                   </span>
                 </button>
 

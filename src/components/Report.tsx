@@ -84,6 +84,7 @@ import {
 } from "../lib/basicFactQuestions";
 import { summarizeFundingEvidence } from "../lib/fundingEvidence";
 import { ExpandableText } from "./ExpandableText";
+import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
 
 /* ── small primitives ─────────────────────────────────────────────── */
 
@@ -1550,7 +1551,7 @@ function reportBasicFactLeads(
       return [{
         predicate: "official_token",
         value: fact.value,
-        qualifier: "Reported by secondary sources; canonical token identity is not verified.",
+        qualifier: "Reported by other sources; the official token is not confirmed.",
         sourceUrl: primary?.url,
         sourceTitle: primary?.title,
         candidateUrls: additional.map((source) => source.url),
@@ -1636,7 +1637,7 @@ function reportBasicFacts(dossier: Dossier, audience: "project" | "investor" | "
     predicate: "product",
     value: product,
     normalizedValue: product.toLowerCase(),
-    qualifier: "first-party project description",
+    qualifier: "official project description",
     status: "verified",
     critical: true,
     sources: [{
@@ -1931,9 +1932,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         : "No open evidence checks remain.",
     },
   });
-  const readinessTitle = legacyCoverageNotCaptured ? "Coverage not captured" : readiness.title;
+  const readinessTitle = legacyCoverageNotCaptured ? "Older report: check details unavailable" : readiness.title;
   const readinessGuidance = legacyCoverageNotCaptured
-    ? "This report was saved before per-check results were recorded. The score is preserved for history, not as proof the checks ran."
+    ? "This report was saved before ARGUS recorded every check separately. The old score is kept for history, but it does not prove that every current check ran."
     : readiness.guidance;
   const presentedVerdict = presentation.displayVerdict === "UNVERIFIABLE"
     ? "UNVERIFIABLE_IDENTITY"
@@ -2197,7 +2198,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         counterCount: axis.counter.length,
         questionCount,
       });
-      const conciseRationale = axis.rationale.replace(/\s+/g, " ").trim();
+      const conciseRationale = plainLanguageSummary(axis.rationale);
       const firstSentence = conciseRationale.match(/^.*?[.!?](?:\s|$)/)?.[0]?.trim() ?? conciseRationale;
       const summary = firstSentence.length > 220
         ? `${firstSentence.slice(0, 217).trimEnd()}…`
@@ -2230,9 +2231,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     // the subject, never with our own process status.
     ...visibleContradictions.slice(0, 2).map((contradiction, index) => ({
       id: `contradiction-${index}`,
-      title: contradiction.claim,
-      detail: contradiction.conflict,
-      provenance: `${contradiction.severity} severity · ${contradiction.confidence} confidence`,
+      title: plainLanguageSummary(contradiction.claim),
+      detail: plainLanguageSummary(contradiction.conflict),
+      provenance: `${contradiction.severity} importance · ${contradiction.confidence} confidence`,
       href: "#contradictions" as `#${string}`,
     })),
     ...decisionBasisSummary.rows
@@ -2265,7 +2266,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .sort((left, right) => (left.weight ? left.score / left.weight : 1) - (right.weight ? right.score / right.weight : 1))
     .map((axis) => {
       const questions = Math.max(axis.gaps.length, axis.gapArtifacts.length);
-      const firstGap = (axis.gaps[0] ?? "").trim();
+      const firstGap = plainLanguageSummary(axis.gaps[0] ?? "");
       const title = bandTierFor(axis.axis) === "assessed_null"
         ? (ASSESSED_NULL_RISK_TITLES[axis.axis] ?? `${diligenceAreaLabel(axis.axis)} was assessed with no positive record.`)
         : firstGap && firstGap.length <= 140
@@ -2274,8 +2275,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       return {
         id: `low-axis-${axis.axis}`,
         title,
-        detail: axis.rationale,
-        provenance: `Limited evidence${questionMeta(questions)}`,
+        detail: plainLanguageSummary(axis.rationale),
+        provenance: `Limited source support${questionMeta(questions)}`,
         href: axisHref(axis.axis),
       };
     });
@@ -2300,7 +2301,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const axisGapQuestions: ReportCanvasNarrativeItem[] = decisionBasisSummary.rows.flatMap((axis) =>
     axis.gaps.map((gap, index) => ({
       id: `verify-axis-${axis.axis}-${index}`,
-      title: gap,
+      title: plainLanguageSummary(gap),
       detail: "Worth confirming before you invest.",
       provenance: "Not yet confirmed",
       href: axisHref(axis.axis),
@@ -2393,15 +2394,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     .map((axis) => {
       const open = axis.weight - axis.score;
       const tier = bandTierFor(axis.axis);
-      const firstGap = (axis.gaps[0] ?? "").trim();
+      const firstGap = plainLanguageSummary(axis.gaps[0] ?? "");
       return {
         id: `points-${axis.axis}`,
         title: `${diligenceAreaLabel(axis.axis)}: ${open} of ${axis.weight} points open`,
         detail: firstGap
           ? sentence(firstGap)
-          : "The open questions for this area are listed in the verification plan.",
+          : "The follow-up questions for this area are listed below.",
         provenance: tier
-          ? `${tier.replace(/_/g, " ")} evidence tier · scored ${axis.score}/${axis.weight}`
+          ? `${tier.replace(/_/g, " ")} source support · scored ${axis.score}/${axis.weight}`
           : `scored ${axis.score}/${axis.weight}`,
         href: axisHref(axis.axis),
       };
@@ -2410,7 +2411,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   // The link is appended at copy time (share link when mintable, app URL else).
   const tldrBase = [
     `ARGUS · ${f.display_name || f.handle} · ${presentedVerdict} ${report.governing_score ?? "N/A"}/100`,
-    f.headline,
+    plainLanguageSummary(f.headline),
     remainingPointsItems[0] ? `Top open item: ${remainingPointsItems[0].title}.` : "",
   ].filter(Boolean).join("\n");
   const confidenceLimits: ReportCanvasNarrativeItem[] = confidenceLimitsBase.slice(0, 6);
@@ -2429,7 +2430,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         f.projectToken.marketCapUsd != null ? `market cap ${usdCompact(f.projectToken.marketCapUsd)}` : null,
         f.projectToken.chain,
       ].filter(Boolean).join(" · "),
-      provenance: `Canonical token · verified via ${f.projectToken.verification === "official_x" ? "official X" : "official domain"}`,
+      provenance: `Official token · confirmed through ${f.projectToken.verification === "official_x" ? "official X" : "official website"}`,
       href: "#project-token" as `#${string}`,
     }] : []),
     ...(f.sourceArtifacts ?? []).map((artifact, index) => ({
@@ -2444,8 +2445,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       title: finding.claim,
       detail: `${finding.verification_status} finding with ${finding.independent_source_count} recorded source${finding.independent_source_count === 1 ? "" : "s"}.`,
       provenance: routingUnresolved
-        ? "Verified finding · excluded from scoring until routing resolves"
-        : "Verified finding · excluded because the scoring pass did not complete",
+        ? "Verified finding · not scored until ARGUS confirms the report type"
+        : "Verified finding · not scored because the scoring step did not finish",
       href: "#publishable-findings" as `#${string}`,
     })),
   ].filter((item, index, items) => items.findIndex((candidate) => candidate.title === item.title) === index).slice(0, 8);
@@ -2560,7 +2561,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       || basicFacts.some((fact) => canonicalBasicFactPredicate(fact.predicate) === "official_token"),
     );
     if (f.projectToken) {
-      heroProofChips.push({ key: "token", label: "Token verified", value: `$${f.projectToken.symbol}`, tone: "pass", href: "#project-token", title: `Canonical token bound via ${f.projectToken.verification === "official_x" ? "the official X account" : "the official domain"}, never a name match.` });
+      heroProofChips.push({ key: "token", label: "Token verified", value: `$${f.projectToken.symbol}`, tone: "pass", href: "#project-token", title: `Confirmed through ${f.projectToken.verification === "official_x" ? "the official X account" : "the official website"}, not just the token name.` });
     } else if (tokenQuestion && basicFactQuestionOutcome(tokenQuestion) === "checked_empty") {
       heroProofChips.push({ key: "token", label: "No official token", tone: "neutral", href: "#basic-facts", title: "A completed search found no verified official token." });
     } else if (tokenQuestion && tokenClaimObserved) {
@@ -2601,7 +2602,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     heroProofChips.push(
       readiness.status === "ready"
         ? { key: "coverage", label: "Checks", value: `${readiness.successful}/${readiness.applicable}`, tone: "pass", href: "#scan-methodology", title: `${readiness.coveragePercent}% of required checks finished.` }
-        : { key: "coverage", label: `Coverage ${readiness.coveragePercent}%`, value: `${readiness.successful}/${readiness.applicable}`, tone: "caution", href: "#scan-methodology", title: readinessGuidance },
+        : { key: "coverage", label: `${readiness.coveragePercent}% checked`, value: `${readiness.successful}/${readiness.applicable}`, tone: "caution", href: "#scan-methodology", title: readinessGuidance },
     );
   }
   // Findings lead, then what we FOUND. Absence-class caution chips stay
@@ -2633,17 +2634,17 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     }] : []),
     ...(fundingEvidence.totalKnownUsd > 0 ? [{
       key: "raised",
-      label: fundingEvidence.independentRoundCount > 0 ? "Documented funding" : "Indexed funding",
+      label: fundingEvidence.independentRoundCount > 0 ? "Confirmed funding" : "Funding record",
       value: `${fundingEvidence.independentRoundCount > 0 ? "≥" : ""}${usdCompact(fundingEvidence.totalKnownUsd)}`,
       sub: fundingEvidence.independentRoundCount > 0
-        ? `${fundingEvidence.rounds.length} evidenced round${fundingEvidence.rounds.length === 1 ? "" : "s"} · lower bound`
-        : `${fundingEvidence.rounds.length} disclosed round${fundingEvidence.rounds.length === 1 ? "" : "s"} · aggregator index`,
+        ? `${fundingEvidence.rounds.length} sourced round${fundingEvidence.rounds.length === 1 ? "" : "s"} · minimum known total`
+        : `${fundingEvidence.rounds.length} reported round${fundingEvidence.rounds.length === 1 ? "" : "s"} · third-party database`,
     }] : []),
     ...(f.projectToken?.deployedChains?.length ? [{
       key: "chains",
       label: "Chains",
       value: String(f.projectToken.deployedChains.length),
-      sub: "CoinGecko-id joined",
+      sub: "Matched through CoinGecko",
     }] : []),
   ];
 
@@ -2665,14 +2666,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               href={immutableReviewHref}
               target="_blank"
               rel="noreferrer"
-              title="The core report is saved. Open the exact immutable snapshot; live supplemental panels remain outside its verdict."
+              title="Open the exact saved report. New checks shown later do not change its score."
             >
               SAVED REPORT
             </a>
           ) : (
             <span
               className={`chip ${!versionContext && f.live ? "tint-signal" : ""}`}
-              title={versionContext ? `Frozen immutable report version ${versionContext.version}` : f.live ? "Collected live from data providers" : "Curated dossier (no provider keys configured)"}
+              title={versionContext ? `Saved report version ${versionContext.version}` : f.live ? "Collected in a new scan" : "Saved example report"}
             >
               {versionContext ? `VERSION ${versionContext.version}` : f.live ? "● LIVE SCAN" : "CURATED"}
             </span>
@@ -2701,7 +2702,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 onClick={() => void share()}
                 disabled={shareState === "creating"}
                 aria-live="polite"
-                title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"}
+                title={shareState === "error" ? "Share link could not be created or copied. Try again." : "Copy a report link that works for 30 days"}
                 className="btn-secondary min-h-11 gap-1.5 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60"
               >
                 <ShareNetwork aria-hidden="true" size={14} weight="bold" />
@@ -2733,7 +2734,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     type="button"
                     onClick={() => void archive()}
                     disabled={archiveState === "archiving"}
-                    title="Remove this case from active work while preserving its immutable evidence and history"
+                    title="Remove this case from active work while keeping its saved report and history"
                     className="w-full rounded-lg px-3 py-2 text-left text-[12.5px] text-ink-dim transition hover:bg-signal/10 hover:text-signal-lift disabled:cursor-wait disabled:opacity-60"
                   >
                     {archiveState === "archiving" ? "Archiving case…" : archiveState === "error" ? "Archive failed · retry" : "Archive case"}
@@ -2765,12 +2766,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         )}
         {persistencePending && (
           <div className="panel mt-4 px-4 py-3 text-[12.5px] text-ink-dim" role="status">
-            Saving the immutable audit before post-scan intelligence runs…
+            Saving this report before running extra checks…
           </div>
         )}
         {(persistenceFailed || persistenceMissingCapability) && (
           <div className="finding tint-caution mt-4 px-4 py-3 text-[12.5px]" role="alert">
-            Post-scan intelligence is paused because this audit is not safely bound to an immutable version. Rescan before spending on supplemental providers.
+            Extra checks are paused because this report was not saved correctly. Run a new scan before trying them again.
             {f.persistence?.state === "failed" && f.persistence.reason && (
               <span className="mono mt-1 block text-[11px] text-ink-faint">save error: {f.persistence.reason}</span>
             )}
@@ -2870,7 +2871,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
 
           <div
             className="order-3 flex flex-wrap items-center gap-5 border-t border-line/60 px-5 py-5 max-sm:grid max-sm:items-start max-sm:gap-4 lg:order-none"
-            aria-label="Decision readiness result"
+            aria-label="Report result and check status"
           >
             <div className="shrink-0 text-center max-sm:flex max-sm:items-center max-sm:gap-3 max-sm:text-left">
               <ScoreRing
@@ -2894,7 +2895,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               <CopyTldrButton base={tldrBase} mint={mintShareUrl} />
             </div>
             <div className="min-w-0 flex-1">
-              <div className="eyebrow mb-1.5">{presentation.resultLabel}</div>
+              <div className="eyebrow mb-1.5">{plainReportStatusLabel(presentation.resultLabel)}</div>
               <div className="flex flex-wrap items-center gap-2.5">
                 <span className={`display text-[44px] uppercase leading-none max-sm:text-[32px] ${verdictTextClass}`}>
                   {m.label}
@@ -2908,7 +2909,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   <span
                     className={`chip ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`}
                     title={readiness.status === "ready"
-                      ? "Every required safety check finished. Read the sources before relying on this result."
+                  ? "Every required safety check finished. Read the sources before relying on this result."
                       : "Some checks are still open. The report lists what is missing."}
                   >
                     {readiness.status === "ready" ? "ready to review" : readiness.status}
@@ -2919,12 +2920,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     className="mono text-[11px] text-ink-dim"
                     title="ARGUS scores each role separately. The lowest role score becomes the overall result."
                   >
-                    {ROLE_META[report.governing_role as SubjectClass].label.toLowerCase()} score used
+                    {ROLE_META[report.governing_role as SubjectClass].label.toLowerCase()} role set the final score
                   </span>
                 )}
               </div>
               <ExpandableText
-                text={presentation.final ? f.headline : legacyCoverageNotCaptured ? readinessGuidance : presentation.note}
+                text={plainLanguageSummary(presentation.final ? f.headline : legacyCoverageNotCaptured ? readinessGuidance : presentation.note)}
                 collapsedLength={240}
                 className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim"
               />
@@ -2947,12 +2948,12 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                     const adverseSignals = diligenceChecks.filter(isAdverseFinding).length
                       + visibleContradictions.length;
                     if (adverseSignals > 0) {
-                      return <span className="text-avoid">{adverseSignals} adverse {adverseSignals === 1 ? "signal" : "signals"}</span>;
+                      return <span className="text-avoid">{adverseSignals} warning {adverseSignals === 1 ? "sign" : "signs"}</span>;
                     }
                     // Never assert a zero under an adverse verdict; route to the basis instead.
                     return favorableVerdict
-                      ? <span>0 adverse findings</span>
-                      : <a href="#decision-basis" className="text-avoid underline-offset-2 hover:underline">see decision basis</a>;
+                      ? <span>0 warning signs</span>
+                      : <a href="#decision-basis" className="text-avoid underline-offset-2 hover:underline">see why this scored this way</a>;
                   })()}
                 </p>
               )}
@@ -2988,7 +2989,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             </dl>
           )}
 
-          <div className={`finding relative order-4 px-5 py-4 ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`} aria-label="Due-diligence readiness">
+          <div className={`finding relative order-4 px-5 py-4 ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`} aria-label="Safety check status">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">{readinessTitle}</span>
               <span className="text-[11px] text-ink-faint">
@@ -3000,7 +3001,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   className="ml-auto inline-flex min-h-8 items-center text-[11px] text-signal-lift underline-offset-2 hover:underline"
                 >
                   {decisionQuestionCount > 0
-                    ? `${decisionQuestionCount} open ${decisionQuestionCount === 1 ? "question" : "questions"}`
+                    ? `${decisionQuestionCount} follow-up ${decisionQuestionCount === 1 ? "question" : "questions"}`
                     : "Review checks"}
                 </a>
               )}
@@ -3025,7 +3026,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                 {onRescan && (
                   <button type="button" onClick={onRescan} className="btn-chip tint-signal min-h-11 shrink-0 gap-1.5 font-medium">
                     <ArrowsClockwise aria-hidden="true" size={14} weight="bold" />
-                    Rescan to capture coverage
+                    Rescan to record every check
                   </button>
                 )}
               </div>
@@ -3120,14 +3121,14 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   </h2>
                   <p className="mt-1.5 max-w-3xl text-[12.5px] leading-relaxed text-ink-dim">
                     {routingUnresolved
-                      ? "ARGUS could not confirm whether this is a project, organization, token, or person. The evidence below is still useful, but this snapshot is not ready for an investment decision."
-                      : `ARGUS identified this as a ${resolvedRoleLabel.toLowerCase()}, but the decision review did not finish. The evidence below is still useful, but this snapshot is not ready for an investment decision.`}
+                      ? "ARGUS could not confirm whether this is a project, organization, token, or person. The sources below may still help, but this report does not have a usable result."
+                      : `ARGUS identified this as a ${resolvedRoleLabel.toLowerCase()}, but the scoring step did not finish. The sources below may still help, but this report does not have a usable result.`}
                   </p>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <span className="chip tint-caution">No decision areas scored</span>
                     <span className="chip">{readiness.successful} checks completed</span>
-                    <span className="chip">{visibleIntelligenceCount} evidence items and leads</span>
-                    {providerGaps.length > 0 && <span className="chip tint-caution">{providerGaps.length} source gaps</span>}
+                    <span className="chip">{visibleIntelligenceCount} sources and possible leads</span>
+                    {providerGaps.length > 0 && <span className="chip tint-caution">{providerGaps.length} source checks did not finish</span>}
                   </div>
                 </div>
                 {onRescan && (
@@ -3154,11 +3155,11 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               items={decisionFrameworkUnavailable ? unscoredIntelNarrative : verdictNarrative}
               emptyCopy={decisionFrameworkUnavailable
                 ? routingUnresolved
-                  ? "No usable evidence was saved. Confirm what this subject is, review source coverage, and rerun the investigation."
-                  : "No usable evidence was saved. Review source coverage and retry the investigation."
+                  ? "No usable sources were saved. Confirm what this subject is, review which sources were available, and run the investigation again."
+                  : "No usable sources were saved. Review which sources were available and try the investigation again."
                 : favorableVerdict
-                  ? "No cited rationale is available in this snapshot. Review the underlying evidence before relying on the score."
-                  : "No adverse evidence driver is recorded for this result. Inspect the decision basis before relying on the stored verdict."}
+                  ? "This saved report does not explain the score. Review the sources before relying on it."
+                  : "No warning in the saved sources explains this result. Review why it scored this way before relying on it."}
             />
             <ReportCanvasNarrativeSection
               id="confidence-limits"
@@ -3168,8 +3169,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   ? "ARGUS needs to confirm what this subject is before it can score it."
                   : "ARGUS identified the subject, but the decision review did not finish."
                 : favorableVerdict
-                  ? "Verified risks, conflicts, and adverse findings. Things we have not checked yet are listed separately under open questions."
-                  : "Verified positive findings stay visible so an adverse verdict is shown in context."}
+                  ? "Verified risks and conflicting sources. Unanswered questions are listed separately below."
+                  : "Verified positive findings stay visible so a negative result is shown in context."}
               tone={decisionFrameworkUnavailable ? "caution" : favorableVerdict ? (report.cap_applied ? "avoid" : "caution") : "pass"}
               items={decisionFrameworkUnavailable ? confidenceLimits : countervailingNarrative}
               emptyCopy={decisionFrameworkUnavailable
@@ -3184,7 +3185,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             />
             {!decisionFrameworkUnavailable && decisionQuestionCount > 0 && (
               <p className="border-t border-line/60 py-3 text-[11.5px] text-ink-faint">
-                Still to check: <a href="#verification-next" className="text-caution underline-offset-2 hover:underline">{decisionQuestionCount} important {decisionQuestionCount === 1 ? "question" : "questions"}</a>.
+                Follow up on: <a href="#verification-next" className="text-caution underline-offset-2 hover:underline">{decisionQuestionCount} important {decisionQuestionCount === 1 ? "question" : "questions"}</a>.
               </p>
             )}
           </div>
@@ -3214,7 +3215,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           {remainingVerificationQuestions.length > 0 && (
             <details className="border-t border-line/60 py-4" open={printExpanded || undefined}>
               <summary className="cursor-pointer text-[13px] font-medium text-ink-dim hover:text-ink">
-                More open questions · {remainingVerificationQuestions.length}
+                More follow-up questions · {remainingVerificationQuestions.length}
               </summary>
               <ul className="mt-3 space-y-2">
                 {remainingVerificationQuestions.map((item) => (
@@ -3876,15 +3877,15 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               {providerGaps.length > 0 && (
                 <details id={diligenceChecks.length > 0 ? "provider-data-coverage" : "scan-methodology"} className="panel mt-2 px-4 py-3">
                   <summary className="cursor-pointer text-[12.5px] font-medium text-ink-dim">
-                    Data coverage notes · {providerGaps.length}
+                    Source problems · {providerGaps.length}
                   </summary>
                   <p className="mt-2 text-[11.5px] leading-relaxed text-ink-faint">
-                    These source availability notes explain coverage. They are not findings about the subject.
+                    These notes explain which sources did not work. They are not warnings about the subject.
                   </p>
                   <ul className="mt-2 divide-y divide-line/60">
                     {providerGaps.map((run) => (
                       <li key={run.id} className="flex flex-wrap items-start justify-between gap-2 py-2 text-[11.5px]">
-                        <span className="text-ink-dim">{run.label}</span>
+                        <span className="text-ink-dim">{plainLanguageSummary(run.label)}</span>
                         <span className="text-ink-faint">{run.state}</span>
                         {run.detail && <span className="w-full leading-relaxed text-ink-faint">{run.detail}</span>}
                       </li>

@@ -16,15 +16,15 @@ export function reconReportText(
     ? `${base}/?version=${encodeURIComponent(evidence.reportVersionId)}`
     : null;
   const provenance = evidence?.version
-    ? `· ARGUS immutable snapshot v${evidence.version}`
+    ? `· ARGUS saved report v${evidence.version}`
     : evidence?.reportVersionId
-      ? "· ARGUS immutable site recon"
+      ? "· ARGUS saved website report"
       : evidence?.privateSession
-        ? "· private live ARGUS session"
-        : "· live ARGUS site recon";
+        ? "· private / not saved"
+        : "· new ARGUS website check";
 
   return [
-    `${recon.title || host} · ${verdict ? `${verdict.verdict} ${verdict.score ?? "N/A"}/100` : recon.retrieval.status} · site${verdict?.capApplied ? ` (cap: ${verdict.capApplied.replace(/_/g, " ")})` : ""}`,
+    `${recon.title || host} · ${verdict ? `${verdict.verdict} ${verdict.score ?? "N/A"}/100` : recon.retrieval.status} · website${verdict?.capApplied ? ` (score limit: ${verdict.capApplied.replace(/_/g, " ")})` : ""}`,
     recon.identityLine,
     "",
     ...(verdict?.reasons ?? []).slice(0, 6).map((reason) => `${GLYPH[reason.tone] ?? "·"} ${reason.text}`),

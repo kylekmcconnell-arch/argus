@@ -112,7 +112,7 @@ export function RadarPage({ onAudit }: { onAudit: (id: string) => void }) {
             <h1 className="display-sm text-[24px] text-ink">Radar</h1>
           </div>
           <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">
-            Trending and freshly-listed tokens, audited live on-chain. Scams float to the top.
+            Trending and newly listed tokens, checked against live blockchain and market data. The riskiest results appear first.
           </p>
         </div>
         <div className="text-right text-[12.5px] text-ink-faint">

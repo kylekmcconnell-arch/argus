@@ -82,7 +82,7 @@ describe("supporting-page truth states", () => {
 
     await vi.waitFor(() => expect(container.textContent).toContain("Unavailable"));
     expect(container.textContent).toContain("Latest visible request failed");
-    expect(container.textContent).toContain("Credential readiness and observed request health");
+    expect(container.textContent).toContain("See which outside sources ARGUS can use and whether recent checks worked");
   });
 
   it("does not call an unconfigured or cached provider healthy", async () => {

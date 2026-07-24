@@ -216,14 +216,14 @@ describe("CaseBriefPanel", () => {
   it("keeps the human recommendation separate and requires explicit evidence re-anchoring", async () => {
     await renderPanel();
 
-    expect(container.textContent).toContain("Current model evidence");
+    expect(container.textContent).toContain("Current ARGUS report");
     expect(container.textContent).toContain("v4 · FAIL · 24");
     expect(container.textContent).toContain("v2 · CAUTION · 61");
     expect(container.textContent).toContain("Analyst recommendation");
-    expect(container.textContent).toContain("New evidence is available");
+    expect(container.textContent).toContain("A newer report is available");
     expect(container.textContent).toContain("Waiting on treasury signer evidence.");
     expect(container.querySelector<HTMLAnchorElement>("a[href='?version=report-old']")?.target).toBe("_blank");
-    expect(container.querySelector<HTMLAnchorElement>("a[href='?version=report-current']")?.textContent).toContain("Review current evidence v4");
+    expect(container.querySelector<HTMLAnchorElement>("a[href='?version=report-current']")?.textContent).toContain("Review current report v4");
 
     await act(async () => button("Re-anchor to v4").click());
     expect(button("Keep existing anchor").getAttribute("aria-pressed")).toBe("true");
@@ -444,7 +444,7 @@ describe("CaseBriefPanel", () => {
 
     await act(async () => button("Load older append-only notes").click());
     await settle();
-    await act(async () => button("Load older immutable revisions").click());
+    await act(async () => button("Load older versions").click());
     await settle();
 
     expect(harness.fetchOlderCaseBriefNotes).toHaveBeenCalledWith("case-token", {

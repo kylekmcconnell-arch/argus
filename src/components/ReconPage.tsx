@@ -22,6 +22,7 @@ import { reconResultPolicy } from "../lib/reconResultPolicy";
 import { reconReportText } from "../lib/reconReportText";
 import { fetchReconWebTeam } from "../lib/reconSupplements";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
+import { plainLanguageSummary } from "../lib/plainLanguage";
 
 // Turn a finished recon into a graph contribution: the project, its X account,
 // and (if found) its on-chain token + that token's own subgraph.
@@ -77,9 +78,9 @@ const OUTCOME_TONE: Record<string, string> = {
 };
 
 const COVERAGE: Record<string, { label: string; color: string; blurb: string }> = {
-  rendered: { label: "FULL COVERAGE", color: "var(--color-pass)", blurb: "Page retrieved directly." },
-  recovered: { label: "RECOVERED", color: "var(--color-caution)", blurb: "Direct fetch failed; content recovered by rendering the JS app." },
-  gap: { label: "COVERAGE GAP", color: "var(--color-unverifiable)", blurb: "Site could not be retrieved or rendered. No content claims are made." },
+  rendered: { label: "WEBSITE READ", color: "var(--color-pass)", blurb: "ARGUS read the website directly." },
+  recovered: { label: "WEBSITE READ", color: "var(--color-caution)", blurb: "The first attempt failed, so ARGUS opened the site like a browser and read it." },
+  gap: { label: "WEBSITE UNAVAILABLE", color: "var(--color-unverifiable)", blurb: "ARGUS could not open the website, so it makes no claims about its content." },
 };
 
 const EXAMPLES = ["neuro-mesh.io", "stripe.com"];
@@ -291,13 +292,12 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
       : undefined;
   return (
     <>
-      {openRecent && <ScoreTicker onOpen={openRecent} label="Recent site recons · click to open the report" filter={(e) => e.kind === "site"} />}
+      {openRecent && <ScoreTicker onOpen={openRecent} label="Recent website checks · open a saved report" filter={(e) => e.kind === "site"} />}
     <div className="mx-auto max-w-3xl px-6 py-12">
-      <h1 className="display-sm text-[24px] text-ink">Site recon</h1>
+      <h1 className="display-sm text-[24px] text-ink">Check a project website</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-        Point ARGUS at a project's website. It fetches, and when a site is a JavaScript app that returns only a
-        shell, it escalates to a rendering crawler instead of guessing. Crucially, when it cannot see something it
-        says so: a failed fetch becomes a coverage gap, never a confident "anonymous team."
+        Enter a project's website. ARGUS reads what the site says about the product, team, funding, and token.
+        If the site cannot be opened, ARGUS says so instead of guessing.
       </p>
 
       {snapshotContext && (
@@ -335,7 +335,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
           disabled={running}
           className="btn-primary shrink-0 px-4 py-2.5 text-[13.5px] font-medium disabled:opacity-50"
         >
-          {running ? "running…" : "Run recon"}
+          {running ? "checking…" : "Check website"}
         </button>
       </div>
       <div className="mt-2 flex items-center gap-2 text-[12px] text-ink-faint">
@@ -348,7 +348,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
       {/* retrieval trace — the fail -> escalate routing, shown */}
       {stages.length > 0 && (
         <div className="panel mt-6 overflow-hidden">
-          <div className="eyebrow border-b border-line px-4 py-2">Retrieval</div>
+          <div className="eyebrow border-b border-line px-4 py-2">How ARGUS opened the site</div>
           {stages.map((s, i) => (
             <div key={i} className="flex items-start gap-3 border-b border-line px-4 py-2.5 last:border-0">
               <span className="mono mt-0.5 shrink-0 text-[11px] text-ink-faint">{i + 1}</span>
@@ -370,7 +370,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
             This is {redirecting.name}'s site. Opening the full ${redirecting.symbol} report…
           </div>
-          <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A site recon only reads the website; ${redirecting.symbol} is a live token ({redirecting.chain}) whose official homepage is this domain, so ARGUS is running the full on-chain investigation instead.</p>
+          <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">A website check only reads the site. ${redirecting.symbol} is a live token on {redirecting.chain}, and this is its official website, so ARGUS is opening the full token report instead.</p>
         </div>
       ) : recon && (
         <>
@@ -388,7 +388,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                       <span className="chip tint-var" style={{ "--tint": COVERAGE[recon.retrieval.status].color } as React.CSSProperties}>
                         {COVERAGE[recon.retrieval.status].label}
                       </span>
-                      {v.capApplied && <span className="chip tint-avoid">cap · {v.capApplied.replace(/_/g, " ")}</span>}
+                      {v.capApplied && <span className="chip tint-avoid">score limit · {v.capApplied.replace(/_/g, " ")}</span>}
                       {briefBound && resultPolicy.canMutate && onOpenBrief && reconHost && (
                         <button
                           type="button"
@@ -416,14 +416,14 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                       </button>
                     </div>
                     {recon.title && <div className="mt-1 truncate text-[13.5px] text-ink-dim">{recon.title}</div>}
-                    <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">{teamKnown && TEAM_ABSENCE.test(recon.identityLine) ? "Team identified off the rendered page. See the Team section below." : recon.identityLine}</p>
+                    <p className="mt-1.5 text-[13.5px] leading-relaxed text-ink-dim">{teamKnown && TEAM_ABSENCE.test(recon.identityLine) ? "ARGUS found team members outside the website. See the Team section below." : plainLanguageSummary(recon.identityLine)}</p>
                   </div>
                 </div>
                 <div className="mt-3 space-y-1.5 border-t border-line/60 pt-3">
                   {v.reasons.filter((r) => !(teamKnown && TEAM_ABSENCE.test(r.text))).map((r, i) => (
                     <div key={i} className="flex items-start gap-2.5">
                       <span className="mono mt-0.5 shrink-0 text-[12.5px]" style={{ color: TONE[r.tone] }}>{GLYPH[r.tone]}</span>
-                      <span className="text-[13.5px] leading-snug text-ink-dim">{r.text}</span>
+                      <span className="text-[13.5px] leading-snug text-ink-dim">{plainLanguageSummary(r.text)}</span>
                     </div>
                   ))}
                 </div>
@@ -441,10 +441,10 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
               <div className="flex flex-wrap items-center gap-2">
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M3 12h4l3 8 4-16 3 8h4" /></svg>
                 <span className="text-[12.5px] font-medium text-signal-lift">This project has a live token: ${projToken.symbol}{projToken.rank ? ` · CoinGecko #${projToken.rank}` : ""} · {projToken.chain}</span>
-                <span className="mono ml-auto text-[11px] text-signal-lift">open full on-chain report →</span>
+                <span className="mono ml-auto text-[11px] text-signal-lift">open full token report →</span>
               </div>
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
-                The site recon only reads the website. Open the ${projToken.symbol} report for market intelligence, holder distribution, wallet clustering, deployer &amp; bytecode forensics, and the sanctions screen.
+                This check only reads the website. Open the ${projToken.symbol} report for market data, large holders, connected wallets, who created the token, copied contract code, and sanctions checks.
               </p>
             </button>
           )}
@@ -473,7 +473,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
               {recon.findings.filter((f) => !(teamKnown && TEAM_ABSENCE.test(f.claim))).map((f, i) => (
                 <div key={i} className="flex items-start gap-2.5">
                   <span className="mono mt-0.5 shrink-0 text-[12.5px]" style={{ color: TONE[f.tone] }}>{GLYPH[f.tone]}</span>
-                  <span className="text-[13.5px] leading-snug text-ink-dim">{f.claim}</span>
+                  <span className="text-[13.5px] leading-snug text-ink-dim">{plainLanguageSummary(f.claim)}</span>
                 </div>
               ))}
             </div>
@@ -483,7 +483,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
           {recon.pivot && (
             <div className="panel tint-var mt-3 p-4" style={{ "--tint": TONE[recon.pivot.reconcile.tone] } as React.CSSProperties}>
               <div className="flex items-center gap-2">
-                <span className="eyebrow">On-chain reality check</span>
+                <span className="eyebrow">Token claim check</span>
                 <span className="mono shrink-0 text-[12.5px]" style={{ color: TONE[recon.pivot.reconcile.tone] }}>{GLYPH[recon.pivot.reconcile.tone]}</span>
                 {recon.pivot.method === "name-search" && recon.pivot.found && (
                   <span className="chip">ticker match · unconfirmed</span>
@@ -504,7 +504,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                 </div>
               )}
 
-              <p className="mt-2 text-[13.5px] font-medium leading-relaxed text-ink">{recon.pivot.reconcile.line}</p>
+              <p className="mt-2 text-[13.5px] font-medium leading-relaxed text-ink">{plainLanguageSummary(recon.pivot.reconcile.line)}</p>
 
               {/* found token -> click through to the full token audit. Wording
                   makes clear a name-search token is being judged on its OWN,
@@ -547,14 +547,14 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                 </Card>
               )}
               {recon.funding.length > 0 && (
-                <Card title="Funding claims (unverified)">
+                <Card title="Funding claims to verify">
                   <div className="flex flex-wrap gap-1.5">
                     {recon.funding.map((f) => <span key={f} className="chip normal-case tracking-normal">{f}</span>)}
                   </div>
                 </Card>
               )}
               {recon.tokenSignals.length > 0 && !recon.isFund && (
-                <Card title="Token signals">
+                <Card title="Token clues">
                   <div className="flex flex-wrap gap-1.5">
                     {recon.tokenSignals.map((t) => <span key={t} className="chip normal-case tracking-normal">{t}</span>)}
                   </div>
@@ -580,7 +580,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
               <div className="mt-3 panel p-4">
                 <div className="flex items-center gap-2">
                   <span className="eyebrow">Team · {people.length} {people.length === 1 ? "person" : "people"}</span>
-                  {teamSearching && <span className="text-[11px] text-ink-faint">digging Google / LinkedIn / Crunchbase / X…</span>}
+                  {teamSearching && <span className="text-[11px] text-ink-faint">checking Google, LinkedIn, Crunchbase, and X…</span>}
                 </div>
                 {people.length > 0 ? (
                   <div className="mt-2 space-y-1.5">
@@ -604,7 +604,7 @@ export function ReconPage({ initialUrl, initialRecon, initialVersionContext, ini
                     ))}
                   </div>
                 ) : (
-                  !teamSearching && <p className="mt-1.5 text-[12.5px] text-ink-faint">No team members named on the site or dug up via web / LinkedIn / X search.</p>
+                  !teamSearching && <p className="mt-1.5 text-[12.5px] text-ink-faint">ARGUS did not find named team members on the website, LinkedIn, or X.</p>
                 )}
               </div>
             );

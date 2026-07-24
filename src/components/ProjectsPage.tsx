@@ -72,7 +72,7 @@ export function ProjectsPage({ onAudit, onOpenRecent }: { onAudit: (h: string, p
       <WorkspacePageHeader
         eyebrow="Project intelligence"
         title="Projects"
-        description={<>Investigate protocols, tokens, and products as organizations: the team behind them, product substance, token conduct, backing, liveness, and unresolved ownership questions.</>}
+        description={<>Investigate a project as a whole: who runs it, what it has built, how its token behaves, who backs it, whether people use it, and what is still unknown.</>}
         meta={<span className="chip tint-unverifiable">{projects.length} investigated</span>}
       />
 

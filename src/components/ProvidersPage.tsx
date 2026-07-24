@@ -223,10 +223,10 @@ export function ProvidersPage() {
 
   return (
     <div className="mx-auto max-w-5xl px-6 py-10">
-      <h1 className="display-sm text-[24px] text-ink">Data sources &amp; coverage</h1>
+      <h1 className="display-sm text-[24px] text-ink">Data sources and check status</h1>
       <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-        Credential readiness and observed request health across ARGUS. Configured means access is present; Healthy
-        means a recorded request succeeded. Secret values are never shown.
+        See which outside sources ARGUS can use and whether recent checks worked. “Connected” means access is set up.
+        “Healthy” means a recent check succeeded. Secret keys are never shown.
       </p>
       {data && (
         <div className="panel mt-5 grid grid-cols-2 gap-px overflow-hidden bg-line/60 sm:grid-cols-4" aria-label="Provider status summary">
@@ -235,7 +235,7 @@ export function ProvidersPage() {
             <span className="stat-value">{allProviders.length}</span>
           </div>
           <div className="stat-tile rounded-none">
-            <span className="stat-label">credentials present</span>
+            <span className="stat-label">sources connected</span>
             <span className="stat-value">{configured}/{providers.length}</span>
           </div>
           <div className="stat-tile rounded-none">
@@ -258,7 +258,7 @@ export function ProvidersPage() {
       )}
       {missing.length > 0 && (
         <div className="tint-caution mt-4 rounded-lg border px-3 py-2 text-[12.5px]">
-          {missing.length} required provider{missing.length === 1 ? "" : "s"} not configured: {missing.map((m) => m.label).join(", ")}.
+          {missing.length} required source{missing.length === 1 ? "" : "s"} not connected: {missing.map((m) => m.label).join(", ")}.
         </div>
       )}
 
@@ -272,7 +272,7 @@ export function ProvidersPage() {
           />
         ))}
 
-        {!data && !dataError && <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">loading provider status…</div>}
+        {!data && !dataError && <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">loading source status…</div>}
 
         {/* the bar: one labeled divider, then keyless sources as identical rows */}
         {keyless.length > 0 && (
@@ -292,16 +292,16 @@ export function ProvidersPage() {
 
       {usageError && data && (
         <p className="mt-3 text-[12.5px] leading-relaxed text-caution" role="status">
-          Request health could not be refreshed. Credential states above are still valid, but should not be read as live provider health.
+          Recent source activity could not be refreshed. The connection status above is still valid, but it may not reflect current availability.
         </p>
       )}
 
       <section className="mt-6" aria-labelledby="provider-usage-title">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            <h2 id="provider-usage-title" className="text-[15px] font-medium text-ink">Immutable usage trail</h2>
+            <h2 id="provider-usage-title" className="text-[15px] font-medium text-ink">Saved source activity</h2>
             <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-dim">
-              Each recorded report-bound provider request becomes an immutable event. Transport retries reuse that event; fresh panel runs append against the exact report version.
+              Each saved report records which outside sources ran, whether they worked, and their estimated cost. New checks are added without changing older report records.
             </p>
           </div>
           {usage && (
@@ -316,13 +316,13 @@ export function ProvidersPage() {
 
         <div className="panel mt-3 overflow-hidden">
           {!usage && !usageError && (
-            <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">loading immutable provider events…</div>
+            <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">loading source activity…</div>
           )}
           {usageError && (
             <div className="tint-caution px-4 py-3 text-[12.5px]" role="alert">{usageError}</div>
           )}
           {usage && usage.events.length === 0 && (
-            <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">No report-bound provider events have been recorded yet.</div>
+            <div className="px-4 py-6 text-center text-[12.5px] text-ink-faint">No saved source activity yet.</div>
           )}
           {usage && usage.events.length > 0 && (
             <div className="eyebrow border-b border-line/60 bg-void/30 px-4 py-2">
@@ -339,7 +339,7 @@ export function ProvidersPage() {
                   <span className="chip tint-var" style={{ "--tint": STATUS_COLOR[event.status] ?? "var(--color-ink-faint)" } as React.CSSProperties}>{event.status}</span>
                 </span>
                 <span className="mt-0.5 block text-[11px] text-ink-faint">
-                  {event.report ? `${event.report.label} · ${event.report.kind} snapshot v${event.report.version}` : "exact report version"}
+                  {event.report ? `${event.report.label} · ${event.report.kind} saved report v${event.report.version}` : "saved report"}
                   {` · ${event.actor}`}
                 </span>
                 {event.meta && <span className="mt-0.5 block truncate text-[11px] text-ink-faint" title={event.meta}>{event.meta}</span>}

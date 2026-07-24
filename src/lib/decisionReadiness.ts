@@ -45,11 +45,11 @@ const plural = (count: number, singular: string, pluralForm = `${singular}s`) =>
 
 function gapDescription(readiness: Pick<DecisionReadiness, "unknown" | "providerUnavailable" | "stale">): string {
   const gaps = [
-    readiness.unknown ? `${readiness.unknown} not completed` : "",
+    readiness.unknown ? `${readiness.unknown} did not finish` : "",
     readiness.providerUnavailable
-      ? `${plural(readiness.providerUnavailable, "provider path")} unavailable`
+      ? `${plural(readiness.providerUnavailable, "source")} unavailable`
       : "",
-    readiness.stale ? `${readiness.stale} stale` : "",
+    readiness.stale ? `${readiness.stale} out of date` : "",
   ].filter(Boolean);
 
   return gaps.join("; ");
@@ -166,11 +166,11 @@ export function deriveDecisionReadiness(
       return {
         ...base,
         title: coverage.findings > 0
-          ? "All checks finished: review the findings"
-          : "All checks finished",
+          ? "Safety checks finished: review the warnings"
+          : "Safety checks finished",
         guidance: coverage.findings > 0
-          ? `All ${plural(applicable, "check")} finished, and ${plural(coverage.findings, "finding")} need your review. This is research, not financial advice.`
-          : `All ${plural(applicable, "check")} finished. Read the sources before making a decision. This is not financial advice.`,
+          ? `All ${plural(applicable, "required check")} finished, and ${plural(coverage.findings, "warning")} ${coverage.findings === 1 ? "needs" : "need"} your review. Other questions are follow-ups, not failed safety checks. This is research, not financial advice.`
+          : `All ${plural(applicable, "required check")} finished. Other questions are follow-ups, not failed safety checks. Read the sources before making a decision. This is not financial advice.`,
       };
     }
     // Clearance granted under the coverage policy with enrichment gaps waived.
@@ -179,9 +179,9 @@ export function deriveDecisionReadiness(
     return {
       ...base,
       title: coverage.findings > 0
-        ? "Required checks finished: review the findings"
-        : "Required checks finished",
-      guidance: `${successful} of ${applicable} checks finished${readyGaps ? ` (${readyGaps})` : ""}. Every required safety check finished. The other open checks may add detail, but they do not block review. This is research, not financial advice.`,
+        ? "Safety checks finished: review the warnings"
+        : "Safety checks finished",
+      guidance: `${successful} of ${applicable} checks finished${readyGaps ? ` (${readyGaps})` : ""}. Every required safety check finished. The remaining questions may add detail, but they are not failed safety checks. This is research, not financial advice.`,
     };
   }
 

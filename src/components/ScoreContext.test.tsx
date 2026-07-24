@@ -39,7 +39,7 @@ describe("OutcomeDeltaStrip", () => {
     expect(container.textContent).toContain("since v4");
     expect(container.textContent).toContain("score 74 → 90 (+16)");
     expect(container.textContent).toContain("verdict CAUTION → PASS");
-    expect(container.textContent).toContain("coverage partial → complete");
+    expect(container.textContent).toContain("report status partial → complete");
     expect(container.querySelector(".tint-pass")).not.toBeNull();
   });
 
@@ -76,10 +76,10 @@ describe("ProviderFailureNotice", () => {
         { provider: "claude", op: "basic-facts-search", failed: 3 },
       ]} />);
     });
-    expect(container.textContent).toContain("2 evidence operations could not complete after 5 failed attempts.");
+    expect(container.textContent).toContain("2 source checks did not finish after 5 failed attempts.");
     expect(container.textContent).not.toContain("no fallback provider");
     expect(container.textContent).toContain("claude · record_verdict · http_400 credit balance too low");
-    expect(container.textContent).toContain("remain disclosed below");
+    expect(container.textContent).toContain("This may leave part of the report unanswered");
     expect(container.querySelector('[role="alert"]')).not.toBeNull();
   });
 

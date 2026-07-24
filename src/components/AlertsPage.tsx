@@ -8,7 +8,7 @@ import { X } from "@phosphor-icons/react";
 type Alert = { ref: string; subject?: string; label?: string; type?: "drift" | "ring"; detail?: string; at?: number; ts?: string };
 
 const TYPE_META: Record<string, { label: string; color: string }> = {
-  drift: { label: "on-chain drift", color: "var(--color-caution)" },
+  drift: { label: "blockchain change", color: "var(--color-caution)" },
   ring: { label: "flagged connection", color: "var(--color-avoid)" },
 };
 

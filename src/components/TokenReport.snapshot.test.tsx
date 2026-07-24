@@ -254,7 +254,7 @@ describe("token report supplemental evidence boundary", () => {
     act(() => copy?.click());
     const copiedReport = String(harness.clipboard.mock.calls.at(-1)?.[0] ?? "");
     expect(copiedReport).toContain(`?version=${versionContext.reportVersionId}`);
-    expect(copiedReport).toContain("ARGUS immutable snapshot v2");
+    expect(copiedReport).toContain("ARGUS saved report v2");
     expect(copiedReport).not.toContain("?t=");
     expect(copiedReport).not.toContain("audited live");
 
@@ -276,7 +276,7 @@ describe("token report supplemental evidence boundary", () => {
     const pending = dossier({ persistence: { state: "pending" } });
     render(pending);
 
-    expect(container.textContent).toContain("Saving the immutable scan");
+    expect(container.textContent).toContain("Saving this report before running extra checks");
     expect(harness.livePanel).not.toHaveBeenCalled();
     expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({ panelCostToken: undefined }));
 
@@ -338,7 +338,7 @@ describe("token report supplemental evidence boundary", () => {
       .find((button) => button.textContent?.trim() === "Copy report");
     act(() => copy?.click());
     const copiedReport = String(harness.clipboard.mock.calls.at(-1)?.[0] ?? "");
-    expect(copiedReport).toContain("private live ARGUS session");
+    expect(copiedReport).toContain("private ARGUS scan");
     expect(copiedReport).not.toContain("?t=");
     expect(copiedReport).not.toContain("?version=");
   });
@@ -354,7 +354,7 @@ describe("token report supplemental evidence boundary", () => {
       },
     }));
 
-    expect(container.textContent).toContain("RISK SIGNAL");
+    expect(container.textContent).toContain("RISK WARNING");
     expect(container.textContent).toContain("FAIL");
     expect(container.textContent).toContain("risk score");
     expect(container.textContent).toContain("some checks are still open");
@@ -363,7 +363,7 @@ describe("token report supplemental evidence boundary", () => {
       .find((button) => button.textContent?.trim() === "Copy report");
     act(() => copy?.click());
     const copiedReport = String(harness.clipboard.mock.calls.at(-1)?.[0] ?? "");
-    expect(copiedReport).toContain("RISK SIGNAL: FAIL");
-    expect(copiedReport).toContain("INVESTIGATION INCOMPLETE");
+    expect(copiedReport).toContain("RISK WARNING: FAIL");
+    expect(copiedReport).toContain("CHECKS INCOMPLETE");
   });
 });

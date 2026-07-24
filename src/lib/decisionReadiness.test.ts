@@ -52,8 +52,8 @@ describe("deriveDecisionReadiness", () => {
       stale: 1,
       notApplicable: 1,
     });
-    expect(result.guidance).toContain("2 not completed");
-    expect(result.guidance).toContain("1 provider path unavailable");
+    expect(result.guidance).toContain("2 did not finish");
+    expect(result.guidance).toContain("1 source unavailable");
     expect(result.guidance).toContain("Do not rely on the score or result yet");
   });
 
@@ -94,9 +94,9 @@ describe("deriveDecisionReadiness", () => {
       unresolved: 0,
       findings: 1,
       checkedEmpty: 1,
-      title: "All checks finished: review the findings",
+      title: "Safety checks finished: review the warnings",
     });
-    expect(result.guidance).toContain("1 finding need your review");
+    expect(result.guidance).toContain("1 warning needs your review");
     expect(result.guidance).toContain("not financial advice");
   });
 

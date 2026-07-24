@@ -60,6 +60,7 @@ import {
   type BasicFactLeadView,
   type BasicFactView,
 } from "./BasicFactsPanel";
+import { plainLanguageSummary } from "../lib/plainLanguage";
 
 const initial = (s: string) => (s.replace(/^[@$]/, "")[0] ?? "?").toUpperCase();
 
@@ -201,10 +202,10 @@ function ProjectAccountStatusPill({
   if (reviewOpen || !verdict) {
     return (
       <StatusPill
-        label="Checks still open"
+        label="Account review open"
         color="var(--color-caution)"
         score={null}
-        title="One or more required checks did not finish. Open the report to see what is missing."
+        title="The token safety checks may be finished, but the separate review of the project’s X account still has missing checks."
       />
     );
   }
@@ -587,14 +588,14 @@ export function InvestigationReport({
   const nextStepItems = [...requiredGapChecks, ...enrichmentGapChecks]
     .slice(0, 6)
     .map((check) => ({
-      label: `${requiredGapChecks.includes(check) ? "Required: " : ""}Resolve ${check.label.toLowerCase()}`,
+      label: `${requiredGapChecks.includes(check) ? "Required: " : ""}Check ${check.label.toLowerCase()}`,
       detail: check.note,
     }));
   // One paste, whole verdict: composed for group chats. The link is appended
   // at copy time (share link when mintable, app URL else).
   const tldrBase = [
     `ARGUS · $${token.symbol} investigation · risk score ${observedTokenMeta.label}${token.score == null ? "" : ` ${token.score}/100`} · safety checks ${readinessLabel}`,
-    token.headline,
+    plainLanguageSummary(token.headline),
     nextStepItems[0] ? `Top open item: ${nextStepItems[0].label}.` : "",
   ].filter(Boolean).join("\n");
   const verifiedItems = recordedChecks.slice(0, 6).map((check) => ({ label: check.label, detail: check.note }));
@@ -616,9 +617,9 @@ export function InvestigationReport({
           <button onClick={onReset} className="btn-ghost flex min-h-9 items-center gap-1.5 px-1 text-[12.5px]">
             <ArrowLeft size={15} weight="bold" aria-hidden="true" /> New investigation
           </button>
-          <span className="mono text-[11px] text-ink-faint">/ full investigation</span>
+          <span className="mono text-[11px] text-ink-faint">/ token + project report</span>
           <span className={`chip ${versionContext ? "" : "tint-signal"}`}>
-            {versionContext ? `snapshot v${versionContext.version}` : "live scan"}
+            {versionContext ? `saved report v${versionContext.version}` : "new scan"}
           </span>
           <div className="order-3 flex w-full items-center gap-2 sm:order-none sm:ml-auto sm:w-auto sm:justify-end">
             {onOpenBrief && (
@@ -631,7 +632,7 @@ export function InvestigationReport({
             </a>
             <div className="hidden items-center gap-2 sm:flex">
               {canShare && (
-                <button type="button" onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable investigation link"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
+                <button type="button" onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Share link could not be created or copied. Try again." : "Copy a report link that works for 30 days"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
                   <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
                   {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share"}
                 </button>
@@ -698,7 +699,7 @@ export function InvestigationReport({
         )}
         {persistencePending && (
           <div className="mt-4 panel px-4 py-3 text-[12.5px] text-ink-dim" role="status">
-            Saving the immutable investigation before post-scan intelligence runs…
+            Saving this report before running extra checks…
           </div>
         )}
         {(persistenceFailed || persistenceMissingCapability) && (
@@ -777,7 +778,7 @@ export function InvestigationReport({
                   className="readiness-progress mt-2"
                   value={readiness.coveragePercent}
                   max={100}
-                  aria-label={`Evidence outcomes recorded: ${readiness.coveragePercent}%`}
+                  aria-label={`Checks finished: ${readiness.coveragePercent}%`}
                 />
               </div>
             </section>
@@ -793,11 +794,11 @@ export function InvestigationReport({
               </div>
               <dl className="mt-5 grid grid-cols-2 gap-x-4 gap-y-4 sm:grid-cols-4 xl:grid-cols-2" aria-label="Market size details">
                 <div>
-                  <dt className="stat-label">CoinGecko rank</dt>
+                  <dt className="stat-label">Market rank</dt>
                   <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg.rank}` : "N/A"}</dd>
                 </div>
                 <div>
-                  <dt className="stat-label" title="Estimated value if every token were circulating.">All-token value</dt>
+                  <dt className="stat-label" title="Estimated value if every token were available to trade.">Value if all circulate</dt>
                   <dd className="stat-value mt-1">{money(fullyDilutedValue)}</dd>
                 </div>
                 <div>
@@ -1137,7 +1138,7 @@ export function InvestigationReport({
                             disabled={spent >= MAX_FOUNDER_AUDITS}
                             className="btn-chip tint-signal shrink-0 disabled:opacity-40"
                           >
-                            {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "audit →"}
+                            {spent >= MAX_FOUNDER_AUDITS ? "audit limit reached" : "audit →"}
                           </button>
                         ) : (
                           <span className="mono shrink-0 text-[11px] text-ink-faint">no handle</span>
@@ -1149,7 +1150,7 @@ export function InvestigationReport({
               )}
               {advisors.length > 0 && (
                 <div className={teamPeople.length > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}>
-                  <div className="eyebrow">Advisors / backers ({advisors.length}) · claimed, corroborated</div>
+                  <div className="eyebrow">Advisors / backers ({advisors.length}) · claimed, checked against other sources</div>
                   <div className="mt-1.5 space-y-1.5">
                     {advisors.map((a) => {
                       const c = advisorChip(a.corroboration_verdict);

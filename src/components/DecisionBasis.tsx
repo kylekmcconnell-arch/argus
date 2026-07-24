@@ -3,6 +3,7 @@ import type { AxisEvidenceRecord } from "../data/evidence";
 import type { RoleReport, SubjectClass } from "../engine";
 import { buildDecisionBasis, type DecisionBasisRow, type DecisionBasisStatus } from "../lib/decisionBasis";
 import { axisLabel, ROLE_META } from "../lib/verdict";
+import { plainLanguageSummary } from "../lib/plainLanguage";
 
 export interface DecisionBasisProps {
   roleReport?: RoleReport;
@@ -59,7 +60,7 @@ function capturedLabel(value?: string): string | null {
 
 function roleLabel(role?: string): string {
   const known = role ? ROLE_META[role as SubjectClass] : undefined;
-  return known?.label ?? (role ? role.toLowerCase().replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase()) : "Governing track");
+  return known?.label ?? (role ? role.toLowerCase().replace(/_/g, " ").replace(/^./, (letter) => letter.toUpperCase()) : "Review type");
 }
 
 function defaultAxis(rows: readonly DecisionBasisRow[]): string | null {
@@ -75,7 +76,9 @@ function axisAnchorId(axis: string): string {
 }
 
 function evidenceTitle(value: string): string {
-  return value.replace(/\b([A-Z]{1,3}\d+_[a-z0-9_]+)\b/gi, (axis) => axisLabel(axis));
+  return plainLanguageSummary(
+    value.replace(/\b([A-Z]{1,3}\d+_[a-z0-9_]+)\b/gi, (axis) => axisLabel(axis)),
+  );
 }
 
 function investorQuestion(value: string): string | null {
@@ -186,9 +189,9 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
       ? "Run corrected investigation"
       : unavailableReason === "scoring"
         ? "Retry scoring investigation"
-        : "Rescan to capture lineage";
+        : "Rescan with source links";
     return (
-      <section aria-label="Decision basis" className="panel px-4 py-3.5">
+      <section aria-label="Why this score" className="panel px-4 py-3.5">
         <div className="flex flex-wrap items-center gap-2">
           <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Evidence behind the score</h3>
           <span className="chip">{statusLabel}</span>
@@ -238,7 +241,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
   };
 
   return (
-    <section aria-label="Decision basis" className="panel px-4 py-3.5">
+    <section aria-label="Why this score" className="panel px-4 py-3.5">
       <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
         <h3 className="text-[13.5px] font-semibold tracking-tight text-ink">Evidence behind the score</h3>
         <span className="text-[12.5px] text-ink-faint">{roleLabel(model.role ?? undefined)}</span>
@@ -252,7 +255,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
 
       {model.rows.length ? (
         <>
-          <div className="mt-3 grid gap-2 md:grid-cols-2" role="tablist" aria-label="Diligence area evidence">
+          <div className="mt-3 grid gap-2 md:grid-cols-2" role="tablist" aria-label="Score areas and their sources">
             {model.rows.map((row, index) => {
               const selectedTab = row.axis === selected?.axis;
               const meta = STATUS_META[row.status];
@@ -300,17 +303,17 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
 
               <div className="mt-3 grid gap-3 lg:grid-cols-2">
                 <div>
-                  <h5 className="eyebrow">Supporting evidence</h5>
+                  <h5 className="eyebrow">Sources that support this result</h5>
                   {selected.support.length ? (
-                    <ul className="mt-1.5 space-y-2" aria-label={`Supporting evidence for ${axisLabel(selected.axis)}`}>
+                    <ul className="mt-1.5 space-y-2" aria-label={`Sources supporting ${axisLabel(selected.axis)}`}>
                       {selected.support.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="support" />)}
                     </ul>
-                  ) : <p className="mt-1.5 text-[11px] text-ink-faint">No verified supporting source was captured.</p>}
+                  ) : <p className="mt-1.5 text-[11px] text-ink-faint">No verified source supports this part of the score.</p>}
                 </div>
                 <div>
-                  <h5 className="eyebrow">Conflicting evidence</h5>
+                  <h5 className="eyebrow">Sources that disagree</h5>
                   {selected.counter.length ? (
-                    <ul className="mt-1.5 space-y-2" aria-label={`Counter-evidence for ${axisLabel(selected.axis)}`}>
+                    <ul className="mt-1.5 space-y-2" aria-label={`Sources that disagree for ${axisLabel(selected.axis)}`}>
                       {selected.counter.map((record) => <EvidenceRecord key={record.artifactId} record={record} relation="counter" />)}
                     </ul>
                   ) : <p className="mt-1.5 text-[11px] text-ink-faint">No conflicting source was captured.</p>}
@@ -336,7 +339,7 @@ export function DecisionBasis({ roleReport, catalog, lineageVersion, unavailable
           )}
         </>
       ) : (
-        <p className="mt-3 text-[12.5px] text-ink-dim">No diligence areas were scored in this report.</p>
+        <p className="mt-3 text-[12.5px] text-ink-dim">No score areas were completed in this report.</p>
       )}
     </section>
   );

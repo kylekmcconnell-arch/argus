@@ -63,7 +63,7 @@ export function EvmDeployer({ address, chain, symbol, knownDeployer, panelCostTo
 
   if (chain === "solana" || !panelCostToken) return null;
   const current = result?.key === requestKey ? result : null;
-  if (!current) return <div className="panel p-4 text-[12.5px] text-ink-faint">tracing the deployer on-chain…</div>;
+  if (!current) return <div className="panel p-4 text-[12.5px] text-ink-faint">checking the token creator on the blockchain…</div>;
   if (current.failure) return <PanelRequestNotice failure={current.failure} label="Deployer intelligence" />;
   const data = current.data;
   if (!data || data.available === false || !data.deployer) {

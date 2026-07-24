@@ -71,7 +71,7 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
     return (
       <div className="panel tint-var p-4" style={{ "--tint": TONE[d.verdict.tone] } as React.CSSProperties}>
         <div className="flex flex-wrap items-center gap-2">
-          <span className="eyebrow">Holder forensics</span>
+          <span className="eyebrow">Holder analysis</span>
           <span className="mono text-[11px] text-ink-faint">RugCheck</span>
           {d.rugged && <span className="chip tint-avoid">rugged</span>}
         </div>
@@ -131,8 +131,8 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
   return (
     <div className="panel p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="eyebrow">Holder forensics</span>
-        <span className="mono text-[11px] text-ink-faint">on-chain</span>
+        <span className="eyebrow">Holder analysis</span>
+        <span className="mono text-[11px] text-ink-faint">blockchain data</span>
       </div>
       {(arkhamState === "rescan_required" || arkhamState === "unavailable") && (
         <PanelRequestNotice failure={arkhamState} label="Holder identity labels" className="mt-3" />
@@ -160,7 +160,7 @@ export function HolderForensics({ address, chain, holderCount, evmTop, insiderPc
       )}
       <p className="mt-2.5 text-[11px] leading-relaxed text-ink-faint">
         {top.length ? (concentrated ? `Concentrated: the top ${top.length} wallets hold ${topSum.toFixed(0)}% of supply.` : `Top ${top.length} wallets hold ${topSum.toFixed(0)}%.`) : "Holder-level data not available for this token."}
-        {chain !== "solana" && " Deep cluster/insider forensics are Solana-only for now."}
+        {chain !== "solana" && " Deeper checks for connected or insider wallets are only available on Solana for now."}
       </p>
     </div>
   );

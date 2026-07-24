@@ -43,6 +43,7 @@ import {
   Star,
 } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
+import { plainLanguageSummary, plainReportStatusLabel } from "../lib/plainLanguage";
 import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 
 const shortAddr = (a: string) => (a.length > 12 ? `${a.slice(0, 5)}…${a.slice(-4)}` : a);
@@ -120,28 +121,28 @@ function tokenReportText(
   const findings = [...d.findings]
     .sort((a, b) => (TONE_RANK[b.tone] ?? 0) - (TONE_RANK[a.tone] ?? 0))
     .slice(0, 6)
-    .map((f) => `${TONE_GLYPH[f.tone] ?? "·"} ${f.claim}`);
+    .map((f) => `${TONE_GLYPH[f.tone] ?? "·"} ${plainLanguageSummary(f.claim)}`);
   const exactLink = evidence?.reportVersionId
     ? `${location.origin}/?version=${encodeURIComponent(evidence.reportVersionId)}`
     : null;
   const provenance = evidence?.version
-    ? `· ARGUS immutable snapshot v${evidence.version}`
+    ? `· ARGUS saved report v${evidence.version}`
     : evidence?.reportVersionId
-      ? "· ARGUS immutable scan"
+      ? "· ARGUS saved report"
       : evidence?.privateSession
-        ? "· private live ARGUS session"
-        : "· live ARGUS analysis";
+        ? "· private ARGUS scan"
+        : "· new ARGUS scan";
   return [
-    `$${d.symbol} · ${presentation.resultLabel}: ${presentation.displayVerdict} · ${d.chain}${d.capApplied ? ` (cap: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
-    presentation.readinessLabel,
-    `${readiness.successful}/${readiness.applicable} checks finished · ${readiness.unresolved} open · ${readiness.coveragePercent}% complete`,
-    `Stored model output: ${d.verdict} ${d.score ?? "N/A"}/100`,
+    `$${d.symbol} · ${plainReportStatusLabel(presentation.resultLabel)}: ${presentation.displayVerdict} · ${d.chain}${d.capApplied ? ` (score limit: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
+    plainReportStatusLabel(presentation.readinessLabel),
+    `${readiness.successful}/${readiness.applicable} checks finished · ${readiness.unresolved} still open · ${readiness.coveragePercent}% complete`,
+    `Saved scoring result: ${d.verdict} ${d.score ?? "N/A"}/100`,
     presentation.note,
-    d.headline,
+    plainLanguageSummary(d.headline),
     "",
     ...findings,
     "",
-    `liq ${moneyShort(d.liquidityUsd)} · mc ${moneyShort(d.mcap)} · age ${age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} CEX` : ""}`,
+    `Liquidity ${moneyShort(d.liquidityUsd)} · market cap ${moneyShort(d.mcap)} · token age ${age}${d.cg?.cexCount ? ` · ${d.cg.cexCount} centralized exchanges` : ""}`,
     d.address,
     ...(exactLink ? [exactLink] : []),
     provenance,
@@ -320,9 +321,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             <ArrowLeft size={15} weight="bold" aria-hidden="true" />
             New investigation
           </button>
-          <span className="mono text-[11px] text-ink-faint">/ token investigation</span>
+          <span className="mono text-[11px] text-ink-faint">/ token report</span>
           <span className={`chip ${versionContext ? "" : "tint-signal"}`}>
-            {versionContext ? `snapshot v${versionContext.version}` : "live scan"}
+            {versionContext ? `saved report v${versionContext.version}` : "new scan"}
           </span>
           <div className="scrollbar-none order-3 flex w-full items-center gap-2 overflow-x-auto pb-1 sm:order-none sm:ml-auto sm:w-auto sm:justify-end sm:overflow-visible sm:pb-0">
             {onOpenBrief && (
@@ -334,7 +335,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
             </a>
             {canShare && (
-              <button onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
+              <button onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Share link could not be created or copied. Try again." : "Copy a report link that works for 30 days"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
                 <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
                 {shareState === "creating" ? "Securing…" : shareState === "copied" ? "Copied" : shareState === "error" ? "Retry share" : "Share"}
               </button>
@@ -377,7 +378,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         )}
         {persistencePending && (
           <div className="mt-4 panel px-4 py-3 text-[12.5px] text-ink-dim" role="status">
-            Saving the immutable scan before post-scan intelligence runs…
+            Saving this report before running extra checks…
           </div>
         )}
         {(persistenceFailed || persistenceMissingCapability) && (
@@ -407,7 +408,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
           <div className="flex flex-wrap gap-2">
             <div className="stat-tile"><div className="stat-label">mcap</div><div className="stat-value mt-0.5">{money(d.mcap)}</div></div>
-            <div className="stat-tile"><div className="stat-label">FDV</div><div className="stat-value mt-0.5">{money(d.fdv)}</div></div>
+            <div className="stat-tile" title="Value if every token were circulating"><div className="stat-label">All-token value (FDV)</div><div className="stat-value mt-0.5">{money(d.fdv)}</div></div>
             <div className="stat-tile"><div className="stat-label">liquidity</div><div className="stat-value mt-0.5">{money(d.liquidityUsd)}</div></div>
             <div className="stat-tile"><div className="stat-label">24h vol</div><div className="stat-value mt-0.5">{money(d.vol24)}</div></div>
           </div>
@@ -433,7 +434,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               </div>
             </div>
             <div className="min-w-0 flex-1">
-              <div className="eyebrow mb-1.5">{presentation.resultLabel}</div>
+              <div className="eyebrow mb-1.5">{plainReportStatusLabel(presentation.resultLabel)}</div>
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
                 <span className="display text-[32px] uppercase leading-none" style={{ color: presentationColor }}>{presentationMeta.label}</span>
                 {presentation.secondarySignal && (
@@ -441,14 +442,14 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 )}
               </div>
               <p className="mt-2.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-                {presentation.final ? d.headline : presentation.note}
+                {plainLanguageSummary(presentation.final ? d.headline : presentation.note)}
               </p>
               <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-                {presentation.final ? readiness.guidance : <>This score uses the checks that finished. It is not an approval to buy or invest. {d.headline}</>}
+                {presentation.final ? readiness.guidance : <>This score uses the checks that finished. It is not an approval to buy or invest. {plainLanguageSummary(d.headline)}</>}
               </p>
               {d.capApplied && (
                 <div className="chip tint-avoid mt-3 font-medium">
-                  ▲ Hard cap · {d.capApplied.replace(/_/g, " ")}
+                  Score limit · {d.capApplied.replace(/_/g, " ")}
                 </div>
               )}
             </div>
@@ -457,18 +458,18 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           <div
             className="finding tint-var relative px-6 py-4"
             style={{ "--tint": readinessColor } as React.CSSProperties}
-            aria-label="Evidence readiness"
+            aria-label="Safety check status"
           >
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <span className="mono text-[12.5px] font-semibold uppercase tracking-[0.14em]">
-                {readiness.status === "ready" ? "Evidence complete" : `${readiness.status} coverage`}
+                {readiness.status === "ready" ? "Safety checks finished" : `${readiness.coveragePercent}% of checks finished`}
               </span>
               <span className="text-[11px] text-ink-faint">required checks are shown below</span>
               <a href="#token-methodology" className="ml-auto text-[11px] text-signal-lift underline-offset-2 hover:underline">Review checks</a>
             </div>
-            <dl className="mt-3 grid gap-2 sm:grid-cols-3" aria-label="Evidence readiness summary">
+            <dl className="mt-3 grid gap-2 sm:grid-cols-3" aria-label="Safety check summary">
               <div className="stat-tile">
-                <dt className="stat-label">Coverage</dt>
+                <dt className="stat-label">Checks complete</dt>
                 <dd className="stat-value mt-0.5 font-semibold">{readiness.coveragePercent}%</dd>
               </div>
               <div className="stat-tile">
@@ -579,7 +580,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                   <Check label="No balance-mutable authority" ok={!s.balanceMutable} na={!gp} />
                   <Check label="No transfer hook" ok={!s.transferHook} na={!gp} />
                   <Check label="No transfer fee" ok={!s.transferFee} na={!gp} />
-                  <Check label="Metadata immutable" ok={!s.metadataMutable} na={!gp} />
+                  <Check label="Token details cannot be changed" ok={!s.metadataMutable} na={!gp} />
                   <Check label="Transferable" ok={!s.nonTransferable} na={!gp} />
                 </>
               ) : (
@@ -615,7 +616,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               <Check
                 label="CoinGecko listing"
                 ok={!!d.cg?.listed && (d.cg?.cexCount ?? 0) > 0}
-                value={d.cg ? (d.cg.listed ? `${d.cg.rank ? "#" + d.cg.rank + " · " : ""}${d.cg.cexCount} CEX` : "unlisted") : undefined}
+                value={d.cg ? (d.cg.listed ? `${d.cg.rank ? "#" + d.cg.rank + " · " : ""}${d.cg.cexCount} centralized exchanges` : "unlisted") : undefined}
                 na={!d.cg}
               />
             </div>
@@ -726,7 +727,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
               ?? undefined}
             context={[
             `${d.name} ($${d.symbol}) on ${d.chain}`,
-            d.headline,
+            plainLanguageSummary(d.headline),
             `early score ${d.verdict} ${d.score ?? ""}`,
             `report status ${readiness.status}: ${readiness.successful}/${readiness.applicable} checks finished, ${readiness.unresolved} open`,
             d.deployer ? `deployer ${d.deployer}` : "",

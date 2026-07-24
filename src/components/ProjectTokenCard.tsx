@@ -82,7 +82,7 @@ export function ProjectTokenCard({
         <span className="mono break-all text-[11px] text-ink-faint">{token.address}</span>
         {onAudit && (
           <button type="button" onClick={() => onAudit(token.address)} className="btn-chip tint-signal ml-auto min-h-10 gap-1.5 font-medium">
-            Open full on-chain investigation <ArrowSquareOut size={13} aria-hidden="true" />
+            Open full token report <ArrowSquareOut size={13} aria-hidden="true" />
           </button>
         )}
       </div>

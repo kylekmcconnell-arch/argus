@@ -51,7 +51,7 @@ afterEach(() => {
 });
 
 function decisionBasisText(): string {
-  return container.querySelector('section[aria-label="Decision basis"]')?.textContent ?? "";
+  return container.querySelector('section[aria-label="Why this score"]')?.textContent ?? "";
 }
 
 describe("private person report evidence boundary", () => {
@@ -690,8 +690,8 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} onAudit={() => {}} />);
     });
 
-    expect(container.textContent).toContain("not safely bound to an immutable version");
-    expect(container.textContent).toContain("Rescan before spending on supplemental providers");
+    expect(container.textContent).toContain("report was not saved correctly");
+    expect(container.textContent).toContain("Run a new scan before trying them again");
     expect(harness.livePanel).not.toHaveBeenCalled();
   });
 
@@ -733,7 +733,7 @@ describe("private person report evidence boundary", () => {
 
     const snapshotLink = container.querySelector<HTMLAnchorElement>(`a[href="/?version=${reportVersionId}"]`);
     expect(snapshotLink?.textContent?.trim()).toBe("SAVED REPORT");
-    expect(snapshotLink?.title).toContain("exact immutable snapshot");
+    expect(snapshotLink?.title).toContain("exact saved report");
     expect(snapshotLink?.target).toBe("_blank");
     expect(container.textContent).toContain("report saved");
     expect(container.textContent).not.toContain("live collection");
@@ -965,10 +965,10 @@ describe("decision-safe person report presentation", () => {
 
     expect(container.textContent).toContain("Project routing unresolved");
     expect(container.textContent).toContain("ARGUS collected intelligence, but did not select a scoring methodology");
-    expect(container.textContent).toContain("Coverage 0%");
+    expect(container.textContent).toContain("0% checked");
     expect(container.textContent).toContain("Resolve whether this account represents a project, organization, token, or person");
-    expect(container.textContent).toContain("Data coverage notes");
-    expect(container.textContent).toContain("Identity resolution");
+    expect(container.textContent).toContain("Source problems");
+    expect(container.textContent).toContain("Identity check");
     expect(container.textContent).toContain("Provider returned no identity match");
     expect([...container.querySelectorAll("span")].some((node) => node.textContent?.trim() === "decision-ready")).toBe(false);
     expect(container.textContent).not.toContain("<UNKNOWN>");
@@ -1015,7 +1015,7 @@ describe("decision-safe person report presentation", () => {
 
     expect(container.textContent).toContain("Score did not finish");
     expect(container.textContent).toContain("ARGUS resolved this subject to Project, but the scoring pass did not complete");
-    expect(container.textContent).toContain("Coverage 0%");
+    expect(container.textContent).toContain("0% checked");
     expect(container.textContent).toContain("What ARGUS found before the score failed");
     expect(container.textContent).toContain("Complete the Project scoring pass");
     expect(container.textContent).not.toContain("Project routing unresolved");
@@ -1186,7 +1186,7 @@ describe("decision-safe person report presentation", () => {
     });
 
     expect(dossier.report.composite_verdict).toBe("PASS");
-    expect(container.textContent).toContain("DECISION READINESS");
+    expect(container.textContent).toContain("REPORT STATUS");
     expect(container.textContent).toContain("INCOMPLETE");
     expect(container.textContent).toContain("EARLY SCORE · PASS 100/100");
     expect(container.textContent).toContain("score withheld");
@@ -1194,7 +1194,7 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("key checks are still open");
     expect(container.textContent).toContain("Points before safety limits 95 + 5 bonus");
     expect(container.textContent).toContain("Current score 100");
-    const decisionResult = container.querySelector<HTMLElement>('[aria-label="Decision readiness result"]');
+    const decisionResult = container.querySelector<HTMLElement>('[aria-label="Report result and check status"]');
     expect(decisionResult?.classList.contains("max-sm:grid")).toBe(true);
     const preliminarySignal = [...container.querySelectorAll<HTMLElement>(".chip")]
       .find((chip) => chip.textContent?.includes("EARLY SCORE"));
@@ -1265,12 +1265,11 @@ describe("decision-safe person report presentation", () => {
     expect([...container.querySelectorAll(".display")].some((node) => node.textContent?.trim() === "PROVISIONAL")).toBe(true);
     expect(container.textContent).toContain("provisional score");
     expect(container.textContent).toContain("PASS SIGNAL");
-    expect(container.textContent).toContain("Coverage 76%");
-    expect(container.textContent).toContain("Coverage 76%");
+    expect(container.textContent).toContain("76% checked");
     expect(container.textContent).toContain("10/13");
     expect(container.textContent).toContain("6 of 6 areas have sources");
-    expect(container.textContent).toContain("3 open questions");
-    expect(container.textContent).toContain("Still to check: 3 important questions");
+    expect(container.textContent).toContain("3 follow-up questions");
+    expect(container.textContent).toContain("Follow up on: 3 important questions");
     expect(container.textContent).toContain("Do not rely on this result");
     expect(container.textContent).toContain("This score uses the facts collected so far");
     expect(container.textContent).toContain("Current score 71");
@@ -2168,9 +2167,9 @@ describe("legacy person report coverage truth", () => {
       );
     });
 
-    expect(container.textContent).toContain("Coverage not captured");
+    expect(container.textContent).toContain("Older report: check details unavailable");
     expect(container.textContent).toContain("Check details unavailable");
-    expect(container.textContent).toContain("report was saved before per-check results were recorded");
+    expect(container.textContent).toContain("report was saved before ARGUS recorded every check separately");
     expect(container.textContent).not.toContain("Evidence coverage0%");
     expect(container.textContent).not.toContain("0 / 0");
     expect(container.textContent).not.toContain("0 unresolved");
@@ -2179,7 +2178,7 @@ describe("legacy person report coverage truth", () => {
     expect(container.querySelector("#scan-methodology")).toBeNull();
 
     const recovery = [...container.querySelectorAll<HTMLButtonElement>("button")]
-      .find((button) => button.textContent?.trim() === "Rescan to capture coverage");
+      .find((button) => button.textContent?.trim() === "Rescan to record every check");
     expect(recovery).toBeDefined();
     act(() => recovery?.click());
     expect(onRescan).toHaveBeenCalledTimes(1);
@@ -2235,7 +2234,7 @@ describe("legacy person report coverage truth", () => {
     });
 
     expect(container.textContent).toContain("Report saved");
-    expect(container.textContent).not.toContain("1970");
+    expect(container.textContent).not.toContain("Scored Jan 1, 1970");
   });
 
   it("does not manufacture a founder token warning or empty outcome summary from absent structured claims", () => {
