@@ -606,6 +606,12 @@ export function InvestigationReport({
     return people;
   })();
   const advisors = (projectAccount?.evidence.testimonials ?? []).filter((t) => t.claimed_relationship === "advisor");
+  const founderTeam = teamPeople.filter((person) => /\b(?:co[- ]?founder|founder|creator)\b/i.test(person.role ?? ""));
+  const otherNamedTeam = teamPeople.filter((person) => !founderTeam.includes(person));
+  const teamGroups = [
+    { label: "Founders", people: founderTeam },
+    { label: "Other named team", people: otherNamedTeam },
+  ].filter((group) => group.people.length > 0);
   const advisorChip = (v?: string): { label: string; color: string } => {
     const s = (v ?? "").toLowerCase();
     if (s.includes("corrobor")) return { label: "confirmed twice", color: "var(--color-pass)" };
@@ -744,10 +750,8 @@ export function InvestigationReport({
     : token.verdict === "CAUTION" || token.verdict === "INCOMPLETE" || token.verdict === "UNVERIFIABLE_IDENTITY"
       ? "caution"
       : "avoid";
-  const hasTeamChapter = teamPeople.length > 0 || advisors.length > 0;
   const hasConnectionsChapter = Boolean(invGraph && invGraph.nodes.length > 1);
-  const teamChapterNumber = 5;
-  const connectionsChapterNumber = teamChapterNumber + Number(hasTeamChapter);
+  const connectionsChapterNumber = 5;
   const challengeChapterNumber = connectionsChapterNumber + Number(hasConnectionsChapter);
   const scanDetailsChapterNumber = challengeChapterNumber + 1;
   const chapterLabel = (chapter: number, label: string) =>
@@ -1119,12 +1123,12 @@ export function InvestigationReport({
         <div id="investigation-people" className="story-chapter story-chapter-muted report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
             index="04 · People"
-            title="Who is behind it"
-            description="See the people publicly tied to the project, the project account, and the wallet that deployed the token."
+            title="Project, deployer, and team"
+            description="See the official project account, the wallet that deployed the token, and the people publicly tied to the project."
           />
           <div id="investigation-evidence" className="scroll-mt-28 grid gap-3 lg:grid-cols-2">
           {/* on-chain */}
-          <Card title="Blockchain data" accent={tm.color}>
+          <Card title="Token record" accent={tm.color}>
             <div className="flex items-center justify-between">
               <span className="mono text-[13.5px] text-ink">{`$${token.symbol}`}</span>
               <VerdictPill verdict={token.verdict} score={token.score} />
@@ -1156,21 +1160,9 @@ export function InvestigationReport({
             <button onClick={onOpenToken} className="btn-chip tint-signal mt-3">Open token report →</button>
           </Card>
 
-          {/* the people behind it (summary; the full team is its own section below) */}
-          <Card title="The people behind it">
-            {teamPeople.length > 0 ? (
-              <>
-                <p className="text-[12.5px] leading-relaxed text-ink-dim">
-                  {teamPeople.length} {teamPeople.length === 1 ? "person is" : "people are"} publicly tied to this project: {teamPeople.slice(0, 4).map((p) => p.name).filter(Boolean).join(", ")}{teamPeople.length > 4 ? ", …" : ""}.
-                </p>
-                <p className="mt-1.5 text-[12.5px] text-ink-faint">Full roster with roles &amp; links in the Team section below.</p>
-              </>
-            ) : (
-              <p className="text-[12.5px] leading-relaxed text-ink-dim">{recon ? recon.identityLine : inv.founderNote}</p>
-            )}
-
+          <Card title="Project account and deployer">
             {/* project account — explicitly NOT a founder */}
-            <div className="mt-2.5 border-t border-line/60 pt-2.5">
+            <div>
               <div className="eyebrow">Project account (not a founder)</div>
               {projectX ? (
                 <div className="mt-1 flex items-center justify-between gap-2">
@@ -1234,57 +1226,63 @@ export function InvestigationReport({
             )}
           </Card>
           </div>
-        </div>
-
-        {/* TEAM — the headline section, merged from every source, each clickable */}
-        {hasTeamChapter && (
-          <div id="investigation-team" className="story-chapter report-section scroll-mt-28 mt-7">
-            <ReportSectionHeading
-              index={chapterLabel(teamChapterNumber, "Team")}
-              title="The named team"
-              description="Each person links back to the public source that tied them to this project."
-            />
-            <Card title="Team · from X content, the site, and web/LinkedIn">
-              {teamPeople.length > 0 && (
+          <div id="investigation-team" className="mt-3 scroll-mt-28">
+            <Card title="Named team and founders">
+              {teamPeople.length > 0 ? (
                 <div>
-                  <div className="eyebrow">Team & founders ({teamPeople.length}) · click to run a full audit</div>
-                  <div className="mt-1.5 space-y-1.5">
-                    {teamPeople.map((m) => (
-                      <div key={m.handle ?? m.name} className="flex items-center justify-between gap-2">
-                        <span className="flex min-w-0 flex-wrap items-center gap-1.5">
-                          <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
-                          <span className="text-[12.5px] text-ink">{m.name}</span>
-                          {m.handle && !teamNameLooksLikeHandle(m) && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
-                          {m.role && <span className="text-[11px] text-ink-faint">{m.role}</span>}
-                          {m.linkedin && (
-                            <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
-                          )}
-                          {m.developerProfiles?.map((profile) => (
-                            <a key={profile.url} href={profile.url} target="_blank" rel="noreferrer" title={`Linked from ${m.handle}'s X profile`} className="link-ext text-[11px]">
-                              {profile.provider === "github" ? "GitHub" : "Hugging Face"}
-                            </a>
+                  <p className="text-[12.5px] leading-relaxed text-ink-dim">
+                    {teamPeople.length} {teamPeople.length === 1 ? "person is" : "people are"} publicly tied to this project. People are grouped by their published role.
+                  </p>
+                  <div className="mt-3 space-y-3">
+                    {teamGroups.map((group) => (
+                      <section key={group.label} aria-label={group.label}>
+                        <div className="eyebrow">{group.label} ({group.people.length})</div>
+                        <div className="mt-1.5 space-y-1.5">
+                          {group.people.map((m) => (
+                            <div key={m.handle ?? m.name} className="flex items-center justify-between gap-2">
+                              <span className="flex min-w-0 flex-wrap items-center gap-1.5">
+                                <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
+                                <span className="text-[12.5px] text-ink">{m.name}</span>
+                                {m.handle && !teamNameLooksLikeHandle(m) && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
+                                {m.role && <span className="text-[11px] text-ink-faint">{m.role}</span>}
+                                {m.linkedin && (
+                                  <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
+                                )}
+                                {m.developerProfiles?.map((profile) => (
+                                  <a key={profile.url} href={profile.url} target="_blank" rel="noreferrer" title={`Linked from ${m.handle}'s X profile`} className="link-ext text-[11px]">
+                                    {profile.provider === "github" ? "GitHub" : "Hugging Face"}
+                                  </a>
+                                ))}
+                                <span className="chip normal-case tracking-normal">{m.source}</span>
+                              </span>
+                              {m.handle ? (
+                                <button
+                                  onClick={() => auditFounder(m.handle!)}
+                                  disabled={spent >= MAX_FOUNDER_AUDITS}
+                                  className="btn-chip tint-signal shrink-0 disabled:opacity-40"
+                                >
+                                  {spent >= MAX_FOUNDER_AUDITS ? "review limit reached" : "Review →"}
+                                </button>
+                              ) : (
+                                <span className="shrink-0 text-[11px] text-ink-faint">No X profile</span>
+                              )}
+                            </div>
                           ))}
-                          <span className="chip normal-case tracking-normal">{m.source}</span>
-                        </span>
-                        {m.handle ? (
-                          <button
-                            onClick={() => auditFounder(m.handle!)}
-                            disabled={spent >= MAX_FOUNDER_AUDITS}
-                            className="btn-chip tint-signal shrink-0 disabled:opacity-40"
-                          >
-                            {spent >= MAX_FOUNDER_AUDITS ? "audit limit reached" : "audit →"}
-                          </button>
-                        ) : (
-                          <span className="mono shrink-0 text-[11px] text-ink-faint">no handle</span>
-                        )}
-                      </div>
+                        </div>
+                      </section>
                     ))}
                   </div>
+                </div>
+              ) : (
+                <div>
+                  <p className="text-[12.5px] font-medium text-ink">No named team was confirmed.</p>
+                  <p className="mt-1 text-[12px] leading-relaxed text-ink-faint">{recon ? recon.identityLine : inv.founderNote}</p>
                 </div>
               )}
               {advisors.length > 0 && (
                 <div className={teamPeople.length > 0 ? "mt-3 border-t border-line/60 pt-3" : ""}>
-                  <div className="eyebrow">Advisors / backers ({advisors.length}) · claimed, checked against other sources</div>
+                  <div className="eyebrow">Claimed advisors and backers ({advisors.length})</div>
+                  <p className="mt-1 text-[11.5px] text-ink-faint">These names are checked separately and are not counted as team members.</p>
                   <div className="mt-1.5 space-y-1.5">
                     {advisors.map((a) => {
                       const c = advisorChip(a.corroboration_verdict);
@@ -1302,19 +1300,19 @@ export function InvestigationReport({
                               disabled={spent >= MAX_FOUNDER_AUDITS}
                               className="btn-chip tint-signal shrink-0 disabled:opacity-40"
                             >
-                              {spent >= MAX_FOUNDER_AUDITS ? "cap reached" : "background →"}
+                              {spent >= MAX_FOUNDER_AUDITS ? "review limit reached" : "Review →"}
                             </button>
                           )}
                         </div>
                       );
                     })}
                   </div>
-                  <p className="mt-2 text-[12.5px] leading-snug text-ink-faint">A claimed advisor who does not follow or has never acknowledged the project is a classic fake-name-drop signal.</p>
+                  <p className="mt-2 text-[12.5px] leading-snug text-ink-faint">A claimed advisor who has never publicly acknowledged the project may be a misleading name-drop.</p>
                 </div>
               )}
             </Card>
           </div>
-        )}
+        </div>
 
         {/* on-chain forensic suite — the same cluster the token report uses:
             market intel, holders, clustering, operator trace, EVM deployer +

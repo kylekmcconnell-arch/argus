@@ -448,8 +448,12 @@ describe("investigation exact sharing", () => {
     }));
 
     expect(container.textContent).toContain("Built by Erik Voorhees, Teana Baker-Taylor");
-    expect(container.textContent).toContain("Team & founders (3)");
-    expect(container.textContent).not.toContain("Team & founders (4)");
+    expect(container.textContent).toContain("Named team and founders");
+    expect(container.textContent).toContain("Founders (2)");
+    expect(container.textContent).toContain("Other named team (1)");
+    expect(container.textContent).not.toContain("Who is behind it");
+    expect(container.textContent).not.toContain("The people behind it");
+    expect(container.textContent).not.toContain("Full roster with roles");
     expect(container.textContent).not.toContain("project scan + project scan");
     expect(container.textContent).toContain("Token checks");
     expect(container.textContent).toContain("Project account checks");
@@ -478,10 +482,9 @@ describe("investigation exact sharing", () => {
       "02 · Why",
       "03 · Market",
       "04 · People",
-      "05 · Team",
-      "06 · Connections",
-      "07 · Challenge",
-      "08 · Scan details",
+      "05 · Connections",
+      "06 · Challenge",
+      "07 · Scan details",
     ]);
     expect(container.textContent).toContain("What ARGUS checked");
     expect(container.textContent).not.toContain("What to verify next");
