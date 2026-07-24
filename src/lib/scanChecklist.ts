@@ -65,22 +65,22 @@ const SUCCESSFUL = new Set<CheckStatus>(["confirmed", "finding", "checked-empty"
 const UNKNOWN_OR_FAILED = new Set<CheckStatus>(["unknown", "unavailable", "stale"]);
 
 /** Summarize execution coverage separately from what the checks found. */
-// Some checks record their honest null as a substantive "finding" (so the axis
-// they feed is covered and scores low) even though an absent POSITIVE signal is
-// never counter-evidence. The founder repeat-backing assessment is one: "no
-// repeat backing on record" must read as a neutral completed outcome, never as an
-// adverse finding. Its positive result uses "confirmed", so only its "finding"
-// branch is a neutral null.
-export const NEUTRAL_NULL_FINDING_CHECK_IDS: ReadonlySet<string> = new Set<string>([
+// Some checks use "finding" to mean a completed review lead rather than verified
+// counter-evidence. Neutral nulls cover an axis without inventing a positive
+// result, while profile-photo classification is visual triage that explicitly
+// cannot prove ownership or identity. Keep both visible in their detail panels,
+// but never promote either into the report's adverse-finding headline.
+export const NON_ADVERSE_FINDING_CHECK_IDS: ReadonlySet<string> = new Set<string>([
   "founder-repeat-backing",
   "project-token-identity",
   "project-backing-partners",
   "investor-fund-scale",
+  "profile-photo-authenticity",
 ]);
 
 /** A "finding" that genuinely signals an adverse discovery (not a neutral null). */
 export const isAdverseFinding = (check: Pick<ScanCheck, "status" | "checkId">): boolean =>
-  check.status === "finding" && !(check.checkId !== undefined && NEUTRAL_NULL_FINDING_CHECK_IDS.has(check.checkId));
+  check.status === "finding" && !(check.checkId !== undefined && NON_ADVERSE_FINDING_CHECK_IDS.has(check.checkId));
 
 export function summarizeChecks(checks: readonly ScanCheck[]): CoverageSummary {
   const count = (status: CheckStatus) => checks.filter((check) => check.status === status).length;

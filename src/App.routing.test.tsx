@@ -33,6 +33,7 @@ const harness = vi.hoisted(() => ({
   startTokenScan: vi.fn(),
   syncReport: vi.fn(),
   logAudit: vi.fn(),
+  reconcileAuditOutcome: vi.fn(),
   personContribution: vi.fn(),
   recordContribution: vi.fn(),
   personOnComplete: null as ((dossier: Record<string, unknown>, priv?: boolean) => void) | null,
@@ -159,6 +160,7 @@ vi.mock("./components/CaseBriefPanel", () => ({
 vi.mock("./lib/auditlog", () => ({
   hydrateSharedLog: vi.fn(),
   logAudit: harness.logAudit,
+  reconcileAuditOutcome: harness.reconcileAuditOutcome,
 }));
 
 vi.mock("./graph/store", () => ({
@@ -665,12 +667,25 @@ describe("App routing safety", () => {
   });
 
   it("preserves a normal stored-report deep link while opening its report", async () => {
+    const payload = {
+      handle: "storedfounder",
+      display_name: "Stored Founder",
+      headline: "Stored founder has a verified track record.",
+      report: {
+        composite_verdict: "PASS",
+        governing_score: 84,
+        identity_confidence: "Confirmed",
+        roles: ["Founder"],
+      },
+      evidence: { associates: [] },
+      checkRuns: [{ checkId: "identity-resolution", status: "confirmed" }],
+    };
     harness.fetchReportState.mockResolvedValue({
       status: "open",
       report: {
         kind: "person",
         ref: "storedfounder",
-        payload: { handle: "storedfounder" },
+        payload,
         versionContext: { caseId: "case-person", reportVersionId: "version-person" },
       },
     });
@@ -680,6 +695,12 @@ describe("App routing safety", () => {
 
     expect(window.location.search).toBe("?s=storedfounder");
     expect(view.querySelector("[data-testid='person-case-brief']")).not.toBeNull();
+    expect(harness.reconcileAuditOutcome).toHaveBeenCalledWith("storedfounder", "person", {
+      verdict: "PASS",
+      score: 84,
+      coverage: "ready",
+      summary: "Stored founder has a verified track record.",
+    });
     expectNoRunnerStarted();
   });
 

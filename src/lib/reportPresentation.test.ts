@@ -117,6 +117,24 @@ describe("public report presentation policy", () => {
     },
   );
 
+  it("describes an incomplete CAUTION as a score band, not a material risk finding", () => {
+    const partial = presentPublicReport({ verdict: "CAUTION", score: 42, completeness: "partial" });
+    const failed = presentPublicReport({ verdict: "CAUTION", score: 42, completeness: "failed" });
+    const inconsistent = presentPublicReport({ verdict: "CAUTION", score: 82, completeness: "partial" });
+    const fail = presentPublicReport({ verdict: "FAIL", score: 34, completeness: "partial" });
+
+    expect(partial.note).toBe(
+      "The scored evidence falls in the caution band, but missing coverage prevents a complete assessment.",
+    );
+    expect(failed.note).toBe(
+      "The scored evidence fell in the caution band, but the investigation failed before coverage could be completed.",
+    );
+    expect(inconsistent.note).toBe(
+      "The stored score conflicts with the caution signal, and coverage is incomplete.",
+    );
+    expect(fail.note).toContain("A material risk signal was recorded");
+  });
+
   it("publishes PASS as a verdict only with complete coverage", () => {
     expect(presentPublicReport({ verdict: "PASS", score: 88, completeness: "complete" })).toMatchObject({
       displayVerdict: "PASS",

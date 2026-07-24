@@ -323,7 +323,7 @@ describe("private person report evidence boundary", () => {
       root.render(<Report dossier={dossier} onReset={() => {}} />);
     });
 
-    expect(container.textContent).toContain("At least $176M documented across 2 evidenced funding rounds");
+    expect(container.textContent).toContain("≥$176M across 2 evidenced funding rounds");
     expect(container.textContent).toContain("Series B");
     expect(container.textContent).toContain("Polychain Capital");
     expect(container.textContent).not.toContain("BlackRock");

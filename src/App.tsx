@@ -202,6 +202,21 @@ function briefTargetForPerson(dossier: Dossier): CaseBriefTarget | null {
   return null;
 }
 
+function reconcileStoredPersonOutcome(ref: string, dossier: Dossier): void {
+  if (!dossier?.report) return;
+  reconcileAuditOutcome(ref, "person", {
+    verdict: dossier.report.composite_verdict,
+    score: dossier.report.governing_score,
+    summary: dossier.headline,
+    coverage: deriveDecisionReadiness(dossier.checkRuns?.length ? dossier.checkRuns : personChecks({
+      identityConfidence: dossier.report.identity_confidence ?? undefined,
+      realName: (dossier.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
+      roles: dossier.report.roles ?? [],
+      hasAssociates: (dossier.evidence.associates ?? []).length > 0,
+    })).status,
+  });
+}
+
 function cachedFromStoredReport(report: StoredReport): Cached | null {
   if (report.kind === "site") {
     const recon = storedSiteRecon(report);
@@ -692,24 +707,13 @@ export default function App() {
       if (rep?.payload && rep.kind === "person") {
         const c = { kind: "person" as const, dossier: storedPersonDossier(rep) };
         cacheResult(resultCache.current, ref, c);
+        reconcileStoredPersonOutcome(ref, c.dossier);
         showCached(ref, c);
         // The ACTIVE stored version is the server truth for this case; fold its
         // outcome back into the newest audit-log row so the Recent-cases chip
         // stops contradicting the opened report (chip shows the last RUN, which
         // may never have become the active projection). Same field mapping as
         // the run-time logAudit above.
-        const d = c.dossier;
-        reconcileAuditOutcome(ref, "person", {
-          verdict: d.report.composite_verdict,
-          score: d.report.governing_score,
-          summary: d.headline,
-          coverage: deriveDecisionReadiness(d.checkRuns?.length ? d.checkRuns : personChecks({
-            identityConfidence: d.report.identity_confidence ?? undefined,
-            realName: (d.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
-            roles: d.report.roles ?? [],
-            hasAssociates: (d.evidence.associates ?? []).length > 0,
-          })).status,
-        });
         return;
       }
       await new Promise((r) => setTimeout(r, 1500));
@@ -843,6 +847,7 @@ export default function App() {
           ? { kind: "token" as const, dossier: storedTokenDossier(rep) }
           : { kind: "person" as const, dossier: storedPersonDossier(rep) };
       cacheResult(resultCache.current, ref, cached, !requestedKind);
+      if (cached.kind === "person") reconcileStoredPersonOutcome(ref, cached.dossier);
       showCached(ref, cached);
       return;
     }

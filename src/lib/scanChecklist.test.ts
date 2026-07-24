@@ -106,6 +106,24 @@ describe("summarizeChecks", () => {
       unknown: 1,
     });
   });
+
+  it("keeps visual profile-photo review leads visible without calling them adverse", () => {
+    const summary = summarizeChecks([
+      {
+        checkId: "profile-photo-authenticity",
+        label: "Profile-photo integrity",
+        status: "finding",
+      },
+      {
+        checkId: "trust-graph-connections",
+        label: "Trust-graph connections",
+        status: "finding",
+      },
+    ]);
+
+    expect(summary.successful).toBe(2);
+    expect(summary.findings).toBe(1);
+  });
 });
 
 describe("tokenChecks", () => {

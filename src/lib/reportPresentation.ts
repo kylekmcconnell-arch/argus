@@ -255,6 +255,17 @@ export function presentPublicReport(input: {
 
     if (adverse) {
       const consistentScore = scoreMatchesVerdict(rawVerdict, score) ? score : "";
+      const note = rawVerdict === "CAUTION"
+        ? score && !consistentScore
+          ? "The stored score conflicts with the caution signal, and coverage is incomplete."
+          : completeness === "failed"
+            ? "The scored evidence fell in the caution band, but the investigation failed before coverage could be completed."
+            : "The scored evidence falls in the caution band, but missing coverage prevents a complete assessment."
+        : score && !consistentScore
+          ? "A material risk signal was recorded, but its stored score conflicts with the verdict and coverage is incomplete."
+          : completeness === "failed"
+            ? "A material risk signal was recorded, but the investigation failed before coverage could be completed."
+            : "A material risk signal was recorded, but missing coverage prevents a complete assessment.";
       return Object.freeze({
         rawVerdict,
         displayVerdict: visibleVerdict(rawVerdict),
@@ -265,11 +276,7 @@ export function presentPublicReport(input: {
         primaryScore: consistentScore,
         scoreLabel: consistentScore ? "MODEL SCORE" : null,
         secondarySignal: null,
-        note: score && !consistentScore
-          ? "A material risk signal was recorded, but its stored score conflicts with the verdict and coverage is incomplete."
-          : completeness === "failed"
-            ? "A material risk signal was recorded, but the investigation failed before coverage could be completed."
-            : "A material risk signal was recorded, but missing coverage prevents a complete assessment.",
+        note,
         final: false,
       });
     }

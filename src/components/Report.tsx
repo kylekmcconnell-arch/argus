@@ -1548,9 +1548,9 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     && fundingEvidence.totalKnownUsd > 0
     ? {
         ...firstFundingFact,
-        value: `At least ${usdCompact(fundingEvidence.totalKnownUsd)} documented across ${fundingEvidence.rounds.length} evidenced funding round${fundingEvidence.rounds.length === 1 ? "" : "s"}`,
+        value: `≥${usdCompact(fundingEvidence.totalKnownUsd)} across ${fundingEvidence.rounds.length} evidenced funding round${fundingEvidence.rounds.length === 1 ? "" : "s"}`,
         normalizedValue: `at least ${fundingEvidence.totalKnownUsd} documented funding`,
-        qualifier: "documented lower bound from frozen sources",
+        qualifier: "documented lower bound",
         status: fundingEvidence.independentSourceCount >= 2 ? "corroborated" : firstFundingFact.status,
         providerProjection: false,
         sources: [...new Map(acceptedFundingFacts
@@ -2597,15 +2597,20 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               </p>
               {presentation.final && !legacyCoverageNotCaptured && (
                 <p className="mono mt-2 text-[11px] text-ink-faint" aria-label="Verdict support summary">
-                  <span className="tabular">{verifiedDecisionFactCount}</span> facts verified
-                  <span aria-hidden="true"> · </span>
+                  {verifiedDecisionFactCount > 0 && (
+                    <>
+                      <span className="tabular">{verifiedDecisionFactCount}</span> facts verified
+                      <span aria-hidden="true"> · </span>
+                    </>
+                  )}
                   <span className="tabular">{cleanScreens.length}</span> screens clean
                   <span aria-hidden="true"> · </span>
                   {(() => {
                     // A neutral assessment null (e.g. "no repeat backing on record")
                     // is recorded as a substantive "finding" so it can cover + score
                     // its axis, but an absent positive signal is never counter-evidence.
-                    // isAdverseFinding excludes those neutral nulls from the tally.
+                    // Visual profile-photo triage is also only a review lead.
+                    // isAdverseFinding excludes both from the adverse tally.
                     const adverseSignals = diligenceChecks.filter(isAdverseFinding).length
                       + visibleContradictions.length;
                     if (adverseSignals > 0) {
