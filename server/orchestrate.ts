@@ -76,6 +76,10 @@ import { collectUpcomingUnlocks } from "./adapters/tokenUnlocks";
 import { describeOutcomeDelta, readPriorOutcome } from "./adapters/priorOutcome";
 import { collectSecurityAudits } from "./adapters/securityAudits";
 import { collectCompanyEnrichment } from "./adapters/monid";
+import {
+  hydrateOfficialProjectIdentityFromFacts,
+  verifiedOfficialProjectIdentity,
+} from "./projectIdentity";
 
 // Role words stripped when a venture name is derived from a fact value like
 // "Aave Labs CEO" or "CEO at Aave Labs": only the company survives.
@@ -1294,8 +1298,7 @@ export function providerBackedRoles(evidence: CollectedEvidence): SubjectClass[]
     // website never becomes a PROJECT methodology by accident.
     if (
       fact.predicate === "official_identity"
-      && canonicalOfficialWebsite(evidence.profile.website) !== null
-      && classifySubject(fact.value).applicable_classes.includes(SubjectClass.PROJECT)
+      && verifiedOfficialProjectIdentity(evidence, [fact]) !== null
     ) {
       roles.add(SubjectClass.PROJECT);
     }
@@ -1926,6 +1929,38 @@ export function recordProtocolSecurityIncidentFindings(evidence: CollectedEviden
     recorded += 1;
   }
   return recorded;
+}
+
+async function recoverProjectProtocolIncidentEvidence(ctx: CollectContext): Promise<void> {
+  const token = ctx.evidence.projectToken;
+  if (!token?.verified || ctx.evidence.protocolTvl) return;
+  const outcome = await collectProtocolTvl(defiLlamaLookupName(token.name));
+  if (
+    !outcome.available
+    || !token.coingeckoId
+    || !protocolRecordMatchesCanonicalToken(outcome.value.geckoId, token.coingeckoId)
+  ) return;
+  ctx.evidence.protocolTvl = {
+    ...outcome.value,
+    capturedAt: token.capturedAt,
+  };
+  if (outcome.value.chains.length) {
+    ctx.evidence.projectToken = {
+      ...token,
+      deployedChains: outcome.value.chains,
+    };
+  }
+  const incidentCount = recordProtocolSecurityIncidentFindings(ctx.evidence);
+  if (!incidentCount) return;
+  const newest = [...(ctx.evidence.protocolTvl.hacks ?? [])]
+    .sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")))[0];
+  ctx.emit({
+    phase: "Token",
+    label: `${incidentCount} protocol security incident${incidentCount === 1 ? "" : "s"} recovered`,
+    detail: `${newest?.date ?? "Undated"}${newest?.amountUsd ? ` · $${(newest.amountUsd / 1_000_000).toFixed(0)}M` : ""} · verified after the official project identity was restored.`,
+    source: "defillama",
+    tone: "warn",
+  });
 }
 
 // ── Phase 3.5: adverse-signal sweep, manipulation-tooling flag, cross-project
@@ -2859,6 +2894,7 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
   const officialWebsiteBeforeBasicFacts = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? null;
   await runAdapter(basicFactsAdapter);
   flushLaneProviderRows();
+  hydrateOfficialProjectIdentityFromFacts(evidence);
   const rolesAfterBasicFacts = providerBackedRoles(evidence);
   const officialWebsiteAfterBasicFacts = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? null;
   const recoveredProjectSite = !officialWebsiteBeforeBasicFacts
@@ -2879,6 +2915,19 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
     evidence.roles = providerBackedRoles(evidence);
   } else {
     evidence.roles = rolesAfterBasicFacts;
+  }
+  if (recoveredProjectSite && evidence.projectToken?.verified && !evidence.protocolTvl) {
+    try {
+      await recoverProjectProtocolIncidentEvidence(ctx);
+    } catch (error) {
+      emit({
+        phase: "Token",
+        label: "Recovered protocol incident lookup failed",
+        detail: String(error),
+        source: "defillama",
+        tone: "warn",
+      });
+    }
   }
   // Founder financing recall: a verified founder's primary venture usually has
   // public funding rounds (the financing record the basic-facts pass otherwise

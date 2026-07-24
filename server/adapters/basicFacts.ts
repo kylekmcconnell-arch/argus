@@ -18,6 +18,7 @@ import { grokSearch } from "./x";
 import { groundedSearch, groundedSearchProvisioned } from "./groundedSearch";
 import { readEntityFacts } from "../entityStore";
 import { canonicalEntityKey } from "../../src/engine";
+import { hydrateOfficialProjectIdentityFromFacts } from "../projectIdentity";
 import type { Adapter, AdapterRunResult, CollectContext } from "./types";
 
 const ANTHROPIC_URL = "https://api.anthropic.com/v1/messages";
@@ -4375,11 +4376,16 @@ export async function collectBasicFacts(
   ctx: CollectContext,
   dependencies: BasicFactsCollectorDependencies = {},
 ): Promise<AdapterRunResult> {
-  const questions = basicFactsResearchQuestions(ctx);
   // A reused fact answers its question already, so discovery skips it entirely.
   // Gated inside loadReusableBasicFacts by ARGUS_ENTITY_REUSE, so callers that do
   // not set the flag (all current tests + the default) get [] and the unchanged path.
   const reusedFacts = await loadReusableBasicFacts(ctx);
+  // Knowledge-base reuse must restore identity context before selecting the
+  // role-aware question contract. Otherwise a suspended project account keeps
+  // the person question set, skips incident/token diligence, and later becomes
+  // decisionless even though its first-party identity was already verified.
+  hydrateOfficialProjectIdentityFromFacts(ctx.evidence, reusedFacts);
+  const questions = basicFactsResearchQuestions(ctx);
   const questionsToDiscover = reusedFacts.length
     ? questions.filter((question) => deterministicQuestionAnswerRefs(ctx, question, reusedFacts).length === 0)
     : questions;

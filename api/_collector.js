@@ -9286,6 +9286,41 @@ async function writeEntityFacts(organizationId, canonicalKey, entry) {
   }
 }
 
+// server/projectIdentity.ts
+function verifiedOfficialProjectIdentity(evidence, facts = evidence.basicFacts ?? []) {
+  if (evidence.profile.identity_confidence === "SuspectedImpersonation") return null;
+  for (const fact of facts) {
+    if (fact.predicate !== "official_identity" || fact.artifact_verified !== true || fact.status !== "verified" && fact.status !== "corroborated") continue;
+    const projectQuestion = fact.questionId?.startsWith("project.") === true;
+    const projectValue = classifySubject(fact.value).applicable_classes.includes("PROJECT" /* PROJECT */);
+    if (!projectQuestion && !projectValue) continue;
+    for (const source2 of fact.sources) {
+      if (source2.sourceClass !== "official_subject" || source2.relation !== "supports" || source2.artifactVerified !== true) continue;
+      const website = canonicalOfficialWebsite(source2.url);
+      if (website) return { fact, website };
+    }
+  }
+  return null;
+}
+function hydrateOfficialProjectIdentityFromFacts(evidence, facts = evidence.basicFacts ?? []) {
+  const recovered = verifiedOfficialProjectIdentity(evidence, facts);
+  if (!recovered) return null;
+  if (!canonicalOfficialWebsite(evidence.profile.website)) {
+    evidence.profile.website = recovered.website.canonicalUrl;
+  }
+  const currentName = evidence.profile.display_name.trim();
+  const handleName = evidence.profile.handle.replace(/^@/, "").toLowerCase();
+  if (evidence.profile.profile_collection_state !== "resolved" || !currentName || currentName.toLowerCase() === handleName) {
+    evidence.profile.display_name = recovered.fact.value.trim();
+  }
+  evidence.profile.identity_confidence = "Confirmed";
+  evidence.profile.identity_note = `${recovered.fact.value.trim()} is bound to ${recovered.website.domain} by a verified first-party identity artifact.`;
+  if (!evidence.roles.includes("PROJECT" /* PROJECT */)) {
+    evidence.roles = [...evidence.roles, "PROJECT" /* PROJECT */];
+  }
+  return recovered;
+}
+
 // server/adapters/basicFacts.ts
 var ANTHROPIC_URL2 = "https://api.anthropic.com/v1/messages";
 var PRIMARY_SEARCH_USES_PER_BATCH = 2;
@@ -12629,8 +12664,9 @@ async function loadReusableBasicFacts(ctx) {
   return cached.filter((fact) => Boolean(fact) && typeof fact === "object" && typeof fact.predicate === "string" && typeof fact.value === "string" && fact.artifact_verified === true && fact.predicate !== "legal_regulatory_event" && !projectionLike(fact));
 }
 async function collectBasicFacts(ctx, dependencies = {}) {
-  const questions = basicFactsResearchQuestions(ctx);
   const reusedFacts = await loadReusableBasicFacts(ctx);
+  hydrateOfficialProjectIdentityFromFacts(ctx.evidence, reusedFacts);
+  const questions = basicFactsResearchQuestions(ctx);
   const questionsToDiscover = reusedFacts.length ? questions.filter((question) => deterministicQuestionAnswerRefs(ctx, question, reusedFacts).length === 0) : questions;
   if (reusedFacts.length) {
     ctx.emit({
@@ -19531,7 +19567,7 @@ function providerBackedRoles(evidence) {
     if (fact.predicate === "founder" || fact.predicate === "founded" || fact.predicate === "executive") {
       roles.add("FOUNDER" /* FOUNDER */);
     }
-    if (fact.predicate === "official_identity" && canonicalOfficialWebsite(evidence.profile.website) !== null && classifySubject(fact.value).applicable_classes.includes("PROJECT" /* PROJECT */)) {
+    if (fact.predicate === "official_identity" && verifiedOfficialProjectIdentity(evidence, [fact]) !== null) {
       roles.add("PROJECT" /* PROJECT */);
     }
   }
@@ -19941,6 +19977,32 @@ function recordProtocolSecurityIncidentFindings(evidence) {
     recorded += 1;
   }
   return recorded;
+}
+async function recoverProjectProtocolIncidentEvidence(ctx) {
+  const token = ctx.evidence.projectToken;
+  if (!token?.verified || ctx.evidence.protocolTvl) return;
+  const outcome = await collectProtocolTvl(defiLlamaLookupName(token.name));
+  if (!outcome.available || !token.coingeckoId || !protocolRecordMatchesCanonicalToken(outcome.value.geckoId, token.coingeckoId)) return;
+  ctx.evidence.protocolTvl = {
+    ...outcome.value,
+    capturedAt: token.capturedAt
+  };
+  if (outcome.value.chains.length) {
+    ctx.evidence.projectToken = {
+      ...token,
+      deployedChains: outcome.value.chains
+    };
+  }
+  const incidentCount = recordProtocolSecurityIncidentFindings(ctx.evidence);
+  if (!incidentCount) return;
+  const newest = [...ctx.evidence.protocolTvl.hacks ?? []].sort((left, right) => String(right.date ?? "").localeCompare(String(left.date ?? "")))[0];
+  ctx.emit({
+    phase: "Token",
+    label: `${incidentCount} protocol security incident${incidentCount === 1 ? "" : "s"} recovered`,
+    detail: `${newest?.date ?? "Undated"}${newest?.amountUsd ? ` \xB7 $${(newest.amountUsd / 1e6).toFixed(0)}M` : ""} \xB7 verified after the official project identity was restored.`,
+    source: "defillama",
+    tone: "warn"
+  });
 }
 var handleFrom = (s) => s?.match(/@([A-Za-z0-9_]{2,30})/)?.[1];
 function adverseSignalToFinding(sig) {
@@ -20670,6 +20732,7 @@ async function runAuditWithLedger(rawHandle, emit, options) {
   const officialWebsiteBeforeBasicFacts = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? null;
   await runAdapter(basicFactsAdapter);
   flushLaneProviderRows();
+  hydrateOfficialProjectIdentityFromFacts(evidence);
   const rolesAfterBasicFacts = providerBackedRoles(evidence);
   const officialWebsiteAfterBasicFacts = canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? null;
   const recoveredProjectSite = !officialWebsiteBeforeBasicFacts && officialWebsiteAfterBasicFacts !== null && rolesAfterBasicFacts.includes("PROJECT" /* PROJECT */);
@@ -20683,6 +20746,19 @@ async function runAuditWithLedger(rawHandle, emit, options) {
     evidence.roles = providerBackedRoles(evidence);
   } else {
     evidence.roles = rolesAfterBasicFacts;
+  }
+  if (recoveredProjectSite && evidence.projectToken?.verified && !evidence.protocolTvl) {
+    try {
+      await recoverProjectProtocolIncidentEvidence(ctx);
+    } catch (error) {
+      emit({
+        phase: "Token",
+        label: "Recovered protocol incident lookup failed",
+        detail: String(error),
+        source: "defillama",
+        tone: "warn"
+      });
+    }
   }
   if (!fixture && !evidence.companyEnrichment && evidence.roles.includes("FOUNDER" /* FOUNDER */)) {
     const primaryVenture = deriveFounderVentureCandidate(evidence);

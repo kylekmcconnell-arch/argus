@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { SubjectClass, VentureOutcome, type Venture } from "../src/engine";
 import { emptyEvidence, type BasicFact, type BasicFactPredicate } from "../src/data/evidence";
 import type { CheckObservation, CollectContext } from "./adapters/types";
+import { basicFactsResearchQuestions } from "./adapters/basicFacts";
 import {
   axisCatalog,
   coalesceTeamMembersByHandle,
@@ -11,6 +12,10 @@ import {
   projectVerifiedBasicFacts,
   providerBackedRoles,
 } from "./orchestrate";
+import {
+  hydrateOfficialProjectIdentityFromFacts,
+  verifiedOfficialProjectIdentity,
+} from "./projectIdentity";
 
 const basicFact = (predicate: BasicFactPredicate, value: string, qualifier?: string): BasicFact => ({
   factId: `fact-${predicate}-${value}`,
@@ -163,6 +168,36 @@ describe("provider-backed project routing", () => {
     evidence.basicFacts = [basicFact("official_identity", "Drift Protocol")];
 
     expect(providerBackedRoles(evidence)).toEqual([SubjectClass.PROJECT]);
+  });
+
+  it("restores a reused project identity before routing a suspended account", () => {
+    const evidence = emptyEvidence("@driftprotocol");
+    evidence.profile.display_name = "driftprotocol";
+    evidence.profile.profile_collection_state = "unavailable";
+    const identity = {
+      ...basicFact("official_identity", "Drift Protocol"),
+      questionId: "project.official_identity",
+      sources: [{
+        ...basicFact("official_identity", "Drift Protocol").sources[0],
+        url: "https://www.drift.trade/governance/introducing-the-drift-governance-token",
+      }],
+    };
+
+    expect(verifiedOfficialProjectIdentity(evidence, [identity])).toEqual(expect.objectContaining({
+      fact: expect.objectContaining({ value: "Drift Protocol" }),
+      website: expect.objectContaining({ domain: "drift.trade" }),
+    }));
+    expect(hydrateOfficialProjectIdentityFromFacts(evidence, [identity])).not.toBeNull();
+    expect(evidence.profile.website).toBe("https://drift.trade/governance/introducing-the-drift-governance-token");
+    expect(evidence.profile.display_name).toBe("Drift Protocol");
+    expect(evidence.profile.identity_confidence).toBe("Confirmed");
+    expect(evidence.roles).toEqual([SubjectClass.PROJECT]);
+    expect(basicFactsResearchQuestions({
+      handle: evidence.profile.handle,
+      evidence,
+      emit: () => undefined,
+    }).some((question) => question.predicate === "security_incident")).toBe(true);
+    expect(providerBackedRoles({ ...evidence, basicFacts: [identity] })).toEqual([SubjectClass.PROJECT]);
   });
 
   it("does not route to FOUNDER on a non-founder fact or an unresolved founder fact", () => {
