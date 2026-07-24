@@ -232,7 +232,7 @@ describe("v1 person decision-readiness contract", () => {
       score: null,
       decision_ready: false,
       completeness_state: "partial",
-      headline: "Evidence coverage is incomplete. Do not treat the preliminary score as investment clearance.",
+      headline: "Some checks did not finish. Do not rely on the early score yet.",
       decision_readiness: {
         state: "provisional",
         coverage_percent: 90,

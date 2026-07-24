@@ -49,7 +49,18 @@ export interface DeployerTrail {
 
 // A person found by the web-deep team search (Google/LinkedIn/Crunchbase/X), with
 // their real name connected to handle + LinkedIn where possible.
-export interface WebPerson { name: string; handle?: string; linkedin?: string; role: string; evidence?: string }
+export interface WebPerson {
+  name: string;
+  handle?: string;
+  linkedin?: string;
+  role: string;
+  evidence?: string;
+  developerProfiles?: Array<{
+    provider: "github" | "huggingface";
+    url: string;
+    sourceUrl: string;
+  }>;
+}
 
 export interface ProjectAccountAuditOutcome {
   state: "complete" | "failed" | "unavailable";

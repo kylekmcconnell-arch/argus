@@ -139,4 +139,21 @@ describe("supporting-page truth states", () => {
     expect(html).toContain("Relationship ledger");
     expect(html).toContain("associates");
   });
+
+  it("does not label a large token holder as a contradicted relationship", () => {
+    const html = renderToStaticMarkup(
+      <TrustGraph
+        nodes={[
+          { type: "Token", key: "token:base:0xabc", subject: true },
+          { type: "Identity", subtype: "Wallet", key: "wallet:base:0xdef" },
+        ]}
+        // Legacy snapshots used Contradicted for a >25% holder. The read-time
+        // renderer must correct that old label as well as new scans.
+        edges={[{ src: "token:base:0xabc", dst: "wallet:base:0xdef", type: "HELD_BY", verdict: "Contradicted" }]}
+      />,
+    );
+
+    expect(html).toContain("High concentration");
+    expect(html).not.toContain(">Contradicted<");
+  });
 });

@@ -326,7 +326,7 @@ function tokenResult(input: {
     && (input.verdict !== "PASS" || input.dossier.cg?.ath?.drawdownPct === -75)
     && !presentation.final
     && presentation.displayVerdict === expectedPublicDisplay
-    && (input.verdict !== "PASS" || presentation.secondarySignal?.includes("PRELIMINARY MODEL SIGNAL") === true)
+    && (input.verdict !== "PASS" || presentation.secondarySignal?.includes("EARLY SCORE") === true)
     && (input.verdict === "PASS" || presentation.resultLabel === "RISK SIGNAL");
   return {
     id: input.id,

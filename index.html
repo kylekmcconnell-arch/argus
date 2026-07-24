@@ -1,18 +1,18 @@
 <!doctype html>
-<html lang="en" data-theme="dark" style="color-scheme: dark">
+<html lang="en" data-theme="light" style="color-scheme: light">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#06080c" />
+    <meta name="theme-color" content="#f4f7fb" />
     <script>
       // Apply the validated saved theme before paint. Invalid or unavailable
-      // storage always falls back to ARGUS's intentional dark default.
+      // storage always falls back to ARGUS's light default.
       (() => {
-        let theme = "dark";
+        let theme = "light";
         try {
-          if (localStorage.getItem("argus-theme") === "light") theme = "light";
+          if (localStorage.getItem("argus-theme") === "dark") theme = "dark";
         } catch (e) {}
         const root = document.documentElement;
         root.dataset.theme = theme;

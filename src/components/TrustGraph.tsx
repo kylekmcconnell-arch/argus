@@ -25,6 +25,9 @@ function nodeStyle(n: PanoptesNode, e?: PanoptesEdge): { fill: string; ring: str
   if (n.outcome === "Rug" || n.was_rug) return { fill: "var(--color-avoid)", ring: "var(--color-avoid)", label: String(n.key) };
   if (n.outcome === "Acquisition" || n.outcome === "IPO") return { fill: "var(--color-pass)", ring: "var(--color-pass)", label: String(n.key) };
   if (e?.verdict === "Unconfirmed") return { fill: "var(--color-panel-2)", ring: "var(--color-caution)", label: String(n.key) };
+  if (e?.risk === "high_concentration" || (e?.type === "HELD_BY" && e?.verdict === "Contradicted")) {
+    return { fill: "var(--color-panel-2)", ring: "var(--color-caution)", label: String(n.key) };
+  }
   if (e?.verdict === "Contradicted") return { fill: "var(--color-panel-2)", ring: "var(--color-avoid)", label: String(n.key) };
   return { fill: "var(--color-panel-2)", ring: "var(--color-line-2)", label: String(n.key) };
 }
@@ -52,6 +55,16 @@ function relationshipTone(verdict: unknown): string {
   if (verdict === "Unconfirmed") return "tint-caution";
   if (verdict === "Confirmed" || verdict === "Acknowledged") return "tint-pass";
   return "tint-neutral";
+}
+
+function relationshipStatus(edge?: PanoptesEdge): { label: string; tone: string } {
+  if (edge?.risk === "high_concentration" || (edge?.type === "HELD_BY" && edge?.verdict === "Contradicted")) {
+    return { label: "High concentration", tone: "tint-caution" };
+  }
+  if (typeof edge?.verdict === "string") {
+    return { label: edge.verdict, tone: relationshipTone(edge.verdict) };
+  }
+  return { label: "Observed", tone: "tint-neutral" };
 }
 
 // Radial star map with legibility at scale: entities spread over concentric
@@ -207,7 +220,9 @@ export function TrustGraph({
           {/* inner edges */}
           {placed.map((p, i) => {
             const st = nodeStyle(p.node, p.edge);
-            const contradicted = p.edge?.verdict === "Contradicted";
+            const concentrated = p.edge?.risk === "high_concentration"
+              || (p.edge?.type === "HELD_BY" && p.edge?.verdict === "Contradicted");
+            const contradicted = p.edge?.verdict === "Contradicted" && !concentrated;
             const unconfirmed = p.edge?.verdict === "Unconfirmed";
             const focused = hover === p.id;
             const faded = hover !== null && !focused;
@@ -216,7 +231,7 @@ export function TrustGraph({
             const y1 = anchor?.y ?? cy;
             return (
               <g key={`e${i}`} opacity={faded ? 0.25 : 1}>
-                <line x1={x1} y1={y1} x2={p.x} y2={p.y} stroke={contradicted ? "var(--color-avoid)" : unconfirmed ? "var(--color-line-2)" : st.ring} strokeWidth={contradicted ? 1.4 : focused ? 1.4 : 1} strokeDasharray={unconfirmed ? "3 4" : contradicted ? "5 3" : undefined} opacity={unconfirmed ? 0.5 : 0.7} />
+                <line x1={x1} y1={y1} x2={p.x} y2={p.y} stroke={contradicted ? "var(--color-avoid)" : concentrated ? "var(--color-caution)" : unconfirmed ? "var(--color-line-2)" : st.ring} strokeWidth={contradicted || concentrated ? 1.4 : focused ? 1.4 : 1} strokeDasharray={unconfirmed ? "3 4" : contradicted ? "5 3" : undefined} opacity={unconfirmed ? 0.5 : 0.7} />
                 {/* per-spoke labels drown at scale: show them all only when sparse,
                     otherwise only on the hovered spoke */}
                 {p.edge && (!dense || focused) && (
@@ -325,7 +340,7 @@ export function TrustGraph({
               const edge = entry.edge;
               const action = nodeAction(entry.node, onAudit, onOpenProject);
               const relation = edge ? EDGE_LABEL[edge.type] ?? edge.type.toLowerCase() : "connected to";
-              const verdict = typeof edge?.verdict === "string" ? edge.verdict : "Observed";
+              const status = relationshipStatus(edge);
               return (
                 <li key={`${entry.depth}:${entry.node.key}:${index}`} className="grid gap-2 px-3 py-2.5 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
                   <div className="min-w-0">
@@ -340,7 +355,7 @@ export function TrustGraph({
                     <p className="mt-1 text-[11px] text-ink-faint">Entity type: {String(entry.node.type)}</p>
                   </div>
                   <div className="flex items-center gap-2 sm:justify-end">
-                    <span className={`chip ${relationshipTone(edge?.verdict)}`}>{verdict}</span>
+                    <span className={`chip ${status.tone}`}>{status.label}</span>
                     {action && <button onClick={action} className="btn-chip tint-signal">open →</button>}
                   </div>
                 </li>

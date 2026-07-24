@@ -16,7 +16,7 @@ describe("deriveDecisionReadiness", () => {
       applicable: 0,
       successful: 0,
       unresolved: 0,
-      title: "Investigation incomplete",
+      title: "Report not ready",
     });
 
     const result = deriveDecisionReadiness(checks(["not-applicable", "not-applicable"]));
@@ -27,7 +27,7 @@ describe("deriveDecisionReadiness", () => {
       applicable: 0,
       notApplicable: 2,
     });
-    expect(result.guidance).toContain("No applicable checks");
+    expect(result.guidance).toContain("No checks were available");
   });
 
   it("reports each unresolved reason and keeps thin coverage incomplete", () => {
@@ -54,7 +54,7 @@ describe("deriveDecisionReadiness", () => {
     });
     expect(result.guidance).toContain("2 not completed");
     expect(result.guidance).toContain("1 provider path unavailable");
-    expect(result.guidance).toContain("Do not treat the score or verdict as investment-ready");
+    expect(result.guidance).toContain("Do not rely on the score or result yet");
   });
 
   it("marks substantial but unfinished coverage provisional at the policy floor", () => {
@@ -73,9 +73,9 @@ describe("deriveDecisionReadiness", () => {
       applicable: 10,
       successful: 7,
       unresolved: 3,
-      title: "Assessment is provisional",
+      title: "Review with gaps",
     });
-    expect(result.guidance).toContain("Treat the score and verdict as provisional");
+    expect(result.guidance).toContain("Treat the result as an early read");
   });
 
   it("requires every applicable check to have an observable outcome before becoming ready", () => {
@@ -94,10 +94,10 @@ describe("deriveDecisionReadiness", () => {
       unresolved: 0,
       findings: 1,
       checkedEmpty: 1,
-      title: "Evidence coverage complete: findings require review",
+      title: "All checks finished: review the findings",
     });
-    expect(result.guidance).toContain("including 1 finding");
-    expect(result.guidance).toContain("not an investment recommendation");
+    expect(result.guidance).toContain("1 finding need your review");
+    expect(result.guidance).toContain("not financial advice");
   });
 
   it("floors display coverage so an unresolved check never rounds up to 100%", () => {
@@ -191,9 +191,9 @@ describe("deriveDecisionReadiness", () => {
       applicable: 3,
       unresolved: 1,
       decisionBlockers: 1,
-      title: "Subject routing unresolved",
+      title: "ARGUS could not identify what this account represents",
     });
-    expect(result.guidance).toContain("collected intelligence only");
+    expect(result.guidance).toContain("Use the facts as research");
   });
 
   it("labels a resolved role with no governing axes as incomplete scoring, not failed routing", () => {
@@ -209,11 +209,11 @@ describe("deriveDecisionReadiness", () => {
       applicable: 3,
       unresolved: 1,
       decisionBlockers: 1,
-      title: "Scoring output incomplete",
+      title: "The score is not ready",
     });
-    expect(result.guidance).toContain("resolved an evidence-backed role");
-    expect(result.guidance).toContain("analyst did not return a complete, valid governing-axis score");
-    expect(result.guidance).not.toContain("did not resolve an evidence-backed role");
+    expect(result.guidance).toContain("identified the subject");
+    expect(result.guidance).toContain("scoring step did not finish");
+    expect(result.guidance).not.toContain("could not identify");
   });
 
   it("requires qualifying support for every governing axis before becoming ready", () => {
@@ -229,9 +229,9 @@ describe("deriveDecisionReadiness", () => {
       decisionAxisTotal: 4,
       evidenceBackedAxes: 3,
       decisionBlockers: 1,
-      title: "Assessment is provisional",
+      title: "Review with gaps",
     });
-    expect(result.guidance).toContain("1 governing axis has no qualifying frozen support");
+    expect(result.guidance).toContain("1 part of the score does not have a saved source");
   });
 });
 

@@ -31,9 +31,9 @@ function browserStorage(): ThemeStorage | undefined {
   }
 }
 
-/** Unknown, corrupted, or unavailable preferences intentionally resolve dark. */
+/** Unknown, corrupted, or unavailable preferences resolve to the light default. */
 export function normalizeArgusTheme(value: unknown): ArgusTheme {
-  return value === "light" ? "light" : "dark";
+  return value === "dark" ? "dark" : "light";
 }
 
 export function currentArgusTheme(doc: ThemeDocument | undefined = browserDocument()): ArgusTheme {
@@ -44,7 +44,7 @@ export function readStoredArgusTheme(storage: ThemeStorage | undefined = browser
   try {
     return normalizeArgusTheme(storage?.getItem(ARGUS_THEME_STORAGE_KEY));
   } catch {
-    return "dark";
+    return "light";
   }
 }
 

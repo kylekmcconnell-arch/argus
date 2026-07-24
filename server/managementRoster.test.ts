@@ -5,6 +5,7 @@ import { mergeManagementIntoWebTeam } from "./orchestrate";
 const enrichment = (management: Array<{ name: string; title: string; priorCompanies: string[]; linkedin: string | null; startYear: string | null }>) => ({
   name: "Uniswap Labs",
   uuid: "monid-uuid",
+  identityMatch: "official_domain" as const,
   management,
   sourceUrl: "https://monid.example/company/monid-uuid",
   capturedAt: "2026-07-23T00:00:00.000Z",
@@ -26,6 +27,7 @@ describe("mergeManagementIntoWebTeam", () => {
       artifact_verified: true,
       evidence_origin: "deterministic",
       provider: "monid",
+      sourceUrl: "https://monid.example/company/monid-uuid",
       identity_link_evidence_origin: "deterministic",
     });
     expect(member?.evidence).toContain("BlackRock");
@@ -66,5 +68,25 @@ describe("mergeManagementIntoWebTeam", () => {
     mergeManagementIntoWebTeam(evidence, emit);
     expect(evidence.webTeam ?? []).toHaveLength(0);
     expect(emit).not.toHaveBeenCalled();
+  });
+
+  it("rejects leadership from a name-only company match", () => {
+    const evidence = emptyEvidence("@askvenice");
+    evidence.companyEnrichment = {
+      ...enrichment([
+        { name: "Nik Rae Falco", title: "Founder and Owner", priorCompanies: [], linkedin: null, startYear: null },
+      ]),
+      identityMatch: "name_only",
+      sourceUrl: "https://venicetrim.com",
+    };
+    const emit = vi.fn();
+    mergeManagementIntoWebTeam(evidence, emit);
+
+    expect(evidence.webTeam ?? []).toHaveLength(0);
+    expect(emit).toHaveBeenCalledWith(expect.objectContaining({
+      label: "Leadership match rejected",
+      source: "monid",
+      tone: "warn",
+    }));
   });
 });

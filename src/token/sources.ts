@@ -150,9 +150,9 @@ interface CoinGeckoResponse {
   description?: { en?: unknown };
 }
 
-// CoinGecko's description.en is the project's own blurb — the "what it actually
-// does" a report should lead with. Strip HTML + markdown links to plain text and
-// keep the first couple of sentences.
+// CoinGecko's description.en is the project's own blurb. Keep enough clean text
+// for the report's Read more control instead of permanently truncating it in
+// the data layer.
 function cleanBlurb(raw: unknown): string | null {
   if (typeof raw !== "string" || !raw.trim()) return null;
   let s = raw
@@ -164,10 +164,7 @@ function cleanBlurb(raw: unknown): string | null {
     .replace(/\s+/g, " ")
     .trim();
   if (!s) return null;
-  // First 1–2 sentences, capped, without cutting mid-word.
-  const sentences = s.match(/[^.!?]+[.!?]+/g);
-  if (sentences && sentences.length) s = sentences.slice(0, 2).join(" ").trim();
-  if (s.length > 300) s = s.slice(0, 297).replace(/\s+\S*$/, "") + "…";
+  if (s.length > 1_600) s = `${s.slice(0, 1_597).replace(/\s+\S*$/, "").trim()}…`;
   return s;
 }
 // Tier-1 CEXes carry the most weight (real listings = real diligence + KYC trail).

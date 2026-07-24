@@ -254,7 +254,7 @@ export function buildNetwork(dossiers: { handle: string; d: Dossier }[], extra: 
         src, dst, type: String(e.type),
         verdict: e.verdict ? String(e.verdict) : undefined,
         outcome: e.outcome ? String(e.outcome) : undefined,
-        rug: e.outcome === "Rug" || e.verdict === "Contradicted",
+        rug: e.outcome === "Rug" || (e.verdict === "Contradicted" && e.type !== "HELD_BY"),
       });
     }
   };

@@ -105,15 +105,15 @@ export function InvestigationDecisionCanvas({
     <section id="report-summary" className="report-section mt-6 scroll-mt-28">
       <header className="report-section-heading">
         <div>
-          <p className="eyebrow text-signal-lift">01 · Decision ledger</p>
-          <h2 className="mt-1 text-[20px] font-semibold tracking-tight text-ink">How the result is supported</h2>
+          <p className="eyebrow text-signal-lift">01 · Result</p>
+          <h2 className="mt-1 text-[20px] font-semibold tracking-tight text-ink">How ARGUS got this result</h2>
           <p className="mt-1 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-            The verdict, its counterweight, and the remaining verification work are kept in one evidence ledger.
+            See what supports the result, what works against it, and what is still unanswered.
           </p>
         </div>
         <div className="shrink-0 text-left sm:text-right">
           <p className="mono text-[22px] font-semibold tabular-nums text-ink">{coveragePercent}%</p>
-          <p className="mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">{successful}/{applicable} outcomes</p>
+          <p className="mono text-[10px] uppercase tracking-[0.1em] text-ink-faint">{successful}/{applicable} checks</p>
         </div>
       </header>
 
@@ -123,25 +123,25 @@ export function InvestigationDecisionCanvas({
             <ReportCanvasNarrativeSection
               title={`Why ARGUS reaches ${verdictLabel}`}
               description={favorable
-                ? "Only recorded outcomes and evidence-backed positive findings appear in this summary."
-                : "Only recorded adverse findings, failed checks, and decision-limiting evidence appear in this summary."}
+                ? "This list shows the finished checks and sourced facts that support the result."
+                : "This list shows the failed checks and sourced risks that drive the result."}
               tone={verdictTone}
               items={narrativeItems("verdict", verdictItems, evidenceHref)}
               emptyCopy={favorable
-                ? "No evidence-backed support is recorded yet. Treat the result as incomplete and inspect the coverage gaps."
-                : "No recorded adverse driver explains this result. Inspect the underlying evidence before relying on the verdict."}
+                ? "No sourced support is recorded yet. Read the open questions before using this result."
+                : "No recorded risk explains this result. Read the evidence before relying on it."}
             />
             <ReportCanvasNarrativeSection
               id="report-risks"
               title={favorable ? "What limits confidence" : "What evidence pulls the other way"}
               description={favorable
-                ? "Adverse findings and open evidence gaps remain visible even when the model signal is favorable."
-                : "Verified positive evidence stays visible so an adverse verdict is not presented without its counterweight."}
+                ? "Risks and unanswered questions stay visible even when the score is high."
+                : "Positive evidence stays visible even when the score is low."}
               tone={favorable ? "caution" : "pass"}
               items={narrativeItems("counterweight", countervailingItems, evidenceHref)}
               emptyCopy={favorable
-                ? "No adverse finding or unresolved confidence limit is recorded in this snapshot."
-                : "No evidence-backed positive counterweight is recorded in this snapshot."}
+                ? "No risk or major unanswered question is recorded in this saved report."
+                : "No sourced positive finding is recorded in this saved report."}
             />
           </div>
 
@@ -149,30 +149,30 @@ export function InvestigationDecisionCanvas({
             <section aria-label="Evidence coverage and freshness">
               <div className="flex items-center gap-2">
                 <Database size={17} weight="duotone" aria-hidden="true" className="text-signal-lift" />
-                <h3 className="eyebrow text-ink-dim">Evidence coverage</h3>
+                <h3 className="eyebrow text-ink-dim">Checks finished</h3>
                 <span className="mono ml-auto text-[13.5px] font-semibold text-ink">{coveragePercent}%</span>
               </div>
               <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-line" role="progressbar" aria-label="Evidence coverage" aria-valuemin={0} aria-valuemax={100} aria-valuenow={coveragePercent}>
                 <div className="h-full rounded-full bg-signal" style={{ width: `${Math.max(0, Math.min(100, coveragePercent))}%` }} />
               </div>
               <p className="mt-2 text-[11px] leading-snug text-ink-faint">
-                {successful} recorded outcomes, {openQuestions.length} open {openQuestions.length === 1 ? "path" : "paths"}.
+                {successful} finished, {openQuestions.length} open.
               </p>
             </section>
 
             <div className="mt-4 border-t border-line/60 pt-4">
               <DecisionLedgerList
-                title="Open questions · verify next"
+                title="Check next"
                 items={nextSteps}
                 href={methodologyHref}
-                emptyCopy="All applicable checks have recorded outcomes."
+                emptyCopy="All checks finished."
                 limit={4}
               />
               <DecisionLedgerList
-                title="Recorded outcomes"
+                title="Finished checks"
                 items={verified}
                 href={evidenceHref}
-                emptyCopy="No completed outcome is recorded yet."
+                emptyCopy="No check has finished yet."
                 limit={4}
               />
             </div>

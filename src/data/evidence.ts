@@ -332,6 +332,7 @@ export interface SecurityAuditsSnapshot {
 export interface CompanyEnrichmentSnapshot {
   name: string;
   uuid: string;
+  identityMatch?: "official_domain" | "name_only";
   funding?: {
     totalRaisedUsd: number | null;
     rounds: Array<{
@@ -658,6 +659,12 @@ export interface WebTeamMember {
   /** Exact fetched page that directly supports the person's project role. */
   sourceUrl?: string;
   projects?: { name: string; role?: string }[]; // their OTHER projects (serial-founder web)
+  /** Developer profiles linked directly from this person's own X profile. */
+  developerProfiles?: Array<{
+    provider: "github" | "huggingface";
+    url: string;
+    sourceUrl: string;
+  }>;
   /** Discovery-only model rows stay visible but are excluded from governing scoring. */
   evidence_origin?: EvidenceOrigin;
   artifact_verified?: boolean;

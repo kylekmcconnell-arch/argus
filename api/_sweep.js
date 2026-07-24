@@ -287,9 +287,7 @@ function cleanBlurb(raw) {
   if (typeof raw !== "string" || !raw.trim()) return null;
   let s = raw.replace(/<[^>]+>/g, " ").replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1").replace(/https?:\/\/\S+/g, "").replace(/[*_`>#]+/g, " ").replace(/&amp;/g, "&").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
   if (!s) return null;
-  const sentences = s.match(/[^.!?]+[.!?]+/g);
-  if (sentences && sentences.length) s = sentences.slice(0, 2).join(" ").trim();
-  if (s.length > 300) s = s.slice(0, 297).replace(/\s+\S*$/, "") + "\u2026";
+  if (s.length > 1600) s = `${s.slice(0, 1597).replace(/\s+\S*$/, "").trim()}\u2026`;
   return s;
 }
 var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
@@ -641,6 +639,7 @@ async function runTokenAudit(input, emit, opts) {
   const chain = pair.chainId;
   const liquidityUsd = pair.liquidity?.usd ?? 0;
   const fdv = pair.marketCap ?? pair.fdv ?? 0;
+  const fullyDilutedValuation = pair.fdv ?? pair.marketCap ?? 0;
   const vol24 = pair.volume?.h24 ?? 0;
   const buys = pair.txns?.h24?.buys ?? 0;
   const sells = pair.txns?.h24?.sells ?? 0;
@@ -923,6 +922,7 @@ async function runTokenAudit(input, emit, opts) {
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? void 0,
     priceUsd: pair.priceUsd ? Number(pair.priceUsd) : void 0,
     mcap: fdv,
+    fdv: fullyDilutedValuation,
     liquidityUsd,
     vol24,
     ageDays,
@@ -976,7 +976,12 @@ function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders
   holders.slice(0, 4).forEach((h) => {
     const k = walletEntityKey(chain, h.address);
     nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: (h.tag || "holder") + ":" + h.address.slice(0, 8), chain, address: h.address, concentration: h.percent });
-    edges.push({ src: center, dst: k, type: "HELD_BY", verdict: h.percent > 25 ? "Contradicted" : void 0 });
+    edges.push({
+      src: center,
+      dst: k,
+      type: "HELD_BY",
+      ...h.percent > 25 ? { risk: "high_concentration" } : {}
+    });
   });
   socials.slice(0, 3).forEach((x) => {
     const xh = x.url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i)?.[1];

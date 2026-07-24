@@ -2465,6 +2465,18 @@ interface RunAuditOptions {
  * "why isn't more of the team listed" gap without a new provider.
  */
 export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Emit): void {
+  if (evidence.companyEnrichment?.identityMatch !== "official_domain") {
+    if (evidence.companyEnrichment?.management?.length) {
+      emit({
+        phase: "Team",
+        label: "Leadership match rejected",
+        detail: `Monid matched ${evidence.companyEnrichment.name} by name only. Its people were excluded because the provider website did not match the project's official website.`,
+        source: "monid",
+        tone: "warn",
+      });
+    }
+    return;
+  }
   const management = evidence.companyEnrichment?.management ?? [];
   if (!management.length) return;
   const webTeam = evidence.webTeam ?? (evidence.webTeam = []);
@@ -2495,6 +2507,7 @@ export function mergeManagementIntoWebTeam(evidence: CollectedEvidence, emit: Em
       linkedin: person.linkedin ?? undefined,
       evidence: person.priorCompanies?.length ? `prior: ${person.priorCompanies.slice(0, 3).join(", ")}` : undefined,
       source: "Monid/Akta leadership record",
+      sourceUrl: evidence.companyEnrichment.sourceUrl,
       evidence_origin: "deterministic",
       artifact_verified: true,
       provider: "monid",
@@ -2745,17 +2758,18 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
           // to a skipped path, never push the whole run past the platform
           // function budget.
           const companyLookup = evidence.projectToken.homepage
-            ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl
-            ?? projectName;
-          const enrichment = await withWallClockBox(
-            collectCompanyEnrichment(companyLookup, {
-              sections: ["funding_detail", "management_profile", "firmographic"],
-            }),
-            MONID_ENRICHMENT_BUDGET_MS,
-          );
-          if (enrichment?.available) {
-            evidence.companyEnrichment = { ...enrichment.value, capturedAt };
-            mergeManagementIntoWebTeam(evidence, emit);
+            ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+          if (companyLookup) {
+            const enrichment = await withWallClockBox(
+              collectCompanyEnrichment(companyLookup, {
+                sections: ["funding_detail", "management_profile", "firmographic"],
+              }),
+              MONID_ENRICHMENT_BUDGET_MS,
+            );
+            if (enrichment?.available) {
+              evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+              mergeManagementIntoWebTeam(evidence, emit);
+            }
           }
         }
       } catch (error) {
@@ -2927,6 +2941,32 @@ async function runAuditWithLedger(rawHandle: string, emit: Emit, options?: RunAu
         source: "defillama",
         tone: "warn",
       });
+    }
+  }
+  // The official domain may only be recovered during the basic-facts pass
+  // (common for suspended or sparse X profiles). Run company leadership only
+  // after that exact domain is known. Never fall back to a company-name match.
+  const recoveredCompanyLookup = evidence.projectToken?.homepage
+    ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+  if (
+    !fixture
+    && recoveredCompanyLookup
+    && rolesAfterBasicFacts.includes(SubjectClass.PROJECT)
+    && evidence.companyEnrichment?.identityMatch !== "official_domain"
+  ) {
+    try {
+      const enrichment = await withWallClockBox(
+        collectCompanyEnrichment(recoveredCompanyLookup, {
+          sections: ["funding_detail", "management_profile", "firmographic"],
+        }),
+        MONID_ENRICHMENT_BUDGET_MS,
+      );
+      if (enrichment?.available && enrichment.value.identityMatch === "official_domain") {
+        evidence.companyEnrichment = { ...enrichment.value, capturedAt: new Date().toISOString() };
+        mergeManagementIntoWebTeam(evidence, emit);
+      }
+    } catch (error) {
+      emit({ phase: "Team", label: "Company leadership lookup failed", detail: String(error), source: "monid", tone: "warn" });
     }
   }
   // Founder financing recall: a verified founder's primary venture usually has

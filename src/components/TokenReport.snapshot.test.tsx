@@ -191,8 +191,8 @@ describe("token report supplemental evidence boundary", () => {
     }
 
     expect(container.textContent).toContain("Why ARGUS reaches PASS");
-    expect(container.textContent).toContain("Recorded outcomes");
-    expect(container.textContent).toContain("Open questions");
+    expect(container.textContent).toContain("Finished checks");
+    expect(container.textContent).toContain("Check next");
     expect(container.querySelector('[role="progressbar"][aria-label="Evidence coverage"]')).not.toBeNull();
   });
 
@@ -236,7 +236,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(counterweight).not.toContain("Market intelligence");
     expect(counterweight).not.toContain("CoinGecko returned no matching asset");
 
-    const recordedOutcomes = container.querySelector('section[aria-label="Recorded outcomes"]')?.textContent ?? "";
+    const recordedOutcomes = container.querySelector('section[aria-label="Finished checks"]')?.textContent ?? "";
     expect(recordedOutcomes).toContain("Market intelligence");
   });
 
@@ -246,7 +246,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(container.textContent).toContain("SNAPSHOT v2");
     expect(container.textContent).toContain("Captured charts are shown below");
     expect(harness.livePanel).not.toHaveBeenCalled();
-    expect(harness.secondOpinion).not.toHaveBeenCalled();
+    expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({ panelCostToken: undefined }));
     expect(harness.serviceAlert).not.toHaveBeenCalled();
 
     const copy = [...container.querySelectorAll("button")]
@@ -265,7 +265,7 @@ describe("token report supplemental evidence boundary", () => {
 
     expect(container.textContent).toContain("not part of snapshot v2");
     expect(harness.livePanel).toHaveBeenCalled();
-    expect(harness.secondOpinion).not.toHaveBeenCalled();
+    expect(harness.secondOpinion).toHaveBeenLastCalledWith(expect.objectContaining({ panelCostToken: undefined }));
     expect(harness.livePanel.mock.calls.some(([name]) => name === "on-chain" || name === "counterparties")).toBe(false);
     expect(harness.livePanel.mock.calls.find(([name]) => name === "project-research")?.[1]).not.toHaveProperty("panelCostToken");
     expect(harness.livePanel.mock.calls.some(([name]) => name === "add-info" || name === "link-entity")).toBe(false);
@@ -278,7 +278,7 @@ describe("token report supplemental evidence boundary", () => {
 
     expect(container.textContent).toContain("Saving the immutable scan");
     expect(harness.livePanel).not.toHaveBeenCalled();
-    expect(harness.secondOpinion).not.toHaveBeenCalled();
+    expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({ panelCostToken: undefined }));
 
     render(dossier({
       deployer: "0x4444444444444444444444444444444444444444",
@@ -320,7 +320,7 @@ describe("token report supplemental evidence boundary", () => {
 
     expect(container.textContent).toContain("Post-scan intelligence is paused");
     expect(harness.livePanel).not.toHaveBeenCalled();
-    expect(harness.secondOpinion).not.toHaveBeenCalled();
+    expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({ panelCostToken: undefined }));
   });
 
   it("keeps private supplemental panels paused and copies no mutable subject link", () => {
@@ -330,7 +330,7 @@ describe("token report supplemental evidence boundary", () => {
     expect(container.textContent).toContain("avoid shared cache traces");
     expect(container.textContent).toContain("not saved to a case");
     expect(harness.livePanel).not.toHaveBeenCalled();
-    expect(harness.secondOpinion).not.toHaveBeenCalled();
+    expect(harness.secondOpinion).toHaveBeenCalledWith(expect.objectContaining({ panelCostToken: undefined }));
     expect([...container.querySelectorAll("button")].some((button) => button.textContent === "Share")).toBe(false);
     expect([...container.querySelectorAll("button")].some((button) => button.textContent?.includes("Watch"))).toBe(false);
 
@@ -356,8 +356,8 @@ describe("token report supplemental evidence boundary", () => {
 
     expect(container.textContent).toContain("RISK SIGNAL");
     expect(container.textContent).toContain("FAIL");
-    expect(container.textContent).toContain("model score");
-    expect(container.textContent).toContain("missing coverage prevents a complete assessment");
+    expect(container.textContent).toContain("risk score");
+    expect(container.textContent).toContain("some checks are still open");
 
     const copy = [...container.querySelectorAll("button")]
       .find((button) => button.textContent?.trim() === "Copy report");

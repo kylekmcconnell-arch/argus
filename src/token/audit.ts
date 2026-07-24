@@ -60,7 +60,7 @@ export interface NormalizedSafety {
 
 export interface TokenDossier {
   address: string; chain: string; dexId: string; pairAddress?: string; symbol: string; name: string;
-  imageUrl?: string; priceUsd?: number; mcap?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
+  imageUrl?: string; priceUsd?: number; mcap?: number; fdv?: number; liquidityUsd?: number; vol24?: number; ageDays?: number;
   priceChange?: { m5?: number; h1?: number; h6?: number; h24?: number };
   /** Frozen GeckoTerminal series captured during the scan for snapshot-safe rendering. */
   priceHistory?: PriceHistory;
@@ -375,7 +375,10 @@ async function runTokenAudit(
   const address = pair.baseToken.address;
   const chain = pair.chainId;
   const liquidityUsd = pair.liquidity?.usd ?? 0;
+  // `mcap` is the circulating value when DexScreener provides it. Preserve FDV
+  // separately so the report does not label one as the other.
   const fdv = pair.marketCap ?? pair.fdv ?? 0;
+  const fullyDilutedValuation = pair.fdv ?? pair.marketCap ?? 0;
   const vol24 = pair.volume?.h24 ?? 0;
   const buys = pair.txns?.h24?.buys ?? 0;
   const sells = pair.txns?.h24?.sells ?? 0;
@@ -730,7 +733,7 @@ async function runTokenAudit(
   return {
     address, chain, dexId: pair.dexId, pairAddress: pair.pairAddress, symbol: pair.baseToken.symbol, name: pair.baseToken.name,
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? undefined, priceUsd: pair.priceUsd ? Number(pair.priceUsd) : undefined,
-    mcap: fdv, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
+    mcap: fdv, fdv: fullyDilutedValuation, liquidityUsd, vol24, ageDays, priceChange: pair.priceChange,
     ...(priceHistory ? { priceHistory } : {}),
     verdict, score, capApplied, headline, axes, safety: s, socials,
     projectX, deployer, topHolders, insiderPct, bundleCount, bundleRisk, cg, graph, findings, trace, live: true, safetyChecked: s.available,
@@ -767,7 +770,12 @@ function buildGraph(chain: string, address: string, symbol: string, verdict: str
     // node whether it later appears as a holder, deployer or funder.
     const k = walletEntityKey(chain, h.address);
     nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: (h.tag || "holder") + ":" + h.address.slice(0, 8), chain, address: h.address, concentration: h.percent });
-    edges.push({ src: center, dst: k, type: "HELD_BY", verdict: h.percent > 25 ? "Contradicted" : undefined });
+    edges.push({
+      src: center,
+      dst: k,
+      type: "HELD_BY",
+      ...(h.percent > 25 ? { risk: "high_concentration" } : {}),
+    });
   });
   socials.slice(0, 3).forEach((x) => {
     // Key by the real DESTINATION (@handle or domain) — nodes keyed by the

@@ -8277,8 +8277,12 @@ function toStringList(value) {
 }
 function hostOf(value) {
   if (!isNonEmptyString(value)) return null;
-  const host = value.trim().toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
-  return host || null;
+  const raw = value.trim().toLowerCase();
+  try {
+    return new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`).hostname.replace(/^www\./, "") || null;
+  } catch {
+    return raw.replace(/^https?:\/\//, "").replace(/^www\./, "").split(/[/?#]/, 1)[0] || null;
+  }
 }
 function websiteUrl(value) {
   const host = hostOf(value);
@@ -8544,11 +8548,15 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
   const management = sections.includes("management_profile") ? parseManagement(root.management_profile) : void 0;
   const firmographic = sections.includes("firmographic") ? parseFirmographic(root.firmographic) : void 0;
   const name = isNonEmptyString(chosen.name) ? chosen.name.trim() : firmographic?.legalName ?? query;
+  const queryHost = hostOf(query);
+  const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
+  const identityMatch = queryLooksLikeHost && hostOf(chosen.website) === queryHost ? "official_domain" : "name_only";
   return {
     available: true,
     value: {
       name,
       uuid,
+      identityMatch,
       ...funding ? { funding } : {},
       ...management ? { management } : {},
       ...firmographic ? { firmographic } : {},
@@ -18121,7 +18129,7 @@ function projectProviderBackedBasicFacts(evidence) {
       `canonical token of ${ventureToken.ventureName}`
     ));
   }
-  const founderProfile = isProject ? evidence.companyEnrichment?.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title)) : void 0;
+  const founderProfile = isProject && evidence.companyEnrichment?.identityMatch === "official_domain" ? evidence.companyEnrichment.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title)) : void 0;
   if (founderProfile?.name.trim() && evidence.companyEnrichment) {
     const prior = founderProfile.priorCompanies.filter(Boolean).slice(0, 3).join(", ");
     projected.push(makeFact(
@@ -18192,9 +18200,7 @@ function cleanBlurb(raw) {
   if (typeof raw !== "string" || !raw.trim()) return null;
   let s = raw.replace(/<[^>]+>/g, " ").replace(/\[([^\]]+)\]\((?:[^)]+)\)/g, "$1").replace(/https?:\/\/\S+/g, "").replace(/[*_`>#]+/g, " ").replace(/&amp;/g, "&").replace(/&[a-z]+;/gi, " ").replace(/\s+/g, " ").trim();
   if (!s) return null;
-  const sentences = s.match(/[^.!?]+[.!?]+/g);
-  if (sentences && sentences.length) s = sentences.slice(0, 2).join(" ").trim();
-  if (s.length > 300) s = s.slice(0, 297).replace(/\s+\S*$/, "") + "\u2026";
+  if (s.length > 1600) s = `${s.slice(0, 1597).replace(/\s+\S*$/, "").trim()}\u2026`;
   return s;
 }
 var CG_TIER1 = /binance|coinbase|kraken|okx|bybit|kucoin|gate|crypto\.?com|bitget|upbit|huobi|htx|mexc/i;
@@ -20401,6 +20407,18 @@ function downgradeFixtureEvidenceForLive(seed) {
   };
 }
 function mergeManagementIntoWebTeam(evidence, emit) {
+  if (evidence.companyEnrichment?.identityMatch !== "official_domain") {
+    if (evidence.companyEnrichment?.management?.length) {
+      emit({
+        phase: "Team",
+        label: "Leadership match rejected",
+        detail: `Monid matched ${evidence.companyEnrichment.name} by name only. Its people were excluded because the provider website did not match the project's official website.`,
+        source: "monid",
+        tone: "warn"
+      });
+    }
+    return;
+  }
   const management = evidence.companyEnrichment?.management ?? [];
   if (!management.length) return;
   const webTeam = evidence.webTeam ?? (evidence.webTeam = []);
@@ -20431,6 +20449,7 @@ function mergeManagementIntoWebTeam(evidence, emit) {
       linkedin: person.linkedin ?? void 0,
       evidence: person.priorCompanies?.length ? `prior: ${person.priorCompanies.slice(0, 3).join(", ")}` : void 0,
       source: "Monid/Akta leadership record",
+      sourceUrl: evidence.companyEnrichment.sourceUrl,
       evidence_origin: "deterministic",
       artifact_verified: true,
       provider: "monid",
@@ -20625,16 +20644,18 @@ async function runAuditWithLedger(rawHandle, emit, options) {
           }
         }
         if (!fundingIdentityMatched) {
-          const companyLookup = evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl ?? projectName2;
-          const enrichment = await withWallClockBox(
-            collectCompanyEnrichment(companyLookup, {
-              sections: ["funding_detail", "management_profile", "firmographic"]
-            }),
-            MONID_ENRICHMENT_BUDGET_MS
-          );
-          if (enrichment?.available) {
-            evidence.companyEnrichment = { ...enrichment.value, capturedAt };
-            mergeManagementIntoWebTeam(evidence, emit);
+          const companyLookup = evidence.projectToken.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+          if (companyLookup) {
+            const enrichment = await withWallClockBox(
+              collectCompanyEnrichment(companyLookup, {
+                sections: ["funding_detail", "management_profile", "firmographic"]
+              }),
+              MONID_ENRICHMENT_BUDGET_MS
+            );
+            if (enrichment?.available) {
+              evidence.companyEnrichment = { ...enrichment.value, capturedAt };
+              mergeManagementIntoWebTeam(evidence, emit);
+            }
           }
         }
       } catch (error) {
@@ -20758,6 +20779,23 @@ async function runAuditWithLedger(rawHandle, emit, options) {
         source: "defillama",
         tone: "warn"
       });
+    }
+  }
+  const recoveredCompanyLookup = evidence.projectToken?.homepage ?? canonicalOfficialWebsite(evidence.profile.website)?.canonicalUrl;
+  if (!fixture && recoveredCompanyLookup && rolesAfterBasicFacts.includes("PROJECT" /* PROJECT */) && evidence.companyEnrichment?.identityMatch !== "official_domain") {
+    try {
+      const enrichment = await withWallClockBox(
+        collectCompanyEnrichment(recoveredCompanyLookup, {
+          sections: ["funding_detail", "management_profile", "firmographic"]
+        }),
+        MONID_ENRICHMENT_BUDGET_MS
+      );
+      if (enrichment?.available && enrichment.value.identityMatch === "official_domain") {
+        evidence.companyEnrichment = { ...enrichment.value, capturedAt: (/* @__PURE__ */ new Date()).toISOString() };
+        mergeManagementIntoWebTeam(evidence, emit);
+      }
+    } catch (error) {
+      emit({ phase: "Team", label: "Company leadership lookup failed", detail: String(error), source: "monid", tone: "warn" });
     }
   }
   if (!fixture && !evidence.companyEnrichment && evidence.roles.includes("FOUNDER" /* FOUNDER */)) {
@@ -21554,6 +21592,7 @@ async function runTokenAudit(input, emit, opts) {
   const chain = pair.chainId;
   const liquidityUsd = pair.liquidity?.usd ?? 0;
   const fdv = pair.marketCap ?? pair.fdv ?? 0;
+  const fullyDilutedValuation = pair.fdv ?? pair.marketCap ?? 0;
   const vol24 = pair.volume?.h24 ?? 0;
   const buys = pair.txns?.h24?.buys ?? 0;
   const sells = pair.txns?.h24?.sells ?? 0;
@@ -21836,6 +21875,7 @@ async function runTokenAudit(input, emit, opts) {
     imageUrl: pair.info?.imageUrl ?? cg?.image ?? void 0,
     priceUsd: pair.priceUsd ? Number(pair.priceUsd) : void 0,
     mcap: fdv,
+    fdv: fullyDilutedValuation,
     liquidityUsd,
     vol24,
     ageDays,
@@ -21889,7 +21929,12 @@ function buildGraph(chain, address, symbol, verdict, projectX, deployer, holders
   holders.slice(0, 4).forEach((h) => {
     const k = walletEntityKey(chain, h.address);
     nodes.push({ type: "Identity", subtype: "Wallet", key: k, label: (h.tag || "holder") + ":" + h.address.slice(0, 8), chain, address: h.address, concentration: h.percent });
-    edges.push({ src: center, dst: k, type: "HELD_BY", verdict: h.percent > 25 ? "Contradicted" : void 0 });
+    edges.push({
+      src: center,
+      dst: k,
+      type: "HELD_BY",
+      ...h.percent > 25 ? { risk: "high_concentration" } : {}
+    });
   });
   socials.slice(0, 3).forEach((x) => {
     const xh = x.url.match(/(?:x\.com|twitter\.com)\/([A-Za-z0-9_]{2,30})/i)?.[1];

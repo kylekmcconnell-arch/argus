@@ -60,6 +60,7 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     evidence.companyEnrichment = {
       name: "Aave",
       uuid: "00005d7",
+      identityMatch: "official_domain",
       funding: {
         totalRaisedUsd: 49_000_000,
         rounds: [{ date: "2020-10-12", round: "Strategic", amountUsd: 25_000_000, leadInvestors: ["Blockchain Capital"], otherInvestors: [] }],
@@ -84,6 +85,7 @@ describe("projectProviderBackedBasicFacts: diligence gap-fillers", () => {
     evidence.companyEnrichment = {
       name: "Aave",
       uuid: "00005d7",
+      identityMatch: "name_only",
       funding: {
         totalRaisedUsd: 49_000_000,
         rounds: [{ date: "2020-10-12", round: "Strategic", amountUsd: 25_000_000, leadInvestors: ["Blockchain Capital"], otherInvestors: [] }],

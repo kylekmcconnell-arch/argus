@@ -115,6 +115,42 @@ async function followsAndTags(handle: string, key: string, counter?: CallCounter
   return out;
 }
 
+const DEVELOPER_ROLE = /\b(?:founder|co-?founder|cto|chief technology officer|lead (?:dev|developer|engineer)|engineering lead)\b/i;
+
+export function profileDeveloperLinks(profile: any, handle: string): Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }> {
+  const candidates = [
+    profile?.url,
+    profile?.website,
+    profile?.link,
+    profile?.profile_url,
+    profile?.profile_bio?.entities?.url?.urls?.[0]?.expanded_url,
+    ...(Array.isArray(profile?.profile_bio?.entities?.description?.urls)
+      ? profile.profile_bio.entities.description.urls.map((entry: any) => entry?.expanded_url)
+      : []),
+    ...(Array.isArray(profile?.entities?.description?.urls)
+      ? profile.entities.description.urls.map((entry: any) => entry?.expanded_url)
+      : []),
+    ...String(profile?.description ?? "").matchAll(/https?:\/\/(?:www\.)?(?:github\.com|huggingface\.co)\/[A-Za-z0-9_.-]+/gi),
+  ].flatMap((value) => typeof value === "string" ? [value] : Array.isArray(value) ? [value[0]] : []);
+  const sourceUrl = `https://x.com/${handle.replace(/^@/, "")}`;
+  const out = new Map<string, { provider: "github" | "huggingface"; url: string; sourceUrl: string }>();
+  for (const candidate of candidates) {
+    const match = String(candidate).match(/https?:\/\/(?:www\.)?(github\.com|huggingface\.co)\/([A-Za-z0-9_.-]+)/i);
+    if (!match) continue;
+    const provider = match[1].toLowerCase() === "github.com" ? "github" : "huggingface";
+    const url = `https://${match[1].toLowerCase()}/${match[2]}`;
+    out.set(`${provider}:${match[2].toLowerCase()}`, { provider, url, sourceUrl });
+  }
+  return [...out.values()].slice(0, 3);
+}
+
+async function developerLinksFromX(handle: string, key: string, counter: CallCounter) {
+  const user = handle.replace(/^@/, "");
+  const payload = await twJson(`${TW}/twitter/user/info?userName=${encodeURIComponent(user)}`, key, counter);
+  const profile = payload?.data ?? payload;
+  return profileDeveloperLinks(profile, user);
+}
+
 // ── GitHub org (deterministic) ─────────────────────────────────────────────
 async function ghJson(path: string, key: string, counter?: CallCounter): Promise<any> {
   if (counter) counter.calls += 1;
@@ -249,6 +285,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         } else {
           byKey.set(k, cleaned);
         }
+      }
+    }
+    // If the project has no official GitHub, inspect the personal X profiles of
+    // its technical leaders for links they published themselves. This is a
+    // direct identity bridge, never a name search.
+    if (!gh && twKey) {
+      const developerProfileCounter: CallCounter = { calls: 0, succeeded: 0 };
+      const eligible = [...byKey.values()]
+        .filter((person) => person.handle && DEVELOPER_ROLE.test(String(person.role ?? "")))
+        .slice(0, 5);
+      await Promise.all(eligible.map(async (person) => {
+        const profiles = await developerLinksFromX(person.handle, twKey, developerProfileCounter);
+        if (profiles.length) person.developerProfiles = profiles;
+      }));
+      if (developerProfileCounter.calls > 0) {
+        await attachPanelCost(panelAuth.organizationId, panelCostVersionId, {
+          provider: "twitterapi",
+          op: "panel:recon-team-developer-links",
+          calls: developerProfileCounter.calls,
+          usd: developerProfileCounter.calls * 0.0002,
+          initiatedBy: panelAuth.userId,
+          status: counterStatus(developerProfileCounter),
+        });
       }
     }
     res.status(200).json({ available: true, people: [...byKey.values()].slice(0, 20) });

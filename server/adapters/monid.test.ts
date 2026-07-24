@@ -114,6 +114,7 @@ describe("collectCompanyEnrichment", () => {
 
     expect(out.value.uuid).toBe("co-uuid-123");
     expect(out.value.name).toBe("Acme Labs");
+    expect(out.value.identityMatch).toBe("name_only");
     expect(out.value.sourceUrl).toBe("https://acme.xyz");
 
     // funding: amount_usd is already absolute USD — must NOT be multiplied.
@@ -205,6 +206,7 @@ describe("collectCompanyEnrichment", () => {
     expect(out.available).toBe(true);
     if (!out.available) throw new Error("expected available");
     expect(out.value.uuid).toBe("supergemma-uuid");
+    expect(out.value.identityMatch).toBe("official_domain");
     expect(out.value.sourceUrl).toBe("https://supergemma.ai");
     expect(selectedCompany).toBe("supergemma-uuid");
   });

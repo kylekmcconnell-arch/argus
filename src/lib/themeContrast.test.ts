@@ -144,7 +144,7 @@ describe("ARGUS theme contrast", () => {
 
     expect(runtimeDark).toBe(token(dark, "void"));
     expect(runtimeLight).toBe(token(light, "void"));
-    expect(initialChrome).toBe(runtimeDark);
+    expect(initialChrome).toBe(runtimeLight);
     expect(prePaintChrome).toEqual([runtimeLight, runtimeDark]);
   });
 });

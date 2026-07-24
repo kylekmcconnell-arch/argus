@@ -103,7 +103,7 @@ describe("public immutable report card", () => {
     expect(captured.statusCode).toBe(200);
     expect(captured.body).toContain('<div class="label">DECISION READINESS</div><div class="verdict">INCOMPLETE</div>');
     expect(captured.body).toContain("INVESTIGATION INCOMPLETE");
-    expect(captured.body).toContain("PRELIMINARY MODEL SIGNAL · PASS 94/100");
+    expect(captured.body).toContain("EARLY SCORE · PASS 94/100");
     expect(captured.body).toContain("PARTIAL COVERAGE");
     expect(captured.body).not.toContain('<div class="label">VERDICT</div><div class="verdict">PASS</div>');
     expect(captured.body).toContain("<title>@alice · INCOMPLETE · investigation incomplete · ARGUS</title>");
@@ -111,7 +111,7 @@ describe("public immutable report card", () => {
       '<meta property="og:title" content="@alice · INCOMPLETE · investigation incomplete · ARGUS"/>',
     );
     expect(captured.body).toContain(
-      '<meta name="description" content="Evidence coverage is incomplete. Do not treat the preliminary score as investment clearance.',
+      '<meta name="description" content="Some checks did not finish. Do not rely on the early score yet.',
     );
     expect(captured.body).toContain(`href="/?version=${VERSION_ID}"`);
     expect(captured.body).toContain("Open exact snapshot");
@@ -134,8 +134,10 @@ describe("public immutable report card", () => {
       expect(captured.body).toContain('<div class="label">RISK SIGNAL</div>');
       expect(captured.body).toContain(`<div class="verdict">${verdict}</div>`);
       expect(captured.body).toContain("INVESTIGATION INCOMPLETE");
-      expect(captured.body).toContain("MODEL SCORE");
-      expect(captured.body).toContain("missing coverage prevents a complete assessment");
+      expect(captured.body).toContain("RISK SCORE");
+      expect(captured.body).toContain(verdict === "CAUTION"
+        ? "some checks are still open"
+        : "Treat this as a warning, not a finished report");
     },
   );
 

@@ -1,11 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type { TokenDossier } from "../token/audit";
 
-// Adversarial review of the verdict, auto-run on every token report. A second set
-// of eyes that tries to break the verdict both ways — too harsh (false positive)
-// and too lenient (false negative) — grounded only in the evidence the audit
-// produced. Surfaces its challenges + a recommendation (uphold/soften/harden) so a
-// questionable verdict doesn't ship unchallenged.
+// On-demand adversarial review of the verdict. A second set of eyes tries to
+// break the result both ways, grounded only in the evidence the audit produced.
 type Challenge = { direction: "too_harsh" | "too_lenient"; point: string };
 type Data = { available: boolean; recommendation?: string; confidence?: string; summary?: string; challenges?: Challenge[]; note?: string };
 
@@ -34,14 +31,23 @@ function buildEvidence(d: TokenDossier): string {
   return lines.join("\n");
 }
 
-export function SecondOpinion({ dossier, panelCostToken }: { dossier: TokenDossier; panelCostToken?: string }) {
+export function SecondOpinion({
+  dossier,
+  panelCostToken,
+  id = "challenge-score",
+  onRescan,
+}: {
+  dossier: TokenDossier;
+  panelCostToken?: string;
+  id?: string;
+  onRescan?: () => void;
+}) {
   const [data, setData] = useState<Data | null>(null);
-  const [state, setState] = useState<"loading" | "done">("loading");
-  const ran = useRef(false);
+  const [state, setState] = useState<"idle" | "loading" | "done">("idle");
 
-  useEffect(() => {
-    if (ran.current) return;
-    ran.current = true;
+  const runChallenge = () => {
+    if (!panelCostToken || state === "loading") return;
+    setState("loading");
     (async () => {
       try {
         const r = await fetch("/api/challenge-verdict", {
@@ -61,11 +67,52 @@ export function SecondOpinion({ dossier, panelCostToken }: { dossier: TokenDossi
       } catch { /* non-fatal */ }
       setState("done");
     })();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dossier.address, panelCostToken]);
+  };
 
-  if (state === "loading") return <div className="panel p-4 text-[12.5px] text-ink-faint">stress-testing the verdict…</div>;
-  if (!data || data.available === false || (!data.summary && !(data.challenges ?? []).length)) return null;
+  if (!panelCostToken) {
+    return (
+      <section id={id} className="panel scroll-mt-28 p-4" aria-label="Challenge the score">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="eyebrow">Challenge the score</span>
+          {onRescan && (
+            <button type="button" onClick={onRescan} className="btn-secondary ml-auto min-h-9 px-3 text-[12px]">
+              Rescan to challenge
+            </button>
+          )}
+        </div>
+        <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
+          A second model can look for reasons this score may be too high or too low. Run a fresh scan first.
+        </p>
+      </section>
+    );
+  }
+
+  if (state === "idle") {
+    return (
+      <section id={id} className="panel scroll-mt-28 p-4" aria-label="Challenge the score">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="eyebrow">Challenge the score</span>
+          <button type="button" onClick={runChallenge} className="btn-primary ml-auto min-h-9 px-3 text-[12px]">
+            Run second opinion
+          </button>
+        </div>
+        <p className="mt-2 text-[12.5px] leading-relaxed text-ink-dim">
+          Ask a second model to argue both sides using only the evidence in this report.
+        </p>
+      </section>
+    );
+  }
+
+  if (state === "loading") {
+    return <section id={id} className="panel scroll-mt-28 p-4 text-[12.5px] text-ink-faint">Checking whether the score is too high or too low…</section>;
+  }
+  if (!data || data.available === false || (!data.summary && !(data.challenges ?? []).length)) {
+    return (
+      <section id={id} className="panel scroll-mt-28 p-4 text-[12.5px] text-ink-faint">
+        The second opinion did not return a usable result. The original report is unchanged.
+      </section>
+    );
+  }
 
   const rec = REC[data.recommendation ?? "uphold"] ?? REC.uphold;
   const challenges = data.challenges ?? [];
@@ -74,9 +121,9 @@ export function SecondOpinion({ dossier, panelCostToken }: { dossier: TokenDossi
   const flagged = data.recommendation !== "uphold";
 
   return (
-    <div className={`panel p-4 ${flagged ? "tint-var" : ""}`} style={flagged ? ({ "--tint": rec.color } as React.CSSProperties) : undefined}>
+    <section id={id} className={`panel scroll-mt-28 p-4 ${flagged ? "tint-var" : ""}`} style={flagged ? ({ "--tint": rec.color } as React.CSSProperties) : undefined}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="eyebrow">Adversarial review</span>
+        <span className="eyebrow">Second opinion</span>
         <span className="chip tint-var" style={{ "--tint": rec.color } as React.CSSProperties}>{rec.label}</span>
         {data.confidence && <span className="mono ml-auto text-[11px] text-ink-dim">{data.confidence} confidence</span>}
       </div>
@@ -97,6 +144,6 @@ export function SecondOpinion({ dossier, panelCostToken }: { dossier: TokenDossi
           </div>
         )}
       </div>
-    </div>
+    </section>
   );
 }

@@ -29,7 +29,7 @@ describe("public report presentation policy", () => {
       readinessLabel: "INVESTIGATION INCOMPLETE",
       coverageLabel: "PARTIAL COVERAGE",
       primaryScore: "",
-      secondarySignal: "PRELIMINARY MODEL SIGNAL · PASS 94/100",
+      secondarySignal: "EARLY SCORE · PASS 94/100",
       final: false,
     });
   });
@@ -53,9 +53,9 @@ describe("public report presentation policy", () => {
       secondarySignal: "PASS SIGNAL",
       final: false,
     });
-    expect(presentation.note).toContain("All 6 governing axes have frozen evidence support");
+    expect(presentation.note).toContain("All 6 parts of the score have saved sources");
     expect(presentation.note).toContain("3 of 13 applicable evidence checks remain open");
-    expect(presentation.note).toContain("Final clearance remains withheld");
+    expect(presentation.note).toContain("Do not rely on this result");
     expect(publicReportTitle("@jupiterexchange", presentation)).toBe(
       "@jupiterexchange · PROVISIONAL · 71/100 · assessment provisional · ARGUS",
     );
@@ -110,10 +110,10 @@ describe("public report presentation policy", () => {
         readinessLabel: "INVESTIGATION INCOMPLETE",
         coverageLabel: "PARTIAL COVERAGE",
         primaryScore: score == null ? "" : String(score),
-        scoreLabel: score == null ? null : "MODEL SCORE",
+        scoreLabel: score == null ? null : "RISK SCORE",
         final: false,
       });
-      expect(presentation.note).toContain("missing coverage");
+      expect(presentation.note).toContain("some checks are still open");
     },
   );
 
@@ -124,15 +124,15 @@ describe("public report presentation policy", () => {
     const fail = presentPublicReport({ verdict: "FAIL", score: 34, completeness: "partial" });
 
     expect(partial.note).toBe(
-      "The scored evidence falls in the caution band, but missing coverage prevents a complete assessment.",
+      "The score is in the caution range, but some checks are still open.",
     );
     expect(failed.note).toBe(
-      "The scored evidence fell in the caution band, but the investigation failed before coverage could be completed.",
+      "The score is in the caution range, but the scan failed before all checks finished.",
     );
     expect(inconsistent.note).toBe(
-      "The stored score conflicts with the caution signal, and coverage is incomplete.",
+      "The saved score does not match the caution result, and some checks are still open.",
     );
-    expect(fail.note).toContain("A material risk signal was recorded");
+    expect(fail.note).toContain("ARGUS found a serious risk");
   });
 
   it("publishes PASS as a verdict only with complete coverage", () => {
@@ -303,7 +303,7 @@ describe("public report presentation policy", () => {
       "@alice · INCOMPLETE · investigation incomplete · ARGUS",
     );
     expect(publicReportDescription("Strong operator.", "SERVER-COLLECTED REPORT", presentation)).toMatch(
-      /^Evidence coverage is incomplete\. Do not treat the preliminary score as investment clearance\./,
+      /^Some checks did not finish\. Do not rely on the early score yet\./,
     );
   });
 });

@@ -290,7 +290,7 @@ export function DossiersPage({
                 </span>
                 <span
                   className="flex shrink-0 flex-col items-end gap-1 leading-none"
-                  title={readout.positiveNeedsQualification ? `Underlying model signal: ${r.verdict} ${r.score ?? "N/A"}. Stored evidence is not complete.` : undefined}
+                  title={readout.positiveNeedsQualification ? `Early score: ${r.verdict} ${r.score ?? "N/A"}. Some checks did not finish.` : undefined}
                 >
                   <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{r.score ?? "N/A"}</span>
                   {readout.label && <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}>{readout.label}</span>}
@@ -401,7 +401,7 @@ export function DossiersPage({
           </span>
           <span
             className="flex shrink-0 flex-col items-end gap-1 leading-none"
-            title={readout.positiveNeedsQualification ? `Underlying model signal: ${scored.verdict} ${scored.score ?? "N/A"}. Stored evidence is not complete.` : undefined}
+            title={readout.positiveNeedsQualification ? `Early score: ${scored.verdict} ${scored.score ?? "N/A"}. Some checks did not finish.` : undefined}
           >
             <span className="mono text-[18px] font-semibold tabular" style={{ color }}>{scored.score ?? "N/A"}</span>
             {readout.label && <span className="chip tint-var" style={{ "--tint": color } as React.CSSProperties}>{readout.label}</span>}

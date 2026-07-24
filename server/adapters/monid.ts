@@ -84,6 +84,12 @@ export interface FirmographicInfo {
 export interface CompanyEnrichment {
   name: string;
   uuid: string;
+  /**
+   * Management may enter a report only when the provider company joined the
+   * subject through the same official website. A name-only match remains a
+   * funding/firmographic research lead and cannot identify people.
+   */
+  identityMatch: "official_domain" | "name_only";
   funding?: FundingInfo;
   management?: ManagementPerson[];
   firmographic?: FirmographicInfo;
@@ -129,13 +135,18 @@ function toStringList(value: unknown): string[] {
 /** normalize a website/host to a comparable bare host (no scheme / www / slash) */
 function hostOf(value: unknown): string | null {
   if (!isNonEmptyString(value)) return null;
-  const host = value
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/^www\./, "")
-    .replace(/\/+$/, "");
-  return host || null;
+  const raw = value.trim().toLowerCase();
+  try {
+    return new URL(/^https?:\/\//.test(raw) ? raw : `https://${raw}`)
+      .hostname
+      .replace(/^www\./, "") || null;
+  } catch {
+    return raw
+      .replace(/^https?:\/\//, "")
+      .replace(/^www\./, "")
+      .split(/[/?#]/, 1)[0]
+      || null;
+  }
 }
 
 function websiteUrl(value: unknown): string | null {
@@ -502,12 +513,18 @@ export async function collectCompanyEnrichment(
   const name = isNonEmptyString(chosen.name)
     ? chosen.name.trim()
     : firmographic?.legalName ?? query;
+  const queryHost = hostOf(query);
+  const queryLooksLikeHost = Boolean(queryHost?.includes(".") && !queryHost.includes(" "));
+  const identityMatch = queryLooksLikeHost && hostOf(chosen.website) === queryHost
+    ? "official_domain"
+    : "name_only";
 
   return {
     available: true,
     value: {
       name,
       uuid,
+      identityMatch,
       ...(funding ? { funding } : {}),
       ...(management ? { management } : {}),
       ...(firmographic ? { firmographic } : {}),

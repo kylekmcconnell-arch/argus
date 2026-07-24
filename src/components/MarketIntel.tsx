@@ -22,7 +22,12 @@ type Intel = {
   ath?: { value: number | null; date: number; drawdownPct: number | null } | null;
   atl?: { value: number | null; date: number; recoveryPct: number | null } | null;
   flags?: { hasTeam: boolean; hasFundingRounds: boolean; hasCrowdsales: boolean; hasVesting: boolean; hasNextUnlock: boolean };
-  category?: { name: string; position: number | null; peersRanked: number | null } | null;
+  category?: {
+    name: string;
+    position: number | null;
+    peersRanked: number | null;
+    leaders?: Array<{ name: string; symbol: string; rank: number; marketCap: number | null }>;
+  } | null;
   contracts?: Contract[];
   macro?: { investmentActivity: number | null; btcDominance: number | null; mcapChange: number | null } | null;
   url?: string | null;
@@ -81,7 +86,7 @@ export function MarketIntel({ symbol, contract, chain, panelCostToken }: { symbo
   return (
     <div className={`panel p-4 ${imp ? "border-avoid" : ""}`}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="eyebrow">Market intelligence</span>
+        <span className="eyebrow">Competitive and market position</span>
         {d.matched && d.rank && <span className="chip">#{d.rank}</span>}
         {d.matched && d.category?.position && d.category.peersRanked && (
           <span className="chip normal-case tracking-normal">#{d.category.position}/{d.category.peersRanked} {d.category.name}</span>
@@ -138,6 +143,36 @@ export function MarketIntel({ symbol, contract, chain, panelCostToken }: { symbo
             <p className="mt-2.5 text-[12.5px] leading-relaxed text-caution">
               {lowCirc ? `Only ${d.dilutionPct}% of max supply circulates` : "FDV far above market cap"}. Significant locked supply remains to hit the market{f?.hasNextUnlock ? ", with an unlock scheduled" : ""}.
             </p>
+          )}
+
+          {d.category && (
+            <section className="mt-3 border-t border-line/60 pt-3" aria-label="Competitive analysis">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <h3 className="text-[13px] font-semibold text-ink">Competitive analysis</h3>
+                <span className="text-[11.5px] text-ink-faint">
+                  {d.category.position && d.category.peersRanked
+                    ? `Ranks ${d.category.position} of ${d.category.peersRanked} tracked ${d.category.name} assets`
+                    : d.category.name}
+                </span>
+              </div>
+              {(d.category.leaders?.length ?? 0) > 0 ? (
+                <div className="mt-2 grid gap-1.5 sm:grid-cols-2">
+                  {d.category.leaders!.map((peer) => (
+                    <div key={`${peer.rank}:${peer.symbol}`} className="flex items-center gap-2 rounded-md border border-line/70 bg-panel-2/30 px-2.5 py-2 text-[12px]">
+                      <span className="mono text-ink-faint">#{peer.rank}</span>
+                      <span className="min-w-0 flex-1 truncate text-ink">{peer.name}</span>
+                      <span className="mono text-ink-faint">${peer.symbol}</span>
+                      <span className="mono text-ink-dim">{money(peer.marketCap)}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p className="mt-1.5 text-[12px] text-ink-faint">Sector leaders were not available in this refresh.</p>
+              )}
+              <p className="mt-2 text-[11px] leading-relaxed text-ink-faint">
+                This compares market size and category rank. It does not compare product quality by itself.
+              </p>
+            </section>
           )}
 
           {inv != null && (

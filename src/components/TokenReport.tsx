@@ -24,6 +24,8 @@ import { LinkEntity } from "./LinkEntity";
 import { AskReport } from "./AskReport";
 import { Unknowns } from "./Unknowns";
 import { SecondOpinion } from "./SecondOpinion";
+import { ExpandableText } from "./ExpandableText";
+import { ReportDisclaimer } from "./ReportDisclaimer";
 import { ServiceAlert } from "./ServiceAlert";
 import { RingAlert } from "./RingAlert";
 import { LiveSupplementalNotice, SnapshotEvidenceControl } from "./SnapshotEvidenceControl";
@@ -37,6 +39,7 @@ import {
   Graph,
   Plus,
   ShareNetwork,
+  ShieldWarning,
   Star,
 } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
@@ -131,7 +134,7 @@ function tokenReportText(
   return [
     `$${d.symbol} · ${presentation.resultLabel}: ${presentation.displayVerdict} · ${d.chain}${d.capApplied ? ` (cap: ${d.capApplied.replace(/_/g, " ")})` : ""}`,
     presentation.readinessLabel,
-    `${readiness.successful}/${readiness.applicable} evidence outcomes recorded · ${readiness.unresolved} unresolved · ${readiness.coveragePercent}% coverage`,
+    `${readiness.successful}/${readiness.applicable} checks finished · ${readiness.unresolved} open · ${readiness.coveragePercent}% complete`,
     `Stored model output: ${d.verdict} ${d.score ?? "N/A"}/100`,
     presentation.note,
     d.headline,
@@ -311,7 +314,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
   return (
     <div className="relative min-h-full pb-24">
-      <header className="border-b border-line bg-void/90">
+      <header className="sticky top-0 z-30 border-b border-line bg-void/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
           <button onClick={onReset} className="btn-ghost flex min-h-9 items-center gap-1.5 px-1 text-[12.5px]">
             <ArrowLeft size={15} weight="bold" aria-hidden="true" />
@@ -327,6 +330,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
               </button>
             )}
+            <a href="#token-challenge" title="Ask a second model to look for reasons the score may be too high or too low" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
+              <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
+            </a>
             {canShare && (
               <button onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable report link"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
                 <ShareNetwork size={16} weight="duotone" aria-hidden="true" />
@@ -399,8 +405,9 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             </div>
             <ProjectLinks className="mt-2" website={projectSite} xHandle={d.projectX ?? d.cg?.twitter} links={d.socials} />
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <div className="stat-tile"><div className="stat-label">mcap</div><div className="stat-value mt-0.5">{money(d.mcap)}</div></div>
+            <div className="stat-tile"><div className="stat-label">FDV</div><div className="stat-value mt-0.5">{money(d.fdv)}</div></div>
             <div className="stat-tile"><div className="stat-label">liquidity</div><div className="stat-value mt-0.5">{money(d.liquidityUsd)}</div></div>
             <div className="stat-tile"><div className="stat-label">24h vol</div><div className="stat-value mt-0.5">{money(d.vol24)}</div></div>
           </div>
@@ -408,8 +415,12 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
 
         {/* what the project actually does — CoinGecko's own blurb */}
         {d.cg?.description && (
-          <p className="mt-3 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim">{d.cg.description}</p>
+          <ExpandableText
+            text={d.cg.description}
+            className="mt-3 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim"
+          />
         )}
+        <ReportDisclaimer className="mt-2 max-w-3xl" />
 
         {/* Decision layer: model output and evidence completeness are separate.
             A thinly-supported PASS must never read like an investment-ready clearance. */}
@@ -433,7 +444,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
                 {presentation.final ? d.headline : presentation.note}
               </p>
               <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-                {presentation.final ? readiness.guidance : <>Stored scored-evidence summary, not clearance: {d.headline}</>}
+                {presentation.final ? readiness.guidance : <>This score uses the checks that finished. It is not an approval to buy or invest. {d.headline}</>}
               </p>
               {d.capApplied && (
                 <div className="chip tint-avoid mt-3 font-medium">
@@ -472,7 +483,7 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           </div>
         </div>
 
-        <div className="sticky top-0 z-10 mt-5">
+        <div className="sticky top-[65px] z-20 mt-5">
           <ReportCanvasSectionNav
             sticky={false}
             items={[
@@ -499,6 +510,10 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
           applicable={readiness.applicable}
           capturedAt={capturedAt}
         />
+
+        <div className="mt-4">
+          <SecondOpinion id="token-challenge" dossier={d} panelCostToken={panelCostToken} onRescan={onRescan} />
+        </div>
 
         <div id="token-evidence" className="scroll-mt-28" aria-hidden="true" />
 
@@ -533,13 +548,6 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
         <div className="mt-4">
           <Unknowns dossier={d} />
         </div>
-
-        {/* adversarial review — auto-run second opinion that stress-tests the verdict */}
-        {showCurrentIntelligence && panelCostToken && (
-          <div className="mt-3">
-            <SecondOpinion dossier={d} panelCostToken={panelCostToken} />
-          </div>
-        )}
 
         {!gp && (
           <div className="mt-3 panel px-4 py-3 text-[12.5px] text-ink-dim">
@@ -719,8 +727,8 @@ export function TokenReport({ dossier: d, onReset, onAudit, onRescan, onOpenBrie
             context={[
             `${d.name} ($${d.symbol}) on ${d.chain}`,
             d.headline,
-            `underlying model signal ${d.verdict} ${d.score ?? ""}`,
-            `decision readiness ${readiness.status}: ${readiness.successful}/${readiness.applicable} evidence outcomes recorded, ${readiness.unresolved} unresolved`,
+            `early score ${d.verdict} ${d.score ?? ""}`,
+            `report status ${readiness.status}: ${readiness.successful}/${readiness.applicable} checks finished, ${readiness.unresolved} open`,
             d.deployer ? `deployer ${d.deployer}` : "",
             d.cg ? `${d.cg.cexCount} CEX listings${d.cg.rank ? `, rank #${d.cg.rank}` : ""}` : "not on CoinGecko",
             projectSite ? `site ${projectSite}` : "",

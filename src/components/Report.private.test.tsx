@@ -1179,16 +1179,16 @@ describe("decision-safe person report presentation", () => {
     expect(dossier.report.composite_verdict).toBe("PASS");
     expect(container.textContent).toContain("DECISION READINESS");
     expect(container.textContent).toContain("INCOMPLETE");
-    expect(container.textContent).toContain("PRELIMINARY MODEL SIGNAL · PASS 100/100");
+    expect(container.textContent).toContain("EARLY SCORE · PASS 100/100");
     expect(container.textContent).toContain("score withheld");
-    expect(container.textContent).toContain("Preliminary scored-axis breakdown");
-    expect(container.textContent).toContain("final decision score is withheld");
+    expect(container.textContent).toContain("The final score is not ready");
+    expect(container.textContent).toContain("key checks are still open");
     expect(container.textContent).toContain("preliminary raw axis total");
     expect(container.textContent).toContain("= preliminary 100");
     const decisionResult = container.querySelector<HTMLElement>('[aria-label="Decision readiness result"]');
     expect(decisionResult?.classList.contains("max-sm:grid")).toBe(true);
     const preliminarySignal = [...container.querySelectorAll<HTMLElement>(".chip")]
-      .find((chip) => chip.textContent?.includes("PRELIMINARY MODEL SIGNAL"));
+      .find((chip) => chip.textContent?.includes("EARLY SCORE"));
     expect(preliminarySignal?.classList.contains("chip-wrap")).toBe(true);
   });
 
@@ -1262,8 +1262,8 @@ describe("decision-safe person report presentation", () => {
     expect(container.textContent).toContain("6 of 6 diligence areas have cited support");
     expect(container.textContent).toContain("3 open questions");
     expect(container.textContent).toContain("Also open: 3 decision questions");
-    expect(container.textContent).toContain("Final clearance remains withheld");
-    expect(container.textContent).toContain("Evidence-backed scored-axis breakdown");
+    expect(container.textContent).toContain("Do not rely on this result");
+    expect(container.textContent).toContain("This score uses the facts collected so far");
     expect(container.textContent).toContain("= provisional 71");
     expect(container.textContent).not.toContain("score withheld");
   });

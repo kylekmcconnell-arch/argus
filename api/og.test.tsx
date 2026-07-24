@@ -120,7 +120,7 @@ describe("Open Graph report presentation", () => {
       expect(text).toContain(policy.displayVerdict);
       expect(text).toContain(policy.readinessLabel);
       expect(text).toContain(policy.coverageLabel);
-      expect(text).toContain("MODEL SCORE");
+      expect(text).toContain("RISK SCORE");
     },
   );
 

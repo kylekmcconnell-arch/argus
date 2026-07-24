@@ -182,17 +182,74 @@ describe("investigation exact sharing", () => {
       },
     }));
 
-    expect(container.textContent).toContain("Observed token risk");
+    expect(container.textContent).toContain("Risk score");
     expect(container.textContent).toContain("PASS 84");
-    expect(container.textContent).toContain("SCAN BLOCKED");
-    expect(container.textContent).toContain("Model result ≠ clearance");
-    expect(container.textContent).toContain("Required safety gate");
+    expect(container.textContent).toContain("NOT READY");
+    expect(container.textContent).toContain("Score only · not financial advice");
+    expect(container.textContent).toContain("What this report means");
     expect(container.textContent).toContain("Market scale");
-    expect(container.textContent).toContain("1 required safety gate is still open");
+    expect(container.textContent).toContain("1 required safety check is not finished");
     expect(container.querySelector<HTMLProgressElement>('progress[aria-label="Evidence outcomes recorded: 53%"]')?.value).toBe(53);
     expect(container.textContent).toContain("Why ARGUS reaches PASS");
     expect(container.textContent).not.toContain("Why ARGUS reaches INCOMPLETE");
     expect(container.textContent).not.toContain("Investigation incomplete");
+  });
+
+  it("drops legacy Monid team rows that cannot be tied to the official project domain", () => {
+    render(investigation({
+      siteUrl: "https://venice.ai",
+      projectAccount: {
+        handle: "@askvenice",
+        display_name: "Venice",
+        avatar: "",
+        bio: "Private generative AI",
+        followers: "0",
+        joined: "",
+        identity_note: "",
+        headline: "Project account",
+        live: true,
+        notableFollowers: [],
+        contradictions: [],
+        checkRuns: [{ checkId: "identity-resolution", label: "Identity", status: "confirmed" }],
+        webTeam: [
+          {
+            name: "Nik Rae Falco",
+            role: "Founder and Owner",
+            source: "Monid/Akta leadership record",
+            provider: "monid",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+          },
+          {
+            name: "Real Builder",
+            role: "Engineer",
+            source: "official team page",
+            sourceUrl: "https://venice.ai/about",
+            provider: "team-page",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+          },
+        ],
+        report: {
+          composite_verdict: "PASS",
+          governing_score: 80,
+          identity_confidence: "Confirmed",
+          roles: [],
+        },
+        evidence: {
+          ventures: [],
+          testimonials: [],
+          advised: [],
+          associates: [],
+          wallets: [],
+          promotions: [],
+        },
+        graph: { nodes: [], edges: [] },
+      } as unknown as NonNullable<Investigation["projectAccount"]>,
+    }));
+
+    expect(container.textContent).toContain("Real Builder");
+    expect(container.textContent).not.toContain("Nik Rae Falco");
   });
 
   it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
@@ -240,8 +297,8 @@ describe("investigation exact sharing", () => {
     }
 
     expect(container.textContent).toContain("Why ARGUS reaches PASS");
-    expect(container.textContent).toContain("Recorded outcomes");
-    expect(container.textContent).toContain("Open questions");
+    expect(container.textContent).toContain("Finished checks");
+    expect(container.textContent).toContain("Check next");
     expect(container.querySelector('[role="progressbar"][aria-label="Evidence coverage"]')).not.toBeNull();
   });
 
@@ -274,7 +331,7 @@ describe("investigation exact sharing", () => {
       },
     }));
 
-    expect(container.textContent).toContain("What the scan captured");
+    expect(container.textContent).toContain("Market and ownership charts");
     expect(container.textContent).toContain("Market and ownership structure");
     expect(container.textContent).toContain("CAPTURED JUL 23, 2026");
     expect(container.textContent).toContain("From captured peak");
@@ -376,7 +433,7 @@ describe("investigation exact sharing", () => {
     });
     const pasted = String(harness.clipboard.mock.calls[0]?.[0]);
     const lines = pasted.split("\n");
-    expect(lines[0]).toContain("ARGUS · $ARG investigation · observed token risk PASS 88/100 · readiness DECISION READY");
+    expect(lines[0]).toContain("ARGUS · $ARG investigation · risk score PASS 88/100 · safety checks READY TO REVIEW");
     expect(lines).toContain("Investigation share test");
     expect(lines[lines.length - 1]).toBe("http://localhost:3000/api/card?share=opaque");
   });

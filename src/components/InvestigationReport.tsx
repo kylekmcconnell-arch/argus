@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
 import { verdictMeta } from "../lib/verdict";
+import { isWatched, toggleWatch } from "../lib/watchlist";
 import type { Investigation } from "../lib/investigation";
 import { Avatar } from "./Avatar";
 import { xAvatar, personAvatar } from "../lib/avatars";
@@ -46,8 +47,12 @@ import {
   IdentificationBadge,
   ShareNetwork,
   ShieldWarning,
+  Star,
 } from "@phosphor-icons/react";
 import { InvestigationDecisionCanvas } from "./InvestigationDecisionCanvas";
+import { SecondOpinion } from "./SecondOpinion";
+import { ExpandableText } from "./ExpandableText";
+import { ReportDisclaimer } from "./ReportDisclaimer";
 import { CopyTldrButton, ScoreContextStrip } from "./ScoreContext";
 import { ReportCanvasSectionNav } from "./ReportCanvasPrimitives";
 import {
@@ -93,12 +98,14 @@ function StatusPill({
   label,
   color,
   score,
+  title,
   fail = false,
   large = false,
 }: {
   label: string;
   color: string;
   score: number | null;
+  title?: string;
   fail?: boolean;
   large?: boolean;
 }) {
@@ -106,6 +113,7 @@ function StatusPill({
     <span
       className={`verdict-pill ${large ? "verdict-pill-lg" : ""} ${fail ? "tint-fail" : "tint-var"}`}
       style={fail ? undefined : ({ "--tint": color } as React.CSSProperties)}
+      title={title}
     >
       {label}{typeof score === "number" ? ` ${score}` : ""}
     </span>
@@ -140,6 +148,7 @@ function ProjectAccountStatusPill({
         label="Review open"
         color="var(--color-caution)"
         score={null}
+        title="This project account is missing one or more required checks. Open it and read the gaps before relying on its score."
       />
     );
   }
@@ -173,6 +182,7 @@ export function InvestigationReport({
   onOpenBrief?: () => void;
 }) {
   const [spent, setSpent] = useState(0);
+  const [watched, setWatched] = useState(() => isWatched(inv.token.address));
   const spentRef = useRef(0); // synchronous guard so a rapid double-click can't overshoot the cap
   const versionContext = inv.versionContext;
   const [currentIntelligenceVersionId, setCurrentIntelligenceVersionId] = useState<string | null>(null);
@@ -201,20 +211,17 @@ export function InvestigationReport({
     versionContext?.reportVersionId
     || (inv.persistence?.state === "persisted" && inv.persistence.reportVersionId),
   );
-  const { token, projectX, recon, projectAccount, founders, deployerTrail } = inv;
+  const { token, projectX, siteUrl, recon, projectAccount, founders, deployerTrail } = inv;
   const investigationBasicFactSnapshot = inv as Investigation & {
     basicFacts?: BasicFactView[];
     basicFactLeads?: BasicFactLeadView[];
   };
-  const projectBasicFacts = projectAccount?.basicFacts
+  const rawProjectBasicFacts = projectAccount?.basicFacts
     ?? investigationBasicFactSnapshot.basicFacts
     ?? [];
   const projectBasicFactLeads = projectAccount?.basicFactLeads
     ?? investigationBasicFactSnapshot.basicFactLeads
     ?? [];
-  const showProjectBasicFacts = Boolean(projectAccount)
-    || projectBasicFacts.length > 0
-    || projectBasicFactLeads.length > 0;
   const tokenSubjectGraphKey = String(token.graph.nodes.find((node) => node.subject)?.key ?? "") || undefined;
   // Credit org-side outcomes the bound project scan recorded in this same
   // payload; without a confirmed canonical binding this is a no-op.
@@ -228,10 +235,10 @@ export function InvestigationReport({
   const clearance = clearanceCoverage(diligenceChecks);
   const observedTokenMeta = verdictMeta(token.verdict);
   const readinessLabel = readiness.status === "ready"
-    ? "DECISION READY"
+    ? "READY TO REVIEW"
     : readiness.status === "provisional"
       ? "REVIEW WITH GAPS"
-      : "SCAN BLOCKED";
+      : "NOT READY";
   const readinessColor = readiness.status === "ready"
     ? "var(--color-pass)"
     : readiness.status === "provisional"
@@ -262,10 +269,15 @@ export function InvestigationReport({
     projectPositiveNeedsQualification || projectAccount?.report.composite_verdict === "INCOMPLETE",
   );
   const presentedProjectVerdict = projectAccount?.report.composite_verdict;
-  const projectAccountHeadline = projectAccount?.headline
-    .replace(/^Investigation incomplete:\s*/i, "Project account review remains open: ")
-    .replace(/the analyst did not return one valid score for every required axis/gi, "one or more required scoring axes did not produce a valid result");
+  const projectAccountHeadline = projectAccount
+    ? projectReviewOpen
+      ? "This project account review is missing one or more required checks. Open the full report to see what is still needed."
+      : projectAccount.headline
+    : undefined;
   const marketCap = token.mcap ?? token.cg?.mcapUsd ?? undefined;
+  const fullyDilutedValue = token.fdv
+    ?? projectAccount?.projectToken?.fdvUsd
+    ?? undefined;
   const establishedAsset = Boolean(
     (token.cg?.rank != null && token.cg.rank <= 250)
     || (marketCap != null && marketCap >= 100_000_000)
@@ -286,35 +298,108 @@ export function InvestigationReport({
   const tm = observedTokenMeta;
   // The project's GitHub org (from its site links), for commit forensics.
   // The project's own website (first non-social link) → domain intelligence.
-  const projectDomain = [...(recon?.socials ?? []), ...(token.socials ?? [])]
-    .map((s) => s.url)
+  const projectDomain = [siteUrl, ...(recon?.socials ?? []).map((s) => s.url), ...(token.socials ?? []).map((s) => s.url)]
+    .filter((url): url is string => Boolean(url))
     .find((u) => /^https?:\/\//i.test(u) && !/x\.com|twitter\.com|t\.me|telegram|discord|github\.com|medium\.com|linktr\.ee/i.test(u))
     ?.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").replace(/^www\./, "") ?? null;
   const ghOrg = (recon?.socials ?? [])
     .map((s) => s.url.match(/github\.com\/([A-Za-z0-9_.-]{1,39})/i)?.[1])
     .find((g) => g && !/^(orgs|sponsors|topics|features|about|marketplace|explore|pricing)$/i.test(g)) ?? null;
+  const projectBasicFacts = rawProjectBasicFacts.filter((fact) => {
+    const monidSources = (fact.sources ?? []).filter((source) =>
+      source.provider === "monid" || /Monid\/Akta/i.test(source.title ?? ""));
+    if (!fact.providerProjection || !monidSources.length) return true;
+    if (!projectDomain) return false;
+    return monidSources.some((source) => {
+      try {
+        const sourceHost = new URL(source.url ?? "").hostname.replace(/^www\./, "").toLowerCase();
+        return sourceHost === projectDomain
+          || sourceHost.endsWith(`.${projectDomain}`)
+          || projectDomain.endsWith(`.${sourceHost}`);
+      } catch {
+        return false;
+      }
+    });
+  });
+  const showProjectBasicFacts = Boolean(projectAccount)
+    || projectBasicFacts.length > 0
+    || projectBasicFactLeads.length > 0;
   // Unified team: members named in the project's X content (associates) merged
   // with people dug up via the web/LinkedIn search, deduped by handle so a
   // pseudonymous handle gets enriched with its real name + LinkedIn.
-  const teamUnified: { name: string; handle?: string; role: string; linkedin?: string }[] = (() => {
-    const map = new Map<string, { name: string; handle?: string; role: string; linkedin?: string }>();
+  const teamUnified: { name: string; handle?: string; role: string; linkedin?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
+    type TeamRow = { name: string; handle?: string; role: string; linkedin?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string };
+    const map = new Map<string, TeamRow>();
+    const normalizedName = (value: string) => value.trim().toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+    const findExisting = (person: { name: string; handle?: string; linkedin?: string }) => {
+      const handleKey = person.handle?.replace(/^@/, "").toLowerCase();
+      const linkedinKey = person.linkedin?.replace(/^https?:\/\//, "").replace(/\/$/, "").toLowerCase();
+      const nameKey = normalizedName(person.name);
+      return [...map.entries()].find(([, row]) =>
+        (handleKey && row.handle?.replace(/^@/, "").toLowerCase() === handleKey)
+        || (linkedinKey && row.linkedin?.replace(/^https?:\/\//, "").replace(/\/$/, "").toLowerCase() === linkedinKey)
+        || (nameKey && normalizedName(row.name) === nameKey));
+    };
+    const add = (person: TeamRow) => {
+      const existing = findExisting(person);
+      if (!existing) {
+        map.set(person.handle?.replace(/^@/, "").toLowerCase() || normalizedName(person.name), person);
+        return;
+      }
+      const [key, row] = existing;
+      map.set(key, {
+        ...row,
+        name: row.name || person.name,
+        handle: row.handle ?? person.handle,
+        linkedin: row.linkedin ?? person.linkedin,
+        role: !row.role || /^team$/i.test(row.role) ? person.role : row.role,
+        developerProfiles: row.developerProfiles ?? person.developerProfiles,
+        source: row.source === person.source ? row.source : `${row.source} + ${person.source}`,
+      });
+    };
     for (const a of projectAccount?.evidence.associates ?? []) {
       if (!/^team:/i.test(a.relation ?? "")) continue;
-      map.set(a.associate_key.toLowerCase(), { name: a.associate_key, handle: a.associate_key, role: (a.relation ?? "team").replace(/^team:\s*/i, "") });
+      add({ name: a.associate_key, handle: a.associate_key, role: (a.relation ?? "team").replace(/^team:\s*/i, ""), source: "project account" });
+    }
+    for (const p of projectAccount?.webTeam ?? []) {
+      if (p.provider === "monid") {
+        if (!projectDomain || !p.sourceUrl) continue;
+        try {
+          const sourceHost = new URL(p.sourceUrl).hostname.replace(/^www\./, "").toLowerCase();
+          if (sourceHost !== projectDomain
+            && !sourceHost.endsWith(`.${projectDomain}`)
+            && !projectDomain.endsWith(`.${sourceHost}`)) continue;
+        } catch {
+          continue;
+        }
+      }
+      add({
+        name: p.name,
+        handle: p.handle,
+        role: p.role,
+        linkedin: p.linkedin,
+        developerProfiles: p.developerProfiles,
+        source: p.linkedin ? "project scan + LinkedIn" : "project scan",
+      });
     }
     for (const p of inv.webTeam ?? []) {
-      const ex = p.handle ? map.get(p.handle.toLowerCase()) : undefined;
-      if (ex) { ex.name = p.name || ex.name; ex.linkedin = ex.linkedin ?? p.linkedin; if (!ex.role || ex.role === "team") ex.role = p.role; }
-      else map.set((p.handle ?? p.name).toLowerCase(), { name: p.name, handle: p.handle, role: p.role, linkedin: p.linkedin });
+      add({
+        name: p.name,
+        handle: p.handle,
+        role: p.role,
+        linkedin: p.linkedin,
+        developerProfiles: p.developerProfiles,
+        source: p.linkedin ? "web/LinkedIn" : "X content",
+      });
     }
     return [...map.values()];
   })();
   // The full team, from EVERY source: site names, site-linked handles, project
   // bio handles, X-content team, and the web/LinkedIn dig — merged into one list.
-  const teamPeople: { name: string; handle?: string; role?: string; linkedin?: string; source: string }[] = (() => {
-    const map = new Map<string, { name: string; handle?: string; role?: string; linkedin?: string; source: string }>();
+  const teamPeople: { name: string; handle?: string; role?: string; linkedin?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }[] = (() => {
+    const map = new Map<string, { name: string; handle?: string; role?: string; linkedin?: string; developerProfiles?: Array<{ provider: "github" | "huggingface"; url: string; sourceUrl: string }>; source: string }>();
     const k = (h?: string | null, n?: string) => (h ? h.replace(/^@/, "").toLowerCase() : (n ?? "").toLowerCase());
-    for (const m of teamUnified) map.set(k(m.handle, m.name), { name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, source: m.linkedin ? "web/LinkedIn" : "X content" });
+    for (const m of teamUnified) map.set(k(m.handle, m.name), { name: m.name, handle: m.handle, role: m.role, linkedin: m.linkedin, developerProfiles: m.developerProfiles, source: m.source });
     for (const f of founders) {
       const key = k(f.handle, f.name);
       const ex = map.get(key);
@@ -363,6 +448,24 @@ export function InvestigationReport({
       setShareState("error");
       setTimeout(() => setShareState("idle"), 3000);
     }
+  };
+  const watch = () => {
+    if (!canMutateWorkspace) return;
+    setWatched(toggleWatch({
+      id: token.address,
+      kind: "token",
+      label: `$${token.symbol}`,
+      chain: token.chain,
+      via: token.chain === "solana" ? "solana" : "evm",
+      addedAt: 0,
+      snapshot: {
+        verdict: token.verdict,
+        score: token.score,
+        completenessState: readiness.status === "ready" ? "complete" : "partial",
+        liquidityUsd: token.liquidityUsd,
+        mcap: marketCap,
+      },
+    }));
   };
 
   // Same mint the Share button uses, composed into the TLDR at copy time so a
@@ -416,8 +519,8 @@ export function InvestigationReport({
     ...(readiness.status !== "ready" ? [{
       label: readinessLabel,
       detail: requiredGapChecks.length
-        ? `${requiredGapChecks.map((check) => check.label).join(", ")} must record a terminal outcome before clearance.`
-        : readiness.guidance.replace(/investigation incomplete/gi, "scan blocked"),
+        ? `Finish ${requiredGapChecks.map((check) => check.label).join(", ")} before relying on this report.`
+        : readiness.guidance,
     }] : []),
   ].slice(0, 6);
   const nextStepItems = [...requiredGapChecks, ...enrichmentGapChecks]
@@ -429,7 +532,7 @@ export function InvestigationReport({
   // One paste, whole verdict: composed for group chats. The link is appended
   // at copy time (share link when mintable, app URL else).
   const tldrBase = [
-    `ARGUS · $${token.symbol} investigation · observed token risk ${observedTokenMeta.label}${token.score == null ? "" : ` ${token.score}/100`} · readiness ${readinessLabel}`,
+    `ARGUS · $${token.symbol} investigation · risk score ${observedTokenMeta.label}${token.score == null ? "" : ` ${token.score}/100`} · safety checks ${readinessLabel}`,
     token.headline,
     nextStepItems[0] ? `Top open item: ${nextStepItems[0].label}.` : "",
   ].filter(Boolean).join("\n");
@@ -447,7 +550,7 @@ export function InvestigationReport({
 
   return (
     <div className="relative min-h-full pb-24">
-      <header className="border-b border-line bg-void/90">
+      <header className="sticky top-0 z-30 border-b border-line bg-void/90 backdrop-blur">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
           <button onClick={onReset} className="btn-ghost flex min-h-9 items-center gap-1.5 px-1 text-[12.5px]">
             <ArrowLeft size={15} weight="bold" aria-hidden="true" /> New investigation
@@ -462,6 +565,9 @@ export function InvestigationReport({
                 <Briefcase size={16} weight="duotone" aria-hidden="true" /> Case brief
               </button>
             )}
+            <a href="#investigation-challenge" title="Ask a second model to look for reasons the score may be too high or too low" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] font-medium">
+              <ShieldWarning size={16} weight="duotone" aria-hidden="true" /> Challenge
+            </a>
             <div className="hidden items-center gap-2 sm:flex">
               {canShare && (
                 <button type="button" onClick={() => void share()} disabled={shareState === "creating"} aria-live="polite" title={shareState === "error" ? "Secure share could not be created or copied. Retry when ready." : "Copy a 30-day immutable investigation link"} className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] disabled:cursor-wait disabled:opacity-60">
@@ -473,6 +579,12 @@ export function InvestigationReport({
                 <button onClick={onReAudit} title="Run this investigation again with current evidence" className="btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px]">
                   <ArrowClockwise size={16} weight="duotone" aria-hidden="true" />
                   Rescan
+                </button>
+              )}
+              {canMutateWorkspace && (
+                <button type="button" onClick={watch} aria-pressed={watched} title="Add this report to your watchlist so later scans can flag changes" className={`btn-secondary flex min-h-10 items-center gap-2 px-3 text-[12.5px] ${watched ? "tint-signal" : ""}`}>
+                  <Star size={16} weight={watched ? "fill" : "duotone"} aria-hidden="true" />
+                  {watched ? "Watching" : "Watch"}
                 </button>
               )}
             </div>
@@ -551,16 +663,16 @@ export function InvestigationReport({
           </div>
 
           <div className="investigation-hero-grid mt-5 grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
-            <section className="panel investigation-hero-card flex flex-col p-5" aria-label="Observed token risk">
+            <section className="panel investigation-hero-card flex flex-col p-5" aria-label="Risk score">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="eyebrow">Observed token risk</span>
+                <span className="eyebrow">Risk score</span>
                 <VerdictPill verdict={token.verdict} score={token.score} large />
               </div>
               <p className="mt-4 text-[13px] leading-relaxed text-ink-dim">
-                The model result from evidence that completed. It is deliberately separate from whether every required safety gate finished.
+                This score uses the checks that finished. It is not an approval to buy or invest.
               </p>
               <div className="mt-auto border-t border-line/70 pt-3">
-                <p className="mono text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">Model result ≠ clearance</p>
+                <p className="mono text-[10.5px] uppercase tracking-[0.1em] text-ink-faint">Score only · not financial advice</p>
                 <ScoreContextStrip
                   subjectRef={token.address}
                   score={token.score}
@@ -576,22 +688,26 @@ export function InvestigationReport({
               aria-label="Investigation readiness"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="eyebrow">Decision readiness</span>
+                <span className="eyebrow">Safety checks</span>
                 <StatusPill label={readinessLabel} color={readinessColor} score={null} large />
               </div>
               <h2 className="mt-4 text-[17px] font-semibold leading-snug text-ink">
                 {requiredGapChecks.length
-                  ? `${requiredGapChecks.length} required safety ${requiredGapChecks.length === 1 ? "gate is" : "gates are"} still open`
-                  : readiness.title}
+                  ? `${requiredGapChecks.length} required safety ${requiredGapChecks.length === 1 ? "check is" : "checks are"} not finished`
+                  : readiness.status === "ready"
+                    ? "Required safety checks are finished"
+                    : "This report does not have enough finished checks"}
               </h2>
               <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-dim">
                 {requiredGapChecks.length
-                  ? "The observed risk result remains visible, but ARGUS will not infer clearance without the required terminal outcome."
-                  : "Every required safety screen has a recorded outcome. Remaining open paths are disclosed as enrichment, not hidden as false certainty."}
+                  ? "You can still see the score, but this report is not ready until that check finishes."
+                  : readiness.status === "ready"
+                    ? "Extra research may still be open. We list it below so nothing is hidden."
+                    : "Read the open questions below. Do not rely on this score yet."}
               </p>
               <div className="mt-auto pt-4">
                 <div className="flex items-center justify-between gap-3">
-                  <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">Evidence outcomes</span>
+                  <span className="mono text-[10.5px] uppercase tracking-[0.08em] text-ink-faint">Checks finished</span>
                   <span className="mono text-[11px] text-ink-dim">
                     {readiness.successful}/{readiness.applicable} · {readiness.coveragePercent}%
                   </span>
@@ -620,12 +736,12 @@ export function InvestigationReport({
                   <dd className="stat-value mt-1 text-signal-lift">{token.cg?.rank ? `#${token.cg.rank}` : "N/A"}</dd>
                 </div>
                 <div>
-                  <dt className="stat-label">Liquidity</dt>
-                  <dd className="stat-value mt-1">{money(token.liquidityUsd)}</dd>
+                  <dt className="stat-label">Fully diluted value</dt>
+                  <dd className="stat-value mt-1">{money(fullyDilutedValue)}</dd>
                 </div>
                 <div>
-                  <dt className="stat-label">CEX markets</dt>
-                  <dd className="stat-value mt-1">{token.cg?.cexCount ?? "N/A"}</dd>
+                  <dt className="stat-label">Liquidity</dt>
+                  <dd className="stat-value mt-1">{money(token.liquidityUsd)}</dd>
                 </div>
                 <div>
                   <dt className="stat-label">Holders</dt>
@@ -633,7 +749,7 @@ export function InvestigationReport({
                 </div>
               </dl>
               <p className="mono mt-5 border-t border-line/70 pt-3 text-[10.5px] uppercase tracking-[0.08em] text-signal-lift">
-                Scale builds confidence · it never waives safety
+                Size helps with context · it does not make an asset safe
               </p>
             </section>
           </div>
@@ -641,24 +757,28 @@ export function InvestigationReport({
           <section
             className="panel clearance-boundary mt-3 flex flex-col gap-4 p-4 tint-var sm:flex-row sm:items-center sm:justify-between"
             style={{ "--tint": readinessColor } as React.CSSProperties}
-            aria-label="Clearance boundary"
+            aria-label="What this report means"
           >
             <div>
-              <p className="eyebrow">{requiredGapChecks.length ? "Required safety gate" : "Clearance boundary"}</p>
+              <p className="eyebrow">What this report means</p>
               <h2 className="mt-1 text-[14px] font-semibold text-ink">
                 {requiredGapChecks.length
-                  ? `${requiredGapChecks.map((check) => check.label).join(", ")} must record a terminal outcome before clearance.`
-                  : "All required safety gates recorded."}
+                  ? `${requiredGapChecks.map((check) => check.label).join(", ")} must finish before this report is ready.`
+                  : readiness.status === "ready"
+                    ? "Required safety checks are finished."
+                    : "This report is not ready to rely on yet."}
               </h2>
               <p className="mt-1 text-[11.5px] leading-relaxed text-ink-dim">
                 {requiredGapChecks.length
-                  ? `${enrichmentGapChecks.length} additional enrichment ${enrichmentGapChecks.length === 1 ? "path remains" : "paths remain"} disclosed separately.`
-                  : `${enrichmentGapChecks.length} enrichment ${enrichmentGapChecks.length === 1 ? "path remains" : "paths remain"} open; ${enrichmentGapChecks.length === 1 ? "it does" : "they do"} not withhold clearance.`}
+                  ? `${enrichmentGapChecks.length} extra ${enrichmentGapChecks.length === 1 ? "check is" : "checks are"} also open and listed below.`
+                  : readiness.status === "ready"
+                    ? `${enrichmentGapChecks.length} extra ${enrichmentGapChecks.length === 1 ? "check is" : "checks are"} still open. ${enrichmentGapChecks.length === 1 ? "It does" : "They do"} not block review.`
+                    : "Open the check list to see what is missing."}
               </p>
             </div>
             <div className="flex shrink-0 flex-wrap items-center gap-3">
               <a href="#investigation-methodology" className="text-[12px] font-medium text-signal-lift underline-offset-2 hover:underline">
-                Review all checks
+                See every check
               </a>
               {onReAudit && readiness.status !== "ready" && (
                 <button type="button" onClick={onReAudit} className="btn-primary min-h-10 px-3 text-[12px] font-medium">
@@ -677,7 +797,7 @@ export function InvestigationReport({
                 verdict={presentedProjectVerdict}
                 score={projectReviewOpen ? null : projectAccount.report.governing_score}
               />
-              {projectReadiness && <span>{projectReadiness.successful}/{projectReadiness.applicable} outcomes recorded</span>}
+              {projectReadiness && <span>{projectReadiness.successful}/{projectReadiness.applicable} checks finished</span>}
             </div>
           )}
           {/* Lead with the TEAM when we know it — don't declare "no team" when it's named below. */}
@@ -691,8 +811,14 @@ export function InvestigationReport({
           {/* What the project actually IS — CoinGecko's own blurb, else the project's X bio. */}
           {(() => {
             const blurb = token.cg?.description || projectAccount?.bio || null;
-            return blurb ? <p className="mt-2 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim">{blurb}</p> : null;
+            return blurb ? (
+              <ExpandableText
+                text={blurb}
+                className="mt-2 max-w-3xl text-[13.5px] leading-relaxed text-ink-dim"
+              />
+            ) : null;
           })()}
+          <ReportDisclaimer className="mt-2 max-w-3xl" />
           {/* official website + socials */}
           <ProjectLinks
             className="mt-3"
@@ -700,10 +826,18 @@ export function InvestigationReport({
             xHandle={projectX ?? token.cg?.twitter}
             links={[...(recon?.socials ?? []), ...(token.socials ?? [])]}
           />
+          {canMutateWorkspace && (
+            <div className="mt-3 flex max-w-3xl flex-wrap items-center gap-2 rounded-lg border border-line bg-panel-2/40 px-3 py-2.5">
+              <span className="text-[12.5px] text-ink-dim">Get an alert when a later scan finds a change.</span>
+              <button type="button" onClick={watch} aria-pressed={watched} className={`btn-chip ml-auto ${watched ? "tint-signal" : ""}`}>
+                {watched ? "Watching report" : "Add to watchlist"}
+              </button>
+            </div>
+          )}
           <p className="mono mt-2 break-all text-[11px] text-ink-faint">{inv.rootRef}</p>
         </div>
 
-        <div className="sticky top-0 z-10 mt-5">
+        <div className="sticky top-[65px] z-20 mt-5">
           <ReportCanvasSectionNav
             sticky={false}
             items={[
@@ -736,12 +870,21 @@ export function InvestigationReport({
           methodologyHref="#investigation-methodology"
         />
 
+        <div className="mt-4">
+          <SecondOpinion
+            id="investigation-challenge"
+            dossier={token}
+            panelCostToken={panelCostToken}
+            onRescan={onReAudit}
+          />
+        </div>
+
         {showProjectBasicFacts && (
           <div className="report-section mt-7">
             <ReportSectionHeading
               index="02 · Core facts"
-              title="What is verified about the project"
-              description="Source-backed facts stay separate from research leads that have not yet cleared verification."
+              title="What we verified about the project"
+              description="Verified facts are shown first. Unconfirmed leads are kept in a separate list."
             />
             <BasicFactsPanel
               id="investigation-basic-facts"
@@ -754,9 +897,9 @@ export function InvestigationReport({
 
         <div id="investigation-visuals" className="report-section scroll-mt-28 mt-7">
           <ReportSectionHeading
-            index="03 · Visual intelligence"
-            title="What the scan captured"
-            description="Frozen market, ownership, and protocol charts remain visible with the report. Live refreshes are labeled separately and never alter the stored result."
+            index="03 · Charts"
+            title="Market and ownership charts"
+            description="These charts use the data saved with this report. Live updates are labeled separately."
           />
           <div className="mt-3 space-y-3">
             <MarketPerformancePanel
@@ -780,8 +923,8 @@ export function InvestigationReport({
         <div className="report-section mt-7">
           <ReportSectionHeading
             index="04 · Evidence"
-            title="Token, ownership, and operator record"
-            description="The on-chain result and the people behind it are shown together before deeper enrichment."
+            title="Token, ownership, and team"
+            description="See the token checks and the people publicly tied to the project."
           />
         </div>
         <div id="investigation-evidence" className="scroll-mt-28 mt-3 grid gap-3 lg:grid-cols-2">
@@ -899,7 +1042,7 @@ export function InvestigationReport({
             <ReportSectionHeading
               index="05 · People"
               title="Team and named relationships"
-              description="Every person remains tied to the source that connected them to the project."
+              description="Each person links back to the source that tied them to this project."
             />
             <Card title="Team · from X content, the site, and web/LinkedIn">
               {teamPeople.length > 0 && (
@@ -916,6 +1059,11 @@ export function InvestigationReport({
                           {m.linkedin && (
                             <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>
                           )}
+                          {m.developerProfiles?.map((profile) => (
+                            <a key={profile.url} href={profile.url} target="_blank" rel="noreferrer" title={`Linked from ${m.handle}'s X profile`} className="link-ext text-[11px]">
+                              {profile.provider === "github" ? "GitHub" : "Hugging Face"}
+                            </a>
+                          ))}
                           <span className="chip normal-case tracking-normal">{m.source}</span>
                         </span>
                         {m.handle ? (
@@ -1006,7 +1154,7 @@ export function InvestigationReport({
             <ReportSectionHeading
               index="06 · Relationships"
               title="How the subjects connect"
-              description="The graph and its readable ledger expose links without turning proximity into guilt."
+              description="The graph shows recorded links. A link by itself does not mean wrongdoing."
             />
             <Card title="Connection web · click any node to open it">
               <TrustGraph nodes={invGraph.nodes} edges={invGraph.edges} connections={showCurrentIntelligence ? connections : []} onAudit={onAudit} onOpenProject={(name) => onAudit(name)} />
@@ -1063,7 +1211,7 @@ export function InvestigationReport({
           <ReportSectionHeading
             index="07 · Sources & checks"
             title="What ARGUS checked"
-            description="Terminal outcomes, unresolved paths, and findings remain inspectable at check level."
+            description="See which checks finished, which found a problem, and which are still open."
           />
           <MethodologyChecklist id="investigation-methodology" checks={diligenceChecks} />
         </div>

@@ -47,18 +47,34 @@ async function categoryName(id: number, key: string, usage: CallCounter): Promis
 
 // Where this token's global rank sits among its sector's ranked peers (24h cache
 // per category). Returns { peersRanked, position } — "12th of 500 ranked GameFi".
-async function categoryPlacement(categoryId: number, rank: number | null, key: string, usage: CallCounter): Promise<{ position: number; peersRanked: number } | null> {
+interface CategoryPeer {
+  name: string;
+  symbol: string;
+  rank: number;
+  marketCap: number | null;
+}
+
+async function categoryContext(categoryId: number, rank: number | null, key: string, usage: CallCounter): Promise<{ position: number; peersRanked: number; leaders: CategoryPeer[] } | null> {
   if (!categoryId || rank == null) return null;
-  const ck = `cr:catranks:${categoryId}`;
-  let ranks = await cacheGetJson<number[]>(ck);
-  if (!ranks) {
+  const ck = `cr:category-context:v2:${categoryId}`;
+  let peers = await cacheGetJson<CategoryPeer[]>(ck);
+  if (!peers) {
     const d = await cr(`/currencies?limit=500&categoryId=${categoryId}&sortBy=rank&sortDirection=ASC`, key, usage);
-    ranks = (d?.data ?? []).map((x: any) => x.rank).filter((r: any) => typeof r === "number").sort((a: number, b: number) => a - b);
-    if (ranks && ranks.length) await cacheSetJson(ck, ranks);
+    const collected: CategoryPeer[] = (d?.data ?? [])
+      .filter((entry: any) => typeof entry?.rank === "number" && typeof entry?.name === "string")
+      .map((entry: any) => ({
+        name: entry.name,
+        symbol: String(entry.symbol ?? "").toUpperCase(),
+        rank: entry.rank,
+        marketCap: num(entry.marketCap),
+      }))
+      .sort((left: CategoryPeer, right: CategoryPeer) => left.rank - right.rank);
+    peers = collected;
+    if (collected.length) await cacheSetJson(ck, collected);
   }
-  if (!ranks?.length) return null;
-  const position = ranks.filter((r) => r <= rank).length;
-  return { position, peersRanked: ranks.length };
+  if (!peers?.length) return null;
+  const position = peers.filter((peer) => peer.rank <= rank).length;
+  return { position, peersRanked: peers.length, leaders: peers.slice(0, 5) };
 }
 
 async function macro(key: string, usage: CallCounter): Promise<{ investmentActivity: number | null; btcDominance: number | null; mcapChange: number | null } | null> {
@@ -135,9 +151,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const price = num(d.price);
   const recoveryPct = atlValue && price ? Math.round(((price - atlValue) / atlValue) * 100) : null;
 
-  const [catName, placement, mac] = await Promise.all([
+  const [catName, category, mac] = await Promise.all([
     categoryName(d.categoryId, key, usage),
-    categoryPlacement(d.categoryId, d.rank ?? null, key, usage),
+    categoryContext(d.categoryId, d.rank ?? null, key, usage),
     macro(key, usage),
   ]);
 
@@ -167,7 +183,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       hasVesting: !!d.hasVesting,
       hasNextUnlock: !!d.hasNextUnlock,
     },
-    category: catName ? { name: catName, position: placement?.position ?? null, peersRanked: placement?.peersRanked ?? null } : null,
+    category: catName ? {
+      name: catName,
+      position: category?.position ?? null,
+      peersRanked: category?.peersRanked ?? null,
+      leaders: category?.leaders ?? [],
+    } : null,
     contracts: (d.contracts ?? []).map((c: any) => ({ chain: c.platform?.name ?? c.platform?.key ?? "?", address: c.address })),
     macro: mac,
     url: d.key ? `https://cryptorank.io/price/${d.key}` : null,

@@ -1056,7 +1056,8 @@ export function projectProviderBackedBasicFacts(evidence: CollectedEvidence): vo
   // Monid/Akta management → founder identity (the "people behind it"). Conservative:
   // only a clearly-labelled founder/CEO profile.
   const founderProfile = isProject
-    ? evidence.companyEnrichment?.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title))
+    && evidence.companyEnrichment?.identityMatch === "official_domain"
+    ? evidence.companyEnrichment.management?.find((person) => /founder/i.test(person.title) || /\bceo\b/i.test(person.title))
     : undefined;
   if (founderProfile?.name.trim() && evidence.companyEnrichment) {
     const prior = founderProfile.priorCompanies.filter(Boolean).slice(0, 3).join(", ");

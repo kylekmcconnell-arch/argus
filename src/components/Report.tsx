@@ -69,6 +69,7 @@ import {
   type ReportCanvasNarrativeItem,
   type ReportCanvasRailItem,
 } from "./ReportCanvasPrimitives";
+import { ReportDisclaimer } from "./ReportDisclaimer";
 import {
   BasicFactsPanel,
   type BasicFactLeadView,
@@ -535,8 +536,8 @@ function RoleCard({ rr, governing, scoreState }: { rr: RoleReport; governing: bo
           {!coverageReady && (
             <p className="panel-inset mt-3 px-3 py-2 text-[11px] leading-relaxed text-caution" role="note">
               {provisional
-                ? "Evidence-backed scored-axis breakdown. The score is provisional and final clearance remains withheld until the open evidence checks are resolved."
-                : "Preliminary scored-axis breakdown. The final decision score is withheld until evidence coverage is complete."}
+                ? "This score uses the facts collected so far. Treat it as an early read until the open checks finish."
+                : "The final score is not ready because key checks are still open."}
             </p>
           )}
           <div className="divide-y divide-line/60">
@@ -2576,7 +2577,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   if (!legacyCoverageNotCaptured) {
     heroProofChips.push(
       readiness.status === "ready"
-        ? { key: "coverage", label: "Checks", value: `${readiness.successful}/${readiness.applicable}`, tone: "pass", href: "#scan-methodology", title: `${readiness.coveragePercent}% of applicable decision-critical checks have recorded outcomes.` }
+        ? { key: "coverage", label: "Checks", value: `${readiness.successful}/${readiness.applicable}`, tone: "pass", href: "#scan-methodology", title: `${readiness.coveragePercent}% of required checks finished.` }
         : { key: "coverage", label: `Coverage ${readiness.coveragePercent}%`, value: `${readiness.successful}/${readiness.applicable}`, tone: "caution", href: "#scan-methodology", title: readinessGuidance },
     );
   }
@@ -2628,7 +2629,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
       <div className="grid-bg absolute inset-0 top-0 -z-10 h-72" />
 
       {/* top bar */}
-      <header className="relative z-20 border-b border-line bg-void/85 backdrop-blur">
+      <header className="sticky top-0 z-30 border-b border-line bg-void/85 backdrop-blur">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3 px-5 py-3">
           <button type="button" onClick={onReset} className="inline-flex min-h-11 shrink-0 items-center gap-1.5 rounded-md px-2 text-[13.5px] text-ink-dim transition hover:bg-panel-2 hover:text-ink">
             <ArrowLeft aria-hidden="true" size={15} weight="bold" />
@@ -2766,6 +2767,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   <span className="mono text-[13.5px] text-ink-faint">{f.handle}</span>
                 </div>
                 <p className="mt-2 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">{f.bio}</p>
+                <ReportDisclaimer className="mt-2 max-w-2xl" />
                 <div className="mt-3 flex flex-wrap items-center gap-2">
                   {roles.map((r) => (
                     <span key={r} className="chip">
@@ -2880,8 +2882,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   <span
                     className={`chip ${readiness.status === "ready" ? "tint-pass" : "tint-caution"}`}
                     title={readiness.status === "ready"
-                      ? "Decision-ready: every safety screen recorded its outcome and evidence coverage cleared the bar, so this verdict is complete enough to act on."
-                      : "This verdict is published with known gaps; the coverage panel lists exactly what is still open."}
+                      ? "Every required safety check finished. Read the sources before relying on this result."
+                      : "Some checks are still open. The report lists what is missing."}
                   >
                     {readiness.status === "ready" ? "decision-ready" : readiness.status}
                   </span>
@@ -2928,7 +2930,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
               )}
               {!presentation.final && f.headline && (
                 <p className="mt-2 max-w-2xl text-[12.5px] leading-relaxed text-ink-faint">
-                  <span className="text-ink-dim">Stored scored-evidence summary, not clearance:</span> {f.headline}
+                  <span className="text-ink-dim">This score uses the facts ARGUS saved. It is not an approval or recommendation.</span> {f.headline}
                 </p>
               )}
               {report.cap_applied && (
@@ -3012,7 +3014,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         </section>
 
-        <div className="sticky top-0 z-10 mt-5">
+        <div className="sticky top-[69px] z-20 mt-5">
           <ReportCanvasSectionNav
             sticky={false}
             items={[

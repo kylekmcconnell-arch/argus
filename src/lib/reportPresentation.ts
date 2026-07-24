@@ -12,7 +12,7 @@ export interface PublicReportPresentation {
   coverageLabel: "COMPLETE COVERAGE" | "PARTIAL COVERAGE" | "FAILED COVERAGE";
   color: string;
   primaryScore: string;
-  scoreLabel: "SCORE" | "PROVISIONAL SCORE" | "MODEL SCORE" | null;
+  scoreLabel: "SCORE" | "PROVISIONAL SCORE" | "RISK SCORE" | null;
   secondarySignal: string | null;
   note: string;
   final: boolean;
@@ -248,7 +248,7 @@ export function presentPublicReport(input: {
         primaryScore: score,
         scoreLabel: "PROVISIONAL SCORE",
         secondarySignal: "PASS SIGNAL",
-        note: `All ${axisTotal} governing axes have frozen evidence support. ${neededEvidenceSummary} Final clearance remains withheld.`,
+        note: `All ${axisTotal} parts of the score have saved sources. ${neededEvidenceSummary} Do not rely on this result until the open checks finish.`,
         final: false,
       });
     }
@@ -257,15 +257,15 @@ export function presentPublicReport(input: {
       const consistentScore = scoreMatchesVerdict(rawVerdict, score) ? score : "";
       const note = rawVerdict === "CAUTION"
         ? score && !consistentScore
-          ? "The stored score conflicts with the caution signal, and coverage is incomplete."
+          ? "The saved score does not match the caution result, and some checks are still open."
           : completeness === "failed"
-            ? "The scored evidence fell in the caution band, but the investigation failed before coverage could be completed."
-            : "The scored evidence falls in the caution band, but missing coverage prevents a complete assessment."
+            ? "The score is in the caution range, but the scan failed before all checks finished."
+            : "The score is in the caution range, but some checks are still open."
         : score && !consistentScore
-          ? "A material risk signal was recorded, but its stored score conflicts with the verdict and coverage is incomplete."
+          ? "ARGUS found a serious risk, but the saved score does not match the result and some checks are still open."
           : completeness === "failed"
-            ? "A material risk signal was recorded, but the investigation failed before coverage could be completed."
-            : "A material risk signal was recorded, but missing coverage prevents a complete assessment.";
+            ? "ARGUS found a serious risk, but the scan failed before all checks finished."
+            : "ARGUS found a serious risk, and some checks are still open. Treat this as a warning, not a finished report.";
       return Object.freeze({
         rawVerdict,
         displayVerdict: visibleVerdict(rawVerdict),
@@ -274,7 +274,7 @@ export function presentPublicReport(input: {
         coverageLabel,
         color: VERDICT_COLORS[rawVerdict] ?? VERDICT_COLORS.INCOMPLETE,
         primaryScore: consistentScore,
-        scoreLabel: consistentScore ? "MODEL SCORE" : null,
+        scoreLabel: consistentScore ? "RISK SCORE" : null,
         secondarySignal: null,
         note,
         final: false,
@@ -295,12 +295,12 @@ export function presentPublicReport(input: {
         ? modelSignal(
             rawVerdict,
             rawVerdict === "PASS" && !scoreMatchesVerdict(rawVerdict, score) ? "" : score,
-            "PRELIMINARY MODEL SIGNAL",
+            "EARLY SCORE",
           )
         : null,
       note: completeness === "failed"
-        ? "The investigation failed before ARGUS could publish a decision-ready assessment."
-        : "Evidence coverage is incomplete. Do not treat the preliminary score as investment clearance.",
+        ? "The scan failed before ARGUS could finish the report."
+        : "Some checks did not finish. Do not rely on the early score yet.",
       final: false,
     });
   }
@@ -356,8 +356,8 @@ export function presentPublicReport(input: {
       scoreLabel: null,
       secondarySignal: null,
       note: score
-        ? "The stored verdict conflicts with its score band. ARGUS cannot publish investment clearance."
-        : "Evidence coverage is complete, but no valid score was stored. ARGUS cannot publish investment clearance.",
+        ? "The saved result does not match its score. This report is not ready."
+        : "The checks finished, but no valid score was saved. This report is not ready.",
       final: false,
     });
   }

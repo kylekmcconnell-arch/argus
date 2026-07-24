@@ -131,16 +131,16 @@ export function deriveDecisionReadiness(
   if (routingUnresolved) {
     return {
       ...base,
-      title: "Subject routing unresolved",
-      guidance: "Provider checks recorded intelligence, but ARGUS did not resolve an evidence-backed role and scoring methodology. Treat this as collected intelligence only, not a decision-ready assessment.",
+      title: "ARGUS could not identify what this account represents",
+      guidance: "Some checks finished, but ARGUS could not confirm whether this is a person, project, or investor. Use the facts as research, not as a final result.",
     };
   }
 
   if (scoringOutputIncomplete) {
     return {
       ...base,
-      title: "Scoring output incomplete",
-      guidance: "ARGUS resolved an evidence-backed role, but the analyst did not return a complete, valid governing-axis score. Treat the provider evidence as collected intelligence only until the scoring pass completes.",
+      title: "The score is not ready",
+      guidance: "ARGUS identified the subject, but part of the scoring step did not finish. You can still read the facts, but do not rely on the score yet.",
     };
   }
 
@@ -151,13 +151,13 @@ export function deriveDecisionReadiness(
     return {
       ...base,
       title: evidenceBackedAxes === 0
-        ? "Decision evidence missing"
+        ? "The score is missing source support"
         : status === "provisional"
-          ? "Assessment is provisional"
-          : "Investigation incomplete",
-      guidance: `${plural(missingAxisSupport, "governing axis", "governing axes")} ${missingAxisSupport === 1 ? "has" : "have"} no qualifying frozen support. ${status === "provisional"
-        ? "Treat the score and verdict as provisional until the decision evidence is complete."
-        : "Do not treat the score or verdict as decision-ready until the decision evidence is complete."}`,
+          ? "Review with gaps"
+          : "Report not ready",
+      guidance: `${plural(missingAxisSupport, "part of the score", "parts of the score")} ${missingAxisSupport === 1 ? "does" : "do"} not have a saved source. ${status === "provisional"
+        ? "Treat the result as an early read until those sources are added."
+        : "Do not rely on the result until those sources are added."}`,
     };
   }
 
@@ -166,11 +166,11 @@ export function deriveDecisionReadiness(
       return {
         ...base,
         title: coverage.findings > 0
-          ? "Evidence coverage complete: findings require review"
-          : "Evidence coverage complete",
+          ? "All checks finished: review the findings"
+          : "All checks finished",
         guidance: coverage.findings > 0
-          ? `All ${plural(applicable, "applicable check")} have recorded outcomes, including ${plural(coverage.findings, "finding")}. Coverage is complete, but this is not an investment recommendation.`
-          : `All ${plural(applicable, "applicable check")} have recorded outcomes. Review the underlying evidence before making an investment decision.`,
+          ? `All ${plural(applicable, "check")} finished, and ${plural(coverage.findings, "finding")} need your review. This is research, not financial advice.`
+          : `All ${plural(applicable, "check")} finished. Read the sources before making a decision. This is not financial advice.`,
       };
     }
     // Clearance granted under the coverage policy with enrichment gaps waived.
@@ -179,34 +179,34 @@ export function deriveDecisionReadiness(
     return {
       ...base,
       title: coverage.findings > 0
-        ? "Evidence coverage sufficient: findings require review"
-        : "Evidence coverage sufficient",
-      guidance: `${successful} of ${applicable} applicable checks have recorded outcomes${readyGaps ? ` (${readyGaps})` : ""}. Every safety screen is recorded; the remaining paths are enrichment gaps that no longer withhold clearance. Review the underlying evidence before making an investment decision.`,
+        ? "Required checks finished: review the findings"
+        : "Required checks finished",
+      guidance: `${successful} of ${applicable} checks finished${readyGaps ? ` (${readyGaps})` : ""}. Every required safety check finished. The other open checks may add detail, but they do not block review. This is research, not financial advice.`,
     };
   }
 
   if (applicable === 0) {
     return {
       ...base,
-      title: "Investigation incomplete",
-      guidance: "No applicable checks are defined for this report. Do not treat its score or verdict as investment-ready.",
+      title: "Report not ready",
+      guidance: "No checks were available for this report. Do not rely on its score or result.",
     };
   }
 
   const gaps = gapDescription(base);
-  const coverageStatement = `${successful} of ${applicable} applicable checks have recorded outcomes${gaps ? ` (${gaps})` : ""}.`;
+  const coverageStatement = `${successful} of ${applicable} checks finished${gaps ? ` (${gaps})` : ""}.`;
 
   if (status === "provisional") {
     return {
       ...base,
-      title: "Assessment is provisional",
-      guidance: `${coverageStatement} Treat the score and verdict as provisional until the remaining evidence gaps are resolved.`,
+      title: "Review with gaps",
+      guidance: `${coverageStatement} Treat the result as an early read until the open checks finish.`,
     };
   }
 
   return {
     ...base,
-    title: "Investigation incomplete",
-    guidance: `${coverageStatement} Do not treat the score or verdict as investment-ready.`,
+    title: "Report not ready",
+    guidance: `${coverageStatement} Do not rely on the score or result yet.`,
   };
 }

@@ -29,17 +29,17 @@ function memoryStorage(initial: Record<string, string> = {}) {
 }
 
 describe("ARGUS theme normalization", () => {
-  it("accepts light and defaults every other value to dark", () => {
+  it("accepts dark and defaults every other value to light", () => {
     expect(normalizeArgusTheme("light")).toBe("light");
     expect(normalizeArgusTheme("dark")).toBe("dark");
-    expect(normalizeArgusTheme("system")).toBe("dark");
-    expect(normalizeArgusTheme(null)).toBe("dark");
+    expect(normalizeArgusTheme("system")).toBe("light");
+    expect(normalizeArgusTheme(null)).toBe("light");
   });
 
   it("toggles only between the supported themes", () => {
     expect(nextArgusTheme("dark")).toBe("light");
     expect(nextArgusTheme("light")).toBe("dark");
-    expect(nextArgusTheme("corrupt")).toBe("light");
+    expect(nextArgusTheme("corrupt")).toBe("dark");
   });
 });
 
@@ -49,7 +49,7 @@ describe("ARGUS theme persistence", () => {
     expect(readStoredArgusTheme(storage)).toBe("light");
 
     storage.setItem(ARGUS_THEME_STORAGE_KEY, "sepia");
-    expect(readStoredArgusTheme(storage)).toBe("dark");
+    expect(readStoredArgusTheme(storage)).toBe("light");
   });
 
   it("falls back safely when storage is blocked", () => {
@@ -58,7 +58,7 @@ describe("ARGUS theme persistence", () => {
       setItem: vi.fn(() => { throw new Error("blocked"); }),
     };
 
-    expect(readStoredArgusTheme(blocked)).toBe("dark");
+    expect(readStoredArgusTheme(blocked)).toBe("light");
     expect(persistArgusTheme("light", blocked)).toBe("light");
   });
 });

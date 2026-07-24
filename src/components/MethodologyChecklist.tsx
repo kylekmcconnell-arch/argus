@@ -38,24 +38,24 @@ export function MethodologyChecklist({ checks, id }: { checks: ScanCheck[]; id?:
   const coverage = summarizeChecks(checks);
   const grouped = [
     {
-      label: "Required safety gates",
-      description: "These checks cannot be waived for clearance.",
+      label: "Required safety checks",
+      description: "These checks must finish before the report is ready.",
       checks: checks.filter((check) => check.checkId && NEVER_WAIVE_CHECK_IDS.has(check.checkId)),
     },
     {
       label: "Core risk evidence",
-      description: "Primary contract, market, holder, and operator checks.",
+      description: "The main contract, market, holder, and team checks.",
       checks: checks.filter((check) => check.checkId && CORE_TOKEN_CHECK_IDS.has(check.checkId)),
     },
     {
       label: "Additional diligence",
-      description: "Disclosed research paths that deepen confidence and count toward the coverage floor.",
+      description: "Extra research that can add detail but does not hide an unfinished required check.",
       checks: checks.filter((check) =>
         !check.checkId
         || (!NEVER_WAIVE_CHECK_IDS.has(check.checkId) && !CORE_TOKEN_CHECK_IDS.has(check.checkId))),
     },
   ].filter((group) => group.checks.length > 0);
-  const openRequired = grouped[0]?.label === "Required safety gates"
+  const openRequired = grouped[0]?.label === "Required safety checks"
     ? grouped[0].checks.filter((check) => ["unknown", "unavailable", "stale"].includes(check.status)).length
     : 0;
 
@@ -115,7 +115,7 @@ export function MethodologyChecklist({ checks, id }: { checks: ScanCheck[]; id?:
             </section>
           ))}
           <p className="px-2 py-1.5 text-[11px] leading-snug text-ink-faint">
-            A recorded outcome means ARGUS stored an observable result, including findings and explicit empty responses. Unknown means no completion result is present; provider unavailable means a required data source or coverage path did not respond. Stale results are excluded from completed coverage.
+            Finished means the check returned a result, even if it found nothing. Open means the check did not finish. Old results do not count.
           </p>
         </div>
       )}
