@@ -257,19 +257,38 @@ describe("collectCompanyEnrichment", () => {
     expect(enrichmentCalls).toBe(0);
   });
 
-  it("accepts the official root domain for an official app subdomain", async () => {
+  it("retries the verified root domain when an app-subdomain search returns noise", async () => {
+    const searchQueries: string[] = [];
+    const fetcher = ((_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        endpoint?: string;
+        input?: { queryParams?: { query?: string } };
+      };
+      if (body.endpoint === "/v1/company/search") {
+        const query = body.input?.queryParams?.query ?? "";
+        searchQueries.push(query);
+        return Promise.resolve(jsonResponse(searchCompleted(
+          query.includes("app.drift.trade")
+            ? [{ uuid: "wrong-app", name: "DRMEP", website: "app.drmep.com" }]
+            : [{ uuid: "drift-protocol", name: "Drift Protocol", website: "drift.trade" }],
+        )));
+      }
+      if (body.endpoint === "/v1/company/enrichment") {
+        return Promise.resolve(jsonResponse(enrichmentCompleted({
+          firmographic: { legal_name: "Drift Foundation" },
+        })));
+      }
+      return Promise.resolve(jsonResponse({}, 404));
+    }) as unknown as typeof fetch;
+
     const out = await collectProjectCompanyEnrichment("https://app.drift.trade", {
       officialName: "Drift Protocol",
-      fetcher: runFetcher({
-        search: searchCompleted([
-          { uuid: "drift-protocol", name: "Drift Protocol", website: "drift.trade" },
-        ]),
-        enrichment: enrichmentCompleted({ firmographic: { legal_name: "Drift Foundation" } }),
-      }),
+      fetcher,
     });
 
     expect(out.available).toBe(true);
     if (!out.available) throw new Error("expected available");
+    expect(searchQueries).toEqual(["https://app.drift.trade", "https://drift.trade"]);
     expect(out.value.identityMatch).toBe("official_domain");
     expect(out.value.requestedDomain).toBe("app.drift.trade");
     expect(out.value.matchedDomain).toBe("drift.trade");

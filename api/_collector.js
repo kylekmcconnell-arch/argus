@@ -8408,6 +8408,12 @@ function relatedOfficialHosts(expected, candidate) {
   }
   return null;
 }
+function registrableProjectDomain(host) {
+  const parts = host.split(".").filter(Boolean);
+  if (parts.length <= 2) return host;
+  const lastTwo = parts.slice(-2).join(".");
+  return /^(?:co|com|org|net|gov|ac|edu)\.[a-z]{2}$/.test(lastTwo) ? parts.slice(-3).join(".") : lastTwo;
+}
 function logCompanyResolution(event, details) {
   if (process.env.NODE_ENV === "test") return;
   console.info("[monid.company_resolution]", JSON.stringify({ event, ...details }));
@@ -8629,29 +8635,59 @@ async function collectCompanyEnrichment(nameOrWebsite, options = {}) {
   }
   const fetcher = options.fetcher ?? fetch;
   const sections = normalizeSections(options.sections);
-  const search = await startRun(
-    key,
-    "/v1/company/search",
-    { queryParams: { query } },
-    fetcher
-  );
-  if (!search.ok) {
-    recordCall("monid", "company/search", 0, `search \xB7 ${search.note}`, "failed");
-    logCompanyResolution("provider_error", {
-      stage: "search",
-      queryDomain: hostOf(query),
-      note: search.note
-    });
-    return { available: false, reason: "unavailable", note: search.note };
+  const queryDomain = hostOf(query);
+  const rootDomain = queryDomain ? registrableProjectDomain(queryDomain) : null;
+  const searchQueries = [
+    query,
+    ...options.identityPolicy === "official_domain_only" && queryDomain && rootDomain && rootDomain !== queryDomain ? [`https://${rootDomain}`] : []
+  ];
+  let companies = [];
+  let decision = null;
+  for (let index = 0; index < searchQueries.length; index += 1) {
+    const providerQuery = searchQueries[index];
+    const search = await startRun(
+      key,
+      "/v1/company/search",
+      { queryParams: { query: providerQuery } },
+      fetcher
+    );
+    if (!search.ok) {
+      recordCall("monid", "company/search", 0, `search \xB7 ${search.note}`, "failed");
+      logCompanyResolution("provider_error", {
+        stage: "search",
+        queryDomain,
+        providerQuery: hostOf(providerQuery) ?? providerQuery,
+        note: search.note
+      });
+      return { available: false, reason: "unavailable", note: search.note };
+    }
+    companies = companyList(search.data);
+    decision = pickBestMatch(companies, query, options);
+    if (!("reason" in decision) || decision.reason === "ambiguous") break;
+    if (index + 1 < searchQueries.length) {
+      recordCall(
+        "monid",
+        "company/search",
+        0,
+        `search \xB7 no_match \xB7 retry ${hostOf(searchQueries[index + 1]) ?? searchQueries[index + 1]}`,
+        "succeeded"
+      );
+    }
   }
-  const companies = companyList(search.data);
-  const decision = pickBestMatch(companies, query, options);
+  if (!decision) {
+    return {
+      available: false,
+      reason: "no_match",
+      note: `No Monid/Akta company matched "${query}".`
+    };
+  }
   if ("reason" in decision) {
     recordCall("monid", "company/search", 0, `search \xB7 ${decision.reason}`, "succeeded");
     logCompanyResolution("rejected", {
       reason: decision.reason,
       queryDomain: decision.requestedDomain,
       candidateCount: decision.candidateCount,
+      searchDomains: searchQueries.map((providerQuery) => hostOf(providerQuery) ?? providerQuery),
       candidateDomains: companies.map((company) => hostOf(company?.website)).filter((domain) => Boolean(domain)).slice(0, 10)
     });
     return {

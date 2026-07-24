@@ -349,6 +349,16 @@ function relatedOfficialHosts(expected: string, candidate: string): "exact_host"
   return null;
 }
 
+/** Parent domain used only as a second provider search query. */
+function registrableProjectDomain(host: string): string {
+  const parts = host.split(".").filter(Boolean);
+  if (parts.length <= 2) return host;
+  const lastTwo = parts.slice(-2).join(".");
+  return /^(?:co|com|org|net|gov|ac|edu)\.[a-z]{2}$/.test(lastTwo)
+    ? parts.slice(-3).join(".")
+    : lastTwo;
+}
+
 function logCompanyResolution(
   event: "matched" | "rejected" | "provider_error",
   details: Record<string, unknown>,
@@ -637,31 +647,69 @@ export async function collectCompanyEnrichment(
   const fetcher = options.fetcher ?? fetch;
   const sections = normalizeSections(options.sections);
 
-  // 1) Free resolution via /v1/company/search.
-  const search = await startRun(
-    key,
-    "/v1/company/search",
-    { queryParams: { query } },
-    fetcher,
-  );
-  if (!search.ok) {
-    recordCall("monid", "company/search", 0, `search · ${search.note}`, "failed");
-    logCompanyResolution("provider_error", {
-      stage: "search",
-      queryDomain: hostOf(query),
-      note: search.note,
-    });
-    return { available: false, reason: "unavailable", note: search.note };
+  // 1) Free resolution via /v1/company/search. Some providers index a company
+  // at its root domain even when the verified product URL is an app subdomain
+  // (app.drift.trade → drift.trade). Retry that root only after the exact
+  // official host produces no match; the selector still compares every
+  // candidate against the original verified host.
+  const queryDomain = hostOf(query);
+  const rootDomain = queryDomain ? registrableProjectDomain(queryDomain) : null;
+  const searchQueries = [
+    query,
+    ...(options.identityPolicy === "official_domain_only"
+      && queryDomain
+      && rootDomain
+      && rootDomain !== queryDomain
+      ? [`https://${rootDomain}`]
+      : []),
+  ];
+  let companies: any[] = [];
+  let decision: CompanyMatchDecision | null = null;
+  for (let index = 0; index < searchQueries.length; index += 1) {
+    const providerQuery = searchQueries[index];
+    const search = await startRun(
+      key,
+      "/v1/company/search",
+      { queryParams: { query: providerQuery } },
+      fetcher,
+    );
+    if (!search.ok) {
+      recordCall("monid", "company/search", 0, `search · ${search.note}`, "failed");
+      logCompanyResolution("provider_error", {
+        stage: "search",
+        queryDomain,
+        providerQuery: hostOf(providerQuery) ?? providerQuery,
+        note: search.note,
+      });
+      return { available: false, reason: "unavailable", note: search.note };
+    }
+    companies = companyList(search.data);
+    decision = pickBestMatch(companies, query, options);
+    if (!("reason" in decision) || decision.reason === "ambiguous") break;
+    if (index + 1 < searchQueries.length) {
+      recordCall(
+        "monid",
+        "company/search",
+        0,
+        `search · no_match · retry ${hostOf(searchQueries[index + 1]) ?? searchQueries[index + 1]}`,
+        "succeeded",
+      );
+    }
   }
-
-  const companies = companyList(search.data);
-  const decision = pickBestMatch(companies, query, options);
+  if (!decision) {
+    return {
+      available: false,
+      reason: "no_match",
+      note: `No Monid/Akta company matched "${query}".`,
+    };
+  }
   if ("reason" in decision) {
     recordCall("monid", "company/search", 0, `search · ${decision.reason}`, "succeeded");
     logCompanyResolution("rejected", {
       reason: decision.reason,
       queryDomain: decision.requestedDomain,
       candidateCount: decision.candidateCount,
+      searchDomains: searchQueries.map((providerQuery) => hostOf(providerQuery) ?? providerQuery),
       candidateDomains: companies
         .map((company) => hostOf(company?.website))
         .filter((domain): domain is string => Boolean(domain))
