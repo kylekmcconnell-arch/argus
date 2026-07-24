@@ -352,6 +352,29 @@ describe("private person report evidence boundary", () => {
         roles: ["PROJECT"],
         governing_role: "PROJECT",
       },
+      basicFacts: [{
+        factId: "verified-product",
+        subjectKey: "@ponsdotfamily",
+        predicate: "product",
+        value: "Launchpad for tokens on Robinhood Chain",
+        normalizedValue: "launchpad for tokens on robinhood chain",
+        status: "verified" as const,
+        critical: true,
+        sources: [{
+          url: "https://www.ponsfamily.com/launchpad",
+          title: "Official Pons launchpad",
+          sourceClass: "official_subject" as const,
+          relation: "supports" as const,
+          excerpt: "Pons launches tokens on Robinhood Chain.",
+          contentHash: "1".repeat(64),
+          capturedAt: "2026-07-24T05:38:00.000Z",
+          provider: "public-web",
+          artifactVerified: true,
+        }],
+        evidence_origin: "deterministic" as const,
+        artifact_verified: true,
+        provider: "public-web",
+      }],
       basicFactLeads: [{
         predicate: "founder",
         value: "MEADGod",
@@ -388,6 +411,13 @@ describe("private person report evidence boundary", () => {
         excerpt: "Pons recorded $120 million token volume on Robinhood Chain.",
         provider: "test",
       }, {
+        predicate: "product",
+        value: "Launchpad",
+        sourceUrl: "https://docs.ponsfamily.com/",
+        sourceTitle: "Pons docs",
+        excerpt: "Pons is a token launchpad on Robinhood Chain.",
+        provider: "test",
+      }, {
         predicate: "repository",
         value: "https://docs.ponsfamily.com/",
         sourceUrl: "https://docs.ponsfamily.com/",
@@ -407,6 +437,7 @@ describe("private person report evidence boundary", () => {
     expect(leads).not.toContain("$120 million volume");
     expect(leads).not.toContain("Wesley Pons");
     expect(leads).not.toContain("PoNS medical device");
+    expect(leads).not.toContain("Pons docs");
     expect(leads).not.toContain("https://docs.ponsfamily.com/");
   });
 

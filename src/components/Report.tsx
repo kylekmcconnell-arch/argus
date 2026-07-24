@@ -1396,6 +1396,7 @@ function projectLeadIsRelevant(dossier: Dossier, lead: BasicFactLeadView): boole
 function reportBasicFactLeads(
   dossier: Dossier,
   audience: "project" | "investor" | "founder" | "person",
+  publishedFacts: readonly BasicFactView[],
 ): BasicFactLeadView[] {
   const legacyTokenLeads = audience !== "project"
     ? []
@@ -1413,8 +1414,13 @@ function reportBasicFactLeads(
       }];
     });
   const candidates = [...(dossier.basicFactLeads ?? []), ...legacyTokenLeads];
+  const answeredPredicates = new Set(publishedFacts
+    .filter((fact) => fact.status === "verified" || fact.status === "corroborated")
+    .map((fact) => canonicalBasicFactPredicate(fact.predicate)));
   const relevant = audience === "project"
-    ? candidates.filter((lead) => projectLeadIsRelevant(dossier, lead))
+    ? candidates.filter((lead) =>
+      !answeredPredicates.has(canonicalBasicFactPredicate(lead.predicate))
+      && projectLeadIsRelevant(dossier, lead))
     : candidates;
   const seen = new Set<string>();
   return relevant.filter((lead) => {
@@ -1654,8 +1660,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           : roles.includes(SubjectClass.FOUNDER)
             ? "founder" as const
             : "person" as const;
-  const basicFactLeads = reportBasicFactLeads(f, basicFactsAudience);
   const publicationBasicFacts = reportBasicFacts(f, basicFactsAudience);
+  const basicFactLeads = reportBasicFactLeads(f, basicFactsAudience, publicationBasicFacts);
   const fundingEvidence = summarizeFundingEvidence(
     publicationBasicFacts,
     f.protocolFunding?.rounds ?? [],
