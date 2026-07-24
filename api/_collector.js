@@ -12618,6 +12618,16 @@ async function collectBasicFacts(ctx, dependencies = {}) {
       officialHosts = [.../* @__PURE__ */ new Set([...officialHosts, officialScope])];
       aliases = [.../* @__PURE__ */ new Set([...aliases, boundIdentity])];
       ctx.evidence.profile.website = officialScope;
+      ctx.evidence.profile.display_name = boundIdentity;
+      ctx.evidence.profile.identity_confidence = "Confirmed";
+      ctx.evidence.profile.identity_note = `${boundIdentity} was confirmed by a freshly fetched first-party site that links the exact @${ctx.handle.replace(/^@/, "")} account.`;
+      ctx.recordCheck?.({
+        id: "identity-resolution",
+        status: "confirmed",
+        note: `${boundIdentity} was confirmed by a freshly fetched first-party site that links the exact @${ctx.handle.replace(/^@/, "")} account`,
+        provider: "basic-facts-web",
+        sourceCount: 1
+      });
       recovered.push({
         subject: boundIdentity,
         predicate: "official_identity",

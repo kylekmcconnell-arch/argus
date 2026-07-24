@@ -971,6 +971,8 @@ describe("basic-facts source verification", () => {
 
     expect(result.state).toBe("executed");
     expect(evidence.profile.website).toBe("https://www.drift.trade/");
+    expect(evidence.profile.display_name).toBe("Drift Protocol");
+    expect(evidence.profile.identity_confidence).toBe("Confirmed");
     expect(evidence.basicFacts).toContainEqual(expect.objectContaining({
       predicate: "official_identity",
       value: "Drift Protocol",
