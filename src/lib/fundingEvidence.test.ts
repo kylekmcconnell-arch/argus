@@ -94,6 +94,12 @@ describe("summarizeFundingEvidence", () => {
         excerpt: "Venice raised a $65 million Series A led by Dragonfly at a $1 billion valuation.",
         provider: "public-web",
         sourceClass: "official_subject",
+      }, {
+        url: "https://example.com/venice-series-a",
+        title: "Venice AI funding",
+        excerpt: "Company valuation $1 billion following the Series A financing.",
+        provider: "public-web",
+        sourceClass: "independent_press",
       }],
     }]);
 

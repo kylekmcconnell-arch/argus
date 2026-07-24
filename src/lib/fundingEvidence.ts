@@ -165,10 +165,15 @@ function strongSources(fact: FundingEvidenceFact): FundingEvidenceSource[] {
 function roundFromFact(fact: FundingEvidenceFact): FundingEvidenceRound | null {
   const sources = strongSources(fact);
   if (!sources.length) return null;
-  const corpus = [compact(fact.value), ...sources.flatMap((source) => [compact(source.title), compact(source.excerpt)])]
+  const verifiedValue = compact(fact.value);
+  const corpus = [verifiedValue, ...sources.flatMap((source) => [compact(source.title), compact(source.excerpt)])]
     .filter(Boolean)
     .join(". ");
-  const amounts = moneyAmounts(corpus);
+  // The verified fact value is the collector's atomic answer to "how much was
+  // raised?" Prefer that amount over larger numbers repeated in supporting
+  // titles or excerpts, which commonly include the company's valuation.
+  const valueAmounts = moneyAmounts(verifiedValue);
+  const amounts = valueAmounts.length ? valueAmounts : moneyAmounts(corpus);
   if (!amounts.length) return null;
   const lead = leadInvestor(corpus);
   return {
