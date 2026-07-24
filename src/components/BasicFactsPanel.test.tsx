@@ -695,7 +695,7 @@ describe("BasicFactsPanel", () => {
     expect(text).toContain("Uniswap Web App");
     expect(text).toContain("$2.36B");
     expect(text).not.toContain("$2.40B");
-    expect(text.match(/operates a live on-chain protocol/g)?.length).toBe(1);
+    expect(text.match(/operates a live blockchain protocol/g)?.length).toBe(1);
   });
 
   it("lists disclosed funding rounds newest first under the funding answer", () => {

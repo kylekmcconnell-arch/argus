@@ -167,7 +167,7 @@ export function WatchlistPage({ onAudit }: { onAudit: (id: string) => void }) {
           <button
             onClick={onSweep}
             disabled={sweep === "running"}
-            title="Run a one-off server sweep of the shared watchlist: on-chain drift + ring check against the trust graph. Writes the Alerts feed. Manual only; nothing runs in the background."
+            title="Check the shared watchlist now for token changes and new links to flagged people, projects, or wallets. Any warning appears under Alerts. This only runs when you click it."
             className="btn-chip tint-signal disabled:opacity-60"
           >
             {sweep === "running" ? "sweeping…" : "Sweep now"}

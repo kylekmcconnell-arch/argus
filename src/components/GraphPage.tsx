@@ -60,14 +60,14 @@ export function GraphPage({ onOpen }: { onOpen: (handle: string) => void }) {
     <div className="mx-auto max-w-5xl px-6 py-10">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="display-sm text-[24px] text-ink">Trust graph</h1>
+          <h1 className="display-sm text-[24px] text-ink">Connections</h1>
           <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
-            Every audit is a star map on its own. Merged, they compound: an entity in two investigations
-            becomes a bridge, a wallet tied to several rugs becomes a serial actor, and a cluster of flagged
-            subjects sharing one hidden hub becomes a cabal. None of that shows in a single report.
+            See people, projects, and wallets that appear in more than one report. Repeated links can reveal
+            the same operator or funding source behind several projects. A connection is a lead to review,
+            not proof that two subjects are controlled by the same person.
           </p>
         </div>
-        <div className="flex shrink-0 rounded-lg border border-line bg-panel p-1" role="group" aria-label="Trust graph view">
+        <div className="flex shrink-0 rounded-lg border border-line bg-panel p-1" role="group" aria-label="Connections view">
           {(["network", "subject"] as const).map((m) => (
             <button
               key={m}

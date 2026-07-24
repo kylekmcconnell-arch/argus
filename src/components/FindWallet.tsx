@@ -166,7 +166,7 @@ export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: st
           <p className="mt-1.5 max-w-2xl text-[13.5px] leading-relaxed text-ink-dim">
             Turn a clue into a wallet. Paste an X handle, an ENS / basename / .sol name, a full or partial address,
             or drop a screenshot. ARGUS resolves it via Farcaster-verified addresses, self-disclosed bios, and name
-            records, then lets you trace each wallet on-chain.
+            records, then lets you trace each wallet on the blockchain.
           </p>
         </div>
 
@@ -251,8 +251,8 @@ export function FindWallet({ onAudit, onReset, onOpenRecent }: { onAudit: (q: st
         {cards.length === 0 && !busy && (
           <div className="empty-state mt-10">
             {priv
-              ? "Private mode: resolutions run but are not recorded to your trust graph."
-              : "Resolved wallets are recorded into your trust graph, so a handle you resolve here bridges to any token audit that touches the same wallet."}
+              ? "Private mode: ARGUS finds the wallets but does not save them to Connections."
+              : "Found wallets are saved to Connections. If a token report uses the same wallet, ARGUS will show the link."}
           </div>
         )}
       </div>

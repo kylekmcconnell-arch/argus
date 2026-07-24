@@ -17,6 +17,8 @@ function plainDecisionText(value: string): string {
     .trim()
     .replace(/^Resolve deployer trail$/i, "Who deployed the contract")
     .replace(/^Resolve bytecode fingerprint$/i, "Copied contract code")
+    .replace(/^Check deployer trail$/i, "Who deployed the contract")
+    .replace(/^Check bytecode fingerprint$/i, "Copied contract code")
     .replace(/^Resolve wallet clustering$/i, "Connected holder wallets")
     .replace(/^Resolve operator\s*\/\s*funding trace$/i, "Where the deployer’s funds came from")
     .replace(/^Resolve holder distribution$/i, "Large holder distribution")

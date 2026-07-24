@@ -136,7 +136,7 @@ export function AddInfo({ subject, subjectKind, canonicalRef, subjectGraphKey }:
           <div aria-live="polite">
             {state === "submitting" && <p className="mt-2 text-[12.5px] text-ink-faint">Submitted. Verifying it exists on source, then checking it can be proven…</p>}
             {state === "live" && <p className="mt-2 text-[12.5px] text-pass">Verified and published live.</p>}
-            {state === "pending" && <p className="mt-2 text-[12.5px] text-caution">Queued for owner review: {reason}. It exists, but ARGUS couldn't auto-prove it's this subject's, so it remains unpublished until an owner approves it in AdminOps.</p>}
+            {state === "pending" && <p className="mt-2 text-[12.5px] text-caution">Waiting for an owner to review: {reason}. The source exists, but ARGUS could not confirm it belongs to this subject. It will not appear until an owner approves it under Access &amp; activity.</p>}
             {state === "rejected" && <p className="mt-2 text-[12.5px] text-caution">Rejected: {reason}. The target has to actually exist on source.</p>}
           </div>
           {state === "idle" && <p className="mt-2 text-[11px] leading-snug text-ink-faint">Add something the scan missed. If ARGUS can prove it (e.g. the GitHub links back to this X) it publishes live; if it only verifies the thing exists but can't tie it to this subject, it's held for your approval. A target that doesn't exist is rejected.</p>}

@@ -329,16 +329,16 @@ export function Sidebar({
         {/* primary navigation */}
         <nav aria-label="Primary" className={`space-y-px ${compact ? "px-2" : "px-2.5"}`}>
           <NavGroup compact={compact} label="Investigate" />
-          <NavItem compact={compact} icon={FilesIcon} label="Investigation canvas" active={view === "idle" || view === "audit"} onClick={() => nav("idle")} />
+          <NavItem compact={compact} icon={FilesIcon} label="New investigation" active={view === "idle" || view === "audit"} onClick={() => nav("idle")} />
           <NavItem compact={compact} icon={CrosshairIcon} label="Radar" active={view === "radar"} onClick={() => nav("radar")} />
-          <NavItem compact={compact} icon={GlobeSimpleIcon} label="Site recon" active={view === "recon"} onClick={() => nav("recon")} />
+          <NavItem compact={compact} icon={GlobeSimpleIcon} label="Website check" active={view === "recon"} onClick={() => nav("recon")} />
           <NavItem compact={compact} icon={WalletIcon} label="Find wallet" active={view === "find"} onClick={() => nav("find")} />
 
           <NavGroup compact={compact} label="Intelligence" />
-          <NavItem compact={compact} icon={GitBranchIcon} label="Trust graph" active={view === "graph"} onClick={() => nav("graph")} />
-          <NavItem compact={compact} icon={ChartLineUpIcon} label="Market signals" active={view === "trending"} onClick={() => nav("trending")} />
+          <NavItem compact={compact} icon={GitBranchIcon} label="Connections" active={view === "graph"} onClick={() => nav("graph")} />
+          <NavItem compact={compact} icon={ChartLineUpIcon} label="Market trends" active={view === "trending"} onClick={() => nav("trending")} />
           {compact ? (
-            <NavItem compact icon={UsersThreeIcon} label="Entity library" active={directoryActive} onClick={() => nav("founders")} />
+            <NavItem compact icon={UsersThreeIcon} label="People & projects" active={directoryActive} onClick={() => nav("founders")} />
           ) : (
             <details
               open={directoryActive || directoriesOpen}
@@ -347,7 +347,7 @@ export function Sidebar({
             >
               <summary className={`flex min-h-9 cursor-pointer list-none items-center gap-2.5 rounded-md px-2.5 py-2 text-[13.5px] transition hover:bg-panel/70 hover:text-ink [&::-webkit-details-marker]:hidden ${directoryActive ? "text-ink" : "text-ink-dim"}`}>
                 <UsersThreeIcon size={17} weight={directoryActive ? "bold" : "regular"} className={directoryActive ? "text-signal-lift" : "text-ink-faint"} aria-hidden />
-                <span>Entity library</span>
+                <span>People &amp; projects</span>
                 <CaretDownIcon size={14} className="ml-auto text-ink-faint transition-transform group-open:rotate-180" aria-hidden />
               </summary>
               <div className="space-y-px">
@@ -366,7 +366,7 @@ export function Sidebar({
           <NavGroup compact={compact} label="Workspace" />
           <NavItem compact={compact} icon={BellIcon} label="Alerts" active={view === "alerts"} onClick={() => nav("alerts")} />
           <NavItem compact={compact} icon={PlugsConnectedIcon} label="Data sources" active={view === "providers"} onClick={() => nav("providers")} />
-          <NavItem compact={compact} icon={KeyIcon} label={auth.role === "owner" ? "Audit & access" : "Audit log"} active={view === "admin"} onClick={() => nav("admin")} />
+          <NavItem compact={compact} icon={KeyIcon} label={auth.role === "owner" ? "Access & activity" : "Activity log"} active={view === "admin"} onClick={() => nav("admin")} />
         </nav>
 
         {/* recent cases */}

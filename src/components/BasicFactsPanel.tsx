@@ -132,7 +132,7 @@ function safeHttpUrl(value?: string): string | null {
 }
 
 function sourceLabel(source: BasicFactSourceView, url: string): string {
-  if (source.title?.trim()) return source.title.trim();
+  if (source.title?.trim()) return plainLanguageSummary(source.title);
   try {
     return new URL(url).hostname.replace(/^www\./, "");
   } catch {
@@ -911,7 +911,7 @@ export function BasicFactsPanel({
                     <div className="mt-2 flex flex-wrap gap-1.5">
                       {urls.slice(0, 3).map((url, urlIndex) => (
                         <a key={url} href={url} target="_blank" rel="noopener noreferrer" className="btn-chip min-h-8 tint-caution normal-case tracking-normal">
-                          {urlIndex === 0 && lead.sourceTitle?.trim() ? lead.sourceTitle.trim() : `Candidate source ${urlIndex + 1}`} <ArrowSquareOut aria-hidden="true" size={12} weight="bold" />
+                          {urlIndex === 0 && lead.sourceTitle?.trim() ? plainLanguageSummary(lead.sourceTitle) : `Candidate source ${urlIndex + 1}`} <ArrowSquareOut aria-hidden="true" size={12} weight="bold" />
                         </a>
                       ))}
                     </div>

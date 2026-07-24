@@ -177,7 +177,7 @@ describe("Recent report controls", () => {
     expect(sidebar?.className.split(/\s+/)).not.toContain("lg:w-[72px]");
 
     const investigationCanvas = [...(sidebar?.querySelectorAll<HTMLButtonElement>("nav button") ?? [])]
-      .find((button) => button.textContent?.includes("Investigation canvas"));
+      .find((button) => button.textContent?.includes("New investigation"));
     expect(investigationCanvas).toBeDefined();
     expect(investigationCanvas?.querySelector("span.sr-only")).toBeNull();
     expect(sidebar?.textContent).toContain("Recent cases");

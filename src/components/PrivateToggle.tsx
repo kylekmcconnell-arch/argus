@@ -41,7 +41,7 @@ export function PrivateToggle({ on, onToggle, className = "" }: { on: boolean; o
           role="tooltip"
           className="pointer-events-none absolute left-1/2 top-[calc(100%+8px)] z-50 w-[236px] -translate-x-1/2 rounded-lg border border-line-2 bg-panel px-3 py-2 text-[12.5px] leading-relaxed text-ink-dim opacity-0 transition-opacity duration-150 soft-shadow group-hover/info:opacity-100 group-focus-within/info:opacity-100"
         >
-          A private search runs the same audit but <span className="text-ink">won't show in or add to the public trust graph</span>: no tickers, no recent audits, no shared record. <span className="text-ink-faint">A premium option.</span>
+          A private search runs the same checks but <span className="text-ink">does not appear in shared history or Connections</span>. <span className="text-ink-faint">A premium option.</span>
         </span>
       </span>
     </div>

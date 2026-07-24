@@ -64,13 +64,13 @@ export function EvmDeployer({ address, chain, symbol, knownDeployer, panelCostTo
   if (chain === "solana" || !panelCostToken) return null;
   const current = result?.key === requestKey ? result : null;
   if (!current) return <div className="panel p-4 text-[12.5px] text-ink-faint">checking the token creator on the blockchain…</div>;
-  if (current.failure) return <PanelRequestNotice failure={current.failure} label="Deployer intelligence" />;
+  if (current.failure) return <PanelRequestNotice failure={current.failure} label="Token creator check" />;
   const data = current.data;
   if (!data || data.available === false || !data.deployer) {
     if (data && data.note && data.available !== false) {
       return (
         <div className="panel p-4">
-          <span className="eyebrow">Deployer trail</span>
+          <span className="eyebrow">Who created the token</span>
           <p className="mt-1.5 text-[12.5px] text-ink-dim">{data.note}</p>
         </div>
       );
@@ -84,14 +84,14 @@ export function EvmDeployer({ address, chain, symbol, knownDeployer, panelCostTo
   return (
     <div className={`panel p-4 ${serial ? "tint-var" : ""}`} style={serial ? ({ "--tint": "var(--color-avoid)" } as React.CSSProperties) : undefined}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="eyebrow">Deployer trail</span>
+        <span className="eyebrow">Who created the token</span>
         {typeof data.deployments === "number" && data.deployments > 0 && (
           <span className="mono ml-auto text-[11px] text-ink-faint">{data.deployments} contract{data.deployments === 1 ? "" : "s"} deployed by this wallet</span>
         )}
       </div>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-[12.5px] text-ink-dim">
-        <span>Deployer</span>
+        <span>Creator wallet</span>
         <a href={`https://${exp}/address/${data.deployer}`} target="_blank" rel="noreferrer" className="link-ext mono">{shortAddr(data.deployer)}</a>
         {data.walletAgeDays != null && <span className="text-[11px] text-ink-faint">· {data.walletAgeDays}d old</span>}
         {data.funder && (

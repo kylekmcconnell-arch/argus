@@ -170,7 +170,7 @@ export function KolReport({ handle, promotions, associates, panelCostToken, reco
             just vanish from the list. Ticker-only, no DEX pair under that symbol. */}
         {!loading && unresolved.length > 0 && (
           <p className="mt-1.5 text-[12.5px] leading-relaxed text-ink-faint">
-            Also promoted, couldn't price on-chain (ticker-only; no DEX pair found under that symbol): {unresolved.map((t) => t.label).join(", ")}.
+            Also promoted, but ARGUS could not find a matching token price (ticker only; no exchange pair found under that symbol): {unresolved.map((t) => t.label).join(", ")}.
           </p>
         )}
       </div>
@@ -178,7 +178,7 @@ export function KolReport({ handle, promotions, associates, panelCostToken, reco
       {/* reach authenticity */}
       {signals && (
         <div className="mt-3 border-t border-line pt-3">
-          <div className="text-[12.5px] font-medium text-ink">Reach authenticity</div>
+          <div className="text-[12.5px] font-medium text-ink">Are the followers real?</div>
           <div className={`mt-1 text-[12.5px] leading-relaxed ${signals.flags?.length ? "text-avoid" : "text-ink-dim"}`}>{signals.note}</div>
           <div className="mono mt-1.5 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-ink-faint">
             {signals.totalFollowers != null && <span>{Number(signals.totalFollowers).toLocaleString()} followers</span>}

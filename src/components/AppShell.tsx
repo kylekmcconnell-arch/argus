@@ -93,7 +93,7 @@ export function AppShell({
           </button>
           <ArgusMark size={22} />
           <span className="display text-[13.5px] tracking-[0.02em] text-ink">ARGUS</span>
-          <span className="mono ml-auto hidden text-[10px] uppercase tracking-[0.12em] text-ink-faint sm:block">Investigation canvas</span>
+          <span className="mono ml-auto hidden text-[10px] uppercase tracking-[0.12em] text-ink-faint sm:block">New investigation</span>
         </div>
 
         <main id="argus-main-content" tabIndex={-1} className="thin-scroll atmosphere flex-1 overflow-x-hidden overflow-y-auto">{children}</main>

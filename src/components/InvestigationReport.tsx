@@ -473,7 +473,7 @@ export function InvestigationReport({
   const advisors = (projectAccount?.evidence.testimonials ?? []).filter((t) => t.claimed_relationship === "advisor");
   const advisorChip = (v?: string): { label: string; color: string } => {
     const s = (v ?? "").toLowerCase();
-    if (s.includes("corrobor")) return { label: "corroborated", color: "var(--color-pass)" };
+    if (s.includes("corrobor")) return { label: "confirmed twice", color: "var(--color-pass)" };
     if (s.includes("contradict")) return { label: "contradicted", color: "var(--color-avoid)" };
     return { label: "unconfirmed", color: "var(--color-ink-faint)" };
   };
@@ -747,7 +747,7 @@ export function InvestigationReport({
             <section
               className="panel investigation-hero-card investigation-readiness-card flex flex-col p-5 tint-var"
               style={{ "--tint": readinessColor } as React.CSSProperties}
-              aria-label="Investigation readiness"
+              aria-label="Report status"
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <span className="eyebrow">Safety checks</span>
@@ -984,20 +984,20 @@ export function InvestigationReport({
 
         <div className="report-section mt-7">
           <ReportSectionHeading
-            index="04 · Evidence"
+            index="04 · Sources"
             title="Token, ownership, and team"
             description="See the token checks and the people publicly tied to the project."
           />
         </div>
         <div id="investigation-evidence" className="scroll-mt-28 mt-3 grid gap-3 lg:grid-cols-2">
           {/* on-chain */}
-          <Card title="On-chain" accent={tm.color}>
+          <Card title="Blockchain data" accent={tm.color}>
             <div className="flex items-center justify-between">
               <span className="mono text-[13.5px] text-ink">{`$${token.symbol}`}</span>
               <VerdictPill verdict={token.verdict} score={token.score} />
             </div>
             <p className="mt-1.5 text-[12.5px] leading-snug text-ink-dim">
-              {token.headline
+              {plainLanguageSummary(token.headline)
                 .replace(/^Clears the forensic bar:\s*/i, "Passed the main token checks: ")
                 .replace(/owned, tradeable, with real depth/gi, "tradeable with meaningful liquidity")}
             </p>

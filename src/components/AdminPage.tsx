@@ -238,7 +238,7 @@ export function AdminPage({ onAudit }: { onAudit?: (q: string) => void }) {
       {/* log */}
       {shown.length === 0 ? (
         <div className="empty-state mt-6">
-          {log.length === 0 ? "No audits yet. Run a token, a handle, or a site recon and it will appear here." : "Nothing matches this filter."}
+          {log.length === 0 ? "No scans yet. Run a token, handle, or website check and it will appear here." : "Nothing matches this filter."}
         </div>
       ) : (
         <div className="panel mt-4 overflow-hidden">

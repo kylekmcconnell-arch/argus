@@ -51,13 +51,13 @@ export function BytecodeForensics({ address, chain, symbol, record = true }: { a
   }, []);
 
   if (chain === "solana") return null;
-  if (state === "loading") return <div className="panel p-4 text-[12.5px] text-ink-faint">fingerprinting the contract bytecode…</div>;
+  if (state === "loading") return <div className="panel p-4 text-[12.5px] text-ink-faint">checking whether this contract copies known scam code…</div>;
   if (!data || data.available === false || data.isContract === false) {
     // Only render a note if there's something honest to say (EOA / unsupported chain).
     if (data && (data.isContract === false || data.note)) {
       return (
         <div className="panel p-4">
-          <span className="eyebrow">Bytecode fingerprint</span>
+          <span className="eyebrow">Copied contract code</span>
           <p className="mt-1.5 text-[12.5px] text-ink-dim">{data.note}</p>
         </div>
       );
@@ -77,7 +77,7 @@ export function BytecodeForensics({ address, chain, symbol, record = true }: { a
   return (
     <div className={`panel p-4 ${alarm ? "tint-var" : ""}`} style={alarm ? ({ "--tint": "var(--color-avoid)" } as React.CSSProperties) : undefined}>
       <div className="flex flex-wrap items-center gap-2">
-        <span className="eyebrow">Bytecode fingerprint</span>
+        <span className="eyebrow">Copied contract code</span>
         {data.fingerprint && <span className="mono text-[11px] text-ink-faint">{data.fingerprint}</span>}
         {data.proxy && data.implementation && (
           <a href={`https://etherscan.io/address/${data.implementation}`} target="_blank" rel="noreferrer" title={`implementation ${data.implementation}`} className="link-ext mono rounded border border-line px-1.5 py-0.5 text-[11px]">proxy → impl</a>
@@ -100,7 +100,7 @@ export function BytecodeForensics({ address, chain, symbol, record = true }: { a
 
       {caps.length > 0 && (
         <div className="mt-2.5">
-          <div className="eyebrow">Callable capabilities in the code <span className="normal-case text-ink-faint/70">(neutral; confirm each is renounced or governed)</span></div>
+          <div className="eyebrow">What the contract can do <span className="normal-case text-ink-faint/70">(not automatically dangerous; check who controls each ability)</span></div>
           <div className="mt-1.5 flex flex-wrap gap-1.5">
             {caps.map((c) => (
               <span key={c.selector} title={c.selector} className="chip">

@@ -150,11 +150,11 @@ export function LinkEntity({ subject, subjectKind, canonicalRef, graphSubjectKey
 
           <div aria-live="polite">
             {state === "submitting" && <p className="mt-2 text-[12.5px] text-ink-faint">Submitted. Verifying the entity exists before linking…</p>}
-            {state === "live" && <p className="mt-2 text-[12.5px] text-pass">Linked and bridged into the trust graph.</p>}
-            {state === "pending" && <p className="mt-2 text-[12.5px] text-caution">Queued for owner review: {reason}. The target is verified real, but the relationship remains unpublished and outside the graph until an owner approves it in AdminOps.</p>}
+            {state === "live" && <p className="mt-2 text-[12.5px] text-pass">Linked and added to Connections.</p>}
+            {state === "pending" && <p className="mt-2 text-[12.5px] text-caution">Waiting for an owner to review: {reason}. The person or project is real, but the relationship will not appear until it is approved under Access &amp; activity.</p>}
             {state === "rejected" && <p className="mt-2 text-[12.5px] text-caution">Not linked: {reason}. The target must be a real, verifiable entity.</p>}
           </div>
-          {state === "idle" && <p className="mt-2 text-[11px] leading-snug text-ink-faint">Hand-link a connection the scan missed. The target is verified on source; a provable link goes live, a relationship claim is held for your approval, then it's wired as an edge in the trust graph. It appears in the connection web and triggers a ring alert if that entity is (or becomes) flagged.</p>}
+          {state === "idle" && <p className="mt-2 text-[11px] leading-snug text-ink-faint">Add a connection the scan missed. ARGUS confirms the person or project exists. Clear public links appear right away; uncertain relationships wait for an owner to approve them. Approved links appear under Connections and can trigger an alert.</p>}
         </div>
       )}
     </div>

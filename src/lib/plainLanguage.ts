@@ -13,6 +13,7 @@ export function plainLanguageSummary(value: string): string {
     .replace(/\bfirst-party\b/gi, "official")
     .replace(/\bon-chain liveness\b/gi, "blockchain activity")
     .replace(/\bmarket liveness\b/gi, "market activity")
+    .replace(/\bon-chain\b/gi, "blockchain")
     .replace(/\bliveness\b/gi, "activity")
     .replace(/\bevidence-backed\b/gi, "source-supported")
     .replace(/\bdecision readiness\b/gi, "safety check status")

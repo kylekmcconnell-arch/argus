@@ -66,7 +66,7 @@ export function ApiPage() {
         <Endpoint
           method="GET"
           path="/api/v1/token"
-          desc="Live forensic rug-audit of a token from its contract address or a DexScreener link. EVM and Solana."
+          desc="Run live token safety checks from a contract address or DexScreener link. Supports EVM chains and Solana."
           params={[["address", "contract address (or url= a DexScreener link)"]]}
           curl={`curl -H "Authorization: Bearer $ARGUS_ACCESS_TOKEN" \\
   "${BASE}/api/v1/token?address=0x6982508145454ce325ddbe47a25d4ec3d2311933"`}
@@ -78,7 +78,7 @@ export function ApiPage() {
   "verdict": "PASS",
   "score": 89,
   "cap_applied": null,
-  "headline": "Clears the forensic bar: authorities revoked, LP locked...",
+  "headline": "Passed the main token checks: controls removed, liquidity locked...",
   "market": { "marketCap": 1.2e9, "liquidityUsd": 20500000, "ageDays": 1157 },
   "safety": { "honeypot": false, "mintable": false, "ownerRenounced": true, "lpLocked": true },
   "holders": { "insiderPct": 39, "bundleRisk": "elevated" },
@@ -91,7 +91,7 @@ export function ApiPage() {
         <Endpoint
           method="GET"
           path="/api/v1/person"
-          desc="Multi-class principal audit (founder / fund / KOL / advisor / agency), governed by the most severe role. Final verdict and score are withheld until frozen coverage is decision-ready; raw scorer output remains explicit and preliminary."
+          desc="Review a founder, fund, promoter, advisor, or agency. ARGUS uses the riskiest confirmed role and does not show a final result until every required safety check finishes."
           params={[["handle", "an X handle, e.g. @gakonst"]]}
           curl={`curl -H "Authorization: Bearer $ARGUS_ACCESS_TOKEN" \\
   "${BASE}/api/v1/person?handle=gakonst"`}

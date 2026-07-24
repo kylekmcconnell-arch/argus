@@ -734,7 +734,7 @@ function FindingsLedger({ findings }: { findings: Dossier["report"]["publishable
               />
               <div className="min-w-0 flex-1">
                 <p className="text-[13.5px] leading-snug text-ink">{f.claim}</p>
-                <div role="group" aria-label="Evidence provenance" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-ink-faint">
+                <div role="group" aria-label="Source details" className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5 text-[11px] text-ink-faint">
                   <span className="inline-flex items-center gap-1.5 rounded border border-line px-1.5 py-0.5">
                     <span>Status</span>
                     <span className="mono font-medium" style={{ color: statusColor }}>{f.verification_status}</span>
@@ -904,7 +904,7 @@ const FUND_SCALE_METRIC_LABEL: Record<NonNullable<SourceArtifact["fundScaleMetri
 const FUND_SCALE_BASIS_LABEL: Record<NonNullable<SourceArtifact["fundScaleBasis"]>, string> = {
   regulatory: "regulatory filing",
   manager_reported: "manager reported",
-  press_corroborated: "press corroborated",
+  press_corroborated: "confirmed by news sources",
 };
 
 type InvestorSourceRole = "Affiliation source" | "Fund domain source" | "Scale source" | "Deal source";
@@ -2352,7 +2352,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     ...(routingUnresolved ? [{
       id: "verify-subject-routing",
       title: "Resolve whether this account represents a project, organization, token, or person",
-      detail: "No evidence-backed role selected a scoring methodology. Confirm the official site relationship, then run the matching project and on-chain investigation paths.",
+      detail: "ARGUS could not confirm a role to score. Confirm the official website relationship, then run the matching project and token checks.",
       provenance: "Required before scoring",
       href: "#identity-evidence" as `#${string}`,
     }] : []),
@@ -2471,7 +2471,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
   const providerCapturedLabel = frozenSourceDate(f.providerSnapshot?.capturedAt);
   const freshnessRail: ReportCanvasRailItem[] = [
     ...(capturedLabel ? [{ id: "version-captured", label: `Report saved ${capturedLabel}`, meta: versionContext ? `version ${versionContext.version}` : undefined }] : []),
-    ...(providerCapturedLabel ? [{ id: "provider-captured", label: `Evidence gathered ${providerCapturedLabel}`, meta: `${f.providerSnapshot?.runs.length ?? 0} data-source runs recorded` }] : []),
+    ...(providerCapturedLabel ? [{ id: "provider-captured", label: `Sources checked ${providerCapturedLabel}`, meta: `${f.providerSnapshot?.runs.length ?? 0} outside source checks recorded` }] : []),
     ...(finalizedLabel ? [{ id: "report-finalized", label: `Scored ${finalizedLabel}`, meta: report.audit_id }] : []),
   ];
   const verifiedDecisionFactCount = basicFacts.filter((fact) =>
@@ -3181,7 +3181,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
                   ? cleanScreens.length
                     ? `No adverse findings in the collected evidence. ${cleanScreens.length} ${cleanScreens.length === 1 ? "screen" : "screens"} ran clean, including ${cleanScreens.slice(0, 3).map((check) => check.label.toLowerCase()).join(", ")}.`
                     : "No adverse findings in the collected evidence."
-                  : "No evidence-backed positive counterweight is recorded in this report."}
+                  : "No confirmed positive finding is recorded in this report."}
             />
             {!decisionFrameworkUnavailable && decisionQuestionCount > 0 && (
               <p className="border-t border-line/60 py-3 text-[11.5px] text-ink-faint">
@@ -3499,7 +3499,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         <div className="2xl:columns-2 2xl:gap-3">
           {evidence.wallets.length > 0 && (
             <div className="mb-3 min-w-0 break-inside-avoid">
-              <Section title="Wallets & on-chain links" kicker="addresses tied to them · ranked by attribution strength">
+              <Section title="Wallets and blockchain links" kicker="addresses tied to them · strongest links shown first">
                 <Clamp itemCount={evidence.wallets.length} label="wallets">
                 <Card className="divide-y divide-line/60">
                   {[...evidence.wallets]
@@ -3932,7 +3932,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {/* findings ledger */}
         {publishableSubjectFindings.length > 0 && (
           <div id="publishable-findings" className="scroll-mt-28">
-            <Section title="Publishable findings" kicker="sourced · dated · independently corroborated">
+            <Section title="Confirmed findings" kicker="sources and dates included · checked against other records">
               <FindingsLedger findings={publishableSubjectFindings} />
             </Section>
           </div>

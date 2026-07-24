@@ -59,7 +59,7 @@ export function TrendingPage({ onOpen }: { onOpen: (ref: string) => void }) {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="flex items-center gap-2.5 display-sm text-[24px] text-ink">
-            Market signals
+            Market trends
             <span className="mono inline-flex items-center gap-1.5 rounded-full border border-line px-2 py-0.5 text-[11px] uppercase tracking-wider text-signal-lift">
               <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-signal" /> live
             </span>

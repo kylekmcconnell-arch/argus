@@ -59,15 +59,15 @@ export function Counterparties({ address, subject, panelCostToken, record = true
   }, [address, panelCostToken, record, requestKey, subject]);
 
   const current = result?.key === requestKey ? result : null;
-  if (current?.failure) return <PanelRequestNotice failure={current.failure} label="Counterparty intelligence" />;
+  if (current?.failure) return <PanelRequestNotice failure={current.failure} label="Money connection check" />;
   const rows = current?.rows;
   if (!rows || rows.length === 0) return null;
   return (
     <div className="panel p-4">
       <div className="flex flex-wrap items-center gap-2">
         <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--color-signal)" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><circle cx="6" cy="6" r="2.4" /><circle cx="18" cy="18" r="2.4" /><circle cx="18" cy="6" r="2.4" /><path d="M8.4 6H16M6 8.4V16M8 16l8-8" /></svg>
-        <span className="eyebrow">Counterparties</span>
-        <span className="text-[11.5px] text-ink-dim">who the deployer moves money with, on-chain (Arkham)</span>
+        <span className="eyebrow">Money connections</span>
+        <span className="text-[11.5px] text-ink-dim">wallets and exchanges that moved money with the token creator (Arkham)</span>
       </div>
       <div className="mt-2.5 divide-y divide-line/60">
         {rows.map((c, i) => {
@@ -86,7 +86,7 @@ export function Counterparties({ address, subject, panelCostToken, record = true
           );
         })}
       </div>
-      <p className="mt-2 text-[11px] leading-snug text-ink-faint">Named non-exchange counterparties are wired into the trust graph as verified relationship edges. A shared fund or mixer bridges two operators automatically.</p>
+      <p className="mt-2 text-[11px] leading-snug text-ink-faint">ARGUS saves confirmed links to these wallets. If another report uses the same fund or mixer, it will appear under Connections.</p>
     </div>
   );
 }
