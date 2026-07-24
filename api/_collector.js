@@ -19023,15 +19023,24 @@ var ADAPTER_PROVIDERS = {
   "onchain": ["helius"]
 };
 var teamEvidenceRank = (member) => member.artifact_verified === true && member.evidence_origin !== "model_lead" ? 2 : member.evidence_origin !== "model_lead" ? 1 : 0;
+var canonicalTeamName = (value) => {
+  const raw = (value ?? "").trim().toLowerCase();
+  if (!raw || raw.startsWith("@")) return "";
+  const tokens = raw.split(/[^a-z0-9]+/).filter(Boolean);
+  return tokens.length >= 2 ? tokens.join(" ") : "";
+};
 function coalesceTeamMembersByHandle(members) {
   const output = [];
   const indexByHandle = /* @__PURE__ */ new Map();
+  const indexByName = /* @__PURE__ */ new Map();
   for (const member of members) {
     const handle = member.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
-    const existingIndex = handle ? indexByHandle.get(handle) : void 0;
+    const name = canonicalTeamName(member.name);
+    const existingIndex = (handle ? indexByHandle.get(handle) : void 0) ?? (name ? indexByName.get(name) : void 0);
     if (existingIndex === void 0) {
       output.push({ ...member });
       if (handle) indexByHandle.set(handle, output.length - 1);
+      if (name) indexByName.set(name, output.length - 1);
       continue;
     }
     const existing = output[existingIndex];
@@ -19050,6 +19059,10 @@ function coalesceTeamMembersByHandle(members) {
       if (secondary.linkedin) merged.linkedin = secondary.linkedin;
     }
     output[existingIndex] = merged;
+    const mergedHandle = merged.handle?.trim().replace(/^@/, "").toLowerCase() ?? "";
+    const mergedName = canonicalTeamName(merged.name);
+    if (mergedHandle) indexByHandle.set(mergedHandle, existingIndex);
+    if (mergedName) indexByName.set(mergedName, existingIndex);
   }
   return output;
 }
@@ -19479,6 +19492,12 @@ async function coldIntake(ctx, profileAlreadyResolved = false) {
   const norm3 = (s) => (s ?? "").trim().toLowerCase().replace(/^@/, "");
   const byHandle = /* @__PURE__ */ new Map();
   const byName = /* @__PURE__ */ new Map();
+  for (const member of webTeam) {
+    const handle = norm3(member.handle);
+    const name = norm3(member.name);
+    if (handle) byHandle.set(handle, member);
+    if (name) byName.set(name, member);
+  }
   const teamCandidates = [
     ...pageTeam.map((member) => ({
       ...member,

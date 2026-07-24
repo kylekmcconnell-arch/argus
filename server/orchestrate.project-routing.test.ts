@@ -94,6 +94,39 @@ describe("provider-backed project routing", () => {
     ]);
   });
 
+  it("coalesces a provider name-only row with the same enriched full-name identity", () => {
+    expect(coalesceTeamMembersByHandle([
+      {
+        name: "Erik Voorhees",
+        role: "Founder & CEO",
+        source: "Monid/Akta management record",
+        sourceUrl: "https://venice.ai/",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "monid",
+        identity_link_evidence_origin: "deterministic",
+      },
+      {
+        name: "Erik Voorhees",
+        handle: "@ErikVoorhees",
+        role: "Founder & CEO",
+        source: "Official project post",
+        sourceUrl: "https://x.com/askvenice/status/1",
+        evidence_origin: "deterministic",
+        artifact_verified: true,
+        provider: "twitterapi",
+        identity_link_evidence_origin: "deterministic",
+      },
+    ])).toEqual([
+      expect.objectContaining({
+        name: "Erik Voorhees",
+        handle: "@ErikVoorhees",
+        role: "Founder & CEO",
+        artifact_verified: true,
+      }),
+    ]);
+  });
+
   it("routes @world_xyz to the PROJECT methodology and requests every PROJECT axis", () => {
     const evidence = resolvedProjectProfile("the solana prediction market");
     const roles = providerBackedRoles(evidence);

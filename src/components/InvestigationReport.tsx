@@ -1113,7 +1113,7 @@ export function InvestigationReport({
                         <span className="flex min-w-0 flex-wrap items-center gap-1.5">
                           <Avatar src={personAvatar(m.handle, m.linkedin)} letter={initial(m.name)} size={20} rounded="rounded-full" letterClass="text-[9px]" />
                           <span className="text-[12.5px] text-ink">{m.name}</span>
-                          {m.handle && m.handle.replace(/^@/, "").toLowerCase() !== m.name.toLowerCase() && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
+                          {m.handle && normalizedTeamIdentity(m.handle) !== normalizedTeamIdentity(m.name) && <span className="mono text-[11px] text-ink-faint">{m.handle}</span>}
                           {m.role && <span className="text-[11px] text-ink-faint">{m.role}</span>}
                           {m.linkedin && (
                             <a href={`https://${m.linkedin.replace(/^https?:\/\//, "")}`} target="_blank" rel="noreferrer" className="link-ext text-[11px]">LinkedIn</a>

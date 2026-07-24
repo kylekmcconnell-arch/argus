@@ -289,6 +289,16 @@ describe("investigation exact sharing", () => {
             evidence_origin: "deterministic",
             artifact_verified: true,
           },
+          {
+            name: "@twistartups",
+            handle: "@twistartups",
+            role: "CEO",
+            source: "official project post",
+            sourceUrl: "https://x.com/askvenice/status/1",
+            provider: "twitterapi",
+            evidence_origin: "deterministic",
+            artifact_verified: true,
+          },
         ],
         report: {
           composite_verdict: "PASS",
@@ -312,9 +322,11 @@ describe("investigation exact sharing", () => {
     }));
 
     expect(container.textContent).toContain("Built by Erik Voorhees, Teana Baker-Taylor");
-    expect(container.textContent).toContain("Team & founders (2)");
+    expect(container.textContent).toContain("Team & founders (3)");
     expect(container.textContent).not.toContain("Team & founders (4)");
     expect(container.textContent).not.toContain("project scan + project scan");
+    const teamSectionText = container.querySelector("#investigation-team")?.textContent ?? "";
+    expect(teamSectionText.match(/@twistartups/g)).toHaveLength(1);
   });
 
   it("binds report chat and every decision-canvas navigation link to the immutable snapshot", () => {
