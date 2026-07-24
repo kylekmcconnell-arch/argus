@@ -1630,6 +1630,33 @@ describe("decision-safe person report presentation", () => {
     expect(basis).not.toContain("Independent profile of the founder");
   });
 
+  it("repairs a frozen probable label only when the snapshot already contains a licensed full-name resolution", () => {
+    const base = buildReport(SUBJECTS[1]);
+    const dossier = {
+      ...base,
+      display_name: "Georgios Konstantopoulos",
+      report: {
+        ...base.report,
+        identity_confidence: "Probable" as const,
+      },
+      checkRuns: [{
+        checkId: "identity-resolution",
+        label: "Identity resolution",
+        status: "confirmed" as const,
+        note: "GitHub account gakonst links back to @gakonst · licensed identity record resolved to Georgios Konstantopoulos",
+        provider: "github,peopledatalabs",
+        sourceCount: 2,
+      }],
+    };
+
+    act(() => {
+      root.render(<Report dossier={dossier} onReset={() => {}} />);
+    });
+
+    expect(container.textContent).toContain("Identity verified");
+    expect(container.textContent).not.toContain("Identity probable");
+  });
+
   it("does not promote checked-empty, no-match, or unsupported artifacts into positive support", () => {
     const base = buildReport(SUBJECTS[1]);
     const modelFinding = {

@@ -1583,13 +1583,28 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     : roles[0]
       ? ROLE_META[roles[0]]?.label ?? roles[0]
       : "subject";
+  const versionContext = f.versionContext ?? f.viewVersionContext;
+  const frozenDiligenceChecks = versionContext?.checks ?? f.checkRuns ?? [];
+  const identityResolutionCheck = frozenDiligenceChecks.find((check) => check.checkId === "identity-resolution");
+  const fullResolvedName = (f.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2;
+  // Older frozen reports sometimes retained "Probable" even after the same
+  // snapshot recorded a licensed full-name resolution plus another independent
+  // identity source. Correct only that exact, source-counted contradiction at
+  // presentation time. Never infer or invent a name from weaker evidence.
+  const displayIdentityConfidence = report.identity_confidence === "Probable"
+    && identityResolutionCheck?.status === "confirmed"
+    && (identityResolutionCheck.sourceCount ?? 0) >= 2
+    && /peopledatalabs/i.test(identityResolutionCheck.provider ?? "")
+    && /licensed identity record resolved to\b/i.test(identityResolutionCheck.note ?? "")
+    && fullResolvedName
+    ? "Confirmed"
+    : report.identity_confidence;
   const derivedDiligenceChecks = personChecks({
-    identityConfidence: report.identity_confidence ?? undefined,
-    realName: (f.display_name ?? "").trim().split(/\s+/).filter(Boolean).length >= 2,
+    identityConfidence: displayIdentityConfidence ?? undefined,
+    realName: fullResolvedName,
     roles,
     hasAssociates: (evidence.associates?.length ?? 0) > 0,
   });
-  const versionContext = f.versionContext ?? f.viewVersionContext;
   const diligenceChecks = versionContext
     ? versionContext.checks
     : f.checkRuns?.length
@@ -2196,7 +2211,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
     canonicalBasicFactPredicate(entry.predicate) === predicate);
   const heroProofChips: HeroProofChip[] = [];
   {
-    const ic = report.identity_confidence;
+    const ic = displayIdentityConfidence;
     heroProofChips.push(
       ic === "SuspectedImpersonation"
         ? { key: "identity", label: "Impersonation suspected", tone: "avoid", href: "#identity-evidence", title: "Identity screen flagged suspected impersonation. Review before anything else." }
@@ -2911,8 +2926,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
             legal or sanctions clearance. */}
         {showOffchainSupplemental && (
           <div className="mt-3 space-y-2">
-            <SanctionsNameScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
-            <LegalScreen name={f.display_name} resolved={report.identity_confidence === "Confirmed" || report.identity_confidence === "Probable"} />
+            <SanctionsNameScreen name={f.display_name} resolved={displayIdentityConfidence === "Confirmed" || displayIdentityConfidence === "Probable"} />
+            <LegalScreen name={f.display_name} resolved={displayIdentityConfidence === "Confirmed" || displayIdentityConfidence === "Probable"} />
           </div>
         )}
 
@@ -2926,7 +2941,7 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
         {report.governing_role !== "KOL" && webTeam && webTeam.length > 0 ? (
           <div className="mt-3">
             <div className="mb-1.5 flex flex-wrap items-center gap-2">
-              <span className="chip normal-case">{report.identity_confidence}</span>
+              <span className="chip normal-case">{displayIdentityConfidence}</span>
               <span className="text-[11px] text-ink-faint">identity resolved through the named team · click a handle to audit them</span>
             </div>
             <Card className="divide-y divide-line/60">
@@ -2975,8 +2990,8 @@ export function Report({ dossier, onReset, onAudit, onRescan, onOpenProject, onO
           </div>
         ) : (
           <div className="panel mt-3 flex items-start gap-3 px-4 py-3">
-            <span className={`chip normal-case mt-0.5 ${report.identity_confidence === "SuspectedImpersonation" ? "tint-unverifiable" : ""}`}>
-              {report.identity_confidence}
+            <span className={`chip normal-case mt-0.5 ${displayIdentityConfidence === "SuspectedImpersonation" ? "tint-unverifiable" : ""}`}>
+              {displayIdentityConfidence}
             </span>
             <div className="min-w-0">
               <p className="text-[12.5px] leading-relaxed text-ink-dim">{f.identity_note}</p>
