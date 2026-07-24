@@ -203,7 +203,11 @@ export function groundedSearchProvisioned(): boolean {
   return Boolean(env("SERPER_API_KEY") && (openRouterExtractModel() || env("ANTHROPIC_API_KEY")));
 }
 
-export async function groundedSearch(system: string, user: string, opts?: { cacheKey?: string; bypassCache?: boolean }): Promise<string | null> {
+export async function groundedSearch(
+  system: string,
+  user: string,
+  opts?: { cacheKey?: string; bypassCache?: boolean; queries?: readonly string[] },
+): Promise<string | null> {
   const serperKey = env("SERPER_API_KEY");
   // Needs Serper for search plus SOME extractor: OpenRouter (when a slug model +
   // key are set) or native Anthropic. Otherwise not provisioned -> caller falls back.
@@ -214,7 +218,12 @@ export async function groundedSearch(system: string, user: string, opts?: { cach
     if (hit) return hit;
   }
 
-  const queries = await generateQueries(system, user);
+  // High-value collectors can supply exact deterministic queries. This avoids
+  // asking a model to rediscover obvious search syntax such as an official
+  // company's own funding announcements, while retaining the same Serper,
+  // source-fetch, and grounded extraction boundaries.
+  const queries = opts?.queries?.map((query) => query.trim()).filter(Boolean).slice(0, 5)
+    ?? await generateQueries(system, user);
   if (!queries.length) return null;
 
   const searched = await Promise.all(queries.map((q) => serperSearch(q, serperKey)));

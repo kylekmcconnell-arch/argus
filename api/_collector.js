@@ -6153,7 +6153,7 @@ async function groundedSearch(system, user, opts) {
     const hit = await cacheGet(cacheKey);
     if (hit) return hit;
   }
-  const queries = await generateQueries(system, user);
+  const queries = opts?.queries?.map((query) => query.trim()).filter(Boolean).slice(0, 5) ?? await generateQueries(system, user);
   if (!queries.length) return null;
   const searched = await Promise.all(queries.map((q) => serperSearch(q, serperKey)));
   const succeeded = searched.filter((outcome) => outcome.status === "succeeded");
@@ -9568,7 +9568,7 @@ var MAX_REPAIR_QUESTIONS = 8;
 var MAX_PROJECT_REPAIR_QUESTIONS = 9;
 var MAX_REPAIR_PROVIDER_CALLS = 8;
 var DISCOVERY_TIMEOUT_MS = 9e4;
-var RESEARCH_CACHE_VERSION = "v9";
+var RESEARCH_CACHE_VERSION = "v10";
 var SENSITIVE_URL_PARAM3 = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 var PREDICATES = /* @__PURE__ */ new Set([
   "official_identity",
@@ -10579,6 +10579,20 @@ function questionSearchGroups(questions, phase) {
   }));
   return [...grouped, ...targeted];
 }
+function deterministicFundingSearchQueries(ctx, questions) {
+  if (questions.length !== 1 || questions[0]?.audience !== "project" || questions[0]?.predicate !== "funding") return void 0;
+  const subject = subjectName(ctx).replace(/"/g, "").trim();
+  let host = "";
+  try {
+    host = ctx.evidence.profile.website ? new URL(ctx.evidence.profile.website).hostname : "";
+  } catch {
+  }
+  return [
+    host ? `site:${host} "${subject}" funding raised financing` : "",
+    host ? `site:${host} "${subject}" "Series A" OR "Series B" OR "seed round"` : "",
+    `"${subject}" funding round valuation investors`
+  ].filter(Boolean);
+}
 async function mapDiscoveryGroups(groups, work) {
   if (!groups.length) return [];
   const output = new Array(groups.length);
@@ -10775,7 +10789,10 @@ async function discoverGroundedBasicFactLeadsDetailed(ctx, questions, phase) {
     const text2 = await groundedSearch(
       "You are ARGUS's basic-facts research scout. Answer only from the provided sources, cite their exact URLs, and return only the requested JSON. Every answer remains an unverified lead until ARGUS fetches and verifies the exact source passage.",
       discoveryPrompt(ctx, batchQuestions, phase),
-      { cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grounded:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}` }
+      {
+        cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grounded:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}`,
+        queries: deterministicFundingSearchQueries(ctx, batchQuestions)
+      }
     );
     if (text2 === null) {
       return { ...group, state: "failed", leads: [], attempts: 1, detail: `${key}:grounded_unavailable` };

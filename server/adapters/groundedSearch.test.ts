@@ -97,6 +97,46 @@ describe("groundedSearch OpenRouter routing", () => {
     expect(urls.some((u) => u.includes("openrouter.ai"))).toBe(false);
   });
 
+  it("uses supplied official-site queries without spending a model call generating queries", async () => {
+    process.env.SERPER_API_KEY = "serp";
+    process.env.ANTHROPIC_API_KEY = "sk-ant";
+    delete process.env.OPENROUTER_API_KEY;
+    process.env.ARGUS_EXTRACT_MODEL = "claude-haiku-4-5";
+
+    const serperQueries: string[] = [];
+    let anthropicHits = 0;
+    vi.stubGlobal("fetch", vi.fn(async (url: string, init: { body: string }) => {
+      const u = String(url);
+      if (u.includes("serper")) {
+        serperQueries.push(String((JSON.parse(init.body) as { q?: unknown }).q ?? ""));
+        return ok({ organic: [{
+          title: "Venice Raises $65 Million Series A",
+          link: "https://venice.ai/blog/venice-raises-65-million-series-a",
+          snippet: "Venice announced a $65 million Series A led by Dragonfly at a $1 billion valuation.",
+        }] });
+      }
+      anthropicHits += 1;
+      return ok({
+        content: [{ type: "text", text: "EXTRACTED FUNDING" }],
+        usage: { input_tokens: 10, output_tokens: 5 },
+      });
+    }));
+
+    const result = await groundedSearch("system", "user", {
+      queries: [
+        'site:venice.ai "Venice" funding raised financing',
+        'site:venice.ai "Venice" "Series A"',
+      ],
+    });
+
+    expect(result).toBe("EXTRACTED FUNDING");
+    expect(serperQueries).toEqual([
+      'site:venice.ai "Venice" funding raised financing',
+      'site:venice.ai "Venice" "Series A"',
+    ]);
+    expect(anthropicHits).toBe(1);
+  });
+
   it("records Serper HTTP failures as failed provider attempts", async () => {
     process.env.SERPER_API_KEY = "configured-but-rejected";
     process.env.ANTHROPIC_API_KEY = "sk-ant";

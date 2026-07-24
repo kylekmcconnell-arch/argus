@@ -35,7 +35,7 @@ const MAX_REPAIR_PROVIDER_CALLS = 8;
 // tight enough that slow calls timed out and fell back to Grok (erasing the cost
 // win). Discovery batches run in parallel, well inside the ~390s budget.
 const DISCOVERY_TIMEOUT_MS = 90_000;
-const RESEARCH_CACHE_VERSION = "v9";
+const RESEARCH_CACHE_VERSION = "v10";
 const SENSITIVE_URL_PARAM = /^(?:(?:x[-_]?(?:amz|goog)|x[-_](?:oss|cos))[-_].+|x[-_]ms[-_](?:signature|token|credential)|access[_-]?token|api[_-]?key|key|token|signature|sig|auth|credential|credentials|security[_-]?token|session[_-]?token|awsaccesskeyid|googleaccessid|key[_-]?pair[_-]?id|policy|cf[_-]?access[_-]?token)$/i;
 
 const PREDICATES = new Set<BasicFactPredicate>([
@@ -1345,6 +1345,25 @@ function questionSearchGroups(
   return [...grouped, ...targeted];
 }
 
+function deterministicFundingSearchQueries(
+  ctx: CollectContext,
+  questions: readonly BasicFactsResearchQuestion[],
+): string[] | undefined {
+  if (
+    questions.length !== 1
+    || questions[0]?.audience !== "project"
+    || questions[0]?.predicate !== "funding"
+  ) return undefined;
+  const subject = subjectName(ctx).replace(/"/g, "").trim();
+  let host = "";
+  try { host = ctx.evidence.profile.website ? new URL(ctx.evidence.profile.website).hostname : ""; } catch { /* no official host */ }
+  return [
+    host ? `site:${host} "${subject}" funding raised financing` : "",
+    host ? `site:${host} "${subject}" "Series A" OR "Series B" OR "seed round"` : "",
+    `"${subject}" funding round valuation investors`,
+  ].filter(Boolean);
+}
+
 async function mapDiscoveryGroups<T>(
   groups: readonly QuestionSearchGroup[],
   work: (group: QuestionSearchGroup) => Promise<T>,
@@ -1622,7 +1641,10 @@ export async function discoverGroundedBasicFactLeadsDetailed(
     const text = await groundedSearch(
       "You are ARGUS's basic-facts research scout. Answer only from the provided sources, cite their exact URLs, and return only the requested JSON. Every answer remains an unverified lead until ARGUS fetches and verifies the exact source passage.",
       discoveryPrompt(ctx, batchQuestions, phase),
-      { cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grounded:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}` },
+      {
+        cacheKey: `basic-facts:${RESEARCH_CACHE_VERSION}:grounded:${audience}:${phase}:${key}:${fingerprint}:${ctx.handle.toLowerCase()}:${canonicalSubject.toLowerCase()}`,
+        queries: deterministicFundingSearchQueries(ctx, batchQuestions),
+      },
     );
     if (text === null) {
       return { ...group, state: "failed", leads: [], attempts: 1, detail: `${key}:grounded_unavailable` };
