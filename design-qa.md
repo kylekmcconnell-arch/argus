@@ -215,3 +215,64 @@ final result: passed
 - P3: at 720px height, Recent cases remains reachable by scrolling, matching the established full-sidebar behavior.
 
 final result: passed
+
+---
+
+# Design QA: `@ponsdotfamily` saved report
+
+final result: passed
+
+## Comparison target
+
+- Source visual truth: authenticated production capture before repair, `docs/design-qa/ponsdotfamily/02-facts-risk.png`, `docs/design-qa/ponsdotfamily/03-coverage-provider.png`, `docs/design-qa/ponsdotfamily/05-team-candidates.png`, and `docs/design-qa/ponsdotfamily/06-bad-leads.png`
+- Rendered implementation: authenticated production report after deployment, `docs/design-qa/ponsdotfamily/08-after-facts.png`, `docs/design-qa/ponsdotfamily/10-after-coverage.png`, `docs/design-qa/ponsdotfamily/12-after-identity.png`, and `docs/design-qa/ponsdotfamily/14-final-bottom.png`
+- Production URL: `https://argus-one-flax.vercel.app/?s=%40ponsdotfamily&kind=person`
+- State: dark theme, owner-authenticated, frozen person report version 5, no paid rescan
+- CSS viewport: 1280 x 720
+- Source and implementation captures: 976 x 720 pixels, browser-capture density identical on both sides
+- Density normalization: none required because every compared pair used the same browser, CSS viewport, capture dimensions, theme, authentication state, and saved report
+
+## Comparison evidence
+
+- Full evidence-card comparison: `docs/design-qa/ponsdotfamily/09-facts-before-after.png`
+- Coverage-message comparison: `docs/design-qa/ponsdotfamily/11-coverage-before-after.png`
+- Lower-layout comparison after the responsive iteration: `docs/design-qa/ponsdotfamily/15-bottom-before-after.png`
+- Focused comparisons were required because the source labels, coverage wording, and lower report controls were too small to judge reliably from the hero alone.
+
+## Required fidelity surfaces
+
+- Fonts and typography: Existing ARGUS sans and mono treatments, weights, sizes, and hierarchy remain unchanged. The new product answer uses the existing fact-card typography. No clipping or broken wrapping remains at the tested width.
+- Spacing and layout rhythm: The evidence card grid keeps its existing spacing. Empty relationship visualization space was removed. The lower signature modules now remain single-column at 1280px, eliminating the methodology, coverage, and frozen-evidence collisions.
+- Colors and visual tokens: Existing semantic pass, caution, risk, border, and background tokens remain unchanged. No new ad hoc color was introduced.
+- Image quality and asset fidelity: The stored profile image and all existing icon-library assets remain unchanged. No placeholder, CSS art, or replacement asset was introduced.
+- Copy and content: Unrelated identity citations were removed, the first-party project description now answers the product question, provider failures distinguish operations from retries, conflict copy no longer overclaims a completed test, and unverified leads are explicitly secondary.
+- Icons and controls: Existing Phosphor icons and native disclosure controls remain aligned and keyboard-operable.
+- Accessibility: The leads disclosure uses native `details` and `summary`. Main content has no horizontal overflow at 1280px, and the report navigation remains visible.
+
+## Findings and iteration history
+
+### Iteration 1
+
+- P1, identity evidence: The official-identity card cited unrelated medical-device and olive-oil brands. Fixed by retaining the exact official X profile when a provider-resolved project identity exists. Post-fix evidence: `docs/design-qa/ponsdotfamily/09-facts-before-after.png`.
+- P1, contradictory product state: The report described a launchpad in its verdict while saying the product question was unanswered. Fixed by projecting the frozen first-party X bio into a non-floor-eligible product fact. Post-fix evidence: `docs/design-qa/ponsdotfamily/09-facts-before-after.png`.
+- P1, team attribution: Generic name-only model leads appeared as investigative team candidates. Fixed by failing closed unless a stable handle or LinkedIn locator exists. Post-fix evidence: `docs/design-qa/ponsdotfamily/12-after-identity.png`.
+- P2, hierarchy: An empty relationship graph and expanded low-quality leads consumed prominent space. Fixed by hiding empty graphs, removing non-actionable search-result leads, and collapsing the remaining follow-up leads. Post-fix evidence: `docs/design-qa/ponsdotfamily/14-final-bottom.png`.
+- P2, failure copy: The banner emphasized 52 failed attempts as though they were 52 independent broken evidence lanes. Fixed by stating three affected operations and retaining the attempt count as secondary detail. Post-fix evidence: `docs/design-qa/ponsdotfamily/11-coverage-before-after.png`.
+
+### Iteration 2
+
+- P2, responsive collision: At 1280px the 248px sidebar left 1025px for the report, but the lower report modules still activated a two-column masonry layout. Methodology and evidence controls collided with the ventures row. Fixed by moving the two-column breakpoint from `lg` to `2xl`. Post-fix evidence: `docs/design-qa/ponsdotfamily/15-bottom-before-after.png`.
+
+## Interaction and runtime checks
+
+- Opened the saved `@ponsdotfamily` case from Recent cases.
+- Confirmed the report loaded version 5 without starting a scan.
+- Confirmed the remaining two follow-up leads are collapsed by default.
+- Confirmed the empty Connection web is absent.
+- Confirmed main content dimensions are 1025px client width and 1025px scroll width.
+- Confirmed the signature module column layout is inactive at 1280px.
+- Confirmed the browser console contains no errors.
+
+## Residual P3 polish
+
+- The first-party product value is intentionally literal and could later receive a shorter presentation label, but it is accurate, readable, and does not block the report task.
